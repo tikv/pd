@@ -195,7 +195,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						continue
 					}
 					// FromSync means this region's meta info might be stale.
-					if origin == nil || (origin != nil && origin.SourceFresh()) {
+					if origin == nil || (origin != nil && origin.IsSourceFresh()) {
 						bc.RegionsInfo.AtomicAddStaleRegionCnt()
 					}
 					_, saveKV, _, _ := regionGuide(region, origin)

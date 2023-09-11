@@ -88,13 +88,13 @@ const (
 	FromHeartbeat
 )
 
-// SourceStale means this region's meta info might be stale.
-func (r *RegionInfo) SourceStale() bool {
+// IsSourceStale means this region's meta info might be stale.
+func (r *RegionInfo) IsSourceStale() bool {
 	return r.source == FromStorage || r.source == FromSync
 }
 
-// SourceFresh means this region's meta info is relatively fresher.
-func (r *RegionInfo) SourceFresh() bool {
+// IsSourceFresh means this region's meta info is relatively fresher.
+func (r *RegionInfo) IsSourceFresh() bool {
 	return r.source == FromHeartbeat
 }
 
@@ -705,7 +705,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			saveKV, saveCache, isNew = true, true, true
 		} else {
-			if origin.SourceStale() {
+			if origin.IsSourceStale() {
 				isNew = true
 			}
 			r := region.GetRegionEpoch()
@@ -910,7 +910,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 		return nil, err
 	}
 	// If origin is stale, need to sub the stale region count.
-	if origin != nil && origin.SourceStale() && region.SourceFresh() {
+	if origin != nil && origin.IsSourceStale() && region.IsSourceFresh() {
 		r.tree.AtomicSubStaleRegionCnt()
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
