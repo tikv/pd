@@ -94,7 +94,7 @@ require (
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20230816095313-e6414634f8fc // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20230911054332-22add1e00511 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -111,8 +111,8 @@ require (
 	github.com/soheilhy/cmux v0.1.4 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/objx v0.2.0 // indirect
-	github.com/swaggo/files v0.0.0-20190704085106-630677cd5c14 // indirect
-	github.com/swaggo/http-swagger v0.0.0-20200308142732-58ac5e232fba // indirect
+	github.com/swaggo/files v0.0.0-20210815190702-a29dd2bc99b2 // indirect
+	github.com/swaggo/http-swagger v1.2.6 // indirect
 	github.com/swaggo/swag v1.8.3 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965 // indirect
 	github.com/tklauser/go-sysconf v0.3.4 // indirect
