@@ -67,13 +67,16 @@ func (suite *serverTestSuite) TearDownSuite() {
 
 func (suite *serverTestSuite) TestAllocID() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	time.Sleep(200 * time.Millisecond)
 	id, err := tc.GetPrimaryServer().GetCluster().AllocID()
 	re.NoError(err)
 	re.NotEqual(uint64(0), id)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 }
 
 func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
@@ -83,15 +86,32 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+	time.Sleep(200 * time.Millisecond)
 	cluster := tc.GetPrimaryServer().GetCluster()
 	id, err := cluster.AllocID()
 	re.NoError(err)
 	re.NotEqual(uint64(0), id)
 	suite.cluster.ResignLeader()
 	suite.cluster.WaitLeader()
-	time.Sleep(time.Second)
+	time.Sleep(200 * time.Millisecond)
 	id1, err := cluster.AllocID()
 	re.NoError(err)
 	re.Greater(id1, id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+}
+
+func (suite *serverTestSuite) TestPrimaryChange() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	primary := tc.GetPrimaryServer()
+	addr := primary.GetAddr()
+	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
+	primary.Close()
+	tc.WaitForPrimaryServing(re)
+	primary = tc.GetPrimaryServer()
+	re.NotEqual(addr, primary.GetAddr())
+	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
 }

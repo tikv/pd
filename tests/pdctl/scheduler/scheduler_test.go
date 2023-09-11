@@ -100,7 +100,8 @@ func TestScheduler(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
 	time.Sleep(3 * time.Second)
 
 	// scheduler show command

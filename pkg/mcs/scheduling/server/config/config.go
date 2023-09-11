@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -237,6 +238,18 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 // SetScheduleConfig sets the scheduling configuration.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	o.schedule.Store(cfg)
+}
+
+// AdjustScheduleCfg adjusts the schedule config.
+func (o *PersistConfig) AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
+	// In case we add new default schedulers.
+	for _, ps := range sc.DefaultSchedulers {
+		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {
+			return scheduleCfg.Schedulers[i].Type == ps.Type
+		}) {
+			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
+		}
+	}
 }
 
 // GetReplicationConfig returns replication configurations.
