@@ -325,6 +325,12 @@ func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
 	return path.Join(electionPath, utils.PrimaryKey)
 }
 
+// SchedulingPrimaryPath returns the path of scheduling primary.
+// Path: /ms/{cluster_id}/scheduling/primary
+func SchedulingPrimaryPath(clusterID uint64) string {
+	return path.Join(SchedulingSvcRootPath(clusterID), utils.PrimaryKey)
+}
+
 // KeyspaceGroupsElectionPath returns the path of keyspace groups election.
 // default keyspace group: "/ms/{cluster_id}/tso/00000".
 // non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}".

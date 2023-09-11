@@ -226,10 +226,11 @@ type Server struct {
 
 	auditBackends []audit.Backend
 
-	registry          *registry.ServiceRegistry
-	mode              string
-	servicePrimaryMap sync.Map /* Store as map[string]string */
-	tsoPrimaryWatcher *etcdutil.LoopWatcher
+	registry                 *registry.ServiceRegistry
+	mode                     string
+	servicePrimaryMap        sync.Map /* Store as map[string]string */
+	tsoPrimaryWatcher        *etcdutil.LoopWatcher
+	schedulingPrimaryWatcher *etcdutil.LoopWatcher
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -618,6 +619,8 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	if s.IsAPIServiceMode() {
 		s.initTSOPrimaryWatcher()
 		s.tsoPrimaryWatcher.StartWatchLoop()
+		s.initSchedulingPrimaryWatcher()
+		s.schedulingPrimaryWatcher.StartWatchLoop()
 	}
 }
 
@@ -1962,8 +1965,18 @@ func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := mcs.TSOServiceName
 	tsoRootPath := endpoint.TSOSvcRootPath(s.clusterID)
 	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, mcs.DefaultKeyspaceGroupID)
+	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
+}
+
+func (s *Server) initSchedulingPrimaryWatcher() {
+	serviceName := mcs.SchedulingServiceName
+	primaryKey := endpoint.SchedulingPrimaryPath(s.clusterID)
+	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
+}
+
+func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string) *etcdutil.LoopWatcher {
 	putFn := func(kv *mvccpb.KeyValue) error {
-		primary := &tsopb.Participant{} // TODO: use Generics
+		primary := member.NewParticipantByService(serviceName)
 		if err := proto.Unmarshal(kv.Value, primary); err != nil {
 			return err
 		}
@@ -1971,7 +1984,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 		if len(listenUrls) > 0 {
 			// listenUrls[0] is the primary service endpoint of the keyspace group
 			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-			log.Info("update tso primary", zap.String("primary", listenUrls[0]))
+			log.Info("update service primary", zap.String("service-name", serviceName), zap.String("primary", listenUrls[0]))
 		}
 		return nil
 	}
@@ -1981,16 +1994,17 @@ func (s *Server) initTSOPrimaryWatcher() {
 		if ok {
 			oldPrimary = v.(string)
 		}
-		log.Info("delete tso primary", zap.String("old-primary", oldPrimary))
+		log.Info("delete service primary", zap.String("service-name", serviceName), zap.String("old-primary", oldPrimary))
 		s.servicePrimaryMap.Delete(serviceName)
 		return nil
 	}
-	s.tsoPrimaryWatcher = etcdutil.NewLoopWatcher(
+	name := fmt.Sprintf("%s-primary-watcher", serviceName)
+	return etcdutil.NewLoopWatcher(
 		s.serverLoopCtx,
 		&s.serverLoopWg,
 		s.client,
-		"tso-primary-watcher",
-		tsoServicePrimaryKey,
+		name,
+		primaryKey,
 		putFn,
 		deleteFn,
 		func() error { return nil },
