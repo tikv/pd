@@ -59,11 +59,11 @@ func TestRegionStatistics(t *testing.T) {
 		{Peer: peers[1], DownSeconds: 3608},
 	}
 
-	store3 := stores[3].Clone(core.OfflineStore(false))
+	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	stores[3] = store3
 	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
-	region1 := core.NewRegionInfo(r1, peers[0])
+	region1 := core.NewRegionInfo(r1, peers[0], core.SetApproximateSize(1))
 	region2 := core.NewRegionInfo(r2, peers[0])
 	regionStats := NewRegionStatistics(nil, opt, manager)
 	regionStats.Observe(region1, stores)
@@ -97,7 +97,8 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[PendingPeer], 1)
 	re.Len(regionStats.stats[LearnerPeer], 1)
 	re.Len(regionStats.stats[OversizedRegion], 1)
-	re.Len(regionStats.stats[UndersizedRegion], 1)
+	re.Len(regionStats.stats[UndersizedRegion], 0)
+	re.Len(regionStats.stats[EmptyRegion], 0)
 	re.Len(regionStats.stats[OfflinePeer], 1)
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
@@ -109,7 +110,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Empty(regionStats.stats[LearnerPeer])
 	re.Empty(regionStats.stats[OfflinePeer])
 
-	store3 = stores[3].Clone(core.UpStore())
+	store3 = stores[3].Clone(core.SetStoreState(metapb.StoreState_Up))
 	stores[3] = store3
 	regionStats.Observe(region1, stores)
 	re.Empty(regionStats.stats[OfflinePeer])

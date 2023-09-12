@@ -64,7 +64,7 @@ var (
 	balanceLeaderNoFollowerRegionCounter   = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-follower-region")
 	balanceLeaderSkipCounter               = schedulerCounter.WithLabelValues(BalanceLeaderName, "skip")
 	balanceLeaderNewOpCounter              = schedulerCounter.WithLabelValues(BalanceLeaderName, "new-operator")
-	balanceLeaderStoreRecentlySplitRegions = schedulerCounter.WithLabelValues(BalanceLeaderName, "source-split-region")
+	balanceLeaderStoreRecentlySplitRegions = schedulerCounter.WithLabelValues(BalanceLeaderName, "source-recently-split-regions")
 )
 
 type balanceLeaderSchedulerConfig struct {

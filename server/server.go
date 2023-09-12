@@ -17,6 +17,7 @@ package server
 import (
 	"bytes"
 	"context"
+	errorspkg "errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -189,7 +190,7 @@ type Server struct {
 	// startCallbacks will be called after the server is started.
 	startCallbacks []func()
 	// leaderCallbacks will be called after the server becomes leader.
-	leaderCallbacks []func(context.Context)
+	leaderCallbacks []func(context.Context) error
 	// closeCallbacks will be called before the server is closed.
 	closeCallbacks []func()
 
@@ -1022,18 +1023,18 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 	}
 	old := s.persistOptions.GetReplicationConfig()
 	if cfg.EnablePlacementRules != old.EnablePlacementRules {
-		raftCluster := s.GetRaftCluster()
-		if raftCluster == nil {
+		rc := s.GetRaftCluster()
+		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
-			if err := raftCluster.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
 				return err
 			}
 		} else {
 			// NOTE: can be removed after placement rules feature is enabled by default.
-			for _, s := range raftCluster.GetStores() {
+			for _, s := range rc.GetStores() {
 				if !s.IsRemoved() && s.IsTiFlash() {
 					return errors.New("cannot disable placement rules with TiFlash nodes")
 				}
@@ -1043,8 +1044,12 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 
 	var rule *placement.Rule
 	if cfg.EnablePlacementRules {
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			return errs.ErrNotBootstrapped.GenWithStackByArgs()
+		}
 		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		defaultRule := s.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
+		defaultRule := rc.GetRuleManager().GetRule("pd", "default")
 
 		CheckInDefaultRule := func() error {
 			// replication config  won't work when placement rule is enabled and exceeds one default rule
@@ -1070,7 +1075,11 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 	if rule != nil {
 		rule.Count = int(cfg.MaxReplicas)
 		rule.LocationLabels = cfg.LocationLabels
-		if err := s.GetRaftCluster().GetRuleManager().SetRule(rule); err != nil {
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			return errs.ErrNotBootstrapped.GenWithStackByArgs()
+		}
+		if err := rc.GetRuleManager().SetRule(rule); err != nil {
 			log.Error("failed to update rule count",
 				errs.ZapError(err))
 			return err
@@ -1082,7 +1091,11 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		s.persistOptions.SetReplicationConfig(old)
 		if rule != nil {
 			rule.Count = int(old.MaxReplicas)
-			if e := s.GetRaftCluster().GetRuleManager().SetRule(rule); e != nil {
+			rc := s.GetRaftCluster()
+			if rc == nil {
+				return errs.ErrNotBootstrapped.GenWithStackByArgs()
+			}
+			if e := rc.GetRuleManager().SetRule(rule); e != nil {
 				log.Error("failed to roll back count of rule when update replication config", errs.ZapError(e))
 			}
 		}
@@ -1370,18 +1383,18 @@ func (s *Server) GetServerOption() *config.PersistOptions {
 
 // GetMetaRegions gets meta regions from cluster.
 func (s *Server) GetMetaRegions() []*metapb.Region {
-	cluster := s.GetRaftCluster()
-	if cluster != nil {
-		return cluster.GetMetaRegions()
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		return rc.GetMetaRegions()
 	}
 	return nil
 }
 
 // GetRegions gets regions from cluster.
 func (s *Server) GetRegions() []*core.RegionInfo {
-	cluster := s.GetRaftCluster()
-	if cluster != nil {
-		return cluster.GetRegions()
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		return rc.GetRegions()
 	}
 	return nil
 }
@@ -1518,9 +1531,9 @@ func (s *Server) SetReplicationModeConfig(cfg config.ReplicationModeConfig) erro
 	}
 	log.Info("replication mode config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 
-	cluster := s.GetRaftCluster()
-	if cluster != nil {
-		err := cluster.GetReplicationMode().UpdateConfig(cfg)
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		err := rc.GetReplicationMode().UpdateConfig(cfg)
 		if err != nil {
 			log.Warn("failed to update replication mode", errs.ZapError(err))
 			// revert to old config
@@ -1546,7 +1559,7 @@ func (s *Server) IsServing() bool {
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the leader if there is embedded etcd, or the primary otherwise.
-func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	s.leaderCallbacks = append(s.leaderCallbacks, callbacks...)
 }
 
@@ -1669,8 +1682,11 @@ func (s *Server) campaignLeader() {
 		defer func() {
 			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
 			failpoint.Inject("updateAfterResetTSO", func() {
-				if err = allocator.UpdateTSO(); err != nil {
-					panic(err)
+				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+				}
+				if allocator.IsInitialize() {
+					log.Panic("the allocator should be uninitialized after reset")
 				}
 			})
 		}()
@@ -1988,7 +2004,11 @@ func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
 
 // GetExternalTS returns external timestamp.
 func (s *Server) GetExternalTS() uint64 {
-	return s.GetRaftCluster().GetExternalTS()
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return 0
+	}
+	return rc.GetExternalTS()
 }
 
 // SetExternalTS returns external timestamp.
@@ -1998,14 +2018,18 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
 		return errors.New(desc)
 	}
-	currentExternalTS := s.GetRaftCluster().GetExternalTS()
+	c := s.GetRaftCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	currentExternalTS := c.GetExternalTS()
 	if tsoutil.CompareTimestampUint64(externalTS, currentExternalTS) != 1 {
 		desc := "the external timestamp should be larger than current external timestamp"
 		log.Error(desc, zap.Uint64("request", externalTS), zap.Uint64("current", currentExternalTS))
 		return errors.New(desc)
 	}
-	s.GetRaftCluster().SetExternalTS(externalTS)
-	return nil
+
+	return c.SetExternalTS(externalTS)
 }
 
 // IsLocalTSOEnabled returns if the local TSO is enabled.

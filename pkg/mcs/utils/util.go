@@ -24,10 +24,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"

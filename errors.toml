@@ -821,6 +821,11 @@ error = '''
 sync max ts failed, %s
 '''
 
+["PD:tso:ErrUpdateTimestamp"]
+error = '''
+update timestamp failed, %s
+'''
+
 ["PD:typeutil:ErrBytesToUint64"]
 error = '''
 invalid data, must 8 bytes, but %d

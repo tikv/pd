@@ -473,10 +473,10 @@ func (f *StoreStateFilter) hasRejectLeaderProperty(conf config.SharedConfigProvi
 	return statusOK
 }
 
-func (f *StoreStateFilter) hasSplitRegion(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *StoreStateFilter) hasRecentlySplitRegions(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if f.ForbidRecentlySplitRegions && store.HasRecentlySplitRegions() {
-		f.Reason = storeStateSplitRegion
-		return statusStoreSplitRegion
+		f.Reason = storeStateRecentlySplitRegions
+		return statusStoreRecentlySplitRegions
 	}
 	f.Reason = storeStateOK
 	return statusOK
@@ -510,7 +510,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 	var funcs []conditionFunc
 	switch typ {
 	case leaderSource:
-		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected, f.hasSplitRegion}
+		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected, f.hasRecentlySplitRegions}
 	case regionSource:
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case witnessSource:

@@ -317,7 +317,6 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 			for j := 0; j < requestsPerClient; j++ {
 				select {
 				case <-ctx.Done():
-					respErr.Store(ctx.Err())
 					s.cleanupGRPCStream(streams, cleanupFuncs, i)
 					return
 				default:

@@ -15,14 +15,9 @@
 package tso
 
 import (
-	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 )
 
 var _ ServiceConfig = (*TestServiceConfig)(nil)
@@ -89,24 +84,4 @@ func (c *TestServiceConfig) GetMaxResetTSGap() time.Duration {
 // GetTLSConfig returns the TLSConfig field of TestServiceConfig.
 func (c *TestServiceConfig) GetTLSConfig() *grpcutil.TLSConfig {
 	return c.TLSConfig
-}
-
-func startEmbeddedEtcd(t *testing.T) (backendEndpoint string, etcdClient *clientv3.Client, clean func()) {
-	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	clean = func() {
-		etcd.Close()
-	}
-
-	backendEndpoint = cfg.LCUrls[0].String()
-	re.NoError(err)
-
-	etcdClient, err = clientv3.NewFromURL(backendEndpoint)
-	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
-
-	return
 }

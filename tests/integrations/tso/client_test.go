@@ -436,7 +436,7 @@ func TestMixedTSODeployment(t *testing.T) {
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
-	checkTSO(ctx1, re, &wg, backendEndpoints, pd.WithAllowTSOFallback() /* It's expected that the timestamp fallback happens here */)
+	checkTSO(ctx1, re, &wg, backendEndpoints)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -498,14 +498,13 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 }
 
 func checkTSO(
-	ctx context.Context, re *require.Assertions, wg *sync.WaitGroup,
-	backendEndpoints string, opts ...pd.ClientOption,
+	ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, backendEndpoints string,
 ) {
 	wg.Add(tsoRequestConcurrencyNumber)
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		go func() {
 			defer wg.Done()
-			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","), opts...)
+			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","))
 			defer cli.Close()
 			var ts, lastTS uint64
 			for {

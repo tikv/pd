@@ -18,12 +18,13 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -135,18 +136,26 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		if s.IsClosed() {
 			return status.Errorf(codes.Unknown, "server not started")
 		}
-		if request.GetHeader().GetClusterId() != s.clusterID {
+		header := request.GetHeader()
+		clusterID := header.GetClusterId()
+		if clusterID != s.clusterID {
 			return status.Errorf(
 				codes.FailedPrecondition, "mismatch cluster id, need %d but got %d",
-				s.clusterID, request.GetHeader().GetClusterId())
+				s.clusterID, clusterID)
 		}
+		keyspaceID := header.GetKeyspaceId()
+		keyspaceGroupID := header.GetKeyspaceGroupId()
+		dcLocation := request.GetDcLocation()
 		count := request.GetCount()
 		ts, keyspaceGroupBelongTo, err := s.keyspaceGroupManager.HandleTSORequest(
-			request.Header.KeyspaceId, request.Header.KeyspaceGroupId, request.GetDcLocation(), count)
+			ctx,
+			keyspaceID, keyspaceGroupID,
+			dcLocation, count)
 		if err != nil {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
-		tsoHandleDuration.Observe(time.Since(start).Seconds())
+		keyspaceGroupIDStr := strconv.FormatUint(uint64(keyspaceGroupID), 10)
+		tsoHandleDuration.WithLabelValues(keyspaceGroupIDStr).Observe(time.Since(start).Seconds())
 		response := &tsopb.TsoResponse{
 			Header:    s.header(keyspaceGroupBelongTo),
 			Timestamp: &ts,

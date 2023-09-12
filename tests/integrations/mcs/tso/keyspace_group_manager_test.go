@@ -289,7 +289,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
 	kgm := primary.GetKeyspaceGroupManager()
 	re.NotNil(kgm)
-	ts, _, err := kgm.HandleTSORequest(keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, 1)
+	ts, _, err := kgm.HandleTSORequest(suite.ctx, keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, 1)
 	return ts, err
 }
 
@@ -648,14 +648,16 @@ func waitFinishMerge(
 	mergeTargetID uint32,
 	keyspaces []uint32,
 ) {
+	var kg *endpoint.KeyspaceGroup
 	testutil.Eventually(re, func() bool {
-		kg := handlersutil.MustLoadKeyspaceGroupByID(re, server, mergeTargetID)
-		re.Equal(mcsutils.DefaultKeyspaceGroupID, kg.ID)
-		for _, keyspaceID := range keyspaces {
-			re.Contains(kg.Keyspaces, keyspaceID)
-		}
+		kg = handlersutil.MustLoadKeyspaceGroupByID(re, server, mergeTargetID)
+		re.Equal(mergeTargetID, kg.ID)
 		return !kg.IsMergeTarget()
 	})
+	// If the merge is finished, the target keyspace group should contain all the keyspaces.
+	for _, keyspaceID := range keyspaces {
+		re.Contains(kg.Keyspaces, keyspaceID)
+	}
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeBeforeInitTSO() {

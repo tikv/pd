@@ -143,17 +143,25 @@ func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConf
 
 // AllocID allocates a new ID.
 func (c *Cluster) AllocID() (uint64, error) {
-	cli := c.apiServerLeader.Load().(pdpb.PDClient)
-	if cli == nil {
-		c.checkMembershipCh <- struct{}{}
-		return 0, errors.New("API server leader is not found")
+	client, err := c.getAPIServerLeaderClient()
+	if err != nil {
+		return 0, err
 	}
-	resp, err := cli.AllocID(c.ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
+	resp, err := client.AllocID(c.ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
 	if err != nil {
 		c.checkMembershipCh <- struct{}{}
 		return 0, err
 	}
 	return resp.GetId(), nil
+}
+
+func (c *Cluster) getAPIServerLeaderClient() (pdpb.PDClient, error) {
+	cli := c.apiServerLeader.Load()
+	if cli == nil {
+		c.checkMembershipCh <- struct{}{}
+		return nil, errors.New("API server leader is not found")
+	}
+	return cli.(pdpb.PDClient), nil
 }
 
 // SwitchAPIServerLeader switches the API server leader.

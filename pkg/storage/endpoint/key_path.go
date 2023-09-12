@@ -121,6 +121,17 @@ func StorePath(storeID uint64) string {
 	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
 }
 
+// StorePathPrefix returns the store meta info key path prefix.
+func StorePathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), clusterPath, "s") + "/"
+}
+
+// ExtractStoreIDFromPath extracts the store ID from the given path.
+func ExtractStoreIDFromPath(clusterID uint64, path string) (uint64, error) {
+	idStr := strings.TrimLeft(strings.TrimPrefix(path, StorePathPrefix(clusterID)), "0")
+	return strconv.ParseUint(idStr, 10, 64)
+}
+
 func storeLeaderWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
 }

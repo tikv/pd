@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -31,6 +30,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/spf13/cobra"
@@ -39,12 +39,14 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -76,6 +78,7 @@ type Server struct {
 	cfg           *config.Config
 	clusterID     uint64
 	persistConfig *config.PersistConfig
+	basicCluster  *core.BasicCluster
 
 	// for the primary election of scheduling
 	participant *member.Participant
@@ -84,7 +87,8 @@ type Server struct {
 	checkMembershipCh chan struct{}
 
 	// primaryCallbacks will be called after the server becomes leader.
-	primaryCallbacks []func(context.Context)
+	primaryCallbacks     []func(context.Context) error
+	primaryExitCallbacks []func()
 
 	// for service registry
 	serviceID       *discovery.ServiceRegistryEntry
@@ -97,6 +101,7 @@ type Server struct {
 	// for watching the PD API server meta info updates that are related to the scheduling.
 	configWatcher *config.Watcher
 	ruleWatcher   *rule.Watcher
+	metaWatcher   *meta.Watcher
 }
 
 // Name returns the unique name for this server in the scheduling cluster.
@@ -151,6 +156,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 		ticker = time.NewTicker(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
+	var curLeader uint64
 	for {
 		select {
 		case <-ctx.Done():
@@ -159,9 +165,13 @@ func (s *Server) updateAPIServerMemberLoop() {
 		case <-ticker.C:
 		case <-s.checkMembershipCh:
 		}
+		if !s.IsServing() {
+			continue
+		}
 		members, err := s.GetClient().MemberList(ctx)
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
+			continue
 		}
 		for _, ep := range members.Members {
 			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
@@ -175,7 +185,10 @@ func (s *Server) updateAPIServerMemberLoop() {
 					log.Info("failed to get delegate client", errs.ZapError(err))
 				}
 				if s.cluster.SwitchAPIServerLeader(pdpb.NewPDClient(cc)) {
-					log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+					if status.Leader != curLeader {
+						log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+					}
+					curLeader = ep.ID
 					break
 				}
 			}
@@ -238,9 +251,16 @@ func (s *Server) campaignLeader() {
 
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
-		cb(ctx)
+		if err := cb(ctx); err != nil {
+			log.Error("failed to trigger the primary callback functions", errs.ZapError(err))
+			return
+		}
 	}
-
+	defer func() {
+		for _, cb := range s.primaryExitCallbacks {
+			cb()
+		}
+	}()
 	s.participant.EnableLeader()
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
@@ -274,9 +294,6 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
-	s.GetCoordinator().Stop()
-	s.ruleWatcher.Close()
-	s.configWatcher.Close()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -303,8 +320,13 @@ func (s *Server) IsClosed() bool {
 }
 
 // AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
-func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	s.primaryCallbacks = append(s.primaryCallbacks, callbacks...)
+}
+
+// AddServiceExitCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
+func (s *Server) AddServiceExitCallback(callbacks ...func()) {
+	s.primaryExitCallbacks = append(s.primaryExitCallbacks, callbacks...)
 }
 
 // GetTLSConfig gets the security config.
@@ -315,6 +337,11 @@ func (s *Server) GetTLSConfig() *grpcutil.TLSConfig {
 // GetCluster returns the cluster.
 func (s *Server) GetCluster() *Cluster {
 	return s.cluster
+}
+
+// GetBasicCluster returns the basic cluster.
+func (s *Server) GetBasicCluster() *core.BasicCluster {
+	return s.basicCluster
 }
 
 // GetCoordinator returns the coordinator.
@@ -359,24 +386,17 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.ListenAddr
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-	schedulingPrimaryPrefix := endpoint.SchedulingSvcRootPath(s.clusterID)
-	s.participant = member.NewParticipant(s.GetClient())
-	s.participant.InitInfo(uniqueName, uniqueID, path.Join(schedulingPrimaryPrefix, fmt.Sprintf("%05d", 0)),
-		utils.PrimaryKey, "primary election", s.cfg.AdvertiseListenAddr)
-	err = s.startWatcher()
-	if err != nil {
-		return err
+	s.participant = member.NewParticipant(s.GetClient(), utils.SchedulingServiceName)
+	p := &schedulingpb.Participant{
+		Name:       uniqueName,
+		Id:         uniqueID, // id is unique among all participants
+		ListenUrls: []string{s.cfg.AdvertiseListenAddr},
 	}
-	s.storage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(s.GetClient(), endpoint.PDRootPath(s.clusterID)), nil)
-	basicCluster := core.NewBasicCluster()
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, basicCluster)
-	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
-	if err != nil {
-		return err
-	}
+	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
 
 	s.service = &Service{Server: s}
+	s.AddServiceReadyCallback(s.startCluster)
+	s.AddServiceExitCallback(s.stopCluster)
 	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
 		return err
 	}
@@ -388,7 +408,6 @@ func (s *Server) startServer() (err error) {
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	s.checkMembershipCh <- struct{}{}
 	<-serverReadyChan
-	go s.GetCoordinator().RunUntilStop()
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
@@ -411,16 +430,39 @@ func (s *Server) startServer() (err error) {
 	return nil
 }
 
-func (s *Server) startWatcher() (err error) {
-	s.configWatcher, err = config.NewWatcher(
-		s.Context(), s.GetClient(), s.clusterID, s.persistConfig,
-	)
+func (s *Server) startCluster(context.Context) error {
+	s.basicCluster = core.NewBasicCluster()
+	err := s.startWatcher()
 	if err != nil {
 		return err
 	}
-	s.ruleWatcher, err = rule.NewWatcher(
-		s.Context(), s.GetClient(), s.clusterID,
-	)
+	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, s.basicCluster)
+	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
+	if err != nil {
+		return err
+	}
+	go s.GetCoordinator().RunUntilStop()
+	return nil
+}
+
+func (s *Server) stopCluster() {
+	s.GetCoordinator().Stop()
+	s.ruleWatcher.Close()
+	s.configWatcher.Close()
+	s.metaWatcher.Close()
+}
+
+func (s *Server) startWatcher() (err error) {
+	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.basicCluster)
+	if err != nil {
+		return err
+	}
+	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.persistConfig)
+	if err != nil {
+		return err
+	}
+	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID)
 	return err
 }
 
@@ -438,6 +480,7 @@ func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
+	schedulers.Register()
 	cmd.Flags().Parse(args)
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
