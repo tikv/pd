@@ -112,16 +112,21 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 		if strings.HasPrefix(r.URL.Path, rule.matchPath) {
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !ok || addr == "" {
-				log.Warn("failed to get the service primary addr when try match redirect rules",
+				log.Warn("failed to get the service primary addr when trying to match redirect rules",
 					zap.String("path", r.URL.Path))
 			}
 			// Extract parameters from the URL path
+			// e.g. r.URL.Path = /pd/api/v1/operators/1 (before redirect)
+			//      matchPath  = /pd/api/v1/operators
+			//      targetPath = /scheduling/api/v1/operators
+			//      r.URL.Path = /scheduling/api/v1/operator/1 (after redirect)
 			pathParams := strings.TrimPrefix(r.URL.Path, rule.matchPath)
-			if len(pathParams) > 0 && pathParams[0] == '/' {
-				pathParams = pathParams[1:] // Remove leading '/'
+			pathParams = strings.Trim(pathParams, "/") // Remove leading and trailing '/'
+			if len(pathParams) > 0 {
+				r.URL.Path = rule.targetPath + "/" + pathParams
+			} else {
+				r.URL.Path = rule.targetPath
 			}
-			r.URL.Path = rule.targetPath + "/" + pathParams
-			r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 			return true, addr
 		}
 	}
@@ -129,10 +134,10 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	needRedirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
+	redirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
 	isLeader := h.s.GetMember().IsLeader()
-	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !needRedirectToMicroService {
+	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !redirectToMicroService {
 		next(w, r)
 		return
 	}
@@ -157,7 +162,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 
 	var clientUrls []string
-	if needRedirectToMicroService {
+	if redirectToMicroService {
 		if len(targetAddr) == 0 {
 			http.Error(w, apiutil.ErrRedirectFailed, http.StatusInternalServerError)
 			return
