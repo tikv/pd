@@ -91,7 +91,7 @@ func (c *RaftCluster) ProcessRegionSplit(regions []*metapb.Region) []error {
 	}
 	// If the number of regions exceeds the threshold, update the last split time.
 	if len(regions) >= maxSplitThreshold {
-		newStore := leaderStore.Clone(core.SetLastSplitTime(time.Now()))
+		newStore := leaderStore.Clone(core.SetRecentlySplitRegionsTime(time.Now()))
 		c.core.PutStore(newStore)
 	}
 	return errList

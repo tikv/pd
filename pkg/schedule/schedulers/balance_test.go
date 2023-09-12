@@ -298,7 +298,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
 
 	// can't balance leader from 4 to 1 when store 1 has split in it.
 	store := suite.tc.GetStore(4)
-	store = store.Clone(core.SetLastSplitTime(time.Now()))
+	store = store.Clone(core.SetRecentlySplitRegionsTime(time.Now()))
 	suite.tc.PutStore(store)
 	op := suite.schedule()
 	suite.Empty(op)

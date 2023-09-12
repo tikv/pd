@@ -332,8 +332,8 @@ type StoreStateFilter struct {
 	// If it checks failed, the operator will be put back to the waiting queue util the limit is available.
 	// But the scheduler should keep the same with the operator level.
 	OperatorLevel constant.PriorityLevel
-	// set true if not allow balance leader from this store
-	ForbidSplit bool
+	// check the store not split recently in it if set true.
+	ForbidRecentlySplitRegions bool
 	// Reason is used to distinguish the reason of store state filter
 	Reason filterType
 }
@@ -474,7 +474,7 @@ func (f *StoreStateFilter) hasRejectLeaderProperty(conf config.SharedConfigProvi
 }
 
 func (f *StoreStateFilter) hasSplitRegion(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
-	if f.ForbidSplit && store.IsSplitStore() {
+	if f.ForbidRecentlySplitRegions && store.HasRecentlySplitRegions() {
 		f.Reason = storeStateSplitRegion
 		return statusStoreSplitRegion
 	}

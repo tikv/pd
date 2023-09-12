@@ -41,7 +41,7 @@ var (
 
 	statusStoreNotMatchRule      = plan.NewStatus(plan.StatusStoreNotMatchRule)
 	statusStoreNotMatchIsolation = plan.NewStatus(plan.StatusStoreNotMatchIsolation)
-	statusStoreSplitRegion       = plan.NewStatus(plan.StatusStoreSplitRegion)
+	statusStoreSplitRegion       = plan.NewStatus(plan.StatusStoreRecentlySplitRegions)
 
 	// region filter status
 	statusRegionPendingPeer                 = plan.NewStatus(plan.StatusRegionUnhealthy)

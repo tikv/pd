@@ -51,23 +51,23 @@ const (
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
-	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
-	leaderCount         int
-	regionCount         int
-	learnerCount        int
-	witnessCount        int
-	leaderSize          int64
-	regionSize          int64
-	pendingPeerCount    int
-	lastPersistTime     time.Time
-	leaderWeight        float64
-	regionWeight        float64
-	limiter             storelimit.StoreLimit
-	minResolvedTS       uint64
-	lastAwakenTime      time.Time
-	lastSplitTime       time.Time
+	pauseLeaderTransfer      bool // not allow to be used as source or target of transfer leader
+	slowStoreEvicted         bool // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted         bool // this store has been evicted as a slow store by trend, should not transfer leader to it
+	leaderCount              int
+	regionCount              int
+	learnerCount             int
+	witnessCount             int
+	leaderSize               int64
+	regionSize               int64
+	pendingPeerCount         int
+	lastPersistTime          time.Time
+	leaderWeight             float64
+	regionWeight             float64
+	limiter                  storelimit.StoreLimit
+	minResolvedTS            uint64
+	lastAwakenTime           time.Time
+	recentlySplitRegionsTime time.Time
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -541,9 +541,9 @@ func (s *StoreInfo) NeedAwakenStore() bool {
 	return s.GetLastHeartbeatTS().Sub(s.lastAwakenTime) > awakenStoreInterval
 }
 
-// IsSplitStore checks if there are some region are splitted in this store.
-func (s *StoreInfo) IsSplitStore() bool {
-	return time.Since(s.lastSplitTime) < splitStoreWait
+// HasRecentlySplitRegions checks if there are some region are splitted in this store.
+func (s *StoreInfo) HasRecentlySplitRegions() bool {
+	return time.Since(s.recentlySplitRegionsTime) < splitStoreWait
 }
 
 var (

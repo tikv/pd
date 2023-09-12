@@ -111,7 +111,7 @@ func TestReportBatchSplit(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	store := newTestStores(1, "2.0.0")
 	cluster.core.PutStore(store[0])
-	re.False(cluster.GetStore(1).IsSplitStore())
+	re.False(cluster.GetStore(1).HasRecentlySplitRegions())
 	regions := []*metapb.Region{
 		{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3})},
 		{Id: 2, StartKey: []byte("a"), EndKey: []byte("b"), Peers: mockRegionPeer(cluster, []uint64{1, 2, 3})},
@@ -142,5 +142,5 @@ func TestReportBatchSplit(t *testing.T) {
 	_, err = cluster.HandleBatchReportSplit(&pdpb.ReportBatchSplitRequest{Regions: regions})
 	re.NoError(err)
 
-	re.True(cluster.GetStore(1).IsSplitStore())
+	re.True(cluster.GetStore(1).HasRecentlySplitRegions())
 }
