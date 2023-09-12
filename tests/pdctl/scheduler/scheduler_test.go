@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/versioninfo"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
@@ -128,7 +129,8 @@ func TestScheduler(t *testing.T) {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
 	time.Sleep(3 * time.Second)
 
 	// scheduler show command
