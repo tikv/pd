@@ -469,8 +469,6 @@ func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
 }
 
-<<<<<<< HEAD:server/core/region.go
-=======
 // IsEmptyRegion returns whether the region is empty.
 func (r *RegionInfo) IsEmptyRegion() bool {
 	// When cluster resumes, the region size may be not initialized, but region heartbeat is send.
@@ -478,21 +476,6 @@ func (r *RegionInfo) IsEmptyRegion() bool {
 	return r.approximateSize == EmptyRegionApproximateSize
 }
 
-// GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
-func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
-	peer := r.GetStorePeer(storeID)
-	if storeID != 0 && peer != nil && peer.IsWitness {
-		return 0
-	}
-	return r.approximateKeys
-}
-
-// GetApproximateKvSize returns the approximate kv size of the region.
-func (r *RegionInfo) GetApproximateKvSize() int64 {
-	return r.approximateKvSize
-}
-
->>>>>>> 74ead5cbd (statistics: fix empty region count when resuming (#7009)):pkg/core/region.go
 // GetApproximateKeys returns the approximate keys of the region.
 func (r *RegionInfo) GetApproximateKeys() int64 {
 	return r.approximateKeys
