@@ -17,12 +17,18 @@ package scheduling
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -77,6 +83,7 @@ func (suite *configTestSuite) TestConfigWatch() {
 		suite.pdLeaderServer.GetEtcdClient(),
 		suite.cluster.GetCluster().GetId(),
 		config.NewPersistConfig(config.NewConfig()),
+		endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
 	)
 	re.NoError(err)
 	// Check the initial config value.
@@ -128,39 +135,75 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	// Make sure the config is persisted before the watcher is created.
 	persistConfig(re, suite.pdLeaderServer)
 	// Create a config watcher.
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	watcher, err := config.NewWatcher(
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		suite.cluster.GetCluster().GetId(),
 		config.NewPersistConfig(config.NewConfig()),
+		storage,
 	)
 	re.NoError(err)
 	// Get all default scheduler names.
-	var schedulerNames, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllScheduleConfig()
-
+	var namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllScheduleConfig()
 	testutil.Eventually(re, func() bool {
-		targetCount := len(sc.DefaultSchedulers)
-		return len(schedulerNames) == targetCount
+		return len(namesFromAPIServer) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.
-	for _, schedulerName := range schedulerNames {
-		testutil.Eventually(re, func() bool {
-			return len(watcher.GetSchedulerConfig(schedulerName)) > 0
-		})
-	}
+	var namesFromSchedulingServer []string
+	testutil.Eventually(re, func() bool {
+		namesFromSchedulingServer, _, err = storage.LoadAllScheduleConfig()
+		re.NoError(err)
+		return len(namesFromSchedulingServer) == len(namesFromAPIServer)
+	})
+	re.Equal(namesFromAPIServer, namesFromSchedulingServer)
 	// Add a new scheduler.
 	err = suite.pdLeaderServer.GetServer().GetHandler().AddEvictLeaderScheduler(1)
 	re.NoError(err)
 	// Check the new scheduler's config.
 	testutil.Eventually(re, func() bool {
-		return len(watcher.GetSchedulerConfig(schedulers.EvictLeaderName)) > 0
+		namesFromSchedulingServer, _, err = storage.LoadAllScheduleConfig()
+		re.NoError(err)
+		return slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
 	})
+	// Update the scheduler.
+	suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(&metapb.Store{
+		Id:            2,
+		Address:       "mock://2",
+		LastHeartbeat: time.Now().UnixNano(),
+	})
+	err = suite.pdLeaderServer.GetServer().GetHandler().AddEvictOrGrant(2, schedulers.EvictLeaderName)
+	re.NoError(err)
+	// Check the updated scheduler's config.
+	var (
+		configs        []string
+		evictLeaderCfg struct {
+			StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+		}
+	)
+	testutil.Eventually(re, func() bool {
+		namesFromSchedulingServer, configs, err = storage.LoadAllScheduleConfig()
+		re.NoError(err)
+		for idx, name := range namesFromSchedulingServer {
+			if name == schedulers.EvictLeaderName {
+				err = schedulers.DecodeConfig([]byte(configs[idx]), &evictLeaderCfg)
+				re.NoError(err)
+				return len(evictLeaderCfg.StoreIDWithRanges) == 2
+			}
+		}
+		return false
+	})
+	// Validate the updated scheduler's config.
+	re.Contains(evictLeaderCfg.StoreIDWithRanges, uint64(1))
+	re.Contains(evictLeaderCfg.StoreIDWithRanges, uint64(2))
 	// Remove the scheduler.
 	err = suite.pdLeaderServer.GetServer().GetHandler().RemoveScheduler(schedulers.EvictLeaderName)
 	re.NoError(err)
 	// Check the removed scheduler's config.
 	testutil.Eventually(re, func() bool {
-		return len(watcher.GetSchedulerConfig(schedulers.EvictLeaderName)) == 0
+		namesFromSchedulingServer, _, err = storage.LoadAllScheduleConfig()
+		re.NoError(err)
+		return !slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
 	})
 	watcher.Close()
 }

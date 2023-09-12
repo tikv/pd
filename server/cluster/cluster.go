@@ -795,6 +795,16 @@ func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
 	return c.coordinator.GetSchedulersController().GetSchedulerHandlers()
 }
 
+// AddSchedulerHandler adds a scheduler handler.
+func (c *RaftCluster) AddSchedulerHandler(scheduler schedulers.Scheduler, args ...string) error {
+	return c.coordinator.GetSchedulersController().AddSchedulerHandler(scheduler, args...)
+}
+
+// RemoveSchedulerHandler removes a scheduler handler.
+func (c *RaftCluster) RemoveSchedulerHandler(name string) error {
+	return c.coordinator.GetSchedulersController().RemoveSchedulerHandler(name)
+}
+
 // AddScheduler adds a scheduler.
 func (c *RaftCluster) AddScheduler(scheduler schedulers.Scheduler, args ...string) error {
 	return c.coordinator.GetSchedulersController().AddScheduler(scheduler, args...)
