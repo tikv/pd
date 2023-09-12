@@ -167,11 +167,17 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		return slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
 	})
 	// Update the scheduler.
-	suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(&metapb.Store{
-		Id:            2,
-		Address:       "mock://2",
-		LastHeartbeat: time.Now().UnixNano(),
-	})
+	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(
+		&metapb.Store{
+			Id:            2,
+			Address:       "mock://2",
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+			Version:       "4.0.0",
+		},
+	)
+	re.NoError(err)
 	err = suite.pdLeaderServer.GetServer().GetHandler().AddEvictOrGrant(2, schedulers.EvictLeaderName)
 	re.NoError(err)
 	// Check the updated scheduler's config.

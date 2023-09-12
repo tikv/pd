@@ -47,7 +47,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -433,7 +432,7 @@ func (s *Server) startServer() (err error) {
 
 func (s *Server) startCluster(context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
-	err := s.startWatcher(s.storage)
+	err := s.startWatcher()
 	if err != nil {
 		return err
 	}
@@ -454,12 +453,12 @@ func (s *Server) stopCluster() {
 	s.metaWatcher.Close()
 }
 
-func (s *Server) startWatcher(storage storage.Storage) (err error) {
+func (s *Server) startWatcher() (err error) {
 	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.basicCluster)
 	if err != nil {
 		return err
 	}
-	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.persistConfig, storage)
+	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.persistConfig, s.storage)
 	if err != nil {
 		return err
 	}
