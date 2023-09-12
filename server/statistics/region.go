@@ -57,10 +57,12 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 	s.Count++
 	approximateKeys := r.GetApproximateKeys()
 	approximateSize := r.GetApproximateSize()
-	if approximateSize <= core.EmptyRegionApproximateSize {
+	if approximateSize == core.EmptyRegionApproximateSize {
 		s.EmptyCount++
 	}
-	s.StorageSize += approximateSize
+	if !r.IsEmptyRegion() {
+		s.StorageSize += approximateSize
+	}
 	s.StorageKeys += approximateKeys
 	leader := r.GetLeader()
 	if leader != nil {

@@ -843,7 +843,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	region.Inherit(origin, c.storeConfigManager.GetStoreConfig().IsEnableRegionBucket())
+	if c.GetStoreConfig().IsEnableRegionBucket() {
+		region.InheritBuckets(origin)
+	}
 
 	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
