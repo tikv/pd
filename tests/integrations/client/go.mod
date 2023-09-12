@@ -118,8 +118,14 @@ require (
 	github.com/pingcap/check v0.0.0-20211026125417-57bd13f7b5f0 // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
+<<<<<<< HEAD:tests/integrations/client/go.mod
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
 	github.com/pingcap/tidb-dashboard v0.0.0-20230705095454-5e220f970f27 // indirect
+=======
+	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
+	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20230911054332-22add1e00511 // indirect
+>>>>>>> e8f95acfb (chore(dashboard): update version to v2023.09.11.1 (#7065)):tests/client/go.mod
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -139,7 +145,11 @@ require (
 	github.com/soheilhy/cmux v0.1.4 // indirect
 	github.com/spf13/cobra v1.0.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+<<<<<<< HEAD:tests/integrations/client/go.mod
 	github.com/stretchr/objx v0.5.0 // indirect
+=======
+	github.com/stretchr/objx v0.2.0 // indirect
+>>>>>>> e8f95acfb (chore(dashboard): update version to v2023.09.11.1 (#7065)):tests/client/go.mod
 	github.com/swaggo/files v0.0.0-20210815190702-a29dd2bc99b2 // indirect
 	github.com/swaggo/http-swagger v1.2.6 // indirect
 	github.com/swaggo/swag v1.8.3 // indirect
