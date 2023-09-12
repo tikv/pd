@@ -1713,7 +1713,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		if !rc.GetOperatorController().AddOperator(op) {
 			return &pdpb.ScatterRegionResponse{
 				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					"operator cancelled because store limit exceeded"),
+					"operator canceled because cannot add an operator to the execute queue"),
 			}, nil
 		}
 	}

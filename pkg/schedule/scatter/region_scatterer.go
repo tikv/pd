@@ -296,7 +296,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	for _, peer := range region.GetPeers() {
 		store := r.cluster.GetStore(peer.GetStoreId())
 		if store == nil {
-			return nil, errs.ErrGetSourceStore.FastGenByArgs(fmt.Sprintf("store not found, peer: %v", peer))
+			return nil, errs.ErrGetSourceStore.FastGenByArgs(fmt.Sprintf("store not found, peer: %v, region id: %d", peer, region.GetID()))
 		}
 		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			ordinaryPeers[peer.GetStoreId()] = peer
@@ -384,6 +384,7 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 			targetPeers[peer.GetStoreId()] = peer
 		}
 		r.Put(targetPeers, region.GetLeader().GetStoreId(), group)
+		log.Debug("fail to create scatter region operator", errs.ZapError(err))
 		return nil, errs.ErrCreateOperator.FastGenByArgs(fmt.Sprintf("failed to create scatter region operator for region %v", region.GetID()))
 	}
 	if op != nil {
