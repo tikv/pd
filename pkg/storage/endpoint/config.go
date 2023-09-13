@@ -18,8 +18,10 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 // ConfigStorage defines the storage operations on the config.
@@ -41,6 +43,7 @@ func (se *StorageEndpoint) LoadConfig(cfg interface{}) (bool, error) {
 	}
 	err = json.Unmarshal([]byte(value), cfg)
 	if err != nil {
+		log.Warn("dbg invalid config", zap.String("value", string(value)))
 		return false, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	return true, nil
