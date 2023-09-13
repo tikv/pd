@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -87,7 +88,7 @@ func (h *labelsHandler) GetStoresByLabel(w http.ResponseWriter, r *http.Request)
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
 		if store == nil {
-			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID).Error())
+			h.rd.JSON(w, http.StatusInternalServerError, errs.ErrStoreNotFoundByID(storeID).Error())
 			return
 		}
 

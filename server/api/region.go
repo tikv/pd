@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/statistics"
@@ -763,7 +764,7 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 	}
 	region := rc.GetRegion(uint64(id))
 	if region == nil {
-		h.rd.JSON(w, http.StatusNotFound, server.ErrRegionNotFound(uint64(id)).Error())
+		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound(uint64(id)).Error())
 		return
 	}
 
@@ -1037,7 +1038,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		opsCount, failures, err = rc.GetRegionScatter().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+		opsCount, failures, err = rc.GetRegionScatterer().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -1048,7 +1049,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusBadRequest, "regions_id is invalid")
 			return
 		}
-		opsCount, failures, err = rc.GetRegionScatter().ScatterRegionsByID(ids, group, retryLimit, false)
+		opsCount, failures, err = rc.GetRegionScatterer().ScatterRegionsByID(ids, group, retryLimit, false)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return

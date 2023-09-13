@@ -765,8 +765,8 @@ func (c *RaftCluster) SetPrepared() {
 	c.coordinator.GetPrepareChecker().SetPrepared()
 }
 
-// GetRegionScatter returns the region scatter.
-func (c *RaftCluster) GetRegionScatter() *scatter.RegionScatterer {
+// GetRegionScatterer returns the region scatter.
+func (c *RaftCluster) GetRegionScatterer() *scatter.RegionScatterer {
 	return c.coordinator.GetRegionScatterer()
 }
 
