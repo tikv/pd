@@ -1062,7 +1062,6 @@ func (s *Server) ReportBatchSplit(ctx context.Context, request *pdpb.ReportBatch
 	if rc == nil {
 		return &pdpb.ReportBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-
 	_, err := rc.HandleBatchReportSplit(request)
 	if err != nil {
 		return nil, status.Errorf(codes.Unknown, err.Error())
