@@ -45,19 +45,25 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/admin/reset-ts",
 				tsoapi.APIPathPrefix+"/admin/reset-ts",
-				mcs.TSOServiceName),
+				mcs.TSOServiceName,
+				[]string{http.MethodPost}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/operators",
 				scheapi.APIPathPrefix+"/operators",
-				mcs.SchedulingServiceName),
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost, http.MethodGet, http.MethodDelete}),
+			// because the writing of all the meta information of the scheduling service is in the API server,
+			// we only forward read-only requests about checkers and schedulers to the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/checker", // Note: this is a typo in the original code
 				scheapi.APIPathPrefix+"/checkers",
-				mcs.SchedulingServiceName),
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",
 				scheapi.APIPathPrefix+"/schedulers",
-				mcs.SchedulingServiceName),
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
 		),
 		negroni.Wrap(r)),
 	)

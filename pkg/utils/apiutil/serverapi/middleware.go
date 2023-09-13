@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/urfave/negroni"
@@ -76,6 +77,7 @@ type microserviceRedirectRule struct {
 	matchPath         string
 	targetPath        string
 	targetServiceName string
+	matchMethods      []string
 }
 
 // NewRedirector redirects request to the leader if needs to be handled in the leader.
@@ -91,12 +93,13 @@ func NewRedirector(s *server.Server, opts ...RedirectorOption) negroni.Handler {
 type RedirectorOption func(*redirector)
 
 // MicroserviceRedirectRule new a microservice redirect rule option
-func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string) RedirectorOption {
+func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string, methods []string) RedirectorOption {
 	return func(s *redirector) {
 		s.microserviceRedirectRules = append(s.microserviceRedirectRules, &microserviceRedirectRule{
 			matchPath,
 			targetPath,
 			targetServiceName,
+			methods,
 		})
 	}
 }
@@ -109,7 +112,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 		return false, ""
 	}
 	for _, rule := range h.microserviceRedirectRules {
-		if strings.HasPrefix(r.URL.Path, rule.matchPath) {
+		if strings.HasPrefix(r.URL.Path, rule.matchPath) && slice.Contains(rule.matchMethods, r.Method) {
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !ok || addr == "" {
 				log.Warn("failed to get the service primary addr when trying to match redirect rules",
