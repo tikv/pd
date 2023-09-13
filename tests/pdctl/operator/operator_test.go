@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -32,14 +32,24 @@ import (
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func TestOperator(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var err error
+type operatorTestSuite struct {
+	suite.Suite
+	ctx     context.Context
+	cancel  context.CancelFunc
+	cluster *tests.TestCluster
+	pdAddr  string
+	opts    []tests.ConfigOption
+	cleanup func()
+}
+
+func TestOperatorTestSuite(t *testing.T) {
+	suite.Run(t, new(operatorTestSuite))
+}
+
+func (suite *operatorTestSuite) SetupSuite() {
 	var start time.Time
 	start = start.Add(time.Hour)
-	cluster, err := tests.NewTestCluster(ctx, 1,
+	suite.opts = []tests.ConfigOption{
 		// TODO: enable placementrules
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 2
@@ -48,12 +58,64 @@ func TestOperator(t *testing.T) {
 		func(conf *config.Config, serverName string) {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
 		},
-	)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+	}
+}
+
+func (suite *operatorTestSuite) TearDownSuite() {
+	suite.cancel()
+}
+
+func (suite *operatorTestSuite) TestOperatorInPDMode() {
+	suite.runPDMode()
+	suite.checkOperator()
+	suite.cleanup()
+}
+
+func (suite *operatorTestSuite) TestOperatorInAPIMode() {
+	suite.runAPIMode()
+	// Fixme: uncomment this after we can forward region and store
+	// suite.checkOperator()
+	suite.cleanup()
+}
+
+func (suite *operatorTestSuite) runPDMode() {
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	var err error
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1, suite.opts...)
+	suite.NoError(err)
+	err = suite.cluster.RunInitialServers()
+	suite.NoError(err)
+	suite.cluster.WaitLeader()
+	suite.pdAddr = suite.cluster.GetConfig().GetClientURL()
+	leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NoError(leaderServer.BootstrapCluster())
+	suite.cleanup = func() {
+		suite.cluster.Destroy()
+	}
+}
+
+func (suite *operatorTestSuite) runAPIMode() {
+	var err error
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1, suite.opts...)
+	suite.NoError(err)
+	suite.NoError(suite.cluster.RunInitialServers())
+	suite.NotEmpty(suite.cluster.WaitLeader())
+	server := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NoError(server.BootstrapCluster())
+	suite.pdAddr = server.GetAddr()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.pdAddr)
+	suite.NoError(err)
+	tc.WaitForPrimaryServing(suite.Require())
+	suite.cleanup = func() {
+		suite.cluster.Destroy()
+		tc.Destroy()
+	}
+}
+
+func (suite *operatorTestSuite) checkOperator() {
+	re := suite.Require()
+
 	cmd := pdctlCmd.GetRootCmd()
 
 	stores := []*metapb.Store{
@@ -78,22 +140,31 @@ func TestOperator(t *testing.T) {
 			LastHeartbeat: time.Now().Add(-time.Minute * 20).UnixNano(),
 		},
 	}
-
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
+	leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
 	for _, store := range stores {
 		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
 	}
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
+	pdctl.MustPutRegion(re, suite.cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
 	}))
-	pdctl.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
+	pdctl.MustPutRegion(re, suite.cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
 		{Id: 3, StoreId: 1},
 		{Id: 4, StoreId: 2},
 	}))
-	defer cluster.Destroy()
+
+	pdAddr := suite.pdAddr
+	args := []string{"-u", pdAddr, "operator", "show"}
+	var slice []string
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &slice))
+	re.Len(slice, 0)
+	args = []string{"-u", pdAddr, "operator", "check", "2"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "operator not found")
 
 	var testCases = []struct {
 		cmd    []string
@@ -175,9 +246,10 @@ func TestOperator(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		_, err := pdctl.ExecuteCommand(cmd, testCase.cmd...)
+		output, err = pdctl.ExecuteCommand(cmd, testCase.cmd...)
 		re.NoError(err)
-		output, err := pdctl.ExecuteCommand(cmd, testCase.show...)
+		re.NotContains(string(output), "Failed")
+		output, err = pdctl.ExecuteCommand(cmd, testCase.show...)
 		re.NoError(err)
 		re.Contains(string(output), testCase.expect)
 		start := time.Now()
@@ -190,11 +262,11 @@ func TestOperator(t *testing.T) {
 	}
 
 	// operator add merge-region <source_region_id> <target_region_id>
-	args := []string{"-u", pdAddr, "operator", "add", "merge-region", "1", "3"}
+	args = []string{"-u", pdAddr, "operator", "add", "merge-region", "1", "3"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	args = []string{"-u", pdAddr, "operator", "show"}
-	output, err := pdctl.ExecuteCommand(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "merge region 1 into region 3")
 	args = []string{"-u", pdAddr, "operator", "remove", "1"}
