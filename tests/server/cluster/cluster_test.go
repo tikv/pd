@@ -882,7 +882,9 @@ func TestLoadClusterInfo(t *testing.T) {
 	for _, region := range regions {
 		re.NoError(testStorage.SaveRegion(region))
 	}
-	re.NoError(storage.TryLoadRegionsOnce(ctx, testStorage, raftCluster.GetBasicCluster().PutRegion))
+	regionsNum, err := storage.TryLoadRegionsOnce(ctx, testStorage, raftCluster.GetBasicCluster().PutRegion)
+	re.NoError(err)
+	re.Equal(int64(0), regionsNum)
 	re.Equal(n, raftCluster.GetTotalRegionCount())
 }
 

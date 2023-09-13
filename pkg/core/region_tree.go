@@ -16,7 +16,6 @@ package core
 import (
 	"bytes"
 	"math/rand"
-	"sync/atomic"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -62,8 +61,6 @@ type regionTree struct {
 	totalSize           int64
 	totalWriteBytesRate float64
 	totalWriteKeysRate  float64
-	// count the stale meta regions
-	staleRegionCnt int64
 }
 
 func newRegionTree() *regionTree {
@@ -72,7 +69,6 @@ func newRegionTree() *regionTree {
 		totalSize:           0,
 		totalWriteBytesRate: 0,
 		totalWriteKeysRate:  0,
-		staleRegionCnt:      0,
 	}
 }
 
@@ -345,21 +341,4 @@ func (t *regionTree) TotalWriteRate() (bytesRate, keysRate float64) {
 		return 0, 0
 	}
 	return t.totalWriteBytesRate, t.totalWriteKeysRate
-}
-
-func (t *regionTree) AtomicAddStaleRegionCnt() {
-	if t.length() == 0 {
-		return
-	}
-	atomic.AddInt64(&t.staleRegionCnt, 1)
-}
-
-func (t *regionTree) AtomicSubStaleRegionCnt() {
-	if t.length() == 0 {
-		return
-	}
-	if t.staleRegionCnt == 0 {
-		return
-	}
-	atomic.AddInt64(&t.staleRegionCnt, -1)
 }

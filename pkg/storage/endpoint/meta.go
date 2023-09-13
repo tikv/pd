@@ -43,7 +43,7 @@ type MetaStorage interface {
 // RegionStorage defines the storage operations on the Region meta info.
 type RegionStorage interface {
 	LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error)
-	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error
+	LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) (int64, error)
 	SaveRegion(region *metapb.Region) error
 	DeleteRegion(region *metapb.Region) error
 	Flush() error
@@ -166,7 +166,7 @@ func (se *StorageEndpoint) LoadRegion(regionID uint64, region *metapb.Region) (o
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
+func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) (int64, error) {
 	nextID := uint64(0)
 	endKey := RegionPath(math.MaxUint64)
 
@@ -174,6 +174,7 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 	// the message packet to exceed the grpc message size limit (4MB). Here we use
 	// a variable rangeLimit to work around.
 	rangeLimit := MaxKVRangeLimit
+	regionsNum := int64(0)
 	for {
 		failpoint.Inject("slowLoadRegion", func() {
 			rangeLimit = 1
@@ -185,34 +186,36 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			if rangeLimit /= 2; rangeLimit >= MinKVRangeLimit {
 				continue
 			}
-			return err
+			return 0, err
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return 0, ctx.Err()
 		default:
 		}
 
 		for _, r := range res {
 			region := &metapb.Region{}
 			if err := region.Unmarshal([]byte(r)); err != nil {
-				return errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
+				return 0, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByArgs()
 			}
 			if err = encryption.DecryptRegion(region, se.encryptionKeyManager); err != nil {
-				return err
+				return 0, err
 			}
 
 			nextID = region.GetId() + 1
 			overlaps := f(core.NewRegionInfo(region, nil))
+			regionsNum += 1
 			for _, item := range overlaps {
 				if err := se.DeleteRegion(item.GetMeta()); err != nil {
-					return err
+					return 0, err
 				}
+				regionsNum -= 1
 			}
 		}
 
 		if len(res) < rangeLimit {
-			return nil
+			return regionsNum, nil
 		}
 	}
 }
