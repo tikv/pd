@@ -77,7 +77,27 @@ var (
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
 	*Server
+	schedulingClient             atomic.Value
 	concurrentTSOProxyStreamings atomic.Int32
+}
+
+type schedulingClient struct {
+	client      schedulingpb.SchedulingClient
+	lastPrimary string
+}
+
+func (s *schedulingClient) getClient() schedulingpb.SchedulingClient {
+	if s == nil {
+		return nil
+	}
+	return s.client
+}
+
+func (s *schedulingClient) getPrimaryAddr() string {
+	if s == nil {
+		return ""
+	}
+	return s.lastPrimary
 }
 
 type request interface {
@@ -981,8 +1001,8 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		s.handleDamagedStore(request.GetStats())
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		if s.IsAPIServiceMode() {
-			client := s.getForwardedClient(ctx)
-			if client != nil {
+			s.updateSchedulingClient(ctx)
+			if s.schedulingClient.Load() != nil {
 				req := &schedulingpb.StoreHeartbeatRequest{
 					Header: &schedulingpb.RequestHeader{
 						ClusterId: request.GetHeader().GetClusterId(),
@@ -990,7 +1010,10 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 					},
 					Stats: request.GetStats(),
 				}
-				schedulingpb.NewSchedulingClient(client).StoreHeartbeat(ctx, req)
+				if _, err := s.schedulingClient.Load().(*schedulingClient).getClient().StoreHeartbeat(ctx, req); err != nil {
+					// reset to let it be updated in the next request
+					s.schedulingClient.Store(&schedulingClient{})
+				}
 			}
 		}
 	}
@@ -1006,16 +1029,18 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	return resp, nil
 }
 
-func (s *GrpcServer) getForwardedClient(ctx context.Context) *grpc.ClientConn {
+func (s *GrpcServer) updateSchedulingClient(ctx context.Context) {
 	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
-	if forwardedHost != "" {
+	if forwardedHost != "" && forwardedHost != s.schedulingClient.Load().(*schedulingClient).getPrimaryAddr() {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			log.Error("get delegate client failed", zap.Error(err))
 		}
-		return client
+		s.schedulingClient.Store(&schedulingClient{
+			client:      schedulingpb.NewSchedulingClient(client),
+			lastPrimary: forwardedHost,
+		})
 	}
-	return nil
 }
 
 // bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
