@@ -41,13 +41,16 @@ func (b ByteSize) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON parses a JSON string into the byte size.
 func (b *ByteSize) UnmarshalJSON(text []byte) error {
-	s, err := strconv.Unquote(string(text))
+	v, err := units.RAMInBytes(string(text))
 	if err != nil {
-		return errors.WithStack(err)
-	}
-	v, err := units.RAMInBytes(s)
-	if err != nil {
-		return errors.WithStack(err)
+		s, err := strconv.Unquote(string(text))
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		v, err = units.RAMInBytes(s)
+		if err != nil {
+			return errors.WithStack(err)
+		}
 	}
 	*b = ByteSize(v)
 	return nil
