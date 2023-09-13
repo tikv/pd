@@ -980,7 +980,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	if store := c.core.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}
-	c.core.PutStore(newStore)
+
+	c.updateStoreLocked(newStore)
 	var (
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
@@ -1803,12 +1804,31 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	c.core.PutStore(store)
+	c.updateStoreLocked(store)
 	if !c.isAPIServiceMode {
 		c.hotStat.GetOrCreateRollingStoreStats(store.GetID())
 		c.slowStat.ObserveSlowStoreStatus(store.GetID(), store.IsSlow())
 	}
 	return nil
+}
+
+func (c *RaftCluster) updateStoreLocked(store *core.StoreInfo) {
+	originTotalMemory := c.core.GetClusterTotalMemory()
+	c.core.PutStore(store)
+	newTotalMemory := c.core.GetClusterTotalMemory()
+	if c.opt.IsLimitRegionCountEnabled() && originTotalMemory != newTotalMemory {
+		replicaMemory := c.opt.GetMemoryUsagePerRegionReplica()
+		stopRatio := c.opt.GetStopSplitRegionMemoryRatio()
+		// Older TiKV does not report memory stats.
+		if replicaMemory > 0 && stopRatio > 0.0 {
+			// Reserve some memory for system and auxiliary usage.
+			allowedMemory := float64(newTotalMemory) * stopRatio
+			allowedRegionCount := uint64(float64(replicaMemory) / allowedMemory)
+			c.core.SetAllowedRegionReplicaCount(allowedRegionCount)
+			tikvClusterAllowedRegionCount.Set(float64(allowedRegionCount))
+			tikvClusterTotalMemory.Set(float64(newTotalMemory))
+		}
+	}
 }
 
 func (c *RaftCluster) checkStores() {
@@ -2507,7 +2527,7 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 	}
 
 	newStore := store.Clone(core.SetMinResolvedTS(minResolvedTS))
-	c.core.PutStore(newStore)
+	c.updateStoreLocked(newStore)
 	return nil
 }
 
@@ -2810,4 +2830,9 @@ func (c *RaftCluster) GetPausedSchedulerDelayAt(name string) (int64, error) {
 // GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
 func (c *RaftCluster) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 	return c.coordinator.GetSchedulersController().GetPausedSchedulerDelayUntil(name)
+}
+
+// CheckAllowedRegionReplicaCount checks if spilt more replica is allowed.
+func (c *RaftCluster) CheckAllowedRegionReplicaCount(count uint64) bool {
+	return c.core.CheckAllowedRegionReplicaCount(count)
 }

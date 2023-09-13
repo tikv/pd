@@ -808,6 +808,24 @@ func (s *StoresInfo) UpdateStoreStatus(storeID uint64, leaderCount, regionCount,
 	}
 }
 
+// GetTotalMemory get total memory of all stores.
+func (s *StoresInfo) GetTotalMemory() uint64 {
+	totalMemory := uint64(0)
+	for _, store := range s.stores {
+		totalMemory += store.GetTotalMemory()
+	}
+	return totalMemory
+}
+
+// GetReplicaCount get used memory of all stores.
+func (s *StoresInfo) GetReplicaCount() uint64 {
+	replicaCount := 0
+	for _, store := range s.stores {
+		replicaCount += store.regionCount
+	}
+	return uint64(replicaCount)
+}
+
 // IsStoreContainLabel returns if the store contains the given label.
 func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 	for _, l := range store.GetLabels() {

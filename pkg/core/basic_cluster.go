@@ -25,6 +25,7 @@ type BasicCluster struct {
 	Stores struct {
 		mu syncutil.RWMutex
 		*StoresInfo
+		allowedRegionReplicaCount uint64
 	}
 
 	*RegionsInfo
@@ -36,6 +37,7 @@ func NewBasicCluster() *BasicCluster {
 		Stores: struct {
 			mu syncutil.RWMutex
 			*StoresInfo
+			allowedRegionReplicaCount uint64
 		}{StoresInfo: NewStoresInfo()},
 
 		RegionsInfo: NewRegionsInfo(),
@@ -244,6 +246,37 @@ func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRate
 // GetStoresWriteRate get total write rate of each store's regions.
 func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
 	return bc.getWriteRate(bc.RegionsInfo.GetStoreWriteRate)
+}
+
+// GetClusterTotalMemory get the total memory the TiKV cluster.
+func (bc *BasicCluster) GetClusterTotalMemory() uint64 {
+	bc.Stores.mu.RLock()
+	defer bc.Stores.mu.Unlock()
+	return bc.Stores.GetTotalMemory()
+}
+
+// GetReplicaCount get the current region replica count.
+func (bc *BasicCluster) GetReplicaCount() uint64 {
+	bc.Stores.mu.RLock()
+	defer bc.Stores.mu.Unlock()
+	return bc.Stores.GetReplicaCount()
+}
+
+// CheckAllowedRegionReplicaCount get the number of allowed region replica count of the TiKV cluster.
+func (bc *BasicCluster) CheckAllowedRegionReplicaCount(count uint64) bool {
+	bc.Stores.mu.RLock()
+	defer bc.Stores.mu.Unlock()
+	if bc.Stores.allowedRegionReplicaCount <= 0 {
+		return true
+	}
+	return bc.Stores.GetReplicaCount()+count < bc.Stores.allowedRegionReplicaCount
+}
+
+// SetAllowedRegionReplicaCount set the number of allowed region replica count of the TiKV cluster.
+func (bc *BasicCluster) SetAllowedRegionReplicaCount(count uint64) {
+	bc.Stores.mu.RLock()
+	defer bc.Stores.mu.Unlock()
+	bc.Stores.allowedRegionReplicaCount = count
 }
 
 // RegionSetInformer provides access to a shared informer of regions.

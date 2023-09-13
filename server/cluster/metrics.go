@@ -95,6 +95,21 @@ var (
 			Name:      "store_sync",
 			Help:      "The state of store sync config",
 		}, []string{"address", "state"})
+
+	tikvClusterTotalMemory = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "tikv_cluster_total_memory",
+			Help:      "The total memory of TiKV cluster",
+		})
+	tikvClusterAllowedRegionCount = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "tikv_cluster_allowed_region_count",
+			Help:      "The number of maximum allowed region count of TiKV cluster",
+		})
 )
 
 func init() {
@@ -108,4 +123,6 @@ func init() {
 	prometheus.MustRegister(storesETAGauge)
 	prometheus.MustRegister(storeSyncConfigEvent)
 	prometheus.MustRegister(updateStoreStatsGauge)
+	prometheus.MustRegister(tikvClusterTotalMemory)
+	prometheus.MustRegister(tikvClusterAllowedRegionCount)
 }

@@ -149,3 +149,17 @@ func climp0(v float64) uint64 {
 	}
 	return uint64(v)
 }
+
+// GetTotalMemory returns the total memory of the store.
+func (ss *storeStats) GetTotalMemory() uint64 {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.rawStats.GetTotalMemory()
+}
+
+// GetUsedMemory returns the current used memory of the store.
+func (ss *storeStats) GetUsedMemory() uint64 {
+	ss.mu.RLock()
+	defer ss.mu.RUnlock()
+	return ss.rawStats.GetUsedMemory()
+}

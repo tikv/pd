@@ -110,6 +110,7 @@ var (
 	ErrInternalGrowth                   = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
 	ErrSchedulerCreateFuncNotRegistered = errors.Normalize("create func of %v is not registered", errors.RFCCodeText("PD:scheduler:ErrSchedulerCreateFuncNotRegistered"))
 	ErrSchedulerTiKVSplitDisabled       = errors.Normalize("tikv split region disabled", errors.RFCCodeText("PD:scheduler:ErrSchedulerTiKVSplitDisabled"))
+	ErrSchedulerTiKVSplitThrottled      = errors.Normalize("tikv split region throttled", errors.RFCCodeText("PD:scheduler:ErrSchedulerTiKVSplitThrottled"))
 )
 
 // checker errors

@@ -49,6 +49,10 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
 	}
+	replicas := len(request.Region.Peers)
+	if !c.isAskSplitAllowed(uint64(replicas)) {
+		return nil, errs.ErrSchedulerTiKVSplitThrottled.FastGenByArgs()
+	}
 	reqRegion := request.GetRegion()
 	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
@@ -90,6 +94,17 @@ func (c *RaftCluster) isSchedulingHalted() bool {
 	return c.opt.IsSchedulingHalted()
 }
 
+// isAskSplitAllowed checks if split more region is allowed.
+// Every region replica needs a certain amount of memory to run. PD needs to
+// limit the total number of region replicas so that they do not overload TiKV
+// cluster.
+func (c *RaftCluster) isAskSplitAllowed(splitCount uint64) bool {
+	if !c.opt.IsLimitRegionCountEnabled() {
+		return true
+	}
+	return c.CheckAllowedRegionReplicaCount(splitCount)
+}
+
 // ValidRequestRegion is used to decide if the region is valid.
 func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
@@ -115,8 +130,12 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
 	}
-	reqRegion := request.GetRegion()
 	splitCount := request.GetSplitCount()
+	replicas := len(request.Region.Peers)
+	if !c.isAskSplitAllowed(uint64(splitCount) * uint64(replicas)) {
+		return nil, errs.ErrSchedulerTiKVSplitThrottled.FastGenByArgs()
+	}
+	reqRegion := request.GetRegion()
 	err := c.ValidRequestRegion(reqRegion)
 	if err != nil {
 		return nil, err

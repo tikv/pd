@@ -17,6 +17,7 @@ package config
 import (
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -57,6 +58,16 @@ const (
 	defaultEnablePlacementRules  = true
 	defaultEnableWitness         = false
 	defaultHaltScheduling        = false
+
+	// TODO: set default to false
+	defaultEnableLimitRegionCount     = true
+	defaultStopSplitRegionMemoryRatio = 0.9
+	// The default memory usage per-region in raftstore v1.
+	// 4 MB is concluded through an test.
+	// See https://gist.github.com/overvenus/4b52386f07ee34cf4dbdc62961b22763
+	defaultMemoryUsagePerRegionReplicaV1 = typeutil.ByteSize(4 * units.MB)
+	// The default memory usage per-region in raftstore v2.
+	defaultMemoryUsagePerRegionReplicaV2 = typeutil.ByteSize(4 * units.MB)
 
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
@@ -235,6 +246,14 @@ type ScheduleConfig struct {
 	// on ebs-based BR we need to disable it with TTL
 	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
 
+	// EnableLimitRegionCount is the option to enable limit region count in a TiKV node.
+	EnableLimitRegionCount bool `toml:"enable-limit-region-count" json:"enable-limit-region-count,string,omitempty"`
+	// MemoryUsagePerRegionReplica is the approximately memory usage that a region replica needs.
+	MemoryUsagePerRegionReplica typeutil.ByteSize `toml:"memory-usage-per-region-replica" json:"memory-usage-per-region-replica,string,omitempty"`
+	// StopSplitRegionMemoryRatio is the ratio of used memory to total memory that stops split region.
+	// The value must be in [0.0, 1.0]
+	StopSplitRegionMemoryRatio float64 `toml:"stop-split-region-memory-ratio" json:"stop-split-region-memory-ratio,omitempty"`
+
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
@@ -347,6 +366,15 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
+	}
+	if !meta.IsDefined("enable-limit-region-count") {
+		c.EnableLimitRegionCount = defaultEnableLimitRegionCount
+	}
+	if !meta.IsDefined("memory-usage-per-region-replica") {
+		configutil.AdjustByteSize(&c.MemoryUsagePerRegionReplica, defaultMemoryUsagePerRegionReplicaV1)
+	}
+	if !meta.IsDefined("stop-split-region-memory-ratio") {
+		configutil.AdjustFloat64(&c.StopSplitRegionMemoryRatio, defaultStopSplitRegionMemoryRatio)
 	}
 	configutil.AdjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	configutil.AdjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)

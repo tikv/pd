@@ -623,6 +623,21 @@ func (o *PersistOptions) IsTikvRegionSplitEnabled() bool {
 	return o.getTTLBoolOr(enableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
 }
 
+// IsLimitRegionCountEnabled returns whether pd needs to limit region count.
+func (o *PersistOptions) IsLimitRegionCountEnabled() bool {
+	return o.GetScheduleConfig().EnableLimitRegionCount
+}
+
+// GetMemoryUsagePerRegionReplica returns whether pd needs to limit region count.
+func (o *PersistOptions) GetMemoryUsagePerRegionReplica() uint64 {
+	return uint64(o.GetScheduleConfig().MemoryUsagePerRegionReplica)
+}
+
+// GetStopSplitRegionMemoryRatio returns whether pd needs to limit region count.
+func (o *PersistOptions) GetStopSplitRegionMemoryRatio() float64 {
+	return o.GetScheduleConfig().StopSplitRegionMemoryRatio
+}
+
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
 func (o *PersistOptions) GetMaxMovableHotPeerSize() int64 {
 	return o.GetScheduleConfig().MaxMovableHotPeerSize
