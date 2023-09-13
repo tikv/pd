@@ -236,7 +236,7 @@ func (s *Server) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
 
 // AddServiceReadyCallback implements basicserver.
 // It adds callbacks when it's ready for providing tso service.
-func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context)) {
+func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
 	// Do nothing here. The primary of each keyspace group assigned to this host
 	// will respond to the requests accordingly.
 }

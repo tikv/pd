@@ -433,6 +433,11 @@ func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.server.GetTSOAllocatorManager()
 }
 
+// GetServicePrimaryAddr returns the primary address of the service.
+func (s *TestServer) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
+	return s.server.GetServicePrimaryAddr(ctx, serviceName)
+}
+
 // TestCluster is only for test.
 type TestCluster struct {
 	config  *clusterConfig

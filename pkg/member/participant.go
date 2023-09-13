@@ -166,15 +166,7 @@ func (m *Participant) setLeader(member participant) {
 
 // unsetLeader unsets the member's leader.
 func (m *Participant) unsetLeader() {
-	var leader participant
-	switch m.serviceName {
-	case utils.TSOServiceName:
-		leader = &tsopb.Participant{}
-	case utils.SchedulingServiceName:
-		leader = &schedulingpb.Participant{}
-	case utils.ResourceManagerServiceName:
-		leader = &resource_manager.Participant{}
-	}
+	leader := NewParticipantByService(m.serviceName)
 	m.leader.Store(leader)
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
@@ -225,15 +217,7 @@ func (m *Participant) PreCheckLeader() error {
 
 // getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func (m *Participant) getPersistentLeader() (participant, int64, error) {
-	var leader participant
-	switch m.serviceName {
-	case utils.TSOServiceName:
-		leader = &tsopb.Participant{}
-	case utils.SchedulingServiceName:
-		leader = &schedulingpb.Participant{}
-	case utils.ResourceManagerServiceName:
-		leader = &resource_manager.Participant{}
-	}
+	leader := NewParticipantByService(m.serviceName)
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
 	if err != nil {
 		return nil, 0, err
@@ -398,4 +382,17 @@ func (m *Participant) campaignCheck() bool {
 // SetCampaignChecker sets the pre-campaign checker.
 func (m *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
 	m.campaignChecker.Store(checker)
+}
+
+// NewParticipantByService creates a new participant by service name.
+func NewParticipantByService(serviceName string) (p participant) {
+	switch serviceName {
+	case utils.TSOServiceName:
+		p = &tsopb.Participant{}
+	case utils.SchedulingServiceName:
+		p = &schedulingpb.Participant{}
+	case utils.ResourceManagerServiceName:
+		p = &resource_manager.Participant{}
+	}
+	return p
 }

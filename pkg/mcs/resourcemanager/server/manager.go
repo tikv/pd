@@ -101,7 +101,7 @@ func (m *Manager) GetBasicServer() bs.Server {
 }
 
 // Init initializes the resource group manager.
-func (m *Manager) Init(ctx context.Context) {
+func (m *Manager) Init(ctx context.Context) error {
 	// Todo: If we can modify following configs in the future, we should reload these configs.
 	// Store the controller config into the storage.
 	m.storage.SaveControllerConfig(m.controllerConfig)
@@ -156,6 +156,7 @@ func (m *Manager) Init(ctx context.Context) {
 		m.persistLoop(ctx)
 	}()
 	log.Info("resource group manager finishes initialization")
+	return nil
 }
 
 // AddResourceGroup puts a resource group.
