@@ -53,7 +53,7 @@ type minResolvedTS struct {
 // @Failure      500    {string}  string  "PD server failed to proceed the request."
 // @Router   /min-resolved-ts/{store_id} [get]
 func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *http.Request) {
-	c := h.svr.GetRaftCluster()
+	c := getCluster(r)
 	idStr := mux.Vars(r)["store_id"]
 	storeID, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
@@ -84,7 +84,7 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router       /min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
-	c := h.svr.GetRaftCluster()
+	c := getCluster(r)
 	scopeMinResolvedTS := c.GetMinResolvedTS()
 	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
 
