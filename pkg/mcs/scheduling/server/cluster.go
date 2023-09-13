@@ -208,26 +208,34 @@ func (c *Cluster) UpdateScheduler() {
 			s, err := schedulers.CreateScheduler(
 				scheduler.Type,
 				c.coordinator.GetOperatorController(),
-				// NOTICE: currently the scheduler config stored in this storage won't be used,
-				// we need to figure out a way to unify this storage and persisted config.
 				c.storage,
 				schedulers.ConfigSliceDecoder(scheduler.Type, scheduler.Args),
 				schedulersController.RemoveScheduler,
 			)
-			name := s.GetName()
-			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
-				continue
-			}
 			if err != nil {
 				log.Error("failed to create scheduler",
-					zap.String("scheduler-name", name), zap.Strings("scheduler-args", scheduler.Args), errs.ZapError(err))
+					zap.String("scheduler-type", scheduler.Type),
+					zap.Strings("scheduler-args", scheduler.Args),
+					errs.ZapError(err))
+				continue
+			}
+			name := s.GetName()
+			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
+				log.Info("scheduler has already existed, skip adding it",
+					zap.String("scheduler-name", name),
+					zap.Strings("scheduler-args", scheduler.Args))
+				continue
 			}
 			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
 				log.Error("failed to add scheduler",
-					zap.String("scheduler-name", name), zap.Strings("scheduler-args", scheduler.Args), errs.ZapError(err))
+					zap.String("scheduler-name", name),
+					zap.Strings("scheduler-args", scheduler.Args),
+					errs.ZapError(err))
+				continue
 			}
 			log.Info("add scheduler successfully",
-				zap.String("scheduler-name", name), zap.Strings("scheduler-args", scheduler.Args))
+				zap.String("scheduler-name", name),
+				zap.Strings("scheduler-args", scheduler.Args))
 		}
 		// Remove the deleted schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
@@ -238,9 +246,13 @@ func (c *Cluster) UpdateScheduler() {
 				continue
 			}
 			if err := schedulersController.RemoveScheduler(name); err != nil {
-				log.Error("failed to remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+				log.Error("failed to remove scheduler",
+					zap.String("scheduler-name", name),
+					errs.ZapError(err))
+				continue
 			}
-			log.Info("remove scheduler successfully", zap.String("scheduler-name", name))
+			log.Info("remove scheduler successfully",
+				zap.String("scheduler-name", name))
 		}
 	}
 }
