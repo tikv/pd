@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package api_test
+package api
 
 import (
 	"bytes"
@@ -43,13 +43,6 @@ import (
 	"github.com/tikv/pd/tests/pdctl"
 	"go.uber.org/goleak"
 )
-
-// dialClient used to dial http request.
-var dialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
