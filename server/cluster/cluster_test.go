@@ -67,6 +67,9 @@ func TestStoreHeartbeat(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	opt.GetScheduleConfig().StoreLimitVersion = "v2"
+	opt.GetScheduleConfig().EnableLimitRegionCount = true
+	opt.GetScheduleConfig().MemoryUsagePerRegionReplica = typeutil.ByteSize(10)
+	opt.GetScheduleConfig().StopSplitRegionMemoryRatio = 1.0
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 
@@ -88,6 +91,7 @@ func TestStoreHeartbeat(t *testing.T) {
 			Capacity:    100,
 			Available:   50,
 			RegionCount: 1,
+			TotalMemory: 100,
 		}
 		re.Error(cluster.HandleStoreHeartbeat(req, resp))
 
@@ -97,6 +101,9 @@ func TestStoreHeartbeat(t *testing.T) {
 		re.Equal(int64(0), store.GetLastHeartbeatTS().UnixNano())
 
 		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+		re.EqualValues((i+1)*100, cluster.core.GetClusterTotalMemory())
+		re.True(cluster.core.CheckAllowedRegionReplicaCount(uint64((i + 1) * 10)))
+		re.False(cluster.core.CheckAllowedRegionReplicaCount(uint64((i+1)*10 + 1)))
 
 		s := cluster.GetStore(store.GetID())
 		re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())

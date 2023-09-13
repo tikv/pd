@@ -65,9 +65,9 @@ const (
 	// The default memory usage per-region in raftstore v1.
 	// 4 MB is concluded through an test.
 	// See https://gist.github.com/overvenus/4b52386f07ee34cf4dbdc62961b22763
-	defaultMemoryUsagePerRegionReplicaV1 = typeutil.ByteSize(4 * units.MB)
+	defaultMemoryUsagePerRegionReplicaV1 = typeutil.ByteSize(4 * units.MiB)
 	// The default memory usage per-region in raftstore v2.
-	defaultMemoryUsagePerRegionReplicaV2 = typeutil.ByteSize(4 * units.MB)
+	defaultMemoryUsagePerRegionReplicaV2 = typeutil.ByteSize(4 * units.MiB)
 
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
@@ -375,6 +375,11 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("stop-split-region-memory-ratio") {
 		configutil.AdjustFloat64(&c.StopSplitRegionMemoryRatio, defaultStopSplitRegionMemoryRatio)
+	}
+	if c.StopSplitRegionMemoryRatio < 0 {
+		c.StopSplitRegionMemoryRatio = 0.0
+	} else if c.StopSplitRegionMemoryRatio > 1 {
+		c.StopSplitRegionMemoryRatio = 1.0
 	}
 	configutil.AdjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
 	configutil.AdjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)

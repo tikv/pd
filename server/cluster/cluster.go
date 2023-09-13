@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -1813,20 +1814,24 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) updateStoreLocked(store *core.StoreInfo) {
-	originTotalMemory := c.core.GetClusterTotalMemory()
 	c.core.PutStore(store)
-	newTotalMemory := c.core.GetClusterTotalMemory()
-	if c.opt.IsLimitRegionCountEnabled() && originTotalMemory != newTotalMemory {
+	if c.opt.IsLimitRegionCountEnabled() {
 		replicaMemory := c.opt.GetMemoryUsagePerRegionReplica()
 		stopRatio := c.opt.GetStopSplitRegionMemoryRatio()
 		// Older TiKV does not report memory stats.
 		if replicaMemory > 0 && stopRatio > 0.0 {
+			totalMemory := c.core.GetClusterTotalMemory()
 			// Reserve some memory for system and auxiliary usage.
-			allowedMemory := float64(newTotalMemory) * stopRatio
-			allowedRegionCount := uint64(float64(replicaMemory) / allowedMemory)
-			c.core.SetAllowedRegionReplicaCount(allowedRegionCount)
-			tikvClusterAllowedRegionCount.Set(float64(allowedRegionCount))
-			tikvClusterTotalMemory.Set(float64(newTotalMemory))
+			allowedMemory := float64(totalMemory) * stopRatio
+			allowedReplicaCount := uint64(allowedMemory / float64(replicaMemory))
+			changed := c.core.SetAllowedRegionReplicaCount(allowedReplicaCount)
+			tikvClusterAllowedRegionCount.Set(float64(allowedReplicaCount))
+			tikvClusterTotalMemory.Set(float64(totalMemory))
+			if changed {
+				log.Info("cluster allowed replica count changed",
+					zap.String("cluster-total-memory", units.BytesSize(float64(totalMemory))),
+					zap.Uint64("allowed-replica-count", allowedReplicaCount))
+			}
 		}
 	}
 }
