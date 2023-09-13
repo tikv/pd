@@ -58,7 +58,7 @@ type Watcher struct {
 	// to make sure the coordinator could access them correctly.
 	storage storage.Storage
 	// schedulersController is used to trigger the scheduler's config reloading.
-	// Store as *schedulers.Controller.
+	// Store as `*schedulers.Controller`.
 	schedulersController atomic.Value
 }
 

@@ -147,14 +147,14 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	)
 	re.NoError(err)
 	// Get all default scheduler names.
-	var namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfig()
+	var namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
 	testutil.Eventually(re, func() bool {
 		return len(namesFromAPIServer) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.
 	var namesFromSchedulingServer []string
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfig()
+		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
 		return len(namesFromSchedulingServer) == len(namesFromAPIServer)
 	})
@@ -165,7 +165,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	// Check the new scheduler's config.
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfig()
+		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
 		return slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
 	})
@@ -193,7 +193,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName)
 	// Check the removed scheduler's config.
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfig()
+		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
 		return !slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
 	})

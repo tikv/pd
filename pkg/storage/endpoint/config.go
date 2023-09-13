@@ -28,7 +28,7 @@ type ConfigStorage interface {
 	LoadConfig(cfg interface{}) (bool, error)
 	SaveConfig(cfg interface{}) error
 	// Each scheduler has its own customized config, so we need to store them separately.
-	LoadAllSchedulerConfig() ([]string, []string, error)
+	LoadAllSchedulerConfigs() ([]string, []string, error)
 	LoadSchedulerConfig(schedulerName string) (string, error)
 	SaveSchedulerConfig(schedulerName string, data []byte) error
 	RemoveSchedulerConfig(schedulerName string) error
@@ -58,8 +58,8 @@ func (se *StorageEndpoint) SaveConfig(cfg interface{}) error {
 	return se.Save(configPath, string(value))
 }
 
-// LoadAllSchedulerConfig loads all schedulers' config.
-func (se *StorageEndpoint) LoadAllSchedulerConfig() ([]string, []string, error) {
+// LoadAllSchedulerConfigs loads all schedulers' config.
+func (se *StorageEndpoint) LoadAllSchedulerConfigs() ([]string, []string, error) {
 	prefix := customSchedulerConfigPath + "/"
 	keys, values, err := se.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
 	for i, key := range keys {

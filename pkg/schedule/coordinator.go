@@ -417,7 +417,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		err           error
 	)
 	for i := 0; i < maxLoadConfigRetries; i++ {
-		scheduleNames, configs, err = c.cluster.GetStorage().LoadAllSchedulerConfig()
+		scheduleNames, configs, err = c.cluster.GetStorage().LoadAllSchedulerConfigs()
 		select {
 		case <-c.ctx.Done():
 			log.Info("init schedulers has been stopped")

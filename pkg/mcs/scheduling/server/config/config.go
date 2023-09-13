@@ -252,9 +252,8 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
-	// We only need to care about the scheduler number here since the coordinator
-	// is not aware of the underlying value changes, however, it should react on
-	// the scheduler number changes to handle the add/remove scheduler events.
+	// The coordinator is not aware of the underlying scheduler config changes, however, it
+	// should react on the scheduler number changes to handle the add/remove scheduler events.
 	if notifier := o.getSchedulersUpdatingNotifier(); notifier != nil &&
 		len(old.Schedulers) != len(cfg.Schedulers) {
 		notifier <- struct{}{}
