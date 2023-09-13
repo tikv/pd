@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
+	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -107,11 +108,21 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 	primary := tc.GetPrimaryServer()
-	addr := primary.GetAddr()
+	oldPrimaryAddr := primary.GetAddr()
 	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
+	testutil.Eventually(re, func() bool {
+		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
+		return ok && oldPrimaryAddr == watchedAddr
+	})
+	// transfer leader
 	primary.Close()
 	tc.WaitForPrimaryServing(re)
 	primary = tc.GetPrimaryServer()
-	re.NotEqual(addr, primary.GetAddr())
+	newPrimaryAddr := primary.GetAddr()
+	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
 	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
+	testutil.Eventually(re, func() bool {
+		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
+		return ok && newPrimaryAddr == watchedAddr
+	})
 }

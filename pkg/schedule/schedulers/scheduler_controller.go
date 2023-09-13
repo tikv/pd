@@ -40,22 +40,28 @@ var denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues
 // Controller is used to manage all schedulers.
 type Controller struct {
 	sync.RWMutex
-	wg           sync.WaitGroup
-	ctx          context.Context
-	cluster      sche.SchedulerCluster
-	storage      endpoint.ConfigStorage
-	schedulers   map[string]*ScheduleController
-	opController *operator.Controller
+	wg      sync.WaitGroup
+	ctx     context.Context
+	cluster sche.SchedulerCluster
+	storage endpoint.ConfigStorage
+	// schedulers is used to manage all schedulers, which will only be initialized
+	// and used in the PD leader service mode now.
+	schedulers map[string]*ScheduleController
+	// schedulerHandlers is used to manage the HTTP handlers of schedulers,
+	// which will only be initialized and used in the API service mode now.
+	schedulerHandlers map[string]http.Handler
+	opController      *operator.Controller
 }
 
 // NewController creates a scheduler controller.
 func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller) *Controller {
 	return &Controller{
-		ctx:          ctx,
-		cluster:      cluster,
-		storage:      storage,
-		schedulers:   make(map[string]*ScheduleController),
-		opController: opController,
+		ctx:               ctx,
+		cluster:           cluster,
+		storage:           storage,
+		schedulers:        make(map[string]*ScheduleController),
+		schedulerHandlers: make(map[string]http.Handler),
+		opController:      opController,
 	}
 }
 
@@ -86,6 +92,9 @@ func (c *Controller) GetSchedulerNames() []string {
 func (c *Controller) GetSchedulerHandlers() map[string]http.Handler {
 	c.RLock()
 	defer c.RUnlock()
+	if len(c.schedulerHandlers) > 0 {
+		return c.schedulerHandlers
+	}
 	handlers := make(map[string]http.Handler, len(c.schedulers))
 	for name, scheduler := range c.schedulers {
 		handlers[name] = scheduler.Scheduler
@@ -115,6 +124,50 @@ func (c *Controller) isSchedulingHalted() bool {
 // ResetSchedulerMetrics resets metrics of all schedulers.
 func (c *Controller) ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
+}
+
+// AddSchedulerHandler adds the HTTP handler for a scheduler.
+func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) error {
+	c.Lock()
+	defer c.Unlock()
+
+	name := scheduler.GetName()
+	if _, ok := c.schedulerHandlers[name]; ok {
+		return errs.ErrSchedulerExisted.FastGenByArgs()
+	}
+
+	c.schedulerHandlers[name] = scheduler
+	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
+	return nil
+}
+
+// RemoveSchedulerHandler removes the HTTP handler for a scheduler.
+func (c *Controller) RemoveSchedulerHandler(name string) error {
+	c.Lock()
+	defer c.Unlock()
+	if c.cluster == nil {
+		return errs.ErrNotBootstrapped.FastGenByArgs()
+	}
+	s, ok := c.schedulerHandlers[name]
+	if !ok {
+		return errs.ErrSchedulerNotFound.FastGenByArgs()
+	}
+
+	conf := c.cluster.GetSchedulerConfig()
+	conf.RemoveSchedulerCfg(s.(Scheduler).GetType())
+	if err := conf.Persist(c.storage); err != nil {
+		log.Error("the option can not persist scheduler config", errs.ZapError(err))
+		return err
+	}
+
+	if err := c.storage.RemoveScheduleConfig(name); err != nil {
+		log.Error("can not remove the scheduler config", errs.ZapError(err))
+		return err
+	}
+
+	delete(c.schedulerHandlers, name)
+
+	return nil
 }
 
 // AddScheduler adds a scheduler.
@@ -249,8 +302,9 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 	if c.cluster == nil {
 		return false, errs.ErrNotBootstrapped.FastGenByArgs()
 	}
-	_, ok := c.schedulers[name]
-	if !ok {
+	_, existScheduler := c.schedulers[name]
+	_, existHandler := c.schedulerHandlers[name]
+	if !existScheduler && !existHandler {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 	return true, nil

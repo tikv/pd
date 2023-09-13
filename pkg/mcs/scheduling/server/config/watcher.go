@@ -23,6 +23,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -50,6 +51,9 @@ type Watcher struct {
 	schedulerConfigWatcher *etcdutil.LoopWatcher
 
 	*PersistConfig
+	// Some data, like the scheduler configs, should be loaded into the storage
+	// to make sure the coordinator could access them correctly.
+	storage storage.Storage
 }
 
 type persistedConfig struct {
@@ -65,6 +69,7 @@ func NewWatcher(
 	etcdClient *clientv3.Client,
 	clusterID uint64,
 	persistConfig *PersistConfig,
+	storage storage.Storage,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	cw := &Watcher{
@@ -74,6 +79,7 @@ func NewWatcher(
 		schedulerConfigPathPrefix: endpoint.SchedulerConfigPathPrefix(clusterID),
 		etcdClient:                etcdClient,
 		PersistConfig:             persistConfig,
+		storage:                   storage,
 	}
 	err := cw.initializeConfigWatcher()
 	if err != nil {
@@ -120,15 +126,15 @@ func (cw *Watcher) initializeConfigWatcher() error {
 func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
-		cw.SetSchedulerConfig(
+		return cw.storage.SaveScheduleConfig(
 			strings.TrimPrefix(string(kv.Key), prefixToTrim),
-			string(kv.Value),
+			kv.Value,
 		)
-		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		cw.RemoveSchedulerConfig(strings.TrimPrefix(string(kv.Key), prefixToTrim))
-		return nil
+		return cw.storage.RemoveScheduleConfig(
+			strings.TrimPrefix(string(kv.Key), prefixToTrim),
+		)
 	}
 	postEventFn := func() error {
 		return nil

@@ -91,8 +91,10 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 // CreateSchedulerFunc is for creating scheduler.
 type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
 
-var schedulerMap = make(map[string]CreateSchedulerFunc)
-var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
+var (
+	schedulerMap           = make(map[string]CreateSchedulerFunc)
+	schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
+)
 
 // RegisterScheduler binds a scheduler creator. It should be called in init()
 // func of a package.
