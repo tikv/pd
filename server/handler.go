@@ -901,14 +901,20 @@ func (h *Handler) ResetTS(ts uint64) error {
 
 // SetStoreLimitScene sets the limit values for different scenes
 func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
-	cluster := h.s.GetRaftCluster()
-	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return
+	}
+	rc.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
 }
 
 // GetStoreLimitScene returns the limit values for different scenes
 func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
-	cluster := h.s.GetRaftCluster()
-	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return nil
+	}
+	return rc.GetStoreLimiter().StoreLimitScene(limitType)
 }
 
 // PluginLoad loads the plugin referenced by the pluginPath
