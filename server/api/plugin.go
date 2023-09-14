@@ -48,6 +48,10 @@ func newPluginHandler(handler *server.Handler, rd *render.Render) *pluginHandler
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /plugin [post]
 func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
+	if !h.GetScheduleConfig().EnableSchedulePlugin {
+		h.rd.JSON(w, http.StatusInternalServerError, errors.New("load plugin failed, please enable plugin first"))
+		return
+	}
 	h.processPluginCommand(w, r, schedule.PluginLoad)
 }
 
@@ -62,6 +66,10 @@ func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /plugin [delete]
 func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
+	if !h.GetScheduleConfig().EnableSchedulePlugin {
+		h.rd.JSON(w, http.StatusInternalServerError, errors.New("unload plugin failed, please enable plugin first"))
+		return
+	}
 	h.processPluginCommand(w, r, schedule.PluginUnload)
 }
 

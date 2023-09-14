@@ -115,6 +115,7 @@ type SharedConfigProvider interface {
 	IsWitnessAllowed() bool
 	IsPlacementRulesCacheEnabled() bool
 	SetHaltScheduling(bool, string)
+	SetEnableSchedulePlugin(bool)
 
 	// for test purpose
 	SetPlacementRulesCacheEnabled(bool)

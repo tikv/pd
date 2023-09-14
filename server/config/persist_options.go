@@ -982,6 +982,13 @@ func (o *PersistOptions) IsSchedulingHalted() bool {
 	return o.GetScheduleConfig().HaltScheduling
 }
 
+// SetEnableSchedulePlugin to set the option for witness. It's only used to test.
+func (o *PersistOptions) SetEnableSchedulePlugin(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableSchedulePlugin = enable
+	o.SetScheduleConfig(v)
+}
+
 // GetRegionMaxSize returns the max region size in MB
 func (o *PersistOptions) GetRegionMaxSize() uint64 {
 	return o.GetStoreConfig().GetRegionMaxSize()

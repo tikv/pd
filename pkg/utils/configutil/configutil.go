@@ -81,6 +81,7 @@ type SecurityConfig struct {
 	// RedactInfoLog indicates that whether enabling redact log
 	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
 	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
+	GrantPlugin   bool              `toml:"grant-plugin" json:"grant-plugin"`
 }
 
 // PrintConfigCheckMsg prints the message about configuration checks.

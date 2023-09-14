@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/replication"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
@@ -168,10 +169,10 @@ func (suite *adminTestSuite) TestDropRegions() {
 func (suite *adminTestSuite) TestPersistFile() {
 	data := []byte("#!/bin/sh\nrm -rf /")
 	re := suite.Require()
-	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/fun.sh", data, tu.StatusNotOK(re))
+	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/"+replication.DrStatusFile, data, tu.StatusNotOK(re))
 	suite.NoError(err)
 	data = []byte(`{"foo":"bar"}`)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/good.json", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/"+replication.DrStatusFile, data, tu.StatusOK(re))
 	suite.NoError(err)
 }
 
