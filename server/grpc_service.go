@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/tso"
@@ -879,24 +880,6 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
-	if s.IsAPIServiceMode() {
-		forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
-		if forwardedHost != "" {
-			client, err := s.getDelegateClient(ctx, forwardedHost)
-			if err != nil {
-				return &pdpb.PutStoreResponse{
-					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-						"get delegate client failed"),
-				}, nil
-			}
-			if resp, _ := schedulingpb.NewSchedulingClient(client).PutStore(ctx, request); resp.GetHeader().GetError() != nil {
-				return &pdpb.PutStoreResponse{
-					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().String()),
-				}, nil
-			}
-		}
-	}
-
 	if err := rc.PutStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -1111,14 +1094,14 @@ type heartbeatServer struct {
 	closed int32
 }
 
-func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
+func (s *heartbeatServer) Send(m hbstream.RegionHeartbeatResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
 	}
 	done := make(chan error, 1)
 	go func() {
 		defer logutil.LogPanic()
-		done <- s.stream.Send(m)
+		done <- s.stream.Send(m.(*pdpb.RegionHeartbeatResponse))
 	}()
 	timer := time.NewTimer(heartbeatSendTimeout)
 	defer timer.Stop()
@@ -1390,7 +1373,27 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				}
 			}
 			if schedulingStream != nil {
-				if err := schedulingStream.Send(request); err != nil {
+				req := &schedulingpb.RegionHeartbeatRequest{
+					Header: &schedulingpb.RequestHeader{
+						ClusterId: request.GetHeader().GetClusterId(),
+						SenderId:  request.GetHeader().GetSenderId(),
+					},
+					Region:          request.GetRegion(),
+					Leader:          request.GetLeader(),
+					DownPeers:       request.GetDownPeers(),
+					PendingPeers:    request.GetPendingPeers(),
+					BytesWritten:    request.GetBytesWritten(),
+					BytesRead:       request.GetBytesRead(),
+					KeysWritten:     request.GetKeysWritten(),
+					KeysRead:        request.GetKeysRead(),
+					ApproximateSize: request.GetApproximateSize(),
+					ApproximateKeys: request.GetApproximateKeys(),
+					Interval:        request.GetInterval(),
+					Term:            request.GetTerm(),
+					QueryStats:      request.GetQueryStats(),
+					CpuUsage:        request.GetCpuUsage(),
+				}
+				if err := schedulingStream.Send(req); err != nil {
 					log.Error("forward region heartbeat failed", zap.Error(err))
 				}
 			}
@@ -2363,7 +2366,23 @@ func forwardSchedulingToServer(forwardStream schedulingpb.Scheduling_RegionHeart
 			errCh <- errors.WithStack(err)
 			return
 		}
-		if err := server.Send(resp); err != nil {
+		response := &pdpb.RegionHeartbeatResponse{
+			Header: &pdpb.ResponseHeader{
+				ClusterId: resp.GetHeader().GetClusterId(),
+				// ignore error here
+			},
+			ChangePeer:      resp.GetChangePeer(),
+			TransferLeader:  resp.GetTransferLeader(),
+			RegionId:        resp.GetRegionId(),
+			RegionEpoch:     resp.GetRegionEpoch(),
+			TargetPeer:      resp.GetTargetPeer(),
+			Merge:           resp.GetMerge(),
+			SplitRegion:     resp.GetSplitRegion(),
+			ChangePeerV2:    resp.GetChangePeerV2(),
+			SwitchWitnesses: resp.GetSwitchWitnesses(),
+		}
+
+		if err := server.Send(response); err != nil {
 			errCh <- errors.WithStack(err)
 			return
 		}

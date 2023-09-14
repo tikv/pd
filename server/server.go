@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -486,7 +485,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
-	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, s.cluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
 		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
@@ -2009,44 +2008,6 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		s.client,
 		name,
 		primaryKey,
-		putFn,
-		deleteFn,
-		func() error { return nil },
-	)
-}
-
-func (s *Server) initSchedulingPrimaryWatcher() {
-	serviceName := mcs.SchedulingServiceName
-	schedulingRootPath := endpoint.SchedulingSvcRootPath(s.clusterID)
-	schedulingServicePrimaryKey := path.Join(schedulingRootPath, mcs.PrimaryKey)
-	putFn := func(kv *mvccpb.KeyValue) error {
-		primary := &tsopb.Participant{} // TODO: use Generics
-		if err := proto.Unmarshal(kv.Value, primary); err != nil {
-			return err
-		}
-		listenUrls := primary.GetListenUrls()
-		if len(listenUrls) > 0 {
-			s.servicePrimaryMap.Store(serviceName, listenUrls[0])
-			log.Info("update scheduling primary", zap.String("primary", listenUrls[0]))
-		}
-		return nil
-	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
-		var oldPrimary string
-		v, ok := s.servicePrimaryMap.Load(serviceName)
-		if ok {
-			oldPrimary = v.(string)
-		}
-		log.Info("delete scheduling primary", zap.String("old-primary", oldPrimary))
-		s.servicePrimaryMap.Delete(serviceName)
-		return nil
-	}
-	s.schedulingPrimaryWatcher = etcdutil.NewLoopWatcher(
-		s.serverLoopCtx,
-		&s.serverLoopWg,
-		s.client,
-		"scheduling-primary-watcher",
-		schedulingServicePrimaryKey,
 		putFn,
 		deleteFn,
 		func() error { return nil },

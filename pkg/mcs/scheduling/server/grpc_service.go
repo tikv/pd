@@ -21,13 +21,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
@@ -74,21 +74,21 @@ func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 	}
 }
 
-// heartbeatServer wraps PD_RegionHeartbeatServer to ensure when any error
+// heartbeatServer wraps Scheduling_RegionHeartbeatServer to ensure when any error
 // occurs on Send() or Recv(), both endpoints will be closed.
 type heartbeatServer struct {
-	stream pdpb.PD_RegionHeartbeatServer
+	stream schedulingpb.Scheduling_RegionHeartbeatServer
 	closed int32
 }
 
-func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
+func (s *heartbeatServer) Send(m hbstream.RegionHeartbeatResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
 	}
 	done := make(chan error, 1)
 	go func() {
 		defer logutil.LogPanic()
-		done <- s.stream.Send(m)
+		done <- s.stream.Send(m.(*schedulingpb.RegionHeartbeatResponse))
 	}()
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
@@ -104,7 +104,7 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 	}
 }
 
-func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
+func (s *heartbeatServer) Recv() (*schedulingpb.RegionHeartbeatRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
@@ -141,10 +141,10 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 
 		c := s.GetCluster()
 		if c == nil {
-			resp := &pdpb.RegionHeartbeatResponse{Header: &pdpb.ResponseHeader{
+			resp := &schedulingpb.RegionHeartbeatResponse{Header: &schedulingpb.ResponseHeader{
 				ClusterId: s.clusterID,
-				Error: &pdpb.Error{
-					Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
+				Error: &schedulingpb.Error{
+					Type:    schedulingpb.ErrorType_NOT_BOOTSTRAPPED,
 					Message: "scheduling server is not initialized yet",
 				},
 			}}
@@ -162,11 +162,11 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 			s.hbStreams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
-		region := core.RegionFromHeartbeat(request, core.SetFromHeartbeat(true))
+		region := core.RegionFromForward(request, core.SetFromHeartbeat(true))
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
-			msg := err.Error()
-			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
+			// TODO: if we need to send the error back to API server.
+			log.Error("failed handle region heartbeat", zap.Error(err))
 			continue
 		}
 	}

@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -172,6 +173,54 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 		queryStats:        heartbeat.GetQueryStats(),
+	}
+
+	for _, opt := range opts {
+		opt(region)
+	}
+
+	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
+		region.writtenKeys = 0
+		region.writtenBytes = 0
+	}
+	if region.readKeys >= ImpossibleFlowSize || region.readBytes >= ImpossibleFlowSize {
+		region.readKeys = 0
+		region.readBytes = 0
+	}
+
+	sort.Sort(peerStatsSlice(region.downPeers))
+	sort.Sort(peerSlice(region.pendingPeers))
+
+	classifyVoterAndLearner(region)
+	return region
+}
+
+// RegionFromForward constructs a Region from forwarded region heartbeat.
+func RegionFromForward(heartbeat *schedulingpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
+	// Convert unit to MB.
+	// If region isn't empty and less than 1MB, use 1MB instead.
+	regionSize := heartbeat.GetApproximateSize() / units.MiB
+	// Due to https://github.com/tikv/tikv/pull/11170, if region size is not initialized,
+	// approximate size will be zero, and region size is zero not EmptyRegionApproximateSize
+	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
+		regionSize = EmptyRegionApproximateSize
+	}
+
+	region := &RegionInfo{
+		term:            heartbeat.GetTerm(),
+		meta:            heartbeat.GetRegion(),
+		leader:          heartbeat.GetLeader(),
+		downPeers:       heartbeat.GetDownPeers(),
+		pendingPeers:    heartbeat.GetPendingPeers(),
+		cpuUsage:        heartbeat.GetCpuUsage(),
+		writtenBytes:    heartbeat.GetBytesWritten(),
+		writtenKeys:     heartbeat.GetKeysWritten(),
+		readBytes:       heartbeat.GetBytesRead(),
+		readKeys:        heartbeat.GetKeysRead(),
+		approximateSize: int64(regionSize),
+		approximateKeys: int64(heartbeat.GetApproximateKeys()),
+		interval:        heartbeat.GetInterval(),
+		queryStats:      heartbeat.GetQueryStats(),
 	}
 
 	for _, opt := range opts {
