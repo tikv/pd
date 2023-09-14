@@ -222,7 +222,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 			State:         metapb.StoreState_Up,
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
-			Version:       "4.0.0",
+			Version:       "7.0.0",
 		},
 	)
 	re.NoError(err)
