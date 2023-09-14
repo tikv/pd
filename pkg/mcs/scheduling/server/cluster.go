@@ -261,7 +261,7 @@ func (c *Cluster) waitSchedulersInitialized() {
 	ticker := time.NewTicker(time.Millisecond * 100)
 	defer ticker.Stop()
 	for {
-		if c.coordinator.CheckSchedulersInitialized() {
+		if c.coordinator.AreSchedulersInitialized() {
 			return
 		}
 		select {

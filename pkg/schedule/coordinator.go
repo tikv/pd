@@ -117,8 +117,8 @@ func (c *Coordinator) markSchedulersInitialized() {
 	c.schedulersInitialized = true
 }
 
-// CheckSchedulersInitialized returns whether the schedulers have been initialized.
-func (c *Coordinator) CheckSchedulersInitialized() bool {
+// AreSchedulersInitialized returns whether the schedulers have been initialized.
+func (c *Coordinator) AreSchedulersInitialized() bool {
 	c.RLock()
 	defer c.RUnlock()
 	return c.schedulersInitialized
