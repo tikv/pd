@@ -147,14 +147,14 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	)
 	re.NoError(err)
 	// Get all default scheduler names.
-	var namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllScheduleConfig()
+	var namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
 	testutil.Eventually(re, func() bool {
 		return len(namesFromAPIServer) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.
 	var namesFromSchedulingServer []string
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllScheduleConfig()
+		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
 		return len(namesFromSchedulingServer) == len(namesFromAPIServer)
 	})
@@ -165,10 +165,11 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	// Check the new scheduler's config.
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllScheduleConfig()
+		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
 		return slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
 	})
+	assertEvictLeaderStoreIDs(re, storage, []uint64{1})
 	// Update the scheduler by adding a store.
 	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(
 		&metapb.Store{
@@ -192,7 +193,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName)
 	// Check the removed scheduler's config.
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, _, err = storage.LoadAllScheduleConfig()
+		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
 		return !slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
 	})
@@ -202,24 +203,15 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 func assertEvictLeaderStoreIDs(
 	re *require.Assertions, storage *endpoint.StorageEndpoint, storeIDs []uint64,
 ) {
-	var (
-		namesFromSchedulingServer, configs []string
-		err                                error
-		evictLeaderCfg                     struct {
-			StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-		}
-	)
+	var evictLeaderCfg struct {
+		StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+	}
 	testutil.Eventually(re, func() bool {
-		namesFromSchedulingServer, configs, err = storage.LoadAllScheduleConfig()
+		cfg, err := storage.LoadSchedulerConfig(schedulers.EvictLeaderName)
 		re.NoError(err)
-		for idx, name := range namesFromSchedulingServer {
-			if name == schedulers.EvictLeaderName {
-				err = schedulers.DecodeConfig([]byte(configs[idx]), &evictLeaderCfg)
-				re.NoError(err)
-				return len(evictLeaderCfg.StoreIDWithRanges) == len(storeIDs)
-			}
-		}
-		return false
+		err = schedulers.DecodeConfig([]byte(cfg), &evictLeaderCfg)
+		re.NoError(err)
+		return len(evictLeaderCfg.StoreIDWithRanges) == len(storeIDs)
 	})
 	// Validate the updated scheduler's config.
 	for _, storeID := range storeIDs {

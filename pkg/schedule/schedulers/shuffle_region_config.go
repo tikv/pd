@@ -109,5 +109,5 @@ func (conf *shuffleRegionSchedulerConfig) persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(ShuffleRegionName, data)
+	return conf.storage.SaveSchedulerConfig(ShuffleRegionName, data)
 }

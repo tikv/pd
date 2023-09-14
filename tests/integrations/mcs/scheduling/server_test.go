@@ -16,6 +16,7 @@ package scheduling
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -24,9 +25,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/server/api"
 	"go.uber.org/goleak"
 )
 
@@ -104,6 +107,9 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NoError(err)
 	re.Greater(id1, id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+	// Update the pdLeader in test suite.
+	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+	suite.backendEndpoints = suite.pdLeader.GetAddr()
 }
 
 func (suite *serverTestSuite) TestPrimaryChange() {
@@ -181,4 +187,67 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 			store.GetStoreStats().GetKeysRead() == uint64(10000) &&
 			store.GetStoreStats().GetBytesRead() == uint64(99)
 	})
+}
+
+func (suite *serverTestSuite) TestSchedulerSync() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
+	re.Len(schedulersController.GetSchedulerNames(), 5)
+	re.Nil(schedulersController.GetScheduler(schedulers.EvictLeaderName))
+	// Add a new evict-leader-scheduler through the API server.
+	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 1,
+	})
+	// Check if the evict-leader-scheduler is added.
+	testutil.Eventually(re, func() bool {
+		return len(schedulersController.GetSchedulerNames()) == 6 &&
+			schedulersController.GetScheduler(schedulers.EvictLeaderName) != nil
+	})
+	handler, ok := schedulersController.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	re.True(ok)
+	h, ok := handler.(interface {
+		EvictStoreIDs() []uint64
+	})
+	re.True(ok)
+	re.ElementsMatch(h.EvictStoreIDs(), []uint64{1})
+	// Update the evict-leader-scheduler through the API server.
+	err = suite.pdLeader.GetServer().GetRaftCluster().PutStore(
+		&metapb.Store{
+			Id:            2,
+			Address:       "mock://2",
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+			Version:       "7.0.0",
+		},
+	)
+	re.NoError(err)
+	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 2,
+	})
+	var evictStoreIDs []uint64
+	testutil.Eventually(re, func() bool {
+		evictStoreIDs = h.EvictStoreIDs()
+		return len(evictStoreIDs) == 2
+	})
+	re.ElementsMatch(evictStoreIDs, []uint64{1, 2})
+	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", schedulers.EvictLeaderName, 1))
+	testutil.Eventually(re, func() bool {
+		evictStoreIDs = h.EvictStoreIDs()
+		return len(evictStoreIDs) == 1
+	})
+	re.ElementsMatch(evictStoreIDs, []uint64{2})
+	// Remove the evict-leader-scheduler through the API server.
+	api.MustDeleteScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName)
+	// Check if the scheduler is removed.
+	testutil.Eventually(re, func() bool {
+		return len(schedulersController.GetSchedulerNames()) == 5 &&
+			schedulersController.GetScheduler(schedulers.EvictLeaderName) == nil
+	})
+
+	// TODO: test more schedulers.
 }

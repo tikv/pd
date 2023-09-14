@@ -203,6 +203,9 @@ type PersistConfig struct {
 	schedule       atomic.Value
 	replication    atomic.Value
 	storeConfig    atomic.Value
+	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
+	// Store as `chan<- struct{}`.
+	schedulersUpdatingNotifier atomic.Value
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
@@ -215,6 +218,19 @@ func NewPersistConfig(cfg *Config) *PersistConfig {
 	// so we just set an empty value here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
 	return o
+}
+
+// SetSchedulersUpdatingNotifier sets the schedulers updating notifier.
+func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan<- struct{}) {
+	o.schedulersUpdatingNotifier.Store(notifier)
+}
+
+func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
+	v := o.schedulersUpdatingNotifier.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(chan<- struct{})
 }
 
 // GetClusterVersion returns the cluster version.
@@ -232,12 +248,19 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 	return o.schedule.Load().(*sc.ScheduleConfig)
 }
 
-// SetScheduleConfig sets the scheduling configuration.
+// SetScheduleConfig sets the scheduling configuration dynamically.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
+	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
+	// The coordinator is not aware of the underlying scheduler config changes, however, it
+	// should react on the scheduler number changes to handle the add/remove scheduler events.
+	if notifier := o.getSchedulersUpdatingNotifier(); notifier != nil &&
+		len(old.Schedulers) != len(cfg.Schedulers) {
+		notifier <- struct{}{}
+	}
 }
 
-// AdjustScheduleCfg adjusts the schedule config.
+// AdjustScheduleCfg adjusts the schedule config during the initialization.
 func (o *PersistConfig) AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 	// In case we add new default schedulers.
 	for _, ps := range sc.DefaultSchedulers {
@@ -616,7 +639,12 @@ func (o *PersistConfig) IsRaftKV2() bool {
 // TODO: implement the following methods
 
 // AddSchedulerCfg adds the scheduler configurations.
+// This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
 func (o *PersistConfig) AddSchedulerCfg(string, []string) {}
+
+// RemoveSchedulerCfg removes the scheduler configurations.
+// This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
+func (o *PersistConfig) RemoveSchedulerCfg(tp string) {}
 
 // CheckLabelProperty checks if the label property is satisfied.
 func (o *PersistConfig) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
@@ -633,6 +661,3 @@ func (o *PersistConfig) IsTraceRegionFlow() bool {
 func (o *PersistConfig) Persist(storage endpoint.ConfigStorage) error {
 	return nil
 }
-
-// RemoveSchedulerCfg removes the scheduler configurations.
-func (o *PersistConfig) RemoveSchedulerCfg(tp string) {}

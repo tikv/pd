@@ -10,16 +10,20 @@ import (
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
 
@@ -173,6 +177,100 @@ func (c *Cluster) getAPIServerLeaderClient() (pdpb.PDClient, error) {
 func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
 	old := c.apiServerLeader.Load()
 	return c.apiServerLeader.CompareAndSwap(old, new)
+}
+
+// UpdateScheduler listens on the schedulers updating notifier and manage the scheduler creation and deletion.
+func (c *Cluster) UpdateScheduler() {
+	defer logutil.LogPanic()
+
+	// Make sure the coordinator has initialized all the existing schedulers.
+	c.waitSchedulersInitialized()
+	// Establish a notifier to listen the schedulers updating.
+	notifier := make(chan struct{}, 1)
+	// Make sure the check will be triggered once later.
+	notifier <- struct{}{}
+	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("cluster is closing, stop listening the schedulers updating notifier")
+			return
+		case <-notifier:
+		}
+
+		log.Info("schedulers updating notifier is triggered, try to update the scheduler")
+		var (
+			schedulersController   = c.coordinator.GetSchedulersController()
+			latestSchedulersConfig = c.persistConfig.GetScheduleConfig().Schedulers
+		)
+		// Create the newly added schedulers.
+		for _, scheduler := range latestSchedulersConfig {
+			s, err := schedulers.CreateScheduler(
+				scheduler.Type,
+				c.coordinator.GetOperatorController(),
+				c.storage,
+				schedulers.ConfigSliceDecoder(scheduler.Type, scheduler.Args),
+				schedulersController.RemoveScheduler,
+			)
+			if err != nil {
+				log.Error("failed to create scheduler",
+					zap.String("scheduler-type", scheduler.Type),
+					zap.Strings("scheduler-args", scheduler.Args),
+					errs.ZapError(err))
+				continue
+			}
+			name := s.GetName()
+			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
+				log.Info("scheduler has already existed, skip adding it",
+					zap.String("scheduler-name", name),
+					zap.Strings("scheduler-args", scheduler.Args))
+				continue
+			}
+			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
+				log.Error("failed to add scheduler",
+					zap.String("scheduler-name", name),
+					zap.Strings("scheduler-args", scheduler.Args),
+					errs.ZapError(err))
+				continue
+			}
+			log.Info("add scheduler successfully",
+				zap.String("scheduler-name", name),
+				zap.Strings("scheduler-args", scheduler.Args))
+		}
+		// Remove the deleted schedulers.
+		for _, name := range schedulersController.GetSchedulerNames() {
+			scheduler := schedulersController.GetScheduler(name)
+			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
+				return latestSchedulersConfig[i].Type == scheduler.GetType()
+			}) {
+				continue
+			}
+			if err := schedulersController.RemoveScheduler(name); err != nil {
+				log.Error("failed to remove scheduler",
+					zap.String("scheduler-name", name),
+					errs.ZapError(err))
+				continue
+			}
+			log.Info("remove scheduler successfully",
+				zap.String("scheduler-name", name))
+		}
+	}
+}
+
+func (c *Cluster) waitSchedulersInitialized() {
+	ticker := time.NewTicker(time.Millisecond * 100)
+	defer ticker.Stop()
+	for {
+		if c.coordinator.AreSchedulersInitialized() {
+			return
+		}
+		select {
+		case <-c.ctx.Done():
+			log.Info("cluster is closing, stop waiting the schedulers initialization")
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // TODO: implement the following methods
