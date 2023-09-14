@@ -219,7 +219,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		}
 		var watchChannel chan []*meta_storagepb.Event
 		if !c.ruConfig.isSingleGroupByKeyspace {
-			watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix())
+			watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix(), pd.WithPrevKV())
 		}
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
 		if err == nil || c.ruConfig.isSingleGroupByKeyspace {
@@ -277,19 +277,26 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 				for _, item := range resp {
 					revision = item.Kv.ModRevision
-					group := &rmpb.ResourceGroup{}
-					if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
-						continue
-					}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
+						group := &rmpb.ResourceGroup{}
+						if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
+							continue
+						}
 						if item, ok := c.groupsController.Load(group.Name); ok {
 							gc := item.(*groupCostController)
 							gc.modifyMeta(group)
 						}
 					case meta_storagepb.Event_DELETE:
-						if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
-							resourceGroupStatusGauge.DeleteLabelValues(group.Name)
+						if item.PrevKv != nil {
+							group := &rmpb.ResourceGroup{}
+							if err := proto.Unmarshal(item.PrevKv.Value, group); err != nil {
+								continue
+							}
+							log.Info("delete resource group", zap.String("name", group.Name))
+							if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
+								resourceGroupStatusGauge.DeleteLabelValues(group.Name)
+							}
 						}
 					}
 				}
