@@ -1469,6 +1469,10 @@ func TestStoreConfigSync(t *testing.T) {
 	err = opt.Reload(tc.GetStorage())
 	re.NoError(err)
 	re.Equal(tc.GetOpts().(*config.PersistOptions).GetStoreConfig(), opt.GetStoreConfig())
+
+	re.Equal("v1", opt.GetScheduleConfig().StoreLimitVersion)
+	re.NoError(opt.SwitchRaftV2(tc.GetStorage()))
+	re.Equal("v2", opt.GetScheduleConfig().StoreLimitVersion)
 }
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {
