@@ -2,22 +2,29 @@ package server
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"go.uber.org/zap"
 )
 
 // Cluster is used to manage all information for scheduling purpose.
@@ -28,6 +35,7 @@ type Cluster struct {
 	ruleManager       *placement.RuleManager
 	labelerManager    *labeler.RegionLabeler
 	regionStats       *statistics.RegionStatistics
+	labelLevelStats   *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
 	storage           storage.Storage
 	coordinator       *schedule.Coordinator
@@ -53,6 +61,7 @@ func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storag
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
+		labelLevelStats:   statistics.NewLabelStatistics(),
 		storage:           storage,
 		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
@@ -170,8 +179,172 @@ func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
 	return c.apiServerLeader.CompareAndSwap(old, new)
 }
 
+// UpdateScheduler listens on the schedulers updating notifier and manage the scheduler creation and deletion.
+func (c *Cluster) UpdateScheduler() {
+	defer logutil.LogPanic()
+
+	// Make sure the coordinator has initialized all the existing schedulers.
+	c.waitSchedulersInitialized()
+	// Establish a notifier to listen the schedulers updating.
+	notifier := make(chan struct{}, 1)
+	// Make sure the check will be triggered once later.
+	notifier <- struct{}{}
+	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("cluster is closing, stop listening the schedulers updating notifier")
+			return
+		case <-notifier:
+		}
+
+		log.Info("schedulers updating notifier is triggered, try to update the scheduler")
+		var (
+			schedulersController   = c.coordinator.GetSchedulersController()
+			latestSchedulersConfig = c.persistConfig.GetScheduleConfig().Schedulers
+		)
+		// Create the newly added schedulers.
+		for _, scheduler := range latestSchedulersConfig {
+			s, err := schedulers.CreateScheduler(
+				scheduler.Type,
+				c.coordinator.GetOperatorController(),
+				c.storage,
+				schedulers.ConfigSliceDecoder(scheduler.Type, scheduler.Args),
+				schedulersController.RemoveScheduler,
+			)
+			if err != nil {
+				log.Error("failed to create scheduler",
+					zap.String("scheduler-type", scheduler.Type),
+					zap.Strings("scheduler-args", scheduler.Args),
+					errs.ZapError(err))
+				continue
+			}
+			name := s.GetName()
+			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
+				log.Info("scheduler has already existed, skip adding it",
+					zap.String("scheduler-name", name),
+					zap.Strings("scheduler-args", scheduler.Args))
+				continue
+			}
+			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
+				log.Error("failed to add scheduler",
+					zap.String("scheduler-name", name),
+					zap.Strings("scheduler-args", scheduler.Args),
+					errs.ZapError(err))
+				continue
+			}
+			log.Info("add scheduler successfully",
+				zap.String("scheduler-name", name),
+				zap.Strings("scheduler-args", scheduler.Args))
+		}
+		// Remove the deleted schedulers.
+		for _, name := range schedulersController.GetSchedulerNames() {
+			scheduler := schedulersController.GetScheduler(name)
+			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
+				return latestSchedulersConfig[i].Type == scheduler.GetType()
+			}) {
+				continue
+			}
+			if err := schedulersController.RemoveScheduler(name); err != nil {
+				log.Error("failed to remove scheduler",
+					zap.String("scheduler-name", name),
+					errs.ZapError(err))
+				continue
+			}
+			log.Info("remove scheduler successfully",
+				zap.String("scheduler-name", name))
+		}
+	}
+}
+
+func (c *Cluster) waitSchedulersInitialized() {
+	ticker := time.NewTicker(time.Millisecond * 100)
+	defer ticker.Stop()
+	for {
+		if c.coordinator.AreSchedulersInitialized() {
+			return
+		}
+		select {
+		case <-c.ctx.Done():
+			log.Info("cluster is closing, stop waiting the schedulers initialization")
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
 // TODO: implement the following methods
 
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.
 func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
+	for _, region := range regions {
+		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
+	}
+}
+
+func (c *Cluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
+	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
+	for _, p := range region.GetPeers() {
+		if store := c.GetStore(p.GetStoreId()); store != nil && !core.IsStoreContainLabel(store.GetMeta(), key, value) {
+			stores = append(stores, store)
+		}
+	}
+	return stores
+}
+
+// HandleStoreHeartbeat updates the store status.
+func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatRequest) error {
+	stats := heartbeat.GetStats()
+	storeID := stats.GetStoreId()
+	store := c.GetStore(storeID)
+	if store == nil {
+		return errors.Errorf("store %v not found", storeID)
+	}
+
+	nowTime := time.Now()
+	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
+
+	if store := c.GetStore(storeID); store != nil {
+		statistics.UpdateStoreHeartbeatMetrics(store)
+	}
+	c.PutStore(newStore)
+	c.hotStat.Observe(storeID, newStore.GetStoreStats())
+	c.hotStat.FilterUnhealthyStore(c)
+	reportInterval := stats.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+
+	regions := make(map[uint64]*core.RegionInfo, len(stats.GetPeerStats()))
+	for _, peerStat := range stats.GetPeerStats() {
+		regionID := peerStat.GetRegionId()
+		region := c.GetRegion(regionID)
+		regions[regionID] = region
+		if region == nil {
+			log.Warn("discard hot peer stat for unknown region",
+				zap.Uint64("region-id", regionID),
+				zap.Uint64("store-id", storeID))
+			continue
+		}
+		peer := region.GetStorePeer(storeID)
+		if peer == nil {
+			log.Warn("discard hot peer stat for unknown region peer",
+				zap.Uint64("region-id", regionID),
+				zap.Uint64("store-id", storeID))
+			continue
+		}
+		readQueryNum := core.GetReadQueryNum(peerStat.GetQueryStats())
+		loads := []float64{
+			utils.RegionReadBytes:     float64(peerStat.GetReadBytes()),
+			utils.RegionReadKeys:      float64(peerStat.GetReadKeys()),
+			utils.RegionReadQueryNum:  float64(readQueryNum),
+			utils.RegionWriteBytes:    0,
+			utils.RegionWriteKeys:     0,
+			utils.RegionWriteQueryNum: 0,
+		}
+		peerInfo := core.NewPeerInfo(peer, loads, interval)
+		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
+	}
+
+	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
+	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
+	return nil
 }

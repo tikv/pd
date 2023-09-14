@@ -3092,7 +3092,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(evict, "2"))
 	re.Len(controller.GetSchedulerNames(), defaultCount+2)
-	sches, _, err := storage.LoadAllScheduleConfig()
+	sches, _, err := storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
 	re.Len(sches, defaultCount+2)
 
@@ -3121,7 +3121,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(newOpt.GetSchedulers(), defaultCount)
 	re.NoError(newOpt.Reload(storage))
 	// only remains 3 items with independent config.
-	sches, _, err = storage.LoadAllScheduleConfig()
+	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
 	re.Len(sches, 3)
 
@@ -3202,7 +3202,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(gls1, "1"))
 	re.Len(controller.GetSchedulerNames(), defaultCount+1)
-	sches, _, err := storage.LoadAllScheduleConfig()
+	sches, _, err := storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
 	re.Len(sches, defaultCount+1)
 
@@ -3214,7 +3214,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
 	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	// all removed
-	sches, _, err = storage.LoadAllScheduleConfig()
+	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
 	re.Empty(sches)
 	re.Empty(controller.GetSchedulerNames())

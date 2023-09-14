@@ -15,12 +15,15 @@
 package server
 
 import (
+	"context"
 	"net/http"
 
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -64,8 +67,29 @@ func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 	}
 }
 
+// StoreHeartbeat implements gRPC PDServer.
+func (s *Service) StoreHeartbeat(ctx context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		// TODO: add metrics
+		log.Info("cluster isn't initialized")
+		return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
+	}
+
+	if c.GetStore(request.GetStats().GetStoreId()) == nil {
+		s.metaWatcher.GetStoreWatcher().ForceLoad()
+	}
+
+	// TODO: add metrics
+	if err := c.HandleStoreHeartbeat(request); err != nil {
+		log.Error("handle store heartbeat failed", zap.Error(err))
+	}
+	return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
+}
+
 // RegisterGRPCService registers the service to gRPC server.
 func (s *Service) RegisterGRPCService(g *grpc.Server) {
+	schedulingpb.RegisterSchedulingServer(g, s)
 }
 
 // RegisterRESTHandler registers the service to REST server.

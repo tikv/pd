@@ -20,6 +20,7 @@ import (
 
 	"github.com/gorilla/mux"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
@@ -39,7 +40,9 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
 		serverapi.NewRedirector(svr, serverapi.MicroserviceRedirectRule(
-			apiPrefix+"/api/v1"+"/admin/reset-ts", tsoapi.APIPathPrefix+"/admin/reset-ts", "tso")),
+			apiPrefix+"/api/v1"+"/admin/reset-ts",
+			tsoapi.APIPathPrefix+"/admin/reset-ts",
+			mcs.TSOServiceName)),
 		negroni.Wrap(r)),
 	)
 
