@@ -345,9 +345,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 				for _, item := range resp {
 					cfgRevision = item.Kv.ModRevision
-					if !strings.HasPrefix(string(item.Kv.Key), controllerConfigPath) {
-						continue
-					}
 					config := &Config{}
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
