@@ -443,13 +443,14 @@ func (s *Server) startCluster(context.Context) error {
 		return err
 	}
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
-	go s.cluster.UpdateScheduler()
+	s.cluster.StartBackgroundJobs()
 	go s.GetCoordinator().RunUntilStop()
 	return nil
 }
 
 func (s *Server) stopCluster() {
 	s.GetCoordinator().Stop()
+	s.cluster.StopBackgroundJobs()
 	s.ruleWatcher.Close()
 	s.configWatcher.Close()
 	s.metaWatcher.Close()
