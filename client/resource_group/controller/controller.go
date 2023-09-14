@@ -219,6 +219,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		}
 		var watchChannel chan []*meta_storagepb.Event
 		if !c.ruConfig.isSingleGroupByKeyspace {
+			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
 			watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix(), pd.WithPrevKV())
 		}
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
@@ -293,10 +294,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 							if err := proto.Unmarshal(item.PrevKv.Value, group); err != nil {
 								continue
 							}
-							log.Info("delete resource group", zap.String("name", group.Name))
 							if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
 								resourceGroupStatusGauge.DeleteLabelValues(group.Name)
 							}
+						} else {
+							// Prev-kv is compacted means there must have been a delete event before this event,
+							// which means that this is just a duplicated event, so we can just ignore it.
+							log.Info("previous key-value pair has been compacted", zap.String("previous key", string(item.Kv.Key)))
 						}
 					}
 				}
