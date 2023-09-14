@@ -1032,7 +1032,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 func (s *GrpcServer) updateSchedulingClient(ctx context.Context) {
 	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
 	pre := s.schedulingClient.Load()
-	if forwardedHost != "" && (pre != nil && forwardedHost != pre.(*schedulingClient).getPrimaryAddr()) {
+	if forwardedHost != "" && ((pre == nil) || (pre != nil && forwardedHost != pre.(*schedulingClient).getPrimaryAddr())) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			log.Error("get delegate client failed", zap.Error(err))
