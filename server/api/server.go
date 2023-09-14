@@ -64,6 +64,8 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/schedulers",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
+			// TODO: we need to consider the case that v1 api not support restful api.
+			// we might change the previous path parameters to query parameters.
 		),
 		negroni.Wrap(r)),
 	)
