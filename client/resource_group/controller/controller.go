@@ -300,12 +300,12 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						} else {
 							// Prev-kv is compacted means there must have been a delete event before this event,
 							// which means that this is just a duplicated event, so we can just ignore it.
-							log.Info("previous key-value pair has been compacted", zap.String("previous key", string(item.Kv.Key)))
+							log.Info("previous key-value pair has been compacted", zap.String("required-key", string(item.Kv.Key)), zap.String("value", string(item.Kv.Value)))
 						}
 					}
 				}
 			case <-watchRetryTimer.C:
-				watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix())
+				watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix(), pd.WithPrevKV())
 				if err != nil {
 					watchRetryTimer.Reset(watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
