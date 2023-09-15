@@ -69,10 +69,12 @@ func (suite *dashboardTestSuite) TearDownSuite() {
 }
 
 func (suite *dashboardTestSuite) TestDashboardRedirect() {
+	println("TestDashboardRedirect")
 	suite.testDashboard(false)
 }
 
 func (suite *dashboardTestSuite) TestDashboardProxy() {
+	println("TestDashboardProxy")
 	suite.testDashboard(true)
 }
 

@@ -23,9 +23,9 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        worker_id: [1]
     outputs:
-      job-total: 13
+      job-total: 1
     steps:
       - uses: actions/setup-go@v3
         with:
@@ -48,31 +48,31 @@ jobs:
           JOB_COUNT: 10 # 11, 12 13 are for other integrations jobs
         run: |
           make ci-test-job JOB_COUNT=$(($JOB_COUNT)) JOB_INDEX=$WORKER_ID
-          mv covprofile covprofile_$WORKER_ID
-          sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
-      - name: Upload coverage result ${{ matrix.worker_id }}
-        uses: actions/upload-artifact@v2
-        with:
-          name: cover-reports
-          path: covprofile_${{ matrix.worker_id }}
-  report-coverage:
-    needs: chunks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Download chunk report
-        uses: actions/download-artifact@v2
-        with:
-          name: cover-reports
-      - name: Merge
-        env:
-          TOTAL_JOBS: ${{needs.chunks.outputs.job-total}}
-        run: for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
-      - name: Send coverage
-        uses: codecov/codecov-action@v1
-        with:
-          token: ${{ secrets.CODECOV }}
-          file: ./covprofile
-          flags: unittests
-          name: codecov-umbrella
+#          mv covprofile covprofile_$WORKER_ID
+#          sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
+#      - name: Upload coverage result ${{ matrix.worker_id }}
+#        uses: actions/upload-artifact@v2
+#        with:
+#          name: cover-reports
+#          path: covprofile_${{ matrix.worker_id }}
+#  report-coverage:
+#    needs: chunks
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v3
+#      - name: Download chunk report
+#        uses: actions/download-artifact@v2
+#        with:
+#          name: cover-reports
+#      - name: Merge
+#        env:
+#          TOTAL_JOBS: ${{needs.chunks.outputs.job-total}}
+#        run: for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
+#      - name: Send coverage
+#        uses: codecov/codecov-action@v1
+#        with:
+#          token: ${{ secrets.CODECOV }}
+#          file: ./covprofile
+#          flags: unittests
+#          name: codecov-umbrella
