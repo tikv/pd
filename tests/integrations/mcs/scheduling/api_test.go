@@ -2,6 +2,7 @@ package scheduling_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -119,21 +121,40 @@ func (suite *apiTestSuite) TestAPIForward() {
 	var resp map[string]interface{}
 
 	// Test opeartor
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice)
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 	re.Len(slice, 0)
 
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/2"), &resp)
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/2"), &resp,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 	re.Nil(resp)
 
-	// Test checker
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp)
+	// Test checker: only read-only requests are forwarded
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 	suite.False(resp["paused"].(bool))
 
-	// Test scheduler
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), &slice)
+	input := make(map[string]interface{})
+	input["delay"] = 10
+	pauseArgs, err := json.Marshal(input)
+	suite.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), pauseArgs,
+		testutil.StatusOK(re), testutil.WithoutHeader(re, apiutil.PDRedirectorHeader))
+	suite.NoError(err)
+
+	// Test scheduler: only read-only requests are forwarded
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), &slice,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 	re.Contains(slice, "balance-leader-scheduler")
+
+	input["delay"] = 30
+	pauseArgs, err = json.Marshal(input)
+	suite.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/all"), pauseArgs,
+		testutil.StatusOK(re), testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	suite.NoError(err)
 }

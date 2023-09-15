@@ -171,6 +171,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		clientUrls = append(clientUrls, targetAddr)
+		w.Header().Set(apiutil.ForwardToMicroServiceHeader, "true")
 	} else {
 		leader := h.s.GetMember().GetLeader()
 		if leader == nil {

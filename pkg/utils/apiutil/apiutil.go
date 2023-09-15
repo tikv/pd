@@ -57,6 +57,8 @@ const (
 	XForwardedPortHeader = "X-Forwarded-Port"
 	// XRealIPHeader is used to mark the real client IP.
 	XRealIPHeader = "X-Real-Ip"
+	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
+	ForwardToMicroServiceHeader = "Forward-To-Micro-Service"
 
 	// ErrRedirectFailed is the error message for redirect failed.
 	ErrRedirectFailed = "redirect failed"
