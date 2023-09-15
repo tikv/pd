@@ -253,7 +253,7 @@ func TestOperator(t *testing.T) {
 	})
 }
 
-func TestOperatorInMicroservice(t *testing.T) {
+func TestForwardOperatorRequest(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

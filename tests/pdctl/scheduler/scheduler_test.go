@@ -531,7 +531,7 @@ func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v inte
 	json.Unmarshal(output, v)
 }
 
-func TestSchedulerInMicroservice(t *testing.T) {
+func TestForwardSchedulerRequest(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
