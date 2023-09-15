@@ -675,6 +675,10 @@ func buildSplitKeyspaces(
 			newKeyspaceMap[keyspace] = struct{}{}
 		}
 	}
+	// Check if the new keyspace list is empty.
+	if len(newSplit) == 0 {
+		return nil, nil, ErrKeyspaceGroupWithEmptyKeyspace
+	}
 	// Get the split keyspace list for the old keyspace group.
 	oldSplit := make([]uint32, 0, oldNum-len(newSplit))
 	for _, keyspace := range old {
