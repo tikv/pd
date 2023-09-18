@@ -31,7 +31,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -144,59 +143,31 @@ const (
 	InitClusterRegionThreshold = 100
 )
 
-// RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
-	// Convert unit to MB.
-	// If region isn't empty and less than 1MB, use 1MB instead.
-	regionSize := heartbeat.GetApproximateSize() / units.MiB
-	// Due to https://github.com/tikv/tikv/pull/11170, if region size is not initialized,
-	// approximate size will be zero, and region size is zero not EmptyRegionApproximateSize
-	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
-		regionSize = EmptyRegionApproximateSize
-	}
-	regionKvSize := heartbeat.GetApproximateKvSize() / units.MiB
-
-	region := &RegionInfo{
-		term:              heartbeat.GetTerm(),
-		meta:              heartbeat.GetRegion(),
-		leader:            heartbeat.GetLeader(),
-		downPeers:         heartbeat.GetDownPeers(),
-		pendingPeers:      heartbeat.GetPendingPeers(),
-		cpuUsage:          heartbeat.GetCpuUsage(),
-		writtenBytes:      heartbeat.GetBytesWritten(),
-		writtenKeys:       heartbeat.GetKeysWritten(),
-		readBytes:         heartbeat.GetBytesRead(),
-		readKeys:          heartbeat.GetKeysRead(),
-		approximateSize:   int64(regionSize),
-		approximateKvSize: int64(regionKvSize),
-		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
-		interval:          heartbeat.GetInterval(),
-		replicationStatus: heartbeat.GetReplicationStatus(),
-		queryStats:        heartbeat.GetQueryStats(),
-	}
-
-	for _, opt := range opts {
-		opt(region)
-	}
-
-	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
-		region.writtenKeys = 0
-		region.writtenBytes = 0
-	}
-	if region.readKeys >= ImpossibleFlowSize || region.readBytes >= ImpossibleFlowSize {
-		region.readKeys = 0
-		region.readBytes = 0
-	}
-
-	sort.Sort(peerStatsSlice(region.downPeers))
-	sort.Sort(peerSlice(region.pendingPeers))
-
-	classifyVoterAndLearner(region)
-	return region
+// RegionHeartbeatResponse is the interface for region heartbeat response.
+type RegionHeartbeatResponse interface {
+	GetTargetPeer() *metapb.Peer
+	GetRegionId() uint64
 }
 
-// RegionFromForward constructs a Region from forwarded region heartbeat.
-func RegionFromForward(heartbeat *schedulingpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
+// RegionHeartbeatRequest is the interface for region heartbeat request.
+type RegionHeartbeatRequest interface {
+	GetTerm() uint64
+	GetRegion() *metapb.Region
+	GetLeader() *metapb.Peer
+	GetDownPeers() []*pdpb.PeerStats
+	GetPendingPeers() []*metapb.Peer
+	GetBytesWritten() uint64
+	GetKeysWritten() uint64
+	GetBytesRead() uint64
+	GetKeysRead() uint64
+	GetInterval() *pdpb.TimeInterval
+	GetQueryStats() *pdpb.QueryStats
+	GetApproximateSize() uint64
+	GetApproximateKeys() uint64
+}
+
+// RegionFromHeartbeat constructs a Region from region heartbeat.
+func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
 	regionSize := heartbeat.GetApproximateSize() / units.MiB
@@ -212,7 +183,6 @@ func RegionFromForward(heartbeat *schedulingpb.RegionHeartbeatRequest, opts ...R
 		leader:          heartbeat.GetLeader(),
 		downPeers:       heartbeat.GetDownPeers(),
 		pendingPeers:    heartbeat.GetPendingPeers(),
-		cpuUsage:        heartbeat.GetCpuUsage(),
 		writtenBytes:    heartbeat.GetBytesWritten(),
 		writtenKeys:     heartbeat.GetKeysWritten(),
 		readBytes:       heartbeat.GetBytesRead(),
@@ -221,6 +191,13 @@ func RegionFromForward(heartbeat *schedulingpb.RegionHeartbeatRequest, opts ...R
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
 		interval:        heartbeat.GetInterval(),
 		queryStats:      heartbeat.GetQueryStats(),
+	}
+
+	// scheduling service doesn't need the following fields.
+	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
+		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
+		region.replicationStatus = h.GetReplicationStatus()
+		region.cpuUsage = h.GetCpuUsage()
 	}
 
 	for _, opt := range opts {

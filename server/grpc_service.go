@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/tso"
@@ -1094,7 +1093,7 @@ type heartbeatServer struct {
 	closed int32
 }
 
-func (s *heartbeatServer) Send(m hbstream.RegionHeartbeatResponse) error {
+func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
 	}
@@ -1391,7 +1390,6 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					Interval:        request.GetInterval(),
 					Term:            request.GetTerm(),
 					QueryStats:      request.GetQueryStats(),
-					CpuUsage:        request.GetCpuUsage(),
 				}
 				if err := schedulingStream.Send(req); err != nil {
 					log.Error("forward region heartbeat failed", zap.Error(err))

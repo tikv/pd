@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -39,7 +40,7 @@ type Cluster struct {
 	ruleManager       *placement.RuleManager
 	labelerManager    *labeler.RegionLabeler
 	regionStats       *statistics.RegionStatistics
-	labelLevelStats   *statistics.LabelStatistics
+	labelStats        *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
 	storage           storage.Storage
 	coordinator       *schedule.Coordinator
@@ -67,7 +68,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		labelerManager:    labelerManager,
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx),
-		labelLevelStats:   statistics.NewLabelStatistics(),
+		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
 		clusterID:         clusterID,
@@ -85,6 +86,21 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 // GetCoordinator returns the coordinator
 func (c *Cluster) GetCoordinator() *schedule.Coordinator {
 	return c.coordinator
+}
+
+// GetHotStat gets hot stat.
+func (c *Cluster) GetHotStat() *statistics.HotStat {
+	return c.hotStat
+}
+
+// GetRegionStats gets region statistics.
+func (c *Cluster) GetRegionStats() *statistics.RegionStatistics {
+	return c.regionStats
+}
+
+// GetLabelStats gets label statistics.
+func (c *Cluster) GetLabelStats() *statistics.LabelStatistics {
+	return c.labelStats
 }
 
 // GetBasicCluster returns the basic cluster.
@@ -288,7 +304,7 @@ func (c *Cluster) waitSchedulersInitialized() {
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.
 func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
+		c.labelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
 	}
 }
 
@@ -411,15 +427,7 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		region.InheritBuckets(origin)
 	}
 
-	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
-	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-		c.hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
-	}
-	c.coordinator.GetSchedulersController().CheckTransferWitnessLeader(region)
+	cluster.HandleStatsAsync(c, region)
 
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
@@ -445,23 +453,10 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			return err
 		}
 
-		for _, item := range overlaps {
-			if c.regionStats != nil {
-				c.regionStats.ClearDefunctRegion(item.GetID())
-			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetID())
-			c.ruleManager.InvalidCache(item.GetID())
-		}
+		cluster.HandleOverlaps(c, overlaps)
 	}
 
-	if hasRegionStats {
-		c.regionStats.Observe(region, c.GetRegionStores(region))
-	}
-
-	if !c.IsPrepared() && isNew {
-		c.coordinator.GetPrepareChecker().Collect(region)
-	}
-
+	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, c.IsPrepared())
 	return nil
 }
 

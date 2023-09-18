@@ -32,12 +32,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// RegionHeartbeatResponse is the interface for region heartbeat response.
-type RegionHeartbeatResponse interface {
-	GetTargetPeer() *metapb.Peer
-	GetRegionId() uint64
-}
-
 // Operation is detailed scheduling step of a region.
 type Operation struct {
 	ChangePeer *pdpb.ChangePeer
@@ -52,7 +46,7 @@ type Operation struct {
 
 // HeartbeatStream is an interface.
 type HeartbeatStream interface {
-	Send(RegionHeartbeatResponse) error
+	Send(core.RegionHeartbeatResponse) error
 }
 
 const (
@@ -72,7 +66,7 @@ type HeartbeatStreams struct {
 	hbStreamCancel context.CancelFunc
 	clusterID      uint64
 	streams        map[uint64]HeartbeatStream
-	msgCh          chan RegionHeartbeatResponse
+	msgCh          chan core.RegionHeartbeatResponse
 	streamCh       chan streamUpdate
 	storeInformer  core.StoreSetInformer
 	typ            string
@@ -97,7 +91,7 @@ func newHbStreams(ctx context.Context, clusterID uint64, typ string, storeInform
 		hbStreamCancel: hbStreamCancel,
 		clusterID:      clusterID,
 		streams:        make(map[uint64]HeartbeatStream),
-		msgCh:          make(chan RegionHeartbeatResponse, heartbeatChanCapacity),
+		msgCh:          make(chan core.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
 		storeInformer:  storeInformer,
 		typ:            typ,
@@ -118,7 +112,7 @@ func (s *HeartbeatStreams) run() {
 	keepAliveTicker := time.NewTicker(heartbeatStreamKeepAliveInterval)
 	defer keepAliveTicker.Stop()
 
-	var keepAlive RegionHeartbeatResponse
+	var keepAlive core.RegionHeartbeatResponse
 	switch s.typ {
 	case utils.SchedulingServiceName:
 		keepAlive = &schedulingpb.RegionHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}
@@ -208,7 +202,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 	}
 
 	// TODO: use generic
-	var resp RegionHeartbeatResponse
+	var resp core.RegionHeartbeatResponse
 	switch s.typ {
 	case utils.SchedulingServiceName:
 		resp = &schedulingpb.RegionHeartbeatResponse{

@@ -27,7 +27,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
@@ -81,7 +80,7 @@ type heartbeatServer struct {
 	closed int32
 }
 
-func (s *heartbeatServer) Send(m hbstream.RegionHeartbeatResponse) error {
+func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
 	}
@@ -162,7 +161,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 			s.hbStreams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
-		region := core.RegionFromForward(request, core.SetFromHeartbeat(true))
+		region := core.RegionFromHeartbeat(request, core.SetFromHeartbeat(true))
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
 			// TODO: if we need to send the error back to API server.
