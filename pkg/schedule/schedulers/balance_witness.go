@@ -110,7 +110,7 @@ func (conf *balanceWitnessSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(BalanceWitnessName, data)
+	return conf.storage.SaveSchedulerConfig(BalanceWitnessName, data)
 }
 
 type balanceWitnessHandler struct {
@@ -208,6 +208,25 @@ func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
 	return EncodeConfig(b.conf)
+}
+
+func (b *balanceWitnessScheduler) ReloadConfig() error {
+	b.conf.mu.Lock()
+	defer b.conf.mu.Unlock()
+	cfgData, err := b.conf.storage.LoadSchedulerConfig(b.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &balanceWitnessSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	b.conf.Ranges = newCfg.Ranges
+	b.conf.Batch = newCfg.Batch
+	return nil
 }
 
 func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {

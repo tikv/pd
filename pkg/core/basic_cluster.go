@@ -246,6 +246,18 @@ func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, key
 	return bc.getWriteRate(bc.RegionsInfo.GetStoreWriteRate)
 }
 
+// UpdateAllStoreStatus updates the information of all stores.
+func (bc *BasicCluster) UpdateAllStoreStatus() {
+	// Update related stores.
+	stores := bc.GetStores()
+	for _, store := range stores {
+		if store.IsRemoved() {
+			continue
+		}
+		bc.UpdateStoreStatus(store.GetID())
+	}
+}
+
 // RegionSetInformer provides access to a shared informer of regions.
 type RegionSetInformer interface {
 	GetTotalRegionCount() int

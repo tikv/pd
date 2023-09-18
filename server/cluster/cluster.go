@@ -684,13 +684,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 		case <-ticker.C:
 			// Update related stores.
 			start := time.Now()
-			stores := c.GetStores()
-			for _, store := range stores {
-				if store.IsRemoved() {
-					continue
-				}
-				c.core.UpdateStoreStatus(store.GetID())
-			}
+			c.core.UpdateAllStoreStatus()
 			updateStoreStatsGauge.Set(time.Since(start).Seconds())
 		}
 	}
@@ -793,6 +787,16 @@ func (c *RaftCluster) GetSchedulers() []string {
 // GetSchedulerHandlers gets all scheduler handlers.
 func (c *RaftCluster) GetSchedulerHandlers() map[string]http.Handler {
 	return c.coordinator.GetSchedulersController().GetSchedulerHandlers()
+}
+
+// AddSchedulerHandler adds a scheduler handler.
+func (c *RaftCluster) AddSchedulerHandler(scheduler schedulers.Scheduler, args ...string) error {
+	return c.coordinator.GetSchedulersController().AddSchedulerHandler(scheduler, args...)
+}
+
+// RemoveSchedulerHandler removes a scheduler handler.
+func (c *RaftCluster) RemoveSchedulerHandler(name string) error {
+	return c.coordinator.GetSchedulersController().RemoveSchedulerHandler(name)
 }
 
 // AddScheduler adds a scheduler.
