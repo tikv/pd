@@ -115,3 +115,8 @@ func (w *Watcher) Close() {
 	w.cancel()
 	w.wg.Wait()
 }
+
+// GetStoreWatcher returns the store watcher.
+func (w *Watcher) GetStoreWatcher() *etcdutil.LoopWatcher {
+	return w.storeWatcher
+}

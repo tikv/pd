@@ -68,7 +68,7 @@ func (conf *evictSlowTrendSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) getSchedulerName() string {

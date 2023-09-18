@@ -38,6 +38,8 @@ type Scheduler interface {
 	// GetType should in accordance with the name passing to RegisterScheduler()
 	GetType() string
 	EncodeConfig() ([]byte, error)
+	// ReloadConfig reloads the config from the storage.
+	ReloadConfig() error
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
 	Prepare(cluster sche.SchedulerCluster) error
@@ -91,8 +93,10 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 // CreateSchedulerFunc is for creating scheduler.
 type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
 
-var schedulerMap = make(map[string]CreateSchedulerFunc)
-var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
+var (
+	schedulerMap           = make(map[string]CreateSchedulerFunc)
+	schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
+)
 
 // RegisterScheduler binds a scheduler creator. It should be called in init()
 // func of a package.
@@ -128,7 +132,7 @@ func CreateScheduler(typ string, oc *operator.Controller, storage endpoint.Confi
 	if err != nil {
 		return nil, err
 	}
-	err = storage.SaveScheduleConfig(s.GetName(), data)
+	err = storage.SaveSchedulerConfig(s.GetName(), data)
 	return s, err
 }
 
