@@ -57,14 +57,13 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceLeaderScheduleCounter           = schedulerCounter.WithLabelValues(BalanceLeaderName, "schedule")
-	balanceLeaderNoLeaderRegionCounter     = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-leader-region")
-	balanceLeaderRegionHotCounter          = schedulerCounter.WithLabelValues(BalanceLeaderName, "region-hot")
-	balanceLeaderNoTargetStoreCounter      = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-target-store")
-	balanceLeaderNoFollowerRegionCounter   = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-follower-region")
-	balanceLeaderSkipCounter               = schedulerCounter.WithLabelValues(BalanceLeaderName, "skip")
-	balanceLeaderNewOpCounter              = schedulerCounter.WithLabelValues(BalanceLeaderName, "new-operator")
-	balanceLeaderStoreRecentlySplitRegions = schedulerCounter.WithLabelValues(BalanceLeaderName, "source-recently-split-regions")
+	balanceLeaderScheduleCounter         = schedulerCounter.WithLabelValues(BalanceLeaderName, "schedule")
+	balanceLeaderNoLeaderRegionCounter   = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-leader-region")
+	balanceLeaderRegionHotCounter        = schedulerCounter.WithLabelValues(BalanceLeaderName, "region-hot")
+	balanceLeaderNoTargetStoreCounter    = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-target-store")
+	balanceLeaderNoFollowerRegionCounter = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-follower-region")
+	balanceLeaderSkipCounter             = schedulerCounter.WithLabelValues(BalanceLeaderName, "skip")
+	balanceLeaderNewOpCounter            = schedulerCounter.WithLabelValues(BalanceLeaderName, "new-operator")
 )
 
 type balanceLeaderSchedulerConfig struct {
@@ -468,7 +467,8 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.TargetStoreID(), l.conf.Ranges),
-		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(),
+		filter.NewStoreRecentlySplitFilter(solver.GetStores()))
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", solver.TargetStoreID()))
 		balanceLeaderNoFollowerRegionCounter.Inc()
@@ -491,14 +491,6 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		return nil
 	}
 
-	if solver.Source.HasRecentlySplitRegions() {
-		log.Debug("source store recently splits region in one minutes",
-			zap.String("scheduler", l.GetName()),
-			zap.Uint64("store-id", leaderStoreID),
-		)
-		balanceLeaderStoreRecentlySplitRegions.Inc()
-		return nil
-	}
 	finalFilters := l.filters
 	conf := solver.GetSchedulerConfig()
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
