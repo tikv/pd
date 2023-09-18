@@ -31,9 +31,10 @@ import (
 type actionType int
 
 const (
-	add                     actionType = 0
-	modify                  actionType = 1
-	groupSettingsPathPrefix            = "resource_group/settings"
+	add                        actionType = 0
+	modify                     actionType = 1
+	groupSettingsPathPrefix               = "resource_group/settings"
+	controllerConfigPathPrefix            = "resource_group/controller"
 	// errNotPrimary is returned when the requested server is not primary.
 	errNotPrimary = "not primary"
 	// errNotLeader is returned when the requested server is not pd leader.
@@ -42,6 +43,9 @@ const (
 
 // GroupSettingsPathPrefixBytes is used to watch or get resource groups.
 var GroupSettingsPathPrefixBytes = []byte(groupSettingsPathPrefix)
+
+// ControllerConfigPathPrefixBytes is used to watch or get controller config.
+var ControllerConfigPathPrefixBytes = []byte(controllerConfigPathPrefix)
 
 // ResourceManagerClient manages resource group info and token request.
 type ResourceManagerClient interface {

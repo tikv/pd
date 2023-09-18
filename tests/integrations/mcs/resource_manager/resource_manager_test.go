@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -749,11 +750,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
-<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0}`,
-=======
-			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":2,"watch":{"lasting_duration_ms":100000,"type":1}}}`,
->>>>>>> 026ddf08a (resource_manager/client: update kvproto and add `GetResourceGroup` functon (#6515)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -763,7 +760,6 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 						},
 					},
 				}
-<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 			},
 		},
 		{"default", rmpb.GroupMode_RUMode, false, true,
@@ -775,16 +771,6 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 							FillRate:   10000,
 							BurstLimit: -1,
 						},
-=======
-				gs.RunawaySettings = &rmpb.RunawaySettings{
-					Rule: &rmpb.RunawayRule{
-						ExecElapsedTimeMs: 1000,
-					},
-					Action: rmpb.RunawayAction_Kill,
-					Watch: &rmpb.RunawayWatch{
-						Type:              rmpb.RunawayWatchType_Similar,
-						LastingDurationMs: 100000,
->>>>>>> 026ddf08a (resource_manager/client: update kvproto and add `GetResourceGroup` functon (#6515)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 					},
 				}
 			},
@@ -1149,4 +1135,107 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
 	controller.Stop()
+}
+
+func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigChanged() {
+	re := suite.Require()
+	cli := suite.client
+	for _, group := range suite.initGroups {
+		resp, err := cli.AddResourceGroup(suite.ctx, group)
+		re.NoError(err)
+		re.Contains(resp, "Success!")
+	}
+	c1, err := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	re.NoError(err)
+	c1.Start(suite.ctx)
+	// with client option
+	c2, err := controller.NewResourceGroupController(suite.ctx, 2, cli, nil, controller.WithMaxWaitDuration(time.Hour))
+	re.NoError(err)
+	c2.Start(suite.ctx)
+	// helper function for sending HTTP requests and checking responses
+	sendRequest := func(method, url string, body io.Reader) []byte {
+		req, err := http.NewRequest(method, url, body)
+		re.NoError(err)
+		resp, err := http.DefaultClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+		bytes, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		if resp.StatusCode != http.StatusOK {
+			re.Fail(string(bytes))
+		}
+		return bytes
+	}
+
+	getAddr := func() string {
+		server := suite.cluster.GetServer(suite.cluster.GetLeader())
+		if rand.Intn(100)%2 == 1 {
+			server = suite.cluster.GetServer(suite.cluster.GetFollower())
+		}
+		return server.GetAddr()
+	}
+
+	configURL := "/resource-manager/api/v1/config/controller"
+	waitDuration := 10 * time.Second
+	readBaseCost := 1.5
+	defaultCfg := controller.DefaultConfig()
+	// failpoint enableDegradedMode will setup and set it be 1s.
+	defaultCfg.DegradedModeWaitDuration.Duration = time.Second
+	expectRUCfg := controller.GenerateRUConfig(defaultCfg)
+	// initial config verification
+	respString := sendRequest("GET", getAddr()+configURL, nil)
+	defaultString, err := json.Marshal(defaultCfg)
+	re.NoError(err)
+	re.JSONEq(string(respString), string(defaultString))
+	re.EqualValues(expectRUCfg, c1.GetConfig())
+
+	testCases := []struct {
+		configJSON string
+		value      interface{}
+		expected   func(ruConfig *controller.RUConfig)
+	}{
+		{
+			configJSON: fmt.Sprintf(`{"degraded-mode-wait-duration": "%v"}`, waitDuration),
+			value:      waitDuration,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.DegradedModeWaitDuration = waitDuration },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"ltb-max-wait-duration": "%v"}`, waitDuration),
+			value:      waitDuration,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.LTBMaxWaitDuration = waitDuration },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"read-base-cost": %v}`, readBaseCost),
+			value:      readBaseCost,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.ReadBaseCost = controller.RequestUnit(readBaseCost) },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"write-base-cost": %v}`, readBaseCost*2),
+			value:      readBaseCost * 2,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.WriteBaseCost = controller.RequestUnit(readBaseCost * 2) },
+		},
+		{
+			// reset the degraded-mode-wait-duration to default in test.
+			configJSON: fmt.Sprintf(`{"degraded-mode-wait-duration": "%v"}`, time.Second),
+			value:      time.Second,
+			expected:   func(ruConfig *controller.RUConfig) { ruConfig.DegradedModeWaitDuration = time.Second },
+		},
+	}
+	// change properties one by one and verify each time
+	for _, t := range testCases {
+		sendRequest("POST", getAddr()+configURL, strings.NewReader(t.configJSON))
+		time.Sleep(500 * time.Millisecond)
+		t.expected(expectRUCfg)
+		re.EqualValues(expectRUCfg, c1.GetConfig())
+
+		expectRUCfg2 := *expectRUCfg
+		// always apply the client option
+		expectRUCfg2.LTBMaxWaitDuration = time.Hour
+		re.EqualValues(&expectRUCfg2, c2.GetConfig())
+	}
+	// restart c1
+	c1.Stop()
+	c1, err = controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
+	re.NoError(err)
+	re.EqualValues(expectRUCfg, c1.GetConfig())
 }

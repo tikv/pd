@@ -51,6 +51,8 @@ const (
 	// Because the resource manager has not been deployed in microservice mode,
 	// do not enable this function.
 	defaultDegradedModeWaitDuration = time.Second * 0
+	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
+	defaultMaxWaitDuration = 30 * time.Second
 )
 
 // Config is the configuration for the resource manager.
@@ -85,6 +87,9 @@ type ControllerConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
 	DegradedModeWaitDuration typeutil.Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
 
+	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
+	LTBMaxWaitDuration typeutil.Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
@@ -98,6 +103,7 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	rmc.RequestUnit.Adjust()
 
 	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
+	configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
 	failpoint.Inject("enableDegradedMode", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
 	})

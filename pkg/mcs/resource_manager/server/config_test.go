@@ -27,6 +27,7 @@ func TestControllerConfig(t *testing.T) {
 	re := require.New(t)
 	cfgData := `
 [controller]
+ltb-max-wait-duration = "60s"
 degraded-mode-wait-duration = "2s"
 [controller.request-unit]
 read-base-cost = 1.0
@@ -42,6 +43,7 @@ read-cpu-ms-cost =  5.0
 	re.NoError(err)
 
 	re.Equal(cfg.Controller.DegradedModeWaitDuration.Duration, time.Second*2)
+	re.Equal(cfg.Controller.LTBMaxWaitDuration.Duration, time.Second*60)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.CPUMsCost-5), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteCostPerByte-4), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteBaseCost-3), 1e-7)
