@@ -34,7 +34,7 @@ import (
 )
 
 // APIPathPrefix is the prefix of the API path.
-const APIPathPrefix = "/scheduling/api/v1/"
+const APIPathPrefix = "/scheduling/api/v1"
 
 var (
 	once            sync.Once
