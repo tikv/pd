@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -115,6 +116,11 @@ func (suite *apiTestSuite) TestAPIForward() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
+
+	failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)")
+	defer func() {
+		failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader")
+	}()
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", suite.backendEndpoints)
 	var slice []string
