@@ -133,7 +133,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getScheduleName() string {

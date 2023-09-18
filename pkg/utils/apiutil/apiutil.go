@@ -57,6 +57,8 @@ const (
 	XForwardedPortHeader = "X-Forwarded-Port"
 	// XRealIPHeader is used to mark the real client IP.
 	XRealIPHeader = "X-Real-Ip"
+	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
+	ForwardToMicroServiceHeader = "Forward-To-Micro-Service"
 
 	// ErrRedirectFailed is the error message for redirect failed.
 	ErrRedirectFailed = "redirect failed"
@@ -435,8 +437,17 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			reader = resp.Body
 		}
 
+		// We need to copy the response headers before we write the header.
+		// Otherwise, we cannot set the header after w.WriteHeader() is called.
+		// And we need to write the header before we copy the response body.
+		// Otherwise, we cannot set the status code after w.Write() is called.
+		// In other words, we must perform the following steps strictly in order:
+		// 1. Set the response headers.
+		// 2. Write the response header.
+		// 3. Write the response body.
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
+
 		for {
 			if _, err = io.CopyN(w, reader, chunkSize); err != nil {
 				if err == io.EOF {
@@ -455,8 +466,14 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
 }
 
+// copyHeader duplicates the HTTP headers from the source `src` to the destination `dst`.
+// It skips the "Content-Encoding" and "Content-Length" headers because they should be set by `http.ResponseWriter`.
+// These headers may be modified after a redirect when gzip compression is enabled.
 func copyHeader(dst, src http.Header) {
 	for k, vv := range src {
+		if k == "Content-Encoding" || k == "Content-Length" {
+			continue
+		}
 		values := dst[k]
 		for _, v := range vv {
 			if !slice.Contains(values, v) {
