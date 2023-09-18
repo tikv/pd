@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -29,7 +30,9 @@ import (
 
 // Cluster is used to manage all information for scheduling purpose.
 type Cluster struct {
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 	*core.BasicCluster
 	persistConfig     *config.PersistConfig
 	ruleManager       *placement.RuleManager
@@ -47,14 +50,17 @@ type Cluster struct {
 const regionLabelGCInterval = time.Hour
 
 // NewCluster creates a new cluster.
-func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
+func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
+	ctx, cancel := context.WithCancel(parentCtx)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(storage, basicCluster, persistConfig)
 	c := &Cluster{
 		ctx:               ctx,
+		cancel:            cancel,
 		BasicCluster:      basicCluster,
 		ruleManager:       ruleManager,
 		labelerManager:    labelerManager,
@@ -69,6 +75,7 @@ func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storag
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels())
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	return c, nil
@@ -179,9 +186,10 @@ func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
 	return c.apiServerLeader.CompareAndSwap(old, new)
 }
 
-// UpdateScheduler listens on the schedulers updating notifier and manage the scheduler creation and deletion.
-func (c *Cluster) UpdateScheduler() {
+// updateScheduler listens on the schedulers updating notifier and manage the scheduler creation and deletion.
+func (c *Cluster) updateScheduler() {
 	defer logutil.LogPanic()
+	defer c.wg.Done()
 
 	// Make sure the coordinator has initialized all the existing schedulers.
 	c.waitSchedulersInitialized()
@@ -347,4 +355,36 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil
+}
+
+// runUpdateStoreStats updates store stats periodically.
+func (c *Cluster) runUpdateStoreStats() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(9 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("update store stats background jobs has been stopped")
+			return
+		case <-ticker.C:
+			c.UpdateAllStoreStatus()
+		}
+	}
+}
+
+// StartBackgroundJobs starts background jobs.
+func (c *Cluster) StartBackgroundJobs() {
+	c.wg.Add(2)
+	go c.updateScheduler()
+	go c.runUpdateStoreStats()
+}
+
+// StopBackgroundJobs stops background jobs.
+func (c *Cluster) StopBackgroundJobs() {
+	c.cancel()
+	c.wg.Wait()
 }
