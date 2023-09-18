@@ -92,12 +92,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
 		regionStorage := s.server.GetStorage()
-		log.Info("region syncer start load regions")
+		log.Info("region syncer start load region")
 		start := time.Now()
-		loadRegionsNum, err := storage.TryLoadRegionsOnce(ctx, regionStorage, bc.CheckAndPutRegion)
-		// FromStorage means this region's meta info might be stale.
-		bc.AtomicBatchAddStaleRegionCnt(loadRegionsNum)
-		log.Info("region syncer finished load regions", zap.Duration("time-cost", time.Since(start)), zap.Int64("regions-by-load", loadRegionsNum))
+		err := storage.TryLoadRegionsOnce(ctx, regionStorage, bc.CheckAndPutRegion)
+		log.Info("region syncer finished load regions", zap.Duration("time-cost", time.Since(start)))
 		if err != nil {
 			log.Warn("failed to load regions", errs.ZapError(err))
 		}
@@ -195,10 +193,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if err != nil {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
-					}
-					// FromSync means this region's meta info might be stale.
-					if origin == nil || origin.IsSourceFresh() {
-						bc.RegionsInfo.AtomicAddStaleRegionCnt()
 					}
 					_, saveKV, _, _ := regionGuide(region, origin)
 					overlaps := bc.PutRegion(region)

@@ -2375,7 +2375,6 @@ func (c *testCluster) LoadRegion(regionID uint64, followerStoreIDs ...uint64) er
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	c.core.AtomicAddStaleRegionCnt()
 	return c.putRegion(core.NewRegionInfo(region, nil))
 }
 

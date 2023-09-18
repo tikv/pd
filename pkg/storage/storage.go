@@ -123,7 +123,7 @@ func TrySwitchRegionStorage(s Storage, useLocalRegionStorage bool) endpoint.Regi
 
 // TryLoadRegionsOnce loads all regions from storage to RegionsInfo.
 // If the underlying storage is the local region storage, it will only load once.
-func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.RegionInfo) []*core.RegionInfo) (regionsNum int64, err error) {
+func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	ps, ok := s.(*coreStorage)
 	if !ok {
 		return s.LoadRegions(ctx, f)
@@ -136,12 +136,12 @@ func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.Regi
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	if !ps.regionLoaded {
-		if regionsNum, err = ps.regionStorage.LoadRegions(ctx, f); err != nil {
-			return 0, err
+		if err := ps.regionStorage.LoadRegions(ctx, f); err != nil {
+			return err
 		}
 		ps.regionLoaded = true
 	}
-	return
+	return nil
 }
 
 // LoadRegion loads one region from storage.
@@ -153,7 +153,7 @@ func (ps *coreStorage) LoadRegion(regionID uint64, region *metapb.Region) (ok bo
 }
 
 // LoadRegions loads all regions from storage to RegionsInfo.
-func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) (int64, error) {
+func (ps *coreStorage) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	if atomic.LoadInt32(&ps.useRegionStorage) > 0 {
 		return ps.regionStorage.LoadRegions(ctx, f)
 	}

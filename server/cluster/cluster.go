@@ -587,16 +587,12 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	loadRegionsNum, err := storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion)
-	if err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
-	// FromStorage means this region's meta info might be stale.
-	c.core.AtomicBatchAddStaleRegionCnt(loadRegionsNum)
 	log.Info("load regions",
 		zap.Int("count", c.core.GetTotalRegionCount()),
 		zap.Duration("cost", time.Since(start)),
-		zap.Int64("regions-by-load", loadRegionsNum),
 	)
 	if !c.isAPIServiceMode {
 		for _, store := range c.GetStores() {

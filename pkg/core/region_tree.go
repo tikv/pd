@@ -61,6 +61,8 @@ type regionTree struct {
 	totalSize           int64
 	totalWriteBytesRate float64
 	totalWriteKeysRate  float64
+	// count the healthy meta regions
+	healthyRegionsCnt int64
 }
 
 func newRegionTree() *regionTree {
@@ -69,6 +71,7 @@ func newRegionTree() *regionTree {
 		totalSize:           0,
 		totalWriteBytesRate: 0,
 		totalWriteKeysRate:  0,
+		healthyRegionsCnt:   0,
 	}
 }
 
@@ -112,6 +115,9 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
+	if region.IsSourceFresh() {
+		t.healthyRegionsCnt++
+	}
 
 	if !withOverlaps {
 		overlaps = t.overlaps(item)
@@ -133,6 +139,9 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 		regionWriteBytesRate, regionWriteKeysRate = old.GetWriteRate()
 		t.totalWriteBytesRate -= regionWriteBytesRate
 		t.totalWriteKeysRate -= regionWriteKeysRate
+		if old.IsSourceFresh() {
+			t.healthyRegionsCnt--
+		}
 	}
 
 	return result
@@ -149,6 +158,15 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	regionWriteBytesRate, regionWriteKeysRate = origin.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
+
+	// If origin is stale, need to add the healthy region count.
+	if origin.IsSourceStale() && region.IsSourceFresh() {
+		t.healthyRegionsCnt++
+	}
+	// If origin is healthy, need to sub the healthy region count.
+	if origin.IsSourceFresh() && region.IsSourceStale() {
+		t.healthyRegionsCnt--
+	}
 }
 
 // remove removes a region if the region is in the tree.
@@ -168,6 +186,9 @@ func (t *regionTree) remove(region *RegionInfo) {
 	regionWriteBytesRate, regionWriteKeysRate := result.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
+	if region.IsSourceFresh() {
+		t.healthyRegionsCnt--
+	}
 	t.tree.Delete(item)
 }
 

@@ -813,22 +813,19 @@ type RegionsInfo struct {
 	learners     map[uint64]*regionTree // storeID -> sub regionTree
 	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
-	// count the stale meta regions
-	staleRegionCnt int64
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		tree:           newRegionTree(),
-		regions:        make(map[uint64]*regionItem),
-		subRegions:     make(map[uint64]*regionItem),
-		leaders:        make(map[uint64]*regionTree),
-		followers:      make(map[uint64]*regionTree),
-		learners:       make(map[uint64]*regionTree),
-		witnesses:      make(map[uint64]*regionTree),
-		pendingPeers:   make(map[uint64]*regionTree),
-		staleRegionCnt: 0,
+		tree:         newRegionTree(),
+		regions:      make(map[uint64]*regionItem),
+		subRegions:   make(map[uint64]*regionItem),
+		leaders:      make(map[uint64]*regionTree),
+		followers:    make(map[uint64]*regionTree),
+		learners:     make(map[uint64]*regionTree),
+		witnesses:    make(map[uint64]*regionTree),
+		pendingPeers: make(map[uint64]*regionTree),
 	}
 }
 
@@ -882,29 +879,6 @@ func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*reg
 	return origin, overlaps, err
 }
 
-// GetStaleRegionCnt returns the stale region count.
-func (r *RegionsInfo) GetStaleRegionCnt() int64 {
-	return atomic.LoadInt64(&r.staleRegionCnt)
-}
-
-// AtomicAddStaleRegionCnt atomically adds the stale region count.
-func (r *RegionsInfo) AtomicAddStaleRegionCnt() {
-	atomic.AddInt64(&r.staleRegionCnt, 1)
-}
-
-// AtomicBatchAddStaleRegionCnt atomically batch adds the stale region count.
-func (r *RegionsInfo) AtomicBatchAddStaleRegionCnt(num int64) {
-	atomic.AddInt64(&r.staleRegionCnt, num)
-}
-
-// AtomicSubStaleRegionCnt atomically subtracts the stale region count.
-func (r *RegionsInfo) AtomicSubStaleRegionCnt() {
-	if atomic.LoadInt64(&r.staleRegionCnt) == 0 {
-		return
-	}
-	atomic.AddInt64(&r.staleRegionCnt, -1)
-}
-
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
 	r.t.Lock()
@@ -917,10 +891,6 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo
 	if err != nil {
 		r.t.Unlock()
 		return nil, err
-	}
-	// If origin is stale, need to sub the stale region count.
-	if origin != nil && origin.IsSourceStale() && region.IsSourceFresh() {
-		r.AtomicSubStaleRegionCnt()
 	}
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
@@ -1331,6 +1301,13 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	bytesRate += storeBytesRate
 	keysRate += storeKeysRate
 	return
+}
+
+// GetClusterHealthyRegionsCnt get healthy region count of cluster
+func (r *RegionsInfo) GetClusterHealthyRegionsCnt() int64 {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.tree.healthyRegionsCnt
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
