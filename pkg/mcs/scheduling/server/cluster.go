@@ -204,6 +204,7 @@ func (c *Cluster) updateScheduler() {
 			log.Info("cluster is closing, stop listening the schedulers updating notifier")
 			return
 		case <-notifier:
+			// This is triggered by the watcher when the schedulers are updated.
 		}
 
 		log.Info("schedulers updating notifier is triggered, try to update the scheduler")
