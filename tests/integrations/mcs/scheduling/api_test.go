@@ -132,20 +132,25 @@ func (suite *apiTestSuite) TestAPIForward() {
 	re.NoError(err)
 	re.Len(slice, 0)
 
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/2"), &resp,
-		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), []byte(``),
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	suite.NoError(err)
+
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/2"), nil,
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
-	re.Nil(resp)
 
-	// Fixme: uncomment this after we can forward region and store
-	// TODO: add test for post and delete
-	// err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp,
-	// 	testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
-	// re.NoError(err)
-	// re.Nil(resp)
+	err = testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/2"),
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
 
-	// Test checker
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/records"), nil,
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+
+	// Test checker: only read-only requests are forwarded
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 	suite.False(resp["paused"].(bool))
 

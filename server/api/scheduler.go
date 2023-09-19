@@ -324,12 +324,13 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	statusCode, err := apiutil.DoDelete(h.svr.GetHTTPClient(), deleteURL)
+	resp, err := apiutil.DoDelete(h.svr.GetHTTPClient(), deleteURL)
 	if err != nil {
-		h.r.JSON(w, statusCode, err.Error())
+		h.r.JSON(w, resp.StatusCode, err.Error())
 		return
 	}
-	h.r.JSON(w, statusCode, nil)
+	defer resp.Body.Close()
+	h.r.JSON(w, resp.StatusCode, nil)
 }
 
 // FIXME: details of input json body params

@@ -518,7 +518,6 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 // AddRemovePeerOperator adds an operator to remove peer.
 func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) error {
 	c := h.GetCluster()
-
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)

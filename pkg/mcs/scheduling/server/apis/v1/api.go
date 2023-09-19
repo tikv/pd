@@ -302,7 +302,7 @@ type schedulerPausedPeriod struct {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers [get]
 func getSchedulers(c *gin.Context) {
-	svr := c.MustGet(handlerKey).(*scheserver.Server)
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	co := svr.GetCoordinator()
 	sc := co.GetSchedulersController()
 	schedulers := sc.GetSchedulerNames()
