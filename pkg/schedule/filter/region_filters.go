@@ -24,15 +24,6 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 )
 
-// SelectRegions selects regions that be selected from the list.
-func SelectRegions(regions []*core.RegionInfo, filters ...RegionFilter) []*core.RegionInfo {
-	return filterRegionsBy(regions, func(r *core.RegionInfo) bool {
-		return slice.AllOf(filters, func(i int) bool {
-			return filters[i].Select(r).IsOK()
-		})
-	})
-}
-
 func filterRegionsBy(regions []*core.RegionInfo, keepPred func(*core.RegionInfo) bool) (selected []*core.RegionInfo) {
 	for _, s := range regions {
 		if keepPred(s) {
@@ -194,12 +185,12 @@ func (f *SnapshotSenderFilter) Select(region *core.RegionInfo) *plan.Status {
 	return statusRegionLeaderSendSnapshotThrottled
 }
 
-// SnapshotSenderFilter filer the region who's leader store reaches the limit.
+// StoreRecentlySplitFilter filer the region whose leader store not recently split regions.
 type StoreRecentlySplitFilter struct {
 	recentlySplitStores map[uint64]struct{}
 }
 
-// NewStoreRecentlySplitFilter returns creates a StoreRecentlySplitFilter that filters regions whose leader store has recently split region on it.
+// NewStoreRecentlySplitFilter returns creates a StoreRecentlySplitFilter.
 func NewStoreRecentlySplitFilter(stores []*core.StoreInfo) RegionFilter {
 	recentlySplitStores := make(map[uint64]struct{})
 	for _, store := range stores {
@@ -210,7 +201,7 @@ func NewStoreRecentlySplitFilter(stores []*core.StoreInfo) RegionFilter {
 	return &StoreRecentlySplitFilter{recentlySplitStores: recentlySplitStores}
 }
 
-// Select returns ok if the region leader in the senders.
+// Select returns ok if the region leader not in the recentlySplitStores.
 func (f *StoreRecentlySplitFilter) Select(region *core.RegionInfo) *plan.Status {
 	leaderStoreID := region.GetLeader().GetStoreId()
 	if _, ok := f.recentlySplitStores[leaderStoreID]; ok {
