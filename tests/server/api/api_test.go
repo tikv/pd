@@ -768,7 +768,7 @@ func (s *testProgressSuite) TestSendApiWhenRestartRaftCluster(c *C) {
 
 	// Mock restart raft cluster
 	rc := leader.GetRaftCluster()
-	c.Assert(rc, IsNil)
+	c.Assert(rc, NotNil)
 	rc.Stop()
 
 	// Mock client-go will still send request
@@ -779,7 +779,7 @@ func (s *testProgressSuite) TestSendApiWhenRestartRaftCluster(c *C) {
 	err = rc.Start(leader.GetServer())
 	c.Assert(err, IsNil)
 	rc = leader.GetRaftCluster()
-	c.Assert(rc, IsNil)
+	c.Assert(rc, NotNil)
 }
 
 func sendRequest(c *C, url string, method string, statusCode int) []byte {
