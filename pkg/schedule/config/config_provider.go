@@ -47,6 +47,7 @@ type SchedulerConfigProvider interface {
 	SharedConfigProvider
 
 	IsSchedulingHalted() bool
+	GetStoresLimit() map[uint64]StoreLimitConfig
 
 	IsSchedulerDisabled(string) bool
 	AddSchedulerCfg(string, []string)
@@ -137,6 +138,8 @@ type ConfProvider interface {
 type StoreConfigProvider interface {
 	GetRegionMaxSize() uint64
 	GetRegionMaxKeys() uint64
+	GetRegionSplitSize() uint64
+	GetRegionSplitKeys() uint64
 	CheckRegionSize(uint64, uint64) error
 	CheckRegionKeys(uint64, uint64) error
 	IsEnableRegionBucket() bool

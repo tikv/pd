@@ -22,8 +22,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/statistics/utils"
-	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -32,7 +32,7 @@ const (
 )
 
 type storeStatistics struct {
-	opt             *config.PersistOptions
+	opt             config.ConfProvider
 	Up              int
 	Disconnect      int
 	Unhealthy       int
@@ -54,7 +54,7 @@ type storeStatistics struct {
 	Removed         int
 }
 
-func newStoreStatistics(opt *config.PersistOptions) *storeStatistics {
+func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
 	return &storeStatistics{
 		opt:          opt,
 		LabelCounter: make(map[string]int),
@@ -222,11 +222,10 @@ func (s *storeStatistics) Collect() {
 	configs["max-snapshot-count"] = float64(s.opt.GetMaxSnapshotCount())
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
-	storeConfig := s.opt.GetStoreConfig()
-	configs["region-max-size"] = float64(storeConfig.GetRegionMaxSize())
-	configs["region-split-size"] = float64(storeConfig.GetRegionSplitSize())
-	configs["region-split-keys"] = float64(storeConfig.GetRegionSplitKeys())
-	configs["region-max-keys"] = float64(storeConfig.GetRegionMaxKeys())
+	configs["region-max-size"] = float64(s.opt.GetRegionMaxSize())
+	configs["region-split-size"] = float64(s.opt.GetRegionSplitSize())
+	configs["region-split-keys"] = float64(s.opt.GetRegionSplitKeys())
+	configs["region-max-keys"] = float64(s.opt.GetRegionMaxKeys())
 
 	var enableMakeUpReplica, enableRemoveDownReplica, enableRemoveExtraReplica, enableReplaceOfflineReplica float64
 	if s.opt.IsMakeUpReplicaEnabled() {
@@ -290,12 +289,12 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 }
 
 type storeStatisticsMap struct {
-	opt   *config.PersistOptions
+	opt   config.ConfProvider
 	stats *storeStatistics
 }
 
 // NewStoreStatisticsMap creates a new storeStatisticsMap.
-func NewStoreStatisticsMap(opt *config.PersistOptions) *storeStatisticsMap {
+func NewStoreStatisticsMap(opt config.ConfProvider) *storeStatisticsMap {
 	return &storeStatisticsMap{
 		opt:   opt,
 		stats: newStoreStatistics(opt),

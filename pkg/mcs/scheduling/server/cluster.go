@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
@@ -425,12 +426,80 @@ func (c *Cluster) runCoordinator() {
 	c.coordinator.RunUntilStop()
 }
 
+func (c *Cluster) runMetricsCollectionJob() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(10 * time.Second)
+	failpoint.Inject("highFrequencyClusterJobs", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(time.Microsecond)
+	})
+
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("metrics are reset")
+			c.resetMetrics()
+			log.Info("metrics collection job has been stopped")
+			return
+		case <-ticker.C:
+			c.collectMetrics()
+		}
+	}
+}
+
+func (c *Cluster) collectMetrics() {
+	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
+	stores := c.GetStores()
+	for _, s := range stores {
+		statsMap.ObserveHotStat(s, c.hotStat.StoresStats)
+	}
+	statsMap.Collect()
+
+	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
+	c.coordinator.CollectHotSpotMetrics()
+	c.collectClusterMetrics()
+}
+
+func (c *Cluster) collectClusterMetrics() {
+	if c.regionStats == nil {
+		return
+	}
+	c.regionStats.Collect()
+	c.labelStats.Collect()
+	// collect hot cache metrics
+	c.hotStat.CollectMetrics()
+}
+
+func (c *Cluster) resetMetrics() {
+	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
+	statsMap.Reset()
+
+	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
+	c.coordinator.ResetHotSpotMetrics()
+	c.resetClusterMetrics()
+}
+
+func (c *Cluster) resetClusterMetrics() {
+	if c.regionStats == nil {
+		return
+	}
+	c.regionStats.Reset()
+	c.labelStats.Reset()
+	// reset hot cache metrics
+	c.hotStat.ResetMetrics()
+}
+
 // StartBackgroundJobs starts background jobs.
 func (c *Cluster) StartBackgroundJobs() {
-	c.wg.Add(3)
+	c.wg.Add(4)
 	go c.updateScheduler()
 	go c.runUpdateStoreStats()
 	go c.runCoordinator()
+	go c.runMetricsCollectionJob()
 	c.running.Store(true)
 }
 

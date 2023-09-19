@@ -2562,7 +2562,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"create\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", event=\"create\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -2655,7 +2655,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"check\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", event=\"check\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -2748,7 +2748,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"finish\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", event=\"finish\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -2840,7 +2840,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"timeout\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", event=\"timeout\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -2933,7 +2933,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"cancel\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", event=\"cancel\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -2941,7 +2941,7 @@
               "step": 4
             },
             {
-              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", event=\"replace\"}[1m])) by (type)",
+              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", event=\"replace\"}[1m])) by (type)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{type}}",
@@ -3034,7 +3034,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[1m])) by (event)",
+              "expr": "sum(delta(pd_schedule_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (event)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{event}}",
@@ -4736,7 +4736,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_leader\"}",
+              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"hot_write_region_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -4832,7 +4832,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_write_region_as_peer\"}",
+              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"hot_write_region_as_peer\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -5041,7 +5041,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_write_keys_as_leader\"}",
+              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"total_write_keys_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -5146,7 +5146,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"total_write_bytes_as_leader\"}",
+              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"total_write_bytes_as_leader\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{address}}-store-{{store}}",
@@ -5990,7 +5990,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_peer\"}",
+              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"hot_read_region_as_peer\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -5999,7 +5999,7 @@
               "step": 4
             },
             {
-              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", instance=\"$instance\", type=\"hot_read_region_as_leader\"}",
+              "expr": "pd_hotspot_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\", type=\"hot_read_region_as_leader\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "{{address}}-store-{{store}}-leader",
@@ -6964,7 +6964,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_scheduler_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"allow\",instance=\"$instance\"}",
+              "expr": "pd_scheduler_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"allow\"}",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{kind}}",
@@ -7062,14 +7062,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "-sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-leader-scheduler\"}[1m])) by (source)",
+              "expr": "-sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-leader-scheduler\"}[1m])) by (source)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{source}}",
               "refId": "A"
             },
             {
-              "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-leader-scheduler\"}[1m])) by (target)",
+              "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-leader-scheduler\"}[1m])) by (target)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{target}}",
@@ -7166,14 +7166,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "-sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-region-scheduler\"}[1m])) by (source)",
+              "expr": "-sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-region-scheduler\"}[1m])) by (source)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{source}}",
               "refId": "A"
             },
             {
-              "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",instance=\"$instance\",type=\"balance-region-scheduler\"}[1m])) by (target)",
+              "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-region-scheduler\"}[1m])) by (target)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "store-{{target}}",
@@ -7268,7 +7268,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-leader-scheduler\"}[5m])) by (name)",
+              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-leader-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7277,7 +7277,7 @@
               "step": 4
             },
             {
-              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-leader-scheduler\"}[5m]))",
+              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-leader-scheduler\"}[5m]))",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "total",
@@ -7374,7 +7374,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-region-scheduler\"}[5m])) by (name)",
+              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-region-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7383,7 +7383,7 @@
               "step": 4
             },
             {
-              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-region-scheduler\"}[5m]))",
+              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-region-scheduler\"}[5m]))",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "total",
@@ -7480,7 +7480,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"balance-hot-region-scheduler\"}[5m])) by (name)",
+              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"balance-hot-region-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7577,7 +7577,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"split-bucket-scheduler\"}[5m])) by (name)",
+              "expr": "sum(rate(pd_scheduler_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"split-bucket-scheduler\"}[5m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7673,7 +7673,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[1m])) by (type, source, target)",
+              "expr": "sum(delta(pd_scheduler_balance_direction{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (type, source, target)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{source}}-{{target}}-{{type}}",
@@ -7851,7 +7851,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"rule_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"rule_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -7943,7 +7943,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"replica_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"replica_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
@@ -8036,7 +8036,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", type=\"merge_checker\"}[1m])) by (name)",
+              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"merge_checker\"}[1m])) by (name)",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
