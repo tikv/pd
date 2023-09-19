@@ -124,7 +124,7 @@ func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(BalanceLeaderName, data)
+	return conf.storage.SaveSchedulerConfig(BalanceLeaderName, data)
 }
 
 type balanceLeaderHandler struct {
@@ -213,6 +213,25 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
 	return EncodeConfig(l.conf)
+}
+
+func (l *balanceLeaderScheduler) ReloadConfig() error {
+	l.conf.mu.Lock()
+	defer l.conf.mu.Unlock()
+	cfgData, err := l.conf.storage.LoadSchedulerConfig(l.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &balanceLeaderSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	l.conf.Ranges = newCfg.Ranges
+	l.conf.Batch = newCfg.Batch
+	return nil
 }
 
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {

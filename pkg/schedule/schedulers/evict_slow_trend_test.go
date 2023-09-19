@@ -181,7 +181,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	suite.Zero(es2.conf.evictedStore())
 
 	// check the value from storage.
-	sches, vs, err := es2.conf.storage.LoadAllScheduleConfig()
+	sches, vs, err := es2.conf.storage.LoadAllSchedulerConfigs()
 	suite.NoError(err)
 	valueStr := ""
 	for id, sche := range sches {

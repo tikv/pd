@@ -154,13 +154,13 @@ func main() {
 		log.Println("concurrency == 0, exit")
 		return
 	}
-	pdClis := make([]pd.Client, 0)
+	pdClis := make([]pd.Client, *client)
 	for i := 0; i < *client; i++ {
-		pdClis = append(pdClis, newPDClient(ctx))
+		pdClis[i] = newPDClient(ctx)
 	}
-	httpClis := make([]*http.Client, 0)
+	httpClis := make([]*http.Client, *client)
 	for i := 0; i < *client; i++ {
-		httpClis = append(httpClis, newHTTPClient())
+		httpClis[i] = newHTTPClient()
 	}
 	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {

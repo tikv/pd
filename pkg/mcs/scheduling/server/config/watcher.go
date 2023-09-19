@@ -19,10 +19,13 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -49,7 +52,14 @@ type Watcher struct {
 	configWatcher          *etcdutil.LoopWatcher
 	schedulerConfigWatcher *etcdutil.LoopWatcher
 
+	// Some data, like the global schedule config, should be loaded into `PersistConfig`.
 	*PersistConfig
+	// Some data, like the scheduler configs, should be loaded into the storage
+	// to make sure the coordinator could access them correctly.
+	storage storage.Storage
+	// schedulersController is used to trigger the scheduler's config reloading.
+	// Store as `*schedulers.Controller`.
+	schedulersController atomic.Value
 }
 
 type persistedConfig struct {
@@ -65,6 +75,7 @@ func NewWatcher(
 	etcdClient *clientv3.Client,
 	clusterID uint64,
 	persistConfig *PersistConfig,
+	storage storage.Storage,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	cw := &Watcher{
@@ -74,6 +85,7 @@ func NewWatcher(
 		schedulerConfigPathPrefix: endpoint.SchedulerConfigPathPrefix(clusterID),
 		etcdClient:                etcdClient,
 		PersistConfig:             persistConfig,
+		storage:                   storage,
 	}
 	err := cw.initializeConfigWatcher()
 	if err != nil {
@@ -84,6 +96,19 @@ func NewWatcher(
 		return nil, err
 	}
 	return cw, nil
+}
+
+// SetSchedulersController sets the schedulers controller.
+func (cw *Watcher) SetSchedulersController(sc *schedulers.Controller) {
+	cw.schedulersController.Store(sc)
+}
+
+func (cw *Watcher) getSchedulersController() *schedulers.Controller {
+	sc := cw.schedulersController.Load()
+	if sc == nil {
+		return nil
+	}
+	return sc.(*schedulers.Controller)
 }
 
 func (cw *Watcher) initializeConfigWatcher() error {
@@ -120,15 +145,25 @@ func (cw *Watcher) initializeConfigWatcher() error {
 func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
-		cw.SetSchedulerConfig(
-			strings.TrimPrefix(string(kv.Key), prefixToTrim),
-			string(kv.Value),
-		)
+		name := strings.TrimPrefix(string(kv.Key), prefixToTrim)
+		err := cw.storage.SaveSchedulerConfig(name, kv.Value)
+		if err != nil {
+			log.Warn("failed to save scheduler config",
+				zap.String("event-kv-key", string(kv.Key)),
+				zap.String("trimmed-key", name),
+				zap.Error(err))
+			return err
+		}
+		// Ensure the scheduler config could be updated as soon as possible.
+		if sc := cw.getSchedulersController(); sc != nil {
+			return sc.ReloadSchedulerConfig(name)
+		}
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
-		cw.RemoveSchedulerConfig(strings.TrimPrefix(string(kv.Key), prefixToTrim))
-		return nil
+		return cw.storage.RemoveSchedulerConfig(
+			strings.TrimPrefix(string(kv.Key), prefixToTrim),
+		)
 	}
 	postEventFn := func() error {
 		return nil

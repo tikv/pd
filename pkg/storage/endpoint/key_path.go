@@ -25,17 +25,17 @@ import (
 )
 
 const (
-	pdRootPath               = "/pd"
-	clusterPath              = "raft"
-	configPath               = "config"
-	serviceMiddlewarePath    = "service_middleware"
-	schedulePath             = "schedule"
-	gcPath                   = "gc"
-	rulesPath                = "rules"
-	ruleGroupPath            = "rule_group"
-	regionLabelPath          = "region_label"
-	replicationPath          = "replication_mode"
-	customScheduleConfigPath = "scheduler_config"
+	pdRootPath                = "/pd"
+	clusterPath               = "raft"
+	configPath                = "config"
+	serviceMiddlewarePath     = "service_middleware"
+	schedulePath              = "schedule"
+	gcPath                    = "gc"
+	rulesPath                 = "rules"
+	ruleGroupPath             = "rule_group"
+	regionLabelPath           = "region_label"
+	replicationPath           = "replication_mode"
+	customSchedulerConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
@@ -94,7 +94,7 @@ func ConfigPath(clusterID uint64) string {
 
 // SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
 func SchedulerConfigPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), customScheduleConfigPath)
+	return path.Join(PDRootPath(clusterID), customSchedulerConfigPath)
 }
 
 // RulesPathPrefix returns the path prefix to save the placement rules.
@@ -112,8 +112,8 @@ func RegionLabelPathPrefix(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), regionLabelPath)
 }
 
-func scheduleConfigPath(scheduleName string) string {
-	return path.Join(customScheduleConfigPath, scheduleName)
+func schedulerConfigPath(schedulerName string) string {
+	return path.Join(customSchedulerConfigPath, schedulerName)
 }
 
 // StorePath returns the store meta info key path with the given store ID.
@@ -323,6 +323,12 @@ func LegacyRootPath(clusterID uint64) string {
 func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
 	electionPath := KeyspaceGroupsElectionPath(rootPath, keyspaceGroupID)
 	return path.Join(electionPath, utils.PrimaryKey)
+}
+
+// SchedulingPrimaryPath returns the path of scheduling primary.
+// Path: /ms/{cluster_id}/scheduling/primary
+func SchedulingPrimaryPath(clusterID uint64) string {
+	return path.Join(SchedulingSvcRootPath(clusterID), utils.PrimaryKey)
 }
 
 // KeyspaceGroupsElectionPath returns the path of keyspace groups election.

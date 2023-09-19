@@ -829,7 +829,7 @@ func (suite *ruleTestSuite) TestBundleBadRequest() {
 	}
 	for _, testCase := range testCases {
 		err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+testCase.uri, []byte(testCase.data),
-			func(_ []byte, code int) {
+			func(_ []byte, code int, _ http.Header) {
 				suite.Equal(testCase.ok, code == http.StatusOK)
 			})
 		suite.NoError(err)

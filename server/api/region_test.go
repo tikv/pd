@@ -408,7 +408,7 @@ func (suite *regionTestSuite) TestSplitRegions() {
 		hex.EncodeToString([]byte("bbb")),
 		hex.EncodeToString([]byte("ccc")),
 		hex.EncodeToString([]byte("ddd")))
-	checkOpt := func(res []byte, code int) {
+	checkOpt := func(res []byte, code int, _ http.Header) {
 		s := &struct {
 			ProcessedPercentage int      `json:"processed-percentage"`
 			NewRegionsID        []uint64 `json:"regions-id"`

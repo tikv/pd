@@ -69,9 +69,12 @@ var (
 type Coordinator struct {
 	syncutil.RWMutex
 
-	wg                sync.WaitGroup
-	ctx               context.Context
-	cancel            context.CancelFunc
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	schedulersInitialized bool
+
 	cluster           sche.ClusterInformer
 	prepareChecker    *prepareChecker
 	checkers          *checker.Controller
@@ -91,19 +94,34 @@ func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
 	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
 	return &Coordinator{
-		ctx:               ctx,
-		cancel:            cancel,
-		cluster:           cluster,
-		prepareChecker:    newPrepareChecker(),
-		checkers:          checkers,
-		regionScatterer:   scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddSuspectRegions),
-		regionSplitter:    splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddSuspectRegions),
-		schedulers:        schedulers,
-		opController:      opController,
-		hbStreams:         hbStreams,
-		pluginInterface:   NewPluginInterface(),
-		diagnosticManager: diagnostic.NewManager(schedulers, cluster.GetSchedulerConfig()),
+		ctx:                   ctx,
+		cancel:                cancel,
+		schedulersInitialized: false,
+		cluster:               cluster,
+		prepareChecker:        newPrepareChecker(),
+		checkers:              checkers,
+		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddSuspectRegions),
+		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddSuspectRegions),
+		schedulers:            schedulers,
+		opController:          opController,
+		hbStreams:             hbStreams,
+		pluginInterface:       NewPluginInterface(),
+		diagnosticManager:     diagnostic.NewManager(schedulers, cluster.GetSchedulerConfig()),
 	}
+}
+
+// markSchedulersInitialized marks the scheduler initialization is finished.
+func (c *Coordinator) markSchedulersInitialized() {
+	c.Lock()
+	defer c.Unlock()
+	c.schedulersInitialized = true
+}
+
+// AreSchedulersInitialized returns whether the schedulers have been initialized.
+func (c *Coordinator) AreSchedulersInitialized() bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.schedulersInitialized
 }
 
 // GetWaitingRegions returns the regions in the waiting list.
@@ -399,7 +417,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		err           error
 	)
 	for i := 0; i < maxLoadConfigRetries; i++ {
-		scheduleNames, configs, err = c.cluster.GetStorage().LoadAllScheduleConfig()
+		scheduleNames, configs, err = c.cluster.GetStorage().LoadAllSchedulerConfigs()
 		select {
 		case <-c.ctx.Done():
 			log.Info("init schedulers has been stopped")
@@ -444,6 +462,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			if err = c.schedulers.AddScheduler(s); err != nil {
 				log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			}
+		} else if err = c.schedulers.AddSchedulerHandler(s); err != nil {
+			log.Error("can not add scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 		}
 	}
 
@@ -472,6 +492,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 				scheduleCfg.Schedulers[k] = schedulerCfg
 				k++
 			}
+		} else if err = c.schedulers.AddSchedulerHandler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 		}
 	}
 
@@ -481,6 +503,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
+
+	c.markSchedulersInitialized()
 }
 
 // LoadPlugin load user plugin
@@ -507,6 +531,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	// TODO: handle the plugin in API service mode.
 	if err = c.schedulers.AddScheduler(s); err != nil {
 		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
 		return

@@ -24,15 +24,6 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 )
 
-func filterRegionsBy(regions []*core.RegionInfo, keepPred func(*core.RegionInfo) bool) (selected []*core.RegionInfo) {
-	for _, s := range regions {
-		if keepPred(s) {
-			selected = append(selected, s)
-		}
-	}
-	return
-}
-
 // SelectOneRegion selects one region that be selected from the list.
 func SelectOneRegion(regions []*core.RegionInfo, collector *plan.Collector, filters ...RegionFilter) *core.RegionInfo {
 	for _, r := range regions {
