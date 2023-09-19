@@ -84,7 +84,7 @@ func (conf *splitBucketSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(SplitBucketName, data)
+	return conf.storage.SaveSchedulerConfig(SplitBucketName, data)
 }
 
 type splitBucketScheduler struct {
@@ -170,6 +170,19 @@ func (s *splitBucketScheduler) GetName() string {
 // GetType returns the type of the split bucket scheduler.
 func (s *splitBucketScheduler) GetType() string {
 	return SplitBucketType
+}
+
+func (s *splitBucketScheduler) ReloadConfig() error {
+	s.conf.mu.Lock()
+	defer s.conf.mu.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	return DecodeConfig([]byte(cfgData), s.conf)
 }
 
 // ServerHTTP implement Http server.

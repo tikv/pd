@@ -432,22 +432,25 @@ func (s *Server) startServer() (err error) {
 
 func (s *Server) startCluster(context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
+	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	err := s.startWatcher()
 	if err != nil {
 		return err
 	}
-	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, s.basicCluster)
 	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
 	if err != nil {
 		return err
 	}
+	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
+	s.cluster.StartBackgroundJobs()
 	go s.GetCoordinator().RunUntilStop()
 	return nil
 }
 
 func (s *Server) stopCluster() {
 	s.GetCoordinator().Stop()
+	s.cluster.StopBackgroundJobs()
 	s.ruleWatcher.Close()
 	s.configWatcher.Close()
 	s.metaWatcher.Close()
@@ -458,7 +461,7 @@ func (s *Server) startWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.persistConfig)
+	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.persistConfig, s.storage)
 	if err != nil {
 		return err
 	}

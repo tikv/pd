@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
@@ -76,7 +77,27 @@ var (
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
 	*Server
+	schedulingClient             atomic.Value
 	concurrentTSOProxyStreamings atomic.Int32
+}
+
+type schedulingClient struct {
+	client      schedulingpb.SchedulingClient
+	lastPrimary string
+}
+
+func (s *schedulingClient) getClient() schedulingpb.SchedulingClient {
+	if s == nil {
+		return nil
+	}
+	return s.client
+}
+
+func (s *schedulingClient) getPrimaryAddr() string {
+	if s == nil {
+		return ""
+	}
+	return s.lastPrimary
 }
 
 type request interface {
@@ -978,8 +999,23 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}
 
 		s.handleDamagedStore(request.GetStats())
-
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
+		if s.IsAPIServiceMode() {
+			s.updateSchedulingClient(ctx)
+			if s.schedulingClient.Load() != nil {
+				req := &schedulingpb.StoreHeartbeatRequest{
+					Header: &schedulingpb.RequestHeader{
+						ClusterId: request.GetHeader().GetClusterId(),
+						SenderId:  request.GetHeader().GetSenderId(),
+					},
+					Stats: request.GetStats(),
+				}
+				if _, err := s.schedulingClient.Load().(*schedulingClient).getClient().StoreHeartbeat(ctx, req); err != nil {
+					// reset to let it be updated in the next request
+					s.schedulingClient.Store(&schedulingClient{})
+				}
+			}
+		}
 	}
 
 	if status := request.GetDrAutosyncStatus(); status != nil {
@@ -991,6 +1027,21 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	rc.GetUnsafeRecoveryController().HandleStoreHeartbeat(request, resp)
 
 	return resp, nil
+}
+
+func (s *GrpcServer) updateSchedulingClient(ctx context.Context) {
+	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
+	pre := s.schedulingClient.Load()
+	if forwardedHost != "" && ((pre == nil) || (pre != nil && forwardedHost != pre.(*schedulingClient).getPrimaryAddr())) {
+		client, err := s.getDelegateClient(ctx, forwardedHost)
+		if err != nil {
+			log.Error("get delegate client failed", zap.Error(err))
+		}
+		s.schedulingClient.Store(&schedulingClient{
+			client:      schedulingpb.NewSchedulingClient(client),
+			lastPrimary: forwardedHost,
+		})
+	}
 }
 
 // bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
@@ -1709,18 +1760,13 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return nil, err
 	}
 
-	if op == nil {
-		return &pdpb.ScatterRegionResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-				"operator could not be allocated"),
-		}, nil
-	}
-
-	if !rc.GetOperatorController().AddOperator(op) {
-		return &pdpb.ScatterRegionResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-				"operator cancelled because store limit exceeded"),
-		}, nil
+	if op != nil {
+		if !rc.GetOperatorController().AddOperator(op) {
+			return &pdpb.ScatterRegionResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+					"operator canceled because cannot add an operator to the execute queue"),
+			}, nil
+		}
 	}
 
 	return &pdpb.ScatterRegionResponse{

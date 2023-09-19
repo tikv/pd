@@ -938,7 +938,7 @@ func (s *Server) GetConfig() *config.Config {
 	if s.storage == nil {
 		return cfg
 	}
-	sches, configs, err := s.storage.LoadAllScheduleConfig()
+	sches, configs, err := s.storage.LoadAllSchedulerConfigs()
 	if err != nil {
 		return cfg
 	}
@@ -1709,7 +1709,10 @@ func (s *Server) campaignLeader() {
 
 	log.Info("triggering the leader callback functions")
 	for _, cb := range s.leaderCallbacks {
-		cb(ctx)
+		if err := cb(ctx); err != nil {
+			log.Error("failed to execute leader callback function", errs.ZapError(err))
+			return
+		}
 	}
 
 	// Try to create raft cluster.

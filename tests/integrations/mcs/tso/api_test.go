@@ -30,6 +30,7 @@ import (
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -47,10 +48,11 @@ var dialClient = &http.Client{
 
 type tsoAPITestSuite struct {
 	suite.Suite
-	ctx        context.Context
-	cancel     context.CancelFunc
-	pdCluster  *tests.TestCluster
-	tsoCluster *tests.TestTSOCluster
+	ctx              context.Context
+	cancel           context.CancelFunc
+	pdCluster        *tests.TestCluster
+	tsoCluster       *tests.TestTSOCluster
+	backendEndpoints string
 }
 
 func TestTSOAPI(t *testing.T) {
@@ -69,7 +71,8 @@ func (suite *tsoAPITestSuite) SetupTest() {
 	leaderName := suite.pdCluster.WaitLeader()
 	pdLeaderServer := suite.pdCluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
-	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, pdLeaderServer.GetAddr())
+	suite.backendEndpoints = pdLeaderServer.GetAddr()
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 }
 
@@ -93,6 +96,25 @@ func (suite *tsoAPITestSuite) TestGetKeyspaceGroupMembers() {
 	primaryMember, err := primary.GetMember(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(primaryMember.GetLeaderID(), defaultGroupMember.PrimaryID)
+}
+
+func (suite *tsoAPITestSuite) TestForwardResetTS() {
+	re := suite.Require()
+	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	re.NotNil(primary)
+	url := suite.backendEndpoints + "/pd/api/v1/admin/reset-ts"
+
+	// Test reset ts
+	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
+	err := testutil.CheckPostJSON(dialClient, url, input,
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"))
+	suite.NoError(err)
+
+	// Test reset ts with invalid tso
+	input = []byte(`{}`)
+	err = testutil.CheckPostJSON(dialClient, url, input,
+		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"))
+	re.NoError(err)
 }
 
 func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {

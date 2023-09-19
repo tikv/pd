@@ -105,12 +105,18 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 		tc.AddLeaderRegion(i, 1, 2, 3)
 	}
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddSuspectRegions)
-
+	noNeedMoveNum := 0
 	for i := uint64(1); i <= numRegions; i++ {
 		region := tc.GetRegion(i)
-		if op, _ := scatterer.Scatter(region, "", false); op != nil {
+		if op, err := scatterer.Scatter(region, "", false); err == nil {
+			if op == nil {
+				noNeedMoveNum++
+				continue
+			}
 			checkOperator(re, op)
 			operator.ApplyOperator(tc, op)
+		} else {
+			re.Nil(op)
 		}
 	}
 
@@ -140,6 +146,7 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 		re.LessOrEqual(float64(count), 1.1*float64(numRegions)/float64(numStores))
 		re.GreaterOrEqual(float64(count), 0.9*float64(numRegions)/float64(numStores))
 	}
+	re.GreaterOrEqual(noNeedMoveNum, 0)
 }
 
 func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores, numRegions uint64) {
@@ -651,7 +658,8 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 	// Try to scatter a region with peer store id 2/3/4
 	for i := uint64(1); i < 20; i++ {
 		region := tc.AddLeaderRegion(i+200, i%3+2, (i+1)%3+2, (i+2)%3+2)
-		op := scatterer.scatterRegion(region, group, false)
+		op, err := scatterer.scatterRegion(region, group, false)
+		re.NoError(err)
 		re.False(isPeerCountChanged(op))
 		if op != nil {
 			re.Equal(group, op.AdditionalInfos["group"])
@@ -691,7 +699,8 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 	// test region with peer 1 2 3
 	for i := uint64(1); i < 20; i++ {
 		region := tc.AddLeaderRegion(i+200, i%3+1, (i+1)%3+1, (i+2)%3+1)
-		op := scatterer.scatterRegion(region, group, false)
+		op, err := scatterer.scatterRegion(region, group, false)
+		re.NoError(err)
 		re.False(isPeerCountChanged(op))
 	}
 }
@@ -715,7 +724,8 @@ func TestBalanceLeader(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddSuspectRegions)
 	for i := uint64(1001); i <= 1300; i++ {
 		region := tc.AddLeaderRegion(i, 2, 3, 4)
-		op := scatterer.scatterRegion(region, group, false)
+		op, err := scatterer.scatterRegion(region, group, false)
+		re.NoError(err)
 		re.False(isPeerCountChanged(op))
 	}
 	// all leader will be balanced in three stores.
@@ -745,7 +755,8 @@ func TestBalanceRegion(t *testing.T) {
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddSuspectRegions)
 	for i := uint64(1001); i <= 1300; i++ {
 		region := tc.AddLeaderRegion(i, 2, 4, 6)
-		op := scatterer.scatterRegion(region, group, false)
+		op, err := scatterer.scatterRegion(region, group, false)
+		re.NoError(err)
 		re.False(isPeerCountChanged(op))
 	}
 	for i := uint64(2); i <= 7; i++ {
@@ -754,7 +765,8 @@ func TestBalanceRegion(t *testing.T) {
 	// Test for unhealthy region
 	// ref https://github.com/tikv/pd/issues/6099
 	region := tc.AddLeaderRegion(1500, 2, 3, 4, 6)
-	op := scatterer.scatterRegion(region, group, false)
+	op, err := scatterer.scatterRegion(region, group, false)
+	re.NoError(err)
 	re.False(isPeerCountChanged(op))
 }
 

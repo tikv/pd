@@ -115,7 +115,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getSchedulerName() string {
@@ -202,6 +202,24 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	return EncodeConfig(s.conf)
+}
+
+func (s *evictLeaderScheduler) ReloadConfig() error {
+	s.conf.mu.Lock()
+	defer s.conf.mu.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &evictLeaderSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
+	return nil
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {

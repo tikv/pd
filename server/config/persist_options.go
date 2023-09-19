@@ -762,6 +762,12 @@ type persistedConfig struct {
 	StoreConfig sc.StoreConfig `json:"store"`
 }
 
+// SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
+func (o *PersistOptions) SwitchRaftV2(storage endpoint.ConfigStorage) error {
+	o.GetScheduleConfig().StoreLimitVersion = "v2"
+	return o.Persist(storage)
+}
+
 // Persist saves the configuration to the storage.
 func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{
