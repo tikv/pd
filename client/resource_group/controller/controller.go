@@ -323,7 +323,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
-						if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
+						if err = proto.Unmarshal(item.Kv.Value, group); err != nil {
 							continue
 						}
 						if item, ok := c.groupsController.Load(group.Name); ok {
@@ -332,7 +332,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						}
 					case meta_storagepb.Event_DELETE:
 						if item.PrevKv != nil {
-							if err := proto.Unmarshal(item.PrevKv.Value, group); err != nil {
+							if err = proto.Unmarshal(item.PrevKv.Value, group); err != nil {
 								continue
 							}
 							if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {

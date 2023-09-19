@@ -18,8 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/pingcap/log"
-	"go.uber.org/zap"
 	"io"
 	"math/rand"
 	"net/http"
@@ -248,9 +246,10 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		testutil.Eventually(re, func() bool {
 			name := "test" + strconv.Itoa(i)
 			meta = controller.GetActiveResourceGroup(name)
-			re.NotNil(meta)
-			log.Info("meta check", zap.Any("meta", meta), zap.Any("group", group))
-			return meta.RUSettings.RU.Settings.FillRate == uint64(20000)
+			if meta != nil {
+				return meta.RUSettings.RU.Settings.FillRate == uint64(20000)
+			}
+			return false
 		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
 
