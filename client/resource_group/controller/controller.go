@@ -71,9 +71,11 @@ type ResourceGroupProvider interface {
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]pd.GlobalConfigItem, int64, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+
+	// meta storage client
 	Watch(ctx context.Context, key []byte, opts ...pd.OpOption) (chan []*meta_storagepb.Event, error)
+	Get(ctx context.Context, key []byte, opts ...pd.OpOption) (*meta_storagepb.GetResponse, error)
 }
 
 // ResourceControlCreateOption create a ResourceGroupsController with the optional settings.
@@ -89,7 +91,7 @@ func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 // WithMaxWaitDuration is the option to set the max wait duration for acquiring token buckets.
 func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
-		controller.ruConfig.maxWaitDuration = d
+		controller.ruConfig.LTBMaxWaitDuration = d
 	}
 }
 
@@ -122,6 +124,11 @@ type ResourceGroupsController struct {
 		// Currently, we don't do multiple `AcquireTokenBuckets`` at the same time, so there are no concurrency problems with `currentRequests`.
 		currentRequests []*rmpb.TokenBucketRequest
 	}
+
+	opts []ResourceControlCreateOption
+
+	// a cache for ru config and make concurrency safe.
+	safeRuConfig atomic.Pointer[RUConfig]
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -139,7 +146,7 @@ func NewResourceGroupController(
 	if requestUnitConfig != nil {
 		config.RequestUnit = *requestUnitConfig
 	}
-	log.Info("load resource controller config", zap.Reflect("config", config))
+
 	ruConfig := GenerateRUConfig(config)
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
@@ -148,34 +155,37 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan struct{}, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
+		opts:                  opts,
 	}
 	for _, opt := range opts {
 		opt(controller)
 	}
+	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig))
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
+	controller.safeRuConfig.Store(controller.ruConfig)
 	return controller, nil
 }
 
 func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Config, error) {
-	items, _, err := provider.LoadGlobalConfig(ctx, nil, controllerConfigPath)
+	resp, err := provider.Get(ctx, []byte(controllerConfigPath))
 	if err != nil {
 		return nil, err
 	}
-	if len(items) == 0 {
+	if len(resp.Kvs) == 0 {
 		log.Warn("[resource group controller] server does not save config, load config failed")
 		return DefaultConfig(), nil
 	}
 	config := &Config{}
-	err = json.Unmarshal(items[0].PayLoad, config)
+	err = json.Unmarshal(resp.Kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
 	}
 	return config, nil
 }
 
-// GetConfig returns the config of controller. It's only used for test.
+// GetConfig returns the config of controller.
 func (c *ResourceGroupsController) GetConfig() *RUConfig {
-	return c.ruConfig
+	return c.safeRuConfig.Load()
 }
 
 // Source List
@@ -213,23 +223,65 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
 		})
 
-		_, revision, err := c.provider.LoadResourceGroups(ctx)
+		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
-		var watchChannel chan []*meta_storagepb.Event
+		resp, err := c.provider.Get(ctx, []byte(controllerConfigPath))
+		if err != nil {
+			log.Warn("load resource group revision failed", zap.Error(err))
+		}
+		cfgRevision := resp.GetHeader().GetRevision()
+		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-			watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix(), pd.WithPrevKV())
+			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
+			if err != nil {
+				log.Warn("watch resource group meta failed", zap.Error(err))
+			}
+		}
+
+		watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, pd.WithRev(cfgRevision), pd.WithPrefix())
+		if err != nil {
+			log.Warn("watch resource group config failed", zap.Error(err))
 		}
 		watchRetryTimer := time.NewTimer(watchRetryInterval)
-		if err == nil || c.ruConfig.isSingleGroupByKeyspace {
-			watchRetryTimer.Stop()
-		}
 		defer watchRetryTimer.Stop()
 
 		for {
 			select {
+			/* tickers */
+			case <-cleanupTicker.C:
+				c.cleanUpResourceGroup()
+			case <-stateUpdateTicker.C:
+				c.executeOnAllGroups((*groupCostController).updateRunState)
+				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
+				if len(c.run.currentRequests) == 0 {
+					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */)
+				}
+			case <-watchRetryTimer.C:
+				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
+					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
+					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
+					if err != nil {
+						log.Warn("watch resource group meta failed", zap.Error(err))
+						watchRetryTimer.Reset(watchRetryInterval)
+						failpoint.Inject("watchStreamError", func() {
+							watchRetryTimer.Reset(20 * time.Millisecond)
+						})
+					}
+				}
+				if watchConfigChannel == nil {
+					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, pd.WithRev(cfgRevision), pd.WithPrefix())
+					if err != nil {
+						log.Warn("watch resource group config failed", zap.Error(err))
+						watchRetryTimer.Reset(watchRetryInterval)
+					}
+				}
+
+			case <-emergencyTokenAcquisitionTicker.C:
+				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
+			/* channels */
 			case <-c.loopCtx.Done():
 				resourceGroupStatusGauge.Reset()
 				return
@@ -243,14 +295,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					c.handleTokenBucketResponse(resp)
 				}
 				c.run.currentRequests = nil
-			case <-cleanupTicker.C:
-				c.cleanUpResourceGroup()
-			case <-stateUpdateTicker.C:
-				c.executeOnAllGroups((*groupCostController).updateRunState)
-				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
-				if len(c.run.currentRequests) == 0 {
-					c.collectTokenBucketRequests(c.loopCtx, FromPeriodReport, periodicReport /* select resource groups which should be reported periodically */)
-				}
 			case <-c.lowTokenNotifyChan:
 				c.executeOnAllGroups((*groupCostController).updateRunState)
 				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
@@ -260,16 +304,14 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				if c.run.inDegradedMode {
 					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				}
-			case <-emergencyTokenAcquisitionTicker.C:
-				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
-			case resp, ok := <-watchChannel:
+			case resp, ok := <-watchMetaChannel:
 				failpoint.Inject("disableWatch", func() {
 					if c.ruConfig.isSingleGroupByKeyspace {
 						panic("disableWatch")
 					}
 				})
 				if !ok {
-					watchChannel = nil
+					watchMetaChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
@@ -277,10 +319,10 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					continue
 				}
 				for _, item := range resp {
-					revision = item.Kv.ModRevision
+					metaRevision = item.Kv.ModRevision
+					group := &rmpb.ResourceGroup{}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
-						group := &rmpb.ResourceGroup{}
 						if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
 							continue
 						}
@@ -290,7 +332,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						}
 					case meta_storagepb.Event_DELETE:
 						if item.PrevKv != nil {
-							group := &rmpb.ResourceGroup{}
 							if err := proto.Unmarshal(item.PrevKv.Value, group); err != nil {
 								continue
 							}
@@ -304,14 +345,32 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						}
 					}
 				}
-			case <-watchRetryTimer.C:
-				watchChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(revision), pd.WithPrefix(), pd.WithPrevKV())
-				if err != nil {
+			case resp, ok := <-watchConfigChannel:
+				if !ok {
+					watchConfigChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
 					})
+					continue
 				}
+				for _, item := range resp {
+					cfgRevision = item.Kv.ModRevision
+					config := &Config{}
+					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
+						continue
+					}
+					c.ruConfig = GenerateRUConfig(config)
+
+					// Stay compatible with serverless
+					for _, opt := range c.opts {
+						opt(c)
+					}
+					copyCfg := *c.ruConfig
+					c.safeRuConfig.Store(&copyCfg)
+					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
+				}
+
 			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
@@ -1138,7 +1197,7 @@ func (gc *groupCostController) onRequestWait(
 				res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
 				for typ, counter := range gc.run.resourceTokens {
 					if v := getRawResourceValueFromConsumption(delta, typ); v > 0 {
-						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.maxWaitDuration, now, v))
+						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v))
 					}
 				}
 				if d, err = WaitReservations(ctx, now, res); err == nil {
@@ -1148,7 +1207,7 @@ func (gc *groupCostController) onRequestWait(
 				res := make([]*Reservation, 0, len(requestUnitLimitTypeList))
 				for typ, counter := range gc.run.requestUnitTokens {
 					if v := getRUValueFromConsumption(delta, typ); v > 0 {
-						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.maxWaitDuration, now, v))
+						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v))
 					}
 				}
 				if d, err = WaitReservations(ctx, now, res); err == nil {
