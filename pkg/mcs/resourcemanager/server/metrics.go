@@ -26,6 +26,7 @@ const (
 	readTypeLabel          = "read"
 	writeTypeLabel         = "write"
 	backgroundTypeLabel    = "background"
+	tiflashTypeLabel       = "tiflash"
 )
 
 var (
