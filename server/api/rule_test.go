@@ -201,13 +201,13 @@ func (suite *ruleTestSuite) TestGet() {
 			name:  "found",
 			rule:  rule,
 			found: true,
-			code:  200,
+			code:  http.StatusOK,
 		},
 		{
 			name:  "not found",
 			rule:  placement.Rule{GroupID: "a", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 			found: false,
-			code:  404,
+			code:  http.StatusNotFound,
 		},
 	}
 	for _, testCase := range testCases {
