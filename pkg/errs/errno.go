@@ -14,7 +14,11 @@
 
 package errs
 
-import "github.com/pingcap/errors"
+import (
+	"github.com/pingcap/errors"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
 
 const (
 	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
@@ -40,24 +44,56 @@ var (
 
 // tso errors
 var (
-	ErrSetLocalTSOConfig                = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))
-	ErrGetAllocator                     = errors.Normalize("get allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocator"))
-	ErrGetLocalAllocator                = errors.Normalize("get local allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetLocalAllocator"))
-	ErrSyncMaxTS                        = errors.Normalize("sync max ts failed, %s", errors.RFCCodeText("PD:tso:ErrSyncMaxTS"))
-	ErrResetUserTimestamp               = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
-	ErrGenerateTimestamp                = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
-	ErrUpdateTimestamp                  = errors.Normalize("update timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrUpdateTimestamp"))
-	ErrLogicOverflow                    = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
-	ErrProxyTSOTimeout                  = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:tso:ErrProxyTSOTimeout"))
-	ErrKeyspaceGroupIDInvalid           = errors.Normalize("the keyspace group id is invalid, %s", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupIDInvalid"))
-	ErrGetAllocatorManager              = errors.Normalize("get allocator manager failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocatorManager"))
-	ErrLoadKeyspaceGroupsTimeout        = errors.Normalize("load keyspace groups timeout", errors.RFCCodeText("PD:tso:ErrLoadKeyspaceGroupsTimeout"))
-	ErrLoadKeyspaceGroupsTerminated     = errors.Normalize("load keyspace groups terminated", errors.RFCCodeText("PD:tso:ErrLoadKeyspaceGroupsTerminated"))
-	ErrLoadKeyspaceGroupsRetryExhausted = errors.Normalize("load keyspace groups retry exhausted, %s", errors.RFCCodeText("PD:tso:ErrLoadKeyspaceGroupsRetryExhausted"))
-	ErrKeyspaceGroupNotInitialized      = errors.Normalize("the keyspace group %d isn't initialized", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupNotInitialized"))
-	ErrKeyspaceNotAssigned              = errors.Normalize("the keyspace %d isn't assigned to any keyspace group", errors.RFCCodeText("PD:tso:ErrKeyspaceNotAssigned"))
-	ErrGetMinTS                         = errors.Normalize("get min ts failed, %s", errors.RFCCodeText("PD:tso:ErrGetMinTS"))
-	ErrKeyspaceGroupIsMerging           = errors.Normalize("the keyspace group %d is merging", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupIsMerging"))
+	ErrSetLocalTSOConfig   = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))
+	ErrGetAllocator        = errors.Normalize("get allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocator"))
+	ErrGetLocalAllocator   = errors.Normalize("get local allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetLocalAllocator"))
+	ErrSyncMaxTS           = errors.Normalize("sync max ts failed, %s", errors.RFCCodeText("PD:tso:ErrSyncMaxTS"))
+	ErrResetUserTimestamp  = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
+	ErrGenerateTimestamp   = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
+	ErrUpdateTimestamp     = errors.Normalize("update timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrUpdateTimestamp"))
+	ErrLogicOverflow       = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
+	ErrProxyTSOTimeout     = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:tso:ErrProxyTSOTimeout"))
+	ErrGetAllocatorManager = errors.Normalize("get allocator manager failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocatorManager"))
+	ErrGetMinTS            = errors.Normalize("get min ts failed, %s", errors.RFCCodeText("PD:tso:ErrGetMinTS"))
+
+	ErrNotFoundTSOAddr                  = errors.Normalize(status.Errorf(codes.NotFound, "not found tso address").Error(), errors.RFCCodeText("PD:tso:ErrNotFoundTSOAddr"))
+	ErrForwardTSOTimeout                = errors.Normalize(status.Errorf(codes.DeadlineExceeded, "forward tso request timeout").Error(), errors.RFCCodeText("PD:tso:ErrForwardTSOTimeout"))
+	ErrMaxCountTSOProxyRoutinesExceeded = errors.Normalize(status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded").Error(), errors.RFCCodeText("PD:tso:ErrMaxCountTSOProxyRoutinesExceeded"))
+	ErrTSOProxyRecvFromClientTimeout    = errors.Normalize(status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server").Error(), errors.RFCCodeText("PD:tso:ErrTSOProxyRecvFromClientTimeout"))
+)
+
+// keyspace errors
+var (
+	ErrKeyspaceNotFound              = errors.Normalize("keyspace does not exist", errors.RFCCodeText("PD:keyspace:ErrKeyspaceNotFound"))
+	ErrKeyspaceExists                = errors.Normalize("keyspace already exists", errors.RFCCodeText("PD:keyspace:ErrKeyspaceExists"))
+	ErrKeyspaceNotAssigned           = errors.Normalize("the keyspace %d isn't assigned to any keyspace group", errors.RFCCodeText("PD:keyspace:ErrKeyspaceNotAssigned"))
+	ErrModifyDefaultKeyspace         = errors.Normalize("cannot modify default keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifyDefaultKeyspace"))
+	ErrKeyspaceNotInKeyspaceGroup    = errors.Normalize("keyspace is not in this keyspace group", errors.RFCCodeText("PD:keyspace:ErrKeyspaceNotInKeyspaceGroup"))
+	ErrKeyspaceNotInAnyKeyspaceGroup = errors.Normalize("keyspace is not in any keyspace group", errors.RFCCodeText("PD:keyspace:ErrKeyspaceNotInAnyKeyspaceGroup"))
+	ErrKeyspaceUpdateNotAllowed      = errors.Normalize("cannot update keyspace that's %s", errors.RFCCodeText("PD:keyspace:ErrKeyspaceUpdateNotAllowed"))
+)
+
+// keyspace group errors
+var (
+	ErrKeyspaceGroupIDInvalid           = errors.Normalize("the keyspace group id is invalid, %s", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupIDInvalid"))
+	ErrLoadKeyspaceGroupsTimeout        = errors.Normalize("load keyspace groups timeout", errors.RFCCodeText("PD:keyspacegroup:ErrLoadKeyspaceGroupsTimeout"))
+	ErrLoadKeyspaceGroupsTerminated     = errors.Normalize("load keyspace groups terminated", errors.RFCCodeText("PD:keyspacegroup:ErrLoadKeyspaceGroupsTerminated"))
+	ErrLoadKeyspaceGroupsRetryExhausted = errors.Normalize("load keyspace groups retry exhausted, %s", errors.RFCCodeText("PD:keyspacegroup:ErrLoadKeyspaceGroupsRetryExhausted"))
+	ErrKeyspaceGroupNotInitialized      = errors.Normalize("the keyspace group %d isn't initialized", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupNotInitialized"))
+	ErrKeyspaceGroupIsMerging           = errors.Normalize("the keyspace group %d is merging", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupIsMerging"))
+	ErrKeyspaceGroupExists              = errors.Normalize("keyspace group already exists", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupExists"))
+	ErrKeyspaceGroupNotExists           = errors.Normalize("keyspace group %v does not exist", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupNotExists"))
+	ErrKeyspaceGroupInSplit             = errors.Normalize("keyspace group %v is in split state", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupInSplit"))
+	ErrKeyspaceGroupNotInSplit          = errors.Normalize("keyspace group %v is not in split state", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupNotInSplit"))
+	ErrKeyspaceGroupInMerging           = errors.Normalize("keyspace group %v is in merging state", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupInMerging"))
+	ErrKeyspaceGroupNotInMerging        = errors.Normalize("keyspace group %v is not in merging state", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupNotInMerging"))
+	ErrNodeNotInKeyspaceGroup           = errors.Normalize("the tso node is not in this keyspace group", errors.RFCCodeText("PD:keyspacegroup:ErrNodeNotInKeyspaceGroup"))
+	ErrNoAvailableNode                  = errors.Normalize("no available node for keyspace group", errors.RFCCodeText("PD:keyspacegroup:ErrNoAvailableNode"))
+	ErrKeyspaceGroupNotEnoughReplicas   = errors.Normalize("not enough replicas in the keyspace group", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupNotEnoughReplicas"))
+	ErrKeyspaceGroupWithEmptyKeyspace   = errors.Normalize("keyspace group with empty keyspace", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupWithEmptyKeyspace"))
+	ErrDefaultKeyspaceGroupNotFound     = errors.Normalize("default keyspace group not found", errors.RFCCodeText("PD:keyspacegroup:ErrDefaultKeyspaceGroupNotFound"))
+	ErrModifyDefaultKeyspaceGroup       = errors.Normalize("default keyspace group cannot be modified", errors.RFCCodeText("PD:keyspacegroup:ErrModifyDefaultKeyspaceGroup"))
+	ErrKeyspaceGroupPrimaryNotFound     = errors.Normalize("primary of keyspace group does not exist", errors.RFCCodeText("PD:keyspacegroup:ErrKeyspaceGroupPrimaryNotFound"))
 )
 
 // member errors
@@ -94,20 +130,20 @@ var (
 
 // operator errors
 var (
-	// ErrOperatorNotFound is error info for operator not found.
 	ErrOperatorNotFound = errors.Normalize("operator not found", errors.RFCCodeText("PD:operator:ErrOperatorNotFound"))
-	// ErrAddOperator is error info for already have an operator when adding operator.
-	ErrAddOperator = errors.Normalize("failed to add operator, maybe already have one", errors.RFCCodeText("PD:operator:ErrAddOperator"))
+	ErrAddOperator      = errors.Normalize("failed to add operator, maybe already have one", errors.RFCCodeText("PD:operator:ErrAddOperator"))
 )
 
 // region errors
 var (
-	// ErrRegionNotAdjacent is error info for region not adjacent.
-	ErrRegionNotAdjacent = errors.Normalize("two regions are not adjacent", errors.RFCCodeText("PD:operator:ErrRegionNotAdjacent"))
-	// ErrRegionNotFound is error info for region not found.
-	ErrRegionNotFound = errors.Normalize("region %v not found", errors.RFCCodeText("PD:operator:ErrRegionNotFound"))
-	// ErrRegionAbnormalPeer is error info for region has abnormal peer.
-	ErrRegionAbnormalPeer = errors.Normalize("region %v has abnormal peer", errors.RFCCodeText("PD:operator:ErrRegionAbnormalPeer"))
+	ErrRegionNotAdjacent  = errors.Normalize("two regions are not adjacent", errors.RFCCodeText("PD:region:ErrRegionNotAdjacent"))
+	ErrRegionNotFound     = errors.Normalize("region %v not found", errors.RFCCodeText("PD:region:ErrRegionNotFound"))
+	ErrRegionAbnormalPeer = errors.Normalize("region %v has abnormal peer", errors.RFCCodeText("PD:region:ErrRegionAbnormalPeer"))
+	ErrRegionSplitTimeout = errors.Normalize("region split timeout", errors.RFCCodeText("PD:region:ErrRegionSplitTimeout"))
+	ErrRegionSplitFailed  = errors.Normalize("region split failed", errors.RFCCodeText("PD:region:ErrRegionSplitFailed"))
+	ErrRegionRuleContent  = errors.Normalize("invalid region rule content, %s", errors.RFCCodeText("PD:region:ErrRegionRuleContent"))
+	ErrRegionRuleNotFound = errors.Normalize("region label rule not found for id %s", errors.RFCCodeText("PD:region:ErrRegionRuleNotFound"))
+	ErrRegionStale        = errors.Normalize("region is stale: region %v origin %v", errors.RFCCodeText("PD:region:ErrRegionStale"))
 )
 
 // plugin errors
@@ -159,12 +195,6 @@ var (
 	ErrBuildRuleList = errors.Normalize("build rule list failed, %s", errors.RFCCodeText("PD:placement:ErrBuildRuleList"))
 )
 
-// region label errors
-var (
-	ErrRegionRuleContent  = errors.Normalize("invalid region rule content, %s", errors.RFCCodeText("PD:region:ErrRegionRuleContent"))
-	ErrRegionRuleNotFound = errors.Normalize("region label rule not found for id %s", errors.RFCCodeText("PD:region:ErrRegionRuleNotFound"))
-)
-
 // cluster errors
 var (
 	ErrNotBootstrapped    = errors.Normalize("TiKV cluster not bootstrapped, please start TiKV first", errors.RFCCodeText("PD:cluster:ErrNotBootstrapped"))
@@ -207,8 +237,12 @@ var (
 	ErrLeaderNil             = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
 	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
 	ErrConfigItem            = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:server:ErrConfiguration"))
-	ErrServerNotStarted      = errors.Normalize("server not started", errors.RFCCodeText("PD:server:ErrServerNotStarted"))
+	ErrServerNotStarted      = errors.Normalize(status.Errorf(codes.Unavailable, "server not started").Error(), errors.RFCCodeText("PD:server:ErrServerNotStarted"))
+	ErrClusterMismatched     = errors.Normalize(status.Errorf(codes.Unavailable, "cluster mismatched").Error(), errors.RFCCodeText("PD:server:ErrClusterMismatched"))
 	ErrRateLimitExceeded     = errors.Normalize("rate limit exceeded", errors.RFCCodeText("PD:server:ErrRateLimitExceeded"))
+	ErrNotLeader             = errors.Normalize(status.Errorf(codes.Unavailable, "not leader").Error(), errors.RFCCodeText("PD:server:ErrNotLeader"))
+	ErrSendHeartbeatTimeout  = errors.Normalize(status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout").Error(), errors.RFCCodeText("PD:server:ErrSendHeartbeatTimeout"))
+	ErrEtcdNotStarted        = errors.Normalize(status.Errorf(codes.Unavailable, "server is started, but etcd not started").Error(), errors.RFCCodeText("PD:server:ErrEtcdNotStarted"))
 )
 
 // logutil errors
@@ -246,23 +280,25 @@ var (
 
 // etcd errors
 var (
-	ErrNewEtcdClient     = errors.Normalize("new etcd client failed", errors.RFCCodeText("PD:etcd:ErrNewEtcdClient"))
-	ErrStartEtcd         = errors.Normalize("start etcd failed", errors.RFCCodeText("PD:etcd:ErrStartEtcd"))
-	ErrEtcdURLMap        = errors.Normalize("etcd url map error", errors.RFCCodeText("PD:etcd:ErrEtcdURLMap"))
-	ErrEtcdGrantLease    = errors.Normalize("etcd lease failed", errors.RFCCodeText("PD:etcd:ErrEtcdGrantLease"))
-	ErrEtcdTxnInternal   = errors.Normalize("internal etcd transaction error occurred", errors.RFCCodeText("PD:etcd:ErrEtcdTxnInternal"))
-	ErrEtcdTxnConflict   = errors.Normalize("etcd transaction failed, conflicted and rolled back", errors.RFCCodeText("PD:etcd:ErrEtcdTxnConflict"))
-	ErrEtcdKVPut         = errors.Normalize("etcd KV put failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVPut"))
-	ErrEtcdKVDelete      = errors.Normalize("etcd KV delete failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVDelete"))
-	ErrEtcdKVGet         = errors.Normalize("etcd KV get failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVGet"))
-	ErrEtcdKVGetResponse = errors.Normalize("etcd invalid get value response %v, must only one", errors.RFCCodeText("PD:etcd:ErrEtcdKVGetResponse"))
-	ErrEtcdGetCluster    = errors.Normalize("etcd get cluster from remote peer failed", errors.RFCCodeText("PD:etcd:ErrEtcdGetCluster"))
-	ErrEtcdMoveLeader    = errors.Normalize("etcd move leader error", errors.RFCCodeText("PD:etcd:ErrEtcdMoveLeader"))
-	ErrEtcdTLSConfig     = errors.Normalize("etcd TLS config error", errors.RFCCodeText("PD:etcd:ErrEtcdTLSConfig"))
-	ErrEtcdWatcherCancel = errors.Normalize("watcher canceled", errors.RFCCodeText("PD:etcd:ErrEtcdWatcherCancel"))
-	ErrCloseEtcdClient   = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
-	ErrEtcdMemberList    = errors.Normalize("etcd member list failed", errors.RFCCodeText("PD:etcd:ErrEtcdMemberList"))
-	ErrEtcdMemberRemove  = errors.Normalize("etcd remove member failed", errors.RFCCodeText("PD:etcd:ErrEtcdMemberRemove"))
+	ErrNewEtcdClient       = errors.Normalize("new etcd client failed", errors.RFCCodeText("PD:etcd:ErrNewEtcdClient"))
+	ErrStartEtcd           = errors.Normalize("start etcd failed", errors.RFCCodeText("PD:etcd:ErrStartEtcd"))
+	ErrEtcdURLMap          = errors.Normalize("etcd url map error", errors.RFCCodeText("PD:etcd:ErrEtcdURLMap"))
+	ErrEtcdGrantLease      = errors.Normalize("etcd lease failed", errors.RFCCodeText("PD:etcd:ErrEtcdGrantLease"))
+	ErrEtcdTxnInternal     = errors.Normalize("internal etcd transaction error occurred", errors.RFCCodeText("PD:etcd:ErrEtcdTxnInternal"))
+	ErrEtcdTxnConflict     = errors.Normalize("etcd transaction failed, conflicted and rolled back", errors.RFCCodeText("PD:etcd:ErrEtcdTxnConflict"))
+	ErrEtcdKVPut           = errors.Normalize("etcd KV put failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVPut"))
+	ErrEtcdKVDelete        = errors.Normalize("etcd KV delete failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVDelete"))
+	ErrEtcdKVGet           = errors.Normalize("etcd KV get failed", errors.RFCCodeText("PD:etcd:ErrEtcdKVGet"))
+	ErrEtcdKVGetResponse   = errors.Normalize("etcd invalid get value response %v, must only one", errors.RFCCodeText("PD:etcd:ErrEtcdKVGetResponse"))
+	ErrEtcdGetCluster      = errors.Normalize("etcd get cluster from remote peer failed", errors.RFCCodeText("PD:etcd:ErrEtcdGetCluster"))
+	ErrEtcdMoveLeader      = errors.Normalize("etcd move leader error", errors.RFCCodeText("PD:etcd:ErrEtcdMoveLeader"))
+	ErrEtcdTLSConfig       = errors.Normalize("etcd TLS config error", errors.RFCCodeText("PD:etcd:ErrEtcdTLSConfig"))
+	ErrEtcdWatcherCancel   = errors.Normalize("watcher canceled", errors.RFCCodeText("PD:etcd:ErrEtcdWatcherCancel"))
+	ErrCloseEtcdClient     = errors.Normalize("close etcd client failed", errors.RFCCodeText("PD:etcd:ErrCloseEtcdClient"))
+	ErrEtcdMemberList      = errors.Normalize("etcd member list failed", errors.RFCCodeText("PD:etcd:ErrEtcdMemberList"))
+	ErrEtcdMemberRemove    = errors.Normalize("etcd remove member failed", errors.RFCCodeText("PD:etcd:ErrEtcdMemberRemove"))
+	ErrExceedMaxEtcdTxnOps = errors.Normalize("exceed max etcd txn operations", errors.RFCCodeText("PD:etcd:ErrExceedMaxEtcdTxnOps"))
+	ErrIllegalOperation    = errors.Normalize("unknown operation", errors.RFCCodeText("PD:etcd:ErrIllegalOperation"))
 )
 
 // dashboard errors

@@ -277,7 +277,7 @@ func (s *Server) IsLocalRequest(forwardedHost string) bool {
 // TODO: Check if the sender is from the global TSO allocator
 func (s *Server) ValidateInternalRequest(_ *tsopb.RequestHeader, _ bool) error {
 	if s.IsClosed() {
-		return ErrNotStarted
+		return errs.ErrServerNotStarted
 	}
 	return nil
 }
@@ -286,7 +286,7 @@ func (s *Server) ValidateInternalRequest(_ *tsopb.RequestHeader, _ bool) error {
 // TODO: Check if the keyspace replica is the primary
 func (s *Server) ValidateRequest(header *tsopb.RequestHeader) error {
 	if s.IsClosed() {
-		return ErrNotStarted
+		return errs.ErrServerNotStarted
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())

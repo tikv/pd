@@ -60,20 +60,6 @@ const (
 	defaultGRPCDialTimeout        = 3 * time.Second
 )
 
-// gRPC errors
-var (
-	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
-	// TODO: work as proxy.
-	ErrNotLeader                        = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted                       = status.Errorf(codes.Unavailable, "server not started")
-	ErrSendHeartbeatTimeout             = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
-	ErrNotFoundTSOAddr                  = status.Errorf(codes.NotFound, "not found tso address")
-	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
-	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
-	ErrTSOProxyRecvFromClientTimeout    = status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
-	ErrEtcdNotStarted                   = status.Errorf(codes.Unavailable, "server is started, but etcd not started")
-)
-
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
 	*Server
@@ -413,7 +399,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
 		if s.IsClosed() {
-			return status.Errorf(codes.Unknown, "server not started")
+			return errs.ErrServerNotStarted
 		}
 		if request.GetHeader().GetClusterId() != s.clusterID {
 			return status.Errorf(codes.FailedPrecondition,
@@ -457,7 +443,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	maxConcurrentTSOProxyStreamings := int32(s.GetMaxConcurrentTSOProxyStreamings())
 	if maxConcurrentTSOProxyStreamings >= 0 {
 		if newCount := s.concurrentTSOProxyStreamings.Add(1); newCount > maxConcurrentTSOProxyStreamings {
-			return errors.WithStack(ErrMaxCountTSOProxyRoutinesExceeded)
+			return errors.WithStack(errs.ErrMaxCountTSOProxyRoutinesExceeded)
 		}
 	}
 
@@ -487,7 +473,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 
 		forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), utils.TSOServiceName)
 		if !ok || len(forwardedHost) == 0 {
-			return errors.WithStack(ErrNotFoundTSOAddr)
+			return errors.WithStack(errs.ErrNotFoundTSOAddr)
 		}
 		if forwardStream == nil || lastForwardedHost != forwardedHost {
 			if cancelForward != nil {
@@ -653,7 +639,7 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 		return errors.WithStack(err)
 	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
-		return ErrForwardTSOTimeout
+		return errs.ErrForwardTSOTimeout
 	}
 }
 
@@ -683,7 +669,7 @@ func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 		return req.request, nil
 	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
-		return nil, ErrTSOProxyRecvFromClientTimeout
+		return nil, errs.ErrTSOProxyRecvFromClientTimeout
 	}
 }
 
@@ -692,7 +678,7 @@ func (s *GrpcServer) getForwardedHost(ctx, streamCtx context.Context) (forwarded
 		var ok bool
 		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
 		if !ok || len(forwardedHost) == 0 {
-			return "", ErrNotFoundTSOAddr
+			return "", errs.ErrNotFoundTSOAddr
 		}
 	} else if fh := grpcutil.GetForwardedHost(streamCtx); !s.isLocalRequest(fh) {
 		forwardedHost = fh
@@ -1070,7 +1056,7 @@ func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 		return err
 	case <-timer.C:
 		atomic.StoreInt32(&b.closed, 1)
-		return ErrSendHeartbeatTimeout
+		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
@@ -1112,7 +1098,7 @@ func (s *heartbeatServer) Send(m *pdpb.RegionHeartbeatResponse) error {
 		return errors.WithStack(err)
 	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
-		return ErrSendHeartbeatTimeout
+		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
@@ -1805,11 +1791,11 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 // SyncRegions syncs the regions.
 func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	if s.IsClosed() || s.cluster == nil {
-		return ErrNotStarted
+		return errs.ErrServerNotStarted
 	}
 	ctx := s.cluster.Context()
 	if ctx == nil {
-		return ErrNotStarted
+		return errs.ErrServerNotStarted
 	}
 	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
 }
@@ -1945,7 +1931,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 // TODO: Call it in gRPC interceptor.
 func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 	if s.IsClosed() || !s.member.IsLeader() {
-		return ErrNotLeader
+		return errs.ErrNotLeader
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
@@ -2178,7 +2164,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 		return nil, err
 	}
 	if !s.member.IsLeader() {
-		return nil, ErrNotLeader
+		return nil, errs.ErrNotLeader
 	}
 	am := s.GetTSOAllocatorManager()
 	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
@@ -2213,7 +2199,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 // the gRPC communication between PD servers internally.
 func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
 	if s.IsClosed() {
-		return ErrNotStarted
+		return errs.ErrServerNotStarted
 	}
 	// If onlyAllowLeader is true, check whether the sender is PD leader.
 	if onlyAllowLeader {
@@ -2348,7 +2334,7 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
 		forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
 		if !ok || forwardedHost == "" {
-			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
+			return pdpb.Timestamp{}, errs.ErrNotFoundTSOAddr
 		}
 		forwardStream, err = s.getTSOForwardStream(forwardedHost)
 		if err != nil {
@@ -2420,7 +2406,7 @@ const globalConfigPath = "/global/config/"
 // it should be set to `Payload bytes` instead of `Value string`
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
 	if s.client == nil {
-		return nil, ErrEtcdNotStarted
+		return nil, errs.ErrEtcdNotStarted
 	}
 	configPath := request.GetConfigPath()
 	if configPath == "" {
@@ -2457,7 +2443,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 // - `ConfigPath` if `Names` is nil can get all values and revision of current path
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
 	if s.client == nil {
-		return nil, ErrEtcdNotStarted
+		return nil, errs.ErrEtcdNotStarted
 	}
 	configPath := request.GetConfigPath()
 	if configPath == "" {
@@ -2496,7 +2482,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	if s.client == nil {
-		return ErrEtcdNotStarted
+		return errs.ErrEtcdNotStarted
 	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()

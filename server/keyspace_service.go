@@ -22,7 +22,7 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -37,9 +37,9 @@ type KeyspaceServer struct {
 // getErrorHeader returns corresponding ResponseHeader based on err.
 func (s *KeyspaceServer) getErrorHeader(err error) *pdpb.ResponseHeader {
 	switch err {
-	case keyspace.ErrKeyspaceExists:
+	case errs.ErrKeyspaceExists:
 		return s.wrapErrorToHeader(pdpb.ErrorType_DUPLICATED_ENTRY, err.Error())
-	case keyspace.ErrKeyspaceNotFound:
+	case errs.ErrKeyspaceNotFound:
 		return s.wrapErrorToHeader(pdpb.ErrorType_ENTRY_NOT_FOUND, err.Error())
 	default:
 		return s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())
