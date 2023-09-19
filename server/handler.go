@@ -153,7 +153,7 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
 		if store == nil {
-			return nil, errs.ErrStoreNotFoundByID(storeID)
+			return nil, errs.ErrStoreNotFound.FastGenByArgs(storeID)
 		}
 		stores = append(stores, store)
 	}
@@ -537,7 +537,7 @@ func (h *Handler) PluginUnload(pluginPath string) error {
 		ch <- schedule.PluginUnload
 		return nil
 	}
-	return errs.ErrPluginNotFound(pluginPath)
+	return errs.ErrPluginNotFound.FastGenByArgs(pluginPath)
 }
 
 // GetAddr returns the server urls for clients.

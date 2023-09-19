@@ -511,6 +511,36 @@ error = '''
 TCP socks error
 '''
 
+["PD:operator:ErrAddOperator"]
+error = '''
+failed to add operator, maybe already have one
+'''
+
+["PD:operator:ErrOperatorNotFound"]
+error = '''
+operator not found
+'''
+
+["PD:operator:ErrPluginNotFound"]
+error = '''
+plugin is not found: %s
+'''
+
+["PD:operator:ErrRegionAbnormalPeer"]
+error = '''
+region %v has abnormal peer
+'''
+
+["PD:operator:ErrRegionNotAdjacent"]
+error = '''
+two regions are not adjacent
+'''
+
+["PD:operator:ErrRegionNotFound"]
+error = '''
+region %v not found
+'''
+
 ["PD:os:ErrOSOpen"]
 error = '''
 open error

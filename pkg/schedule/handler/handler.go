@@ -188,7 +188,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 	c := h.GetCluster()
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return errs.ErrRegionNotFound(regionID)
+		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
 	}
 
 	newLeader := region.GetStoreVoter(storeID)
@@ -209,7 +209,7 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 	c := h.GetCluster()
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return errs.ErrRegionNotFound(regionID)
+		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
 	}
 
 	if c.GetSharedConfig().IsPlacementRulesEnabled() {
@@ -246,7 +246,7 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 	c := h.GetCluster()
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return errs.ErrRegionNotFound(regionID)
+		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
 	}
 
 	oldPeer := region.GetStorePeer(fromStoreID)
@@ -272,7 +272,7 @@ func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (
 	c := h.GetCluster()
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return nil, nil, errs.ErrRegionNotFound(regionID)
+		return nil, nil, errs.ErrRegionNotFound.FastGenByArgs(regionID)
 	}
 
 	if region.GetStorePeer(toStoreID) != nil {
@@ -327,7 +327,7 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 	c := h.GetCluster()
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return errs.ErrRegionNotFound(regionID)
+		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
 	}
 
 	if region.GetStorePeer(fromStoreID) == nil {
@@ -347,20 +347,20 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 	c := h.GetCluster()
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return errs.ErrRegionNotFound(regionID)
+		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
 	}
 
 	target := c.GetRegion(targetID)
 	if target == nil {
-		return errs.ErrRegionNotFound(targetID)
+		return errs.ErrRegionNotFound.FastGenByArgs(targetID)
 	}
 
 	if !filter.IsRegionHealthy(region) || !filter.IsRegionReplicated(c, region) {
-		return errs.ErrRegionAbnormalPeer(regionID)
+		return errs.ErrRegionAbnormalPeer.FastGenByArgs(regionID)
 	}
 
 	if !filter.IsRegionHealthy(target) || !filter.IsRegionReplicated(c, target) {
-		return errs.ErrRegionAbnormalPeer(targetID)
+		return errs.ErrRegionAbnormalPeer.FastGenByArgs(targetID)
 	}
 
 	// for the case first region (start key is nil) with the last region (end key is nil) but not adjacent
@@ -382,7 +382,7 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 	c := h.GetCluster()
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return errs.ErrRegionNotFound(regionID)
+		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
 	}
 
 	policy, ok := pdpb.CheckPolicy_value[strings.ToUpper(policyStr)]
@@ -414,7 +414,7 @@ func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error 
 	c := h.GetCluster()
 	region := c.GetRegion(regionID)
 	if region == nil {
-		return errs.ErrRegionNotFound(regionID)
+		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
 	}
 
 	if c.IsRegionHot(region) {

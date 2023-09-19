@@ -91,6 +91,30 @@ var (
 	ErrClientGetMinTSO       = errors.Normalize("get min TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetMinTSO"))
 )
 
+// operator errors
+var (
+	// ErrOperatorNotFound is error info for operator not found.
+	ErrOperatorNotFound = errors.Normalize("operator not found", errors.RFCCodeText("PD:operator:ErrOperatorNotFound"))
+	// ErrAddOperator is error info for already have an operator when adding operator.
+	ErrAddOperator = errors.Normalize("failed to add operator, maybe already have one", errors.RFCCodeText("PD:operator:ErrAddOperator"))
+)
+
+// region errors
+var (
+	// ErrRegionNotAdjacent is error info for region not adjacent.
+	ErrRegionNotAdjacent = errors.Normalize("two regions are not adjacent", errors.RFCCodeText("PD:operator:ErrRegionNotAdjacent"))
+	// ErrRegionNotFound is error info for region not found.
+	ErrRegionNotFound = errors.Normalize("region %v not found", errors.RFCCodeText("PD:operator:ErrRegionNotFound"))
+	// ErrRegionAbnormalPeer is error info for region has abnormal peer.
+	ErrRegionAbnormalPeer = errors.Normalize("region %v has abnormal peer", errors.RFCCodeText("PD:operator:ErrRegionAbnormalPeer"))
+)
+
+// plugin errors
+var (
+	// ErrPluginNotFound is error info for plugin not found.
+	ErrPluginNotFound = errors.Normalize("plugin is not found: %s", errors.RFCCodeText("PD:operator:ErrPluginNotFound"))
+)
+
 // schedule errors
 var (
 	ErrUnexpectedOperatorStatus = errors.Normalize("operator with unexpected status", errors.RFCCodeText("PD:schedule:ErrUnexpectedOperatorStatus"))

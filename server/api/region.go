@@ -764,7 +764,7 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 	}
 	region := rc.GetRegion(uint64(id))
 	if region == nil {
-		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound(uint64(id)).Error())
+		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(uint64(id)).Error())
 		return
 	}
 

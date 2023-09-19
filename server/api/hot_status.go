@@ -118,7 +118,7 @@ func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Req
 		}
 		store := rc.GetStore(id)
 		if store == nil {
-			h.rd.JSON(w, http.StatusNotFound, errs.ErrStoreNotFoundByID(id).Error())
+			h.rd.JSON(w, http.StatusNotFound, errs.ErrStoreNotFound.FastGenByArgs(id).Error())
 			return
 		}
 		ids = append(ids, id)
@@ -154,7 +154,7 @@ func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Requ
 		}
 		store := rc.GetStore(id)
 		if store == nil {
-			h.rd.JSON(w, http.StatusNotFound, errs.ErrStoreNotFoundByID(id).Error())
+			h.rd.JSON(w, http.StatusNotFound, errs.ErrStoreNotFound.FastGenByArgs(id).Error())
 			return
 		}
 		ids = append(ids, id)
