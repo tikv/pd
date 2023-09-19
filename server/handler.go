@@ -219,19 +219,24 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
-	if !h.s.IsAPIServiceMode() {
+	if h.s.IsAPIServiceMode() {
+		if err = c.AddSchedulerHandler(s, args...); err != nil {
+			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
+			return err
+		}
+		log.Info("add scheduler handler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+	} else {
 		if err = c.AddScheduler(s, args...); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-	} else {
-		c.GetSchedulerConfig().AddSchedulerCfg(s.GetType(), args)
+		log.Info("add scheduler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
 	}
 	if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
-	log.Info("add scheduler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+	log.Info("persist scheduler config successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
 	return nil
 }
 
@@ -241,23 +246,17 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return err
 	}
-	if !h.s.IsAPIServiceMode() {
+	if h.s.IsAPIServiceMode() {
+		if err = c.RemoveSchedulerHandler(name); err != nil {
+			log.Error("can not remove scheduler handler", zap.String("scheduler-name", name), errs.ZapError(err))
+		} else {
+			log.Info("remove scheduler handler successfully", zap.String("scheduler-name", name))
+		}
+	} else {
 		if err = c.RemoveScheduler(name); err != nil {
 			log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
 			log.Info("remove scheduler successfully", zap.String("scheduler-name", name))
-		}
-	} else {
-		conf := c.GetSchedulerConfig()
-		c.GetSchedulerConfig().RemoveSchedulerCfg(schedulers.FindSchedulerTypeByName(name))
-		if err := conf.Persist(c.GetStorage()); err != nil {
-			log.Error("the option can not persist scheduler config", errs.ZapError(err))
-			return err
-		}
-
-		if err := c.GetStorage().RemoveScheduleConfig(name); err != nil {
-			log.Error("can not remove the scheduler config", errs.ZapError(err))
-			return err
 		}
 	}
 	return err

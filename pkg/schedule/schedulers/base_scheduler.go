@@ -82,6 +82,11 @@ func (s *BaseScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(nil)
 }
 
+// ReloadConfig reloads the config from the storage.
+// By default, the scheduler does not need to reload the config
+// if it doesn't support the dynamic configuration.
+func (s *BaseScheduler) ReloadConfig() error { return nil }
+
 // GetNextInterval return the next interval for the scheduler
 func (s *BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(interval, MaxScheduleInterval, exponentialGrowth)
