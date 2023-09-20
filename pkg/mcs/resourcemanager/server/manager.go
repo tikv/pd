@@ -60,7 +60,7 @@ type Manager struct {
 		resourceGroupName string
 		*rmpb.Consumption
 		isBackground bool
-		isTiFlash bool
+		isTiFlash    bool
 	}
 	// record update time of each resource group
 	consumptionRecord map[string]time.Time
@@ -82,7 +82,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 			resourceGroupName string
 			*rmpb.Consumption
 			isBackground bool
-			isTiFlash bool
+			isTiFlash    bool
 		}, defaultConsumptionChanSize),
 		consumptionRecord: make(map[string]time.Time),
 	}
