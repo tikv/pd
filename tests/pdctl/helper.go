@@ -16,21 +16,13 @@ package pdctl
 
 import (
 	"bytes"
-	"context"
-	"fmt"
 	"sort"
 
-	"github.com/docker/go-units"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/tests"
 )
 
 // ExecuteCommand is used for test purpose.
@@ -88,68 +80,4 @@ func CheckRegionsInfo(re *require.Assertions, output *api.RegionsInfo, expected 
 	for i, region := range expected {
 		CheckRegionInfo(re, &got[i], region)
 	}
-}
-
-// MustPutStore is used for test purpose.
-func MustPutStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
-	store.Address = fmt.Sprintf("tikv%d", store.GetId())
-	if len(store.Version) == 0 {
-		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
-	}
-	svr := cluster.GetLeaderServer().GetServer()
-	grpcServer := &server.GrpcServer{Server: svr}
-	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-		Store:  store,
-	})
-	re.NoError(err)
-
-	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
-	newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
-		Capacity:  uint64(10 * units.GiB),
-		UsedSize:  uint64(9 * units.GiB),
-		Available: uint64(1 * units.GiB),
-	}))
-	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
-	if cluster.GetSchedulingPrimaryServer() != nil {
-		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
-	}
-}
-
-// MustPutRegion is used for test purpose.
-func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
-	leader := &metapb.Peer{
-		Id:      regionID,
-		StoreId: storeID,
-	}
-	metaRegion := &metapb.Region{
-		Id:          regionID,
-		StartKey:    start,
-		EndKey:      end,
-		Peers:       []*metapb.Peer{leader},
-		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
-	}
-	r := core.NewRegionInfo(metaRegion, leader, opts...)
-	err := cluster.HandleRegionHeartbeat(r)
-	re.NoError(err)
-	if cluster.GetSchedulingPrimaryServer() != nil {
-		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(r)
-		re.NoError(err)
-	}
-	return r
-}
-
-// MustReportBuckets is used for test purpose.
-func MustReportBuckets(re *require.Assertions, cluster *tests.TestCluster, regionID uint64, start, end []byte, stats *metapb.BucketStats) *metapb.Buckets {
-	buckets := &metapb.Buckets{
-		RegionId: regionID,
-		Version:  1,
-		Keys:     [][]byte{start, end},
-		Stats:    stats,
-		// report buckets interval is 10s
-		PeriodInMs: 10000,
-	}
-	err := cluster.HandleReportBuckets(buckets)
-	re.NoError(err)
-	return buckets
 }
