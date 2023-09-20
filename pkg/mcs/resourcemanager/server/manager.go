@@ -363,23 +363,23 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumption == nil {
 				continue
 			}
-			bgOrTiFlashType := ""
+			ruLabelType := tidbTypeLabel
 			if consumptionInfo.isBackground {
-				bgOrTiFlashType = backgroundTypeLabel
+				ruLabelType = backgroundTypeLabel
 			}
 			if consumptionInfo.isTiFlash {
-				bgOrTiFlashType = tiflashTypeLabel
+				ruLabelType = tiflashTypeLabel
 			}
 
 			var (
 				name                     = consumptionInfo.resourceGroupName
-				rruMetrics               = readRequestUnitCost.WithLabelValues(name, bgOrTiFlashType)
-				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, bgOrTiFlashType)
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name, ruLabelType)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, ruLabelType)
 				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name)
-				readByteMetrics          = readByteCost.WithLabelValues(name, bgOrTiFlashType)
-				writeByteMetrics         = writeByteCost.WithLabelValues(name, bgOrTiFlashType)
-				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, bgOrTiFlashType)
-				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, bgOrTiFlashType)
+				readByteMetrics          = readByteCost.WithLabelValues(name, ruLabelType)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name, ruLabelType)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, ruLabelType)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, ruLabelType)
 				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
 			)

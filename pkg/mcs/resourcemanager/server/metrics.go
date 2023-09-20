@@ -27,6 +27,7 @@ const (
 	writeTypeLabel         = "write"
 	backgroundTypeLabel    = "background"
 	tiflashTypeLabel       = "tiflash"
+	tidbTypeLabel          = "tidb"
 )
 
 var (
