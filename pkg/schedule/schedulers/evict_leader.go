@@ -218,6 +218,19 @@ func (s *evictLeaderScheduler) ReloadConfig() error {
 	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
 		return err
 	}
+	// Resume and pause the leader transfer for each store.
+	for id := range s.conf.StoreIDWithRanges {
+		if _, ok := newCfg.StoreIDWithRanges[id]; ok {
+			continue
+		}
+		s.conf.cluster.ResumeLeaderTransfer(id)
+	}
+	for id := range newCfg.StoreIDWithRanges {
+		if _, ok := s.conf.StoreIDWithRanges[id]; ok {
+			continue
+		}
+		s.conf.cluster.PauseLeaderTransfer(id)
+	}
 	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	return nil
 }

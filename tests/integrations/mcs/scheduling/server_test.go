@@ -17,12 +17,14 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -196,25 +198,15 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), 5)
-	re.Nil(schedulersController.GetScheduler(schedulers.EvictLeaderName))
+	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the API server.
 	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
 		"store_id": 1,
 	})
 	// Check if the evict-leader-scheduler is added.
-	testutil.Eventually(re, func() bool {
-		return len(schedulersController.GetSchedulerNames()) == 6 &&
-			schedulersController.GetScheduler(schedulers.EvictLeaderName) != nil
-	})
-	handler, ok := schedulersController.GetSchedulerHandlers()[schedulers.EvictLeaderName]
-	re.True(ok)
-	h, ok := handler.(interface {
-		EvictStoreIDs() []uint64
-	})
-	re.True(ok)
-	re.ElementsMatch(h.EvictStoreIDs(), []uint64{1})
-	// Update the evict-leader-scheduler through the API server.
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
+	// Add a store_id to the evict-leader-scheduler through the API server.
 	err = suite.pdLeader.GetServer().GetRaftCluster().PutStore(
 		&metapb.Store{
 			Id:            2,
@@ -229,25 +221,69 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
 		"store_id": 2,
 	})
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
+	// Delete a store_id from the evict-leader-scheduler through the API server.
+	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", schedulers.EvictLeaderName, 1))
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{2})
+	// Add a store_id to the evict-leader-scheduler through the API server by the scheduler handler.
+	api.MustCallSchedulerConfigAPI(re, http.MethodPost, suite.backendEndpoints, schedulers.EvictLeaderName, []string{"config"}, map[string]interface{}{
+		"name":     schedulers.EvictLeaderName,
+		"store_id": 1,
+	})
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
+	// Delete a store_id from the evict-leader-scheduler through the API server by the scheduler handler.
+	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, schedulers.EvictLeaderName, []string{"delete", "2"}, nil)
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
+	// If the last store is deleted, the scheduler should be removed.
+	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, schedulers.EvictLeaderName, []string{"delete", "1"}, nil)
+	// Check if the scheduler is removed.
+	checkEvictLeaderSchedulerExist(re, schedulersController, false)
+
+	// Delete the evict-leader-scheduler through the API server by removing the last store_id.
+	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 1,
+	})
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
+	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", schedulers.EvictLeaderName, 1))
+	checkEvictLeaderSchedulerExist(re, schedulersController, false)
+
+	// Delete the evict-leader-scheduler through the API server.
+	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 1,
+	})
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
+	api.MustDeleteScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName)
+	checkEvictLeaderSchedulerExist(re, schedulersController, false)
+
+	// TODO: test more schedulers.
+}
+
+func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
+	testutil.Eventually(re, func() bool {
+		if !exist {
+			return sc.GetScheduler(schedulers.EvictLeaderName) == nil
+		}
+		return sc.GetScheduler(schedulers.EvictLeaderName) != nil
+	})
+}
+
+func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller, expected []uint64) {
+	handler, ok := sc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	re.True(ok)
+	h, ok := handler.(interface {
+		EvictStoreIDs() []uint64
+	})
+	re.True(ok)
 	var evictStoreIDs []uint64
 	testutil.Eventually(re, func() bool {
 		evictStoreIDs = h.EvictStoreIDs()
-		return len(evictStoreIDs) == 2
+		return len(evictStoreIDs) == len(expected)
 	})
-	re.ElementsMatch(evictStoreIDs, []uint64{1, 2})
-	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", schedulers.EvictLeaderName, 1))
-	testutil.Eventually(re, func() bool {
-		evictStoreIDs = h.EvictStoreIDs()
-		return len(evictStoreIDs) == 1
-	})
-	re.ElementsMatch(evictStoreIDs, []uint64{2})
-	// Remove the evict-leader-scheduler through the API server.
-	api.MustDeleteScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName)
-	// Check if the scheduler is removed.
-	testutil.Eventually(re, func() bool {
-		return len(schedulersController.GetSchedulerNames()) == 5 &&
-			schedulersController.GetScheduler(schedulers.EvictLeaderName) == nil
-	})
-
-	// TODO: test more schedulers.
+	re.ElementsMatch(evictStoreIDs, expected)
 }
