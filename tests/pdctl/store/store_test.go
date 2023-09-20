@@ -83,7 +83,7 @@ func TestStore(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
-		pdctl.MustPutStore(re, cluster, store.Store.Store)
+		tests.MustPutStore(re, cluster, store.Store.Store)
 	}
 	defer cluster.Destroy()
 
@@ -293,7 +293,7 @@ func TestStore(t *testing.T) {
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
 		}
-		pdctl.MustPutStore(re, cluster, store2)
+		tests.MustPutStore(re, cluster, store2)
 	}
 
 	// store delete <store_id> command
@@ -510,11 +510,11 @@ func TestTombstoneStore(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
-		pdctl.MustPutStore(re, cluster, store.Store.Store)
+		tests.MustPutStore(re, cluster, store.Store.Store)
 	}
 	defer cluster.Destroy()
-	pdctl.MustPutRegion(re, cluster, 1, 2, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
-	pdctl.MustPutRegion(re, cluster, 2, 3, []byte("b"), []byte("c"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
+	tests.MustPutRegion(re, cluster, 1, 2, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
+	tests.MustPutRegion(re, cluster, 2, 3, []byte("b"), []byte("c"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	// store remove-tombstone
 	args := []string{"-u", pdAddr, "store", "remove-tombstone"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)

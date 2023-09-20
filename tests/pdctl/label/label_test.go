@@ -96,7 +96,7 @@ func TestLabel(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
-		pdctl.MustPutStore(re, cluster, store.Store.Store)
+		tests.MustPutStore(re, cluster, store.Store.Store)
 	}
 	defer cluster.Destroy()
 

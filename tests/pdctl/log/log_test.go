@@ -54,7 +54,7 @@ func (suite *logTestSuite) SetupSuite() {
 	}
 	leaderServer := suite.cluster.GetLeaderServer()
 	suite.NoError(leaderServer.BootstrapCluster())
-	pdctl.MustPutStore(suite.Require(), suite.cluster, store)
+	tests.MustPutStore(suite.Require(), suite.cluster, store)
 }
 
 func (suite *logTestSuite) TearDownSuite() {
