@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -447,6 +448,7 @@ type TestCluster struct {
 		sync.Mutex
 		pool map[uint64]struct{}
 	}
+	schedulingCluster *TestSchedulingCluster
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -627,6 +629,15 @@ func (c *TestCluster) GetFollower() string {
 		}
 	}
 	return ""
+}
+
+// GetLeaderAddr returns the leader's address.
+func (c *TestCluster) GetLeaderAddr() string {
+	leader := c.GetLeader()
+	if leader == "" {
+		return ""
+	}
+	return c.servers[leader].GetAddr()
 }
 
 // WaitLeader is used to get leader.
@@ -827,6 +838,9 @@ func (c *TestCluster) Destroy() {
 			log.Error("failed to destroy the cluster:", errs.ZapError(err))
 		}
 	}
+	if c.schedulingCluster != nil {
+		c.schedulingCluster.Destroy()
+	}
 }
 
 // CheckClusterDCLocation will force the cluster to do the dc-location check in order to speed up the test.
@@ -851,6 +865,19 @@ func (c *TestCluster) CheckTSOUnique(ts uint64) bool {
 	}
 	c.tsPool.pool[ts] = struct{}{}
 	return true
+}
+
+// GetSchedulingPrimaryServer returns the scheduling primary server.
+func (c *TestCluster) GetSchedulingPrimaryServer() *scheduling.Server {
+	if c.schedulingCluster == nil {
+		return nil
+	}
+	return c.schedulingCluster.GetPrimaryServer()
+}
+
+// SetSchedulingCluster sets the scheduling cluster.
+func (c *TestCluster) SetSchedulingCluster(cluster *TestSchedulingCluster) {
+	c.schedulingCluster = cluster
 }
 
 // WaitOp represent the wait configuration

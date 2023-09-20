@@ -203,7 +203,7 @@ func getOperators(c *gin.Context) {
 // @Router   /operators/{region_id} [delete]
 func deleteOperatorByRegion(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
-	id := c.Param("region_id")
+	id := c.Param("id")
 
 	regionID, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {

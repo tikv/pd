@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server/config"
@@ -38,9 +38,7 @@ type operatorTestSuite struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	cluster *tests.TestCluster
-	pdAddr  string
 	opts    []tests.ConfigOption
-	cleanup func()
 }
 
 func TestOperatorTestSuite(t *testing.T) {
@@ -60,58 +58,55 @@ func (suite *operatorTestSuite) SetupSuite() {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
 		},
 	}
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
 }
 
 func (suite *operatorTestSuite) TearDownSuite() {
+	suite.cluster.Destroy()
 	suite.cancel()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 }
 
-func (suite *operatorTestSuite) TestOperatorInPDMode() {
-	suite.runPDMode()
+func (suite *operatorTestSuite) TestOperator() {
+	suite.runInPDMode()
 	suite.checkOperator()
-	suite.cleanup()
 }
 
-func (suite *operatorTestSuite) TestOperatorInAPIMode() {
-	suite.runAPIMode()
-	// Fixme: uncomment this after we can forward region and store
-	// suite.checkOperator()
-	suite.cleanup()
+func (suite *operatorTestSuite) TestForwardOperatorRequest() {
+	suite.runInAPIMode()
+	suite.checkOperator()
 }
 
-func (suite *operatorTestSuite) runPDMode() {
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+func (suite *operatorTestSuite) runInPDMode() {
+	// start pd cluster in pd mode
 	var err error
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1, suite.opts...)
 	suite.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	suite.NoError(err)
-	suite.cluster.WaitLeader()
-	suite.pdAddr = suite.cluster.GetConfig().GetClientURL()
+	suite.NotEmpty(suite.cluster.WaitLeader())
 	leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
 	suite.NoError(leaderServer.BootstrapCluster())
-	suite.cleanup = func() {
-		suite.cluster.Destroy()
-	}
 }
 
-func (suite *operatorTestSuite) runAPIMode() {
+func (suite *operatorTestSuite) runInAPIMode() {
+	// start pd cluster in api mode
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1, suite.opts...)
 	suite.NoError(err)
-	suite.NoError(suite.cluster.RunInitialServers())
+	err = suite.cluster.RunInitialServers()
+	suite.NoError(err)
 	suite.NotEmpty(suite.cluster.WaitLeader())
-	server := suite.cluster.GetServer(suite.cluster.GetLeader())
-	suite.NoError(server.BootstrapCluster())
-	suite.pdAddr = server.GetAddr()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.pdAddr)
+	leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NoError(leaderServer.BootstrapCluster())
+	// start scheduling cluster
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, leaderServer.GetAddr())
 	suite.NoError(err)
 	tc.WaitForPrimaryServing(suite.Require())
-	suite.cleanup = func() {
-		suite.cluster.Destroy()
-		tc.Destroy()
-	}
+	suite.cluster.SetSchedulingCluster(tc)
+	time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 }
 
 func (suite *operatorTestSuite) checkOperator() {
@@ -141,9 +136,11 @@ func (suite *operatorTestSuite) checkOperator() {
 			LastHeartbeat: time.Now().Add(-time.Minute * 20).UnixNano(),
 		},
 	}
-	leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
+
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
+		schedulingPrimary := suite.cluster.GetSchedulingPrimaryServer()
+		pdctl.MustPutStore(re, leaderServer.GetServer(), store, schedulingPrimary)
 	}
 
 	pdctl.MustPutRegion(re, suite.cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
@@ -155,7 +152,7 @@ func (suite *operatorTestSuite) checkOperator() {
 		{Id: 4, StoreId: 2},
 	}))
 
-	pdAddr := suite.pdAddr
+	pdAddr := suite.cluster.GetLeaderAddr()
 	args := []string{"-u", pdAddr, "operator", "show"}
 	var slice []string
 	output, err := pdctl.ExecuteCommand(cmd, args...)
@@ -324,33 +321,4 @@ func (suite *operatorTestSuite) checkOperator() {
 	re.Condition(func() bool {
 		return strings.Contains(string(output1), "Success!") || strings.Contains(string(output2), "Success!")
 	})
-}
-
-func TestForwardOperatorRequest(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
-	re.NoError(err)
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
-	server := cluster.GetServer(cluster.GetLeader())
-	re.NoError(server.BootstrapCluster())
-	backendEndpoints := server.GetAddr()
-	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)
-	re.NoError(err)
-	defer tc.Destroy()
-	tc.WaitForPrimaryServing(re)
-
-	cmd := pdctlCmd.GetRootCmd()
-	args := []string{"-u", backendEndpoints, "operator", "show"}
-	var slice []string
-	output, err := pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &slice))
-	re.Len(slice, 0)
-	args = []string{"-u", backendEndpoints, "operator", "check", "2"}
-	output, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.Contains(string(output), "null")
 }
