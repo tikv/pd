@@ -199,7 +199,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				resourceGroupName string
 				*rmpb.Consumption
 				isBackground bool
-				isTiFlash bool
+				isTiFlash    bool
 			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
 			if isBackground {
 				continue
