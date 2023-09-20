@@ -91,11 +91,12 @@ func CheckRegionsInfo(re *require.Assertions, output *api.RegionsInfo, expected 
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(re *require.Assertions, svr *server.Server, store *metapb.Store) {
+func MustPutStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
 	store.Address = fmt.Sprintf("tikv%d", store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
+	svr := cluster.GetLeaderServer().GetServer()
 	grpcServer := &server.GrpcServer{Server: svr}
 	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
@@ -110,6 +111,9 @@ func MustPutStore(re *require.Assertions, svr *server.Server, store *metapb.Stor
 		Available: uint64(1 * units.GiB),
 	}))
 	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
+	}
 }
 
 // MustPutRegion is used for test purpose.
@@ -128,6 +132,10 @@ func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID,
 	r := core.NewRegionInfo(metaRegion, leader, opts...)
 	err := cluster.HandleRegionHeartbeat(r)
 	re.NoError(err)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(r)
+		re.NoError(err)
+	}
 	return r
 }
 

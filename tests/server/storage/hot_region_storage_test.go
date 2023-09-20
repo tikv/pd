@@ -61,10 +61,10 @@ func TestHotRegionStorage(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().Unix()
@@ -169,10 +169,10 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().Unix()
@@ -261,10 +261,10 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().Unix()

@@ -76,7 +76,7 @@ func TestLoadTimestamp(t *testing.T) {
 func requestLocalTSOs(re *require.Assertions, cluster *tests.TestCluster, dcLocationConfig map[string]string) map[string]*pdpb.Timestamp {
 	dcClientMap := make(map[string]pdpb.PDClient)
 	tsMap := make(map[string]*pdpb.Timestamp)
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	for _, dcLocation := range dcLocationConfig {
 		pdName := leaderServer.GetAllocatorLeader(dcLocation).GetName()
 		dcClientMap[dcLocation] = testutil.MustNewGrpcClient(re, cluster.GetServer(pdName).GetAddr())
@@ -125,7 +125,7 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 	cluster.WaitLeader()
 
 	// Re-request the global TSOs.
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.TsoRequest{

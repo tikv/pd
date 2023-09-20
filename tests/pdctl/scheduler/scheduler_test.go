@@ -94,10 +94,10 @@ func TestScheduler(t *testing.T) {
 		re.Equal(expectedConfig, configInfo)
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 
 	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
@@ -363,7 +363,7 @@ func TestScheduler(t *testing.T) {
 	for _, store := range stores {
 		version := versioninfo.HotScheduleWithQuery
 		store.Version = versioninfo.MinSupportedVersion(version).String()
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
 	// After upgrading, we should not use query.
@@ -488,10 +488,10 @@ func TestSchedulerDiagnostic(t *testing.T) {
 			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 
 	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
@@ -539,7 +539,7 @@ func TestForwardSchedulerRequest(t *testing.T) {
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
-	server := cluster.GetServer(cluster.GetLeader())
+	server := cluster.GetLeaderServer()
 	re.NoError(server.BootstrapCluster())
 	backendEndpoints := server.GetAddr()
 	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)

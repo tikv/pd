@@ -63,10 +63,10 @@ func TestHot(t *testing.T) {
 		Labels:        []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	pdctl.MustPutStore(re, leaderServer.GetServer(), store1)
-	pdctl.MustPutStore(re, leaderServer.GetServer(), store2)
+	pdctl.MustPutStore(re, cluster, store1)
+	pdctl.MustPutStore(re, cluster, store2)
 	defer cluster.Destroy()
 
 	// test hot store
@@ -222,10 +222,10 @@ func TestHotWithStoreID(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 	defer cluster.Destroy()
 
@@ -330,10 +330,10 @@ func TestHistoryHotRegions(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().Unix()
@@ -440,10 +440,10 @@ func TestHotWithoutHotPeer(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		pdctl.MustPutStore(re, cluster, store)
 	}
 	timestamp := uint64(time.Now().UnixNano())
 	load := 1024.0

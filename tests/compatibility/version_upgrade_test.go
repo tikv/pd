@@ -38,7 +38,7 @@ func TestStoreRegister(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	putStoreRequest := &pdpb.PutStoreRequest{
@@ -63,7 +63,7 @@ func TestStoreRegister(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 
-	leaderServer = cluster.GetServer(cluster.GetLeader())
+	leaderServer = cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
 	newVersion := leaderServer.GetClusterVersion()
 	re.Equal(version, newVersion)
@@ -92,7 +92,7 @@ func TestRollingUpgrade(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	stores := []*pdpb.PutStoreRequest{
