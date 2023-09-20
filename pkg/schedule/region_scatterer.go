@@ -455,7 +455,14 @@ func (r *RegionScatterer) selectCandidates(region *core.RegionInfo, oldFit *plac
 		}
 	}
 	for _, store := range stores {
+<<<<<<< HEAD:pkg/schedule/region_scatterer.go
 		storeCount := context.selectedPeer.TotalCountByStore(store.GetID())
+=======
+		storeCount := context.selectedPeer.Get(store.GetID(), group)
+		if store.GetID() == peer.GetStoreId() {
+			originStorePickedCount = storeCount
+		}
+>>>>>>> 24fffdf71 (scatter: fix incorrect judgment condition (#7111)):pkg/schedule/scatter/region_scatterer.go
 		// If storeCount is equal to the maxStoreTotalCount, we should skip this store as candidate.
 		// If the storeCount are all the same for the whole cluster(maxStoreTotalCount == minStoreTotalCount), any store
 		// could be selected as candidate.
