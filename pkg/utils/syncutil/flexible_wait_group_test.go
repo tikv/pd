@@ -36,6 +36,7 @@ func TestFlexibleWaitGroup(t *testing.T) {
 	re.GreaterOrEqual(time.Since(now).Milliseconds(), int64(1000))
 }
 
+// TestAddAfterWait tests the case where Add is called after Wait has started and before Wait has finished.
 func TestAddAfterWait(t *testing.T) {
 	fwg := NewFlexibleWaitGroup()
 	startWait := make(chan struct{})
@@ -65,4 +66,67 @@ func TestAddAfterWait(t *testing.T) {
 		done <- struct{}{}
 	}()
 	<-done
+}
+
+// TestNegativeDelta tests the case where Add is called with a negative delta.
+func TestNegativeDelta(t *testing.T) {
+	require := require.New(t)
+	fwg := NewFlexibleWaitGroup()
+	fwg.Add(5)
+	go func() {
+		fwg.Add(-3)
+		fwg.Done()
+		fwg.Done()
+	}()
+	go func() {
+		fwg.Add(-2)
+		fwg.Done()
+	}()
+	fwg.Wait()
+	require.Equal(0, fwg.count)
+}
+
+// TestMultipleWait tests the case where Wait is called multiple times concurrently.
+func TestMultipleWait(t *testing.T) {
+	require := require.New(t)
+	fwg := NewFlexibleWaitGroup()
+	fwg.Add(3)
+	done := make(chan struct{})
+	go func() {
+		fwg.Wait()
+		done <- struct{}{}
+	}()
+	go func() {
+		fwg.Wait()
+		done <- struct{}{}
+	}()
+	go func() {
+		fwg.Done()
+		time.Sleep(100 * time.Millisecond) // Ensure that Done is called after the Waits
+		fwg.Done()
+		fwg.Done()
+	}()
+	<-done
+	<-done
+	require.Equal(0, fwg.count)
+}
+
+// TestAddAfterWaitFinished tests the case where Add is called after Wait has finished.
+func TestAddAfterWaitFinished(t *testing.T) {
+	require := require.New(t)
+	fwg := NewFlexibleWaitGroup()
+	done := make(chan struct{})
+	go func() {
+		fwg.Add(1)
+		fwg.Done()
+	}()
+	go func() {
+		fwg.Wait()
+		done <- struct{}{}
+	}()
+	<-done
+	fwg.Add(1)
+	require.Equal(1, fwg.count)
+	fwg.Done()
+	require.Equal(0, fwg.count)
 }
