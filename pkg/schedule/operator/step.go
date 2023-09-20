@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
@@ -57,7 +58,7 @@ type OpStep interface {
 	CheckInProgress(ci *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error
 	Influence(opInfluence OpInfluence, region *core.RegionInfo)
 	Timeout(regionSize int64) time.Duration
-	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse
+	GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation
 }
 
 // TransferLeader is an OpStep that transfers a region's leader.
@@ -126,12 +127,12 @@ func (tl TransferLeader) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (tl TransferLeader) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (tl TransferLeader) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	peers := make([]*metapb.Peer, 0, len(tl.ToStores))
 	for _, storeID := range tl.ToStores {
 		peers = append(peers, region.GetStorePeer(storeID))
 	}
-	return &pdpb.RegionHeartbeatResponse{
+	return &hbstream.Operation{
 		TransferLeader: &pdpb.TransferLeader{
 			Peer:  region.GetStorePeer(tl.ToStore),
 			Peers: peers,
@@ -210,7 +211,7 @@ func (ap AddPeer) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (ap AddPeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	peer := region.GetStorePeer(ap.ToStore)
 	if peer != nil {
 		// The newly added peer is pending.
@@ -274,7 +275,7 @@ func (bw BecomeWitness) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (bw BecomeWitness) GetCmd(_ *core.RegionInfo, _ bool) *pdpb.RegionHeartbeatResponse {
+func (bw BecomeWitness) GetCmd(_ *core.RegionInfo, _ bool) *hbstream.Operation {
 	return switchWitness(bw.PeerID, true)
 }
 
@@ -342,7 +343,7 @@ func (bn BecomeNonWitness) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	return switchWitness(bn.PeerID, false)
 }
 
@@ -426,7 +427,7 @@ func (bsw BatchSwitchWitness) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (bsw BatchSwitchWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (bsw BatchSwitchWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	switches := make([]*pdpb.SwitchWitness, 0, len(bsw.ToWitnesses)+len(bsw.ToNonWitnesses))
 	for _, w := range bsw.ToWitnesses {
 		switches = append(switches, w.GetCmd(region, useConfChangeV2).SwitchWitnesses.SwitchWitnesses...)
@@ -434,7 +435,7 @@ func (bsw BatchSwitchWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bo
 	for _, nw := range bsw.ToNonWitnesses {
 		switches = append(switches, nw.GetCmd(region, useConfChangeV2).SwitchWitnesses.SwitchWitnesses...)
 	}
-	return &pdpb.RegionHeartbeatResponse{
+	return &hbstream.Operation{
 		SwitchWitnesses: &pdpb.BatchSwitchWitness{
 			SwitchWitnesses: switches,
 		},
@@ -522,7 +523,7 @@ func (al AddLearner) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (al AddLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (al AddLearner) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	if region.GetStorePeer(al.ToStore) != nil {
 		// The newly added peer is pending.
 		return nil
@@ -581,7 +582,7 @@ func (pl PromoteLearner) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (pl PromoteLearner) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (pl PromoteLearner) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	return createResponse(addNode(pl.PeerID, pl.ToStore, pl.IsWitness), useConfChangeV2)
 }
 
@@ -652,7 +653,7 @@ func (rp RemovePeer) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (rp RemovePeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (rp RemovePeer) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	return createResponse(&pdpb.ChangePeer{
 		ChangeType: eraftpb.ConfChangeType_RemoveNode,
 		Peer:       region.GetStorePeer(rp.FromStore),
@@ -714,11 +715,11 @@ func (mr MergeRegion) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (mr MergeRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (mr MergeRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	if mr.IsPassive {
 		return nil
 	}
-	return &pdpb.RegionHeartbeatResponse{
+	return &hbstream.Operation{
 		Merge: &pdpb.Merge{
 			Target: mr.ToRegion,
 		},
@@ -768,8 +769,8 @@ func (sr SplitRegion) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (sr SplitRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
-	return &pdpb.RegionHeartbeatResponse{
+func (sr SplitRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
+	return &hbstream.Operation{
 		SplitRegion: &pdpb.SplitRegion{
 			Policy: sr.Policy,
 			Keys:   sr.SplitKeys,
@@ -818,7 +819,7 @@ func (dv DemoteVoter) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (dv DemoteVoter) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (dv DemoteVoter) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	return createResponse(addLearnerNode(dv.PeerID, dv.ToStore, dv.IsWitness), useConfChangeV2)
 }
 
@@ -940,7 +941,7 @@ func (cpe ChangePeerV2Enter) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (cpe ChangePeerV2Enter) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (cpe ChangePeerV2Enter) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	if !useConfChangeV2 {
 		// only supported in ChangePeerV2
 		return nil
@@ -952,7 +953,7 @@ func (cpe ChangePeerV2Enter) GetCmd(region *core.RegionInfo, useConfChangeV2 boo
 	for _, dv := range cpe.DemoteVoters {
 		changes = append(changes, dv.GetCmd(region, useConfChangeV2).ChangePeerV2.Changes...)
 	}
-	return &pdpb.RegionHeartbeatResponse{
+	return &hbstream.Operation{
 		ChangePeerV2: &pdpb.ChangePeerV2{
 			Changes: changes,
 		},
@@ -1080,12 +1081,12 @@ func (cpl ChangePeerV2Leave) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (cpl ChangePeerV2Leave) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func (cpl ChangePeerV2Leave) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	if !useConfChangeV2 {
 		// only supported in ChangePeerV2
 		return nil
 	}
-	return &pdpb.RegionHeartbeatResponse{
+	return &hbstream.Operation{
 		ChangePeerV2: &pdpb.ChangePeerV2{},
 	}
 }
@@ -1143,21 +1144,21 @@ func addLearnerNode(id, storeID uint64, isWitness bool) *pdpb.ChangePeer {
 	}
 }
 
-func createResponse(change *pdpb.ChangePeer, useConfChangeV2 bool) *pdpb.RegionHeartbeatResponse {
+func createResponse(change *pdpb.ChangePeer, useConfChangeV2 bool) *hbstream.Operation {
 	if useConfChangeV2 {
-		return &pdpb.RegionHeartbeatResponse{
+		return &hbstream.Operation{
 			ChangePeerV2: &pdpb.ChangePeerV2{
 				Changes: []*pdpb.ChangePeer{change},
 			},
 		}
 	}
-	return &pdpb.RegionHeartbeatResponse{
+	return &hbstream.Operation{
 		ChangePeer: change,
 	}
 }
 
-func switchWitness(peerID uint64, isWitness bool) *pdpb.RegionHeartbeatResponse {
-	return &pdpb.RegionHeartbeatResponse{
+func switchWitness(peerID uint64, isWitness bool) *hbstream.Operation {
+	return &hbstream.Operation{
 		SwitchWitnesses: &pdpb.BatchSwitchWitness{
 			SwitchWitnesses: []*pdpb.SwitchWitness{{PeerId: peerID, IsWitness: isWitness}},
 		},

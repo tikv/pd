@@ -18,9 +18,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -286,4 +288,81 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 		return len(evictStoreIDs) == len(expected)
 	})
 	re.ElementsMatch(evictStoreIDs, expected)
+}
+
+func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://%d", i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+	queryStats := &pdpb.QueryStats{
+		Get:                    5,
+		Coprocessor:            6,
+		Scan:                   7,
+		Put:                    8,
+		Delete:                 9,
+		DeleteRange:            10,
+		AcquirePessimisticLock: 11,
+		Rollback:               12,
+		Prewrite:               13,
+		Commit:                 14,
+	}
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	downPeers := []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}}
+	pendingPeers := []*metapb.Peer{peers[2]}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader:          peers[0],
+		DownPeers:       downPeers,
+		PendingPeers:    pendingPeers,
+		BytesWritten:    10,
+		BytesRead:       20,
+		KeysWritten:     100,
+		KeysRead:        200,
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+		Interval:        interval,
+		QueryStats:      queryStats,
+		Term:            1,
+		CpuUsage:        100,
+	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
+			region.GetKeysRead() == 200 && region.GetKeysWritten() == 100 && region.GetTerm() == 1 &&
+			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
+			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetInterval(), interval) && region.GetReadQueryNum() == 18 && region.GetWriteQueryNum() == 77 &&
+			reflect.DeepEqual(region.GetDownPeers(), downPeers) && reflect.DeepEqual(region.GetPendingPeers(), pendingPeers)
+	})
 }

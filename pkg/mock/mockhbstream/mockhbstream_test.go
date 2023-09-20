@@ -22,12 +22,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestActivity(t *testing.T) {
@@ -41,37 +39,33 @@ func TestActivity(t *testing.T) {
 	cluster.AddRegionStore(2, 0)
 	cluster.AddLeaderRegion(1, 1)
 	region := cluster.GetRegion(1)
-	msg := &pdpb.RegionHeartbeatResponse{
-		ChangePeer: &pdpb.ChangePeer{Peer: &metapb.Peer{Id: 2, StoreId: 2}, ChangeType: eraftpb.ConfChangeType_AddLearnerNode},
-	}
-
 	hbs := hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true)
 	stream1, stream2 := NewHeartbeatStream(), NewHeartbeatStream()
 
 	// Active stream is stream1.
 	hbs.BindStream(1, stream1)
 	testutil.Eventually(re, func() bool {
-		newMsg := typeutil.DeepClone(msg, core.RegionHeartbeatResponseFactory)
-		hbs.SendMsg(region, newMsg)
+		msg := &hbstream.Operation{ChangePeer: &pdpb.ChangePeer{Peer: &metapb.Peer{Id: 2, StoreId: 2}, ChangeType: eraftpb.ConfChangeType_AddLearnerNode}}
+		hbs.SendMsg(region, msg)
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 	// Rebind to stream2.
 	hbs.BindStream(1, stream2)
 	testutil.Eventually(re, func() bool {
-		newMsg := typeutil.DeepClone(msg, core.RegionHeartbeatResponseFactory)
-		hbs.SendMsg(region, newMsg)
+		msg := &hbstream.Operation{ChangePeer: &pdpb.ChangePeer{Peer: &metapb.Peer{Id: 2, StoreId: 2}, ChangeType: eraftpb.ConfChangeType_AddLearnerNode}}
+		hbs.SendMsg(region, msg)
 		return stream1.Recv() == nil && stream2.Recv() != nil
 	})
 	// SendErr to stream2.
 	hbs.SendErr(pdpb.ErrorType_UNKNOWN, "test error", &metapb.Peer{Id: 1, StoreId: 1})
 	res := stream2.Recv()
 	re.NotNil(res)
-	re.NotNil(res.GetHeader().GetError())
+	re.NotNil(res.(*pdpb.RegionHeartbeatResponse).GetHeader().GetError())
 	// Switch back to 1 again.
 	hbs.BindStream(1, stream1)
 	testutil.Eventually(re, func() bool {
-		newMsg := typeutil.DeepClone(msg, core.RegionHeartbeatResponseFactory)
-		hbs.SendMsg(region, newMsg)
+		msg := &hbstream.Operation{ChangePeer: &pdpb.ChangePeer{Peer: &metapb.Peer{Id: 2, StoreId: 2}, ChangeType: eraftpb.ConfChangeType_AddLearnerNode}}
+		hbs.SendMsg(region, msg)
 		return stream1.Recv() != nil && stream2.Recv() == nil
 	})
 }
