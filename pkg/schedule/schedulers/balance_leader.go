@@ -183,7 +183,6 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, ForbidRecentlySplitRegions: true, OperatorLevel: constant.High},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
-	s.regionFilters = filter.NewStoreRecentlySplitFilter(opController.GetCluster().GetStores())
 	return s
 }
 
@@ -349,6 +348,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	opInfluence := l.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
+	l.regionFilters = filter.NewStoreRecentlySplitFilter(cluster.GetStores())
 
 	stores := cluster.GetStores()
 	scoreFunc := func(store *core.StoreInfo) float64 {
