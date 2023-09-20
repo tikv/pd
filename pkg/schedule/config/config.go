@@ -57,7 +57,6 @@ const (
 	defaultEnablePlacementRules  = true
 	defaultEnableWitness         = false
 	defaultHaltScheduling        = false
-	defaultEnableSchedulePlugin  = false
 
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
@@ -270,9 +269,6 @@ type ScheduleConfig struct {
 	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
 	// and any other scheduling configs will be ignored.
 	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
-
-	// EnableSchedulePlugin is the option to enable plugin.
-	EnableSchedulePlugin bool `toml:"enable-schedule-plugin" json:"enable-schedule-plugin,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -369,10 +365,6 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 
 	if !meta.IsDefined("halt-scheduling") {
 		c.HaltScheduling = defaultHaltScheduling
-	}
-
-	if !meta.IsDefined("enable-schedule-plugin") {
-		c.EnableSchedulePlugin = defaultEnableSchedulePlugin
 	}
 
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)

@@ -606,13 +606,6 @@ func (o *PersistConfig) SetHaltScheduling(halt bool, source string) {
 	o.SetScheduleConfig(v)
 }
 
-// SetEnableSchedulePlugin set EnableSchedulePlugin.
-func (o *PersistConfig) SetEnableSchedulePlugin(enable bool) {
-	v := o.GetScheduleConfig().Clone()
-	v.EnableSchedulePlugin = enable
-	o.SetScheduleConfig(v)
-}
-
 // CheckRegionKeys return error if the smallest region's keys is less than mergeKeys
 func (o *PersistConfig) CheckRegionKeys(keys, mergeKeys uint64) error {
 	return o.GetStoreConfig().CheckRegionKeys(keys, mergeKeys)

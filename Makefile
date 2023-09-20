@@ -42,6 +42,10 @@ ifeq ("$(WITH_RACE)", "1")
 	BUILD_CGO_ENABLED := 1
 endif
 
+ifeq ($(PLUGIN), 1)
+	BUILD_TAGS += with_plugin
+endif
+
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty --always)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
@@ -81,6 +85,9 @@ pd-server-failpoint:
 	@$(FAILPOINT_ENABLE)
 	FAILPOINT=1 $(MAKE) pd-server || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
+
+pd-server-plugin:
+	PLUGIN=1 $(MAKE) pd-server
 
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
