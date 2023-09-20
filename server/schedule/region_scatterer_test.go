@@ -66,6 +66,7 @@ func TestScatterRegions(t *testing.T) {
 	scatter(re, 5, 50, true)
 	scatter(re, 5, 500, true)
 	scatter(re, 6, 50, true)
+	scatter(re, 7, 71, true)
 	scatter(re, 5, 50, false)
 	scatterSpecial(re, 3, 6, 50)
 	scatterSpecial(re, 5, 5, 50)
@@ -125,20 +126,40 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 			}
 		}
 	}
+	maxStorePeerTotalCount := uint64(0)
+	minStorePeerTotalCount := uint64(math.MaxUint64)
 
 	// Each store should have the same number of peers.
 	for _, count := range countPeers {
-		re.LessOrEqual(float64(count), 1.1*float64(numRegions*3)/float64(numStores))
-		re.GreaterOrEqual(float64(count), 0.9*float64(numRegions*3)/float64(numStores))
+		if count > maxStorePeerTotalCount {
+			maxStorePeerTotalCount = count
+		}
+		if count < minStorePeerTotalCount {
+			minStorePeerTotalCount = count
+		}
 	}
+	re.LessOrEqual(maxStorePeerTotalCount-minStorePeerTotalCount, uint64(1))
 
 	// Each store should have the same number of leaders.
 	re.Len(countPeers, int(numStores))
 	re.Len(countLeader, int(numStores))
+
+	maxStoreLeaderTotalCount := uint64(0)
+	minStoreLeaderTotalCount := uint64(math.MaxUint64)
 	for _, count := range countLeader {
-		re.LessOrEqual(float64(count), 1.1*float64(numRegions)/float64(numStores))
-		re.GreaterOrEqual(float64(count), 0.9*float64(numRegions)/float64(numStores))
+		if count > maxStoreLeaderTotalCount {
+			maxStoreLeaderTotalCount = count
+		}
+		if count < minStoreLeaderTotalCount {
+			minStoreLeaderTotalCount = count
+		}
 	}
+<<<<<<< HEAD:server/schedule/region_scatterer_test.go
+=======
+	// Since the scatter leader depends on the scatter result of the peer, the maximum difference is 2.
+	re.LessOrEqual(maxStoreLeaderTotalCount-minStoreLeaderTotalCount, uint64(2))
+	re.GreaterOrEqual(noNeedMoveNum, 0)
+>>>>>>> 24fffdf71 (scatter: fix incorrect judgment condition (#7111)):pkg/schedule/scatter/region_scatterer_test.go
 }
 
 func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores, numRegions uint64) {
