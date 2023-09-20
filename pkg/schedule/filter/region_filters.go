@@ -185,7 +185,7 @@ type StoreRecentlySplitFilter struct {
 func NewStoreRecentlySplitFilter(stores []*core.StoreInfo) RegionFilter {
 	recentlySplitStores := make(map[uint64]struct{})
 	for _, store := range stores {
-		if !store.HasRecentlySplitRegions() {
+		if store.HasRecentlySplitRegions() {
 			recentlySplitStores[store.GetID()] = struct{}{}
 		}
 	}
@@ -196,7 +196,7 @@ func NewStoreRecentlySplitFilter(stores []*core.StoreInfo) RegionFilter {
 func (f *StoreRecentlySplitFilter) Select(region *core.RegionInfo) *plan.Status {
 	leaderStoreID := region.GetLeader().GetStoreId()
 	if _, ok := f.recentlySplitStores[leaderStoreID]; ok {
-		return statusOK
+		return statusStoreRecentlySplitRegions
 	}
-	return statusStoreRecentlySplitRegions
+	return statusOK
 }
