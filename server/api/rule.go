@@ -167,7 +167,7 @@ func (h *ruleHandler) preCheckForRegionAndRule(w http.ResponseWriter, r *http.Re
 	}
 	region := cluster.GetRegion(regionID)
 	if region == nil {
-		h.rd.JSON(w, http.StatusNotFound, server.ErrRegionNotFound(regionID).Error())
+		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())
 		return cluster, nil
 	}
 	return cluster, region
