@@ -222,7 +222,6 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateO
 		source:          FromHeartbeat,
 	}
 
-
 	// scheduling service doesn't need the following fields.
 	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
