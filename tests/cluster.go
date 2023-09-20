@@ -631,13 +631,9 @@ func (c *TestCluster) GetFollower() string {
 	return ""
 }
 
-// GetLeaderAddr returns the leader's address.
-func (c *TestCluster) GetLeaderAddr() string {
-	leader := c.GetLeader()
-	if leader == "" {
-		return ""
-	}
-	return c.servers[leader].GetAddr()
+// GetLeaderServer returns the leader server of all servers
+func (c *TestCluster) GetLeaderServer() *TestServer {
+	return c.GetServer(c.GetLeader())
 }
 
 // WaitLeader is used to get leader.

@@ -45,9 +45,9 @@ func TestRegionKeyFormat(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+	pdctl.MustPutStore(re, cluster, store)
 
 	cmd := pdctlCmd.GetRootCmd()
 	output, err := pdctl.ExecuteCommand(cmd, "-u", url, "region", "key", "--format=raw", " ")
@@ -72,9 +72,9 @@ func TestRegion(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+	pdctl.MustPutStore(re, cluster, store)
 
 	downPeer := &metapb.Peer{Id: 8, StoreId: 3}
 	r1 := pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),

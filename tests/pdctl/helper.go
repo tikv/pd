@@ -26,7 +26,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
@@ -92,11 +91,12 @@ func CheckRegionsInfo(re *require.Assertions, output *api.RegionsInfo, expected 
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(re *require.Assertions, svr *server.Server, store *metapb.Store, schedulingServers ...*scheduling.Server) {
+func MustPutStore(re *require.Assertions, cluster *tests.TestCluster, store *metapb.Store) {
 	store.Address = fmt.Sprintf("tikv%d", store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
+	svr := cluster.GetLeaderServer().GetServer()
 	grpcServer := &server.GrpcServer{Server: svr}
 	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
@@ -111,8 +111,8 @@ func MustPutStore(re *require.Assertions, svr *server.Server, store *metapb.Stor
 		Available: uint64(1 * units.GiB),
 	}))
 	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
-	if len(schedulingServers) > 0 && schedulingServers[0] != nil {
-		schedulingServers[0].GetBasicCluster().PutStore(newStore)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
 	}
 }
 

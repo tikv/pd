@@ -137,10 +137,10 @@ func (suite *operatorTestSuite) checkOperator() {
 		},
 	}
 
+	leaderServer := suite.cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
-		schedulingPrimary := suite.cluster.GetSchedulingPrimaryServer()
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store, schedulingPrimary)
+		pdctl.MustPutStore(re, suite.cluster, store)
 	}
 
 	pdctl.MustPutRegion(re, suite.cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
@@ -152,7 +152,7 @@ func (suite *operatorTestSuite) checkOperator() {
 		{Id: 4, StoreId: 2},
 	}))
 
-	pdAddr := suite.cluster.GetLeaderAddr()
+	pdAddr := leaderServer.GetAddr()
 	args := []string{"-u", pdAddr, "operator", "show"}
 	var slice []string
 	output, err := pdctl.ExecuteCommand(cmd, args...)
