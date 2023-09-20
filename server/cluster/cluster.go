@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
@@ -894,9 +895,19 @@ func (c *RaftCluster) GetSuspectRegions() []uint64 {
 	return c.coordinator.GetCheckerController().GetSuspectRegions()
 }
 
-// GetHotStat gets hot stat for test.
+// GetHotStat gets hot stat.
 func (c *RaftCluster) GetHotStat() *statistics.HotStat {
 	return c.hotStat
+}
+
+// GetRegionStats gets region statistics.
+func (c *RaftCluster) GetRegionStats() *statistics.RegionStatistics {
+	return c.regionStats
+}
+
+// GetLabelStats gets label statistics.
+func (c *RaftCluster) GetLabelStats() *statistics.LabelStatistics {
+	return c.labelLevelStats
 }
 
 // RemoveSuspectRegion removes region from suspect list.
@@ -1099,15 +1110,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if !c.isAPIServiceMode {
-		c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
-		c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
-		reportInterval := region.GetInterval()
-		interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-		for _, peer := range region.GetPeers() {
-			peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-			c.hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
-		}
-		c.coordinator.GetSchedulersController().CheckTransferWitnessLeader(region)
+		cluster.HandleStatsAsync(c, region)
 	}
 
 	hasRegionStats := c.regionStats != nil
@@ -1140,27 +1143,16 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if overlaps, err = c.core.AtomicCheckAndPutRegion(region); err != nil {
 			return err
 		}
-
-		for _, item := range overlaps {
-			if !c.isAPIServiceMode {
-				if c.regionStats != nil {
-					c.regionStats.ClearDefunctRegion(item.GetID())
-				}
-				c.labelLevelStats.ClearDefunctRegion(item.GetID())
-			}
-			c.ruleManager.InvalidCache(item.GetID())
+		if !c.isAPIServiceMode {
+			cluster.HandleOverlaps(c, overlaps)
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
 
 	if !c.isAPIServiceMode {
-		if hasRegionStats {
-			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
-		}
+		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, c.IsPrepared())
 	}
-	if !c.IsPrepared() && isNew {
-		c.coordinator.GetPrepareChecker().Collect(region)
-	}
+
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
@@ -2333,8 +2325,8 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
 
-// GetRegionStats returns region statistics from cluster.
-func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
+// GetRegionStatsByRange returns region statistics from cluster.
+func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte) *statistics.RegionStats {
 	return statistics.GetRegionStats(c.core.ScanRegions(startKey, endKey, -1))
 }
 
