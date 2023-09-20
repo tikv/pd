@@ -16,6 +16,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 	"sync"
@@ -26,10 +27,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/goleak"
@@ -131,6 +134,53 @@ func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+}
+
+func mustPutRegion(re *require.Assertions, svr *server.Server, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
+	leader := &metapb.Peer{
+		Id:      regionID,
+		StoreId: storeID,
+	}
+	metaRegion := &metapb.Region{
+		Id:          regionID,
+		StartKey:    start,
+		EndKey:      end,
+		Peers:       []*metapb.Peer{leader},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	r := core.NewRegionInfo(metaRegion, leader, opts...)
+	err := svr.GetRaftCluster().HandleRegionHeartbeat(r)
+	re.NoError(err)
+	return r
+}
+
+func mustPutStore(re *require.Assertions, svr *server.Server, id uint64, state metapb.StoreState, nodeState metapb.NodeState, labels []*metapb.StoreLabel) {
+	s := &server.GrpcServer{Server: svr}
+	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Store: &metapb.Store{
+			Id:        id,
+			Address:   fmt.Sprintf("tikv%d", id),
+			State:     state,
+			NodeState: nodeState,
+			Labels:    labels,
+			Version:   versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
+		},
+	})
+	re.NoError(err)
+	if state == metapb.StoreState_Up {
+		_, err = s.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+			Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+			Stats:  &pdpb.StoreStats{StoreId: id},
+		})
+		re.NoError(err)
+	}
+}
+
+func mustRegionHeartbeat(re *require.Assertions, svr *server.Server, region *core.RegionInfo) {
+	cluster := svr.GetRaftCluster()
+	err := cluster.HandleRegionHeartbeat(region)
+	re.NoError(err)
 }
 
 type serviceTestSuite struct {

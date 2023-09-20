@@ -15,7 +15,6 @@
 package operator_test
 
 import (
-	"context"
 	"encoding/hex"
 	"encoding/json"
 	"strconv"
@@ -23,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
@@ -35,20 +33,16 @@ import (
 
 type operatorTestSuite struct {
 	suite.Suite
-	ctx     context.Context
-	cancel  context.CancelFunc
-	cluster *tests.TestCluster
-	opts    []tests.ConfigOption
 }
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
-func (suite *operatorTestSuite) SetupSuite() {
+func (suite *operatorTestSuite) TestOperator() {
 	var start time.Time
 	start = start.Add(time.Hour)
-	suite.opts = []tests.ConfigOption{
+	opts := []tests.ConfigOption{
 		// TODO: enable placementrules
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 2
@@ -58,58 +52,11 @@ func (suite *operatorTestSuite) SetupSuite() {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
 		},
 	}
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	env := tests.NewSchedulingTestEnvironment(suite.Require(), opts...)
+	env.RunTestInTwoModes(suite.checkOperator)
 }
 
-func (suite *operatorTestSuite) TearDownSuite() {
-	suite.cluster.Destroy()
-	suite.cancel()
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
-}
-
-func (suite *operatorTestSuite) TestOperator() {
-	suite.runInPDMode()
-	suite.checkOperator()
-}
-
-func (suite *operatorTestSuite) TestForwardOperatorRequest() {
-	suite.runInAPIMode()
-	suite.checkOperator()
-}
-
-func (suite *operatorTestSuite) runInPDMode() {
-	// start pd cluster in pd mode
-	var err error
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1, suite.opts...)
-	suite.NoError(err)
-	err = suite.cluster.RunInitialServers()
-	suite.NoError(err)
-	suite.NotEmpty(suite.cluster.WaitLeader())
-	leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
-	suite.NoError(leaderServer.BootstrapCluster())
-}
-
-func (suite *operatorTestSuite) runInAPIMode() {
-	// start pd cluster in api mode
-	var err error
-	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1, suite.opts...)
-	suite.NoError(err)
-	err = suite.cluster.RunInitialServers()
-	suite.NoError(err)
-	suite.NotEmpty(suite.cluster.WaitLeader())
-	leaderServer := suite.cluster.GetServer(suite.cluster.GetLeader())
-	suite.NoError(leaderServer.BootstrapCluster())
-	// start scheduling cluster
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, leaderServer.GetAddr())
-	suite.NoError(err)
-	tc.WaitForPrimaryServing(suite.Require())
-	suite.cluster.SetSchedulingCluster(tc)
-	time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
-}
-
-func (suite *operatorTestSuite) checkOperator() {
+func (suite *operatorTestSuite) checkOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
 
 	cmd := pdctlCmd.GetRootCmd()
@@ -137,22 +84,20 @@ func (suite *operatorTestSuite) checkOperator() {
 		},
 	}
 
-	leaderServer := suite.cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		tests.MustPutStore(re, suite.cluster, store)
+		tests.MustPutStore(re, cluster, store)
 	}
 
-	tests.MustPutRegion(re, suite.cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
 	}))
-	tests.MustPutRegion(re, suite.cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
+	tests.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
 		{Id: 3, StoreId: 1},
 		{Id: 4, StoreId: 2},
 	}))
 
-	pdAddr := leaderServer.GetAddr()
+	pdAddr := cluster.GetLeaderServer().GetAddr()
 	args := []string{"-u", pdAddr, "operator", "show"}
 	var slice []string
 	output, err := pdctl.ExecuteCommand(cmd, args...)

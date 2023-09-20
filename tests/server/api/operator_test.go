@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,62 +15,88 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	pdoperator "github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
+)
+
+var (
+	// testDialClient used to dial http request. only used for test.
+	testDialClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
 )
 
 type operatorTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
 }
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
-func (suite *operatorTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/unexpectedOperator", "return(true)"))
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 1 })
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+func (suite *operatorTestSuite) TestOperator() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 1
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.Require(), opts...)
+	env.RunTestInTwoModes(suite.checkAddRemovePeer)
 
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	env = tests.NewSchedulingTestEnvironment(suite.Require(), opts...)
+	env.RunTestInTwoModes(suite.checkMergeRegionOperator)
 
-	mustBootstrapCluster(re, suite.svr)
+	opts = []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 3
+		},
+	}
+	env = tests.NewSchedulingTestEnvironment(suite.Require(), opts...)
+	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
 }
 
-func (suite *operatorTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *operatorTestSuite) TestAddRemovePeer() {
+func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
 
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
 	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
 	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
 	region := &metapb.Region{
@@ -82,123 +108,126 @@ func (suite *operatorTestSuite) TestAddRemovePeer() {
 		},
 	}
 	regionInfo := core.NewRegionInfo(region, peer1)
-	mustRegionHeartbeat(re, suite.svr, regionInfo)
+	tests.MustPutRegionInfo(re, cluster, regionInfo)
 
-	regionURL := fmt.Sprintf("%s/operators/%d", suite.urlPrefix, region.GetId())
-	operator := mustReadURL(re, regionURL)
-	suite.Contains(operator, "operator not found")
-	recordURL := fmt.Sprintf("%s/operators/records?from=%s", suite.urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
-	records := mustReadURL(re, recordURL)
-	suite.Contains(records, "operator not found")
-
-	mustPutStore(re, suite.svr, 3, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusOK(re))
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
+	err := tu.CheckGetJSON(testDialClient, regionURL, nil,
+		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
 	suite.NoError(err)
-	operator = mustReadURL(re, regionURL)
-	suite.Contains(operator, "add learner peer 1 on store 3")
-	suite.Contains(operator, "RUNNING")
+	recordURL := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
+	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
+		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
+	suite.NoError(err)
+
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusOK(re))
+	suite.NoError(err)
+	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
+		tu.StatusOK(re), tu.StringContain(re, "add learner peer 1 on store 3"), tu.StringContain(re, "RUNNING"))
+	suite.NoError(err)
 
 	err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 	suite.NoError(err)
-	records = mustReadURL(re, recordURL)
-	suite.Contains(records, "admin-add-peer {add peer: store [3]}")
-
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`), tu.StatusOK(re))
+	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
+		tu.StatusOK(re), tu.StringContain(re, "admin-add-peer {add peer: store [3]}"))
 	suite.NoError(err)
-	operator = mustReadURL(re, regionURL)
-	suite.Contains(operator, "RUNNING")
-	suite.Contains(operator, "remove peer on store 2")
+
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`), tu.StatusOK(re))
+	suite.NoError(err)
+	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
+		tu.StatusOK(re), tu.StringContain(re, "remove peer on store 2"), tu.StringContain(re, "RUNNING"))
+	suite.NoError(err)
 
 	err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 	suite.NoError(err)
-	records = mustReadURL(re, recordURL)
-	suite.Contains(records, "admin-remove-peer {rm peer: store [2]}")
-
-	mustPutStore(re, suite.svr, 4, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`), tu.StatusOK(re))
+	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
+		tu.StatusOK(re), tu.StringContain(re, "admin-remove-peer {rm peer: store [2]}"))
 	suite.NoError(err)
-	operator = mustReadURL(re, regionURL)
-	suite.Contains(operator, "add learner peer 2 on store 4")
+
+	tests.MustPutStore(re, cluster, &metapb.Store{
+		Id:            4,
+		State:         metapb.StoreState_Up,
+		NodeState:     metapb.NodeState_Serving,
+		LastHeartbeat: time.Now().UnixNano(),
+	})
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`), tu.StatusOK(re))
+	suite.NoError(err)
+	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
+		tu.StatusOK(re), tu.StringContain(re, "add learner peer 2 on store 4"))
+	suite.NoError(err)
 
 	// Fail to add peer to tombstone store.
-	err = suite.svr.GetRaftCluster().RemoveStore(3, true)
+	err = cluster.GetLeaderServer().GetRaftCluster().RemoveStore(3, true)
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusNotOK(re))
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusNotOK(re))
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`), tu.StatusNotOK(re))
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`), tu.StatusNotOK(re))
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`), tu.StatusNotOK(re))
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`), tu.StatusNotOK(re))
 	suite.NoError(err)
 
 	// Fail to get operator if from is latest.
 	time.Sleep(time.Second)
-	records = mustReadURL(re, fmt.Sprintf("%s/operators/records?from=%s", suite.urlPrefix, strconv.FormatInt(time.Now().Unix(), 10)))
-	suite.Contains(records, "operator not found")
+	url := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
+	err = tu.CheckGetJSON(testDialClient, url, nil,
+		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
+	suite.NoError(err)
 }
 
-func (suite *operatorTestSuite) TestMergeRegionOperator() {
+func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
-	mustRegionHeartbeat(re, suite.svr, r1)
+	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
-	mustRegionHeartbeat(re, suite.svr, r2)
+	tests.MustPutRegionInfo(re, cluster, r2)
 	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
-	mustRegionHeartbeat(re, suite.svr, r3)
+	tests.MustPutRegionInfo(re, cluster, r3)
 
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
 	suite.NoError(err)
 
-	suite.svr.GetHandler().RemoveOperator(10)
-	suite.svr.GetHandler().RemoveOperator(20)
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`), tu.StatusOK(re))
+	tu.CheckDelete(testDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`), tu.StatusOK(re))
 	suite.NoError(err)
-	suite.svr.GetHandler().RemoveOperator(10)
-	suite.svr.GetHandler().RemoveOperator(20)
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`),
+	tu.CheckDelete(testDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`),
 		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
 		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
 	suite.NoError(err)
 }
 
-type transferRegionOperatorTestSuite struct {
-	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
-}
-
-func TestTransferRegionOperatorTestSuite(t *testing.T) {
-	suite.Run(t, new(transferRegionOperatorTestSuite))
-}
-
-func (suite *transferRegionOperatorTestSuite) SetupSuite() {
+func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/unexpectedOperator", "return(true)"))
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.MaxReplicas = 3 })
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "1"}},
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "2"}},
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+			Labels:        []*metapb.StoreLabel{{Key: "key", Value: "3"}},
+		},
+	}
 
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-}
-
-func (suite *transferRegionOperatorTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRule() {
-	re := suite.Require()
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "1"}})
-	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "2"}})
-	mustPutStore(re, suite.svr, 3, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{{Key: "key", Value: "3"}})
-
-	hbStream := mockhbstream.NewHeartbeatStream()
-	suite.svr.GetHBStreams().BindStream(1, hbStream)
-	suite.svr.GetHBStreams().BindStream(2, hbStream)
-	suite.svr.GetHBStreams().BindStream(3, hbStream)
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
 
 	peer1 := &metapb.Peer{Id: 1, StoreId: 1}
 	peer2 := &metapb.Peer{Id: 2, StoreId: 2}
@@ -211,11 +240,13 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			Version: 1,
 		},
 	}
-	mustRegionHeartbeat(re, suite.svr, core.NewRegionInfo(region, peer1))
+	tests.MustPutRegionInfo(re, cluster, core.NewRegionInfo(region, peer1))
 
-	regionURL := fmt.Sprintf("%s/operators/%d", suite.urlPrefix, region.GetId())
-	operator := mustReadURL(re, regionURL)
-	suite.Contains(operator, "operator not found")
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
+	err := tu.CheckGetJSON(testDialClient, regionURL, nil,
+		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
+	re.NoError(err)
 	convertStepsToStr := func(steps []string) string {
 		stepStrs := make([]string, len(steps))
 		for i := range steps {
@@ -376,93 +407,51 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 			}),
 		},
 	}
+	svr := cluster.GetLeaderServer()
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
-		suite.svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+		// TODO: remove this after we can sync this config to all servers.
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			sche.GetOpts().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+		} else {
+			svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+		}
 		if testCase.placementRuleEnable {
-			err := suite.svr.GetRaftCluster().GetRuleManager().Initialize(
-				suite.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
-				suite.svr.GetRaftCluster().GetOpts().GetLocationLabels())
+			err := svr.GetRaftCluster().GetRuleManager().Initialize(
+				svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
+				svr.GetRaftCluster().GetOpts().GetLocationLabels())
 			suite.NoError(err)
 		}
 		if len(testCase.rules) > 0 {
 			// add customized rule first and then remove default rule
-			err := suite.svr.GetRaftCluster().GetRuleManager().SetRules(testCase.rules)
-			suite.NoError(err)
-			err = suite.svr.GetRaftCluster().GetRuleManager().DeleteRule("pd", "default")
-			suite.NoError(err)
+			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+				err := sche.GetCluster().GetRuleManager().SetRules(testCase.rules)
+				suite.NoError(err)
+				err = sche.GetCluster().GetRuleManager().DeleteRule("pd", "default")
+				suite.NoError(err)
+			} else {
+				err := svr.GetRaftCluster().GetRuleManager().SetRules(testCase.rules)
+				suite.NoError(err)
+				err = svr.GetRaftCluster().GetRuleManager().DeleteRule("pd", "default")
+				suite.NoError(err)
+			}
 		}
 		var err error
 		if testCase.expectedError == nil {
-			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), testCase.input, tu.StatusOK(re))
+			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input, tu.StatusOK(re))
 		} else {
-			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", suite.urlPrefix), testCase.input,
+			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input,
 				tu.StatusNotOK(re), tu.StringContain(re, testCase.expectedError.Error()))
 		}
 		suite.NoError(err)
 		if len(testCase.expectSteps) > 0 {
-			operator = mustReadURL(re, regionURL)
-			suite.Contains(operator, testCase.expectSteps)
+			err = tu.CheckGetJSON(testDialClient, regionURL, nil,
+				tu.StatusOK(re), tu.StringContain(re, testCase.expectSteps))
+			suite.NoError(err)
 			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 		} else {
 			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusNotOK(re))
 		}
 		suite.NoError(err)
 	}
-}
-
-func mustPutRegion(re *require.Assertions, svr *server.Server, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
-	leader := &metapb.Peer{
-		Id:      regionID,
-		StoreId: storeID,
-	}
-	metaRegion := &metapb.Region{
-		Id:          regionID,
-		StartKey:    start,
-		EndKey:      end,
-		Peers:       []*metapb.Peer{leader},
-		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
-	}
-	r := core.NewRegionInfo(metaRegion, leader, opts...)
-	err := svr.GetRaftCluster().HandleRegionHeartbeat(r)
-	re.NoError(err)
-	return r
-}
-
-func mustPutStore(re *require.Assertions, svr *server.Server, id uint64, state metapb.StoreState, nodeState metapb.NodeState, labels []*metapb.StoreLabel) {
-	s := &server.GrpcServer{Server: svr}
-	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-		Store: &metapb.Store{
-			Id:        id,
-			Address:   fmt.Sprintf("tikv%d", id),
-			State:     state,
-			NodeState: nodeState,
-			Labels:    labels,
-			Version:   versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
-		},
-	})
-	re.NoError(err)
-	if state == metapb.StoreState_Up {
-		_, err = s.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
-			Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
-			Stats:  &pdpb.StoreStats{StoreId: id},
-		})
-		re.NoError(err)
-	}
-}
-
-func mustRegionHeartbeat(re *require.Assertions, svr *server.Server, region *core.RegionInfo) {
-	cluster := svr.GetRaftCluster()
-	err := cluster.HandleRegionHeartbeat(region)
-	re.NoError(err)
-}
-
-func mustReadURL(re *require.Assertions, url string) string {
-	res, err := testDialClient.Get(url)
-	re.NoError(err)
-	defer res.Body.Close()
-	data, err := io.ReadAll(res.Body)
-	re.NoError(err)
-	return string(data)
 }
