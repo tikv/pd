@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
@@ -40,7 +41,7 @@ var denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues
 // Controller is used to manage all schedulers.
 type Controller struct {
 	sync.RWMutex
-	wg      sync.WaitGroup
+	wg      *syncutil.FlexibleWaitGroup
 	ctx     context.Context
 	cluster sche.SchedulerCluster
 	storage endpoint.ConfigStorage
@@ -57,6 +58,7 @@ type Controller struct {
 func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller) *Controller {
 	return &Controller{
 		ctx:               ctx,
+		wg:                syncutil.NewFlexibleWaitGroup(),
 		cluster:           cluster,
 		storage:           storage,
 		schedulers:        make(map[string]*ScheduleController),
