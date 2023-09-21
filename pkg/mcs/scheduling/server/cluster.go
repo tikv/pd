@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
@@ -431,11 +430,6 @@ func (c *Cluster) runMetricsCollectionJob() {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(10 * time.Second)
-	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Microsecond)
-	})
-
 	defer ticker.Stop()
 
 	for {
