@@ -252,7 +252,7 @@ func (c *Cluster) updateScheduler() {
 					zap.Strings("scheduler-args", scheduler.Args))
 				continue
 			}
-			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
+			if err := schedulersController.AddScheduler(c.storage, s, scheduler.Args...); err != nil {
 				log.Error("failed to add scheduler",
 					zap.String("scheduler-name", name),
 					zap.Strings("scheduler-args", scheduler.Args),

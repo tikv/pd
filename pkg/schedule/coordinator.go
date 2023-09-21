@@ -357,7 +357,7 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 					s, err := schedulers.CreateScheduler(typ, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(typ, args), c.schedulers.RemoveScheduler)
 					if err != nil {
 						log.Warn("initializing evict-slow-trend scheduler failed", errs.ZapError(err))
-					} else if err = c.schedulers.AddScheduler(s, args...); err != nil {
+					} else if err = c.schedulers.AddScheduler(c.cluster.GetStorage(), s, args...); err != nil {
 						log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 					}
 				}
@@ -459,10 +459,10 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		}
 		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 		if needRun {
-			if err = c.schedulers.AddScheduler(s); err != nil {
+			if err = c.schedulers.AddScheduler(c.cluster.GetStorage(), s); err != nil {
 				log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			}
-		} else if err = c.schedulers.AddSchedulerHandler(s); err != nil {
+		} else if err = c.schedulers.AddSchedulerHandler(c.cluster.GetStorage(), s); err != nil {
 			log.Error("can not add scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 		}
 	}
@@ -485,14 +485,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 
 		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
 		if needRun {
-			if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+			if err = c.schedulers.AddScheduler(c.cluster.GetStorage(), s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 				log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			} else {
 				// Only records the valid scheduler config.
 				scheduleCfg.Schedulers[k] = schedulerCfg
 				k++
 			}
-		} else if err = c.schedulers.AddSchedulerHandler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+		} else if err = c.schedulers.AddSchedulerHandler(c.cluster.GetStorage(), s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 		}
 	}
@@ -532,7 +532,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
 	// TODO: handle the plugin in API service mode.
-	if err = c.schedulers.AddScheduler(s); err != nil {
+	if err = c.schedulers.AddScheduler(c.cluster.GetStorage(), s); err != nil {
 		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
 		return
 	}
