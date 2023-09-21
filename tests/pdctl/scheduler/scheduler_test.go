@@ -94,14 +94,14 @@ func TestScheduler(t *testing.T) {
 		re.Equal(expectedConfig, configInfo)
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 
 	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
 	time.Sleep(3 * time.Second)
 
 	// scheduler show command
@@ -363,7 +363,7 @@ func TestScheduler(t *testing.T) {
 	for _, store := range stores {
 		version := versioninfo.HotScheduleWithQuery
 		store.Version = versioninfo.MinSupportedVersion(version).String()
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
 	// After upgrading, we should not use query.
@@ -488,14 +488,14 @@ func TestSchedulerDiagnostic(t *testing.T) {
 			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 
 	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
 	time.Sleep(3 * time.Second)
 
 	echo := mustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)
@@ -539,7 +539,7 @@ func TestForwardSchedulerRequest(t *testing.T) {
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
-	server := cluster.GetServer(cluster.GetLeader())
+	server := cluster.GetLeaderServer()
 	re.NoError(server.BootstrapCluster())
 	backendEndpoints := server.GetAddr()
 	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)

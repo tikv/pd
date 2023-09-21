@@ -26,7 +26,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
@@ -271,9 +270,8 @@ func (suite *adminTestSuite) TestMarkSnapshotRecovering() {
 	suite.NoError(err2)
 	suite.True(resp.Marked)
 	// unmark
-	code, err := apiutil.DoDelete(testDialClient, url)
+	err := tu.CheckDelete(testDialClient, url, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.Equal(200, code)
 	suite.NoError(tu.CheckGetJSON(testDialClient, url, nil,
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 }
@@ -310,9 +308,8 @@ func (suite *adminTestSuite) TestRecoverAllocID() {
 	suite.NoError(err2)
 	suite.Equal(id, uint64(99000001))
 	// unmark
-	code, err := apiutil.DoDelete(testDialClient, markRecoveringURL)
+	err := tu.CheckDelete(testDialClient, markRecoveringURL, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.Equal(200, code)
 	suite.NoError(tu.CheckGetJSON(testDialClient, markRecoveringURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 	suite.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),

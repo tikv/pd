@@ -44,7 +44,7 @@ func TestID(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	var last uint64
 	for i := uint64(0); i < allocStep; i++ {
 		id, err := leaderServer.GetAllocator().Alloc()
@@ -90,7 +90,7 @@ func TestCommand(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(leaderServer.GetClusterID())}
 
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
@@ -116,7 +116,7 @@ func TestMonotonicID(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	var last1 uint64
 	for i := uint64(0); i < 10; i++ {
 		id, err := leaderServer.GetAllocator().Alloc()
@@ -127,7 +127,7 @@ func TestMonotonicID(t *testing.T) {
 	err = cluster.ResignLeader()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer = cluster.GetServer(cluster.GetLeader())
+	leaderServer = cluster.GetLeaderServer()
 	var last2 uint64
 	for i := uint64(0); i < 10; i++ {
 		id, err := leaderServer.GetAllocator().Alloc()
@@ -138,7 +138,7 @@ func TestMonotonicID(t *testing.T) {
 	err = cluster.ResignLeader()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer = cluster.GetServer(cluster.GetLeader())
+	leaderServer = cluster.GetLeaderServer()
 	id, err := leaderServer.GetAllocator().Alloc()
 	re.NoError(err)
 	re.Greater(id, last2)
@@ -162,7 +162,7 @@ func TestPDRestart(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 
 	var last uint64
 	for i := uint64(0); i < 10; i++ {

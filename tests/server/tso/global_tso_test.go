@@ -97,7 +97,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	cluster.WaitLeader()
 
 	var leaderServer, nextLeaderServer *tests.TestServer
-	leaderServer = cluster.GetServer(cluster.GetLeader())
+	leaderServer = cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
 	for _, s := range cluster.GetServers() {
 		if s.GetConfig().Name != cluster.GetLeader() {
@@ -145,7 +145,7 @@ func TestLogicalOverflow(t *testing.T) {
 		re.NoError(cluster.RunInitialServers())
 		cluster.WaitLeader()
 
-		leaderServer := cluster.GetServer(cluster.GetLeader())
+		leaderServer := cluster.GetLeaderServer()
 		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 		clusterID := leaderServer.GetClusterID()
 

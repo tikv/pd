@@ -63,10 +63,10 @@ func TestHot(t *testing.T) {
 		Labels:        []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	pdctl.MustPutStore(re, leaderServer.GetServer(), store1)
-	pdctl.MustPutStore(re, leaderServer.GetServer(), store2)
+	tests.MustPutStore(re, cluster, store1)
+	tests.MustPutStore(re, cluster, store2)
 	defer cluster.Destroy()
 
 	// test hot store
@@ -159,7 +159,7 @@ func TestHot(t *testing.T) {
 				}
 				testHot(hotRegionID, hotStoreID, "read")
 			case "write":
-				pdctl.MustPutRegion(
+				tests.MustPutRegion(
 					re, cluster,
 					hotRegionID, hotStoreID,
 					[]byte("c"), []byte("d"),
@@ -222,16 +222,16 @@ func TestHotWithStoreID(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 	defer cluster.Destroy()
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
-	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
+	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
+	tests.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	// wait hot scheduler starts
 	rc := leaderServer.GetRaftCluster()
 	testutil.Eventually(re, func() bool {
@@ -267,7 +267,7 @@ func TestHotWithStoreID(t *testing.T) {
 		WriteBytes: []uint64{13 * units.MiB},
 		WriteQps:   []uint64{0},
 	}
-	buckets := pdctl.MustReportBuckets(re, cluster, 1, []byte("a"), []byte("b"), stats)
+	buckets := tests.MustReportBuckets(re, cluster, 1, []byte("a"), []byte("b"), stats)
 	args = []string{"-u", pdAddr, "hot", "buckets", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
@@ -330,20 +330,20 @@ func TestHistoryHotRegions(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 	defer cluster.Destroy()
 	startTime := time.Now().Unix()
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
-	pdctl.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
+	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"), core.SetWrittenBytes(6000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
-	pdctl.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000),
+	tests.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"), core.SetWrittenBytes(9000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
-	pdctl.MustPutRegion(re, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000),
+	tests.MustPutRegion(re, cluster, 4, 3, []byte("g"), []byte("h"), core.SetWrittenBytes(9000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
 	// wait hot scheduler starts
 	testutil.Eventually(re, func() bool {
@@ -440,10 +440,10 @@ func TestHotWithoutHotPeer(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 	timestamp := uint64(time.Now().UnixNano())
 	load := 1024.0
