@@ -437,19 +437,20 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, s.basicCluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, utils.SchedulingServiceName, s.basicCluster)
 	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
 	if err != nil {
 		return err
 	}
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
-	go s.cluster.UpdateScheduler()
+	s.cluster.StartBackgroundJobs()
 	go s.GetCoordinator().RunUntilStop()
 	return nil
 }
 
 func (s *Server) stopCluster() {
 	s.GetCoordinator().Stop()
+	s.cluster.StopBackgroundJobs()
 	s.ruleWatcher.Close()
 	s.configWatcher.Close()
 	s.metaWatcher.Close()

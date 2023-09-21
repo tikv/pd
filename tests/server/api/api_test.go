@@ -137,6 +137,7 @@ func (suite *middlewareTestSuite) TearDownSuite() {
 func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"))
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NotNil(leader)
 
 	input := map[string]interface{}{
 		"enable-audit": "true",
@@ -207,6 +208,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 
 func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NotNil(leader)
 	input := map[string]interface{}{
 		"enable-rate-limit": "true",
 	}
@@ -371,6 +373,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 func (suite *middlewareTestSuite) TestSwaggerUrl() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NotNil(leader)
 	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", nil)
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
@@ -380,6 +383,7 @@ func (suite *middlewareTestSuite) TestSwaggerUrl() {
 
 func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NotNil(leader)
 	input := map[string]interface{}{
 		"enable-audit": "true",
 	}
@@ -448,6 +452,7 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	fname := testutil.InitTempFileLogger("info")
 	defer os.RemoveAll(fname)
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	suite.NotNil(leader)
 	input := map[string]interface{}{
 		"enable-audit": "true",
 	}

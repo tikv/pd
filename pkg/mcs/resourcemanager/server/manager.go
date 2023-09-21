@@ -19,10 +19,12 @@ import (
 	"encoding/json"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
@@ -30,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -57,6 +60,7 @@ type Manager struct {
 		resourceGroupName string
 		*rmpb.Consumption
 		isBackground bool
+		isTiFlash    bool
 	}
 	// record update time of each resource group
 	consumptionRecord map[string]time.Time
@@ -78,6 +82,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 			resourceGroupName string
 			*rmpb.Consumption
 			isBackground bool
+			isTiFlash    bool
 		}, defaultConsumptionChanSize),
 		consumptionRecord: make(map[string]time.Time),
 	}
@@ -102,32 +107,46 @@ func (m *Manager) GetBasicServer() bs.Server {
 
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
-	// Todo: If we can modify following configs in the future, we should reload these configs.
-	// Store the controller config into the storage.
-	m.storage.SaveControllerConfig(m.controllerConfig)
+	v, err := m.storage.LoadControllerConfig()
+	if err != nil {
+		log.Error("resource controller config load failed", zap.Error(err), zap.String("v", v))
+		return err
+	}
+	if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
+		log.Error("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
+	}
+
+	// re-save the config to make sure the config has been persisted.
+	if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+		return err
+	}
 	// Load resource group meta info from storage.
 	m.groups = make(map[string]*ResourceGroup)
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
-			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
+			log.Error("failed to parse the resource group", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
 	}
-	m.storage.LoadResourceGroupSettings(handler)
+	if err := m.storage.LoadResourceGroupSettings(handler); err != nil {
+		return err
+	}
 	// Load resource group states from storage.
 	tokenHandler := func(k, v string) {
 		tokens := &GroupStates{}
 		if err := json.Unmarshal([]byte(v), tokens); err != nil {
-			log.Error("err", zap.Error(err), zap.String("k", k), zap.String("v", v))
+			log.Error("failed to parse the resource group state", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
 		if group, ok := m.groups[k]; ok {
 			group.SetStatesIntoResourceGroup(tokens)
 		}
 	}
-	m.storage.LoadResourceGroupStates(tokenHandler)
+	if err := m.storage.LoadResourceGroupStates(tokenHandler); err != nil {
+		return err
+	}
 
 	// Add default group if it's not inited.
 	if _, ok := m.groups[reservedDefaultGroupName]; !ok {
@@ -157,6 +176,47 @@ func (m *Manager) Init(ctx context.Context) error {
 	}()
 	log.Info("resource group manager finishes initialization")
 	return nil
+}
+
+// UpdateControllerConfigItem updates the controller config item.
+func (m *Manager) UpdateControllerConfigItem(key string, value interface{}) error {
+	kp := strings.Split(key, ".")
+	if len(kp) == 0 {
+		return errors.Errorf("invalid key %s", key)
+	}
+	m.Lock()
+	var config interface{}
+	switch kp[0] {
+	case "request-unit":
+		config = &m.controllerConfig.RequestUnit
+	default:
+		config = m.controllerConfig
+	}
+	updated, found, err := jsonutil.AddKeyValue(config, kp[len(kp)-1], value)
+	if err != nil {
+		m.Unlock()
+		return err
+	}
+
+	if !found {
+		m.Unlock()
+		return errors.Errorf("config item %s not found", key)
+	}
+	m.Unlock()
+	if updated {
+		if err := m.storage.SaveControllerConfig(m.controllerConfig); err != nil {
+			log.Error("save controller config failed", zap.Error(err))
+		}
+		log.Info("updated controller config item", zap.String("key", key), zap.Any("value", value))
+	}
+	return nil
+}
+
+// GetControllerConfig returns the controller config.
+func (m *Manager) GetControllerConfig() *ControllerConfig {
+	m.RLock()
+	defer m.RUnlock()
+	return m.controllerConfig
 }
 
 // AddResourceGroup puts a resource group.
@@ -303,20 +363,23 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumption == nil {
 				continue
 			}
-			backgroundType := ""
+			ruLabelType := tidbTypeLabel
 			if consumptionInfo.isBackground {
-				backgroundType = backgroundTypeLabel
+				ruLabelType = backgroundTypeLabel
+			}
+			if consumptionInfo.isTiFlash {
+				ruLabelType = tiflashTypeLabel
 			}
 
 			var (
 				name                     = consumptionInfo.resourceGroupName
-				rruMetrics               = readRequestUnitCost.WithLabelValues(name, backgroundType)
-				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, backgroundType)
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name, ruLabelType)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, ruLabelType)
 				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name)
-				readByteMetrics          = readByteCost.WithLabelValues(name, backgroundType)
-				writeByteMetrics         = writeByteCost.WithLabelValues(name, backgroundType)
-				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, backgroundType)
-				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, backgroundType)
+				readByteMetrics          = readByteCost.WithLabelValues(name, ruLabelType)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name, ruLabelType)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, ruLabelType)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, ruLabelType)
 				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
 			)

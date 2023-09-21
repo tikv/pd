@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -16,6 +18,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/slice"
@@ -29,13 +32,15 @@ import (
 
 // Cluster is used to manage all information for scheduling purpose.
 type Cluster struct {
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
 	*core.BasicCluster
 	persistConfig     *config.PersistConfig
 	ruleManager       *placement.RuleManager
 	labelerManager    *labeler.RegionLabeler
 	regionStats       *statistics.RegionStatistics
-	labelLevelStats   *statistics.LabelStatistics
+	labelStats        *statistics.LabelStatistics
 	hotStat           *statistics.HotStat
 	storage           storage.Storage
 	coordinator       *schedule.Coordinator
@@ -47,28 +52,32 @@ type Cluster struct {
 const regionLabelGCInterval = time.Hour
 
 // NewCluster creates a new cluster.
-func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
+func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
+	ctx, cancel := context.WithCancel(parentCtx)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	ruleManager := placement.NewRuleManager(storage, basicCluster, persistConfig)
 	c := &Cluster{
 		ctx:               ctx,
+		cancel:            cancel,
 		BasicCluster:      basicCluster,
 		ruleManager:       ruleManager,
 		labelerManager:    labelerManager,
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx),
+		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
-		labelLevelStats:   statistics.NewLabelStatistics(),
 		storage:           storage,
 		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
-	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels())
+	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel())
 	if err != nil {
+		cancel()
 		return nil, err
 	}
 	return c, nil
@@ -77,6 +86,21 @@ func NewCluster(ctx context.Context, persistConfig *config.PersistConfig, storag
 // GetCoordinator returns the coordinator
 func (c *Cluster) GetCoordinator() *schedule.Coordinator {
 	return c.coordinator
+}
+
+// GetHotStat gets hot stat.
+func (c *Cluster) GetHotStat() *statistics.HotStat {
+	return c.hotStat
+}
+
+// GetRegionStats gets region statistics.
+func (c *Cluster) GetRegionStats() *statistics.RegionStatistics {
+	return c.regionStats
+}
+
+// GetLabelStats gets label statistics.
+func (c *Cluster) GetLabelStats() *statistics.LabelStatistics {
+	return c.labelStats
 }
 
 // GetBasicCluster returns the basic cluster.
@@ -179,9 +203,10 @@ func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
 	return c.apiServerLeader.CompareAndSwap(old, new)
 }
 
-// UpdateScheduler listens on the schedulers updating notifier and manage the scheduler creation and deletion.
-func (c *Cluster) UpdateScheduler() {
+// updateScheduler listens on the schedulers updating notifier and manage the scheduler creation and deletion.
+func (c *Cluster) updateScheduler() {
 	defer logutil.LogPanic()
+	defer c.wg.Done()
 
 	// Make sure the coordinator has initialized all the existing schedulers.
 	c.waitSchedulersInitialized()
@@ -196,6 +221,7 @@ func (c *Cluster) UpdateScheduler() {
 			log.Info("cluster is closing, stop listening the schedulers updating notifier")
 			return
 		case <-notifier:
+			// This is triggered by the watcher when the schedulers are updated.
 		}
 
 		log.Info("schedulers updating notifier is triggered, try to update the scheduler")
@@ -278,7 +304,7 @@ func (c *Cluster) waitSchedulersInitialized() {
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.
 func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
-		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
+		c.labelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
 	}
 }
 
@@ -347,4 +373,94 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	return nil
+}
+
+// runUpdateStoreStats updates store stats periodically.
+func (c *Cluster) runUpdateStoreStats() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(9 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("update store stats background jobs has been stopped")
+			return
+		case <-ticker.C:
+			c.UpdateAllStoreStatus()
+		}
+	}
+}
+
+// StartBackgroundJobs starts background jobs.
+func (c *Cluster) StartBackgroundJobs() {
+	c.wg.Add(2)
+	go c.updateScheduler()
+	go c.runUpdateStoreStats()
+}
+
+// StopBackgroundJobs stops background jobs.
+func (c *Cluster) StopBackgroundJobs() {
+	c.cancel()
+	c.wg.Wait()
+}
+
+// HandleRegionHeartbeat processes RegionInfo reports from client.
+func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
+	if err := c.processRegionHeartbeat(region); err != nil {
+		return err
+	}
+
+	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
+	return nil
+}
+
+// processRegionHeartbeat updates the region information.
+func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
+	origin, _, err := c.PreCheckPutRegion(region)
+	if err != nil {
+		return err
+	}
+	if c.GetStoreConfig().IsEnableRegionBucket() {
+		region.InheritBuckets(origin)
+	}
+
+	cluster.HandleStatsAsync(c, region)
+
+	hasRegionStats := c.regionStats != nil
+	// Save to storage if meta is updated, except for flashback.
+	// Save to cache if meta or leader is updated, or contains any down/pending peer.
+	// Mark isNew if the region in cache does not have leader.
+	changed := core.GenerateRegionGuideFunc(true)(region, origin)
+	if !changed.SaveCache && !changed.IsNew {
+		// Due to some config changes need to update the region stats as well,
+		// so we do some extra checks here.
+		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
+			c.regionStats.Observe(region, c.GetRegionStores(region))
+		}
+		return nil
+	}
+
+	var overlaps []*core.RegionInfo
+	if changed.SaveCache {
+		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
+		// check its validation again here.
+		//
+		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		if overlaps, err = c.AtomicCheckAndPutRegion(region); err != nil {
+			return err
+		}
+
+		cluster.HandleOverlaps(c, overlaps)
+	}
+
+	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, changed.IsNew, c.IsPrepared())
+	return nil
+}
+
+// IsPrepared return true if the prepare checker is ready.
+func (c *Cluster) IsPrepared() bool {
+	return c.coordinator.GetPrepareChecker().IsPrepared()
 }

@@ -3,6 +3,7 @@ module github.com/tikv/pd/client
 go 1.21
 
 require (
+	github.com/BurntSushi/toml v0.3.1
 	github.com/cloudfoundry/gosigar v1.3.6
 	github.com/gogo/protobuf v1.3.2
 	github.com/opentracing/opentracing-go v1.2.0

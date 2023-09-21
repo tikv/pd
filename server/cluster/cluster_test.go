@@ -243,7 +243,7 @@ func TestSetOfflineStore(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -440,7 +440,7 @@ func TestUpStore(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -543,7 +543,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -1270,7 +1270,7 @@ func TestOfflineAndMerge(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -1469,6 +1469,10 @@ func TestStoreConfigSync(t *testing.T) {
 	err = opt.Reload(tc.GetStorage())
 	re.NoError(err)
 	re.Equal(tc.GetOpts().(*config.PersistOptions).GetStoreConfig(), opt.GetStoreConfig())
+
+	re.Equal("v1", opt.GetScheduleConfig().StoreLimitVersion)
+	re.NoError(opt.SwitchRaftV2(tc.GetStorage()))
+	re.Equal("v2", opt.GetScheduleConfig().StoreLimitVersion)
 }
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {
@@ -2125,7 +2129,7 @@ func newTestRaftCluster(
 	rc.InitCluster(id, opt, s, basicCluster, nil)
 	rc.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
-		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -3633,7 +3637,7 @@ func TestInterval(t *testing.T) {
 func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
-		if res = stream.Recv(); res != nil {
+		if res = stream.Recv().(*pdpb.RegionHeartbeatResponse); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
@@ -3649,7 +3653,7 @@ func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream,
 func waitPromoteLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
-		if res = stream.Recv(); res != nil {
+		if res = stream.Recv().(*pdpb.RegionHeartbeatResponse); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
@@ -3666,7 +3670,7 @@ func waitPromoteLearner(re *require.Assertions, stream mockhbstream.HeartbeatStr
 func waitRemovePeer(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
-		if res = stream.Recv(); res != nil {
+		if res = stream.Recv().(*pdpb.RegionHeartbeatResponse); res != nil {
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_RemoveNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
@@ -3682,7 +3686,7 @@ func waitRemovePeer(re *require.Assertions, stream mockhbstream.HeartbeatStream,
 func waitTransferLeader(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
-		if res = stream.Recv(); res != nil {
+		if res = stream.Recv().(*pdpb.RegionHeartbeatResponse); res != nil {
 			if res.GetRegionId() == region.GetID() {
 				for _, peer := range append(res.GetTransferLeader().GetPeers(), res.GetTransferLeader().GetPeer()) {
 					if peer.GetStoreId() == storeID {

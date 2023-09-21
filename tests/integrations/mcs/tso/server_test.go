@@ -106,23 +106,19 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithInsecure())
 	re.NoError(err)
 	cc.Close()
-	url := s.GetAddr() + tsoapi.APIPathPrefix
-	{
-		resetJSON := `{"tso":"121312", "force-use-larger":true}`
-		re.NoError(err)
-		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJSON))
-		re.NoError(err)
-		defer resp.Body.Close()
-		re.Equal(http.StatusOK, resp.StatusCode)
-	}
-	{
-		resetJSON := `{}`
-		re.NoError(err)
-		resp, err := http.Post(url+"/admin/reset-ts", "application/json", strings.NewReader(resetJSON))
-		re.NoError(err)
-		defer resp.Body.Close()
-		re.Equal(http.StatusBadRequest, resp.StatusCode)
-	}
+
+	url := s.GetAddr() + tsoapi.APIPathPrefix + "/admin/reset-ts"
+	// Test reset ts
+	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
+	err = testutil.CheckPostJSON(dialClient, url, input,
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"))
+	suite.NoError(err)
+
+	// Test reset ts with invalid tso
+	input = []byte(`{}`)
+	err = testutil.CheckPostJSON(dialClient, suite.backendEndpoints+"/pd/api/v1/admin/reset-ts", input,
+		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"))
+	re.NoError(err)
 }
 
 func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {

@@ -330,6 +330,13 @@ func (o *PersistOptions) SetEnableWitness(enable bool) {
 	o.SetScheduleConfig(v)
 }
 
+// SetMaxStoreDownTime to set the max store down time. It's only used to test.
+func (o *PersistOptions) SetMaxStoreDownTime(time time.Duration) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxStoreDownTime = typeutil.NewDuration(time)
+	o.SetScheduleConfig(v)
+}
+
 // SetMaxMergeRegionSize sets the max merge region size.
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()
@@ -760,6 +767,12 @@ type persistedConfig struct {
 	*Config
 	// StoreConfig is injected into Config to avoid breaking the original API.
 	StoreConfig sc.StoreConfig `json:"store"`
+}
+
+// SwitchRaftV2 update some config if tikv raft engine switch into partition raft v2
+func (o *PersistOptions) SwitchRaftV2(storage endpoint.ConfigStorage) error {
+	o.GetScheduleConfig().StoreLimitVersion = "v2"
+	return o.Persist(storage)
 }
 
 // Persist saves the configuration to the storage.

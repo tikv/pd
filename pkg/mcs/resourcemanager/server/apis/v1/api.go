@@ -16,7 +16,9 @@ package apis
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
 	"sync"
 
 	"github.com/gin-contrib/cors"
@@ -29,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+	"github.com/tikv/pd/pkg/utils/reflectutil"
 )
 
 // APIPathPrefix is the prefix of the API path.
@@ -73,7 +76,7 @@ func NewService(srv *rmserver.Service) *Service {
 	manager := srv.GetManager()
 	apiHandlerEngine.Use(func(c *gin.Context) {
 		// manager implements the interface of basicserver.Service.
-		c.Set("service", manager.GetBasicServer())
+		c.Set(multiservicesapi.ServiceContextKey, manager.GetBasicServer())
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
@@ -97,6 +100,8 @@ func (s *Service) RegisterRouter() {
 	configEndpoint.GET("/group/:name", s.getResourceGroup)
 	configEndpoint.GET("/groups", s.getResourceGroupList)
 	configEndpoint.DELETE("/group/:name", s.deleteResourceGroup)
+	configEndpoint.GET("/controller", s.getControllerConfig)
+	configEndpoint.POST("/controller", s.setControllerConfig)
 }
 
 func (s *Service) handler() http.Handler {
@@ -188,6 +193,46 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 func (s *Service) deleteResourceGroup(c *gin.Context) {
 	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
+	}
+	c.String(http.StatusOK, "Success!")
+}
+
+// GetControllerConfig
+//
+//	@Tags		ResourceManager
+//	@Summary	Get the resource controller config.
+//	@Success	200		{string}	json	format	of	rmserver.ControllerConfig
+//	@Failure	400 	{string}	error
+//	@Router		/config/controller [GET]
+func (s *Service) getControllerConfig(c *gin.Context) {
+	config := s.manager.GetControllerConfig()
+	c.IndentedJSON(http.StatusOK, config)
+}
+
+// SetControllerConfig
+//
+//	@Tags		ResourceManager
+//	@Summary	Set the resource controller config.
+//	@Param		config	body	object	true	"json params, rmserver.ControllerConfig"
+//	@Success	200		{string}	string	"Success!"
+//	@Failure	400 	{string}	error
+//	@Router		/config/controller [POST]
+func (s *Service) setControllerConfig(c *gin.Context) {
+	conf := make(map[string]interface{})
+	if err := c.ShouldBindJSON(&conf); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	for k, v := range conf {
+		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(rmserver.ControllerConfig{}), k)
+		if key == "" {
+			c.String(http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
+			return
+		}
+		if err := s.manager.UpdateControllerConfigItem(key, v); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	c.String(http.StatusOK, "Success!")
 }
