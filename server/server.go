@@ -955,7 +955,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
-			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels); err != nil {
+			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel); err != nil {
 				return err
 			}
 		} else {
@@ -978,19 +978,27 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 		defaultRule := rc.GetRuleManager().GetRule("pd", "default")
 
 		CheckInDefaultRule := func() error {
-			// replication config  won't work when placement rule is enabled and exceeds one default rule
+			// replication config won't work when placement rule is enabled and exceeds one default rule
 			if !(defaultRule != nil &&
 				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
-				return errors.New("cannot update MaxReplicas or LocationLabels when placement rules feature is enabled and not only default rule exists, please update rule instead")
+				return errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
+<<<<<<< HEAD
 			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.StringsEqual(defaultRule.LocationLabels, []string(old.LocationLabels))) {
+=======
+			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) && defaultRule.IsolationLevel == old.IsolationLevel) {
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
+<<<<<<< HEAD
 		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.StringsEqual(cfg.LocationLabels, old.LocationLabels)) {
+=======
+		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) && cfg.IsolationLevel == old.IsolationLevel) {
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1001,6 +1009,7 @@ func (s *Server) SetReplicationConfig(cfg config.ReplicationConfig) error {
 	if rule != nil {
 		rule.Count = int(cfg.MaxReplicas)
 		rule.LocationLabels = cfg.LocationLabels
+		rule.IsolationLevel = cfg.IsolationLevel
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()

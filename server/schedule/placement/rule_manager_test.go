@@ -30,8 +30,14 @@ func newTestManager(t *testing.T) (endpoint.RuleStorage, *RuleManager) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
 	var err error
+<<<<<<< HEAD:server/schedule/placement/rule_manager_test.go
 	manager := NewRuleManager(store, nil, nil)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"})
+=======
+	manager := NewRuleManager(store, nil, mockconfig.NewTestOptions())
+	manager.conf.SetEnableWitness(enableWitness)
+	err = manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122)):pkg/schedule/placement/rule_manager_test.go
 	re.NoError(err)
 	return store, manager
 }
@@ -121,7 +127,7 @@ func TestSaveLoad(t *testing.T) {
 	}
 
 	m2 := NewRuleManager(store, nil, nil)
-	err := m2.Initialize(3, []string{"no", "labels"})
+	err := m2.Initialize(3, []string{"no", "labels"}, "")
 	re.NoError(err)
 	re.Len(m2.GetAllRules(), 3)
 	re.Equal(rules[0].String(), m2.GetRule("pd", "default").String())
@@ -137,7 +143,7 @@ func TestSetAfterGet(t *testing.T) {
 	manager.SetRule(rule)
 
 	m2 := NewRuleManager(store, nil, nil)
-	err := m2.Initialize(100, []string{})
+	err := m2.Initialize(100, []string{}, "")
 	re.NoError(err)
 	rule = m2.GetRule("pd", "default")
 	re.Equal(1, rule.Count)
