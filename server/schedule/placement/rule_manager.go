@@ -63,7 +63,7 @@ func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSet
 
 // Initialize loads rules from storage. If Placement Rules feature is never enabled, it creates default rule that is
 // compatible with previous configuration.
-func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error {
+func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolationLevel string) error {
 	m.Lock()
 	defer m.Unlock()
 	if m.initialized {
@@ -78,12 +78,49 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 	}
 	if len(m.ruleConfig.rules) == 0 {
 		// migrate from old config.
+<<<<<<< HEAD:server/schedule/placement/rule_manager.go
 		defaultRule := &Rule{
 			GroupID:        "pd",
 			ID:             "default",
 			Role:           Voter,
 			Count:          maxReplica,
 			LocationLabels: locationLabels,
+=======
+		var defaultRules []*Rule
+		if m.conf != nil && m.conf.IsWitnessAllowed() && maxReplica >= 3 {
+			// Because maxReplica is actually always an odd number, so directly divided by 2
+			witnessCount := maxReplica / 2
+			defaultRules = append(defaultRules,
+				[]*Rule{
+					{
+						GroupID:        "pd",
+						ID:             "default",
+						Role:           Voter,
+						Count:          maxReplica - witnessCount,
+						LocationLabels: locationLabels,
+						IsolationLevel: isolationLevel,
+					},
+					{
+						GroupID:        "pd",
+						ID:             "witness",
+						Role:           Voter,
+						Count:          witnessCount,
+						IsWitness:      true,
+						LocationLabels: locationLabels,
+						IsolationLevel: isolationLevel,
+					},
+				}...,
+			)
+		} else {
+			defaultRules = append(defaultRules, &Rule{
+				GroupID:        "pd",
+				ID:             "default",
+				Role:           Voter,
+				Count:          maxReplica,
+				LocationLabels: locationLabels,
+				IsolationLevel: isolationLevel,
+			})
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122)):pkg/schedule/placement/rule_manager.go
 		}
 		if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
 			return err

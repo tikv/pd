@@ -260,6 +260,45 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+<<<<<<< HEAD
+=======
+// GetSwitchWitnessInterval returns the interval between promote to non-witness and starting to switch to witness.
+func (o *PersistOptions) GetSwitchWitnessInterval() time.Duration {
+	return o.GetScheduleConfig().SwitchWitnessInterval.Duration
+}
+
+// IsDiagnosticAllowed returns whether is enable to use diagnostic.
+func (o *PersistOptions) IsDiagnosticAllowed() bool {
+	return o.GetScheduleConfig().EnableDiagnostic
+}
+
+// SetEnableDiagnostic to set the option for diagnose. It's only used to test.
+func (o *PersistOptions) SetEnableDiagnostic(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableDiagnostic = enable
+	o.SetScheduleConfig(v)
+}
+
+// IsWitnessAllowed returns whether is enable to use witness.
+func (o *PersistOptions) IsWitnessAllowed() bool {
+	return o.GetScheduleConfig().EnableWitness
+}
+
+// SetEnableWitness to set the option for witness. It's only used to test.
+func (o *PersistOptions) SetEnableWitness(enable bool) {
+	v := o.GetScheduleConfig().Clone()
+	v.EnableWitness = enable
+	o.SetScheduleConfig(v)
+}
+
+// SetMaxStoreDownTime to set the max store down time. It's only used to test.
+func (o *PersistOptions) SetMaxStoreDownTime(time time.Duration) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxStoreDownTime = typeutil.NewDuration(time)
+	o.SetScheduleConfig(v)
+}
+
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 // SetMaxMergeRegionSize sets the max merge region size.
 func (o *PersistOptions) SetMaxMergeRegionSize(maxMergeRegionSize uint64) {
 	v := o.GetScheduleConfig().Clone()

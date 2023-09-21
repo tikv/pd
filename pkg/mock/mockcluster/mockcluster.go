@@ -187,8 +187,13 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
+<<<<<<< HEAD
 		mc.RuleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), mc, mc.GetOpts())
 		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels)
+=======
+		mc.RuleManager = placement.NewRuleManager(mc.GetStorage(), mc, mc.GetSharedConfig())
+		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel)
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 	}
 }
 

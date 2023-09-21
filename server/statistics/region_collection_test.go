@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/server/storage/endpoint"
 )
 
+<<<<<<< HEAD:server/statistics/region_collection_test.go
 func TestStatistics(t *testing.T) {
 	TestingT(t)
 }
@@ -48,6 +49,15 @@ func (t *testRegionStatisticsSuite) SetUpTest(c *C) {
 
 func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	opt := config.NewTestOptions()
+=======
+func TestRegionStatistics(t *testing.T) {
+	re := require.New(t)
+	store := storage.NewStorageWithMemoryBackend()
+	manager := placement.NewRuleManager(store, nil, nil)
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	re.NoError(err)
+	opt := mockconfig.NewTestOptions()
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122)):pkg/statistics/region_collection_test.go
 	opt.SetPlacementRuleEnabled(false)
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
@@ -146,8 +156,18 @@ func (t *testRegionStatisticsSuite) TestRegionStatistics(c *C) {
 	c.Assert(regionStats.stats[OfflinePeer], HasLen, 0)
 }
 
+<<<<<<< HEAD:server/statistics/region_collection_test.go
 func (t *testRegionStatisticsSuite) TestRegionStatisticsWithPlacementRule(c *C) {
 	opt := config.NewTestOptions()
+=======
+func TestRegionStatisticsWithPlacementRule(t *testing.T) {
+	re := require.New(t)
+	store := storage.NewStorageWithMemoryBackend()
+	manager := placement.NewRuleManager(store, nil, nil)
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	re.NoError(err)
+	opt := mockconfig.NewTestOptions()
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122)):pkg/statistics/region_collection_test.go
 	opt.SetPlacementRuleEnabled(true)
 	peers := []*metapb.Peer{
 		{Id: 5, StoreId: 1},
