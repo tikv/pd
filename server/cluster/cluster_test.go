@@ -213,11 +213,23 @@ func (s *testClusterInfoSuite) TestFilterUnhealthyStore(c *C) {
 
 func (s *testClusterInfoSuite) TestSetOfflineStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
+<<<<<<< HEAD
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "2.0.0") {
 		c.Assert(cluster.PutStore(store.GetMeta()), IsNil)
+=======
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
+		if err != nil {
+			panic(err)
+		}
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 	}
 	// store 1: up -> offline
 	c.Assert(cluster.RemoveStore(1, false), IsNil)
@@ -300,8 +312,21 @@ func getTestDeployPath(storeID uint64) string {
 
 func (s *testClusterInfoSuite) TestUpStore(c *C) {
 	_, opt, err := newTestScheduleConfig()
+<<<<<<< HEAD
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+=======
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
+		if err != nil {
+			panic(err)
+		}
+	}
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 
 	// Put 3 stores.
 	for _, store := range newTestStores(3, "2.0.0") {
@@ -333,8 +358,79 @@ func (s *testClusterInfoSuite) TestUpStore(c *C) {
 
 func (s *testClusterInfoSuite) TestDeleteStoreUpdatesClusterVersion(c *C) {
 	_, opt, err := newTestScheduleConfig()
+<<<<<<< HEAD
 	c.Assert(err, IsNil)
 	cluster := newTestRaftCluster(s.ctx, mockid.NewIDAllocator(), opt, core.NewStorage(kv.NewMemoryKV()), core.NewBasicCluster())
+=======
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.SetPrepared()
+
+	// Put 5 stores.
+	stores := newTestStores(5, "5.0.0")
+	for _, store := range stores {
+		re.NoError(cluster.PutStore(store.GetMeta()))
+	}
+	regions := newTestRegions(100, 5, 1)
+	var regionInStore1 []*core.RegionInfo
+	for _, region := range regions {
+		if region.GetPeers()[0].GetStoreId() == 1 {
+			region = region.Clone(core.SetApproximateSize(100))
+			regionInStore1 = append(regionInStore1, region)
+		}
+		re.NoError(cluster.putRegion(region))
+	}
+	re.Len(regionInStore1, 20)
+	cluster.progressManager = progress.NewManager()
+	cluster.RemoveStore(1, false)
+	cluster.checkStores()
+	process := "removing-1"
+	// no region moving
+	p, l, cs, err := cluster.progressManager.Status(process)
+	re.NoError(err)
+	re.Equal(0.0, p)
+	re.Equal(math.MaxFloat64, l)
+	re.Equal(0.0, cs)
+	i := 0
+	// simulate region moving by deleting region from store 1
+	for _, region := range regionInStore1 {
+		if i >= 5 {
+			break
+		}
+		cluster.DropCacheRegion(region.GetID())
+		i++
+	}
+	cluster.checkStores()
+	p, l, cs, err = cluster.progressManager.Status(process)
+	re.NoError(err)
+	// In above we delete 5 region from store 1, the total count of region in store 1 is 20.
+	// process = 5 / 20 = 0.25
+	re.Equal(0.25, p)
+	// Each region is 100MB, we use more than 1s to move 5 region.
+	// speed = 5 * 100MB / 20s = 25MB/s
+	re.Equal(25.0, cs)
+	// left second = 15 * 100MB / 25s = 60s
+	re.Equal(60.0, l)
+}
+
+func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
+		if err != nil {
+			panic(err)
+		}
+	}
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 
 	// Put 3 new 4.0.9 stores.
 	for _, store := range newTestStores(3, "4.0.9") {
@@ -835,7 +931,7 @@ func (s *testClusterInfoSuite) TestOfflineAndMerge(c *C) {
 	storage := core.NewStorage(kv.NewMemoryKV())
 	cluster.ruleManager = placement.NewRuleManager(storage, cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -1131,7 +1227,7 @@ func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluste
 	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage, core.NewBasicCluster())
 	rc.ruleManager = placement.NewRuleManager(storage, rc, rc.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}

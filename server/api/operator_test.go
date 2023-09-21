@@ -343,6 +343,7 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 			}, ", "),
 		},
 	}
+<<<<<<< HEAD
 
 	for _, tc := range tt {
 		c.Log(tc.name)
@@ -352,6 +353,18 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 				s.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
 				s.svr.GetRaftCluster().GetOpts().GetLocationLabels())
 			c.Assert(err, IsNil)
+=======
+	for _, testCase := range testCases {
+		suite.T().Log(testCase.name)
+		suite.svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+		if testCase.placementRuleEnable {
+			err := suite.svr.GetRaftCluster().GetRuleManager().Initialize(
+				suite.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
+				suite.svr.GetRaftCluster().GetOpts().GetLocationLabels(),
+				suite.svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
+			)
+			suite.NoError(err)
+>>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 		}
 		if len(tc.rules) > 0 {
 			// add customized rule first and then remove default rule
