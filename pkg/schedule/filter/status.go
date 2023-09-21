@@ -39,8 +39,9 @@ var (
 	// store config limitation
 	statusStoreRejectLeader = plan.NewStatus(plan.StatusStoreRejectLeader)
 
-	statusStoreNotMatchRule      = plan.NewStatus(plan.StatusStoreNotMatchRule)
-	statusStoreNotMatchIsolation = plan.NewStatus(plan.StatusStoreNotMatchIsolation)
+	statusStoreNotMatchRule         = plan.NewStatus(plan.StatusStoreNotMatchRule)
+	statusStoreNotMatchIsolation    = plan.NewStatus(plan.StatusStoreNotMatchIsolation)
+	statusStoreRecentlySplitRegions = plan.NewStatus(plan.StatusStoreRecentlySplitRegions)
 
 	// region filter status
 	statusRegionPendingPeer                 = plan.NewStatus(plan.StatusRegionUnhealthy)
