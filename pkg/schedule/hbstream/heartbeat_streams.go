@@ -23,16 +23,30 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
 
+// Operation is detailed scheduling step of a region.
+type Operation struct {
+	ChangePeer *pdpb.ChangePeer
+	// Pd can return transfer_leader to let TiKV does leader transfer itself.
+	TransferLeader *pdpb.TransferLeader
+	Merge          *pdpb.Merge
+	// PD sends split_region to let TiKV split a region into two regions.
+	SplitRegion     *pdpb.SplitRegion
+	ChangePeerV2    *pdpb.ChangePeerV2
+	SwitchWitnesses *pdpb.BatchSwitchWitness
+}
+
 // HeartbeatStream is an interface.
 type HeartbeatStream interface {
-	Send(*pdpb.RegionHeartbeatResponse) error
+	Send(core.RegionHeartbeatResponse) error
 }
 
 const (
@@ -52,33 +66,35 @@ type HeartbeatStreams struct {
 	hbStreamCancel context.CancelFunc
 	clusterID      uint64
 	streams        map[uint64]HeartbeatStream
-	msgCh          chan *pdpb.RegionHeartbeatResponse
+	msgCh          chan core.RegionHeartbeatResponse
 	streamCh       chan streamUpdate
 	storeInformer  core.StoreSetInformer
+	typ            string
 	needRun        bool // For test only.
 }
 
 // NewHeartbeatStreams creates a new HeartbeatStreams which enable background running by default.
-func NewHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer) *HeartbeatStreams {
-	return newHbStreams(ctx, clusterID, storeInformer, true)
+func NewHeartbeatStreams(ctx context.Context, clusterID uint64, typ string, storeInformer core.StoreSetInformer) *HeartbeatStreams {
+	return newHbStreams(ctx, clusterID, typ, storeInformer, true)
 }
 
 // NewTestHeartbeatStreams creates a new HeartbeatStreams for test purpose only.
 // Please use NewHeartbeatStreams for other usage.
 func NewTestHeartbeatStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
-	return newHbStreams(ctx, clusterID, storeInformer, needRun)
+	return newHbStreams(ctx, clusterID, "", storeInformer, needRun)
 }
 
-func newHbStreams(ctx context.Context, clusterID uint64, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
+func newHbStreams(ctx context.Context, clusterID uint64, typ string, storeInformer core.StoreSetInformer, needRun bool) *HeartbeatStreams {
 	hbStreamCtx, hbStreamCancel := context.WithCancel(ctx)
 	hs := &HeartbeatStreams{
 		hbStreamCtx:    hbStreamCtx,
 		hbStreamCancel: hbStreamCancel,
 		clusterID:      clusterID,
 		streams:        make(map[uint64]HeartbeatStream),
-		msgCh:          make(chan *pdpb.RegionHeartbeatResponse, heartbeatChanCapacity),
+		msgCh:          make(chan core.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),
 		storeInformer:  storeInformer,
+		typ:            typ,
 		needRun:        needRun,
 	}
 	if needRun {
@@ -96,7 +112,13 @@ func (s *HeartbeatStreams) run() {
 	keepAliveTicker := time.NewTicker(heartbeatStreamKeepAliveInterval)
 	defer keepAliveTicker.Stop()
 
-	keepAlive := &pdpb.RegionHeartbeatResponse{Header: &pdpb.ResponseHeader{ClusterId: s.clusterID}}
+	var keepAlive core.RegionHeartbeatResponse
+	switch s.typ {
+	case utils.SchedulingServiceName:
+		keepAlive = &schedulingpb.RegionHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}
+	default:
+		keepAlive = &pdpb.RegionHeartbeatResponse{Header: &pdpb.ResponseHeader{ClusterId: s.clusterID}}
+	}
 
 	for {
 		select {
@@ -108,7 +130,7 @@ func (s *HeartbeatStreams) run() {
 			store := s.storeInformer.GetStore(storeID)
 			if store == nil {
 				log.Error("failed to get store",
-					zap.Uint64("region-id", msg.RegionId),
+					zap.Uint64("region-id", msg.GetRegionId()),
 					zap.Uint64("store-id", storeID), errs.ZapError(errs.ErrGetSourceStore))
 				delete(s.streams, storeID)
 				continue
@@ -117,7 +139,7 @@ func (s *HeartbeatStreams) run() {
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
 					log.Error("send heartbeat message fail",
-						zap.Uint64("region-id", msg.RegionId), errs.ZapError(errs.ErrGRPCSend.Wrap(err).GenWithStackByArgs()))
+						zap.Uint64("region-id", msg.GetRegionId()), errs.ZapError(errs.ErrGRPCSend.Wrap(err).GenWithStackByArgs()))
 					delete(s.streams, storeID)
 					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
 				} else {
@@ -125,7 +147,7 @@ func (s *HeartbeatStreams) run() {
 				}
 			} else {
 				log.Debug("heartbeat stream not found, skip send message",
-					zap.Uint64("region-id", msg.RegionId),
+					zap.Uint64("region-id", msg.GetRegionId()),
 					zap.Uint64("store-id", storeID))
 				heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "skip").Inc()
 			}
@@ -174,18 +196,44 @@ func (s *HeartbeatStreams) BindStream(storeID uint64, stream HeartbeatStream) {
 }
 
 // SendMsg sends a message to related store.
-func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {
+func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 	if region.GetLeader() == nil {
 		return
 	}
 
-	msg.Header = &pdpb.ResponseHeader{ClusterId: s.clusterID}
-	msg.RegionId = region.GetID()
-	msg.RegionEpoch = region.GetRegionEpoch()
-	msg.TargetPeer = region.GetLeader()
+	// TODO: use generic
+	var resp core.RegionHeartbeatResponse
+	switch s.typ {
+	case utils.SchedulingServiceName:
+		resp = &schedulingpb.RegionHeartbeatResponse{
+			Header:          &schedulingpb.ResponseHeader{ClusterId: s.clusterID},
+			RegionId:        region.GetID(),
+			RegionEpoch:     region.GetRegionEpoch(),
+			TargetPeer:      region.GetLeader(),
+			ChangePeer:      op.ChangePeer,
+			TransferLeader:  op.TransferLeader,
+			Merge:           op.Merge,
+			SplitRegion:     op.SplitRegion,
+			ChangePeerV2:    op.ChangePeerV2,
+			SwitchWitnesses: op.SwitchWitnesses,
+		}
+	default:
+		resp = &pdpb.RegionHeartbeatResponse{
+			Header:          &pdpb.ResponseHeader{ClusterId: s.clusterID},
+			RegionId:        region.GetID(),
+			RegionEpoch:     region.GetRegionEpoch(),
+			TargetPeer:      region.GetLeader(),
+			ChangePeer:      op.ChangePeer,
+			TransferLeader:  op.TransferLeader,
+			Merge:           op.Merge,
+			SplitRegion:     op.SplitRegion,
+			ChangePeerV2:    op.ChangePeerV2,
+			SwitchWitnesses: op.SwitchWitnesses,
+		}
+	}
 
 	select {
-	case s.msgCh <- msg:
+	case s.msgCh <- resp:
 	case <-s.hbStreamCtx.Done():
 	}
 }

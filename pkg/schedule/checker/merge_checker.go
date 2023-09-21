@@ -53,9 +53,9 @@ var (
 	mergeCheckerPausedCounter               = checkerCounter.WithLabelValues(mergeCheckerName, "paused")
 	mergeCheckerRecentlySplitCounter        = checkerCounter.WithLabelValues(mergeCheckerName, "recently-split")
 	mergeCheckerRecentlyStartCounter        = checkerCounter.WithLabelValues(mergeCheckerName, "recently-start")
-	mergeCheckerSkipUninitRegionCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "skip-uninit-region")
+	mergeCheckerNoLeaderCounter             = checkerCounter.WithLabelValues(mergeCheckerName, "no-leader")
 	mergeCheckerNoNeedCounter               = checkerCounter.WithLabelValues(mergeCheckerName, "no-need")
-	mergeCheckerSpecialPeerCounter          = checkerCounter.WithLabelValues(mergeCheckerName, "special-peer")
+	mergeCheckerUnhealthyRegionCounter      = checkerCounter.WithLabelValues(mergeCheckerName, "unhealthy-region")
 	mergeCheckerAbnormalReplicaCounter      = checkerCounter.WithLabelValues(mergeCheckerName, "abnormal-replica")
 	mergeCheckerHotRegionCounter            = checkerCounter.WithLabelValues(mergeCheckerName, "hot-region")
 	mergeCheckerNoTargetCounter             = checkerCounter.WithLabelValues(mergeCheckerName, "no-target")
@@ -129,7 +129,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// when pd just started, it will load region meta from region storage,
 	if region.GetLeader() == nil {
-		mergeCheckerSkipUninitRegionCounter.Inc()
+		mergeCheckerNoLeaderCounter.Inc()
 		return nil
 	}
 
@@ -141,7 +141,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// skip region has down peers or pending peers
 	if !filter.IsRegionHealthy(region) {
-		mergeCheckerSpecialPeerCounter.Inc()
+		mergeCheckerUnhealthyRegionCounter.Inc()
 		return nil
 	}
 
