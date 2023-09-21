@@ -60,6 +60,7 @@ type Manager struct {
 		resourceGroupName string
 		*rmpb.Consumption
 		isBackground bool
+		isTiFlash    bool
 	}
 	// record update time of each resource group
 	consumptionRecord map[string]time.Time
@@ -81,6 +82,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 			resourceGroupName string
 			*rmpb.Consumption
 			isBackground bool
+			isTiFlash    bool
 		}, defaultConsumptionChanSize),
 		consumptionRecord: make(map[string]time.Time),
 	}
@@ -361,20 +363,23 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumption == nil {
 				continue
 			}
-			backgroundType := ""
+			ruLabelType := tidbTypeLabel
 			if consumptionInfo.isBackground {
-				backgroundType = backgroundTypeLabel
+				ruLabelType = backgroundTypeLabel
+			}
+			if consumptionInfo.isTiFlash {
+				ruLabelType = tiflashTypeLabel
 			}
 
 			var (
 				name                     = consumptionInfo.resourceGroupName
-				rruMetrics               = readRequestUnitCost.WithLabelValues(name, backgroundType)
-				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, backgroundType)
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name, ruLabelType)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, ruLabelType)
 				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name)
-				readByteMetrics          = readByteCost.WithLabelValues(name, backgroundType)
-				writeByteMetrics         = writeByteCost.WithLabelValues(name, backgroundType)
-				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, backgroundType)
-				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, backgroundType)
+				readByteMetrics          = readByteCost.WithLabelValues(name, ruLabelType)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name, ruLabelType)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, ruLabelType)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, ruLabelType)
 				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
 			)

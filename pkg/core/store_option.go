@@ -274,3 +274,10 @@ func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 		store.lastAwakenTime = lastAwaken
 	}
 }
+
+// SetRecentlySplitRegionsTime sets last split time for the store.
+func SetRecentlySplitRegionsTime(recentlySplitRegionsTime time.Time) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.recentlySplitRegionsTime = recentlySplitRegionsTime
+	}
+}
