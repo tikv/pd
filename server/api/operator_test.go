@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockhbstream"
 	pdoperator "github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
@@ -99,7 +98,7 @@ func (suite *operatorTestSuite) TestAddRemovePeer() {
 	suite.Contains(operator, "add learner peer 1 on store 3")
 	suite.Contains(operator, "RUNNING")
 
-	_, err = apiutil.DoDelete(testDialClient, regionURL)
+	err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 	suite.NoError(err)
 	records = mustReadURL(re, recordURL)
 	suite.Contains(records, "admin-add-peer {add peer: store [3]}")
@@ -110,7 +109,7 @@ func (suite *operatorTestSuite) TestAddRemovePeer() {
 	suite.Contains(operator, "RUNNING")
 	suite.Contains(operator, "remove peer on store 2")
 
-	_, err = apiutil.DoDelete(testDialClient, regionURL)
+	err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 	suite.NoError(err)
 	records = mustReadURL(re, recordURL)
 	suite.Contains(records, "admin-remove-peer {rm peer: store [2]}")
@@ -406,8 +405,10 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 		if len(testCase.expectSteps) > 0 {
 			operator = mustReadURL(re, regionURL)
 			suite.Contains(operator, testCase.expectSteps)
+			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
+		} else {
+			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusNotOK(re))
 		}
-		_, err = apiutil.DoDelete(testDialClient, regionURL)
 		suite.NoError(err)
 	}
 }
