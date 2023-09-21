@@ -418,9 +418,9 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		}
 		if testCase.placementRuleEnable {
 			err := svr.GetRaftCluster().GetRuleManager().Initialize(
-				suite.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
-				suite.svr.GetRaftCluster().GetOpts().GetLocationLabels(),
-				suite.svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
+				svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
+				svr.GetRaftCluster().GetOpts().GetLocationLabels(),
+				svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
 			)
 			suite.NoError(err)
 		}
