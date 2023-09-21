@@ -27,7 +27,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -40,11 +39,6 @@ import (
 )
 
 const randomRegionMaxRetry = 10
-
-// errRegionIsStale is error info for region is stale.
-func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
-	return errors.Errorf("region is stale: region %v origin %v", region, origin)
-}
 
 // RegionInfo records detail region info.
 // the properties are Read-Only once created except buckets.
@@ -921,7 +915,7 @@ func check(region, origin *RegionInfo, overlaps []*regionItem) error {
 	for _, item := range overlaps {
 		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
 		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
-			return errRegionIsStale(region.GetMeta(), item.GetMeta())
+			return errs.ErrRegionStale.FastGenByArgs(region.GetMeta(), item.GetMeta())
 		}
 	}
 	if origin == nil {
@@ -934,7 +928,7 @@ func check(region, origin *RegionInfo, overlaps []*regionItem) error {
 	isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
 	// Region meta is stale, return an error.
 	if (isTermBehind || r.GetVersion() < o.GetVersion() || r.GetConfVer() < o.GetConfVer()) && !region.isRegionRecreated() {
-		return errRegionIsStale(region.GetMeta(), origin.GetMeta())
+		return errs.ErrRegionStale.FastGenByArgs(region.GetMeta(), origin.GetMeta())
 	}
 
 	return nil

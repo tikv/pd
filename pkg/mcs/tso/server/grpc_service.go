@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -33,12 +34,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-)
-
-// gRPC errors
-var (
-	ErrNotStarted        = status.Errorf(codes.Unavailable, "server not started")
-	ErrClusterMismatched = status.Errorf(codes.Unavailable, "cluster mismatched")
 )
 
 var _ tsopb.TSOServer = (*Service)(nil)
@@ -134,7 +129,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
 		if s.IsClosed() {
-			return status.Errorf(codes.Unknown, "server not started")
+			return errs.ErrServerNotStarted
 		}
 		header := request.GetHeader()
 		clusterID := header.GetClusterId()
@@ -253,10 +248,10 @@ func (s *Service) GetMinTS(
 
 func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, error) {
 	if s.IsClosed() || s.keyspaceGroupManager == nil {
-		return tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted
+		return tsopb.ErrorType_NOT_BOOTSTRAPPED, errs.ErrServerNotStarted
 	}
 	if header == nil || header.GetClusterId() != s.clusterID {
-		return tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched
+		return tsopb.ErrorType_CLUSTER_MISMATCHED, errs.ErrClusterMismatched
 	}
 	return tsopb.ErrorType_OK, nil
 }

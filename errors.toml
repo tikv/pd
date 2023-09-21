@@ -381,6 +381,16 @@ error = '''
 watcher canceled
 '''
 
+["PD:etcd:ErrExceedMaxEtcdTxnOps"]
+error = '''
+exceed max etcd txn operations
+'''
+
+["PD:etcd:ErrIllegalOperation"]
+error = '''
+unknown operation
+'''
+
 ["PD:etcd:ErrNewEtcdClient"]
 error = '''
 new etcd client failed
@@ -471,6 +481,136 @@ error = '''
 failed to unmarshal json
 '''
 
+["PD:keyspace:ErrKeyspaceExists"]
+error = '''
+keyspace already exists
+'''
+
+["PD:keyspace:ErrKeyspaceNotAssigned"]
+error = '''
+the keyspace %d isn't assigned to any keyspace group
+'''
+
+["PD:keyspace:ErrKeyspaceNotFound"]
+error = '''
+keyspace does not exist
+'''
+
+["PD:keyspace:ErrKeyspaceNotInAnyKeyspaceGroup"]
+error = '''
+keyspace is not in any keyspace group
+'''
+
+["PD:keyspace:ErrKeyspaceNotInKeyspaceGroup"]
+error = '''
+keyspace is not in this keyspace group
+'''
+
+["PD:keyspace:ErrKeyspaceUpdateNotAllowed"]
+error = '''
+cannot update keyspace that's %s
+'''
+
+["PD:keyspace:ErrModifyDefaultKeyspace"]
+error = '''
+cannot modify default keyspace's state
+'''
+
+["PD:keyspacegroup:ErrDefaultKeyspaceGroupNotFound"]
+error = '''
+default keyspace group not found
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupExists"]
+error = '''
+keyspace group already exists
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupIDInvalid"]
+error = '''
+the keyspace group id is invalid, %s
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupInMerging"]
+error = '''
+keyspace group %v is in merging state
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupInSplit"]
+error = '''
+keyspace group %v is in split state
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupIsMerging"]
+error = '''
+the keyspace group %d is merging
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupNotEnoughReplicas"]
+error = '''
+not enough replicas in the keyspace group
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupNotExists"]
+error = '''
+keyspace group %v does not exist
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupNotInMerging"]
+error = '''
+keyspace group %v is not in merging state
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupNotInSplit"]
+error = '''
+keyspace group %v is not in split state
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupNotInitialized"]
+error = '''
+the keyspace group %d isn't initialized
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupPrimaryNotFound"]
+error = '''
+primary of keyspace group does not exist
+'''
+
+["PD:keyspacegroup:ErrKeyspaceGroupWithEmptyKeyspace"]
+error = '''
+keyspace group with empty keyspace
+'''
+
+["PD:keyspacegroup:ErrLoadKeyspaceGroupsRetryExhausted"]
+error = '''
+load keyspace groups retry exhausted, %s
+'''
+
+["PD:keyspacegroup:ErrLoadKeyspaceGroupsTerminated"]
+error = '''
+load keyspace groups terminated
+'''
+
+["PD:keyspacegroup:ErrLoadKeyspaceGroupsTimeout"]
+error = '''
+load keyspace groups timeout
+'''
+
+["PD:keyspacegroup:ErrModifyDefaultKeyspaceGroup"]
+error = '''
+default keyspace group cannot be modified
+'''
+
+["PD:keyspacegroup:ErrNoAvailableNode"]
+error = '''
+no available node for keyspace group
+'''
+
+["PD:keyspacegroup:ErrNodeNotInKeyspaceGroup"]
+error = '''
+the tso node is not in this keyspace group
+'''
+
 ["PD:leveldb:ErrLevelDBClose"]
 error = '''
 close leveldb error
@@ -529,21 +669,6 @@ operator not found
 ["PD:operator:ErrPluginNotFound"]
 error = '''
 plugin is not found: %s
-'''
-
-["PD:operator:ErrRegionAbnormalPeer"]
-error = '''
-region %v has abnormal peer
-'''
-
-["PD:operator:ErrRegionNotAdjacent"]
-error = '''
-two regions are not adjacent
-'''
-
-["PD:operator:ErrRegionNotFound"]
-error = '''
-region %v not found
 '''
 
 ["PD:os:ErrOSOpen"]
@@ -616,6 +741,21 @@ error = '''
 failed to unmarshal proto
 '''
 
+["PD:region:ErrRegionAbnormalPeer"]
+error = '''
+region %v has abnormal peer
+'''
+
+["PD:region:ErrRegionNotAdjacent"]
+error = '''
+two regions are not adjacent
+'''
+
+["PD:region:ErrRegionNotFound"]
+error = '''
+region %v not found
+'''
+
 ["PD:region:ErrRegionRuleContent"]
 error = '''
 invalid region rule content, %s
@@ -624,6 +764,21 @@ invalid region rule content, %s
 ["PD:region:ErrRegionRuleNotFound"]
 error = '''
 region label rule not found for id %s
+'''
+
+["PD:region:ErrRegionSplitFailed"]
+error = '''
+region split failed
+'''
+
+["PD:region:ErrRegionSplitTimeout"]
+error = '''
+region split timeout
+'''
+
+["PD:region:ErrRegionStale"]
+error = '''
+region is stale: region %v origin %v
 '''
 
 ["PD:resourcemanager:ErrDeleteReservedGroup"]
@@ -726,9 +881,19 @@ error = '''
 client url empty
 '''
 
+["PD:server:ErrClusterMismatched"]
+error = '''
+rpc error: code = Unavailable desc = cluster mismatched
+'''
+
 ["PD:server:ErrConfiguration"]
 error = '''
 cannot set invalid configuration
+'''
+
+["PD:server:ErrEtcdNotStarted"]
+error = '''
+rpc error: code = Unavailable desc = server is started, but etcd not started
 '''
 
 ["PD:server:ErrLeaderNil"]
@@ -736,14 +901,24 @@ error = '''
 leader is nil
 '''
 
+["PD:server:ErrNotLeader"]
+error = '''
+rpc error: code = Unavailable desc = not leader
+'''
+
 ["PD:server:ErrRateLimitExceeded"]
 error = '''
 rate limit exceeded
 '''
 
+["PD:server:ErrSendHeartbeatTimeout"]
+error = '''
+rpc error: code = DeadlineExceeded desc = send heartbeat timeout
+'''
+
 ["PD:server:ErrServerNotStarted"]
 error = '''
-server not started
+rpc error: code = Unavailable desc = server not started
 '''
 
 ["PD:server:ErrServiceRegistered"]
@@ -771,6 +946,11 @@ error = '''
 parse uint error
 '''
 
+["PD:tso:ErrForwardTSOTimeout"]
+error = '''
+rpc error: code = DeadlineExceeded desc = forward tso request timeout
+'''
+
 ["PD:tso:ErrGenerateTimestamp"]
 error = '''
 generate timestamp failed, %s
@@ -796,44 +976,19 @@ error = '''
 get min ts failed, %s
 '''
 
-["PD:tso:ErrKeyspaceGroupIDInvalid"]
-error = '''
-the keyspace group id is invalid, %s
-'''
-
-["PD:tso:ErrKeyspaceGroupIsMerging"]
-error = '''
-the keyspace group %d is merging
-'''
-
-["PD:tso:ErrKeyspaceGroupNotInitialized"]
-error = '''
-the keyspace group %d isn't initialized
-'''
-
-["PD:tso:ErrKeyspaceNotAssigned"]
-error = '''
-the keyspace %d isn't assigned to any keyspace group
-'''
-
-["PD:tso:ErrLoadKeyspaceGroupsRetryExhausted"]
-error = '''
-load keyspace groups retry exhausted, %s
-'''
-
-["PD:tso:ErrLoadKeyspaceGroupsTerminated"]
-error = '''
-load keyspace groups terminated
-'''
-
-["PD:tso:ErrLoadKeyspaceGroupsTimeout"]
-error = '''
-load keyspace groups timeout
-'''
-
 ["PD:tso:ErrLogicOverflow"]
 error = '''
 logic part overflow
+'''
+
+["PD:tso:ErrMaxCountTSOProxyRoutinesExceeded"]
+error = '''
+rpc error: code = ResourceExhausted desc = max count of concurrent tso proxy routines exceeded
+'''
+
+["PD:tso:ErrNotFoundTSOAddr"]
+error = '''
+rpc error: code = NotFound desc = not found tso address
 '''
 
 ["PD:tso:ErrProxyTSOTimeout"]
@@ -854,6 +1009,11 @@ set local tso config failed, %s
 ["PD:tso:ErrSyncMaxTS"]
 error = '''
 sync max ts failed, %s
+'''
+
+["PD:tso:ErrTSOProxyRecvFromClientTimeout"]
+error = '''
+rpc error: code = DeadlineExceeded desc = tso proxy timeout when receiving from client; stream closed by server
 '''
 
 ["PD:tso:ErrUpdateTimestamp"]
