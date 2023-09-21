@@ -214,11 +214,12 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	recoveryDurationGap, ok := input["recovery-duration"].(uint64)
+	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
 	if ok {
+		recoveryDurationGap := (uint64)(recoveryDurationGapFloat)
 		prevRecoveryDurationGap := atomic.LoadUint64(&handler.config.RecoveryDurationGap)
 		atomic.StoreUint64(&handler.config.RecoveryDurationGap, recoveryDurationGap)
-		log.Info("evict-slow-trend-scheduler update 'recovery-duration'", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
+		log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
