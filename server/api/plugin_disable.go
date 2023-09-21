@@ -32,10 +32,10 @@ func newPluginHandler(_ *server.Handler, _ *render.Render) *pluginHandler {
 
 func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("load plugin is disabled, please `make pd-server-plugin` first"))
+	w.Write([]byte("load plugin is disabled, please `PLUGIN=1 $(MAKE) pd-server` first"))
 }
 
 func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("unload plugin is disabled, please `make pd-server-plugin` first"))
+	w.Write([]byte("unload plugin is disabled, please `PLUGIN=1 $(MAKE) pd-server` first"))
 }

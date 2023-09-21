@@ -86,9 +86,6 @@ pd-server-failpoint:
 	FAILPOINT=1 $(MAKE) pd-server || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-pd-server-plugin:
-	PLUGIN=1 $(MAKE) pd-server
-
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
