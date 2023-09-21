@@ -226,17 +226,12 @@ func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
 }
 
 // DoDelete is used to send delete request and return http response code.
-func DoDelete(client *http.Client, url string) (int, error) {
+func DoDelete(client *http.Client, url string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	if err != nil {
-		return http.StatusBadRequest, err
+		return nil, err
 	}
-	res, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer res.Body.Close()
-	return res.StatusCode, nil
+	return client.Do(req)
 }
 
 func checkResponse(resp *http.Response, err error) error {

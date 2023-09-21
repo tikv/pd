@@ -36,7 +36,7 @@ func TestHealth(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	pdAddr := tc.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()

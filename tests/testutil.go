@@ -16,19 +16,26 @@ package tests
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"time"
 
+	"github.com/docker/go-units"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/core"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 )
 
@@ -147,4 +154,69 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return primary
+}
+
+// MustPutStore is used for test purpose.
+func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.Store) {
+	store.Address = fmt.Sprintf("tikv%d", store.GetId())
+	if len(store.Version) == 0 {
+		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
+	}
+	svr := cluster.GetLeaderServer().GetServer()
+	grpcServer := &server.GrpcServer{Server: svr}
+	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Store:  store,
+	})
+	re.NoError(err)
+
+	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
+	newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
+		Capacity:  uint64(10 * units.GiB),
+		UsedSize:  uint64(9 * units.GiB),
+		Available: uint64(1 * units.GiB),
+	}))
+	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
+	}
+}
+
+// MustPutRegion is used for test purpose.
+func MustPutRegion(re *require.Assertions, cluster *TestCluster, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
+	leader := &metapb.Peer{
+		Id:      regionID,
+		StoreId: storeID,
+	}
+	metaRegion := &metapb.Region{
+		Id:          regionID,
+		StartKey:    start,
+		EndKey:      end,
+		Peers:       []*metapb.Peer{leader},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	r := core.NewRegionInfo(metaRegion, leader, opts...)
+	err := cluster.HandleRegionHeartbeat(r)
+	re.NoError(err)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(r)
+		re.NoError(err)
+	}
+	return r
+}
+
+// MustReportBuckets is used for test purpose.
+func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID uint64, start, end []byte, stats *metapb.BucketStats) *metapb.Buckets {
+	buckets := &metapb.Buckets{
+		RegionId: regionID,
+		Version:  1,
+		Keys:     [][]byte{start, end},
+		Stats:    stats,
+		// report buckets interval is 10s
+		PeriodInMs: 10000,
+	}
+	err := cluster.HandleReportBuckets(buckets)
+	re.NoError(err)
+	// TODO: forwards to scheduling server after it supports buckets
+	return buckets
 }

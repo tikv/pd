@@ -43,7 +43,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
-	leader := cluster.GetServer(cluster.GetLeader())
+	leader := cluster.GetLeaderServer()
 	re.NotNil(leader)
 	re.Empty(leader.GetServer().GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig)
 	limitCfg := make(map[string]ratelimit.DimensionConfig)
@@ -69,7 +69,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 		servers = append(servers, s.GetServer())
 	}
 	server.MustWaitLeader(re, servers)
-	leader = cluster.GetServer(cluster.GetLeader())
+	leader = cluster.GetLeaderServer()
 	re.NotNil(leader)
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	re.Len(leader.GetServer().GetServiceMiddlewarePersistOptions().GetRateLimitConfig().LimiterConfig, 1)
