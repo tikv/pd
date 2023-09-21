@@ -92,11 +92,11 @@ func TestLabel(t *testing.T) {
 			},
 		},
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store.Store.Store)
+		tests.MustPutStore(re, cluster, store.Store.Store)
 	}
 	defer cluster.Destroy()
 

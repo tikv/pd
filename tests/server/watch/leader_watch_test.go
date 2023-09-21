@@ -42,7 +42,7 @@ func TestWatcher(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
-	pd1 := cluster.GetServer(cluster.GetLeader())
+	pd1 := cluster.GetLeaderServer()
 	re.NotNil(pd1)
 
 	pd2, err := cluster.Join(ctx)
@@ -80,7 +80,7 @@ func TestWatcherCompacted(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
-	pd1 := cluster.GetServer(cluster.GetLeader())
+	pd1 := cluster.GetLeaderServer()
 	re.NotNil(pd1)
 	client := pd1.GetEtcdClient()
 	_, err = client.Put(context.Background(), "test", "v")

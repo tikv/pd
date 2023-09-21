@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
@@ -93,7 +92,7 @@ func (suite *scheduleTestSuite) TestOriginAPI() {
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
 	suite.Len(resp["store-id-ranges"], 2)
 	deleteURL := fmt.Sprintf("%s/%s", suite.urlPrefix, "evict-leader-scheduler-1")
-	_, err = apiutil.DoDelete(testDialClient, deleteURL)
+	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 	suite.NoError(err)
 	suite.Len(rc.GetSchedulers(), 1)
 	resp1 := make(map[string]interface{})
@@ -101,18 +100,16 @@ func (suite *scheduleTestSuite) TestOriginAPI() {
 	suite.Len(resp1["store-id-ranges"], 1)
 	deleteURL = fmt.Sprintf("%s/%s", suite.urlPrefix, "evict-leader-scheduler-2")
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistFail", "return(true)"))
-	statusCode, err := apiutil.DoDelete(testDialClient, deleteURL)
+	err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusInternalServerError))
 	suite.NoError(err)
-	suite.Equal(500, statusCode)
 	suite.Len(rc.GetSchedulers(), 1)
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistFail"))
-	statusCode, err = apiutil.DoDelete(testDialClient, deleteURL)
+	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.Equal(200, statusCode)
 	suite.Empty(rc.GetSchedulers())
-	suite.NoError(tu.CheckGetJSON(testDialClient, listURL, nil, tu.Status(re, 404)))
-	statusCode, _ = apiutil.DoDelete(testDialClient, deleteURL)
-	suite.Equal(404, statusCode)
+	suite.NoError(tu.CheckGetJSON(testDialClient, listURL, nil, tu.Status(re, http.StatusNotFound)))
+	err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
+	suite.NoError(err)
 }
 
 func (suite *scheduleTestSuite) TestAPI() {
@@ -370,15 +367,14 @@ func (suite *scheduleTestSuite) TestAPI() {
 
 				// using /pd/v1/schedule-config/grant-leader-scheduler/config to delete exists store from grant-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
-				_, err = apiutil.DoDelete(testDialClient, deleteURL)
+				err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 				suite.NoError(err)
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
 				delete(exceptMap, "2")
 				suite.Equal(exceptMap, resp["store-id-ranges"])
-				statusCode, err := apiutil.DoDelete(testDialClient, deleteURL)
+				err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
 				suite.NoError(err)
-				suite.Equal(404, statusCode)
 			},
 		},
 		{
@@ -434,15 +430,14 @@ func (suite *scheduleTestSuite) TestAPI() {
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to delete exist store from evict-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", suite.svr.GetAddr(), apiPrefix, server.SchedulerConfigHandlerPath, name, "4")
-				_, err = apiutil.DoDelete(testDialClient, deleteURL)
+				err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 				suite.NoError(err)
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
 				delete(exceptMap, "4")
 				suite.Equal(exceptMap, resp["store-id-ranges"])
-				statusCode, err := apiutil.DoDelete(testDialClient, deleteURL)
+				err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
 				suite.NoError(err)
-				suite.Equal(404, statusCode)
 			},
 		},
 	}
@@ -591,7 +586,7 @@ func (suite *scheduleTestSuite) addScheduler(body []byte) {
 
 func (suite *scheduleTestSuite) deleteScheduler(createdName string) {
 	deleteURL := fmt.Sprintf("%s/%s", suite.urlPrefix, createdName)
-	_, err := apiutil.DoDelete(testDialClient, deleteURL)
+	err := tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(suite.Require()))
 	suite.NoError(err)
 }
 
