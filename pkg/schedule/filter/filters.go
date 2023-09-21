@@ -332,6 +332,8 @@ type StoreStateFilter struct {
 	// If it checks failed, the operator will be put back to the waiting queue util the limit is available.
 	// But the scheduler should keep the same with the operator level.
 	OperatorLevel constant.PriorityLevel
+	// check the store not split recently in it if set true.
+	ForbidRecentlySplitRegions bool
 	// Reason is used to distinguish the reason of store state filter
 	Reason filterType
 }
@@ -471,6 +473,15 @@ func (f *StoreStateFilter) hasRejectLeaderProperty(conf config.SharedConfigProvi
 	return statusOK
 }
 
+func (f *StoreStateFilter) hasRecentlySplitRegions(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+	if f.ForbidRecentlySplitRegions && store.HasRecentlySplitRegions() {
+		f.Reason = storeStateRecentlySplitRegions
+		return statusStoreRecentlySplitRegions
+	}
+	f.Reason = storeStateOK
+	return statusOK
+}
+
 // The condition table.
 // Y: the condition is temporary (expected to become false soon).
 // N: the condition is expected to be true for a long time.
@@ -499,7 +510,7 @@ func (f *StoreStateFilter) anyConditionMatch(typ int, conf config.SharedConfigPr
 	var funcs []conditionFunc
 	switch typ {
 	case leaderSource:
-		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected}
+		funcs = []conditionFunc{f.isRemoved, f.isDown, f.pauseLeaderTransfer, f.isDisconnected, f.hasRecentlySplitRegions}
 	case regionSource:
 		funcs = []conditionFunc{f.isBusy, f.exceedRemoveLimit, f.tooManySnapshots}
 	case witnessSource:

@@ -1428,10 +1428,24 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	region := rc.GetRegionByKey(request.GetRegionKey())
+	var region *core.RegionInfo
+	// allow region miss temporarily if this key can't be found in the region tree.
+retryLoop:
+	for retry := 0; retry <= 10; retry++ {
+		region = rc.GetRegionByKey(request.GetRegionKey())
+		if region != nil {
+			break retryLoop
+		}
+		select {
+		case <-ctx.Done():
+			break retryLoop
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
+
 	var buckets *metapb.Buckets
 	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
@@ -1473,7 +1487,21 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	region := rc.GetPrevRegionByKey(request.GetRegionKey())
+	var region *core.RegionInfo
+	// allow region miss temporarily if this key can't be found in the region tree.
+retryLoop:
+	for retry := 0; retry <= 10; retry++ {
+		region = rc.GetPrevRegionByKey(request.GetRegionKey())
+		if region != nil {
+			break retryLoop
+		}
+		select {
+		case <-ctx.Done():
+			break retryLoop
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
