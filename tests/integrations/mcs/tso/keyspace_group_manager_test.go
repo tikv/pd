@@ -517,7 +517,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
@@ -711,7 +711,7 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)

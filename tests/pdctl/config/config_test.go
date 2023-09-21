@@ -64,10 +64,10 @@ func TestConfig(t *testing.T) {
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	// config show
@@ -300,10 +300,9 @@ func TestPlacementRules(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -358,7 +357,7 @@ func TestPlacementRules(t *testing.T) {
 	re.Equal([2]string{"pd", "test1"}, rules2[1].Key())
 
 	// test rule region detail
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
 	fit := &placement.RegionFit{}
 	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
 	cmd2 := pdctlCmd.GetRootCmd()
@@ -398,10 +397,9 @@ func TestPlacementRuleGroups(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -473,10 +471,9 @@ func TestPlacementRuleBundle(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -609,10 +606,9 @@ func TestReplicationMode(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	conf := config.ReplicationModeConfig{
@@ -668,10 +664,9 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	checkMaxReplicas := func(expect uint64) {
@@ -813,10 +808,9 @@ func TestPDServerConfig(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
