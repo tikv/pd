@@ -30,14 +30,8 @@ func newTestManager(t *testing.T) (endpoint.RuleStorage, *RuleManager) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
 	var err error
-<<<<<<< HEAD:server/schedule/placement/rule_manager_test.go
 	manager := NewRuleManager(store, nil, nil)
-	err = manager.Initialize(3, []string{"zone", "rack", "host"})
-=======
-	manager := NewRuleManager(store, nil, mockconfig.NewTestOptions())
-	manager.conf.SetEnableWitness(enableWitness)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"}, "")
->>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122)):pkg/schedule/placement/rule_manager_test.go
 	re.NoError(err)
 	return store, manager
 }

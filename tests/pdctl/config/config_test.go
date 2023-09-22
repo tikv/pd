@@ -675,7 +675,7 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		replicationCfg := sc.ReplicationConfig{}
+		replicationCfg := config.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
 		re.Equal(replicationCfg.IsolationLevel, expect)
 	}
