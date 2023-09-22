@@ -72,8 +72,6 @@ const (
 	StatusStoreLowSpace = iota + 500
 	// StatusStoreNotExisted represents the store cannot be found in PD.
 	StatusStoreNotExisted
-	// StatusStoreRecentlySplitRegions represents the store cannot be selected due to the region is splitting.
-	StatusStoreRecentlySplitRegions
 )
 
 // TODO: define region status priority
@@ -129,8 +127,7 @@ var statusText = map[StatusCode]string{
 	StatusStoreDown:         "StoreDown",
 	StatusStoreBusy:         "StoreBusy",
 
-	StatusStoreNotExisted:           "StoreNotExisted",
-	StatusStoreRecentlySplitRegions: "StoreRecentlySplitRegions",
+	StatusStoreNotExisted: "StoreNotExisted",
 
 	// region
 	StatusRegionHot:           "RegionHot",

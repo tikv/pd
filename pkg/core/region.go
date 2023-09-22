@@ -682,14 +682,9 @@ func (r *RegionInfo) isRegionRecreated() bool {
 	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
-// RegionChanged is a struct that records the changes of the region.
-type RegionChanged struct {
-	IsNew, SaveKV, SaveCache, NeedSync bool
-}
-
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(region, origin *RegionInfo) *RegionChanged
+type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
@@ -702,19 +697,18 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark IsNew if the region in cache does not have leader.
-	return func(region, origin *RegionInfo) (changed *RegionChanged) {
-		changed = &RegionChanged{}
+	// Mark isNew if the region in cache does not have leader.
+	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
 		if origin == nil {
 			if log.GetLevel() <= zap.DebugLevel {
 				debug("insert new region",
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			}
-			changed.SaveKV, changed.SaveCache, changed.IsNew = true, true, true
+			saveKV, saveCache, isNew = true, true, true
 		} else {
 			if !origin.IsFromHeartbeat() {
-				changed.IsNew = true
+				isNew = true
 			}
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
@@ -727,7 +721,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-version", r.GetVersion()),
 					)
 				}
-				changed.SaveKV, changed.SaveCache = true, true
+				saveKV, saveCache = true, true
 			}
 			if r.GetConfVer() > o.GetConfVer() {
 				if log.GetLevel() <= zap.InfoLevel {
@@ -738,11 +732,11 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-confver", r.GetConfVer()),
 					)
 				}
-				changed.SaveCache, changed.SaveKV = true, true
+				saveKV, saveCache = true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 				if origin.GetLeader().GetId() == 0 {
-					changed.IsNew = true
+					isNew = true
 				} else if log.GetLevel() <= zap.InfoLevel {
 					info("leader changed",
 						zap.Uint64("region-id", region.GetID()),
@@ -751,17 +745,17 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					)
 				}
 				// We check it first and do not return because the log is important for us to investigate,
-				changed.SaveCache, changed.NeedSync = true, true
+				saveCache, needSync = true, true
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
-				changed.SaveCache, changed.SaveKV = true, true
+				saveKV, saveCache = true, true
 				return
 			}
 			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
 				if log.GetLevel() <= zap.DebugLevel {
 					debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
 				}
-				changed.SaveCache, changed.SaveKV = true, true
+				saveKV, saveCache = true, true
 				return
 			}
 			// Once flow has changed, will update the cache.
@@ -769,39 +763,39 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
 				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
 				region.flowRoundDivisor < origin.flowRoundDivisor {
-				changed.SaveCache, changed.NeedSync = true, true
+				saveCache, needSync = true, true
 				return
 			}
 			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
 				if log.GetLevel() <= zap.DebugLevel {
 					debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
 				}
-				changed.SaveCache, changed.NeedSync = true, true
+				saveCache, needSync = true, true
 				return
 			}
 			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
 				if log.GetLevel() <= zap.DebugLevel {
 					debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
 				}
-				changed.SaveCache, changed.NeedSync = true, true
+				saveCache, needSync = true, true
 				return
 			}
 			if region.GetApproximateSize() != origin.GetApproximateSize() ||
 				region.GetApproximateKeys() != origin.GetApproximateKeys() {
-				changed.SaveCache = true
+				saveCache = true
 				return
 			}
 			if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
-				changed.SaveCache = true
+				saveCache = true
 				return
 			}
 			// Do not save to kv, because 1) flashback will be eventually set to
 			// false, 2) flashback changes almost all regions in a cluster.
 			// Saving kv may downgrade PD performance when there are many regions.
 			if region.IsFlashbackChanged(origin) {
-				changed.SaveCache = true
+				saveCache = true
 				return
 			}
 		}
