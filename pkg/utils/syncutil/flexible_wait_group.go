@@ -60,3 +60,11 @@ func (fwg *FlexibleWaitGroup) Wait() {
 	}
 	fwg.Unlock()
 }
+
+// getCount returns the current count of the FlexibleWaitGroup.
+// It is only used for testing.
+func (fwg *FlexibleWaitGroup) getCount() int {
+	fwg.Lock()
+	defer fwg.Unlock()
+	return fwg.count
+}
