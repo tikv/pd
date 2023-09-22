@@ -48,6 +48,8 @@ const (
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and leader-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
 	BalanceLeaderBatchSize = 4
+	// MaxBalanceLeaderBatchSize is maximum of balance leader batch size
+	MaxBalanceLeaderBatchSize = 10
 
 	transferIn  = "transfer-in"
 	transferOut = "transfer-out"
@@ -148,7 +150,7 @@ func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http
 	handler.rd.JSON(w, httpCode, v)
 }
 
-func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
+func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -160,7 +162,6 @@ type balanceLeaderScheduler struct {
 	conf          *balanceLeaderSchedulerConfig
 	handler       http.Handler
 	filters       []filter.Filter
-	regionFilters filter.RegionFilter
 	filterCounter *filter.Counter
 }
 
@@ -180,7 +181,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		option(s)
 	}
 	s.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, ForbidRecentlySplitRegions: true, OperatorLevel: constant.High},
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.High},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	return s
@@ -276,7 +277,7 @@ func (cs *candidateStores) less(iID uint64, scorei float64, jID uint64, scorej f
 	return scorei > scorej
 }
 
-// hasStore returns true when there are leftover stores.
+// hasStore returns returns true when there are leftover stores.
 func (cs *candidateStores) hasStore() bool {
 	return cs.index < len(cs.stores)
 }
@@ -348,7 +349,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	opInfluence := l.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
-	l.regionFilters = filter.NewStoreRecentlySplitFilter(cluster.GetStores())
 
 	stores := cluster.GetStores()
 	scoreFunc := func(store *core.StoreInfo) float64 {
@@ -486,7 +486,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.TargetStoreID(), l.conf.Ranges),
-		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter(), l.regionFilters)
+		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", solver.TargetStoreID()))
 		balanceLeaderNoFollowerRegionCounter.Inc()
@@ -508,7 +508,6 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		balanceLeaderNoLeaderRegionCounter.Inc()
 		return nil
 	}
-
 	finalFilters := l.filters
 	conf := solver.GetSchedulerConfig()
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
