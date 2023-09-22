@@ -192,6 +192,7 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
 		return err
 	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	return nil
 }

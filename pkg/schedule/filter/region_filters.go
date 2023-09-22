@@ -24,6 +24,24 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 )
 
+// SelectRegions selects regions that be selected from the list.
+func SelectRegions(regions []*core.RegionInfo, filters ...RegionFilter) []*core.RegionInfo {
+	return filterRegionsBy(regions, func(r *core.RegionInfo) bool {
+		return slice.AllOf(filters, func(i int) bool {
+			return filters[i].Select(r).IsOK()
+		})
+	})
+}
+
+func filterRegionsBy(regions []*core.RegionInfo, keepPred func(*core.RegionInfo) bool) (selected []*core.RegionInfo) {
+	for _, s := range regions {
+		if keepPred(s) {
+			selected = append(selected, s)
+		}
+	}
+	return
+}
+
 // SelectOneRegion selects one region that be selected from the list.
 func SelectOneRegion(regions []*core.RegionInfo, collector *plan.Collector, filters ...RegionFilter) *core.RegionInfo {
 	for _, r := range regions {
@@ -155,7 +173,7 @@ type SnapshotSenderFilter struct {
 	senders map[uint64]struct{}
 }
 
-// NewSnapshotSendFilter returns creates a RegionFilter that filters regions whose leader has sender limit on the specific store.
+// NewSnapshotSendFilter returns creates a RegionFilter that filters regions with witness peer on the specific store.
 // level should be set as same with the operator priority level.
 func NewSnapshotSendFilter(stores []*core.StoreInfo, level constant.PriorityLevel) RegionFilter {
 	senders := make(map[uint64]struct{})
@@ -174,29 +192,4 @@ func (f *SnapshotSenderFilter) Select(region *core.RegionInfo) *plan.Status {
 		return statusOK
 	}
 	return statusRegionLeaderSendSnapshotThrottled
-}
-
-// StoreRecentlySplitFilter filer the region whose leader store not recently split regions.
-type StoreRecentlySplitFilter struct {
-	recentlySplitStores map[uint64]struct{}
-}
-
-// NewStoreRecentlySplitFilter returns creates a StoreRecentlySplitFilter.
-func NewStoreRecentlySplitFilter(stores []*core.StoreInfo) RegionFilter {
-	recentlySplitStores := make(map[uint64]struct{})
-	for _, store := range stores {
-		if store.HasRecentlySplitRegions() {
-			recentlySplitStores[store.GetID()] = struct{}{}
-		}
-	}
-	return &StoreRecentlySplitFilter{recentlySplitStores: recentlySplitStores}
-}
-
-// Select returns ok if the region leader not in the recentlySplitStores.
-func (f *StoreRecentlySplitFilter) Select(region *core.RegionInfo) *plan.Status {
-	leaderStoreID := region.GetLeader().GetStoreId()
-	if _, ok := f.recentlySplitStores[leaderStoreID]; ok {
-		return statusStoreRecentlySplitRegions
-	}
-	return statusOK
 }
