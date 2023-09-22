@@ -230,7 +230,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		cfgRevision := resp.GetHeader().GetRevision()
 		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
 		if !c.ruConfig.isSingleGroupByKeyspace {
-			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix())
+			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
+			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
 			if err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
@@ -256,7 +257,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 			case <-watchRetryTimer.C:
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
-					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix())
+					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
+					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
@@ -315,18 +317,27 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				for _, item := range resp {
 					metaRevision = item.Kv.ModRevision
 					group := &rmpb.ResourceGroup{}
-					if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
-						continue
-					}
 					switch item.Type {
 					case meta_storagepb.Event_PUT:
+						if err = proto.Unmarshal(item.Kv.Value, group); err != nil {
+							continue
+						}
 						if item, ok := c.groupsController.Load(group.Name); ok {
 							gc := item.(*groupCostController)
 							gc.modifyMeta(group)
 						}
 					case meta_storagepb.Event_DELETE:
-						if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
-							resourceGroupStatusGauge.DeleteLabelValues(group.Name)
+						if item.PrevKv != nil {
+							if err = proto.Unmarshal(item.PrevKv.Value, group); err != nil {
+								continue
+							}
+							if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
+								resourceGroupStatusGauge.DeleteLabelValues(group.Name)
+							}
+						} else {
+							// Prev-kv is compacted means there must have been a delete event before this event,
+							// which means that this is just a duplicated event, so we can just ignore it.
+							log.Info("previous key-value pair has been compacted", zap.String("required-key", string(item.Kv.Key)), zap.String("value", string(item.Kv.Value)))
 						}
 					}
 				}
