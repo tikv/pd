@@ -363,7 +363,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumption == nil {
 				continue
 			}
-			ruLabelType := tidbTypeLabel
+			ruLabelType := defaultTypeLabel
 			if consumptionInfo.isBackground {
 				ruLabelType = backgroundTypeLabel
 			}
