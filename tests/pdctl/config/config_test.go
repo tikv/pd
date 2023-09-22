@@ -649,10 +649,10 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkIsolationLevel := func(expect string) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		replicationCfg := sc.ReplicationConfig{}
-		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Equal(replicationCfg.IsolationLevel, expect)
+		c.Assert(err, IsNil)
+		replicationCfg := config.ReplicationConfig{}
+		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
+		c.Assert(replicationCfg.IsolationLevel, Equals, expect)
 	}
 
 	checkRuleCount := func(expect int) {
@@ -676,10 +676,10 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkRuleIsolationLevel := func(expect string) {
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
+		c.Assert(err, IsNil)
 		rule := placement.Rule{}
-		re.NoError(json.Unmarshal(output, &rule))
-		re.Equal(rule.IsolationLevel, expect)
+		c.Assert(json.Unmarshal(output, &rule), IsNil)
+		c.Assert(rule.IsolationLevel, Equals, expect)
 	}
 
 	// update successfully when placement rules is not enabled.
@@ -688,18 +688,12 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 	checkMaxReplicas(2)
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "zone,host")
-<<<<<<< HEAD
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
-	checkLocaltionLabels(2)
-=======
-	re.NoError(err)
-	re.Contains(string(output), "Success!")
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "isolation-level", "zone")
-	re.NoError(err)
-	re.Contains(string(output), "Success!")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 	checkLocationLabels(2)
->>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 	checkRuleLocationLabels(2)
 	checkIsolationLevel("zone")
 	checkRuleIsolationLevel("zone")
@@ -718,18 +712,12 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	// We need to change isolation first because we will validate
 	// if the location label contains the isolation level when setting location labels.
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "isolation-level", "host")
-	re.NoError(err)
-	re.Contains(string(output), "Success!")
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "host")
-<<<<<<< HEAD
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
-	checkLocaltionLabels(1)
-=======
-	re.NoError(err)
-	re.Contains(string(output), "Success!")
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "host")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 	checkLocationLabels(1)
->>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 	checkRuleLocationLabels(1)
 	checkIsolationLevel("host")
 	checkRuleIsolationLevel("host")
