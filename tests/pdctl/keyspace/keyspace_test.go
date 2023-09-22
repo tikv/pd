@@ -58,7 +58,7 @@ func TestKeyspace(t *testing.T) {
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	defaultKeyspaceGroupID := fmt.Sprintf("%d", utils.DefaultKeyspaceGroupID)
 

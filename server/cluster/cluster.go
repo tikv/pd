@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
@@ -300,7 +301,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
-		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
 		if err != nil {
 			return err
 		}
@@ -894,9 +895,19 @@ func (c *RaftCluster) GetSuspectRegions() []uint64 {
 	return c.coordinator.GetCheckerController().GetSuspectRegions()
 }
 
-// GetHotStat gets hot stat for test.
+// GetHotStat gets hot stat.
 func (c *RaftCluster) GetHotStat() *statistics.HotStat {
 	return c.hotStat
+}
+
+// GetRegionStats gets region statistics.
+func (c *RaftCluster) GetRegionStats() *statistics.RegionStatistics {
+	return c.regionStats
+}
+
+// GetLabelStats gets label statistics.
+func (c *RaftCluster) GetLabelStats() *statistics.LabelStatistics {
+	return c.labelLevelStats
 }
 
 // RemoveSuspectRegion removes region from suspect list.
@@ -1099,23 +1110,19 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 
 	if !c.isAPIServiceMode {
-		c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
-		c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
-		reportInterval := region.GetInterval()
-		interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-		for _, peer := range region.GetPeers() {
-			peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-			c.hotStat.CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
-		}
-		c.coordinator.GetSchedulersController().CheckTransferWitnessLeader(region)
+		cluster.HandleStatsAsync(c, region)
 	}
 
-	hasRegionStats := c.regionStats != nil
-	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
-	if !c.isAPIServiceMode && !saveKV && !saveCache && !isNew {
+	changed := regionGuide(region, origin)
+	return c.SaveRegion(region, changed)
+}
+
+// SaveRegion saves region info into cache and PD storage.
+func (c *RaftCluster) SaveRegion(region *core.RegionInfo, changed *core.RegionChanged) (err error) {
+	hasRegionStats := c.regionStats != nil
+	if !c.isAPIServiceMode && !changed.SaveKV && !changed.SaveCache && !changed.IsNew {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1129,38 +1136,28 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	})
 
 	var overlaps []*core.RegionInfo
-	if saveCache {
+
+	if changed.SaveCache {
 		failpoint.Inject("decEpoch", func() {
 			region = region.Clone(core.SetRegionConfVer(2), core.SetRegionVersion(2))
 		})
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
-		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		// However, it can't solve the race condition of concurrent heartbeats from the same region.
 		if overlaps, err = c.core.AtomicCheckAndPutRegion(region); err != nil {
 			return err
 		}
-
-		for _, item := range overlaps {
-			if !c.isAPIServiceMode {
-				if c.regionStats != nil {
-					c.regionStats.ClearDefunctRegion(item.GetID())
-				}
-				c.labelLevelStats.ClearDefunctRegion(item.GetID())
-			}
-			c.ruleManager.InvalidCache(item.GetID())
+		if !c.isAPIServiceMode {
+			cluster.HandleOverlaps(c, overlaps)
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
 
 	if !c.isAPIServiceMode {
-		if hasRegionStats {
-			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
-		}
+		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, changed.IsNew, c.IsPrepared())
 	}
-	if !c.IsPrepared() && isNew {
-		c.coordinator.GetPrepareChecker().Collect(region)
-	}
+
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
@@ -1174,7 +1171,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 					errs.ZapError(err))
 			}
 		}
-		if saveKV {
+		if changed.SaveKV {
 			if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
 				log.Error("failed to save region to storage",
 					zap.Uint64("region-id", region.GetID()),
@@ -1185,13 +1182,12 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 	}
 
-	if saveKV || needSync {
+	if changed.SaveKV || changed.NeedSync {
 		select {
 		case c.changedRegions <- region:
 		default:
 		}
 	}
-
 	return nil
 }
 
@@ -2333,8 +2329,8 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
 
-// GetRegionStats returns region statistics from cluster.
-func (c *RaftCluster) GetRegionStats(startKey, endKey []byte) *statistics.RegionStats {
+// GetRegionStatsByRange returns region statistics from cluster.
+func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte) *statistics.RegionStats {
 	return statistics.GetRegionStats(c.core.ScanRegions(startKey, endKey, -1))
 }
 

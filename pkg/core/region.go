@@ -143,8 +143,31 @@ const (
 	InitClusterRegionThreshold = 100
 )
 
+// RegionHeartbeatResponse is the interface for region heartbeat response.
+type RegionHeartbeatResponse interface {
+	GetTargetPeer() *metapb.Peer
+	GetRegionId() uint64
+}
+
+// RegionHeartbeatRequest is the interface for region heartbeat request.
+type RegionHeartbeatRequest interface {
+	GetTerm() uint64
+	GetRegion() *metapb.Region
+	GetLeader() *metapb.Peer
+	GetDownPeers() []*pdpb.PeerStats
+	GetPendingPeers() []*metapb.Peer
+	GetBytesWritten() uint64
+	GetKeysWritten() uint64
+	GetBytesRead() uint64
+	GetKeysRead() uint64
+	GetInterval() *pdpb.TimeInterval
+	GetQueryStats() *pdpb.QueryStats
+	GetApproximateSize() uint64
+	GetApproximateKeys() uint64
+}
+
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
+func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
 	regionSize := heartbeat.GetApproximateSize() / units.MiB
@@ -153,25 +176,28 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
-	regionKvSize := heartbeat.GetApproximateKvSize() / units.MiB
 
 	region := &RegionInfo{
-		term:              heartbeat.GetTerm(),
-		meta:              heartbeat.GetRegion(),
-		leader:            heartbeat.GetLeader(),
-		downPeers:         heartbeat.GetDownPeers(),
-		pendingPeers:      heartbeat.GetPendingPeers(),
-		cpuUsage:          heartbeat.GetCpuUsage(),
-		writtenBytes:      heartbeat.GetBytesWritten(),
-		writtenKeys:       heartbeat.GetKeysWritten(),
-		readBytes:         heartbeat.GetBytesRead(),
-		readKeys:          heartbeat.GetKeysRead(),
-		approximateSize:   int64(regionSize),
-		approximateKvSize: int64(regionKvSize),
-		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
-		interval:          heartbeat.GetInterval(),
-		replicationStatus: heartbeat.GetReplicationStatus(),
-		queryStats:        heartbeat.GetQueryStats(),
+		term:            heartbeat.GetTerm(),
+		meta:            heartbeat.GetRegion(),
+		leader:          heartbeat.GetLeader(),
+		downPeers:       heartbeat.GetDownPeers(),
+		pendingPeers:    heartbeat.GetPendingPeers(),
+		writtenBytes:    heartbeat.GetBytesWritten(),
+		writtenKeys:     heartbeat.GetKeysWritten(),
+		readBytes:       heartbeat.GetBytesRead(),
+		readKeys:        heartbeat.GetKeysRead(),
+		approximateSize: int64(regionSize),
+		approximateKeys: int64(heartbeat.GetApproximateKeys()),
+		interval:        heartbeat.GetInterval(),
+		queryStats:      heartbeat.GetQueryStats(),
+	}
+
+	// scheduling service doesn't need the following fields.
+	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
+		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
+		region.replicationStatus = h.GetReplicationStatus()
+		region.cpuUsage = h.GetCpuUsage()
 	}
 
 	for _, opt := range opts {
@@ -656,9 +682,14 @@ func (r *RegionInfo) isRegionRecreated() bool {
 	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
+// RegionChanged is a struct that records the changes of the region.
+type RegionChanged struct {
+	IsNew, SaveKV, SaveCache, NeedSync bool
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
+type RegionGuideFunc func(region, origin *RegionInfo) *RegionChanged
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
@@ -671,18 +702,19 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
+	// Mark IsNew if the region in cache does not have leader.
+	return func(region, origin *RegionInfo) (changed *RegionChanged) {
+		changed = &RegionChanged{}
 		if origin == nil {
 			if log.GetLevel() <= zap.DebugLevel {
 				debug("insert new region",
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			}
-			saveKV, saveCache, isNew = true, true, true
+			changed.SaveKV, changed.SaveCache, changed.IsNew = true, true, true
 		} else {
 			if !origin.IsFromHeartbeat() {
-				isNew = true
+				changed.IsNew = true
 			}
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
@@ -695,7 +727,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-version", r.GetVersion()),
 					)
 				}
-				saveKV, saveCache = true, true
+				changed.SaveKV, changed.SaveCache = true, true
 			}
 			if r.GetConfVer() > o.GetConfVer() {
 				if log.GetLevel() <= zap.InfoLevel {
@@ -706,11 +738,11 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-confver", r.GetConfVer()),
 					)
 				}
-				saveKV, saveCache = true, true
+				changed.SaveCache, changed.SaveKV = true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 				if origin.GetLeader().GetId() == 0 {
-					isNew = true
+					changed.IsNew = true
 				} else if log.GetLevel() <= zap.InfoLevel {
 					info("leader changed",
 						zap.Uint64("region-id", region.GetID()),
@@ -719,17 +751,17 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					)
 				}
 				// We check it first and do not return because the log is important for us to investigate,
-				saveCache, needSync = true, true
+				changed.SaveCache, changed.NeedSync = true, true
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
-				saveKV, saveCache = true, true
+				changed.SaveCache, changed.SaveKV = true, true
 				return
 			}
 			if len(region.GetBuckets().GetKeys()) != len(origin.GetBuckets().GetKeys()) {
 				if log.GetLevel() <= zap.DebugLevel {
 					debug("bucket key changed", zap.Uint64("region-id", region.GetID()))
 				}
-				saveKV, saveCache = true, true
+				changed.SaveCache, changed.SaveKV = true, true
 				return
 			}
 			// Once flow has changed, will update the cache.
@@ -737,39 +769,39 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			if region.GetRoundBytesWritten() != origin.GetRoundBytesWritten() ||
 				region.GetRoundBytesRead() != origin.GetRoundBytesRead() ||
 				region.flowRoundDivisor < origin.flowRoundDivisor {
-				saveCache, needSync = true, true
+				changed.SaveCache, changed.NeedSync = true, true
 				return
 			}
 			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
 				if log.GetLevel() <= zap.DebugLevel {
 					debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
 				}
-				saveCache, needSync = true, true
+				changed.SaveCache, changed.NeedSync = true, true
 				return
 			}
 			if !SortedPeersEqual(region.GetPendingPeers(), origin.GetPendingPeers()) {
 				if log.GetLevel() <= zap.DebugLevel {
 					debug("pending-peers changed", zap.Uint64("region-id", region.GetID()))
 				}
-				saveCache, needSync = true, true
+				changed.SaveCache, changed.NeedSync = true, true
 				return
 			}
 			if region.GetApproximateSize() != origin.GetApproximateSize() ||
 				region.GetApproximateKeys() != origin.GetApproximateKeys() {
-				saveCache = true
+				changed.SaveCache = true
 				return
 			}
 			if region.GetReplicationStatus().GetState() != replication_modepb.RegionReplicationState_UNKNOWN &&
 				(region.GetReplicationStatus().GetState() != origin.GetReplicationStatus().GetState() ||
 					region.GetReplicationStatus().GetStateId() != origin.GetReplicationStatus().GetStateId()) {
-				saveCache = true
+				changed.SaveCache = true
 				return
 			}
 			// Do not save to kv, because 1) flashback will be eventually set to
 			// false, 2) flashback changes almost all regions in a cluster.
 			// Saving kv may downgrade PD performance when there are many regions.
 			if region.IsFlashbackChanged(origin) {
-				saveCache = true
+				changed.SaveCache = true
 				return
 			}
 		}

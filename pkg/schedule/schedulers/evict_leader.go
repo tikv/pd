@@ -218,8 +218,25 @@ func (s *evictLeaderScheduler) ReloadConfig() error {
 	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
 		return err
 	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	return nil
+}
+
+// pauseAndResumeLeaderTransfer checks the old and new store IDs, and pause or resume the leader transfer.
+func pauseAndResumeLeaderTransfer(cluster *core.BasicCluster, old, new map[uint64][]core.KeyRange) {
+	for id := range old {
+		if _, ok := new[id]; ok {
+			continue
+		}
+		cluster.ResumeLeaderTransfer(id)
+	}
+	for id := range new {
+		if _, ok := old[id]; ok {
+			continue
+		}
+		cluster.PauseLeaderTransfer(id)
+	}
 }
 
 func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {

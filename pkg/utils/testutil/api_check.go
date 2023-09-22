@@ -123,9 +123,18 @@ func CheckPatchJSON(client *http.Client, url string, data []byte, checkOpts ...f
 	return checkResp(resp, checkOpts...)
 }
 
+// CheckDelete is used to do delete request and do check options.
+func CheckDelete(client *http.Client, url string, checkOpts ...func([]byte, int, http.Header)) error {
+	resp, err := apiutil.DoDelete(client, url)
+	if err != nil {
+		return err
+	}
+	return checkResp(resp, checkOpts...)
+}
+
 func checkResp(resp *http.Response, checkOpts ...func([]byte, int, http.Header)) error {
 	res, err := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if err != nil {
 		return err
 	}

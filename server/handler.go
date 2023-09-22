@@ -214,7 +214,13 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 
-	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), c.GetCoordinator().GetSchedulersController().RemoveScheduler)
+	var removeSchedulerCb func(string) error
+	if h.s.IsAPIServiceMode() {
+		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveSchedulerHandler
+	} else {
+		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveScheduler
+	}
+	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), removeSchedulerCb)
 	if err != nil {
 		return err
 	}
