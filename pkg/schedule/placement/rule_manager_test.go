@@ -33,13 +33,8 @@ func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *Ru
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
 	manager := NewRuleManager(store, nil, mockconfig.NewTestOptions())
-<<<<<<< HEAD
 	manager.conf.SetWitnessEnabled(enableWitness)
-	err = manager.Initialize(3, []string{"zone", "rack", "host"})
-=======
-	manager.conf.SetEnableWitness(enableWitness)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"}, "")
->>>>>>> 5b3d0172b (*: fix sync isolation level to default placement rule (#7122))
 	re.NoError(err)
 	return store, manager
 }
