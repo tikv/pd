@@ -402,6 +402,21 @@ func TestScheduler(t *testing.T) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 
+	// test evict-slow-trend scheduler config
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-trend-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+	re.Contains(echo, "evict-slow-trend-scheduler")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-trend-scheduler", "set", "recovery-duration", "100"}, nil)
+	re.Contains(echo, "Success!")
+	conf = make(map[string]interface{})
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-trend-scheduler", "show"}, &conf)
+	re.Equal(100., conf["recovery-duration"])
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-slow-trend-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+	re.NotContains(echo, "evict-slow-trend-scheduler")
+
 	// test show scheduler with paused and disabled status.
 	checkSchedulerWithStatusCommand := func(args []string, status string, expected []string) {
 		if args != nil {
