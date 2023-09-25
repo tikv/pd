@@ -60,7 +60,8 @@ type FileReplicater interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 }
 
-const drStatusFile = "DR_STATE"
+// DrStatusFile is the file name that stores the dr status.
+const DrStatusFile = "DR_STATE"
 const persistFileTimeout = time.Second * 3
 
 // ModeManager is used to control how raft logs are synchronized between
@@ -483,7 +484,7 @@ func (m *ModeManager) tickReplicateStatus() {
 		stateID, ok := m.replicateState.Load(member.GetMemberId())
 		if !ok || stateID.(uint64) != state.StateID {
 			ctx, cancel := context.WithTimeout(context.Background(), persistFileTimeout)
-			err := m.fileReplicater.ReplicateFileToMember(ctx, member, drStatusFile, data)
+			err := m.fileReplicater.ReplicateFileToMember(ctx, member, DrStatusFile, data)
 			if err != nil {
 				log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", state.State), errs.ZapError(err))
 			} else {
