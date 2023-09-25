@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -156,7 +157,7 @@ func (t *timestampOracle) GetTimestampPath() string {
 
 // SyncTimestamp is used to synchronize the timestamp.
 func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
-	log.Info("start to sync timestamp", zap.Uint32("id", t.keyspaceGroupID))
+	log.Info("start to sync timestamp", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 	t.metrics.syncEvent.Inc()
 
 	failpoint.Inject("delaySyncTimestamp", func() {
@@ -179,7 +180,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 		last != typeutil.ZeroTime &&
 		lastSavedTime != typeutil.ZeroTime &&
 		typeutil.SubRealTimeByWallClock(last, lastSavedTime) == 0 {
-		log.Info("skip sync timestamp", zap.Uint32("id", t.keyspaceGroupID))
+		log.Info("skip sync timestamp", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 		t.metrics.skipSyncEvent.Inc()
 		return nil
 	}
@@ -195,7 +196,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
 		log.Warn("system time may be incorrect",
-			zap.Uint32("id", t.keyspaceGroupID),
+			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.Time("last", last), zap.Time("next", next),
 			errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(UpdateTimestampGuard)
@@ -214,7 +215,7 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 
 	t.metrics.syncOKEvent.Inc()
 	log.Info("sync and save timestamp",
-		zap.Uint32("id", t.keyspaceGroupID),
+		logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 		zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
 	// save into memory
 	t.setTSOPhysical(next, true)
@@ -327,7 +328,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
 		log.Warn("clock offset",
-			zap.Uint32("id", t.keyspaceGroupID),
+			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.Duration("jet-lag", jetLag),
 			zap.Time("prev-physical", prevPhysical),
 			zap.Time("now", now),
@@ -347,7 +348,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
 		// Because there is enough timestamp can be allocated before next update.
 		log.Warn("the logical time may be not enough",
-			zap.Uint32("id", t.keyspaceGroupID),
+			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.Int64("prev-logical", prevLogical))
 		next = prevPhysical.Add(time.Millisecond)
 	} else {
@@ -363,7 +364,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 		start := time.Now()
 		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 			log.Warn("save timestamp failed",
-				zap.Uint32("id", t.keyspaceGroupID),
+				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.String("dc-location", t.dcLocation),
 				zap.String("timestamp-path", t.GetTimestampPath()),
 				zap.Error(err))
@@ -406,7 +407,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 		}
 		if resp.GetLogical() >= maxLogical {
 			log.Warn("logical part outside of max logical interval, please check ntp time, or adjust config item `tso-update-physical-interval`",
-				zap.Uint32("id", t.keyspaceGroupID),
+				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.Reflect("response", resp),
 				zap.Int("retry-count", i), errs.ZapError(errs.ErrLogicOverflow))
 			t.metrics.logicalOverflowEvent.Inc()
@@ -428,7 +429,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 func (t *timestampOracle) ResetTimestamp() {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	log.Info("reset the timestamp in memory", zap.Uint32("id", t.keyspaceGroupID))
+	log.Info("reset the timestamp in memory", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 	t.tsoMux.physical = typeutil.ZeroTime
 	t.tsoMux.logical = 0
 	t.tsoMux.updateTime = typeutil.ZeroTime
