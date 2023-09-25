@@ -104,12 +104,16 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[LearnerPeer], 1)
 	re.Len(regionStats.stats[OversizedRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
+<<<<<<< HEAD
 	re.Len(regionStats.offlineStats[ExtraPeer], 1)
 	re.Empty(regionStats.offlineStats[MissPeer])
 	re.Len(regionStats.offlineStats[DownPeer], 1)
 	re.Len(regionStats.offlineStats[PendingPeer], 1)
 	re.Len(regionStats.offlineStats[LearnerPeer], 1)
 	re.Len(regionStats.offlineStats[OfflinePeer], 1)
+=======
+	re.Len(regionStats.stats[OfflinePeer], 1)
+>>>>>>> eac55a768 (Revert "statistics: fix empty region count when resuming (#7009)" (#7149))
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])

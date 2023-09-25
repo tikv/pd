@@ -139,6 +139,10 @@ func (suite *statsTestSuite) TestRegionStats() {
 		Count:            4,
 		EmptyCount:       1,
 		StorageSize:      351,
+<<<<<<< HEAD
+=======
+		UserStorageSize:  291,
+>>>>>>> eac55a768 (Revert "statistics: fix empty region count when resuming (#7009)" (#7149))
 		StorageKeys:      221,
 		StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 3, 2: 1, 3: 1, 4: 2, 5: 2},
@@ -152,6 +156,10 @@ func (suite *statsTestSuite) TestRegionStats() {
 		Count:            2,
 		EmptyCount:       1,
 		StorageSize:      201,
+<<<<<<< HEAD
+=======
+		UserStorageSize:  181,
+>>>>>>> eac55a768 (Revert "statistics: fix empty region count when resuming (#7009)" (#7149))
 		StorageKeys:      151,
 		StoreLeaderCount: map[uint64]int{4: 1, 5: 1},
 		StorePeerCount:   map[uint64]int{1: 2, 4: 1, 5: 2},
