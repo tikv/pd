@@ -484,6 +484,7 @@ func (m *ModeManager) tickUpdateState() {
 		} else {
 			m.updateProgress()
 			progress := m.estimateProgress()
+			drRecoveredRegionGauge.Set(float64(m.drRecoverCount))
 			drRecoverProgressGauge.Set(float64(progress))
 
 			if progress == 1.0 {
@@ -508,6 +509,21 @@ func (m *ModeManager) tickReplicateStatus() {
 		RecoverStartTime: m.drAutoSync.RecoverStartTime,
 	}
 	m.RUnlock()
+
+	// recording metrics
+	var stateNumber float64
+	switch state.State {
+	case drStateSync:
+		stateNumber = 1
+	case drStateAsyncWait:
+		stateNumber = 2
+	case drStateAsync:
+		stateNumber = 3
+	case drStateSyncRecover:
+		stateNumber = 4
+	}
+	drStateGauge.Set(stateNumber)
+	drStateIDGauge.Set(float64(state.StateID))
 
 	data, _ := json.Marshal(state)
 
