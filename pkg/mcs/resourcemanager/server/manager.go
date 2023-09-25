@@ -268,12 +268,12 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 	if name == reservedDefaultGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
-	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
-		return err
-	}
 	m.Lock()
 	delete(m.groups, name)
 	m.Unlock()
+	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
+		return err
+	}
 	return nil
 }
 
