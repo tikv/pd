@@ -1206,7 +1206,7 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	controller.Stop()
 }
 
-func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJobs() {
+func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	re := suite.Require()
 	cli := suite.client
 
@@ -1226,7 +1226,7 @@ func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJob
 	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
 	c.Start(suite.ctx)
 
-	resourceGroupName := suite.initGroups[1].Name
+	resourceGroupName := suite.initGroups[0].Name
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))
 	// test fallback for nil.
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
@@ -1257,9 +1257,15 @@ func (suite *resourceManagerClientTestSuite) TestSkipConsumptionForBackgroundJob
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	// wait for watch event modify.
-	time.Sleep(time.Millisecond * 100)
+	testutil.Eventually(re, func() bool {
+		meta := c.GetActiveResourceGroup("default")
+		if meta != nil && meta.BackgroundSettings != nil {
+			return len(meta.BackgroundSettings.JobTypes) == 2
+		}
+		return false
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
-	resourceGroupName = suite.initGroups[1].Name
+	resourceGroupName = suite.initGroups[0].Name
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_default"))
 	// test fallback for `"lightning", "ddl"`.
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
