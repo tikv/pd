@@ -144,9 +144,8 @@ const (
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
+	// The size of empty region will be correct by the previous RegionInfo.
 	regionSize := heartbeat.GetApproximateSize() / units.MiB
-	// Due to https://github.com/tikv/tikv/pull/11170, if region size is not initialized,
-	// approximate size will be zero, and region size is zero not EmptyRegionApproximateSize
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
@@ -189,9 +188,19 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	return region
 }
 
-// InheritBuckets inherits the buckets from the parent region if bucket enabled.
-func (r *RegionInfo) InheritBuckets(origin *RegionInfo) {
-	if origin != nil && r.buckets == nil {
+// Inherit inherits the buckets and region size from the parent region if bucket enabled.
+// correct approximate size and buckets by the previous size if here exists a reported RegionInfo.
+// See https://github.com/tikv/tikv/issues/11114
+func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
+	// regionSize should not be zero if region is not empty.
+	if r.GetApproximateSize() == 0 {
+		if origin != nil {
+			r.approximateSize = origin.approximateSize
+		} else {
+			r.approximateSize = EmptyRegionApproximateSize
+		}
+	}
+	if bucketEnable && origin != nil && r.buckets == nil {
 		r.buckets = origin.buckets
 	}
 }
@@ -469,11 +478,26 @@ func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
 }
 
+<<<<<<< HEAD:server/core/region.go
 // IsEmptyRegion returns whether the region is empty.
 func (r *RegionInfo) IsEmptyRegion() bool {
 	// When cluster resumes, the region size may be not initialized, but region heartbeat is send.
 	// So use `==` here.
 	return r.approximateSize == EmptyRegionApproximateSize
+=======
+// GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.
+func (r *RegionInfo) GetStorePeerApproximateKeys(storeID uint64) int64 {
+	peer := r.GetStorePeer(storeID)
+	if storeID != 0 && peer != nil && peer.IsWitness {
+		return 0
+	}
+	return r.approximateKeys
+}
+
+// GetApproximateKvSize returns the approximate kv size of the region.
+func (r *RegionInfo) GetApproximateKvSize() int64 {
+	return r.approximateKvSize
+>>>>>>> eac55a768 (Revert "statistics: fix empty region count when resuming (#7009)" (#7149)):pkg/core/region.go
 }
 
 // GetApproximateKeys returns the approximate keys of the region.

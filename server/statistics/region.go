@@ -57,12 +57,21 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 	s.Count++
 	approximateKeys := r.GetApproximateKeys()
 	approximateSize := r.GetApproximateSize()
+<<<<<<< HEAD:server/statistics/region.go
 	if approximateSize == core.EmptyRegionApproximateSize {
 		s.EmptyCount++
 	}
 	if !r.IsEmptyRegion() {
 		s.StorageSize += approximateSize
 	}
+=======
+	approximateKvSize := r.GetApproximateKvSize()
+	if approximateSize <= core.EmptyRegionApproximateSize {
+		s.EmptyCount++
+	}
+	s.StorageSize += approximateSize
+	s.UserStorageSize += approximateKvSize
+>>>>>>> eac55a768 (Revert "statistics: fix empty region count when resuming (#7009)" (#7149)):pkg/statistics/region.go
 	s.StorageKeys += approximateKeys
 	leader := r.GetLeader()
 	if leader != nil {
