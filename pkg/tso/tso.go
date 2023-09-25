@@ -180,7 +180,9 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 		last != typeutil.ZeroTime &&
 		lastSavedTime != typeutil.ZeroTime &&
 		typeutil.SubRealTimeByWallClock(last, lastSavedTime) == 0 {
-		log.Info("skip sync timestamp", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
+		log.Info("skip sync timestamp",
+			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
+			zap.Time("last", last), zap.Time("last-saved", lastSavedTime))
 		t.metrics.skipSyncEvent.Inc()
 		return nil
 	}
@@ -197,7 +199,8 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
 		log.Warn("system time may be incorrect",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-			zap.Time("last", last), zap.Time("next", next),
+			zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
+			zap.Time("next", next),
 			errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(UpdateTimestampGuard)
 	}
@@ -216,7 +219,8 @@ func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
 	t.metrics.syncOKEvent.Inc()
 	log.Info("sync and save timestamp",
 		logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-		zap.Time("last", last), zap.Time("save", save), zap.Time("next", next))
+		zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
+		zap.Time("save", save), zap.Time("next", next))
 	// save into memory
 	t.setTSOPhysical(next, true)
 	return nil
