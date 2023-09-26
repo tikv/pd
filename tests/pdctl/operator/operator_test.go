@@ -52,7 +52,7 @@ func (suite *operatorTestSuite) TestOperator() {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
 		},
 	}
-	env := tests.NewSchedulingTestEnvironment(suite.Require(), opts...)
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
 	env.RunTestInTwoModes(suite.checkOperator)
 }
 

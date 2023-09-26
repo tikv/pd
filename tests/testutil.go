@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/docker/go-units"
@@ -229,7 +230,7 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 
 // SchedulingTestEnvironment is used for test purpose.
 type SchedulingTestEnvironment struct {
-	re      *require.Assertions
+	t       *testing.T
 	ctx     context.Context
 	cancel  context.CancelFunc
 	cluster *TestCluster
@@ -237,27 +238,31 @@ type SchedulingTestEnvironment struct {
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
-func NewSchedulingTestEnvironment(re *require.Assertions, opts ...ConfigOption) *SchedulingTestEnvironment {
+func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *SchedulingTestEnvironment {
 	return &SchedulingTestEnvironment{
-		re:   re,
+		t:    t,
 		opts: opts,
 	}
 }
 
 // RunTestInTwoModes is to run test in two modes.
 func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
-	// start pd cluster in pd mode
+	// run test in pd mode
+	s.t.Log("start to run test in pd mode")
+	re := require.New(s.t)
 	s.runInPDMode()
 	test(s.cluster)
 	s.cleanup()
-	// start pd cluster in api mode
-	s.re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	defer func() {
-		s.re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
-	}()
+	s.t.Log("finish to run test in pd mode")
+
+	// run test in api mode
+	s.t.Log("start to run test in api mode")
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
 	s.runInAPIMode()
 	test(s.cluster)
 	s.cleanup()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+	s.t.Log("finish to run test in api mode")
 }
 
 func (s *SchedulingTestEnvironment) cleanup() {
@@ -267,30 +272,32 @@ func (s *SchedulingTestEnvironment) cleanup() {
 
 func (s *SchedulingTestEnvironment) runInPDMode() {
 	var err error
+	re := require.New(s.t)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.cluster, err = NewTestCluster(s.ctx, 1, s.opts...)
-	s.re.NoError(err)
+	re.NoError(err)
 	err = s.cluster.RunInitialServers()
-	s.re.NoError(err)
-	s.re.NotEmpty(s.cluster.WaitLeader())
+	re.NoError(err)
+	re.NotEmpty(s.cluster.WaitLeader())
 	leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
-	s.re.NoError(leaderServer.BootstrapCluster())
+	re.NoError(leaderServer.BootstrapCluster())
 }
 
 func (s *SchedulingTestEnvironment) runInAPIMode() {
 	var err error
+	re := require.New(s.t)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	s.cluster, err = NewTestAPICluster(s.ctx, 1, s.opts...)
-	s.re.NoError(err)
+	re.NoError(err)
 	err = s.cluster.RunInitialServers()
-	s.re.NoError(err)
-	s.re.NotEmpty(s.cluster.WaitLeader())
+	re.NoError(err)
+	re.NotEmpty(s.cluster.WaitLeader())
 	leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
-	s.re.NoError(leaderServer.BootstrapCluster())
+	re.NoError(leaderServer.BootstrapCluster())
 	// start scheduling cluster
 	tc, err := NewTestSchedulingCluster(s.ctx, 1, leaderServer.GetAddr())
-	s.re.NoError(err)
-	tc.WaitForPrimaryServing(s.re)
+	re.NoError(err)
+	tc.WaitForPrimaryServing(re)
 	s.cluster.SetSchedulingCluster(tc)
 	time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 }
