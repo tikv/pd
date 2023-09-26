@@ -301,7 +301,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
-		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
 		if err != nil {
 			return err
 		}
@@ -1105,9 +1105,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	if c.GetStoreConfig().IsEnableRegionBucket() {
-		region.InheritBuckets(origin)
-	}
+	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.isAPIServiceMode {
 		cluster.HandleStatsAsync(c, region)

@@ -531,21 +531,6 @@ error = '''
 plugin is not found: %s
 '''
 
-["PD:operator:ErrRegionAbnormalPeer"]
-error = '''
-region %v has abnormal peer
-'''
-
-["PD:operator:ErrRegionNotAdjacent"]
-error = '''
-two regions are not adjacent
-'''
-
-["PD:operator:ErrRegionNotFound"]
-error = '''
-region %v not found
-'''
-
 ["PD:os:ErrOSOpen"]
 error = '''
 open error
@@ -614,6 +599,21 @@ failed to marshal proto
 ["PD:proto:ErrProtoUnmarshal"]
 error = '''
 failed to unmarshal proto
+'''
+
+["PD:region:ErrRegionAbnormalPeer"]
+error = '''
+region %v has abnormal peer
+'''
+
+["PD:region:ErrRegionNotAdjacent"]
+error = '''
+two regions are not adjacent
+'''
+
+["PD:region:ErrRegionNotFound"]
+error = '''
+region %v not found
 '''
 
 ["PD:region:ErrRegionRuleContent"]

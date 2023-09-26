@@ -63,7 +63,7 @@ func TestMemberDelete(t *testing.T) {
 	re.NoError(err)
 	leaderName := cluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	leader := cluster.GetServer(leaderName)
+	leader := cluster.GetLeaderServer()
 	var members []*tests.TestServer
 	for _, s := range cluster.GetConfig().InitialServers {
 		if s.Name != leaderName {

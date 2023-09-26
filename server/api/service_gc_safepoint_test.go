@@ -16,7 +16,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 	"testing"
 	"time"
 
@@ -93,9 +92,8 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	suite.NoError(err)
 	suite.Equal(list, listResp)
 
-	statusCode, err := apiutil.DoDelete(testDialClient, sspURL+"/a")
+	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(suite.Require()))
 	suite.NoError(err)
-	suite.Equal(http.StatusOK, statusCode)
 
 	left, err := storage.LoadAllServiceGCSafePoints()
 	suite.NoError(err)

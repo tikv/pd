@@ -111,7 +111,10 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in
-// server-to-server. For security reason, it only accepts JSON formatted data.
+// server-to-server.
+// For security reason,
+//   - it only accepts JSON formatted data.
+//   - it only accepts file name which is `DrStatusFile`.
 func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {

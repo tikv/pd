@@ -103,11 +103,11 @@ var (
 // region errors
 var (
 	// ErrRegionNotAdjacent is error info for region not adjacent.
-	ErrRegionNotAdjacent = errors.Normalize("two regions are not adjacent", errors.RFCCodeText("PD:operator:ErrRegionNotAdjacent"))
+	ErrRegionNotAdjacent = errors.Normalize("two regions are not adjacent", errors.RFCCodeText("PD:region:ErrRegionNotAdjacent"))
 	// ErrRegionNotFound is error info for region not found.
-	ErrRegionNotFound = errors.Normalize("region %v not found", errors.RFCCodeText("PD:operator:ErrRegionNotFound"))
+	ErrRegionNotFound = errors.Normalize("region %v not found", errors.RFCCodeText("PD:region:ErrRegionNotFound"))
 	// ErrRegionAbnormalPeer is error info for region has abnormal peer.
-	ErrRegionAbnormalPeer = errors.Normalize("region %v has abnormal peer", errors.RFCCodeText("PD:operator:ErrRegionAbnormalPeer"))
+	ErrRegionAbnormalPeer = errors.Normalize("region %v has abnormal peer", errors.RFCCodeText("PD:region:ErrRegionAbnormalPeer"))
 )
 
 // plugin errors

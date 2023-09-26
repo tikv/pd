@@ -2638,7 +2638,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 					} else {
 						// Prev-kv is compacted means there must have been a delete event before this event,
 						// which means that this is just a duplicated event, so we can just ignore it.
-						log.Info("previous key-value pair has been compacted", zap.String("previous key", string(e.Kv.Key)))
+						log.Info("previous key-value pair has been compacted", zap.String("required-key", string(e.Kv.Key)))
 					}
 				}
 			}

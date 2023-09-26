@@ -75,7 +75,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		checkMembershipCh: checkMembershipCh,
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
-	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels())
+	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel())
 	if err != nil {
 		cancel()
 		return nil, err
@@ -423,9 +423,7 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	if c.GetStoreConfig().IsEnableRegionBucket() {
-		region.InheritBuckets(origin)
-	}
+	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	cluster.HandleStatsAsync(c, region)
 
