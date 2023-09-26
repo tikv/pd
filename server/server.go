@@ -59,6 +59,7 @@ import (
 	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/server/member"
 	syncer "github.com/tikv/pd/server/region_syncer"
+	"github.com/tikv/pd/server/replication"
 	"github.com/tikv/pd/server/schedule"
 	"github.com/tikv/pd/server/schedule/hbstream"
 	"github.com/tikv/pd/server/schedule/placement"
@@ -1678,8 +1679,15 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
+	if name != replication.DrStatusFile {
+		return errors.New("Invalid file name")
+	}
 	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
-	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
+	path := filepath.Join(s.GetConfig().DataDir, name)
+	if !isPathInDirectory(path, s.GetConfig().DataDir) {
+		return errors.New("Invalid file path")
+	}
+	return os.WriteFile(path, data, 0644) // #nosec
 }
 
 // SaveTTLConfig save ttl config
