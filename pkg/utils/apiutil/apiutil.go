@@ -480,6 +480,7 @@ func copyHeader(dst, src http.Header) {
 }
 
 // ParseTime parses a time string with the format "1694580288"
+// If the string is empty, it returns a zero time.
 func ParseTime(t string) (time.Time, error) {
 	if len(t) == 0 {
 		return time.Time{}, nil

@@ -162,7 +162,7 @@ func (h *operatorHandler) GetOperatorRecords(w http.ResponseWriter, r *http.Requ
 	}
 	records, err := h.GetRecords(from)
 	if err != nil {
-		h.r.JSON(w, http.StatusBadRequest, err.Error())
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.r.JSON(w, http.StatusOK, records)

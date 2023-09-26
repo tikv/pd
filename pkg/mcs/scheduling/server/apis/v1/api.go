@@ -236,7 +236,7 @@ func getOperatorRecords(c *gin.Context) {
 	}
 	records, err := handler.GetRecords(from)
 	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	c.IndentedJSON(http.StatusOK, records)
