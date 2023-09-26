@@ -462,6 +462,7 @@ func TestSetRegionConcurrence(t *testing.T) {
 		regions.AtomicCheckAndPutRegion(region)
 	}()
 	regions.AtomicCheckAndPutRegion(region)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 
 func TestSetRegion(t *testing.T) {

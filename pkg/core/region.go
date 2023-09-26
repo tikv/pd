@@ -996,7 +996,7 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 			// The region tree and the subtree update is not atomic and the region tree is updated first.
 			// If there are two thread needs to update region tree,
 			// t1: thread-A  update region tree
-			// 										t2: thread-B: update region three again
+			// 										t2: thread-B: update region tree again
 			//										t3: thread-B: update subtree
 			// t4: thread-A: update region subtree
 			// to keep region tree consistent with subtree, we need to drop this update.
