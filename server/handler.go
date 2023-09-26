@@ -226,13 +226,13 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	if h.s.IsAPIServiceMode() {
-		if err = c.AddSchedulerHandler(h.s.storage, s, args...); err != nil {
+		if err = c.AddSchedulerHandler(s, args...); err != nil {
 			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
 		log.Info("add scheduler handler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
 	} else {
-		if err = c.AddScheduler(h.s.storage, s, args...); err != nil {
+		if err = c.AddScheduler(s, args...); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}

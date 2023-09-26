@@ -328,7 +328,7 @@ func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictSchedul
 	if err != nil {
 		return
 	}
-	if err = cluster.AddScheduler(cluster.storage, evictScheduler, args...); err != nil {
+	if err = cluster.AddScheduler(evictScheduler, args...); err != nil {
 		return
 	} else if err = cluster.opt.Persist(cluster.GetStorage()); err != nil {
 		return
@@ -3035,12 +3035,12 @@ func TestAddScheduler(t *testing.T) {
 	re.Equal(4, int(batch))
 	gls, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NotNil(controller.AddScheduler(storage.NewStorageWithMemoryBackend(), gls))
+	re.NotNil(controller.AddScheduler(gls))
 	re.NotNil(controller.RemoveScheduler(gls.GetName()))
 
 	gls, err = schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NoError(controller.AddScheduler(storage.NewStorageWithMemoryBackend(), gls))
+	re.NoError(controller.AddScheduler(gls))
 
 	hb, err := schedulers.CreateScheduler(schedulers.HotRegionType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigJSONDecoder([]byte("{}")))
 	re.NoError(err)
@@ -3087,10 +3087,10 @@ func TestPersistScheduler(t *testing.T) {
 
 	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NoError(controller.AddScheduler(storage, gls1, "1"))
+	re.NoError(controller.AddScheduler(gls1, "1"))
 	evict, err := schedulers.CreateScheduler(schedulers.EvictLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.EvictLeaderType, []string{"2"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NoError(controller.AddScheduler(storage, evict, "2"))
+	re.NoError(controller.AddScheduler(evict, "2"))
 	re.Len(controller.GetSchedulerNames(), defaultCount+2)
 	sches, _, err := storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
@@ -3113,7 +3113,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	shuffle, err := schedulers.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedulers.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
-	re.NoError(controller.AddScheduler(storage, shuffle))
+	re.NoError(controller.AddScheduler(shuffle))
 	// suppose we add a new default enable scheduler
 	sc.DefaultSchedulers = append(sc.DefaultSchedulers, sc.SchedulerConfig{Type: "shuffle-region"})
 	defer func() {
@@ -3149,10 +3149,10 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(controller.GetSchedulerNames(), 3)
 	bls, err := schedulers.CreateScheduler(schedulers.BalanceLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.BalanceLeaderType, []string{"", ""}))
 	re.NoError(err)
-	re.NoError(controller.AddScheduler(storage, bls))
+	re.NoError(controller.AddScheduler(bls))
 	brs, err := schedulers.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
-	re.NoError(controller.AddScheduler(storage, brs))
+	re.NoError(controller.AddScheduler(brs))
 	re.Len(controller.GetSchedulerNames(), defaultCount)
 
 	// the scheduler option should contain 6 items
@@ -3201,7 +3201,7 @@ func TestRemoveScheduler(t *testing.T) {
 
 	gls1, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NoError(controller.AddScheduler(storage, gls1, "1"))
+	re.NoError(controller.AddScheduler(gls1, "1"))
 	re.Len(controller.GetSchedulerNames(), defaultCount+1)
 	sches, _, err := storage.LoadAllSchedulerConfigs()
 	re.NoError(err)

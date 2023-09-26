@@ -127,7 +127,7 @@ func (c *Controller) ResetSchedulerMetrics() {
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.
-func (c *Controller) AddSchedulerHandler(storage endpoint.ConfigStorage, scheduler Scheduler, args ...string) error {
+func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -137,8 +137,8 @@ func (c *Controller) AddSchedulerHandler(storage endpoint.ConfigStorage, schedul
 	}
 
 	c.schedulerHandlers[name] = scheduler
-	if err := SaveSchedulerConfig(storage, scheduler); err != nil {
-		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
+		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
@@ -175,7 +175,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 }
 
 // AddScheduler adds a scheduler.
-func (c *Controller) AddScheduler(storage endpoint.ConfigStorage, scheduler Scheduler, args ...string) error {
+func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -191,7 +191,7 @@ func (c *Controller) AddScheduler(storage endpoint.ConfigStorage, scheduler Sche
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.Scheduler.GetName()] = s
-	if err := SaveSchedulerConfig(storage, scheduler); err != nil {
+	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
