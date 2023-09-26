@@ -59,7 +59,7 @@ type evictSlowTrendSchedulerConfig struct {
 	evictCandidate slowCandidate
 	// Last chosen candidate for eviction.
 	lastEvictCandidate slowCandidate
-
+	// Duration gap for recovering the candidate, unit: s.
 	RecoveryDurationGap uint64 `json:"recovery-duration"`
 	// Only evict one store for now
 	EvictedStores []uint64 `json:"evict-by-trend-stores"`
