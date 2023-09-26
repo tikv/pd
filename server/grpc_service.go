@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
@@ -199,7 +200,7 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 	}
 
 	// Get the minimal timestamp from the TSO servers/pods
-	var mutex sync.Mutex
+	var mutex syncutil.Mutex
 	resps := make([]*tsopb.GetMinTSResponse, len(addrs))
 	wg := sync.WaitGroup{}
 	wg.Add(len(addrs))

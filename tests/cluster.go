@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
@@ -68,7 +69,7 @@ var (
 
 // TestServer is only for test.
 type TestServer struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
 	state      int32
@@ -445,7 +446,7 @@ type TestCluster struct {
 	servers map[string]*TestServer
 	// tsPool is used to check the TSO uniqueness among the test cluster
 	tsPool struct {
-		sync.Mutex
+		syncutil.Mutex
 		pool map[uint64]struct{}
 	}
 	schedulingCluster *TestSchedulingCluster
@@ -491,7 +492,7 @@ func createTestCluster(ctx context.Context, initialServerCount int, isAPIService
 		config:  config,
 		servers: servers,
 		tsPool: struct {
-			sync.Mutex
+			syncutil.Mutex
 			pool map[uint64]struct{}
 		}{
 			pool: make(map[uint64]struct{}),
@@ -512,7 +513,7 @@ func restartTestCluster(
 		config:  cluster.config,
 		servers: make(map[string]*TestServer, len(cluster.servers)),
 		tsPool: struct {
-			sync.Mutex
+			syncutil.Mutex
 			pool map[uint64]struct{}
 		}{
 			pool: make(map[uint64]struct{}),

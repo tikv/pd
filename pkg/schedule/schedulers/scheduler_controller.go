@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +40,7 @@ var denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues
 
 // Controller is used to manage all schedulers.
 type Controller struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	wg      sync.WaitGroup
 	ctx     context.Context
 	cluster sche.SchedulerCluster

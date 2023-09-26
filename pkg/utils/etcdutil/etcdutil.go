@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/etcdserver"
@@ -566,7 +567,7 @@ type LoopWatcher struct {
 	postEventFn func() error
 
 	// forceLoadMu is used to ensure two force loads have minimal interval.
-	forceLoadMu sync.RWMutex
+	forceLoadMu syncutil.RWMutex
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
 	lastTimeForceLoad time.Time
 
