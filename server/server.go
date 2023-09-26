@@ -57,6 +57,7 @@ import (
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -1872,8 +1873,15 @@ func (s *Server) ReplicateFileToMember(ctx context.Context, member *pdpb.Member,
 
 // PersistFile saves a file in DataDir.
 func (s *Server) PersistFile(name string, data []byte) error {
+	if name != replication.DrStatusFile {
+		return errors.New("Invalid file name")
+	}
 	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
-	return os.WriteFile(filepath.Join(s.GetConfig().DataDir, name), data, 0644) // #nosec
+	path := filepath.Join(s.GetConfig().DataDir, name)
+	if !isPathInDirectory(path, s.GetConfig().DataDir) {
+		return errors.New("Invalid file path")
+	}
+	return os.WriteFile(path, data, 0644) // #nosec
 }
 
 // SaveTTLConfig save ttl config

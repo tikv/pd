@@ -423,9 +423,7 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	if c.GetStoreConfig().IsEnableRegionBucket() {
-		region.InheritBuckets(origin)
-	}
+	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	cluster.HandleStatsAsync(c, region)
 
