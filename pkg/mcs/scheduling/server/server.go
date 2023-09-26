@@ -444,16 +444,12 @@ func (s *Server) startCluster(context.Context) error {
 	}
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
 	s.cluster.StartBackgroundJobs()
-	go s.GetCoordinator().RunUntilStop()
 	return nil
 }
 
 func (s *Server) stopCluster() {
-	s.GetCoordinator().Stop()
 	s.cluster.StopBackgroundJobs()
-	s.ruleWatcher.Close()
-	s.configWatcher.Close()
-	s.metaWatcher.Close()
+	s.stopWatcher()
 }
 
 func (s *Server) startWatcher() (err error) {
@@ -467,6 +463,12 @@ func (s *Server) startWatcher() (err error) {
 	}
 	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID)
 	return err
+}
+
+func (s *Server) stopWatcher() {
+	s.ruleWatcher.Close()
+	s.configWatcher.Close()
+	s.metaWatcher.Close()
 }
 
 // GetPersistConfig returns the persist config.

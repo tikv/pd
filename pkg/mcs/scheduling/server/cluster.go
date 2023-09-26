@@ -47,6 +47,7 @@ type Cluster struct {
 	checkMembershipCh chan struct{}
 	apiServerLeader   atomic.Value
 	clusterID         uint64
+	running           atomic.Bool
 }
 
 const regionLabelGCInterval = time.Hour
@@ -215,6 +216,9 @@ func (c *Cluster) updateScheduler() {
 	// Make sure the check will be triggered once later.
 	notifier <- struct{}{}
 	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -222,6 +226,18 @@ func (c *Cluster) updateScheduler() {
 			return
 		case <-notifier:
 			// This is triggered by the watcher when the schedulers are updated.
+		}
+
+		if !c.running.Load() {
+			select {
+			case <-c.ctx.Done():
+				log.Info("cluster is closing, stop listening the schedulers updating notifier")
+				return
+			case <-ticker.C:
+				// retry
+				notifier <- struct{}{}
+				continue
+			}
 		}
 
 		log.Info("schedulers updating notifier is triggered, try to update the scheduler")
@@ -394,15 +410,29 @@ func (c *Cluster) runUpdateStoreStats() {
 	}
 }
 
+// runCoordinator runs the main scheduling loop.
+func (c *Cluster) runCoordinator() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+	c.coordinator.RunUntilStop()
+}
+
 // StartBackgroundJobs starts background jobs.
 func (c *Cluster) StartBackgroundJobs() {
-	c.wg.Add(2)
+	c.wg.Add(3)
 	go c.updateScheduler()
 	go c.runUpdateStoreStats()
+	go c.runCoordinator()
+	c.running.Store(true)
 }
 
 // StopBackgroundJobs stops background jobs.
 func (c *Cluster) StopBackgroundJobs() {
+	if !c.running.Load() {
+		return
+	}
+	c.running.Store(false)
+	c.coordinator.Stop()
 	c.cancel()
 	c.wg.Wait()
 }
