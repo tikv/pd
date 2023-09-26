@@ -45,7 +45,7 @@ func (suite *apiTestSuite) SetupSuite() {
 	suite.NoError(err)
 	suite.NoError(cluster.RunInitialServers())
 	suite.NotEmpty(cluster.WaitLeader())
-	suite.server = cluster.GetServer(cluster.GetLeader())
+	suite.server = cluster.GetLeaderServer()
 	suite.NoError(suite.server.BootstrapCluster())
 	suite.backendEndpoints = suite.server.GetAddr()
 	suite.dialClient = &http.Client{

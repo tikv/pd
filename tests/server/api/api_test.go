@@ -40,7 +40,6 @@ import (
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/pdctl"
 	"go.uber.org/goleak"
 )
 
@@ -64,6 +63,7 @@ func TestReconnect(t *testing.T) {
 	// Make connections to followers.
 	// Make sure they proxy requests to the leader.
 	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
 	for name, s := range cluster.GetServers() {
 		if name != leader {
 			res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
@@ -136,7 +136,8 @@ func (suite *middlewareTestSuite) TearDownSuite() {
 
 func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/api/addRequestInfoMiddleware", "return(true)"))
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
+	suite.NotNil(leader)
 
 	input := map[string]interface{}{
 		"enable-audit": "true",
@@ -189,7 +190,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
+	leader := cluster.GetLeaderServer()
 	input := map[string]interface{}{
 		"enable-audit": "true",
 	}
@@ -206,7 +207,8 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 }
 
 func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
+	suite.NotNil(leader)
 	input := map[string]interface{}{
 		"enable-rate-limit": "true",
 	}
@@ -294,7 +296,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		servers = append(servers, s.GetServer())
 	}
 	server.MustWaitLeader(suite.Require(), servers)
-	leader = suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader = suite.cluster.GetLeaderServer()
 	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), true)
 	cfg, ok := leader.GetServer().GetRateLimitConfig().LimiterConfig["SetLogLevel"]
 	suite.Equal(ok, true)
@@ -370,7 +372,8 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 }
 
 func (suite *middlewareTestSuite) TestSwaggerUrl() {
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
+	suite.NotNil(leader)
 	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", nil)
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
@@ -379,7 +382,8 @@ func (suite *middlewareTestSuite) TestSwaggerUrl() {
 }
 
 func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
+	suite.NotNil(leader)
 	input := map[string]interface{}{
 		"enable-audit": "true",
 	}
@@ -414,7 +418,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 		servers = append(servers, s.GetServer())
 	}
 	server.MustWaitLeader(suite.Require(), servers)
-	leader = suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader = suite.cluster.GetLeaderServer()
 
 	timeUnix = time.Now().Unix() - 20
 	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
@@ -447,7 +451,8 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	fname := testutil.InitTempFileLogger("info")
 	defer os.RemoveAll(fname)
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
+	suite.NotNil(leader)
 	input := map[string]interface{}{
 		"enable-audit": "true",
 	}
@@ -476,7 +481,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
+	leader := cluster.GetLeaderServer()
 	input := map[string]interface{}{
 		"enable-audit": "true",
 	}
@@ -498,7 +503,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
+	leader := cluster.GetLeaderServer()
 	input := map[string]interface{}{
 		"enable-audit": "true",
 	}
@@ -520,7 +525,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	cluster, _ := tests.NewTestCluster(ctx, 1)
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
+	leader := cluster.GetLeaderServer()
 	input := map[string]interface{}{
 		"enable-audit": "false",
 	}
@@ -581,7 +586,7 @@ func (suite *redirectorTestSuite) TearDownSuite() {
 
 func (suite *redirectorTestSuite) TestRedirect() {
 	re := suite.Require()
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
 	suite.NotNil(leader)
 	header := mustRequestSuccess(re, leader.GetServer())
 	header.Del("Date")
@@ -597,7 +602,7 @@ func (suite *redirectorTestSuite) TestRedirect() {
 func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	// Find a follower.
 	var follower *server.Server
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
 	for _, svr := range suite.cluster.GetServers() {
 		if svr != leader {
 			follower = svr.GetServer()
@@ -621,7 +626,7 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 func (suite *redirectorTestSuite) TestNotLeader() {
 	// Find a follower.
 	var follower *server.Server
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
 	for _, svr := range suite.cluster.GetServers() {
 		if svr != leader {
 			follower = svr.GetServer()
@@ -652,7 +657,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 }
 
 func (suite *redirectorTestSuite) TestXForwardedFor() {
-	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	leader := suite.cluster.GetLeaderServer()
 	suite.NoError(leader.BootstrapCluster())
 	fname := testutil.InitTempFileLogger("info")
 	defer os.RemoveAll(fname)
@@ -697,7 +702,7 @@ func TestRemovingProgress(t *testing.T) {
 	re.NoError(err)
 
 	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
+	leader := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
@@ -730,12 +735,12 @@ func TestRemovingProgress(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leader.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
-	pdctl.MustPutRegion(re, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
-	pdctl.MustPutRegion(re, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(30))
-	pdctl.MustPutRegion(re, cluster, 1002, 1, []byte("e"), []byte("f"), core.SetApproximateSize(50))
-	pdctl.MustPutRegion(re, cluster, 1003, 2, []byte("g"), []byte("h"), core.SetApproximateSize(40))
+	tests.MustPutRegion(re, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
+	tests.MustPutRegion(re, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(30))
+	tests.MustPutRegion(re, cluster, 1002, 1, []byte("e"), []byte("f"), core.SetApproximateSize(50))
+	tests.MustPutRegion(re, cluster, 1003, 2, []byte("g"), []byte("h"), core.SetApproximateSize(40))
 
 	// no store removing
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusNotFound)
@@ -757,8 +762,8 @@ func TestRemovingProgress(t *testing.T) {
 	re.Equal(math.MaxFloat64, p.LeftSeconds)
 
 	// update size
-	pdctl.MustPutRegion(re, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
-	pdctl.MustPutRegion(re, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
+	tests.MustPutRegion(re, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
+	tests.MustPutRegion(re, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
 
 	// is not prepared
 	time.Sleep(2 * time.Second)
@@ -812,7 +817,8 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	leader := cluster.GetServer(cluster.WaitLeader())
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
 
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()
@@ -855,7 +861,7 @@ func TestPreparingProgress(t *testing.T) {
 	re.NoError(err)
 
 	cluster.WaitLeader()
-	leader := cluster.GetServer(cluster.GetLeader())
+	leader := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
@@ -905,10 +911,10 @@ func TestPreparingProgress(t *testing.T) {
 	}
 
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leader.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 	for i := 0; i < 100; i++ {
-		pdctl.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("p%d", i)), []byte(fmt.Sprintf("%d", i+1)), core.SetApproximateSize(10))
+		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("p%d", i)), []byte(fmt.Sprintf("%d", i+1)), core.SetApproximateSize(10))
 	}
 	// no store preparing
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
@@ -935,8 +941,8 @@ func TestPreparingProgress(t *testing.T) {
 	re.Equal(math.MaxFloat64, p.LeftSeconds)
 
 	// update size
-	pdctl.MustPutRegion(re, cluster, 1000, 4, []byte(fmt.Sprintf("%d", 1000)), []byte(fmt.Sprintf("%d", 1001)), core.SetApproximateSize(10))
-	pdctl.MustPutRegion(re, cluster, 1001, 5, []byte(fmt.Sprintf("%d", 1001)), []byte(fmt.Sprintf("%d", 1002)), core.SetApproximateSize(40))
+	tests.MustPutRegion(re, cluster, 1000, 4, []byte(fmt.Sprintf("%d", 1000)), []byte(fmt.Sprintf("%d", 1001)), core.SetApproximateSize(10))
+	tests.MustPutRegion(re, cluster, 1001, 5, []byte(fmt.Sprintf("%d", 1001)), []byte(fmt.Sprintf("%d", 1002)), core.SetApproximateSize(40))
 	time.Sleep(2 * time.Second)
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
