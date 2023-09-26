@@ -145,35 +145,60 @@ const (
 	InitClusterRegionThreshold = 100
 )
 
+// RegionHeartbeatResponse is the interface for region heartbeat response.
+type RegionHeartbeatResponse interface {
+	GetTargetPeer() *metapb.Peer
+	GetRegionId() uint64
+}
+
+// RegionHeartbeatRequest is the interface for region heartbeat request.
+type RegionHeartbeatRequest interface {
+	GetTerm() uint64
+	GetRegion() *metapb.Region
+	GetLeader() *metapb.Peer
+	GetDownPeers() []*pdpb.PeerStats
+	GetPendingPeers() []*metapb.Peer
+	GetBytesWritten() uint64
+	GetKeysWritten() uint64
+	GetBytesRead() uint64
+	GetKeysRead() uint64
+	GetInterval() *pdpb.TimeInterval
+	GetQueryStats() *pdpb.QueryStats
+	GetApproximateSize() uint64
+	GetApproximateKeys() uint64
+}
+
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
+func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
+	// The size of empty region will be correct by the previous RegionInfo.
 	regionSize := heartbeat.GetApproximateSize() / units.MiB
-	// Due to https://github.com/tikv/tikv/pull/11170, if region size is not initialized,
-	// approximate size will be zero, and region size is zero not EmptyRegionApproximateSize
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
-	regionKvSize := heartbeat.GetApproximateKvSize() / units.MiB
 
 	region := &RegionInfo{
-		term:              heartbeat.GetTerm(),
-		meta:              heartbeat.GetRegion(),
-		leader:            heartbeat.GetLeader(),
-		downPeers:         heartbeat.GetDownPeers(),
-		pendingPeers:      heartbeat.GetPendingPeers(),
-		cpuUsage:          heartbeat.GetCpuUsage(),
-		writtenBytes:      heartbeat.GetBytesWritten(),
-		writtenKeys:       heartbeat.GetKeysWritten(),
-		readBytes:         heartbeat.GetBytesRead(),
-		readKeys:          heartbeat.GetKeysRead(),
-		approximateSize:   int64(regionSize),
-		approximateKvSize: int64(regionKvSize),
-		approximateKeys:   int64(heartbeat.GetApproximateKeys()),
-		interval:          heartbeat.GetInterval(),
-		replicationStatus: heartbeat.GetReplicationStatus(),
-		queryStats:        heartbeat.GetQueryStats(),
+		term:            heartbeat.GetTerm(),
+		meta:            heartbeat.GetRegion(),
+		leader:          heartbeat.GetLeader(),
+		downPeers:       heartbeat.GetDownPeers(),
+		pendingPeers:    heartbeat.GetPendingPeers(),
+		writtenBytes:    heartbeat.GetBytesWritten(),
+		writtenKeys:     heartbeat.GetKeysWritten(),
+		readBytes:       heartbeat.GetBytesRead(),
+		readKeys:        heartbeat.GetKeysRead(),
+		approximateSize: int64(regionSize),
+		approximateKeys: int64(heartbeat.GetApproximateKeys()),
+		interval:        heartbeat.GetInterval(),
+		queryStats:      heartbeat.GetQueryStats(),
+	}
+
+	// scheduling service doesn't need the following fields.
+	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
+		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
+		region.replicationStatus = h.GetReplicationStatus()
+		region.cpuUsage = h.GetCpuUsage()
 	}
 
 	for _, opt := range opts {
@@ -196,9 +221,19 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	return region
 }
 
-// InheritBuckets inherits the buckets from the parent region if bucket enabled.
-func (r *RegionInfo) InheritBuckets(origin *RegionInfo) {
-	if origin != nil && r.buckets == nil {
+// Inherit inherits the buckets and region size from the parent region if bucket enabled.
+// correct approximate size and buckets by the previous size if here exists a reported RegionInfo.
+// See https://github.com/tikv/tikv/issues/11114
+func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
+	// regionSize should not be zero if region is not empty.
+	if r.GetApproximateSize() == 0 {
+		if origin != nil {
+			r.approximateSize = origin.approximateSize
+		} else {
+			r.approximateSize = EmptyRegionApproximateSize
+		}
+	}
+	if bucketEnable && origin != nil && r.buckets == nil {
 		r.buckets = origin.buckets
 	}
 }
@@ -506,13 +541,6 @@ func (r *RegionInfo) GetStorePeerApproximateSize(storeID uint64) int64 {
 // GetApproximateSize returns the approximate size of the region.
 func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
-}
-
-// IsEmptyRegion returns whether the region is empty.
-func (r *RegionInfo) IsEmptyRegion() bool {
-	// When cluster resumes, the region size may be not initialized, but region heartbeat is send.
-	// So use `==` here.
-	return r.approximateSize == EmptyRegionApproximateSize
 }
 
 // GetStorePeerApproximateKeys returns the approximate keys of the peer on the specified store.

@@ -44,7 +44,7 @@ func TestKeyspaceGroup(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	pdAddr := tc.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
@@ -113,7 +113,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// split keyspace group.
@@ -164,7 +164,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// check keyspace group information.
@@ -207,7 +207,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// set-node keyspace group.
@@ -309,7 +309,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// split keyspace group.
@@ -427,7 +427,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// split keyspace group.
@@ -518,7 +518,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	cmd := pdctlCmd.GetRootCmd()
 
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	defaultKeyspaceGroupID := fmt.Sprintf("%d", utils.DefaultKeyspaceGroupID)
 
@@ -600,7 +600,7 @@ func TestInPDMode(t *testing.T) {
 	pdAddr := tc.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
 	tc.WaitLeader()
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	argsList := [][]string{

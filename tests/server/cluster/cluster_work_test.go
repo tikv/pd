@@ -42,7 +42,7 @@ func TestValidRequestRegion(t *testing.T) {
 	re.NoError(err)
 
 	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -86,7 +86,7 @@ func TestAskSplit(t *testing.T) {
 	re.NoError(err)
 
 	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -143,7 +143,7 @@ func TestSuspectRegions(t *testing.T) {
 	re.NoError(err)
 
 	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)

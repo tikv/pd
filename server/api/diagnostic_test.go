@@ -24,7 +24,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -129,7 +128,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	suite.checkStatus("normal", balanceRegionURL)
 
 	deleteURL := fmt.Sprintf("%s/%s", suite.schedulerPrifex, schedulers.BalanceRegionName)
-	_, err = apiutil.DoDelete(testDialClient, deleteURL)
+	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 	suite.NoError(err)
 	suite.checkStatus("disabled", balanceRegionURL)
 }

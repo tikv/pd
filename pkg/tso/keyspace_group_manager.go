@@ -1226,16 +1226,17 @@ func (kgm *KeyspaceGroupManager) finishSplitKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	statusCode, err := apiutil.DoDelete(
+	resp, err := apiutil.DoDelete(
 		kgm.httpClient,
 		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/split", id))
 	if err != nil {
 		return err
 	}
-	if statusCode != http.StatusOK {
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
 		log.Warn("failed to finish split keyspace group",
 			zap.Uint32("keyspace-group-id", id),
-			zap.Int("status-code", statusCode))
+			zap.Int("status-code", resp.StatusCode))
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	kgm.metrics.finishSplitSendDuration.Observe(time.Since(startRequest).Seconds())
@@ -1264,16 +1265,17 @@ func (kgm *KeyspaceGroupManager) finishMergeKeyspaceGroup(id uint32) error {
 		return nil
 	}
 	startRequest := time.Now()
-	statusCode, err := apiutil.DoDelete(
+	resp, err := apiutil.DoDelete(
 		kgm.httpClient,
 		kgm.cfg.GeBackendEndpoints()+keyspaceGroupsAPIPrefix+fmt.Sprintf("/%d/merge", id))
 	if err != nil {
 		return err
 	}
-	if statusCode != http.StatusOK {
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
 		log.Warn("failed to finish merging keyspace group",
 			zap.Uint32("keyspace-group-id", id),
-			zap.Int("status-code", statusCode))
+			zap.Int("status-code", resp.StatusCode))
 		return errs.ErrSendRequest.FastGenByArgs()
 	}
 	kgm.metrics.finishMergeSendDuration.Observe(time.Since(startRequest).Seconds())

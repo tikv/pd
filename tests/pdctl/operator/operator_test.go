@@ -79,17 +79,17 @@ func TestOperator(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
 	}))
-	pdctl.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
+	tests.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
 		{Id: 3, StoreId: 1},
 		{Id: 4, StoreId: 2},
 	}))
@@ -261,7 +261,7 @@ func TestForwardOperatorRequest(t *testing.T) {
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
-	server := cluster.GetServer(cluster.GetLeader())
+	server := cluster.GetLeaderServer()
 	re.NoError(server.BootstrapCluster())
 	backendEndpoints := server.GetAddr()
 	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)

@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
@@ -447,6 +448,7 @@ type TestCluster struct {
 		sync.Mutex
 		pool map[uint64]struct{}
 	}
+	schedulingCluster *TestSchedulingCluster
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -627,6 +629,11 @@ func (c *TestCluster) GetFollower() string {
 		}
 	}
 	return ""
+}
+
+// GetLeaderServer returns the leader server of all servers
+func (c *TestCluster) GetLeaderServer() *TestServer {
+	return c.GetServer(c.GetLeader())
 }
 
 // WaitLeader is used to get leader.
@@ -851,6 +858,19 @@ func (c *TestCluster) CheckTSOUnique(ts uint64) bool {
 	}
 	c.tsPool.pool[ts] = struct{}{}
 	return true
+}
+
+// GetSchedulingPrimaryServer returns the scheduling primary server.
+func (c *TestCluster) GetSchedulingPrimaryServer() *scheduling.Server {
+	if c.schedulingCluster == nil {
+		return nil
+	}
+	return c.schedulingCluster.GetPrimaryServer()
+}
+
+// SetSchedulingCluster sets the scheduling cluster.
+func (c *TestCluster) SetSchedulingCluster(cluster *TestSchedulingCluster) {
+	c.schedulingCluster = cluster
 }
 
 // WaitOp represent the wait configuration
