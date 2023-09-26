@@ -301,7 +301,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
-		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
 		if err != nil {
 			return err
 		}
@@ -1105,24 +1105,18 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	if c.GetStoreConfig().IsEnableRegionBucket() {
-		region.InheritBuckets(origin)
-	}
+	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.isAPIServiceMode {
 		cluster.HandleStatsAsync(c, region)
 	}
 
+	hasRegionStats := c.regionStats != nil
+	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
-	changed := regionGuide(region, origin)
-	return c.SaveRegion(region, changed)
-}
-
-// SaveRegion saves region info into cache and PD storage.
-func (c *RaftCluster) SaveRegion(region *core.RegionInfo, changed *core.RegionChanged) (err error) {
-	hasRegionStats := c.regionStats != nil
-	if !c.isAPIServiceMode && !changed.SaveKV && !changed.SaveCache && !changed.IsNew {
+	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
+	if !c.isAPIServiceMode && !saveKV && !saveCache && !isNew {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1136,15 +1130,14 @@ func (c *RaftCluster) SaveRegion(region *core.RegionInfo, changed *core.RegionCh
 	})
 
 	var overlaps []*core.RegionInfo
-
-	if changed.SaveCache {
+	if saveCache {
 		failpoint.Inject("decEpoch", func() {
 			region = region.Clone(core.SetRegionConfVer(2), core.SetRegionVersion(2))
 		})
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
-		// However, it can't solve the race condition of concurrent heartbeats from the same region.
+		// However it can't solve the race condition of concurrent heartbeats from the same region.
 		if overlaps, err = c.core.AtomicCheckAndPutRegion(region); err != nil {
 			return err
 		}
@@ -1155,7 +1148,7 @@ func (c *RaftCluster) SaveRegion(region *core.RegionInfo, changed *core.RegionCh
 	}
 
 	if !c.isAPIServiceMode {
-		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, changed.IsNew, c.IsPrepared())
+		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, c.IsPrepared())
 	}
 
 	if c.storage != nil {
@@ -1171,7 +1164,7 @@ func (c *RaftCluster) SaveRegion(region *core.RegionInfo, changed *core.RegionCh
 					errs.ZapError(err))
 			}
 		}
-		if changed.SaveKV {
+		if saveKV {
 			if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
 				log.Error("failed to save region to storage",
 					zap.Uint64("region-id", region.GetID()),
@@ -1182,12 +1175,13 @@ func (c *RaftCluster) SaveRegion(region *core.RegionInfo, changed *core.RegionCh
 		}
 	}
 
-	if changed.SaveKV || changed.NeedSync {
+	if saveKV || needSync {
 		select {
 		case c.changedRegions <- region:
 		default:
 		}
 	}
+
 	return nil
 }
 

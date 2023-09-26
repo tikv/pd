@@ -198,7 +198,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			return false
 		}(),
 		LearnerPeer: len(region.GetLearners()) > 0,
-		EmptyRegion: region.IsEmptyRegion(),
+		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
 		OversizedRegion: region.IsOversized(
 			int64(r.conf.GetRegionMaxSize()),
 			int64(r.conf.GetRegionMaxKeys()),
@@ -206,7 +206,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		UndersizedRegion: region.NeedMerge(
 			int64(r.conf.GetMaxMergeRegionSize()),
 			int64(r.conf.GetMaxMergeRegionKeys()),
-		) && region.GetApproximateSize() >= core.EmptyRegionApproximateSize,
+		),
 		WitnessLeader: region.GetLeader().GetIsWitness(),
 	}
 	// Check if the region meets any of the conditions and update the corresponding info.

@@ -142,7 +142,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 	statsAll := &statistics.RegionStats{
 		Count:            4,
 		EmptyCount:       1,
-		StorageSize:      350,
+		StorageSize:      351,
 		UserStorageSize:  291,
 		StorageKeys:      221,
 		StoreLeaderCount: map[uint64]int{1: 1, 4: 2, 5: 1},
@@ -156,7 +156,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 	stats23 := &statistics.RegionStats{
 		Count:            2,
 		EmptyCount:       1,
-		StorageSize:      200,
+		StorageSize:      201,
 		UserStorageSize:  181,
 		StorageKeys:      151,
 		StoreLeaderCount: map[uint64]int{4: 1, 5: 1},

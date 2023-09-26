@@ -389,7 +389,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 		if !suite.legacy {
 			suite.tsoCluster.WaitForDefaultPrimaryServing(re).Close()
 		} else {
-			suite.cluster.GetServer(suite.cluster.GetLeader()).GetServer().Close()
+			suite.cluster.GetLeaderServer().GetServer().Close()
 		}
 		time.Sleep(time.Duration(n) * time.Second)
 	}

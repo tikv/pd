@@ -55,7 +55,6 @@ type ResourceManagerClient interface {
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
-	WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error)
 }
@@ -186,52 +185,6 @@ func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 		groups = append(groups, group)
 	}
 	return groups, resp.Header.Revision, nil
-}
-
-// WatchResourceGroup [just for TEST] watches resource groups changes.
-// It returns a stream of slices of resource groups.
-// The first message in stream contains all current resource groups,
-// all subsequent messages contains new events[PUT/DELETE] for all resource groups.
-func (c *client) WatchResourceGroup(ctx context.Context, revision int64) (chan []*rmpb.ResourceGroup, error) {
-	configChan, err := c.Watch(ctx, GroupSettingsPathPrefixBytes, WithRev(revision), WithPrefix())
-	if err != nil {
-		return nil, err
-	}
-	resourceGroupWatcherChan := make(chan []*rmpb.ResourceGroup)
-	go func() {
-		defer func() {
-			close(resourceGroupWatcherChan)
-			if r := recover(); r != nil {
-				log.Error("[pd] panic in ResourceManagerClient `WatchResourceGroups`", zap.Any("error", r))
-				return
-			}
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case res, ok := <-configChan:
-				if !ok {
-					return
-				}
-				groups := make([]*rmpb.ResourceGroup, 0, len(res))
-				for _, item := range res {
-					switch item.Type {
-					case meta_storagepb.Event_PUT:
-						group := &rmpb.ResourceGroup{}
-						if err := proto.Unmarshal(item.Kv.Value, group); err != nil {
-							return
-						}
-						groups = append(groups, group)
-					case meta_storagepb.Event_DELETE:
-						continue
-					}
-				}
-				resourceGroupWatcherChan <- groups
-			}
-		}
-	}()
-	return resourceGroupWatcherChan, err
 }
 
 func (c *client) AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error) {
