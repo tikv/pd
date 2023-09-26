@@ -68,6 +68,8 @@ func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage e
 
 // Wait waits on all schedulers to exit.
 func (c *Controller) Wait() {
+	c.Lock()
+	defer c.Unlock()
 	c.wg.Wait()
 }
 
