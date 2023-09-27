@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/config"
@@ -42,7 +43,7 @@ type tsoConsistencyTestSuite struct {
 	leaderServer *tests.TestServer
 	dcClientMap  map[string]pdpb.PDClient
 
-	tsPoolMutex sync.Mutex
+	tsPoolMutex syncutil.Mutex
 	tsPool      map[uint64]struct{}
 }
 
