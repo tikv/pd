@@ -61,6 +61,7 @@ type FileReplicater interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 }
 
+// DrStatusFile is the file name that stores the dr status.
 const DrStatusFile = "DR_STATE"
 const persistFileTimeout = time.Second * 10
 
