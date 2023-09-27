@@ -27,8 +27,6 @@ import (
 const (
 	keyspacePrefix = "pd/api/v2/keyspaces"
 	// flags
-	nmID        = "id"
-	nmName      = "name"
 	nmConfig    = "config"
 	nmLimit     = "limit"
 	nmPageToken = "page-token"
@@ -50,40 +48,43 @@ func NewKeyspaceCommand() *cobra.Command {
 
 func newShowKeyspaceCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "show [flags]",
-		Short: "show keyspace metadata specified by keyspace name/id, if both provided, name will be used",
-		Run:   showKeyspaceCommandFunc,
+		Use:   "show",
+		Short: "show keyspace metadata",
 	}
-	r.Flags().String(nmID, "", "keyspace id")
-	r.Flags().String(nmName, "", "keyspace name")
+	showByID := &cobra.Command{
+		Use:   "id <id>",
+		Short: "show keyspace metadata specified by keyspace id",
+		Run:   showKeyspaceIDCommandFunc,
+	}
+	showByName := &cobra.Command{
+		Use:   "name <name>",
+		Short: "show keyspace metadata specified by keyspace name",
+		Run:   showKeyspaceNameCommandFunc,
+	}
+	r.AddCommand(showByID)
+	r.AddCommand(showByName)
 	return r
 }
 
-func showKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 0 {
+func showKeyspaceIDCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
 		cmd.Usage()
 		return
 	}
-	id, err := cmd.Flags().GetString(nmID)
+	resp, err := doRequest(cmd, fmt.Sprintf("%s/id/%s", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Println("Failed to parse flag: ", err)
+		cmd.Printf("Failed to get the keyspace information: %s\n", err)
 		return
 	}
-	name, err := cmd.Flags().GetString(nmName)
-	if err != nil {
-		cmd.Println("Failed to parse flag: ", err)
+	cmd.Println(resp)
+}
+
+func showKeyspaceNameCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 1 {
+		cmd.Usage()
 		return
 	}
-	var url string
-	if name != "" {
-		url = fmt.Sprintf("%s/%s?force_refresh_group_id=true", keyspacePrefix, name)
-	} else if id != "" {
-		url = fmt.Sprintf("%s/id/%s", keyspacePrefix, id)
-	} else {
-		cmd.Println("Either id or name should be provided")
-		return
-	}
-	resp, err := doRequest(cmd, url, http.MethodGet, http.Header{})
+	resp, err := doRequest(cmd, fmt.Sprintf("%s/%s", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the keyspace information: %s\n", err)
 		return
