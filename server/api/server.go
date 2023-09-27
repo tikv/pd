@@ -39,6 +39,22 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	prefix := apiPrefix + "/api/v1"
 	r := createRouter(apiPrefix, svr)
 	router := mux.NewRouter()
+
+	// Following requests are redirected:
+	// 	"/admin/reset-ts", http.MethodPost
+	//	"/operators", http.MethodGet
+	//	"/operators", http.MethodPost
+	//	"/operators/records",http.MethodGet
+	//	"/operators/{region_id}", http.MethodGet
+	//	"/operators/{region_id}", http.MethodDelete
+	//	"/checker/{name}", http.MethodPost
+	//	"/checker/{name}", http.MethodGet
+	//	"/schedulers", http.MethodGet
+	//	"/schedulers/{name}", http.MethodPost
+	//	"/schedulers/diagnostic/{name}", http.MethodGet
+	// Following requests are **not** redirected:
+	//	"/schedulers", http.MethodPost
+	//	"/schedulers/{name}", http.MethodDelete
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
 		serverapi.NewRedirector(svr,
@@ -52,18 +68,23 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/operators",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodPost, http.MethodGet, http.MethodDelete}),
-			// because the writing of all the meta information of the scheduling service is in the API server,
-			// we only forward read-only requests about checkers and schedulers to the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/checker", // Note: this is a typo in the original code
 				scheapi.APIPathPrefix+"/checkers",
 				mcs.SchedulingServiceName,
-				[]string{http.MethodGet}),
+				[]string{http.MethodPost, http.MethodGet}),
+			// because the writing of all the meta information of the scheduling service is in the API server,
+			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",
 				scheapi.APIPathPrefix+"/schedulers",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/schedulers/", // Note: this means "/schedulers/{name}"
+				scheapi.APIPathPrefix+"/schedulers",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost}),
 			// TODO: we need to consider the case that v1 api not support restful api.
 			// we might change the previous path parameters to query parameters.
 		),

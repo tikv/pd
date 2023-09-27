@@ -33,7 +33,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"go.uber.org/zap"
 )
 
 // Server is the interface for handler about schedule.
@@ -719,4 +721,153 @@ func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]pl
 		}
 	}
 	return storeIDToPeerRole, true
+}
+
+// GetCheckerStatus returns the status of the checker.
+func (h *Handler) GetCheckerStatus(name string) (map[string]bool, error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	isPaused, err := co.IsCheckerPaused(name)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]bool{
+		"paused": isPaused,
+	}, nil
+}
+
+// GetSchedulerNames returns all names of schedulers.
+func (h *Handler) GetSchedulerNames() ([]string, error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	return co.GetSchedulersController().GetSchedulerNames(), nil
+}
+
+type schedulerPausedPeriod struct {
+	Name     string    `json:"name"`
+	PausedAt time.Time `json:"paused_at"`
+	ResumeAt time.Time `json:"resume_at"`
+}
+
+// GetSchedulerByStatus returns all names of schedulers by status.
+func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{}, error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	sc := co.GetSchedulersController()
+	schedulers := sc.GetSchedulerNames()
+	switch status {
+	case "paused":
+		var pausedSchedulers []string
+		pausedPeriods := []schedulerPausedPeriod{}
+		for _, scheduler := range schedulers {
+			paused, err := sc.IsSchedulerPaused(scheduler)
+			if err != nil {
+				return nil, err
+			}
+			if paused {
+				if needTS {
+					s := schedulerPausedPeriod{
+						Name:     scheduler,
+						PausedAt: time.Time{},
+						ResumeAt: time.Time{},
+					}
+					pausedAt, err := sc.GetPausedSchedulerDelayAt(scheduler)
+					if err != nil {
+						return nil, err
+					}
+					s.PausedAt = time.Unix(pausedAt, 0)
+					resumeAt, err := sc.GetPausedSchedulerDelayUntil(scheduler)
+					if err != nil {
+						return nil, err
+					}
+					s.ResumeAt = time.Unix(resumeAt, 0)
+					pausedPeriods = append(pausedPeriods, s)
+				} else {
+					pausedSchedulers = append(pausedSchedulers, scheduler)
+				}
+			}
+		}
+		if needTS {
+			return pausedPeriods, nil
+		}
+		return pausedSchedulers, nil
+	case "disabled":
+		var disabledSchedulers []string
+		for _, scheduler := range schedulers {
+			disabled, err := sc.IsSchedulerDisabled(scheduler)
+			if err != nil {
+				return nil, err
+			}
+			if disabled {
+				disabledSchedulers = append(disabledSchedulers, scheduler)
+			}
+		}
+		return disabledSchedulers, nil
+	default:
+		return schedulers, nil
+	}
+}
+
+// GetDiagnosticResult returns the diagnostic results of the specified scheduler.
+func (h *Handler) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
+	if _, ok := schedulers.DiagnosableSummaryFunc[name]; !ok {
+		return nil, errs.ErrSchedulerUndiagnosable.FastGenByArgs(name)
+	}
+	co := h.GetCoordinator()
+	if co == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	result, err := co.GetDiagnosticResult(name)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// PauseOrResumeScheduler pauses a scheduler for delay seconds or resume a paused scheduler.
+// t == 0 : resume scheduler.
+// t > 0 : scheduler delays t seconds.
+func (h *Handler) PauseOrResumeScheduler(name string, t int64) (err error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	if err = co.GetSchedulersController().PauseOrResumeScheduler(name, t); err != nil {
+		if t == 0 {
+			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+		} else {
+			log.Error("can not pause scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+		}
+	} else {
+		if t == 0 {
+			log.Info("resume scheduler successfully", zap.String("scheduler-name", name))
+		} else {
+			log.Info("pause scheduler successfully", zap.String("scheduler-name", name), zap.Int64("pause-seconds", t))
+		}
+	}
+	return err
+}
+
+// PauseOrResumeChecker pauses checker for delay seconds or resume checker
+// t == 0 : resume checker.
+// t > 0 : checker delays t seconds.
+func (h *Handler) PauseOrResumeChecker(name string, t int64) (err error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	if err = co.PauseOrResumeChecker(name, t); err != nil {
+		if t == 0 {
+			log.Error("can not resume checker", zap.String("checker-name", name), errs.ZapError(err))
+		} else {
+			log.Error("can not pause checker", zap.String("checker-name", name), errs.ZapError(err))
+		}
+	}
+	return err
 }
