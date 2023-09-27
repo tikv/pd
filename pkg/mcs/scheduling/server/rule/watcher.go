@@ -19,10 +19,12 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
+	"go.uber.org/zap"
 )
 
 // ruleStorage is an in-memory storage for Placement Rules,
@@ -163,12 +165,14 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		// Since the PD API server will validate the rule before saving it to etcd,
 		// so we could directly save the string rule in JSON to the storage here.
+		log.Info("update placement rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		return rw.ruleStore.SaveRule(
 			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("delete placement rule", zap.String("key", string(kv.Key)))
 		return rw.ruleStore.DeleteRule(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {
@@ -188,12 +192,14 @@ func (rw *Watcher) initializeRuleWatcher() error {
 func (rw *Watcher) initializeGroupWatcher() error {
 	prefixToTrim := rw.ruleGroupPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("update placement rule group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		return rw.ruleStore.SaveRuleGroup(
 			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("delete placement rule group", zap.String("key", string(kv.Key)))
 		return rw.ruleStore.DeleteRuleGroup(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {
@@ -213,12 +219,14 @@ func (rw *Watcher) initializeGroupWatcher() error {
 func (rw *Watcher) initializeRegionLabelWatcher() error {
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		return rw.ruleStore.SaveRegionRule(
 			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("delete region label rule", zap.String("key", string(kv.Key)))
 		return rw.ruleStore.DeleteRegionRule(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {

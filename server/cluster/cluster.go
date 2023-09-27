@@ -427,8 +427,8 @@ func (c *RaftCluster) runStoreConfigSync() {
 	defer c.wg.Done()
 
 	var (
-		synced, switchRaftV2Config bool
-		stores                     = c.GetStores()
+		synced, switchRaftV2Config, isLastSynced bool
+		stores                                   = c.GetStores()
 	)
 	// Start the ticker with a second-level timer to accelerate
 	// the bootstrap stage.
@@ -441,11 +441,14 @@ func (c *RaftCluster) runStoreConfigSync() {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
 		}
+		isLastSynced = synced
 		// Update the stores if the synchronization is not completed.
 		if !synced {
 			stores = c.GetStores()
-		} else if err := c.opt.Persist(c.storage); err != nil {
-			log.Warn("store config persisted failed", zap.Error(err))
+		} else if !isLastSynced && synced {
+			if err := c.opt.Persist(c.storage); err != nil {
+				log.Warn("store config persisted failed", zap.Error(err))
+			}
 		}
 		select {
 		case <-c.ctx.Done():
