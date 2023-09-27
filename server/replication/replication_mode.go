@@ -61,7 +61,7 @@ type FileReplicater interface {
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 }
 
-const drStatusFile = "DR_STATE"
+const DrStatusFile = "DR_STATE"
 const persistFileTimeout = time.Second * 10
 
 // ModeManager is used to control how raft logs are synchronized between
@@ -331,7 +331,7 @@ func (m *ModeManager) drPersistStatusWithLock(status drAutoSyncStatus) {
 
 	m.replicatedMembers = m.replicatedMembers[:0]
 	for _, member := range members {
-		if err := m.fileReplicater.ReplicateFileToMember(ctx, member, drStatusFile, data); err != nil {
+		if err := m.fileReplicater.ReplicateFileToMember(ctx, member, DrStatusFile, data); err != nil {
 			log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", status.State), errs.ZapError(err))
 			// Throw away the error to make it possible to switch to async when
 			// primary and dr DC are disconnected. This will result in the
