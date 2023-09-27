@@ -280,7 +280,7 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 	// decode hex if query has params with hex format
 	formatStr := r.URL.Query().Get("format")
 	if formatStr == "hex" {
-		keyBytes, err := hex.DecodeString(string(key))
+		keyBytes, err := hex.DecodeString(key)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return

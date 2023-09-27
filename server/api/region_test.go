@@ -153,7 +153,6 @@ func (suite *regionTestSuite) TestRegion() {
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
 	r2.Adjust()
 	suite.Equal(NewAPIRegionInfo(r), r2)
-
 }
 
 func (suite *regionTestSuite) TestRegionCheck() {
