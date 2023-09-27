@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
@@ -199,7 +200,7 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 	}
 
 	// Get the minimal timestamp from the TSO servers/pods
-	var mutex sync.Mutex
+	var mutex syncutil.Mutex
 	resps := make([]*tsopb.GetMinTSResponse, len(addrs))
 	wg := sync.WaitGroup{}
 	wg.Add(len(addrs))
@@ -1428,24 +1429,10 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	if rc == nil {
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-	var region *core.RegionInfo
-	// allow region miss temporarily if this key can't be found in the region tree.
-retryLoop:
-	for retry := 0; retry <= 10; retry++ {
-		region = rc.GetRegionByKey(request.GetRegionKey())
-		if region != nil {
-			break retryLoop
-		}
-		select {
-		case <-ctx.Done():
-			break retryLoop
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
+	region := rc.GetRegionByKey(request.GetRegionKey())
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
-
 	var buckets *metapb.Buckets
 	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
@@ -1487,21 +1474,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	var region *core.RegionInfo
-	// allow region miss temporarily if this key can't be found in the region tree.
-retryLoop:
-	for retry := 0; retry <= 10; retry++ {
-		region = rc.GetPrevRegionByKey(request.GetRegionKey())
-		if region != nil {
-			break retryLoop
-		}
-		select {
-		case <-ctx.Done():
-			break retryLoop
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-
+	region := rc.GetPrevRegionByKey(request.GetRegionKey())
 	if region == nil {
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
@@ -2666,7 +2639,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 					} else {
 						// Prev-kv is compacted means there must have been a delete event before this event,
 						// which means that this is just a duplicated event, so we can just ignore it.
-						log.Info("previous key-value pair has been compacted", zap.String("previous key", string(e.Kv.Key)))
+						log.Info("previous key-value pair has been compacted", zap.String("required-key", string(e.Kv.Key)))
 					}
 				}
 			}

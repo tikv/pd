@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"sync"
 	"testing"
@@ -259,4 +260,25 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
 	suite.Equal("QueryMetric", serviceLabel)
+}
+
+func (suite *adminTestSuite) TestCleanPath() {
+	re := suite.Require()
+	// transfer path to /config
+	url := fmt.Sprintf("%s/admin/persist-file/../../config", suite.urlPrefix)
+	cfg := &config.Config{}
+	err := testutil.ReadGetJSON(re, testDialClient, url, cfg)
+	suite.NoError(err)
+
+	// handled by router
+	response := httptest.NewRecorder()
+	r, _, _ := NewHandler(context.Background(), suite.svr)
+	request, err := http.NewRequest(http.MethodGet, url, nil)
+	re.NoError(err)
+	r.ServeHTTP(response, request)
+	// handled by `cleanPath` which is in `mux.ServeHTTP`
+	result := response.Result()
+	defer result.Body.Close()
+	re.NotNil(result.Header["Location"])
+	re.Contains(result.Header["Location"][0], "/pd/api/v1/config")
 }

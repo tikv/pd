@@ -118,7 +118,7 @@ type balanceWitnessHandler struct {
 	config *balanceWitnessSchedulerConfig
 }
 
-func newbalanceWitnessHandler(conf *balanceWitnessSchedulerConfig) http.Handler {
+func newBalanceWitnessHandler(conf *balanceWitnessSchedulerConfig) http.Handler {
 	handler := &balanceWitnessHandler{
 		config: conf,
 		rd:     render.New(render.Options{IndentJSON: true}),
@@ -161,7 +161,7 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 		retryQuota:    newRetryQuota(),
 		name:          BalanceWitnessName,
 		conf:          conf,
-		handler:       newbalanceWitnessHandler(conf),
+		handler:       newBalanceWitnessHandler(conf),
 		counter:       balanceWitnessCounter,
 		filterCounter: filter.NewCounter(filter.BalanceWitness.String()),
 	}

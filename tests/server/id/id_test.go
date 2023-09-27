@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -55,7 +56,7 @@ func TestID(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	var m sync.Mutex
+	var m syncutil.Mutex
 	ids := make(map[uint64]struct{})
 
 	for i := 0; i < 10; i++ {

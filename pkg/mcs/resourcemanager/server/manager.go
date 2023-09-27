@@ -20,7 +20,6 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -34,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
@@ -49,7 +49,7 @@ const (
 
 // Manager is the manager of resource group.
 type Manager struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	srv              bs.Server
 	controllerConfig *ControllerConfig
 	groups           map[string]*ResourceGroup
@@ -363,7 +363,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumption == nil {
 				continue
 			}
-			ruLabelType := tidbTypeLabel
+			ruLabelType := defaultTypeLabel
 			if consumptionInfo.isBackground {
 				ruLabelType = backgroundTypeLabel
 			}
