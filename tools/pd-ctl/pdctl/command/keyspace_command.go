@@ -27,7 +27,8 @@ import (
 const (
 	keyspacePrefix = "pd/api/v2/keyspaces"
 	// flags
-	nmUseID     = "use-id"
+	nmID        = "id"
+	nmName      = "name"
 	nmConfig    = "config"
 	nmLimit     = "limit"
 	nmPageToken = "page-token"
@@ -49,29 +50,38 @@ func NewKeyspaceCommand() *cobra.Command {
 
 func newShowKeyspaceCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "show <keyspace-name> [flags]",
-		Short: "show keyspace metadata specified by keyspace name/id",
+		Use:   "show [flags]",
+		Short: "show keyspace metadata specified by keyspace name/id, if both provided, name will be used",
 		Run:   showKeyspaceCommandFunc,
 	}
-	r.Flags().Bool(nmUseID, false, "use keyspace id instead of keyspace name")
+	r.Flags().String(nmID, "", "keyspace id")
+	r.Flags().String(nmName, "", "keyspace name")
 	return r
 }
 
 func showKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
+	if len(args) != 0 {
 		cmd.Usage()
 		return
 	}
-	useID, err := cmd.Flags().GetBool(nmUseID)
+	id, err := cmd.Flags().GetString(nmID)
+	if err != nil {
+		cmd.Println("Failed to parse flag: ", err)
+		return
+	}
+	name, err := cmd.Flags().GetString(nmName)
 	if err != nil {
 		cmd.Println("Failed to parse flag: ", err)
 		return
 	}
 	var url string
-	if useID {
-		url = fmt.Sprintf("%s/id/%s", keyspacePrefix, args[0])
+	if name != "" {
+		url = fmt.Sprintf("%s/%s?force_refresh_group_id=true", keyspacePrefix, name)
+	} else if id != "" {
+		url = fmt.Sprintf("%s/id/%s", keyspacePrefix, id)
 	} else {
-		url = fmt.Sprintf("%s/%s?force_refresh_group_id=true", keyspacePrefix, args[0])
+		cmd.Println("Either id or name should be provided")
+		return
 	}
 	resp, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
