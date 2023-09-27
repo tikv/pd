@@ -87,7 +87,7 @@ func showKeyspaceNameCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	resp, err := doRequest(cmd, fmt.Sprintf("%s/%s", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
+	resp, err := doRequest(cmd, fmt.Sprintf("%s/%s?force_refresh_group_id=true", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the keyspace information: %s\n", err)
 		return

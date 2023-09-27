@@ -65,7 +65,7 @@ func TestKeyspace(t *testing.T) {
 	var k api.KeyspaceMeta
 	keyspaceName := "keyspace_1"
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace", keyspaceName}
+		args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &k))
@@ -85,7 +85,7 @@ func TestKeyspace(t *testing.T) {
 
 	// check keyspace group in keyspace whether changed.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace", keyspaceName}
+		args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &k))
@@ -93,7 +93,7 @@ func TestKeyspace(t *testing.T) {
 	})
 
 	// test error name
-	args := []string{"-u", pdAddr, "keyspace", "error_name"}
+	args := []string{"-u", pdAddr, "keyspace", "show", "name", "error_name"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "Fail")
