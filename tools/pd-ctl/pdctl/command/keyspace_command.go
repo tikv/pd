@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -30,6 +31,8 @@ const (
 	nmConfig    = "config"
 	nmLimit     = "limit"
 	nmPageToken = "page-token"
+	nmRemove    = "remove"
+	nmUpdate    = "update"
 )
 
 // NewKeyspaceCommand returns a keyspace subcommand of rootCmd.
@@ -136,21 +139,66 @@ func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 
 func newUpdateKeyspaceConfigCommand() *cobra.Command {
 	r := &cobra.Command{
-		Use:   "update-config <keyspace-name> <config-patch>",
-		Short: "update keyspace config, a json merge patch is expected",
+		Use:   "update-config <keyspace-name>",
+		Short: "update keyspace config",
 		Run:   updateKeyspaceConfigCommandFunc,
 	}
+	r.Flags().StringSlice(nmRemove, nil, "keys to remove from keyspace config, "+
+		"specify as comma separated keys, e.g. --remove k1,k2")
+	r.Flags().StringSlice(nmUpdate, nil, "kv pairs to upsert into keyspace config, "+
+		"specify as comma separated key value pairs, e.g. --update k1=v1,k2=v2")
 	return r
 }
 
 func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 2 {
+	if len(args) != 1 {
 		cmd.Usage()
 		return
 	}
-
+	configPatch := map[string]*string{}
+	removeFlags, err := cmd.Flags().GetStringSlice(nmRemove)
+	if err != nil {
+		cmd.Println("Failed to parse flag: ", err)
+		return
+	}
+	for _, flag := range removeFlags {
+		keys := strings.Split(flag, ",")
+		for _, key := range keys {
+			if _, exist := configPatch[key]; exist {
+				cmd.Printf("key %s is specified multiple times\n", key)
+				return
+			}
+			configPatch[key] = nil
+		}
+	}
+	updateFlags, err := cmd.Flags().GetStringSlice(nmUpdate)
+	if err != nil {
+		cmd.Println("Failed to parse flag: ", err)
+		return
+	}
+	for _, flag := range updateFlags {
+		kvs := strings.Split(flag, ",")
+		for _, kv := range kvs {
+			pair := strings.Split(kv, "=")
+			if len(pair) != 2 {
+				cmd.Printf("invalid kv pair %s\n", kv)
+				return
+			}
+			if _, exist := configPatch[pair[0]]; exist {
+				cmd.Printf("key %s is specified multiple times\n", pair[0])
+				return
+			}
+			configPatch[pair[0]] = &pair[1]
+		}
+	}
+	params := handlers.UpdateConfigParams{Config: configPatch}
+	data, err := json.Marshal(params)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
 	url := fmt.Sprintf("%s/%s/config", keyspacePrefix, args[0])
-	resp, err := doRequest(cmd, url, http.MethodPatch, http.Header{}, WithBody(bytes.NewBufferString(args[1])))
+	resp, err := doRequest(cmd, url, http.MethodPatch, http.Header{}, WithBody(bytes.NewBuffer(data)))
 	if err != nil {
 		cmd.Printf("Failed to update the keyspace config: %s\n", err)
 		return
