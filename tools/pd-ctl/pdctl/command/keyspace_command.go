@@ -101,11 +101,6 @@ func newCreateKeyspaceCommand() *cobra.Command {
 	return r
 }
 
-type CreateKeyspaceParams struct {
-	Name   string            `json:"name"`
-	Config map[string]string `json:"config"`
-}
-
 func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 1 {
 		cmd.Usage()
