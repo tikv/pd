@@ -469,9 +469,9 @@ func (s *Server) startWatcher() (err error) {
 	return err
 }
 
-// GetOpts returns the persist config.
+// GetPersistConfig returns the persist config.
 // It's used to test.
-func (s *Server) GetOpts() *config.PersistConfig {
+func (s *Server) GetPersistConfig() *config.PersistConfig {
 	return s.persistConfig
 }
 
