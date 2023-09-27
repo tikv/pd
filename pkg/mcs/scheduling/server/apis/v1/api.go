@@ -264,6 +264,10 @@ func createOperator(c *gin.Context) {
 		c.String(statusCode, err.Error())
 		return
 	}
+	if statusCode == http.StatusOK && result == nil {
+		c.String(http.StatusOK, "The operator is created.")
+		return
+	}
 	c.IndentedJSON(statusCode, result)
 }
 

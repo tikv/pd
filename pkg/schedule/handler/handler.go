@@ -373,7 +373,7 @@ func (h *Handler) HandleOperatorCreation(input map[string]interface{}) (int, int
 	default:
 		return http.StatusBadRequest, nil, errors.Errorf("unknown operator")
 	}
-	return http.StatusOK, nil, errors.Errorf("The operator is created.")
+	return http.StatusOK, nil, nil
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.

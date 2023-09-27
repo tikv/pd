@@ -112,6 +112,10 @@ func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request)
 		h.r.JSON(w, statusCode, err.Error())
 		return
 	}
+	if statusCode == http.StatusOK && result == nil {
+		h.r.JSON(w, http.StatusOK, "The operator is created.")
+		return
+	}
 	h.r.JSON(w, statusCode, result)
 }
 
