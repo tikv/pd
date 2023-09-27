@@ -119,16 +119,28 @@ func CreateScheduler(typ string, opController *OperatorController, storage *core
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 
+<<<<<<< HEAD:server/schedule/scheduler.go
 	s, err := fn(opController, storage, dec)
 	if err != nil {
 		return nil, err
 	}
+=======
+	return fn(oc, storage, dec, removeSchedulerCb...)
+}
+
+// SaveSchedulerConfig saves the config of the specified scheduler.
+func SaveSchedulerConfig(storage endpoint.ConfigStorage, s Scheduler) error {
+>>>>>>> 67529748f (scheduler: fix scheduler save config (#7108)):pkg/schedule/schedulers/scheduler.go
 	data, err := s.EncodeConfig()
 	if err != nil {
-		return nil, err
+		return err
 	}
+<<<<<<< HEAD:server/schedule/scheduler.go
 	err = storage.SaveScheduleConfig(s.GetName(), data)
 	return s, err
+=======
+	return storage.SaveSchedulerConfig(s.GetName(), data)
+>>>>>>> 67529748f (scheduler: fix scheduler save config (#7108)):pkg/schedule/schedulers/scheduler.go
 }
 
 // FindSchedulerTypeByName finds the type of the specified name.

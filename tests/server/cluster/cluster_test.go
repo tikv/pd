@@ -30,7 +30,19 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/mock/mockid"
+<<<<<<< HEAD
 	"github.com/tikv/pd/pkg/testutil"
+=======
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/syncer"
+	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+>>>>>>> 67529748f (scheduler: fix scheduler save config (#7108))
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
@@ -40,6 +52,7 @@ import (
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/server/api"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -1132,7 +1145,281 @@ func (s *clusterTestSuite) TestStaleTermHeartbeat(c *C) {
 	regionReq.Region.RegionEpoch.ConfVer = 1
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
+<<<<<<< HEAD
 	c.Assert(err, IsNil)
+=======
+	re.NoError(err)
+}
+
+func TestTransferLeaderForScheduler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	tc, err := tests.NewTestCluster(ctx, 2)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	// start
+	leaderServer := tc.GetServer(tc.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+	rc := leaderServer.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+
+	storesNum := 2
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	for i := 1; i <= storesNum; i++ {
+		store := &metapb.Store{
+			Id:      uint64(i),
+			Address: "127.0.0.1:" + strconv.Itoa(i),
+		}
+		resp, err := putStore(grpcPDClient, leaderServer.GetClusterID(), store)
+		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	}
+	// region heartbeat
+	id := leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc, id, 1)
+
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Add evict leader scheduler
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 1,
+	})
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 2,
+	})
+	// Check scheduler updated.
+	schedulersController := rc.GetCoordinator().GetSchedulersController()
+	re.Len(schedulersController.GetSchedulerNames(), 6)
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
+
+	// transfer PD leader to another PD
+	tc.ResignLeader()
+	rc.Stop()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	rc1 := leaderServer.GetServer().GetRaftCluster()
+	rc1.Start(leaderServer.GetServer())
+	re.NoError(err)
+	re.NotNil(rc1)
+	// region heartbeat
+	id = leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc1, id, 1)
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Check scheduler updated.
+	schedulersController = rc1.GetCoordinator().GetSchedulersController()
+	re.Len(schedulersController.GetSchedulerNames(), 6)
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
+
+	// transfer PD leader back to the previous PD
+	tc.ResignLeader()
+	rc1.Stop()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	rc = leaderServer.GetServer().GetRaftCluster()
+	rc.Start(leaderServer.GetServer())
+	re.NotNil(rc)
+	// region heartbeat
+	id = leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc, id, 1)
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Check scheduler updated
+	schedulersController = rc.GetCoordinator().GetSchedulersController()
+	re.Len(schedulersController.GetSchedulerNames(), 6)
+	checkEvictLeaderSchedulerExist(re, schedulersController, true)
+	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+}
+
+func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
+	testutil.Eventually(re, func() bool {
+		if !exist {
+			return sc.GetScheduler(schedulers.EvictLeaderName) == nil
+		}
+		return sc.GetScheduler(schedulers.EvictLeaderName) != nil
+	})
+}
+
+func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller, expected []uint64) {
+	handler, ok := sc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	re.True(ok)
+	h, ok := handler.(interface {
+		EvictStoreIDs() []uint64
+	})
+	re.True(ok)
+	var evictStoreIDs []uint64
+	testutil.Eventually(re, func() bool {
+		evictStoreIDs = h.EvictStoreIDs()
+		return len(evictStoreIDs) == len(expected)
+	})
+	re.ElementsMatch(evictStoreIDs, expected)
+}
+
+func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.Allocator, storeID uint64) {
+	for i := 0; i < 3; i++ {
+		regionID, err := id.Alloc()
+		re.NoError(err)
+		peerID, err := id.Alloc()
+		re.NoError(err)
+		region := &metapb.Region{
+			Id:       regionID,
+			Peers:    []*metapb.Peer{{Id: peerID, StoreId: storeID}},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+		}
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	re.Equal(3, rc.GetStore(storeID).GetLeaderCount())
+}
+
+func checkMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
+	re.Eventually(func() bool {
+		ts := rc.GetMinResolvedTS()
+		return expect == ts
+	}, time.Second*10, time.Millisecond*50)
+}
+
+func checkStoreMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expectTS, storeID uint64) {
+	re.Eventually(func() bool {
+		ts := rc.GetStoreMinResolvedTS(storeID)
+		return expectTS == ts
+	}, time.Second*10, time.Millisecond*50)
+}
+
+func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
+	re.Eventually(func() bool {
+		ts2, err := rc.GetStorage().LoadMinResolvedTS()
+		re.NoError(err)
+		return expect == ts2
+	}, time.Second*10, time.Millisecond*50)
+}
+
+func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.RaftCluster, svr *server.Server, interval time.Duration) {
+	cfg := rc.GetPDServerConfig().Clone()
+	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(interval)
+	err := svr.SetPDServerConfig(*cfg)
+	re.NoError(err)
+}
+
+func TestMinResolvedTS(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster.DefaultMinResolvedTSPersistenceInterval = time.Millisecond
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	id := leaderServer.GetAllocator()
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	re.NotNil(rc)
+	svr := leaderServer.GetServer()
+	addStoreAndCheckMinResolvedTS := func(re *require.Assertions, isTiflash bool, minResolvedTS, expect uint64) uint64 {
+		storeID, err := id.Alloc()
+		re.NoError(err)
+		store := &metapb.Store{
+			Id:      storeID,
+			Version: "v6.0.0",
+			Address: "127.0.0.1:" + strconv.Itoa(int(storeID)),
+		}
+		if isTiflash {
+			store.Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
+		}
+		resp, err := putStore(grpcPDClient, clusterID, store)
+		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+		req := &pdpb.ReportMinResolvedTsRequest{
+			Header:        testutil.NewRequestHeader(clusterID),
+			StoreId:       storeID,
+			MinResolvedTs: minResolvedTS,
+		}
+		_, err = grpcPDClient.ReportMinResolvedTS(context.Background(), req)
+		re.NoError(err)
+		ts := rc.GetMinResolvedTS()
+		re.Equal(expect, ts)
+		return storeID
+	}
+
+	// default run job
+	re.NotEqual(rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration, 0)
+	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
+	re.Equal(time.Duration(0), rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration)
+
+	// case1: cluster is no initialized
+	// min resolved ts should be not available
+	status, err := rc.LoadClusterStatus()
+	re.NoError(err)
+	re.False(status.IsInitialized)
+	store1TS := uint64(233)
+	store1 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store1TS, math.MaxUint64)
+
+	// case2: add leader peer to store1 but no run job
+	// min resolved ts should be zero
+	putRegionWithLeader(re, rc, id, store1)
+	checkMinResolvedTS(re, rc, 0)
+
+	// case3: add leader peer to store1 and run job
+	// min resolved ts should be store1TS
+	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
+	checkMinResolvedTS(re, rc, store1TS)
+	checkMinResolvedTSFromStorage(re, rc, store1TS)
+
+	// case4: add tiflash store
+	// min resolved ts should no change
+	addStoreAndCheckMinResolvedTS(re, true /* is tiflash */, 0, store1TS)
+
+	// case5: add new store with lager min resolved ts
+	// min resolved ts should no change
+	store3TS := store1TS + 10
+	store3 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store3TS, store1TS)
+	putRegionWithLeader(re, rc, id, store3)
+
+	// case6: set store1 to tombstone
+	// min resolved ts should change to store 3
+	resetStoreState(re, rc, store1, metapb.StoreState_Tombstone)
+	checkMinResolvedTS(re, rc, store3TS)
+	checkMinResolvedTSFromStorage(re, rc, store3TS)
+	checkStoreMinResolvedTS(re, rc, store3TS, store3)
+	// check no-exist store
+	checkStoreMinResolvedTS(re, rc, math.MaxUint64, 100)
+
+	// case7: add a store with leader peer but no report min resolved ts
+	// min resolved ts should be no change
+	store4 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, 0, store3TS)
+	putRegionWithLeader(re, rc, id, store4)
+	checkMinResolvedTS(re, rc, store3TS)
+	checkMinResolvedTSFromStorage(re, rc, store3TS)
+	resetStoreState(re, rc, store4, metapb.StoreState_Tombstone)
+
+	// case8: set min resolved ts persist interval to zero
+	// although min resolved ts increase, it should be not persisted until job running.
+	store5TS := store3TS + 10
+	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
+	store5 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store5TS, store3TS)
+	resetStoreState(re, rc, store3, metapb.StoreState_Tombstone)
+	putRegionWithLeader(re, rc, id, store5)
+	checkMinResolvedTS(re, rc, store3TS)
+	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
+	checkMinResolvedTS(re, rc, store5TS)
+	checkStoreMinResolvedTS(re, rc, store5TS, store5)
+>>>>>>> 67529748f (scheduler: fix scheduler save config (#7108))
 }
 
 // See https://github.com/tikv/pd/issues/4941

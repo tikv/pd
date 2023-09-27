@@ -189,6 +189,14 @@ func newEvictLeaderScheduler(opController *schedule.OperatorController, conf *ev
 	}
 }
 
+<<<<<<< HEAD:server/schedulers/evict_leader.go
+=======
+// EvictStoreIDs returns the IDs of the evict-stores.
+func (s *evictLeaderScheduler) EvictStoreIDs() []uint64 {
+	return s.conf.getStores()
+}
+
+>>>>>>> 67529748f (scheduler: fix scheduler save config (#7108)):pkg/schedule/schedulers/evict_leader.go
 func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
