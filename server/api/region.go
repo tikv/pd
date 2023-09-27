@@ -277,6 +277,17 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// decode hex if query has params with hex format
+	formatStr := r.URL.Query().Get("format")
+	if formatStr == "hex" {
+		keyBytes, err := hex.DecodeString(string(key))
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		key = string(keyBytes)
+	}
+
 	regionInfo := rc.GetRegionByKey([]byte(key))
 	h.rd.JSON(w, http.StatusOK, NewAPIRegionInfo(regionInfo))
 }
