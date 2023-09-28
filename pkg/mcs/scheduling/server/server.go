@@ -469,6 +469,12 @@ func (s *Server) startWatcher() (err error) {
 	return err
 }
 
+// GetPersistConfig returns the persist config.
+// It's used to test.
+func (s *Server) GetPersistConfig() *config.PersistConfig {
+	return s.persistConfig
+}
+
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{

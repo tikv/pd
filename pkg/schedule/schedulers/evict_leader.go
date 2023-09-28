@@ -181,7 +181,7 @@ func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeade
 	}
 }
 
-// EvictStores returns the IDs of the evict-stores.
+// EvictStoreIDs returns the IDs of the evict-stores.
 func (s *evictLeaderScheduler) EvictStoreIDs() []uint64 {
 	return s.conf.getStores()
 }
