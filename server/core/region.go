@@ -22,11 +22,13 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -885,7 +887,16 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 }
 
 // UpdateSubTree updates the subtree.
+<<<<<<< HEAD:server/core/region.go
 func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*RegionInfo, rangeChanged bool) {
+=======
+func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) {
+	failpoint.Inject("UpdateSubTree", func() {
+		if origin == nil {
+			time.Sleep(time.Second)
+		}
+	})
+>>>>>>> 54219d649 (region: fix the potential panic .  (#7143)):pkg/core/region.go
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
@@ -894,8 +905,17 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*Regi
 			// TODO: Improve performance by deleting only the different peers.
 			r.removeRegionFromSubTreeLocked(origin)
 		} else {
-			r.updateSubTreeStat(origin, region)
-			r.subRegions[region.GetID()].RegionInfo = region
+			// The region tree and the subtree update is not atomic and the region tree is updated first.
+			// If there are two thread needs to update region tree,
+			// t1: thread-A  update region tree
+			// 										t2: thread-B: update region tree again
+			//										t3: thread-B: update subtree
+			// t4: thread-A: update region subtree
+			// to keep region tree consistent with subtree, we need to drop this update.
+			if tree, ok := r.subRegions[region.GetID()]; ok {
+				r.updateSubTreeStat(origin, region)
+				tree.RegionInfo = region
+			}
 			return
 		}
 	}
