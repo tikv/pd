@@ -159,11 +159,11 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
 
-	// If origin is stale, need to add the healthy region count.
+	// If region meta from `stale` to `fresh`, need to add the healthy region count.
 	if origin.IsSourceStale() && region.IsSourceFresh() {
 		t.healthyRegionsCnt++
 	}
-	// If origin is healthy, need to sub the healthy region count.
+	// If region meta from `fresh` to `stale`, need to sub the healthy region count.
 	if origin.IsSourceFresh() && region.IsSourceStale() {
 		t.healthyRegionsCnt--
 	}

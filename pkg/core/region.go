@@ -82,7 +82,7 @@ type RegionSource uint32
 const (
 	// FromStorage means this region's meta info might be stale.
 	FromStorage RegionSource = iota
-	// FromSync means this region's meta info might be stale.
+	// FromSync means this region's meta info is relatively fresher.
 	FromSync
 	// FromHeartbeat means this region's meta info is relatively fresher.
 	FromHeartbeat
@@ -90,17 +90,12 @@ const (
 
 // IsSourceStale means this region's meta info might be stale.
 func (r *RegionInfo) IsSourceStale() bool {
-	return r.source == FromStorage || r.source == FromSync
+	return r.source == FromStorage
 }
 
 // IsSourceFresh means this region's meta info is relatively fresher.
 func (r *RegionInfo) IsSourceFresh() bool {
-	return r.source == FromHeartbeat
-}
-
-// GetRegionSource returns the region source.
-func (r *RegionInfo) GetRegionSource() RegionSource {
-	return r.source
+	return r.source == FromHeartbeat || r.source == FromSync
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.

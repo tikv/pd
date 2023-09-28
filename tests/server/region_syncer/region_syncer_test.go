@@ -284,17 +284,10 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re.NoError(err)
 	re.Equal("pd2", cluster.WaitLeader())
 
-	// transfer leader to pd1
+	// transfer leader to pd1, can start coordinator immediately.
 	err = cluster.ResignLeader()
 	re.NoError(err)
 	re.Equal("pd1", cluster.WaitLeader())
-	leaderServer = cluster.GetServer(cluster.GetLeader())
-	rc = leaderServer.GetServer().GetRaftCluster()
-	for _, region := range regions {
-		err = rc.HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
-	time.Sleep(time.Second)
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }

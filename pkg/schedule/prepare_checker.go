@@ -50,7 +50,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		return true
 	}
 	if float64(c.GetClusterHealthyRegionsCnt()) > float64(c.GetTotalRegionCount())*collectFactor {
-		log.Info("healthy meta region number is satisfied, finish prepare checker", zap.Int64("stale-region", c.GetClusterHealthyRegionsCnt()), zap.Int("total-region", c.GetTotalRegionCount()))
+		log.Info("healthy meta region number is satisfied, finish prepare checker", zap.Int64("healthy-region", c.GetClusterHealthyRegionsCnt()), zap.Int("total-region", c.GetTotalRegionCount()))
 		checker.prepared = true
 		return true
 	}
