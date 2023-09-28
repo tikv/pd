@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +40,7 @@ var denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues
 
 // Controller is used to manage all schedulers.
 type Controller struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	wg      sync.WaitGroup
 	ctx     context.Context
 	cluster sche.SchedulerCluster
@@ -137,6 +138,10 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	}
 
 	c.schedulerHandlers[name] = scheduler
+	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
+		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+		return err
+	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
 	return nil
 }
@@ -187,6 +192,10 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.Scheduler.GetName()] = s
+	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
+		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+		return err
+	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.Scheduler.GetType(), args)
 	return nil
 }

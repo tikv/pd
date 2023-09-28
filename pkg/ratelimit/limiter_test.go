@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"golang.org/x/time/rate"
 )
 
@@ -33,7 +34,7 @@ func TestUpdateConcurrencyLimiter(t *testing.T) {
 	label := "test"
 	status := limiter.Update(label, opts...)
 	re.True(status&ConcurrencyChanged != 0)
-	var lock sync.Mutex
+	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
 	for i := 0; i < 15; i++ {
@@ -118,7 +119,7 @@ func TestUpdateQPSLimiter(t *testing.T) {
 	status := limiter.Update(label, opts...)
 	re.True(status&QPSChanged != 0)
 
-	var lock sync.Mutex
+	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
 	wg.Add(3)
@@ -173,7 +174,7 @@ func TestQPSLimiter(t *testing.T) {
 		opt(label, limiter)
 	}
 
-	var lock sync.Mutex
+	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
 	wg.Add(200)
@@ -208,7 +209,7 @@ func TestTwoLimiters(t *testing.T) {
 		opt(label, limiter)
 	}
 
-	var lock sync.Mutex
+	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
 	wg.Add(200)
@@ -245,7 +246,7 @@ func TestTwoLimiters(t *testing.T) {
 }
 
 func countRateLimiterHandleResult(limiter *Limiter, label string, successCount *int,
-	failedCount *int, lock *sync.Mutex, wg *sync.WaitGroup) {
+	failedCount *int, lock *syncutil.Mutex, wg *sync.WaitGroup) {
 	result := limiter.Allow(label)
 	lock.Lock()
 	defer lock.Unlock()

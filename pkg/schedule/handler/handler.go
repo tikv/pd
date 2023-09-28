@@ -17,6 +17,7 @@ package handler
 import (
 	"bytes"
 	"encoding/hex"
+	"net/http"
 	"strings"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 // Server is the interface for handler about schedule.
@@ -126,6 +128,32 @@ func (h *Handler) GetOperators() ([]*operator.Operator, error) {
 	return c.GetOperators(), nil
 }
 
+// GetOperatorsByKinds returns the running operators by kinds.
+func (h *Handler) GetOperatorsByKinds(kinds []string) ([]*operator.Operator, error) {
+	var (
+		results []*operator.Operator
+		ops     []*operator.Operator
+		err     error
+	)
+	for _, kind := range kinds {
+		switch kind {
+		case operator.OpAdmin.String():
+			ops, err = h.GetAdminOperators()
+		case operator.OpLeader.String():
+			ops, err = h.GetLeaderOperators()
+		case operator.OpRegion.String():
+			ops, err = h.GetRegionOperators()
+		case operator.OpWaiting:
+			ops, err = h.GetWaitingOperators()
+		}
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, ops...)
+	}
+	return results, nil
+}
+
 // GetWaitingOperators returns the waiting operators.
 func (h *Handler) GetWaitingOperators() ([]*operator.Operator, error) {
 	c, err := h.GetOperatorController()
@@ -182,6 +210,170 @@ func (h *Handler) GetRecords(from time.Time) ([]*operator.OpRecord, error) {
 		return nil, errs.ErrOperatorNotFound
 	}
 	return records, nil
+}
+
+// HandleOperatorCreation processes the request and creates an operator based on the provided input.
+// It supports various types of operators such as transfer-leader, transfer-region, add-peer, remove-peer, merge-region, split-region, scatter-region, and scatter-regions.
+// The function validates the input, performs the corresponding operation, and returns the HTTP status code, response body, and any error encountered during the process.
+func (h *Handler) HandleOperatorCreation(input map[string]interface{}) (int, interface{}, error) {
+	name, ok := input["name"].(string)
+	if !ok {
+		return http.StatusBadRequest, nil, errors.Errorf("missing operator name")
+	}
+	switch name {
+	case "transfer-leader":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		storeID, ok := input["to_store_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing store id to transfer leader to")
+		}
+		if err := h.AddTransferLeaderOperator(uint64(regionID), uint64(storeID)); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "transfer-region":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		storeIDs, ok := parseStoreIDsAndPeerRole(input["to_store_ids"], input["peer_roles"])
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("invalid store ids to transfer region to")
+		}
+		if len(storeIDs) == 0 {
+			return http.StatusBadRequest, nil, errors.Errorf("missing store ids to transfer region to")
+		}
+		if err := h.AddTransferRegionOperator(uint64(regionID), storeIDs); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "transfer-peer":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		fromID, ok := input["from_store_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("invalid store id to transfer peer from")
+		}
+		toID, ok := input["to_store_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("invalid store id to transfer peer to")
+		}
+		if err := h.AddTransferPeerOperator(uint64(regionID), uint64(fromID), uint64(toID)); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "add-peer":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("invalid store id to transfer peer to")
+		}
+		if err := h.AddAddPeerOperator(uint64(regionID), uint64(storeID)); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "add-learner":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("invalid store id to transfer peer to")
+		}
+		if err := h.AddAddLearnerOperator(uint64(regionID), uint64(storeID)); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "remove-peer":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("invalid store id to transfer peer to")
+		}
+		if err := h.AddRemovePeerOperator(uint64(regionID), uint64(storeID)); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "merge-region":
+		regionID, ok := input["source_region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		targetID, ok := input["target_region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("invalid target region id to merge to")
+		}
+		if err := h.AddMergeRegionOperator(uint64(regionID), uint64(targetID)); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "split-region":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		policy, ok := input["policy"].(string)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing split policy")
+		}
+		var keys []string
+		if ks, ok := input["keys"]; ok {
+			for _, k := range ks.([]interface{}) {
+				key, ok := k.(string)
+				if !ok {
+					return http.StatusBadRequest, nil, errors.Errorf("bad format keys")
+				}
+				keys = append(keys, key)
+			}
+		}
+		if err := h.AddSplitRegionOperator(uint64(regionID), policy, keys); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "scatter-region":
+		regionID, ok := input["region_id"].(float64)
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("missing region id")
+		}
+		group, _ := input["group"].(string)
+		if err := h.AddScatterRegionOperator(uint64(regionID), group); err != nil {
+			return http.StatusInternalServerError, nil, err
+		}
+	case "scatter-regions":
+		// support both receiving key ranges or regionIDs
+		startKey, _ := input["start_key"].(string)
+		endKey, _ := input["end_key"].(string)
+		ids, ok := typeutil.JSONToUint64Slice(input["region_ids"])
+		if !ok {
+			return http.StatusBadRequest, nil, errors.Errorf("region_ids is invalid")
+		}
+		group, _ := input["group"].(string)
+		// retry 5 times if retryLimit not defined
+		retryLimit := 5
+		if rl, ok := input["retry_limit"].(float64); ok {
+			retryLimit = int(rl)
+		}
+		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKey, endKey, group, retryLimit)
+		errorMessage := ""
+		if err != nil {
+			errorMessage = err.Error()
+		}
+		s := struct {
+			ProcessedPercentage int    `json:"processed-percentage"`
+			Error               string `json:"error"`
+		}{
+			ProcessedPercentage: processedPercentage,
+			Error:               errorMessage,
+		}
+		return http.StatusOK, s, nil
+	default:
+		return http.StatusBadRequest, nil, errors.Errorf("unknown operator")
+	}
+	return http.StatusOK, nil, nil
 }
 
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
@@ -497,4 +689,34 @@ func checkStoreState(c sche.SharedCluster, storeID uint64) error {
 		return errs.ErrStoreUnhealthy.FastGenByArgs(storeID)
 	}
 	return nil
+}
+
+func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]placement.PeerRoleType, bool) {
+	items, ok := ids.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	storeIDToPeerRole := make(map[uint64]placement.PeerRoleType)
+	storeIDs := make([]uint64, 0, len(items))
+	for _, item := range items {
+		id, ok := item.(float64)
+		if !ok {
+			return nil, false
+		}
+		storeIDs = append(storeIDs, uint64(id))
+		storeIDToPeerRole[uint64(id)] = ""
+	}
+
+	peerRoles, ok := roles.([]interface{})
+	// only consider roles having the same length with ids as the valid case
+	if ok && len(peerRoles) == len(storeIDs) {
+		for i, v := range storeIDs {
+			switch pr := peerRoles[i].(type) {
+			case string:
+				storeIDToPeerRole[v] = placement.PeerRoleType(pr)
+			default:
+			}
+		}
+	}
+	return storeIDToPeerRole, true
 }
