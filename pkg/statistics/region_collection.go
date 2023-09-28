@@ -15,13 +15,13 @@
 package statistics
 
 import (
-	"sync"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // RegionInfoProvider is an interface to provide the region information.
@@ -85,7 +85,7 @@ type RegionInfoWithTS struct {
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	rip         RegionInfoProvider
 	conf        sc.CheckerConfigProvider
 	stats       map[RegionStatisticType]map[uint64]*RegionInfoWithTS
@@ -284,7 +284,7 @@ func (r *RegionStatistics) Reset() {
 
 // LabelStatistics is the statistics of the level of labels.
 type LabelStatistics struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	regionLabelStats map[uint64]string
 	labelCounter     map[string]int
 }
