@@ -154,12 +154,6 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 			minStoreLeaderTotalCount = count
 		}
 	}
-<<<<<<< HEAD:server/schedule/region_scatterer_test.go
-=======
-	// Since the scatter leader depends on the scatter result of the peer, the maximum difference is 2.
-	re.LessOrEqual(maxStoreLeaderTotalCount-minStoreLeaderTotalCount, uint64(2))
-	re.GreaterOrEqual(noNeedMoveNum, 0)
->>>>>>> 24fffdf71 (scatter: fix incorrect judgment condition (#7111)):pkg/schedule/scatter/region_scatterer_test.go
 }
 
 func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores, numRegions uint64) {
