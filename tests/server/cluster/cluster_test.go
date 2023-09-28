@@ -1378,10 +1378,7 @@ func checkEvictLeaderSchedulerExist(re *require.Assertions, rc *cluster.RaftClus
 	}
 
 	testutil.Eventually(re, func() bool {
-		if !exist {
-			return !isExistScheduler(rc, schedulers.EvictLeaderName)
-		}
-		return isExistScheduler(rc, schedulers.EvictLeaderName)
+		return isExistScheduler(rc, schedulers.EvictLeaderName) == exist
 	})
 }
 
