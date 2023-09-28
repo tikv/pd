@@ -1025,7 +1025,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	c.coordinator.CheckTransferWitnessLeader(region)
 
 	hasRegionStats := c.regionStats != nil
-	// Save to storage if meta is updated.
+	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
@@ -2518,7 +2518,11 @@ func (c *RaftCluster) GetMinResolvedTS() uint64 {
 func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
 	c.RLock()
 	defer c.RUnlock()
-	if !c.isInitialized() || !core.IsAvailableForMinResolvedTS(c.GetStore(storeID)) {
+	store := c.GetStore(storeID)
+	if store == nil {
+		return math.MaxUint64
+	}
+	if !c.isInitialized() || !core.IsAvailableForMinResolvedTS(store) {
 		return math.MaxUint64
 	}
 	return c.GetStore(storeID).GetMinResolvedTS()
