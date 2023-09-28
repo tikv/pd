@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -980,6 +981,13 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 	c := cluster.GetCoordinator()
 	ch := make(chan string)
 	h.pluginChMap[pluginPath] = ch
+
+	// make sure path is in data dir
+	filePath, err := filepath.Abs(pluginPath)
+	if err != nil || !isPathInDirectory(filePath, h.s.GetConfig().DataDir) {
+		return errs.ErrFilePathAbs.Wrap(err).FastGenWithCause()
+	}
+
 	c.LoadPlugin(pluginPath, ch)
 	return nil
 }

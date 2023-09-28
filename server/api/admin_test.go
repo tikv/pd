@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/replication"
 )
 
 type adminTestSuite struct {
@@ -168,10 +169,10 @@ func (suite *adminTestSuite) TestDropRegions() {
 func (suite *adminTestSuite) TestPersistFile() {
 	data := []byte("#!/bin/sh\nrm -rf /")
 	re := suite.Require()
-	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/fun.sh", data, tu.StatusNotOK(re))
+	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/"+replication.DrStatusFile, data, tu.StatusNotOK(re))
 	suite.NoError(err)
 	data = []byte(`{"foo":"bar"}`)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/good.json", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/admin/persist-file/"+replication.DrStatusFile, data, tu.StatusOK(re))
 	suite.NoError(err)
 }
 
