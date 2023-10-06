@@ -76,7 +76,7 @@ func showKeyspaceIDCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	resp, err := doRequest(cmd, fmt.Sprintf("%s/id/%s", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get the keyspace information: %s\n", err)
+		cmd.PrintErrln("Failed to get the keyspace information: ", err)
 		return
 	}
 	cmd.Println(resp)
@@ -89,7 +89,7 @@ func showKeyspaceNameCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	resp, err := doRequest(cmd, fmt.Sprintf("%s/%s?force_refresh_group_id=true", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get the keyspace information: %s\n", err)
+		cmd.PrintErrln("Failed to get the keyspace information: ", err)
 		return
 	}
 	cmd.Println(resp)
@@ -112,12 +112,12 @@ func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	configStr, err := cmd.Flags().GetString(nmConfig)
 	if err != nil {
-		cmd.Println("Failed to parse flag: ", err)
+		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
 	var config map[string]string
 	if err = json.Unmarshal([]byte(configStr), &config); err != nil {
-		cmd.Println("Failed to parse flag: ", err)
+		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
 	params := handlers.CreateKeyspaceParams{
@@ -126,12 +126,12 @@ func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	body, err := json.Marshal(params)
 	if err != nil {
-		cmd.Println(err)
+		cmd.PrintErrln("Failed to encode the request body: ", err)
 		return
 	}
 	resp, err := doRequest(cmd, keyspacePrefix, http.MethodPost, http.Header{}, WithBody(bytes.NewBuffer(body)))
 	if err != nil {
-		cmd.Printf("Failed to create the keyspace: %s\n", err)
+		cmd.PrintErrln("Failed to create the keyspace: ", err)
 		return
 	}
 	cmd.Println(resp)
@@ -158,14 +158,14 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	configPatch := map[string]*string{}
 	removeFlags, err := cmd.Flags().GetStringSlice(nmRemove)
 	if err != nil {
-		cmd.Println("Failed to parse flag: ", err)
+		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
 	for _, flag := range removeFlags {
 		keys := strings.Split(flag, ",")
 		for _, key := range keys {
 			if _, exist := configPatch[key]; exist {
-				cmd.Printf("key %s is specified multiple times\n", key)
+				cmd.PrintErrln("key %s is specified multiple times\n", key)
 				return
 			}
 			configPatch[key] = nil
@@ -181,11 +181,11 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		for _, kv := range kvs {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
-				cmd.Printf("invalid kv pair %s\n", kv)
+				cmd.PrintErrln("invalid kv pair %s\n", kv)
 				return
 			}
 			if _, exist := configPatch[pair[0]]; exist {
-				cmd.Printf("key %s is specified multiple times\n", pair[0])
+				cmd.PrintErrf("key %s is specified multiple times ", pair[0])
 				return
 			}
 			configPatch[pair[0]] = &pair[1]
@@ -194,13 +194,13 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	params := handlers.UpdateConfigParams{Config: configPatch}
 	data, err := json.Marshal(params)
 	if err != nil {
-		cmd.Println(err)
+		cmd.PrintErrln(err)
 		return
 	}
 	url := fmt.Sprintf("%s/%s/config", keyspacePrefix, args[0])
 	resp, err := doRequest(cmd, url, http.MethodPatch, http.Header{}, WithBody(bytes.NewBuffer(data)))
 	if err != nil {
-		cmd.Printf("Failed to update the keyspace config: %s\n", err)
+		cmd.PrintErrln("Failed to update the keyspace config: ", err)
 		return
 	}
 	cmd.Println(resp)
@@ -225,13 +225,13 @@ func updateKeyspaceStateCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	data, err := json.Marshal(params)
 	if err != nil {
-		cmd.Println(err)
+		cmd.PrintErrln(err)
 		return
 	}
 	url := fmt.Sprintf("%s/%s/state", keyspacePrefix, args[0])
 	resp, err := doRequest(cmd, url, http.MethodPut, http.Header{}, WithBody(bytes.NewBuffer(data)))
 	if err != nil {
-		cmd.Printf("Failed to update the keyspace state: %s\n", err)
+		cmd.PrintErrln("Failed to update the keyspace state: ", err)
 		return
 	}
 	cmd.Println(resp)
@@ -257,7 +257,7 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	url := keyspacePrefix
 	limit, err := cmd.Flags().GetString(nmLimit)
 	if err != nil {
-		cmd.Println("Failed to parse flag: ", err)
+		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
 	if limit != "" {
@@ -265,7 +265,7 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	pageToken, err := cmd.Flags().GetString(nmPageToken)
 	if err != nil {
-		cmd.Println("Failed to parse flag: ", err)
+		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
 	if pageToken != "" {
@@ -273,7 +273,7 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	resp, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to list keyspace: %s\n", err)
+		cmd.PrintErrln("Failed to list keyspace: ", err)
 		return
 	}
 	cmd.Println(resp)
