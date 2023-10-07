@@ -138,7 +138,7 @@ func LoadKeyspace(c *gin.Context) {
 // @Router   /keyspaces/id/{id} [get]
 func LoadKeyspaceByID(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, "invalid keyspace id")
 		return
 	}

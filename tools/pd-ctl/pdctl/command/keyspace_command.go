@@ -30,7 +30,7 @@ const (
 	// flags
 	nmConfig    = "config"
 	nmLimit     = "limit"
-	nmPageToken = "page-token"
+	nmPageToken = "page_token"
 	nmRemove    = "remove"
 	nmUpdate    = "update"
 )
@@ -101,7 +101,7 @@ func newCreateKeyspaceCommand() *cobra.Command {
 		Short: "create a keyspace",
 		Run:   createKeyspaceCommandFunc,
 	}
-	r.Flags().StringSlice(nmConfig, nil, "keyspace configs for the new keyspace, "+
+	r.Flags().StringSlice(nmConfig, nil, "keyspace configs for the new keyspace\n"+
 		"specify as comma separated key value pairs, e.g. --config k1=v1,k2=v2")
 	return r
 }
@@ -123,11 +123,11 @@ func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		for _, kv := range kvs {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
-				cmd.PrintErrf("invalid kv pair %s\n", kv)
+				cmd.PrintErrf("Failed to create keyspace: invalid kv pair %s\n", kv)
 				return
 			}
 			if _, exist := config[pair[0]]; exist {
-				cmd.PrintErrf("key %s is specified multiple times\n", pair[0])
+				cmd.PrintErrf("Failed to create keyspace: key %s is specified multiple times\n", pair[0])
 				return
 			}
 			config[pair[0]] = pair[1]
@@ -156,9 +156,9 @@ func newUpdateKeyspaceConfigCommand() *cobra.Command {
 		Short: "update keyspace config",
 		Run:   updateKeyspaceConfigCommandFunc,
 	}
-	r.Flags().StringSlice(nmRemove, nil, "keys to remove from keyspace config, "+
+	r.Flags().StringSlice(nmRemove, nil, "keys to remove from keyspace config\n"+
 		"specify as comma separated keys, e.g. --remove k1,k2")
-	r.Flags().StringSlice(nmUpdate, nil, "kv pairs to upsert into keyspace config, "+
+	r.Flags().StringSlice(nmUpdate, nil, "kv pairs to upsert into keyspace config\n"+
 		"specify as comma separated key value pairs, e.g. --update k1=v1,k2=v2")
 	return r
 }
@@ -178,7 +178,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		keys := strings.Split(flag, ",")
 		for _, key := range keys {
 			if _, exist := configPatch[key]; exist {
-				cmd.PrintErrf("key %s is specified multiple times\n", key)
+				cmd.PrintErrf("Failed to update keyspace config: key %s is specified multiple times\n", key)
 				return
 			}
 			configPatch[key] = nil
@@ -194,11 +194,11 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		for _, kv := range kvs {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
-				cmd.PrintErrf("invalid kv pair %s\n", kv)
+				cmd.PrintErrf("Failed to update keyspace config: invalid kv pair %s\n", kv)
 				return
 			}
 			if _, exist := configPatch[pair[0]]; exist {
-				cmd.PrintErrf("key %s is specified multiple times\n", pair[0])
+				cmd.PrintErrf("Failed to update keyspace config: key %s is specified multiple times\n", pair[0])
 				return
 			}
 			configPatch[pair[0]] = &pair[1]
@@ -207,7 +207,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	params := handlers.UpdateConfigParams{Config: configPatch}
 	data, err := json.Marshal(params)
 	if err != nil {
-		cmd.PrintErrln(err)
+		cmd.PrintErrln("Failed to update keyspace config:", err)
 		return
 	}
 	url := fmt.Sprintf("%s/%s/config", keyspacePrefix, args[0])
@@ -256,8 +256,8 @@ func newListKeyspaceCommand() *cobra.Command {
 		Short: "list keyspaces according to filters",
 		Run:   listKeyspaceCommandFunc,
 	}
-	r.Flags().String("limit", "", "The maximum number of keyspace metas to return. If not set, no limit is posed.")
-	r.Flags().String("page-token", "", "The keyspace id of the scan start. If not set, scan from keyspace/keyspace group with id 0")
+	r.Flags().String(nmLimit, "", "The maximum number of keyspace metas to return. If not set, no limit is posed.")
+	r.Flags().String(nmPageToken, "", "The keyspace id of the scan start. If not set, scan from keyspace/keyspace group with id 0")
 	return r
 }
 
@@ -282,7 +282,7 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	if pageToken != "" {
-		url += fmt.Sprintf("&page-token=%s", pageToken)
+		url += fmt.Sprintf("&page_token=%s", pageToken)
 	}
 	resp, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
