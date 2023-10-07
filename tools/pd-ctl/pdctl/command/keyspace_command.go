@@ -165,7 +165,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		keys := strings.Split(flag, ",")
 		for _, key := range keys {
 			if _, exist := configPatch[key]; exist {
-				cmd.PrintErrln("key %s is specified multiple times\n", key)
+				cmd.PrintErrf("key %s is specified multiple times\n", key)
 				return
 			}
 			configPatch[key] = nil
@@ -181,11 +181,11 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 		for _, kv := range kvs {
 			pair := strings.Split(kv, "=")
 			if len(pair) != 2 {
-				cmd.PrintErrln("invalid kv pair %s\n", kv)
+				cmd.PrintErrf("invalid kv pair %s\n", kv)
 				return
 			}
 			if _, exist := configPatch[pair[0]]; exist {
-				cmd.PrintErrf("key %s is specified multiple times ", pair[0])
+				cmd.PrintErrf("key %s is specified multiple times\n", pair[0])
 				return
 			}
 			configPatch[pair[0]] = &pair[1]
