@@ -53,7 +53,7 @@ func MustAddScheduler(
 	resp, err := dialClient.Do(httpReq)
 	c.Assert(err, check.IsNil)
 	defer resp.Body.Close()
-	data, err = io.ReadAll(resp.Body)
+	_, err = io.ReadAll(resp.Body)
 	c.Assert(err, check.IsNil)
 	c.Assert(resp.StatusCode, check.Equals, http.StatusOK)
 }
