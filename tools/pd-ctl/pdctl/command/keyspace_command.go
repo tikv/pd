@@ -101,7 +101,8 @@ func newCreateKeyspaceCommand() *cobra.Command {
 		Short: "create a keyspace",
 		Run:   createKeyspaceCommandFunc,
 	}
-	r.Flags().String(nmConfig, "", "keyspace config, in json format")
+	r.Flags().StringSlice(nmConfig, nil, "keyspace configs for the new keyspace, "+
+		"specify as comma separated key value pairs, e.g. --config k1=v1,k2=v2")
 	return r
 }
 
@@ -110,15 +111,27 @@ func createKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	configStr, err := cmd.Flags().GetString(nmConfig)
+
+	configPairs, err := cmd.Flags().GetStringSlice(nmConfig)
 	if err != nil {
 		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
-	var config map[string]string
-	if err = json.Unmarshal([]byte(configStr), &config); err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
+	config := map[string]string{}
+	for _, flag := range configPairs {
+		kvs := strings.Split(flag, ",")
+		for _, kv := range kvs {
+			pair := strings.Split(kv, "=")
+			if len(pair) != 2 {
+				cmd.PrintErrf("invalid kv pair %s\n", kv)
+				return
+			}
+			if _, exist := config[pair[0]]; exist {
+				cmd.PrintErrf("key %s is specified multiple times\n", pair[0])
+				return
+			}
+			config[pair[0]] = pair[1]
+		}
 	}
 	params := handlers.CreateKeyspaceParams{
 		Name:   args[0],
