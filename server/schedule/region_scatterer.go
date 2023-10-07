@@ -437,7 +437,7 @@ func (r *RegionScatterer) selectNewPeer(context engineContext, group string, pee
 	originStorePickedCount := uint64(math.MaxUint64)
 	for _, store := range stores {
 		storeCount := context.selectedPeer.Get(store.GetID(), group)
-		if store.GetID() == peer.GetId() {
+		if store.GetID() == peer.GetStoreId() {
 			originStorePickedCount = storeCount
 		}
 		// If storeCount is equal to the maxStoreTotalCount, we should skip this store as candidate.
