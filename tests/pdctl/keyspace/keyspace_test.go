@@ -117,7 +117,7 @@ func TestKeyspaceTestSuite(t *testing.T) {
 	suite.Run(t, new(keyspaceTestSuite))
 }
 
-func (suite *keyspaceTestSuite) SetupSuite() {
+func (suite *keyspaceTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
@@ -131,7 +131,7 @@ func (suite *keyspaceTestSuite) SetupSuite() {
 	suite.pdAddr = tc.GetConfig().GetClientURL()
 }
 
-func (suite *keyspaceTestSuite) TearDownSuite() {
+func (suite *keyspaceTestSuite) TearDownTest() {
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	suite.cancel()
