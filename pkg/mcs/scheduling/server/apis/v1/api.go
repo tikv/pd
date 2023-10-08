@@ -24,6 +24,7 @@ import (
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/pingcap/log"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule"
@@ -32,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/unrolled/render"
 )
 
@@ -109,10 +111,17 @@ func NewService(srv *scheserver.Service) *Service {
 		root:             root,
 		rd:               createIndentRender(),
 	}
+	s.RegisterAdminRouter()
 	s.RegisterOperatorsRouter()
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
 	return s
+}
+
+// RegisterAdminRouter registers the router of the admin handler.
+func (s *Service) RegisterAdminRouter() {
+	router := s.root.Group("admin")
+	router.PUT("/log", changeLogLevel)
 }
 
 // RegisterSchedulersRouter registers the router of the schedulers handler.
@@ -140,6 +149,22 @@ func (s *Service) RegisterOperatorsRouter() {
 	router.GET("/:id", getOperatorByRegion)
 	router.DELETE("/:id", deleteOperatorByRegion)
 	router.GET("/records", getOperatorRecords)
+}
+
+func changeLogLevel(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	var level string
+	if err := c.Bind(&level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := svr.SetLogLevel(level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	c.String(http.StatusOK, "The log level is updated.")
 }
 
 // @Tags     operators

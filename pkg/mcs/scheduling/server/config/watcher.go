@@ -119,6 +119,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
 			return err
 		}
+		log.Info("update scheduling config", zap.Reflect("new", cfg))
 		cw.AdjustScheduleCfg(&cfg.Schedule)
 		cw.SetClusterVersion(&cfg.ClusterVersion)
 		cw.SetScheduleConfig(&cfg.Schedule)
@@ -146,6 +147,7 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		name := strings.TrimPrefix(string(kv.Key), prefixToTrim)
+		log.Info("update scheduler config", zap.String("name", string(kv.Value)))
 		err := cw.storage.SaveSchedulerConfig(name, kv.Value)
 		if err != nil {
 			log.Warn("failed to save scheduler config",
@@ -161,6 +163,7 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
+		log.Info("remove scheduler config", zap.String("key", string(kv.Key)))
 		return cw.storage.RemoveSchedulerConfig(
 			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 		)
