@@ -17,7 +17,6 @@ package client_test
 import (
 	"path"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
@@ -54,7 +54,7 @@ type globalConfigTestSuite struct {
 	server  *server.GrpcServer
 	client  pd.Client
 	cleanup testutil.CleanupFunc
-	mu      sync.Mutex
+	mu      syncutil.Mutex
 }
 
 func TestGlobalConfigTestSuite(t *testing.T) {

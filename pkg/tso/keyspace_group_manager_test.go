@@ -36,6 +36,7 @@ import (
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -751,7 +752,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 	defer mgr.Close()
 
 	step := 30
-	mux := sync.Mutex{}
+	mux := syncutil.Mutex{}
 	wg := sync.WaitGroup{}
 	for i := 0; i < numberOfKeyspaceGroupsToAdd; i += step {
 		wg.Add(1)
@@ -872,12 +873,12 @@ func addKeyspaceGroupAssignment(
 	groupID uint32,
 	rootPath string,
 	svcAddrs []string,
-	priorites []int,
+	priorities []int,
 	keyspaces []uint32,
 ) error {
 	members := make([]endpoint.KeyspaceGroupMember, len(svcAddrs))
 	for i, svcAddr := range svcAddrs {
-		members[i] = endpoint.KeyspaceGroupMember{Address: svcAddr, Priority: priorites[i]}
+		members[i] = endpoint.KeyspaceGroupMember{Address: svcAddr, Priority: priorities[i]}
 	}
 	group := &endpoint.KeyspaceGroup{
 		ID:        groupID,

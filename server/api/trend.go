@@ -16,10 +16,10 @@ package api
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -89,14 +89,16 @@ func newTrendHandler(s *server.Server, rd *render.Render) *trendHandler {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /trend [get]
 func (h *trendHandler) GetTrend(w http.ResponseWriter, r *http.Request) {
-	var from time.Time
-	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
-		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)
+	var (
+		from time.Time
+		err  error
+	)
+	if froms := r.URL.Query()["from"]; len(froms) > 0 {
+		from, err = apiutil.ParseTime(froms[0])
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		from = time.Unix(fromInt, 0)
 	}
 
 	stores, err := h.getTrendStores()
