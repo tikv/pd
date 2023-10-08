@@ -214,7 +214,12 @@ func (c *Cluster) updateScheduler() {
 	// Establish a notifier to listen the schedulers updating.
 	notifier := make(chan struct{}, 1)
 	// Make sure the check will be triggered once later.
-	notifier <- struct{}{}
+	select {
+	case notifier <- struct{}{}:
+	// If the channel is not empty, it means the check is triggered.
+	default:
+	}
+
 	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -235,7 +240,11 @@ func (c *Cluster) updateScheduler() {
 				return
 			case <-ticker.C:
 				// retry
-				notifier <- struct{}{}
+				select {
+				case notifier <- struct{}{}:
+				// If the channel is not empty, it means the check is triggered.
+				default:
+				}
 				continue
 			}
 		}
