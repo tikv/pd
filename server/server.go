@@ -102,7 +102,7 @@ const (
 	// PDMode represents that server is in PD mode.
 	PDMode = "PD"
 	// APIServiceMode represents that server is in API service mode.
-	APIServiceMode = "API service"
+	APIServiceMode = "API Service"
 
 	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
 	// Note: it need to be less than client.defaultPDTimeout
@@ -1721,6 +1721,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
+	member.ServiceMemberGauge.WithLabelValues(s.mode).Set(1)
 	if !s.IsAPIServiceMode() {
 		// Check the cluster dc-location after the PD leader is elected.
 		go s.tsoAllocatorManager.ClusterDCLocationChecker()
@@ -1730,6 +1731,7 @@ func (s *Server) campaignLeader() {
 		// to be new leader.
 		cancel()
 		s.member.ResetLeader()
+		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
 	})
 
 	CheckPDVersion(s.persistOptions)
