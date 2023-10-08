@@ -186,7 +186,7 @@ func updateKeyspaceConfigCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	updateFlags, err := cmd.Flags().GetStringSlice(nmUpdate)
 	if err != nil {
-		cmd.Println("Failed to parse flag: ", err)
+		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
 	for _, flag := range updateFlags {
