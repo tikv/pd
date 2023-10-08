@@ -21,9 +21,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -76,37 +74,20 @@ func (h *operatorHandler) GetOperatorsByRegion(w http.ResponseWriter, r *http.Re
 func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 	var (
 		results []*operator.Operator
-		ops     []*operator.Operator
 		err     error
 	)
 
 	kinds, ok := r.URL.Query()["kind"]
 	if !ok {
 		results, err = h.Handler.GetOperators()
-		if err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
 	} else {
-		for _, kind := range kinds {
-			switch kind {
-			case "admin":
-				ops, err = h.GetAdminOperators()
-			case "leader":
-				ops, err = h.GetLeaderOperators()
-			case "region":
-				ops, err = h.GetRegionOperators()
-			case "waiting":
-				ops, err = h.GetWaitingOperators()
-			}
-			if err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-			results = append(results, ops...)
-		}
+		results, err = h.Handler.GetOperatorsByKinds(kinds)
 	}
 
+	if err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.r.JSON(w, http.StatusOK, results)
 }
 
@@ -126,198 +107,16 @@ func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	name, ok := input["name"].(string)
-	if !ok {
-		h.r.JSON(w, http.StatusBadRequest, "missing operator name")
+	statusCode, result, err := h.HandleOperatorCreation(input)
+	if err != nil {
+		h.r.JSON(w, statusCode, err.Error())
 		return
 	}
-
-	switch name {
-	case "transfer-leader":
-		regionID, ok := input["region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		storeID, ok := input["to_store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing store id to transfer leader to")
-			return
-		}
-		if err := h.AddTransferLeaderOperator(uint64(regionID), uint64(storeID)); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "transfer-region":
-		regionID, ok := input["region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		storeIDs, ok := parseStoreIDsAndPeerRole(input["to_store_ids"], input["peer_roles"])
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store ids to transfer region to")
-			return
-		}
-		if len(storeIDs) == 0 {
-			h.r.JSON(w, http.StatusBadRequest, "missing store ids to transfer region to")
-			return
-		}
-		if err := h.AddTransferRegionOperator(uint64(regionID), storeIDs); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "transfer-peer":
-		regionID, ok := input["region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		fromID, ok := input["from_store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer from")
-			return
-		}
-		toID, ok := input["to_store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
-			return
-		}
-		if err := h.AddTransferPeerOperator(uint64(regionID), uint64(fromID), uint64(toID)); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "add-peer":
-		regionID, ok := input["region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		storeID, ok := input["store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
-			return
-		}
-		if err := h.AddAddPeerOperator(uint64(regionID), uint64(storeID)); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "add-learner":
-		regionID, ok := input["region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		storeID, ok := input["store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
-			return
-		}
-		if err := h.AddAddLearnerOperator(uint64(regionID), uint64(storeID)); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "remove-peer":
-		regionID, ok := input["region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		storeID, ok := input["store_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid store id to transfer peer to")
-			return
-		}
-		if err := h.AddRemovePeerOperator(uint64(regionID), uint64(storeID)); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "merge-region":
-		regionID, ok := input["source_region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		targetID, ok := input["target_region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "invalid target region id to merge to")
-			return
-		}
-		if err := h.AddMergeRegionOperator(uint64(regionID), uint64(targetID)); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "split-region":
-		regionID, ok := input["region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		policy, ok := input["policy"].(string)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing split policy")
-			return
-		}
-		var keys []string
-		if ks, ok := input["keys"]; ok {
-			for _, k := range ks.([]interface{}) {
-				key, ok := k.(string)
-				if !ok {
-					h.r.JSON(w, http.StatusBadRequest, "bad format keys")
-					return
-				}
-				keys = append(keys, key)
-			}
-		}
-		if err := h.AddSplitRegionOperator(uint64(regionID), policy, keys); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "scatter-region":
-		regionID, ok := input["region_id"].(float64)
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "missing region id")
-			return
-		}
-		group, _ := input["group"].(string)
-		if err := h.AddScatterRegionOperator(uint64(regionID), group); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	case "scatter-regions":
-		// support both receiving key ranges or regionIDs
-		startKey, _ := input["start_key"].(string)
-		endKey, _ := input["end_key"].(string)
-		ids, ok := typeutil.JSONToUint64Slice(input["region_ids"])
-		if !ok {
-			h.r.JSON(w, http.StatusBadRequest, "region_ids is invalid")
-			return
-		}
-		group, _ := input["group"].(string)
-		// retry 5 times if retryLimit not defined
-		retryLimit := 5
-		if rl, ok := input["retry_limit"].(float64); ok {
-			retryLimit = int(rl)
-		}
-		processedPercentage, err := h.AddScatterRegionsOperators(ids, startKey, endKey, group, retryLimit)
-		errorMessage := ""
-		if err != nil {
-			errorMessage = err.Error()
-		}
-		s := struct {
-			ProcessedPercentage int    `json:"processed-percentage"`
-			Error               string `json:"error"`
-		}{
-			ProcessedPercentage: processedPercentage,
-			Error:               errorMessage,
-		}
-		h.r.JSON(w, http.StatusOK, &s)
-		return
-	default:
-		h.r.JSON(w, http.StatusBadRequest, "unknown operator")
+	if statusCode == http.StatusOK && result == nil {
+		h.r.JSON(w, http.StatusOK, "The operator is created.")
 		return
 	}
-	h.r.JSON(w, http.StatusOK, "The operator is created.")
+	h.r.JSON(w, statusCode, result)
 }
 
 // @Tags     operator
@@ -354,14 +153,16 @@ func (h *operatorHandler) DeleteOperatorByRegion(w http.ResponseWriter, r *http.
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /operators/records [get]
 func (h *operatorHandler) GetOperatorRecords(w http.ResponseWriter, r *http.Request) {
-	var from time.Time
-	if fromStr := r.URL.Query()["from"]; len(fromStr) > 0 {
-		fromInt, err := strconv.ParseInt(fromStr[0], 10, 64)
+	var (
+		from time.Time
+		err  error
+	)
+	if froms := r.URL.Query()["from"]; len(froms) > 0 {
+		from, err = apiutil.ParseTime(froms[0])
 		if err != nil {
 			h.r.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		from = time.Unix(fromInt, 0)
 	}
 	records, err := h.GetRecords(from)
 	if err != nil {
@@ -369,34 +170,4 @@ func (h *operatorHandler) GetOperatorRecords(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	h.r.JSON(w, http.StatusOK, records)
-}
-
-func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]placement.PeerRoleType, bool) {
-	items, ok := ids.([]interface{})
-	if !ok {
-		return nil, false
-	}
-	storeIDToPeerRole := make(map[uint64]placement.PeerRoleType)
-	storeIDs := make([]uint64, 0, len(items))
-	for _, item := range items {
-		id, ok := item.(float64)
-		if !ok {
-			return nil, false
-		}
-		storeIDs = append(storeIDs, uint64(id))
-		storeIDToPeerRole[uint64(id)] = ""
-	}
-
-	peerRoles, ok := roles.([]interface{})
-	// only consider roles having the same length with ids as the valid case
-	if ok && len(peerRoles) == len(storeIDs) {
-		for i, v := range storeIDs {
-			switch pr := peerRoles[i].(type) {
-			case string:
-				storeIDToPeerRole[v] = placement.PeerRoleType(pr)
-			default:
-			}
-		}
-	}
-	return storeIDToPeerRole, true
 }

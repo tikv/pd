@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -107,12 +108,29 @@ func NewService(srv *tsoserver.Service) *Service {
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	router.POST("/reset-ts", ResetTS)
+	router.PUT("/log", changeLogLevel)
 }
 
 // RegisterKeyspaceGroupRouter registers the router of the TSO keyspace group handler.
 func (s *Service) RegisterKeyspaceGroupRouter() {
 	router := s.root.Group("keyspace-groups")
 	router.GET("/members", GetKeyspaceGroupMembers)
+}
+
+func changeLogLevel(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	var level string
+	if err := c.Bind(&level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := svr.SetLogLevel(level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	c.String(http.StatusOK, "The log level is updated.")
 }
 
 // ResetTSParams is the input json body params of ResetTS

@@ -162,3 +162,13 @@ func CondUint32(key string, val uint32, condition bool) zap.Field {
 	}
 	return zap.Skip()
 }
+
+// IsLevelLegal checks whether the level is legal.
+func IsLevelLegal(level string) bool {
+	switch strings.ToLower(level) {
+	case "fatal", "error", "warn", "warning", "debug", "info":
+		return true
+	default:
+		return false
+	}
+}

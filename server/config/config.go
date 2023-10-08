@@ -505,7 +505,7 @@ type PDServerConfig struct {
 	// RuntimeServices is the running extension services.
 	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
-	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
+	// Currently, we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`

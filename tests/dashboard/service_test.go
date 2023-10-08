@@ -86,7 +86,8 @@ func (suite *dashboardTestSuite) checkRespCode(url string, code int) {
 }
 
 func waitForConfigSync() {
-	time.Sleep(time.Second)
+	// Need to wait dashboard service start.
+	time.Sleep(3 * time.Second)
 }
 
 func (suite *dashboardTestSuite) checkServiceIsStarted(internalProxy bool, servers map[string]*tests.TestServer, leader *tests.TestServer) string {

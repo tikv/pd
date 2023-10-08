@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"go.etcd.io/etcd/clientv3"
@@ -398,7 +399,7 @@ func (suite *loopWatcherTestSuite) TearDownSuite() {
 
 func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 	cache := struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		data map[string]struct{}
 	}{
 		data: make(map[string]struct{}),
@@ -428,7 +429,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 
 func (suite *loopWatcherTestSuite) TestCallBack() {
 	cache := struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		data map[string]struct{}
 	}{
 		data: make(map[string]struct{}),
@@ -494,7 +495,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				suite.put(fmt.Sprintf("TestWatcherLoadLimit%d", i), "")
 			}
 			cache := struct {
-				sync.RWMutex
+				syncutil.RWMutex
 				data []string
 			}{
 				data: make([]string, 0),
@@ -532,7 +533,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 
 func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	cache := struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		data string
 	}{}
 	checkCache := func(expect string) {
