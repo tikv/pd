@@ -27,10 +27,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 )
 
@@ -57,7 +59,7 @@ func init() {
 // Service is the resource group service.
 type Service struct {
 	apiHandlerEngine *gin.Engine
-	baseEndpoint     *gin.RouterGroup
+	root             *gin.RouterGroup
 
 	manager *rmserver.Manager
 }
@@ -86,15 +88,22 @@ func NewService(srv *rmserver.Service) *Service {
 	s := &Service{
 		manager:          manager,
 		apiHandlerEngine: apiHandlerEngine,
-		baseEndpoint:     endpoint,
+		root:             endpoint,
 	}
+	s.RegisterAdminRouter()
 	s.RegisterRouter()
 	return s
 }
 
+// RegisterAdminRouter registers the router of the TSO admin handler.
+func (s *Service) RegisterAdminRouter() {
+	router := s.root.Group("admin")
+	router.PUT("/log", changeLogLevel)
+}
+
 // RegisterRouter registers the router of the service.
 func (s *Service) RegisterRouter() {
-	configEndpoint := s.baseEndpoint.Group("/config")
+	configEndpoint := s.root.Group("/config")
 	configEndpoint.POST("/group", s.postResourceGroup)
 	configEndpoint.PUT("/group", s.putResourceGroup)
 	configEndpoint.GET("/group/:name", s.getResourceGroup)
@@ -108,6 +117,22 @@ func (s *Service) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.apiHandlerEngine.ServeHTTP(w, r)
 	})
+}
+
+func changeLogLevel(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Service)
+	var level string
+	if err := c.Bind(&level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := svr.SetLogLevel(level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	c.String(http.StatusOK, "The log level is updated.")
 }
 
 // postResourceGroup

@@ -27,6 +27,7 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -127,6 +128,17 @@ func (s *Server) SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup) {
 // RegisterGRPCService registers the grpc service.
 func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
 	s.service.RegisterGRPCService(grpcServer)
+}
+
+// SetLogLevel sets log level.
+func (s *Server) SetLogLevel(level string) error {
+	if !logutil.IsLevelLegal(level) {
+		return errors.Errorf("log level %s is illegal", level)
+	}
+	s.cfg.Log.Level = level
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+	return nil
 }
 
 // Run runs the TSO server.
