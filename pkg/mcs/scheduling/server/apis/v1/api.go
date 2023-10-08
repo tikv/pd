@@ -120,6 +120,8 @@ func (s *Service) RegisterSchedulersRouter() {
 	router := s.root.Group("schedulers")
 	router.GET("", getSchedulers)
 	router.GET("/diagnostic/:name", getDiagnosticResult)
+	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
+	// And we need to do one-to-two forwarding in the API middleware.
 	router.POST("/:name", pauseOrResumeScheduler)
 }
 
