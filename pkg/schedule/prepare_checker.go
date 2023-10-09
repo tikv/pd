@@ -49,13 +49,15 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		checker.prepared = true
 		return true
 	}
-	if float64(c.GetClusterHealthyRegionsCnt()) > float64(c.GetTotalRegionCount())*collectFactor {
-		log.Info("healthy meta region number is satisfied, finish prepare checker", zap.Int64("healthy-region", c.GetClusterHealthyRegionsCnt()), zap.Int("total-region", c.GetTotalRegionCount()))
+	healthyRegionsCnt := c.GetClusterMetaHealthyRegionsCnt()
+	totalRegionsCnt := c.GetTotalRegionCount()
+	if float64(healthyRegionsCnt) > float64(totalRegionsCnt)*collectFactor {
+		log.Info("meta healthy region number is satisfied, finish prepare checker", zap.Int("healthy-region", healthyRegionsCnt), zap.Int("total-region", totalRegionsCnt))
 		checker.prepared = true
 		return true
 	}
 	// The number of active regions should be more than total region of all stores * collectFactor
-	if float64(c.GetTotalRegionCount())*collectFactor > float64(checker.sum) {
+	if float64(totalRegionsCnt)*collectFactor > float64(checker.sum) {
 		return false
 	}
 	for _, store := range c.GetStores() {

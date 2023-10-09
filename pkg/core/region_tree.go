@@ -62,16 +62,16 @@ type regionTree struct {
 	totalWriteBytesRate float64
 	totalWriteKeysRate  float64
 	// count the healthy meta regions
-	healthyRegionsCnt int64
+	metaHealthyRegionsCnt int
 }
 
 func newRegionTree() *regionTree {
 	return &regionTree{
-		tree:                btree.NewG[*regionItem](defaultBTreeDegree),
-		totalSize:           0,
-		totalWriteBytesRate: 0,
-		totalWriteKeysRate:  0,
-		healthyRegionsCnt:   0,
+		tree:                  btree.NewG[*regionItem](defaultBTreeDegree),
+		totalSize:             0,
+		totalWriteBytesRate:   0,
+		totalWriteKeysRate:    0,
+		metaHealthyRegionsCnt: 0,
 	}
 }
 
@@ -116,7 +116,7 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 	t.totalWriteBytesRate += regionWriteBytesRate
 	t.totalWriteKeysRate += regionWriteKeysRate
 	if region.IsSourceFresh() {
-		t.healthyRegionsCnt++
+		t.metaHealthyRegionsCnt++
 	}
 
 	if !withOverlaps {
@@ -140,7 +140,7 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 		t.totalWriteBytesRate -= regionWriteBytesRate
 		t.totalWriteKeysRate -= regionWriteKeysRate
 		if old.IsSourceFresh() {
-			t.healthyRegionsCnt--
+			t.metaHealthyRegionsCnt--
 		}
 	}
 
@@ -161,11 +161,11 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 
 	// If region meta from `stale` to `fresh`, need to add the healthy region count.
 	if origin.IsSourceStale() && region.IsSourceFresh() {
-		t.healthyRegionsCnt++
+		t.metaHealthyRegionsCnt++
 	}
 	// If region meta from `fresh` to `stale`, need to sub the healthy region count.
 	if origin.IsSourceFresh() && region.IsSourceStale() {
-		t.healthyRegionsCnt--
+		t.metaHealthyRegionsCnt--
 	}
 }
 
@@ -187,7 +187,7 @@ func (t *regionTree) remove(region *RegionInfo) {
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
 	if region.IsSourceFresh() {
-		t.healthyRegionsCnt--
+		t.metaHealthyRegionsCnt--
 	}
 	t.tree.Delete(item)
 }

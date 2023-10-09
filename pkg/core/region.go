@@ -1342,11 +1342,11 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	return
 }
 
-// GetClusterHealthyRegionsCnt get healthy region count of cluster
-func (r *RegionsInfo) GetClusterHealthyRegionsCnt() int64 {
+// GetClusterMetaHealthyRegionsCnt get meta healthy region count of cluster
+func (r *RegionsInfo) GetClusterMetaHealthyRegionsCnt() int {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.tree.healthyRegionsCnt
+	return r.tree.metaHealthyRegionsCnt
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
