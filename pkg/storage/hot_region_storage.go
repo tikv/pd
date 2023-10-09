@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -107,30 +108,10 @@ const (
 	defaultDeleteTime = 4
 )
 
-// HotRegionType stands for hot type.
-type HotRegionType uint32
-
-// Flags for flow.
-const (
-	WriteType HotRegionType = iota
-	ReadType
-)
-
 // HotRegionTypes stands for hot type.
 var HotRegionTypes = []string{
-	WriteType.String(),
-	ReadType.String(),
-}
-
-// String return HotRegionType in string format.
-func (h HotRegionType) String() string {
-	switch h {
-	case WriteType:
-		return "write"
-	case ReadType:
-		return "read"
-	}
-	return "unimplemented"
+	utils.Read.String(),
+	utils.Write.String(),
 }
 
 // NewHotRegionsStorage create storage to store hot regions info.
@@ -263,14 +244,14 @@ func (h *HotRegionStorage) pullHotRegionInfo() error {
 	if err != nil {
 		return err
 	}
-	if err := h.packHistoryHotRegions(historyHotReadRegions, ReadType.String()); err != nil {
+	if err := h.packHistoryHotRegions(historyHotReadRegions, utils.Read.String()); err != nil {
 		return err
 	}
 	historyHotWriteRegions, err := h.hotRegionStorageHandler.PackHistoryHotWriteRegions()
 	if err != nil {
 		return err
 	}
-	err = h.packHistoryHotRegions(historyHotWriteRegions, WriteType.String())
+	err = h.packHistoryHotRegions(historyHotWriteRegions, utils.Write.String())
 	return err
 }
 
