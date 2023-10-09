@@ -387,7 +387,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	defer log.Sync()
 
 	versioninfo.Log(serviceName)
-	log.Info("Resource manager config", zap.Reflect("config", cfg))
+	log.Info("resource manager config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 	metricutil.Push(&cfg.Metric)
