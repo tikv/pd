@@ -27,6 +27,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
@@ -476,4 +477,17 @@ func copyHeader(dst, src http.Header) {
 			}
 		}
 	}
+}
+
+// ParseTime parses a time string with the format "1694580288"
+// If the string is empty, it returns a zero time.
+func ParseTime(t string) (time.Time, error) {
+	if len(t) == 0 {
+		return time.Time{}, nil
+	}
+	i, err := strconv.ParseInt(t, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(i, 0), nil
 }

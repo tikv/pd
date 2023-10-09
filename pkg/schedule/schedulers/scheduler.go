@@ -124,16 +124,16 @@ func CreateScheduler(typ string, oc *operator.Controller, storage endpoint.Confi
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 
-	s, err := fn(oc, storage, dec, removeSchedulerCb...)
-	if err != nil {
-		return nil, err
-	}
+	return fn(oc, storage, dec, removeSchedulerCb...)
+}
+
+// SaveSchedulerConfig saves the config of the specified scheduler.
+func SaveSchedulerConfig(storage endpoint.ConfigStorage, s Scheduler) error {
 	data, err := s.EncodeConfig()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	err = storage.SaveSchedulerConfig(s.GetName(), data)
-	return s, err
+	return storage.SaveSchedulerConfig(s.GetName(), data)
 }
 
 // FindSchedulerTypeByName finds the type of the specified name.

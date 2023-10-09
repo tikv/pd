@@ -18,7 +18,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
@@ -43,12 +42,6 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 	}
 }
 
-type schedulerPausedPeriod struct {
-	Name     string    `json:"name"`
-	PausedAt time.Time `json:"paused_at"`
-	ResumeAt time.Time `json:"resume_at"`
-}
-
 // @Tags     scheduler
 // @Summary  List all created schedulers by status.
 // @Produce  json
@@ -56,73 +49,14 @@ type schedulerPausedPeriod struct {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers [get]
 func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request) {
-	schedulers, err := h.Handler.GetSchedulers()
+	status := r.URL.Query().Get("status")
+	_, needTS := r.URL.Query()["timestamp"]
+	output, err := h.Handler.GetSchedulerByStatus(status, needTS)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	status := r.URL.Query().Get("status")
-	_, tsFlag := r.URL.Query()["timestamp"]
-	switch status {
-	case "paused":
-		var pausedSchedulers []string
-		pausedPeriods := []schedulerPausedPeriod{}
-		for _, scheduler := range schedulers {
-			paused, err := h.Handler.IsSchedulerPaused(scheduler)
-			if err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-
-			if paused {
-				if tsFlag {
-					s := schedulerPausedPeriod{
-						Name:     scheduler,
-						PausedAt: time.Time{},
-						ResumeAt: time.Time{},
-					}
-					pausedAt, err := h.Handler.GetPausedSchedulerDelayAt(scheduler)
-					if err != nil {
-						h.r.JSON(w, http.StatusInternalServerError, err.Error())
-						return
-					}
-					s.PausedAt = time.Unix(pausedAt, 0)
-					resumeAt, err := h.Handler.GetPausedSchedulerDelayUntil(scheduler)
-					if err != nil {
-						h.r.JSON(w, http.StatusInternalServerError, err.Error())
-						return
-					}
-					s.ResumeAt = time.Unix(resumeAt, 0)
-					pausedPeriods = append(pausedPeriods, s)
-				} else {
-					pausedSchedulers = append(pausedSchedulers, scheduler)
-				}
-			}
-		}
-		if tsFlag {
-			h.r.JSON(w, http.StatusOK, pausedPeriods)
-		} else {
-			h.r.JSON(w, http.StatusOK, pausedSchedulers)
-		}
-		return
-	case "disabled":
-		var disabledSchedulers []string
-		for _, scheduler := range schedulers {
-			disabled, err := h.Handler.IsSchedulerDisabled(scheduler)
-			if err != nil {
-				h.r.JSON(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-
-			if disabled {
-				disabledSchedulers = append(disabledSchedulers, scheduler)
-			}
-		}
-		h.r.JSON(w, http.StatusOK, disabledSchedulers)
-	default:
-		h.r.JSON(w, http.StatusOK, schedulers)
-	}
+	h.r.JSON(w, http.StatusOK, output)
 }
 
 // FIXME: details of input json body params

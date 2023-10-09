@@ -73,6 +73,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -201,7 +202,7 @@ type Server struct {
 	clientConns sync.Map
 
 	tsoClientPool struct {
-		sync.RWMutex
+		syncutil.RWMutex
 		clients map[string]tsopb.TSO_TsoClient
 	}
 
@@ -259,7 +260,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		mode:                            mode,
 		tsoClientPool: struct {
-			sync.RWMutex
+			syncutil.RWMutex
 			clients map[string]tsopb.TSO_TsoClient
 		}{
 			clients: make(map[string]tsopb.TSO_TsoClient),
@@ -1493,22 +1494,13 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
-	if !isLevelLegal(level) {
+	if !logutil.IsLevelLegal(level) {
 		return errors.Errorf("log level %s is illegal", level)
 	}
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
 	return nil
-}
-
-func isLevelLegal(level string) bool {
-	switch strings.ToLower(level) {
-	case "fatal", "error", "warn", "warning", "debug", "info":
-		return true
-	default:
-		return false
-	}
 }
 
 // GetReplicationModeConfig returns the replication mode config.

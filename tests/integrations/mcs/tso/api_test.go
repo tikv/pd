@@ -30,6 +30,7 @@ import (
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -100,6 +101,11 @@ func (suite *tsoAPITestSuite) TestGetKeyspaceGroupMembers() {
 
 func (suite *tsoAPITestSuite) TestForwardResetTS() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader"))
+	}()
+
 	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
 	re.NotNil(primary)
 	url := suite.backendEndpoints + "/pd/api/v1/admin/reset-ts"
@@ -107,13 +113,13 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 	// Test reset ts
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
 	err := testutil.CheckPostJSON(dialClient, url, input,
-		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"))
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	suite.NoError(err)
 
 	// Test reset ts with invalid tso
 	input = []byte(`{}`)
 	err = testutil.CheckPostJSON(dialClient, url, input,
-		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"))
+		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 }
 

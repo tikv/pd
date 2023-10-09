@@ -78,7 +78,8 @@ package btree
 
 import (
 	"sort"
-	"sync"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // Item represents a single object in the tree.
@@ -101,7 +102,7 @@ const (
 // FreeList, in particular when they're created with Clone.
 // Two Btrees using the same freelist are safe for concurrent write access.
 type FreeListG[T Item[T]] struct {
-	mu       sync.Mutex
+	mu       syncutil.Mutex
 	freelist []*node[T]
 }
 

@@ -264,6 +264,17 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
 	// TODO: test more schedulers.
+	// Fixme: the following code will fail because the scheduler is not removed but not synced.
+	// checkDelete := func(schedulerName string) {
+	// 	re.NotNil(schedulersController.GetScheduler(schedulers.BalanceLeaderName) != nil)
+	// 	api.MustDeleteScheduler(re, suite.backendEndpoints, schedulers.BalanceLeaderName)
+	// 	testutil.Eventually(re, func() bool {
+	// 		return schedulersController.GetScheduler(schedulers.BalanceLeaderName) == nil
+	// 	})
+	// }
+	// checkDelete(schedulers.BalanceLeaderName)
+	// checkDelete(schedulers.BalanceRegionName)
+	// checkDelete(schedulers.HotRegionName)
 }
 
 func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {

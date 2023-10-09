@@ -1428,8 +1428,10 @@ func TestSyncConfigContext(t *testing.T) {
 	// trip schema header
 	now := time.Now()
 	stores[0].GetMeta().StatusAddress = server.URL[7:]
-	synced, _ := tc.syncStoreConfig(tc.GetStores())
+	synced, switchRaftV2, needPersist := tc.syncStoreConfig(tc.GetStores())
 	re.False(synced)
+	re.False(switchRaftV2)
+	re.False(needPersist)
 	re.Less(time.Since(now), clientTimeout*2)
 }
 
@@ -1450,15 +1452,17 @@ func TestStoreConfigSync(t *testing.T) {
 	re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/mockFetchStoreConfigFromTiKV", `return("10MiB")`))
 	// switchRaftV2 will be true.
-	synced, switchRaftV2 := tc.syncStoreConfig(tc.GetStores())
+	synced, switchRaftV2, needPersist := tc.syncStoreConfig(tc.GetStores())
 	re.True(synced)
 	re.True(switchRaftV2)
+	re.True(needPersist)
 	re.EqualValues(512, tc.opt.GetMaxMovableHotPeerSize())
 	re.Equal(uint64(10), tc.GetStoreConfig().GetRegionMaxSize())
 	// switchRaftV2 will be false this time.
-	synced, switchRaftV2 = tc.syncStoreConfig(tc.GetStores())
+	synced, switchRaftV2, needPersist = tc.syncStoreConfig(tc.GetStores())
 	re.True(synced)
 	re.False(switchRaftV2)
+	re.False(needPersist)
 	re.Equal(uint64(10), tc.GetStoreConfig().GetRegionMaxSize())
 	re.NoError(opt.Persist(tc.GetStorage()))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/mockFetchStoreConfigFromTiKV"))
@@ -3111,8 +3115,9 @@ func TestPersistScheduler(t *testing.T) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	re.NoError(err)
-	_, err = schedulers.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedulers.ConfigJSONDecoder([]byte("null")))
+	shuffle, err := schedulers.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedulers.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
+	re.NoError(controller.AddScheduler(shuffle))
 	// suppose we add a new default enable scheduler
 	sc.DefaultSchedulers = append(sc.DefaultSchedulers, sc.SchedulerConfig{Type: "shuffle-region"})
 	defer func() {
