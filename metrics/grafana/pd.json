@@ -303,7 +303,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_size\"}) / sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",type=\"storage_capacity\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_size\"}) / sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_capacity\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -771,14 +771,14 @@
       "steppedLine": false,
       "targets": [
         {
-          "expr": "pd_regions_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+          "expr": "max(pd_regions_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}) by (type)",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "{{type}}",
           "refId": "A"
         },
         {
-          "expr": "sum(pd_regions_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}) by (instance, type)",
+          "expr": "sum(pd_regions_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}) by (type)",
           "format": "time_series",
           "hide": true,
           "intervalFactor": 2,
@@ -12489,7 +12489,9 @@
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": true
+            "values": true,
+            "hideEmpty": true,
+            "hideZero": true
           },
           "lines": true,
           "linewidth": 1,
@@ -12589,7 +12591,9 @@
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false
+            "values": false,
+            "hideEmpty": true,
+            "hideZero": true
           },
           "lines": true,
           "linewidth": 1,
@@ -12689,7 +12693,9 @@
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false
+            "values": false,
+            "hideEmpty": true,
+            "hideZero": true
           },
           "lines": true,
           "linewidth": 1,
@@ -12789,7 +12795,9 @@
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false
+            "values": false,
+            "hideEmpty": true,
+            "hideZero": true
           },
           "lines": true,
           "linewidth": 1,
@@ -12889,7 +12897,9 @@
             "rightSide": true,
             "show": true,
             "total": false,
-            "values": false
+            "values": false,
+            "hideEmpty": true,
+            "hideZero": true
           },
           "lines": true,
           "linewidth": 1,
