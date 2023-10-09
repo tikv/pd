@@ -54,7 +54,8 @@ func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Service is the gRPC service for resource manager.
 type Service struct {
-	ctx     context.Context
+	ctx context.Context
+	*Server
 	manager *Manager
 	// settings
 }

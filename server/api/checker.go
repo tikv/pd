@@ -83,13 +83,10 @@ func (c *checkerHandler) PauseOrResumeChecker(w http.ResponseWriter, r *http.Req
 // @Router   /checker/{name} [get]
 func (c *checkerHandler) GetCheckerStatus(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
-	isPaused, err := c.IsCheckerPaused(name)
+	output, err := c.Handler.GetCheckerStatus(name)
 	if err != nil {
 		c.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	output := map[string]bool{
-		"paused": isPaused,
 	}
 	c.r.JSON(w, http.StatusOK, output)
 }

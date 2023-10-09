@@ -27,6 +27,7 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -117,6 +118,17 @@ func (s *Server) GetAddr() string {
 // GetBackendEndpoints returns the backend endpoints.
 func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
+}
+
+// SetLogLevel sets log level.
+func (s *Server) SetLogLevel(level string) error {
+	if !logutil.IsLevelLegal(level) {
+		return errors.Errorf("log level %s is illegal", level)
+	}
+	s.cfg.Log.Level = level
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+	return nil
 }
 
 // Run runs the scheduling server.
@@ -444,16 +456,12 @@ func (s *Server) startCluster(context.Context) error {
 	}
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
 	s.cluster.StartBackgroundJobs()
-	go s.GetCoordinator().RunUntilStop()
 	return nil
 }
 
 func (s *Server) stopCluster() {
-	s.GetCoordinator().Stop()
 	s.cluster.StopBackgroundJobs()
-	s.ruleWatcher.Close()
-	s.configWatcher.Close()
-	s.metaWatcher.Close()
+	s.stopWatcher()
 }
 
 func (s *Server) startWatcher() (err error) {
@@ -467,6 +475,12 @@ func (s *Server) startWatcher() (err error) {
 	}
 	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID)
 	return err
+}
+
+func (s *Server) stopWatcher() {
+	s.ruleWatcher.Close()
+	s.configWatcher.Close()
+	s.metaWatcher.Close()
 }
 
 // GetPersistConfig returns the persist config.
