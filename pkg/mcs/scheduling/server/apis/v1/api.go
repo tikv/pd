@@ -18,13 +18,13 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/pingcap/log"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule"
@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/unrolled/render"
 )
 
@@ -110,22 +111,34 @@ func NewService(srv *scheserver.Service) *Service {
 		root:             root,
 		rd:               createIndentRender(),
 	}
+	s.RegisterAdminRouter()
 	s.RegisterOperatorsRouter()
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
 	return s
 }
 
+// RegisterAdminRouter registers the router of the admin handler.
+func (s *Service) RegisterAdminRouter() {
+	router := s.root.Group("admin")
+	router.PUT("/log", changeLogLevel)
+}
+
 // RegisterSchedulersRouter registers the router of the schedulers handler.
 func (s *Service) RegisterSchedulersRouter() {
 	router := s.root.Group("schedulers")
 	router.GET("", getSchedulers)
+	router.GET("/diagnostic/:name", getDiagnosticResult)
+	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
+	// And we need to do one-to-two forwarding in the API middleware.
+	router.POST("/:name", pauseOrResumeScheduler)
 }
 
 // RegisterCheckersRouter registers the router of the checkers handler.
 func (s *Service) RegisterCheckersRouter() {
 	router := s.root.Group("checkers")
 	router.GET("/:name", getCheckerByName)
+	router.POST("/:name", pauseOrResumeChecker)
 }
 
 // RegisterOperatorsRouter registers the router of the operators handler.
@@ -136,6 +149,22 @@ func (s *Service) RegisterOperatorsRouter() {
 	router.GET("/:id", getOperatorByRegion)
 	router.DELETE("/:id", deleteOperatorByRegion)
 	router.GET("/records", getOperatorRecords)
+}
+
+func changeLogLevel(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	var level string
+	if err := c.Bind(&level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := svr.SetLogLevel(level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	c.String(http.StatusOK, "The log level is updated.")
 }
 
 // @Tags     operators
@@ -279,24 +308,54 @@ func createOperator(c *gin.Context) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /checkers/{name} [get]
 func getCheckerByName(c *gin.Context) {
-	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	handler := c.MustGet(handlerKey).(*handler.Handler)
 	name := c.Param("name")
-	co := svr.GetCoordinator()
-	isPaused, err := co.IsCheckerPaused(name)
+	output, err := handler.GetCheckerStatus(name)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	output := map[string]bool{
-		"paused": isPaused,
-	}
 	c.IndentedJSON(http.StatusOK, output)
 }
 
-type schedulerPausedPeriod struct {
-	Name     string    `json:"name"`
-	PausedAt time.Time `json:"paused_at"`
-	ResumeAt time.Time `json:"resume_at"`
+// FIXME: details of input json body params
+// @Tags     checker
+// @Summary  Pause or resume region merge.
+// @Accept   json
+// @Param    name  path  string  true  "The name of the checker."
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
+// @Failure  400  {string}  string  "Bad format request."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /checker/{name} [post]
+func pauseOrResumeChecker(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	var input map[string]int
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	name := c.Param("name")
+	t, ok := input["delay"]
+	if !ok {
+		c.String(http.StatusBadRequest, "missing pause time")
+		return
+	}
+	if t < 0 {
+		c.String(http.StatusBadRequest, "delay cannot be negative")
+		return
+	}
+	if err := handler.PauseOrResumeChecker(name, int64(t)); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if t == 0 {
+		c.String(http.StatusOK, "Resume the checker successfully.")
+	} else {
+		c.String(http.StatusOK, "Pause the checker successfully.")
+	}
 }
 
 // @Tags     schedulers
@@ -306,70 +365,63 @@ type schedulerPausedPeriod struct {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers [get]
 func getSchedulers(c *gin.Context) {
-	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	co := svr.GetCoordinator()
-	sc := co.GetSchedulersController()
-	schedulers := sc.GetSchedulerNames()
-
+	handler := c.MustGet(handlerKey).(*handler.Handler)
 	status := c.Query("status")
 	_, needTS := c.GetQuery("timestamp")
-	switch status {
-	case "paused":
-		var pausedSchedulers []string
-		pausedPeriods := []schedulerPausedPeriod{}
-		for _, scheduler := range schedulers {
-			paused, err := sc.IsSchedulerPaused(scheduler)
-			if err != nil {
-				c.String(http.StatusInternalServerError, err.Error())
-				return
-			}
-
-			if paused {
-				if needTS {
-					s := schedulerPausedPeriod{
-						Name:     scheduler,
-						PausedAt: time.Time{},
-						ResumeAt: time.Time{},
-					}
-					pausedAt, err := sc.GetPausedSchedulerDelayAt(scheduler)
-					if err != nil {
-						c.String(http.StatusInternalServerError, err.Error())
-						return
-					}
-					s.PausedAt = time.Unix(pausedAt, 0)
-					resumeAt, err := sc.GetPausedSchedulerDelayUntil(scheduler)
-					if err != nil {
-						c.String(http.StatusInternalServerError, err.Error())
-						return
-					}
-					s.ResumeAt = time.Unix(resumeAt, 0)
-					pausedPeriods = append(pausedPeriods, s)
-				} else {
-					pausedSchedulers = append(pausedSchedulers, scheduler)
-				}
-			}
-		}
-		if needTS {
-			c.IndentedJSON(http.StatusOK, pausedPeriods)
-		} else {
-			c.IndentedJSON(http.StatusOK, pausedSchedulers)
-		}
+	output, err := handler.GetSchedulerByStatus(status, needTS)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
 		return
-	case "disabled":
-		var disabledSchedulers []string
-		for _, scheduler := range schedulers {
-			disabled, err := sc.IsSchedulerDisabled(scheduler)
-			if err != nil {
-				c.String(http.StatusInternalServerError, err.Error())
-				return
-			}
-
-			if disabled {
-				disabledSchedulers = append(disabledSchedulers, scheduler)
-			}
-		}
-		c.IndentedJSON(http.StatusOK, disabledSchedulers)
-	default:
-		c.IndentedJSON(http.StatusOK, schedulers)
 	}
+	c.IndentedJSON(http.StatusOK, output)
+}
+
+// @Tags     schedulers
+// @Summary  List schedulers diagnostic result.
+// @Produce  json
+// @Success  200  {array}   string
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/diagnostic/{name} [get]
+func getDiagnosticResult(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	name := c.Param("name")
+	result, err := handler.GetDiagnosticResult(name)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, result)
+}
+
+// FIXME: details of input json body params
+// @Tags     scheduler
+// @Summary  Pause or resume a scheduler.
+// @Accept   json
+// @Param    name  path  string  true  "The name of the scheduler."
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
+// @Failure  400  {string}  string  "Bad format request."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/{name} [post]
+func pauseOrResumeScheduler(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	var input map[string]int64
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	name := c.Param("name")
+	t, ok := input["delay"]
+	if !ok {
+		c.String(http.StatusBadRequest, "missing pause time")
+		return
+	}
+	if err := handler.PauseOrResumeScheduler(name, t); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.String(http.StatusOK, "Pause or resume the scheduler successfully.")
 }

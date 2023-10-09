@@ -27,6 +27,7 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -117,6 +118,17 @@ func (s *Server) GetAddr() string {
 // GetBackendEndpoints returns the backend endpoints.
 func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
+}
+
+// SetLogLevel sets log level.
+func (s *Server) SetLogLevel(level string) error {
+	if !logutil.IsLevelLegal(level) {
+		return errors.Errorf("log level %s is illegal", level)
+	}
+	s.cfg.Log.Level = level
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+	return nil
 }
 
 // Run runs the scheduling server.

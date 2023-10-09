@@ -112,15 +112,15 @@ func (suite *apiTestSuite) TestGetCheckerByName() {
 
 func (suite *apiTestSuite) TestAPIForward() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader"))
+	}()
+
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-
-	failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)")
-	defer func() {
-		failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader")
-	}()
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", suite.backendEndpoints)
 	var slice []string
@@ -148,7 +148,7 @@ func (suite *apiTestSuite) TestAPIForward() {
 		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 
-	// Test checker: only read-only requests are forwarded
+	// Test checker:
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
@@ -159,10 +159,17 @@ func (suite *apiTestSuite) TestAPIForward() {
 	pauseArgs, err := json.Marshal(input)
 	suite.NoError(err)
 	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), pauseArgs,
-		testutil.StatusOK(re), testutil.WithoutHeader(re, apiutil.PDRedirectorHeader))
+		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	suite.NoError(err)
 
-	// Test scheduler: only read-only requests are forwarded
+	// Test scheduler:
+	// Need to redirect:
+	//	"/schedulers", http.MethodGet
+	//	"/schedulers/{name}", http.MethodPost
+	//	"/schedulers/diagnostic/{name}", http.MethodGet
+	// Should not redirect:
+	//	"/schedulers", http.MethodPost
+	//	"/schedulers/{name}", http.MethodDelete
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), &slice,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
@@ -171,7 +178,19 @@ func (suite *apiTestSuite) TestAPIForward() {
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	suite.NoError(err)
-	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/all"), pauseArgs,
-		testutil.StatusOK(re), testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/balance-leader-scheduler"), pauseArgs,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	suite.NoError(err)
+
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/diagnostic/balance-leader-scheduler"), &resp,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	suite.NoError(err)
+
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), pauseArgs,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+
+	err = testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/balance-leader-scheduler"),
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
 }
