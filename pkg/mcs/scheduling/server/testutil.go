@@ -73,6 +73,6 @@ func GenerateConfig(c *config.Config) (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
+	cfg.DataDir = c.DataDir
 	return cfg, nil
 }

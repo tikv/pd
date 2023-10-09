@@ -37,22 +37,22 @@ type MockPackHotRegionInfo struct {
 	pullInterval     time.Duration
 }
 
-// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from.
-func (m *MockPackHotRegionInfo) PackHistoryHotReadRegions() ([]HistoryHotRegion, error) {
-	result := make([]HistoryHotRegion, len(m.historyHotReads))
-	copy(result, m.historyHotReads)
-	return result, nil
+// GetHistoryHotRegions get hot region info in HistoryHotRegion form.
+func (m *MockPackHotRegionInfo) GetHistoryHotRegions(typ utils.RWType) ([]HistoryHotRegion, error) {
+	switch typ {
+	case utils.Write:
+		result := make([]HistoryHotRegion, len(m.historyHotWrites))
+		copy(result, m.historyHotWrites)
+		return result, nil
+	default: // case utils.Read:
+		result := make([]HistoryHotRegion, len(m.historyHotReads))
+		copy(result, m.historyHotReads)
+		return result, nil
+	}
 }
 
-// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
-func (m *MockPackHotRegionInfo) PackHistoryHotWriteRegions() ([]HistoryHotRegion, error) {
-	result := make([]HistoryHotRegion, len(m.historyHotWrites))
-	copy(result, m.historyHotWrites)
-	return result, nil
-}
-
-// IsLeader return isLeader.
-func (m *MockPackHotRegionInfo) IsLeader() bool {
+// IsServing return isLeader.
+func (m *MockPackHotRegionInfo) IsServing() bool {
 	return m.isLeader
 }
 

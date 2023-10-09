@@ -414,6 +414,16 @@ func (o *PersistConfig) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
+// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information.
+func (o *PersistConfig) GetHotRegionsWriteInterval() time.Duration {
+	return o.GetScheduleConfig().HotRegionsWriteInterval.Duration
+}
+
+// GetHotRegionsReservedDays gets days hot region information is kept.
+func (o *PersistConfig) GetHotRegionsReservedDays() uint64 {
+	return o.GetScheduleConfig().HotRegionsReservedDays
+}
+
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
 func (o *PersistConfig) GetMaxMovableHotPeerSize() int64 {
 	return o.GetScheduleConfig().MaxMovableHotPeerSize

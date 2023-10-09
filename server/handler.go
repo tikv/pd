@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -37,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
-	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -55,7 +53,11 @@ type server struct {
 }
 
 func (s *server) GetCoordinator() *schedule.Coordinator {
-	return s.GetRaftCluster().GetCoordinator()
+	c := s.GetRaftCluster()
+	if c == nil {
+		return nil
+	}
+	return c.GetCoordinator()
 }
 
 func (s *server) GetCluster() sche.SharedCluster {
@@ -152,16 +154,6 @@ func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
 		return nil
 	}
 	return c.GetHotReadRegions()
-}
-
-// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
-func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
-	return h.opt.GetHotRegionsWriteInterval()
-}
-
-// GetHotRegionsReservedDays gets days hot region information is kept.
-func (h *Handler) GetHotRegionsReservedDays() uint64 {
-	return h.opt.GetHotRegionsReservedDays()
 }
 
 // GetStoresLoads gets all hot write stores stats.
@@ -486,73 +478,6 @@ func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration
 	return h.s.SaveTTLConfig(map[string]interface{}{
 		data: value,
 	}, ttl)
-}
-
-// IsLeader return true if this server is leader
-func (h *Handler) IsLeader() bool {
-	return h.s.member.IsLeader()
-}
-
-// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
-func (h *Handler) PackHistoryHotReadRegions() ([]storage.HistoryHotRegion, error) {
-	hotReadRegions := h.GetHotReadRegions()
-	if hotReadRegions == nil {
-		return nil, nil
-	}
-	hotReadPeerRegions := hotReadRegions.AsPeer
-	return h.packHotRegions(hotReadPeerRegions, utils.Read.String())
-}
-
-// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
-func (h *Handler) PackHistoryHotWriteRegions() ([]storage.HistoryHotRegion, error) {
-	hotWriteRegions := h.GetHotWriteRegions()
-	if hotWriteRegions == nil {
-		return nil, nil
-	}
-	hotWritePeerRegions := hotWriteRegions.AsPeer
-	return h.packHotRegions(hotWritePeerRegions, utils.Write.String())
-}
-
-func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []storage.HistoryHotRegion, err error) {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return nil, err
-	}
-	for _, hotPeersStat := range hotPeersStat {
-		stats := hotPeersStat.Stats
-		for _, hotPeerStat := range stats {
-			region := c.GetRegion(hotPeerStat.RegionID)
-			if region == nil {
-				continue
-			}
-			meta := region.GetMeta()
-			meta, err := encryption.EncryptRegion(meta, h.s.encryptionKeyManager)
-			if err != nil {
-				return nil, err
-			}
-			stat := storage.HistoryHotRegion{
-				// store in ms.
-				// TODO: distinguish store heartbeat interval and region heartbeat interval
-				// read statistic from store heartbeat, write statistic from region heartbeat
-				UpdateTime:     int64(region.GetInterval().GetEndTimestamp() * 1000),
-				RegionID:       hotPeerStat.RegionID,
-				StoreID:        hotPeerStat.StoreID,
-				PeerID:         region.GetStorePeer(hotPeerStat.StoreID).GetId(),
-				IsLeader:       hotPeerStat.IsLeader,
-				IsLearner:      core.IsLearner(region.GetPeer(hotPeerStat.StoreID)),
-				HotDegree:      int64(hotPeerStat.HotDegree),
-				FlowBytes:      hotPeerStat.ByteRate,
-				KeyRate:        hotPeerStat.KeyRate,
-				QueryRate:      hotPeerStat.QueryRate,
-				StartKey:       string(region.GetStartKey()),
-				EndKey:         string(region.GetEndKey()),
-				EncryptionMeta: meta.GetEncryptionMeta(),
-				HotRegionType:  hotRegionType,
-			}
-			historyHotRegions = append(historyHotRegions, stat)
-		}
-	}
-	return
 }
 
 // GetHistoryHotRegionIter return a iter which iter all qualified item .

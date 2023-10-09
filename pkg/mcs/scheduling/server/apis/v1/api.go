@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/log"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -68,15 +67,11 @@ type Service struct {
 }
 
 type server struct {
-	server *scheserver.Server
-}
-
-func (s *server) GetCoordinator() *schedule.Coordinator {
-	return s.server.GetCoordinator()
+	*scheserver.Server
 }
 
 func (s *server) GetCluster() sche.SharedCluster {
-	return s.server.GetCluster()
+	return s.Server.GetCluster()
 }
 
 func createIndentRender() *render.Render {
@@ -98,7 +93,7 @@ func NewService(srv *scheserver.Service) *Service {
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiHandlerEngine.Use(func(c *gin.Context) {
 		c.Set(multiservicesapi.ServiceContextKey, srv.Server)
-		c.Set(handlerKey, handler.NewHandler(&server{server: srv.Server}))
+		c.Set(handlerKey, handler.NewHandler(&server{srv.Server}))
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
