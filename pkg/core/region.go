@@ -74,7 +74,7 @@ type RegionInfo struct {
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
 	buckets unsafe.Pointer
-	// source is used to indicate region's source, such as FromHeartbeat/FromSync/FromStorage.
+	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
 }
 
@@ -82,22 +82,22 @@ type RegionInfo struct {
 type RegionSource uint32
 
 const (
-	// FromStorage means this region's meta info might be stale.
-	FromStorage RegionSource = iota
-	// FromSync means this region's meta info is relatively fresher.
-	FromSync
-	// FromHeartbeat means this region's meta info is relatively fresher.
-	FromHeartbeat
+	// Storage means this region's meta info might be stale.
+	Storage RegionSource = iota
+	// Sync means this region's meta info is relatively fresher.
+	Sync
+	// Heartbeat means this region's meta info is relatively fresher.
+	Heartbeat
 )
 
 // IsSourceStale means this region's meta info might be stale.
 func (r *RegionInfo) IsSourceStale() bool {
-	return r.source == FromStorage
+	return r.source == Storage
 }
 
 // IsSourceFresh means this region's meta info is relatively fresher.
 func (r *RegionInfo) IsSourceFresh() bool {
-	return r.source == FromHeartbeat || r.source == FromSync
+	return r.source == Heartbeat || r.source == Sync
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -215,7 +215,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateO
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
 		interval:        heartbeat.GetInterval(),
 		queryStats:      heartbeat.GetQueryStats(),
-		source:          FromHeartbeat,
+		source:          Heartbeat,
 	}
 
 	// scheduling service doesn't need the following fields.

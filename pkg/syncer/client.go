@@ -183,10 +183,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
 							core.SetReadKeys(stats[i].KeysRead),
-							core.SetSource(core.FromSync),
+							core.SetSource(core.Sync),
 						)
 					} else {
-						region = core.NewRegionInfo(r, regionLeader, core.SetSource(core.FromSync))
+						region = core.NewRegionInfo(r, regionLeader, core.SetSource(core.Sync))
 					}
 
 					origin, _, err := bc.PreCheckPutRegion(region)

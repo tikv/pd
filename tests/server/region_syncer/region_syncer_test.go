@@ -310,7 +310,7 @@ func initRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(3)},
 			},
 		}
-		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.FromHeartbeat))
+		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.
 		if i < regionLen/2 {
 			buckets := &metapb.Buckets{
