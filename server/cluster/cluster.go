@@ -2392,37 +2392,6 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	return nil
 }
 
-// GetHotWriteRegions gets hot write regions' info.
-func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	hotWriteRegions := c.coordinator.GetHotRegionsByType(utils.Write)
-	if len(storeIDs) > 0 && hotWriteRegions != nil {
-		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
-	}
-	return hotWriteRegions
-}
-
-// GetHotReadRegions gets hot read regions' info.
-func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	hotReadRegions := c.coordinator.GetHotRegionsByType(utils.Read)
-	if len(storeIDs) > 0 && hotReadRegions != nil {
-		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
-	}
-	return hotReadRegions
-}
-
-func getHotRegionsByStoreIDs(hotPeerInfos *statistics.StoreHotPeersInfos, storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	asLeader := statistics.StoreHotPeersStat{}
-	asPeer := statistics.StoreHotPeersStat{}
-	for _, storeID := range storeIDs {
-		asLeader[storeID] = hotPeerInfos.AsLeader[storeID]
-		asPeer[storeID] = hotPeerInfos.AsPeer[storeID]
-	}
-	return &statistics.StoreHotPeersInfos{
-		AsLeader: asLeader,
-		AsPeer:   asPeer,
-	}
-}
-
 // GetStoreLimiter returns the dynamic adjusting limiter
 func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
 	return c.limiter

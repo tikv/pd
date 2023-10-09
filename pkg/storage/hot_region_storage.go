@@ -91,10 +91,8 @@ type HistoryHotRegion struct {
 
 // HotRegionStorageHandler help hot region storage get hot region info.
 type HotRegionStorageHandler interface {
-	// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
-	PackHistoryHotReadRegions() ([]HistoryHotRegion, error)
-	// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
-	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
+	// GetHistoryHotRegions get hot region info in HistoryHotRegion form.
+	GetHistoryHotRegions(typ utils.RWType) ([]HistoryHotRegion, error)
 	// IsLeader return true means this server is leader.
 	IsLeader() bool
 	// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information.
@@ -240,19 +238,18 @@ func (h *HotRegionStorage) Close() error {
 }
 
 func (h *HotRegionStorage) pullHotRegionInfo() error {
-	historyHotReadRegions, err := h.hotRegionStorageHandler.PackHistoryHotReadRegions()
+	historyHotReadRegions, err := h.hotRegionStorageHandler.GetHistoryHotRegions(utils.Read)
 	if err != nil {
 		return err
 	}
 	if err := h.packHistoryHotRegions(historyHotReadRegions, utils.Read.String()); err != nil {
 		return err
 	}
-	historyHotWriteRegions, err := h.hotRegionStorageHandler.PackHistoryHotWriteRegions()
+	historyHotWriteRegions, err := h.hotRegionStorageHandler.GetHistoryHotRegions(utils.Write)
 	if err != nil {
 		return err
 	}
-	err = h.packHistoryHotRegions(historyHotWriteRegions, utils.Write.String())
-	return err
+	return h.packHistoryHotRegions(historyHotWriteRegions, utils.Write.String())
 }
 
 func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotRegion, hotRegionType string) error {

@@ -73,6 +73,11 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/checkers",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodPost, http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/hotspot",
+				scheapi.APIPathPrefix+"/hotspot",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost, http.MethodGet, http.MethodDelete}),
 			// because the writing of all the meta information of the scheduling service is in the API server,
 			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(

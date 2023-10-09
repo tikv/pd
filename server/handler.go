@@ -107,6 +107,20 @@ func (h *Handler) GetScheduleConfig() *sc.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
 
+// GetStore returns a store.
+// If store does not exist, return error.
+func (h *Handler) GetStore(storeID uint64) (*core.StoreInfo, error) {
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	store := rc.GetStore(storeID)
+	if store == nil {
+		return nil, errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	return store, nil
+}
+
 // GetStores returns all stores in the cluster.
 func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	rc := h.s.GetRaftCluster()
@@ -115,43 +129,69 @@ func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
 	}
 	storeMetas := rc.GetMetaStores()
 	stores := make([]*core.StoreInfo, 0, len(storeMetas))
-	for _, s := range storeMetas {
-		storeID := s.GetId()
-		store := rc.GetStore(storeID)
-		if store == nil {
-			return nil, errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	for _, store := range storeMetas {
+		store, err := h.GetStore(store.GetId())
+		if err != nil {
+			return nil, err
 		}
 		stores = append(stores, store)
 	}
 	return stores, nil
 }
 
-// GetHotWriteRegions gets all hot write regions stats.
-func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
-	c, err := h.GetRaftCluster()
+// GetHotRegions gets hot regions' statistics by RWType and storeIDs.
+// If storeIDs is empty, it returns all hot regions' statistics by RWType.
+func (h *Handler) GetHotRegions(typ utils.RWType, storeIDs ...uint64) (*statistics.StoreHotPeersInfos, error) {
+	cluster, err := h.GetRaftCluster()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return c.GetHotWriteRegions()
+	c := cluster.GetCoordinator()
+	return c.GetHotRegions(typ, storeIDs...), nil
+}
+
+// HotBucketsResponse is the response for hot buckets.
+type HotBucketsResponse map[uint64][]*HotBucketsItem
+
+// HotBucketsItem is the item of hot buckets.
+type HotBucketsItem struct {
+	StartKey   string `json:"start_key"`
+	EndKey     string `json:"end_key"`
+	HotDegree  int    `json:"hot_degree"`
+	ReadBytes  uint64 `json:"read_bytes"`
+	ReadKeys   uint64 `json:"read_keys"`
+	WriteBytes uint64 `json:"write_bytes"`
+	WriteKeys  uint64 `json:"write_keys"`
+}
+
+func convert(buckets *buckets.BucketStat) *HotBucketsItem {
+	return &HotBucketsItem{
+		StartKey:   core.HexRegionKeyStr(buckets.StartKey),
+		EndKey:     core.HexRegionKeyStr(buckets.EndKey),
+		HotDegree:  buckets.HotDegree,
+		ReadBytes:  buckets.Loads[utils.RegionReadBytes],
+		ReadKeys:   buckets.Loads[utils.RegionReadKeys],
+		WriteBytes: buckets.Loads[utils.RegionWriteBytes],
+		WriteKeys:  buckets.Loads[utils.RegionWriteKeys],
+	}
 }
 
 // GetHotBuckets returns all hot buckets stats.
-func (h *Handler) GetHotBuckets(regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
+func (h *Handler) GetHotBuckets(regionIDs ...uint64) HotBucketsResponse {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return nil
 	}
 	degree := c.GetOpts().GetHotRegionCacheHitsThreshold()
-	return c.BucketsStats(degree, regionIDs...)
-}
-
-// GetHotReadRegions gets all hot read regions stats.
-func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return nil
+	stats := c.BucketsStats(degree, regionIDs...)
+	ret := HotBucketsResponse{}
+	for regionID, stats := range stats {
+		ret[regionID] = make([]*HotBucketsItem, len(stats))
+		for i, stat := range stats {
+			ret[regionID][i] = convert(stat)
+		}
 	}
-	return c.GetHotReadRegions()
+	return ret
 }
 
 // GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
@@ -171,6 +211,111 @@ func (h *Handler) GetStoresLoads() map[uint64][]float64 {
 		return nil
 	}
 	return rc.GetStoresLoads()
+}
+
+// HotStoreStats is used to record the status of hot stores.
+type HotStoreStats struct {
+	BytesWriteStats map[uint64]float64 `json:"bytes-write-rate,omitempty"`
+	BytesReadStats  map[uint64]float64 `json:"bytes-read-rate,omitempty"`
+	KeysWriteStats  map[uint64]float64 `json:"keys-write-rate,omitempty"`
+	KeysReadStats   map[uint64]float64 `json:"keys-read-rate,omitempty"`
+	QueryWriteStats map[uint64]float64 `json:"query-write-rate,omitempty"`
+	QueryReadStats  map[uint64]float64 `json:"query-read-rate,omitempty"`
+}
+
+// GetHotStores gets all hot stores stats.
+func (h *Handler) GetHotStores() HotStoreStats {
+	stats := HotStoreStats{
+		BytesWriteStats: make(map[uint64]float64),
+		BytesReadStats:  make(map[uint64]float64),
+		KeysWriteStats:  make(map[uint64]float64),
+		KeysReadStats:   make(map[uint64]float64),
+		QueryWriteStats: make(map[uint64]float64),
+		QueryReadStats:  make(map[uint64]float64),
+	}
+	stores, _ := h.GetStores()
+	storesLoads := h.GetStoresLoads()
+	for _, store := range stores {
+		id := store.GetID()
+		if loads, ok := storesLoads[id]; ok {
+			if store.IsTiFlash() {
+				stats.BytesWriteStats[id] = loads[utils.StoreRegionsWriteBytes]
+				stats.KeysWriteStats[id] = loads[utils.StoreRegionsWriteKeys]
+			} else {
+				stats.BytesWriteStats[id] = loads[utils.StoreWriteBytes]
+				stats.KeysWriteStats[id] = loads[utils.StoreWriteKeys]
+			}
+			stats.BytesReadStats[id] = loads[utils.StoreReadBytes]
+			stats.KeysReadStats[id] = loads[utils.StoreReadKeys]
+			stats.QueryWriteStats[id] = loads[utils.StoreWriteQuery]
+			stats.QueryReadStats[id] = loads[utils.StoreReadQuery]
+		}
+	}
+	return stats
+}
+
+// HistoryHotRegionsRequest wrap request condition from tidb.
+// it is request from tidb
+type HistoryHotRegionsRequest struct {
+	StartTime      int64    `json:"start_time,omitempty"`
+	EndTime        int64    `json:"end_time,omitempty"`
+	RegionIDs      []uint64 `json:"region_ids,omitempty"`
+	StoreIDs       []uint64 `json:"store_ids,omitempty"`
+	PeerIDs        []uint64 `json:"peer_ids,omitempty"`
+	IsLearners     []bool   `json:"is_learners,omitempty"`
+	IsLeaders      []bool   `json:"is_leaders,omitempty"`
+	HotRegionTypes []string `json:"hot_region_type,omitempty"`
+}
+
+// GetAllRequestHistoryHotRegion gets all hot region info in HistoryHotRegion form.
+func (h *Handler) GetAllRequestHistoryHotRegion(request *HistoryHotRegionsRequest) (*storage.HistoryHotRegions, error) {
+	var hotRegionTypes = storage.HotRegionTypes
+	if len(request.HotRegionTypes) != 0 {
+		hotRegionTypes = request.HotRegionTypes
+	}
+	iter := h.GetHistoryHotRegionIter(hotRegionTypes, request.StartTime, request.EndTime)
+	var results []*storage.HistoryHotRegion
+	regionSet, storeSet, peerSet, learnerSet, leaderSet :=
+		make(map[uint64]bool), make(map[uint64]bool),
+		make(map[uint64]bool), make(map[bool]bool), make(map[bool]bool)
+	for _, id := range request.RegionIDs {
+		regionSet[id] = true
+	}
+	for _, id := range request.StoreIDs {
+		storeSet[id] = true
+	}
+	for _, id := range request.PeerIDs {
+		peerSet[id] = true
+	}
+	for _, isLearner := range request.IsLearners {
+		learnerSet[isLearner] = true
+	}
+	for _, isLeader := range request.IsLeaders {
+		leaderSet[isLeader] = true
+	}
+	var next *storage.HistoryHotRegion
+	var err error
+	for next, err = iter.Next(); next != nil && err == nil; next, err = iter.Next() {
+		if len(regionSet) != 0 && !regionSet[next.RegionID] {
+			continue
+		}
+		if len(storeSet) != 0 && !storeSet[next.StoreID] {
+			continue
+		}
+		if len(peerSet) != 0 && !peerSet[next.PeerID] {
+			continue
+		}
+		if !learnerSet[next.IsLearner] {
+			continue
+		}
+		if !leaderSet[next.IsLeader] {
+			continue
+		}
+		results = append(results, next)
+	}
+	return &storage.HistoryHotRegions{
+		HistoryHotRegion: results,
+	}, err
 }
 
 // AddScheduler adds a scheduler.
@@ -493,24 +638,14 @@ func (h *Handler) IsLeader() bool {
 	return h.s.member.IsLeader()
 }
 
-// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
-func (h *Handler) PackHistoryHotReadRegions() ([]storage.HistoryHotRegion, error) {
-	hotReadRegions := h.GetHotReadRegions()
-	if hotReadRegions == nil {
-		return nil, nil
+// GetHistoryHotRegions get hot region info in HistoryHotRegion form.
+func (h *Handler) GetHistoryHotRegions(typ utils.RWType) ([]storage.HistoryHotRegion, error) {
+	hotRegions, err := h.GetHotRegions(typ)
+	if hotRegions == nil || err != nil {
+		return nil, err
 	}
-	hotReadPeerRegions := hotReadRegions.AsPeer
-	return h.packHotRegions(hotReadPeerRegions, utils.Read.String())
-}
-
-// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
-func (h *Handler) PackHistoryHotWriteRegions() ([]storage.HistoryHotRegion, error) {
-	hotWriteRegions := h.GetHotWriteRegions()
-	if hotWriteRegions == nil {
-		return nil, nil
-	}
-	hotWritePeerRegions := hotWriteRegions.AsPeer
-	return h.packHotRegions(hotWritePeerRegions, utils.Write.String())
+	hotPeers := hotRegions.AsPeer
+	return h.packHotRegions(hotPeers, typ.String())
 }
 
 func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []storage.HistoryHotRegion, err error) {

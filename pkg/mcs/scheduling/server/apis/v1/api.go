@@ -115,6 +115,7 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterOperatorsRouter()
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
+	s.RegisterHotspotRouter()
 	return s
 }
 
@@ -139,6 +140,16 @@ func (s *Service) RegisterCheckersRouter() {
 	router := s.root.Group("checkers")
 	router.GET("/:name", getCheckerByName)
 	router.POST("/:name", pauseOrResumeChecker)
+}
+
+// RegisterHotspotRouter registers the router of the hotspot handler.
+func (s *Service) RegisterHotspotRouter() {
+	// router := s.root.Group("hotspot")
+	// router.GET("/regions/write", getHotWriteRegions)
+	// router.GET("/regions/read", getHotReadRegions)
+	// router.GET("/regions/history", getHistoryHotRegions)
+	// router.GET("/stores", getHotStores)
+	// router.GET("/buckets", getHotBuckets)
 }
 
 // RegisterOperatorsRouter registers the router of the operators handler.

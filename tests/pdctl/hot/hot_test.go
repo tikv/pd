@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
@@ -97,7 +97,7 @@ func TestHot(t *testing.T) {
 	args := []string{"-u", pdAddr, "hot", "store"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	hotStores := api.HotStoreStats{}
+	hotStores := server.HotStoreStats{}
 	re.NoError(json.Unmarshal(output, &hotStores))
 	re.Equal(float64(bytesWritten)/utils.StoreHeartBeatReportInterval, hotStores.BytesWriteStats[1])
 	re.Equal(float64(bytesRead)/utils.StoreHeartBeatReportInterval, hotStores.BytesReadStats[1])
@@ -271,7 +271,7 @@ func TestHotWithStoreID(t *testing.T) {
 	args = []string{"-u", pdAddr, "hot", "buckets", "1"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	hotBuckets := api.HotBucketsResponse{}
+	hotBuckets := server.HotBucketsResponse{}
 	re.NoError(json.Unmarshal(output, &hotBuckets))
 	re.Len(hotBuckets, 1)
 	re.Len(hotBuckets[1], 1)
@@ -288,7 +288,7 @@ func TestHotWithStoreID(t *testing.T) {
 	args = []string{"-u", pdAddr, "hot", "buckets", "2"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	hotBuckets = api.HotBucketsResponse{}
+	hotBuckets = server.HotBucketsResponse{}
 	re.NoError(json.Unmarshal(output, &hotBuckets))
 	re.Nil(hotBuckets[2])
 }

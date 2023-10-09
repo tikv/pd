@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
@@ -121,12 +122,13 @@ func (h *trendHandler) GetTrend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *trendHandler) getTrendStores() ([]trendStore, error) {
-	var readStats, writeStats statistics.StoreHotPeersStat
-	if hotRead := h.GetHotReadRegions(); hotRead != nil {
-		readStats = hotRead.AsLeader
+	hotRead, err := h.GetHotRegions(utils.Read)
+	if err != nil {
+		return nil, err
 	}
-	if hotWrite := h.GetHotWriteRegions(); hotWrite != nil {
-		writeStats = hotWrite.AsPeer
+	hotWrite, err := h.GetHotRegions(utils.Write)
+	if err != nil {
+		return nil, err
 	}
 	stores, err := h.GetStores()
 	if err != nil {
@@ -147,8 +149,8 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 			LastHeartbeatTS: info.Status.LastHeartbeatTS,
 			Uptime:          info.Status.Uptime,
 		}
-		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(readStats, store.GetID())
-		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(writeStats, store.GetID())
+		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(hotRead.AsLeader, store.GetID())
+		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(hotWrite.AsPeer, store.GetID())
 		trendStores = append(trendStores, s)
 	}
 	return trendStores, nil
