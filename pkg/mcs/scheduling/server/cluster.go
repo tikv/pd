@@ -204,6 +204,14 @@ func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
 	return c.apiServerLeader.CompareAndSwap(old, new)
 }
 
+func trySend(notifier chan struct{}) {
+	select {
+	case notifier <- struct{}{}:
+	// If the channel is not empty, it means the check is triggered.
+	default:
+	}
+}
+
 // updateScheduler listens on the schedulers updating notifier and manage the scheduler creation and deletion.
 func (c *Cluster) updateScheduler() {
 	defer logutil.LogPanic()
@@ -214,12 +222,7 @@ func (c *Cluster) updateScheduler() {
 	// Establish a notifier to listen the schedulers updating.
 	notifier := make(chan struct{}, 1)
 	// Make sure the check will be triggered once later.
-	select {
-	case notifier <- struct{}{}:
-	// If the channel is not empty, it means the check is triggered.
-	default:
-	}
-
+	trySend(notifier)
 	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -240,11 +243,7 @@ func (c *Cluster) updateScheduler() {
 				return
 			case <-ticker.C:
 				// retry
-				select {
-				case notifier <- struct{}{}:
-				// If the channel is not empty, it means the check is triggered.
-				default:
-				}
+				trySend(notifier)
 				continue
 			}
 		}
