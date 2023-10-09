@@ -77,106 +77,6 @@
         "rgba(50, 172, 45, 0.97)"
       ],
       "datasource": "${DS_TEST-CLUSTER}",
-      "description": "It indicates whether the current PD is the leader or a follower.",
-      "format": "none",
-      "gauge": {
-        "maxValue": 100,
-        "minValue": 0,
-        "show": false,
-        "thresholdLabels": false,
-        "thresholdMarkers": true
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 4,
-        "x": 0,
-        "y": 0
-      },
-      "id": 55,
-      "interval": null,
-      "links": [],
-      "mappingType": 1,
-      "mappingTypes": [
-        {
-          "name": "value to text",
-          "value": 1
-        },
-        {
-          "name": "range to text",
-          "value": 2
-        }
-      ],
-      "maxDataPoints": 100,
-      "nullPointMode": "connected",
-      "nullText": null,
-      "postfix": "",
-      "postfixFontSize": "50%",
-      "prefix": "",
-      "prefixFontSize": "50%",
-      "rangeMaps": [
-        {
-          "from": "1",
-          "text": "Leader",
-          "to": "100000"
-        },
-        {
-          "from": "0",
-          "text": "Follower",
-          "to": "1"
-        }
-      ],
-      "sparkline": {
-        "fillColor": "rgba(31, 118, 189, 0.18)",
-        "full": false,
-        "lineColor": "rgb(31, 120, 193)",
-        "show": false
-      },
-      "tableColumn": "",
-      "targets": [
-        {
-          "expr": "pd_tso_role{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\", dc=\"global\"}",
-          "format": "time_series",
-          "instant": true,
-          "intervalFactor": 2,
-          "legendFormat": "",
-          "metric": "pd_server_tso",
-          "refId": "A",
-          "step": 40
-        }
-      ],
-      "thresholds": "",
-      "title": "PD role",
-      "type": "singlestat",
-      "valueFontSize": "50%",
-      "valueMaps": [
-        {
-          "op": "=",
-          "text": "Unknown",
-          "value": "null"
-        },
-        {
-          "op": "=",
-          "text": "Follower",
-          "value": "0"
-        },
-        {
-          "op": "=",
-          "text": "Leader",
-          "value": "1"
-        }
-      ],
-      "valueName": "current"
-    },
-    {
-      "cacheTimeout": null,
-      "colorBackground": false,
-      "colorValue": false,
-      "colors": [
-        "rgba(245, 54, 54, 0.9)",
-        "rgba(237, 129, 40, 0.89)",
-        "rgba(50, 172, 45, 0.97)"
-      ],
-      "datasource": "${DS_TEST-CLUSTER}",
       "decimals": null,
       "description": "The total capacity size of the cluster",
       "editable": true,
@@ -192,7 +92,7 @@
       "gridPos": {
         "h": 6,
         "w": 4,
-        "x": 4,
+        "x": 0,
         "y": 0
       },
       "id": 10,
@@ -277,7 +177,7 @@
       "gridPos": {
         "h": 6,
         "w": 4,
-        "x": 8,
+        "x": 4,
         "y": 0
       },
       "hideTimeOverride": false,
@@ -362,7 +262,7 @@
       "gridPos": {
         "h": 6,
         "w": 4,
-        "x": 12,
+        "x": 8,
         "y": 0
       },
       "hideTimeOverride": false,
@@ -445,7 +345,7 @@
       "gridPos": {
         "h": 6,
         "w": 4,
-        "x": 16,
+        "x": 12,
         "y": 0
       },
       "id": 97,
@@ -485,16 +385,19 @@
       "tableColumn": "",
       "targets": [
         {
+          "exemplar": true,
           "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",  type=\"store_up_count\"})",
           "format": "time_series",
+          "interval": "",
           "intervalFactor": 2,
+          "legendFormat": "",
           "refId": "A"
         }
       ],
       "thresholds": "0,1",
       "title": "Normal stores",
       "type": "singlestat",
-      "valueFontSize": "100%",
+      "valueFontSize": "80%",
       "valueMaps": [
         {
           "op": "=",
@@ -515,6 +418,90 @@
       ],
       "datasource": "${DS_TEST-CLUSTER}",
       "description": "The total number of Regions without replicas",
+      "editable": true,
+      "error": false,
+      "format": "none",
+      "gauge": {
+        "maxValue": 100,
+        "minValue": 0,
+        "show": false,
+        "thresholdLabels": false,
+        "thresholdMarkers": false
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "id": 21,
+      "interval": null,
+      "links": [],
+      "mappingType": 1,
+      "mappingTypes": [
+        {
+          "name": "value to text",
+          "value": 1
+        },
+        {
+          "name": "range to text",
+          "value": 2
+        }
+      ],
+      "maxDataPoints": 100,
+      "nullPointMode": "null",
+      "nullText": null,
+      "postfix": "",
+      "postfixFontSize": "50%",
+      "prefix": "",
+      "prefixFontSize": "50%",
+      "rangeMaps": [
+        {
+          "from": "null",
+          "text": "N/A",
+          "to": "null"
+        }
+      ],
+      "sparkline": {
+        "fillColor": "rgba(31, 118, 189, 0.18)",
+        "full": true,
+        "lineColor": "rgb(31, 120, 193)",
+        "show": true
+      },
+      "tableColumn": "",
+      "targets": [
+        {
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",type=\"leader_count\"})",
+          "format": "time_series",
+          "intervalFactor": 2,
+          "refId": "A",
+          "step": 40
+        }
+      ],
+      "thresholds": "",
+      "title": "Number of Regions",
+      "type": "singlestat",
+      "valueFontSize": "80%",
+      "valueMaps": [
+        {
+          "op": "=",
+          "text": "N/A",
+          "value": "null"
+        }
+      ],
+      "valueName": "current"
+    },
+    {
+      "cacheTimeout": null,
+      "colorBackground": false,
+      "colorValue": false,
+      "colors": [
+        "rgba(245, 54, 54, 0.9)",
+        "rgba(237, 129, 40, 0.89)",
+        "rgba(50, 172, 45, 0.97)"
+      ],
+      "datasource": "${DS_TEST-CLUSTER}",
+      "description": "The current peer count of the cluster",
       "editable": true,
       "error": false,
       "format": "none",
@@ -568,15 +555,16 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",type=\"leader_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",  type=\"region_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
+          "legendFormat": "count",
           "refId": "A",
-          "step": 40
+          "step": 4
         }
       ],
       "thresholds": "",
-      "title": "Number of Regions",
+      "title": "Current peer count",
       "type": "singlestat",
       "valueFontSize": "80%",
       "valueMaps": [
@@ -804,8 +792,7 @@
           "fill": true,
           "line": true,
           "op": "gt",
-          "value": 100,
-          "yaxis": "left"
+          "value": 100
         }
       ],
       "timeFrom": null,
@@ -849,99 +836,85 @@
       }
     },
     {
-      "aliasColors": {},
-      "bars": false,
-      "dashLength": 10,
-      "dashes": false,
+      "cacheTimeout": null,
       "datasource": "${DS_TEST-CLUSTER}",
-      "decimals": null,
-      "description": "The current peer count of the cluster",
-      "editable": true,
-      "error": false,
-      "fill": 0,
-      "fillGradient": 0,
-      "grid": {},
+      "description": "It indicates the current leader/primary of services",
       "gridPos": {
         "h": 7,
         "w": 8,
         "x": 16,
         "y": 6
       },
-      "hiddenSeries": false,
-      "id": 18,
-      "legend": {
-        "avg": false,
-        "current": false,
-        "max": false,
-        "min": false,
-        "show": false,
-        "total": false,
-        "values": false
-      },
-      "lines": true,
-      "linewidth": 3,
+      "id": 55,
+      "interval": null,
       "links": [],
-      "nullPointMode": "null",
-      "paceLength": 10,
-      "percentage": false,
-      "pointradius": 5,
-      "points": false,
-      "renderer": "flot",
-      "seriesOverrides": [],
-      "spaceLength": 10,
-      "stack": false,
-      "steppedLine": true,
+      "maxDataPoints": 100,
+      "options": {
+        "showHeader": true
+      },
+      "tableColumn": "instance",
       "targets": [
         {
-          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\",  type=\"region_count\"})",
-          "format": "time_series",
+          "exemplar": true,
+          "expr": "service_member_role{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+          "format": "table",
+          "instant": true,
+          "interval": "",
           "intervalFactor": 2,
-          "legendFormat": "count",
+          "legendFormat": "",
+          "metric": "pd_server_tso",
           "refId": "A",
-          "step": 4
+          "step": 40
         }
       ],
-      "thresholds": [],
       "timeFrom": null,
-      "timeRegions": [],
       "timeShift": null,
-      "title": "Current peer count",
-      "tooltip": {
-        "msResolution": false,
-        "shared": true,
-        "sort": 0,
-        "value_type": "cumulative"
-      },
-      "type": "graph",
-      "xaxis": {
-        "buckets": null,
-        "mode": "time",
-        "name": null,
-        "show": true,
-        "values": []
-      },
-      "yaxes": [
+      "title": "Leader/Primary",
+      "transformations": [
         {
-          "format": "none",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": true
+          "id": "filterByValue",
+          "options": {
+            "filters": [
+              {
+                "fieldName": "Value",
+                "config": {
+                  "id": "notEqual",
+                  "options": {
+                    "value": "0"
+                  }
+                }
+              }
+            ],
+            "type": "include",
+            "match": "all"
+          }
         },
         {
-          "format": "none",
-          "label": null,
-          "logBase": 1,
-          "max": null,
-          "min": null,
-          "show": false
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "instance",
+                "service"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "instance": 1,
+              "service": 0
+            },
+            "renameByName": {
+              "instance": ""
+            }
+          }
         }
       ],
-      "yaxis": {
-        "align": false,
-        "alignLevel": null
-      }
+      "type": "table"
     },
     {
       "datasource": "${DS_TEST-CLUSTER}",
@@ -2417,7 +2390,6 @@
           },
           "yaxes": [
             {
-              "$$hashKey": "object:533",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -2426,7 +2398,6 @@
               "show": true
             },
             {
-              "$$hashKey": "object:534",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -9033,7 +9004,7 @@
               "hide": false,
               "intervalFactor": 1,
               "legendFormat": "{{instance}}-logically-in-use",
-              "refId": "B"        
+              "refId": "B"
             }
           ],
           "thresholds": [],
@@ -10789,7 +10760,6 @@
           "renderer": "flot",
           "seriesOverrides": [
             {
-              "$$hashKey": "object:363",
               "alias": "/pending.*/",
               "yaxis": 2
             }
@@ -10836,7 +10806,6 @@
           },
           "yaxes": [
             {
-              "$$hashKey": "object:307",
               "format": "ops",
               "label": null,
               "logBase": 1,
@@ -10845,7 +10814,6 @@
               "show": true
             },
             {
-              "$$hashKey": "object:308",
               "format": "short",
               "label": null,
               "logBase": 1,
@@ -12378,7 +12346,6 @@
     },
     {
       "collapsed": true,
-      "datasource": null,
       "gridPos": {
         "h": 1,
         "w": 24,
