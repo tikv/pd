@@ -94,17 +94,21 @@ func (h *hotStatusHandler) getHotRegions(typ utils.RWType, w http.ResponseWriter
 // @Tags     hotspot
 // @Summary  List the hot stores.
 // @Produce  json
-// @Success  200  {object}  server.HotStoreStats
+// @Success  200  {object}  handler.HotStoreStats
 // @Router   /hotspot/stores [get]
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
-	stats := h.Handler.GetHotStores()
+	stats, err := h.Handler.GetHotStores()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, stats)
 }
 
 // @Tags     hotspot
 // @Summary  List the hot buckets.
 // @Produce  json
-// @Success  200  {object}  server.HotBucketsResponse
+// @Success  200  {object}  handler.HotBucketsResponse
 // @Router   /hotspot/buckets [get]
 func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request) {
 	regionIDs := r.URL.Query()["region_id"]
@@ -114,7 +118,11 @@ func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request)
 			ids[i] = id
 		}
 	}
-	ret := h.Handler.GetHotBuckets(ids...)
+	ret, err := h.Handler.GetHotBuckets(ids...)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, ret)
 }
 

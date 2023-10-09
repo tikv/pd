@@ -15,6 +15,7 @@
 package apis
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -26,11 +27,12 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/pingcap/log"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -102,7 +104,7 @@ func NewService(srv *scheserver.Service) *Service {
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
-	apiHandlerEngine.GET("metrics", utils.PromHandler())
+	apiHandlerEngine.GET("metrics", mcsutils.PromHandler())
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	s := &Service{
@@ -144,12 +146,12 @@ func (s *Service) RegisterCheckersRouter() {
 
 // RegisterHotspotRouter registers the router of the hotspot handler.
 func (s *Service) RegisterHotspotRouter() {
-	// router := s.root.Group("hotspot")
-	// router.GET("/regions/write", getHotWriteRegions)
-	// router.GET("/regions/read", getHotReadRegions)
+	router := s.root.Group("hotspot")
+	router.GET("/regions/write", getHotWriteRegions)
+	router.GET("/regions/read", getHotReadRegions)
 	// router.GET("/regions/history", getHistoryHotRegions)
-	// router.GET("/stores", getHotStores)
-	// router.GET("/buckets", getHotBuckets)
+	router.GET("/stores", getHotStores)
+	router.GET("/buckets", getHotBuckets)
 }
 
 // RegisterOperatorsRouter registers the router of the operators handler.
@@ -435,4 +437,97 @@ func pauseOrResumeScheduler(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "Pause or resume the scheduler successfully.")
+}
+
+// @Tags     hotspot
+// @Summary  List the hot write regions.
+// @Produce  json
+// @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Router   /hotspot/regions/write [get]
+func getHotWriteRegions(c *gin.Context) {
+	getHotRegions(utils.Write, c)
+}
+
+// @Tags     hotspot
+// @Summary  List the hot read regions.
+// @Produce  json
+// @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Router   /hotspot/regions/read [get]
+func getHotReadRegions(c *gin.Context) {
+	getHotRegions(utils.Read, c)
+}
+
+func getHotRegions(typ utils.RWType, c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	storeIDs := c.QueryArray("store_id")
+	if len(storeIDs) < 1 {
+		hotRegions, err := handler.GetHotRegions(typ)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.IndentedJSON(http.StatusOK, hotRegions)
+		return
+	}
+
+	var ids []uint64
+	for _, storeID := range storeIDs {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
+			c.String(http.StatusBadRequest, fmt.Sprintf("invalid store id: %s", storeID))
+			return
+		}
+		_, err = handler.GetStore(id)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	hotRegions, err := handler.GetHotRegions(typ, ids...)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, hotRegions)
+}
+
+// @Tags     hotspot
+// @Summary  List the hot stores.
+// @Produce  json
+// @Success  200  {object}  handler.HotStoreStats
+// @Router   /hotspot/stores [get]
+func getHotStores(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	stores, err := handler.GetHotStores()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, stores)
+}
+
+// @Tags     hotspot
+// @Summary  List the hot buckets.
+// @Produce  json
+// @Success  200  {object}  handler.HotBucketsResponse
+// @Router   /hotspot/buckets [get]
+func getHotBuckets(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	regionIDs := c.QueryArray("region_id")
+	ids := make([]uint64, len(regionIDs))
+	for i, regionID := range regionIDs {
+		if id, err := strconv.ParseUint(regionID, 10, 64); err == nil {
+			ids[i] = id
+		}
+	}
+	ret, err := handler.GetHotBuckets(ids...)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, ret)
 }

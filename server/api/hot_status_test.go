@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -56,7 +57,7 @@ func (suite *hotStatusTestSuite) TearDownSuite() {
 }
 
 func (suite *hotStatusTestSuite) TestGetHotStore() {
-	stat := server.HotStoreStats{}
+	stat := handler.HotStoreStats{}
 	err := tu.ReadGetJSON(suite.Require(), testDialClient, suite.urlPrefix+"/stores", &stat)
 	suite.NoError(err)
 }

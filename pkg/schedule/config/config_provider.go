@@ -116,6 +116,7 @@ type SharedConfigProvider interface {
 	IsWitnessAllowed() bool
 	IsPlacementRulesCacheEnabled() bool
 	SetHaltScheduling(bool, string)
+	GetHotRegionCacheHitsThreshold() int
 
 	// for test purpose
 	SetPlacementRulesCacheEnabled(bool)

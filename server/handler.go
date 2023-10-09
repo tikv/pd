@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
@@ -55,7 +54,11 @@ type server struct {
 }
 
 func (s *server) GetCoordinator() *schedule.Coordinator {
-	return s.GetRaftCluster().GetCoordinator()
+	c := s.GetRaftCluster()
+	if c == nil {
+		return nil
+	}
+	return c.GetCoordinator()
 }
 
 func (s *server) GetCluster() sche.SharedCluster {
@@ -107,93 +110,6 @@ func (h *Handler) GetScheduleConfig() *sc.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
 
-// GetStore returns a store.
-// If store does not exist, return error.
-func (h *Handler) GetStore(storeID uint64) (*core.StoreInfo, error) {
-	rc := h.s.GetRaftCluster()
-	if rc == nil {
-		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
-	}
-	store := rc.GetStore(storeID)
-	if store == nil {
-		return nil, errs.ErrStoreNotFound.FastGenByArgs(storeID)
-	}
-	return store, nil
-}
-
-// GetStores returns all stores in the cluster.
-func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
-	rc := h.s.GetRaftCluster()
-	if rc == nil {
-		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
-	}
-	storeMetas := rc.GetMetaStores()
-	stores := make([]*core.StoreInfo, 0, len(storeMetas))
-	for _, store := range storeMetas {
-		store, err := h.GetStore(store.GetId())
-		if err != nil {
-			return nil, err
-		}
-		stores = append(stores, store)
-	}
-	return stores, nil
-}
-
-// GetHotRegions gets hot regions' statistics by RWType and storeIDs.
-// If storeIDs is empty, it returns all hot regions' statistics by RWType.
-func (h *Handler) GetHotRegions(typ utils.RWType, storeIDs ...uint64) (*statistics.StoreHotPeersInfos, error) {
-	cluster, err := h.GetRaftCluster()
-	if err != nil {
-		return nil, err
-	}
-	c := cluster.GetCoordinator()
-	return c.GetHotRegions(typ, storeIDs...), nil
-}
-
-// HotBucketsResponse is the response for hot buckets.
-type HotBucketsResponse map[uint64][]*HotBucketsItem
-
-// HotBucketsItem is the item of hot buckets.
-type HotBucketsItem struct {
-	StartKey   string `json:"start_key"`
-	EndKey     string `json:"end_key"`
-	HotDegree  int    `json:"hot_degree"`
-	ReadBytes  uint64 `json:"read_bytes"`
-	ReadKeys   uint64 `json:"read_keys"`
-	WriteBytes uint64 `json:"write_bytes"`
-	WriteKeys  uint64 `json:"write_keys"`
-}
-
-func convert(buckets *buckets.BucketStat) *HotBucketsItem {
-	return &HotBucketsItem{
-		StartKey:   core.HexRegionKeyStr(buckets.StartKey),
-		EndKey:     core.HexRegionKeyStr(buckets.EndKey),
-		HotDegree:  buckets.HotDegree,
-		ReadBytes:  buckets.Loads[utils.RegionReadBytes],
-		ReadKeys:   buckets.Loads[utils.RegionReadKeys],
-		WriteBytes: buckets.Loads[utils.RegionWriteBytes],
-		WriteKeys:  buckets.Loads[utils.RegionWriteKeys],
-	}
-}
-
-// GetHotBuckets returns all hot buckets stats.
-func (h *Handler) GetHotBuckets(regionIDs ...uint64) HotBucketsResponse {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return nil
-	}
-	degree := c.GetOpts().GetHotRegionCacheHitsThreshold()
-	stats := c.BucketsStats(degree, regionIDs...)
-	ret := HotBucketsResponse{}
-	for regionID, stats := range stats {
-		ret[regionID] = make([]*HotBucketsItem, len(stats))
-		for i, stat := range stats {
-			ret[regionID][i] = convert(stat)
-		}
-	}
-	return ret
-}
-
 // GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
 func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
 	return h.opt.GetHotRegionsWriteInterval()
@@ -202,56 +118,6 @@ func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
 // GetHotRegionsReservedDays gets days hot region information is kept.
 func (h *Handler) GetHotRegionsReservedDays() uint64 {
 	return h.opt.GetHotRegionsReservedDays()
-}
-
-// GetStoresLoads gets all hot write stores stats.
-func (h *Handler) GetStoresLoads() map[uint64][]float64 {
-	rc := h.s.GetRaftCluster()
-	if rc == nil {
-		return nil
-	}
-	return rc.GetStoresLoads()
-}
-
-// HotStoreStats is used to record the status of hot stores.
-type HotStoreStats struct {
-	BytesWriteStats map[uint64]float64 `json:"bytes-write-rate,omitempty"`
-	BytesReadStats  map[uint64]float64 `json:"bytes-read-rate,omitempty"`
-	KeysWriteStats  map[uint64]float64 `json:"keys-write-rate,omitempty"`
-	KeysReadStats   map[uint64]float64 `json:"keys-read-rate,omitempty"`
-	QueryWriteStats map[uint64]float64 `json:"query-write-rate,omitempty"`
-	QueryReadStats  map[uint64]float64 `json:"query-read-rate,omitempty"`
-}
-
-// GetHotStores gets all hot stores stats.
-func (h *Handler) GetHotStores() HotStoreStats {
-	stats := HotStoreStats{
-		BytesWriteStats: make(map[uint64]float64),
-		BytesReadStats:  make(map[uint64]float64),
-		KeysWriteStats:  make(map[uint64]float64),
-		KeysReadStats:   make(map[uint64]float64),
-		QueryWriteStats: make(map[uint64]float64),
-		QueryReadStats:  make(map[uint64]float64),
-	}
-	stores, _ := h.GetStores()
-	storesLoads := h.GetStoresLoads()
-	for _, store := range stores {
-		id := store.GetID()
-		if loads, ok := storesLoads[id]; ok {
-			if store.IsTiFlash() {
-				stats.BytesWriteStats[id] = loads[utils.StoreRegionsWriteBytes]
-				stats.KeysWriteStats[id] = loads[utils.StoreRegionsWriteKeys]
-			} else {
-				stats.BytesWriteStats[id] = loads[utils.StoreWriteBytes]
-				stats.KeysWriteStats[id] = loads[utils.StoreWriteKeys]
-			}
-			stats.BytesReadStats[id] = loads[utils.StoreReadBytes]
-			stats.KeysReadStats[id] = loads[utils.StoreReadKeys]
-			stats.QueryWriteStats[id] = loads[utils.StoreWriteQuery]
-			stats.QueryReadStats[id] = loads[utils.StoreReadQuery]
-		}
-	}
-	return stats
 }
 
 // HistoryHotRegionsRequest wrap request condition from tidb.

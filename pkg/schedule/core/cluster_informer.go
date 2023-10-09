@@ -56,7 +56,9 @@ type CheckerCluster interface {
 // SharedCluster is an aggregate interface that wraps multiple interfaces
 type SharedCluster interface {
 	BasicCluster
+	statistics.StoreStatInformer
 	statistics.RegionStatInformer
+	buckets.BucketStatInformer
 
 	GetBasicCluster() *core.BasicCluster
 	GetSharedConfig() sc.SharedConfigProvider
