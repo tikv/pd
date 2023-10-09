@@ -348,7 +348,7 @@ func TestHistoryHotRegions(t *testing.T) {
 	// wait hot scheduler starts
 	testutil.Eventually(re, func() bool {
 		hotRegionStorage := leaderServer.GetServer().GetHistoryHotRegionStorage()
-		iter := hotRegionStorage.NewIterator([]string{storage.WriteType.String()}, startTime*1000, time.Now().UnixNano()/int64(time.Millisecond))
+		iter := hotRegionStorage.NewIterator([]string{utils.Write.String()}, startTime*1000, time.Now().UnixNano()/int64(time.Millisecond))
 		next, err := iter.Next()
 		return err == nil && next != nil
 	})

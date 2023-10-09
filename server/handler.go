@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -499,7 +500,7 @@ func (h *Handler) PackHistoryHotReadRegions() ([]storage.HistoryHotRegion, error
 		return nil, nil
 	}
 	hotReadPeerRegions := hotReadRegions.AsPeer
-	return h.packHotRegions(hotReadPeerRegions, storage.ReadType.String())
+	return h.packHotRegions(hotReadPeerRegions, utils.Read.String())
 }
 
 // PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
@@ -509,7 +510,7 @@ func (h *Handler) PackHistoryHotWriteRegions() ([]storage.HistoryHotRegion, erro
 		return nil, nil
 	}
 	hotWritePeerRegions := hotWriteRegions.AsPeer
-	return h.packHotRegions(hotWritePeerRegions, storage.WriteType.String())
+	return h.packHotRegions(hotWritePeerRegions, utils.Write.String())
 }
 
 func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []storage.HistoryHotRegion, err error) {
