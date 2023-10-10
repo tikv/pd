@@ -90,14 +90,9 @@ const (
 	Heartbeat
 )
 
-// IsSourceStale means this region's meta info might be stale.
-func (r *RegionInfo) IsSourceStale() bool {
+// LoadedFromStorage means this region's meta info loaded from storage.
+func (r *RegionInfo) LoadedFromStorage() bool {
 	return r.source == Storage
-}
-
-// IsSourceFresh means this region's meta info is relatively fresher.
-func (r *RegionInfo) IsSourceFresh() bool {
-	return r.source == Heartbeat || r.source == Sync
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -730,7 +725,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			saveKV, saveCache, isNew = true, true, true
 		} else {
-			if origin.IsSourceStale() {
+			if origin.LoadedFromStorage() {
 				isNew = true
 			}
 			r := region.GetRegionEpoch()
@@ -1342,11 +1337,11 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	return
 }
 
-// GetClusterMetaHealthyRegionsCnt get meta healthy region count of cluster
-func (r *RegionsInfo) GetClusterMetaHealthyRegionsCnt() int {
+// GetClusterNotFromStorageRegionsCnt gets the total count of regions that not loaded from storage anymore
+func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.tree.metaHealthyRegionsCnt
+	return r.tree.notFromStorageRegionsCnt
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap

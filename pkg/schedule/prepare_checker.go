@@ -49,10 +49,10 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		checker.prepared = true
 		return true
 	}
-	healthyRegionsCnt := c.GetClusterMetaHealthyRegionsCnt()
+	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
 	totalRegionsCnt := c.GetTotalRegionCount()
-	if float64(healthyRegionsCnt) > float64(totalRegionsCnt)*collectFactor {
-		log.Info("meta healthy region number is satisfied, finish prepare checker", zap.Int("healthy-region", healthyRegionsCnt), zap.Int("total-region", totalRegionsCnt))
+	if float64(notLoadedFromRegionsCnt) > float64(totalRegionsCnt)*collectFactor {
+		log.Info("meta not loaded from region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionsCnt))
 		checker.prepared = true
 		return true
 	}
