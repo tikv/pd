@@ -286,12 +286,11 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string) *
 		}
 	}
 
-	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers())) // StoreID -> Peer
-	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))  // selected StoreID set
-	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))   // StoreID allowed to become Leader
+	targetPeers := make(map[uint64]*metapb.Peer, len(region.GetPeers()))                  // StoreID -> Peer
+	selectedStores := make(map[uint64]struct{}, len(region.GetPeers()))                   // selected StoreID set
+	leaderCandidateStores := make([]uint64, 0, len(region.GetPeers()))                    // StoreID allowed to become Leader
 	scatterWithSameEngine := func(peers map[uint64]*metapb.Peer, context engineContext) { // peers: StoreID -> Peer
 		filterLen := len(context.filters) + 2
-
 		filters := make([]filter.Filter, filterLen)
 		copy(filters, context.filters)
 		filters[filterLen-2] = filter.NewExcludedFilter(r.name, nil, selectedStores)
