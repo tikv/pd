@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -619,10 +620,13 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		gta.am.ResetAllocatorGroup(GlobalDCLocation)
 	}()
 
+	tsoLabel := fmt.Sprintf("TSO Service Group %d", gta.getGroupID())
 	gta.member.EnableLeader()
+	member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(1)
 	defer resetLeaderOnce.Do(func() {
 		cancel()
 		gta.member.ResetLeader()
+		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
 	})
 
 	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
