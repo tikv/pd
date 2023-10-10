@@ -28,11 +28,11 @@ import (
 	"github.com/pingcap/log"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -70,15 +70,11 @@ type Service struct {
 }
 
 type server struct {
-	server *scheserver.Server
-}
-
-func (s *server) GetCoordinator() *schedule.Coordinator {
-	return s.server.GetCoordinator()
+	*scheserver.Server
 }
 
 func (s *server) GetCluster() sche.SharedCluster {
-	return s.server.GetCluster()
+	return s.Server.GetCluster()
 }
 
 func createIndentRender() *render.Render {
@@ -100,7 +96,7 @@ func NewService(srv *scheserver.Service) *Service {
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiHandlerEngine.Use(func(c *gin.Context) {
 		c.Set(multiservicesapi.ServiceContextKey, srv.Server)
-		c.Set(handlerKey, handler.NewHandler(&server{server: srv.Server}))
+		c.Set(handlerKey, handler.NewHandler(&server{srv.Server}))
 		c.Next()
 	})
 	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
@@ -149,7 +145,7 @@ func (s *Service) RegisterHotspotRouter() {
 	router := s.root.Group("hotspot")
 	router.GET("/regions/write", getHotWriteRegions)
 	router.GET("/regions/read", getHotReadRegions)
-	// router.GET("/regions/history", getHistoryHotRegions)
+	router.GET("/regions/history", getHistoryHotRegions)
 	router.GET("/stores", getHotStores)
 	router.GET("/buckets", getHotBuckets)
 }
@@ -530,4 +526,19 @@ func getHotBuckets(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, ret)
+}
+
+// @Tags     hotspot
+// @Summary  List the history hot regions.
+// @Accept   json
+// @Produce  json
+// @Success  200  {object}  storage.HistoryHotRegions
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /hotspot/regions/history [get]
+func getHistoryHotRegions(c *gin.Context) {
+	// TODO: support history hotspot in scheduling server with stateless in the future.
+	// Ref: https://github.com/tikv/pd/pull/7183
+	var res storage.HistoryHotRegions
+	c.IndentedJSON(http.StatusOK, res)
 }

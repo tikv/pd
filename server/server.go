@@ -489,10 +489,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
-	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
-		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
-	if err != nil {
-		return err
+	if !s.IsAPIServiceMode() {
+		s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+			ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
+		if err != nil {
+			return err
+		}
 	}
 	// Run callbacks
 	log.Info("triggering the start callback functions")
@@ -551,8 +553,10 @@ func (s *Server) Close() {
 		log.Error("close storage meet error", errs.ZapError(err))
 	}
 
-	if err := s.hotRegionStorage.Close(); err != nil {
-		log.Error("close hot region storage meet error", errs.ZapError(err))
+	if s.hotRegionStorage != nil {
+		if err := s.hotRegionStorage.Close(); err != nil {
+			log.Error("close hot region storage meet error", errs.ZapError(err))
+		}
 	}
 
 	// Run callbacks

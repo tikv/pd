@@ -294,6 +294,8 @@ func TestHotWithStoreID(t *testing.T) {
 }
 
 func TestHistoryHotRegions(t *testing.T) {
+	// TODO: support history hotspot in scheduling server with stateless in the future.
+	// Ref: https://github.com/tikv/pd/pull/7183
 	re := require.New(t)
 	statistics.Denoising = false
 	ctx, cancel := context.WithCancel(context.Background())
