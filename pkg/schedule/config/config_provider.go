@@ -119,6 +119,7 @@ type SharedConfigProvider interface {
 	GetHotRegionCacheHitsThreshold() int
 
 	// for test purpose
+	SetPlacementRuleEnabled(bool)
 	SetPlacementRulesCacheEnabled(bool)
 	SetEnableWitness(bool)
 }

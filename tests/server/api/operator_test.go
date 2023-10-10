@@ -412,7 +412,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		suite.T().Log(testCase.name)
 		// TODO: remove this after we can sync this config to all servers.
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			sche.GetPersistConfig().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+			sche.GetCluster().GetSchedulerConfig().SetPlacementRuleEnabled(testCase.placementRuleEnable)
 		} else {
 			svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(testCase.placementRuleEnable)
 		}
