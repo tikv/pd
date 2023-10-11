@@ -268,12 +268,25 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 	if name == reservedDefaultGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
-	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
-		return err
-	}
+
+	// First delete meta info from memory, then storage.
+	// This is to avoid an corner case of tiflash.
+	// 1. tiflash received etcd watch to delete resource group.
+	// 2. queries of that deleted resource group come, and tiflash ask PD to check,
+	//    PD may not have deleted the meta info of the group in memory yet. So tiflash will setup the meta info of the group.
+	//    And the meta info of the deleted group will stay in tiflash forever.
 	m.Lock()
+	group, ok := m.groups[name]
+	if !ok {
+		return errors.Errorf("resource group %s not found", name)
+	}
 	delete(m.groups, name)
 	m.Unlock()
+
+	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
+		m.groups[name] = group
+		return err
+	}
 	return nil
 }
 
