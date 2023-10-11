@@ -73,7 +73,7 @@ type server struct {
 	*scheserver.Server
 }
 
-func (s *server) GetCluster() sche.SharedCluster {
+func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.Server.GetCluster()
 }
 
@@ -439,6 +439,8 @@ func pauseOrResumeScheduler(c *gin.Context) {
 // @Summary  List the hot write regions.
 // @Produce  json
 // @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Failure  400  {string}  string  "The request is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/regions/write [get]
 func getHotWriteRegions(c *gin.Context) {
 	getHotRegions(utils.Write, c)
@@ -448,6 +450,8 @@ func getHotWriteRegions(c *gin.Context) {
 // @Summary  List the hot read regions.
 // @Produce  json
 // @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Failure  400  {string}  string  "The request is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/regions/read [get]
 func getHotReadRegions(c *gin.Context) {
 	getHotRegions(utils.Read, c)
@@ -494,6 +498,7 @@ func getHotRegions(typ utils.RWType, c *gin.Context) {
 // @Summary  List the hot stores.
 // @Produce  json
 // @Success  200  {object}  handler.HotStoreStats
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/stores [get]
 func getHotStores(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
@@ -509,6 +514,7 @@ func getHotStores(c *gin.Context) {
 // @Summary  List the hot buckets.
 // @Produce  json
 // @Success  200  {object}  handler.HotBucketsResponse
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/buckets [get]
 func getHotBuckets(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)

@@ -45,7 +45,7 @@ import (
 // TODO: remove it after GetCluster is unified between PD server and Scheduling server.
 type Server interface {
 	GetCoordinator() *schedule.Coordinator
-	GetCluster() sche.SharedCluster
+	GetCluster() sche.SchedulerCluster
 }
 
 // Handler is a handler to handle http request about schedule.

@@ -61,7 +61,7 @@ func (s *server) GetCoordinator() *schedule.Coordinator {
 	return c.GetCoordinator()
 }
 
-func (s *server) GetCluster() sche.SharedCluster {
+func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.GetRaftCluster()
 }
 

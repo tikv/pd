@@ -42,6 +42,8 @@ func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusH
 // @Summary  List the hot write regions.
 // @Produce  json
 // @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Failure  400  {string}  string  "The request is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/regions/write [get]
 func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Request) {
 	h.getHotRegions(utils.Write, w, r)
@@ -51,6 +53,8 @@ func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Req
 // @Summary  List the hot read regions.
 // @Produce  json
 // @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Failure  400  {string}  string  "The request is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/regions/read [get]
 func (h *hotStatusHandler) GetHotReadRegions(w http.ResponseWriter, r *http.Request) {
 	h.getHotRegions(utils.Read, w, r)
@@ -95,6 +99,7 @@ func (h *hotStatusHandler) getHotRegions(typ utils.RWType, w http.ResponseWriter
 // @Summary  List the hot stores.
 // @Produce  json
 // @Success  200  {object}  handler.HotStoreStats
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/stores [get]
 func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.Handler.GetHotStores()
@@ -109,6 +114,7 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) 
 // @Summary  List the hot buckets.
 // @Produce  json
 // @Success  200  {object}  handler.HotBucketsResponse
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/buckets [get]
 func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request) {
 	regionIDs := r.URL.Query()["region_id"]
