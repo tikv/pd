@@ -499,6 +499,11 @@ func (o *PersistConfig) IsSchedulingHalted() bool {
 	return o.GetScheduleConfig().HaltScheduling
 }
 
+// GetStoresLimit gets the stores' limit.
+func (o *PersistConfig) GetStoresLimit() map[uint64]sc.StoreLimitConfig {
+	return o.GetScheduleConfig().StoreLimit
+}
+
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	limit := o.GetStoreLimit(storeID)
@@ -620,9 +625,19 @@ func (o *PersistConfig) GetRegionMaxSize() uint64 {
 	return o.GetStoreConfig().GetRegionMaxSize()
 }
 
-// GetRegionMaxKeys returns the region split keys
+// GetRegionMaxKeys returns the max region keys
 func (o *PersistConfig) GetRegionMaxKeys() uint64 {
 	return o.GetStoreConfig().GetRegionMaxKeys()
+}
+
+// GetRegionSplitSize returns the region split size in MB
+func (o *PersistConfig) GetRegionSplitSize() uint64 {
+	return o.GetStoreConfig().GetRegionSplitSize()
+}
+
+// GetRegionSplitKeys returns the region split keys
+func (o *PersistConfig) GetRegionSplitKeys() uint64 {
+	return o.GetStoreConfig().GetRegionSplitKeys()
 }
 
 // IsEnableRegionBucket return true if the region bucket is enabled.

@@ -62,7 +62,11 @@ import (
 
 var _ bs.Server = (*Server)(nil)
 
-const memberUpdateInterval = time.Minute
+const (
+	serviceName = "Scheduling Service"
+
+	memberUpdateInterval = time.Minute
+)
 
 // Server is the scheduling server, and it implements bs.Server.
 type Server struct {
@@ -255,6 +259,7 @@ func (s *Server) campaignLeader() {
 	defer resetLeaderOnce.Do(func() {
 		cancel()
 		s.participant.ResetLeader()
+		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
 	})
 
 	// maintain the leadership, after this, Scheduling could be ready to provide service.
@@ -274,6 +279,7 @@ func (s *Server) campaignLeader() {
 		}
 	}()
 	s.participant.EnableLeader()
+	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
@@ -456,16 +462,12 @@ func (s *Server) startCluster(context.Context) error {
 	}
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
 	s.cluster.StartBackgroundJobs()
-	go s.GetCoordinator().RunUntilStop()
 	return nil
 }
 
 func (s *Server) stopCluster() {
-	s.GetCoordinator().Stop()
 	s.cluster.StopBackgroundJobs()
-	s.ruleWatcher.Close()
-	s.configWatcher.Close()
-	s.metaWatcher.Close()
+	s.stopWatcher()
 }
 
 func (s *Server) startWatcher() (err error) {
@@ -479,6 +481,12 @@ func (s *Server) startWatcher() (err error) {
 	}
 	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID)
 	return err
+}
+
+func (s *Server) stopWatcher() {
+	s.ruleWatcher.Close()
+	s.configWatcher.Close()
+	s.metaWatcher.Close()
 }
 
 // GetPersistConfig returns the persist config.
@@ -531,8 +539,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("Scheduling")
-	log.Info("Scheduling config", zap.Reflect("config", cfg))
+	versioninfo.Log(serviceName)
+	log.Info("scheduling service config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 	metricutil.Push(&cfg.Metric)

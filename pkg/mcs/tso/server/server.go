@@ -58,6 +58,8 @@ import (
 var _ bs.Server = (*Server)(nil)
 var _ tso.ElectionMember = (*member.Participant)(nil)
 
+const serviceName = "TSO Service"
+
 // Server is the TSO server, and it implements bs.Server.
 type Server struct {
 	*server.BaseServer
@@ -450,8 +452,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("TSO")
-	log.Info("TSO config", zap.Reflect("config", cfg))
+	versioninfo.Log(serviceName)
+	log.Info("TSO service config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 	metricutil.Push(&cfg.Metric)
