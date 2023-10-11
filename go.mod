@@ -201,7 +201,7 @@ require (
 
 replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 
-replace github.com/pingcap/tidb-dashboard => github.com/Connor1996/tidb-dashboard v0.0.0-20231010095012-c3618d59be62
+replace github.com/pingcap/tidb-dashboard => github.com/Connor1996/tidb-dashboard v0.0.0-20231011032303-ff0b56cf7a9a
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
