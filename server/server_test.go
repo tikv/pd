@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -305,4 +306,16 @@ func TestAPIService(t *testing.T) {
 	re.NoError(err)
 	MustWaitLeader(re, []*Server{svr})
 	re.True(svr.IsAPIServiceMode())
+}
+
+func TestIsPathInDirectory(t *testing.T) {
+	re := require.New(t)
+	fileName := "test"
+	directory := "/root/project"
+	path := filepath.Join(directory, fileName)
+	re.True(isPathInDirectory(path, directory))
+
+	fileName = "../../test"
+	path = filepath.Join(directory, fileName)
+	re.False(isPathInDirectory(path, directory))
 }

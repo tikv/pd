@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build with_plugin
+// +build with_plugin
+
 package api
 
 import (

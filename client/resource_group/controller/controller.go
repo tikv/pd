@@ -922,6 +922,9 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	}
 	// collect request resource
 	selected := gc.run.requestInProgress
+	failpoint.Inject("triggerUpdate", func() {
+		selected = true
+	})
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		requests := make([]*rmpb.RawResourceItem, 0, len(requestResourceLimitTypeList))
@@ -973,13 +976,7 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	if !selected {
 		return nil
 	}
-
-	deltaConsumption := &rmpb.Consumption{}
-	*deltaConsumption = *gc.run.consumption
-	sub(deltaConsumption, gc.run.lastRequestConsumption)
-	req.ConsumptionSinceLastRequest = deltaConsumption
-
-	*gc.run.lastRequestConsumption = *gc.run.consumption
+	req.ConsumptionSinceLastRequest = updateDeltaConsumption(gc.run.lastRequestConsumption, gc.run.consumption)
 	gc.run.lastRequestTime = time.Now()
 	gc.run.requestInProgress = true
 	return req
@@ -1046,10 +1043,12 @@ func (gc *groupCostController) onRequestWait(
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
 			gc.mu.Unlock()
+			failpoint.Inject("triggerUpdate", func() {
+				gc.lowRUNotifyChan <- struct{}{}
+			})
 			return nil, nil, err
-		} else {
-			gc.successfulRequestDuration.Observe(d.Seconds())
 		}
+		gc.successfulRequestDuration.Observe(d.Seconds())
 	}
 
 	gc.mu.Lock()

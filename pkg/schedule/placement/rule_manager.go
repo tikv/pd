@@ -66,7 +66,7 @@ func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSet
 
 // Initialize loads rules from storage. If Placement Rules feature is never enabled, it creates default rule that is
 // compatible with previous configuration.
-func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error {
+func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolationLevel string) error {
 	m.Lock()
 	defer m.Unlock()
 	if m.initialized {
@@ -93,6 +93,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 						Role:           Voter,
 						Count:          maxReplica - witnessCount,
 						LocationLabels: locationLabels,
+						IsolationLevel: isolationLevel,
 					},
 					{
 						GroupID:        "pd",
@@ -101,6 +102,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 						Count:          witnessCount,
 						IsWitness:      true,
 						LocationLabels: locationLabels,
+						IsolationLevel: isolationLevel,
 					},
 				}...,
 			)
@@ -111,6 +113,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 				Role:           Voter,
 				Count:          maxReplica,
 				LocationLabels: locationLabels,
+				IsolationLevel: isolationLevel,
 			})
 		}
 		for _, defaultRule := range defaultRules {

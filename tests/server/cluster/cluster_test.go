@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -46,6 +47,7 @@ import (
 	"github.com/tikv/pd/server/config"
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/server/api"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -1276,6 +1278,123 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
+}
+
+func TestTransferLeaderForScheduler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker", `return(true)`))
+	tc, err := tests.NewTestCluster(ctx, 2)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	// start
+	leaderServer := tc.GetServer(tc.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+	rc := leaderServer.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+
+	storesNum := 2
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	for i := 1; i <= storesNum; i++ {
+		store := &metapb.Store{
+			Id:      uint64(i),
+			Address: "127.0.0.1:" + strconv.Itoa(i),
+		}
+		resp, err := putStore(grpcPDClient, leaderServer.GetClusterID(), store)
+		re.NoError(err)
+		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	}
+	// region heartbeat
+	id := leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc, id, 1)
+
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Add evict leader scheduler
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 1,
+	})
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 2,
+	})
+	// Check scheduler updated.
+	re.Len(rc.GetSchedulers(), 6)
+	checkEvictLeaderSchedulerExist(re, rc, true)
+	checkEvictLeaderStoreIDs(re, rc, []uint64{1, 2})
+
+	// transfer PD leader to another PD
+	tc.ResignLeader()
+	rc.Stop()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	rc1 := leaderServer.GetServer().GetRaftCluster()
+	rc1.Start(leaderServer.GetServer())
+	re.NoError(err)
+	re.NotNil(rc1)
+	// region heartbeat
+	id = leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc1, id, 1)
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Check scheduler updated.
+	re.Len(rc1.GetSchedulers(), 6)
+	checkEvictLeaderSchedulerExist(re, rc, true)
+	checkEvictLeaderStoreIDs(re, rc, []uint64{1, 2})
+
+	// transfer PD leader back to the previous PD
+	tc.ResignLeader()
+	rc1.Stop()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	rc = leaderServer.GetServer().GetRaftCluster()
+	rc.Start(leaderServer.GetServer())
+	re.NotNil(rc)
+	// region heartbeat
+	id = leaderServer.GetAllocator()
+	putRegionWithLeader(re, rc, id, 1)
+	time.Sleep(time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	// Check scheduler updated
+	re.Len(rc.GetSchedulers(), 6)
+	checkEvictLeaderSchedulerExist(re, rc, true)
+	checkEvictLeaderStoreIDs(re, rc, []uint64{1, 2})
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker"))
+}
+
+func checkEvictLeaderSchedulerExist(re *require.Assertions, rc *cluster.RaftCluster, exist bool) {
+	isExistScheduler := func(rc *cluster.RaftCluster, name string) bool {
+		s := rc.GetSchedulers()
+		for _, scheduler := range s {
+			if scheduler == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	testutil.Eventually(re, func() bool {
+		return isExistScheduler(rc, schedulers.EvictLeaderName) == exist
+	})
+}
+
+func checkEvictLeaderStoreIDs(re *require.Assertions, rc *cluster.RaftCluster, expected []uint64) {
+	handler, ok := rc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	re.True(ok)
+	h, ok := handler.(interface {
+		EvictStoreIDs() []uint64
+	})
+	re.True(ok)
+	var evictStoreIDs []uint64
+	testutil.Eventually(re, func() bool {
+		evictStoreIDs = h.EvictStoreIDs()
+		return len(evictStoreIDs) == len(expected)
+	})
+	re.ElementsMatch(evictStoreIDs, expected)
 }
 
 func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.Allocator, storeID uint64) {

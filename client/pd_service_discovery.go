@@ -29,16 +29,18 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
 const (
-	globalDCLocation          = "global"
-	memberUpdateInterval      = time.Minute
-	serviceModeUpdateInterval = 3 * time.Second
-	updateMemberTimeout       = time.Second // Use a shorter timeout to recover faster from network isolation.
+	globalDCLocation            = "global"
+	memberUpdateInterval        = time.Minute
+	serviceModeUpdateInterval   = 3 * time.Second
+	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
+	updateMemberBackOffBaseTime = 100 * time.Millisecond
 )
 
 // ServiceDiscovery defines the general interface for service discovery on a quorum-based cluster
@@ -207,9 +209,11 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("[pd] exit member loop due to context canceled")
 			return
 		case <-ticker.C:
 		case <-c.checkMembershipCh:
@@ -217,7 +221,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
-		if err := c.updateMember(); err != nil {
+		if err := bo.Exec(ctx, c.updateMember); err != nil {
 			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetURLs()), errs.ZapError(err))
 		}
 	}
@@ -304,7 +308,7 @@ func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 	}
 }
 
-// Immediately check if there is any membership change among the leader/followers in a
+// CheckMemberChanged Immediately check if there is any membership change among the leader/followers in a
 // quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -943,14 +944,20 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 
 // SetStoreLimitScene sets the limit values for different scenes
 func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
-	cluster := h.s.GetRaftCluster()
-	cluster.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return
+	}
+	rc.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
 }
 
 // GetStoreLimitScene returns the limit values for different scenes
 func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
-	cluster := h.s.GetRaftCluster()
-	return cluster.GetStoreLimiter().StoreLimitScene(limitType)
+	rc := h.s.GetRaftCluster()
+	if rc == nil {
+		return nil
+	}
+	return rc.GetStoreLimiter().StoreLimitScene(limitType)
 }
 
 // GetProgressByID returns the progress details for a given store ID.
@@ -974,6 +981,13 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 	c := cluster.GetCoordinator()
 	ch := make(chan string)
 	h.pluginChMap[pluginPath] = ch
+
+	// make sure path is in data dir
+	filePath, err := filepath.Abs(pluginPath)
+	if err != nil || !isPathInDirectory(filePath, h.s.GetConfig().DataDir) {
+		return errs.ErrFilePathAbs.Wrap(err).FastGenWithCause()
+	}
+
 	c.LoadPlugin(pluginPath, ch)
 	return nil
 }

@@ -377,6 +377,15 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	}
 }
 
+func (suite *middlewareTestSuite) TestSwaggerUrl() {
+	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
+	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", nil)
+	resp, err := dialClient.Do(req)
+	suite.NoError(err)
+	suite.True(resp.StatusCode == http.StatusNotFound)
+	resp.Body.Close()
+}
+
 func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	leader := suite.cluster.GetServer(suite.cluster.GetLeader())
 	input := map[string]interface{}{
@@ -782,6 +791,46 @@ func TestRemovingProgress(t *testing.T) {
 	re.Equal(25.0, p.LeftSeconds)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+}
+
+func TestSendApiWhenRestartRaftCluster(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+		conf.Replication.MaxReplicas = 1
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leader := cluster.GetServer(cluster.WaitLeader())
+
+	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	clusterID := leader.GetClusterID()
+	req := &pdpb.BootstrapRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
+	}
+	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
+	re.NoError(err)
+	re.Nil(resp.GetHeader().GetError())
+
+	// Mock restart raft cluster
+	rc := leader.GetRaftCluster()
+	re.NotNil(rc)
+	rc.Stop()
+
+	// Mock client-go will still send request
+	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/min-resolved-ts", http.MethodGet, http.StatusInternalServerError)
+	re.Contains(string(output), "TiKV cluster not bootstrapped, please start TiKV first")
+
+	err = rc.Start(leader.GetServer())
+	re.NoError(err)
+	rc = leader.GetRaftCluster()
+	re.NotNil(rc)
 }
 
 func TestPreparingProgress(t *testing.T) {

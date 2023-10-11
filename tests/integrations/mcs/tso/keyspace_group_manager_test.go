@@ -104,7 +104,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	// Get a TSO from the keyspace group 1.
 	var ts *pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
-		resp, err := request(re, ctx, suite.tsoClient, 1, suite.pdLeaderServer.GetClusterID(), 222, 1)
+		resp, err := request(ctx, re, suite.tsoClient, 1, suite.pdLeaderServer.GetClusterID(), 222, 1)
 		ts = resp.GetTimestamp()
 		return err == nil && tsoutil.CompareTimestamp(ts, &pdpb.Timestamp{}) > 0
 	})
@@ -124,7 +124,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	// Check the split TSO from keyspace group 2.
 	var splitTS *pdpb.Timestamp
 	testutil.Eventually(re, func() bool {
-		resp, err := request(re, ctx, suite.tsoClient, 1, suite.pdLeaderServer.GetClusterID(), 222, 2)
+		resp, err := request(ctx, re, suite.tsoClient, 1, suite.pdLeaderServer.GetClusterID(), 222, 2)
 		splitTS = resp.GetTimestamp()
 		return err == nil && tsoutil.CompareTimestamp(splitTS, &pdpb.Timestamp{}) > 0
 	})
@@ -132,8 +132,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 }
 
 func request(
+	ctx context.Context,
 	re *require.Assertions,
-	ctx context.Context, client tsopb.TSOClient, count uint32,
+	client tsopb.TSOClient, count uint32,
 	clusterID uint64, keyspaceID, keyspaceGroupID uint32,
 ) (ts *tsopb.TsoResponse, err error) {
 	req := &tsopb.TsoRequest{
