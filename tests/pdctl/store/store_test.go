@@ -327,7 +327,28 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "check", "Invalid_State"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "Unknown state: Invalid_state")
+	re.Contains(string(output), "unknown StoreState: Invalid_state")
+
+	// Mock a disconnected store.
+	storeCheck := &metapb.Store{
+		Id:            uint64(2000),
+		State:         metapb.StoreState_Up,
+		NodeState:     metapb.NodeState_Serving,
+		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Minute),
+	}
+	tests.MustPutStore(re, cluster, storeCheck)
+	args = []string{"-u", pdAddr, "store", "check", "Disconnected"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "\"id\": 2000,")
+	// Mock a down store.
+	storeCheck.Id = uint64(2001)
+	storeCheck.LastHeartbeat = time.Now().UnixNano() - int64(1*time.Hour)
+	tests.MustPutStore(re, cluster, storeCheck)
+	args = []string{"-u", pdAddr, "store", "check", "Down"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "\"id\": 2001,")
 
 	// store cancel-delete <store_id> command
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
