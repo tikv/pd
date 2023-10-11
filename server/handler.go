@@ -92,24 +92,6 @@ func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 	return rc, nil
 }
 
-// IsSchedulerPaused returns whether scheduler is paused.
-func (h *Handler) IsSchedulerPaused(name string) (bool, error) {
-	rc, err := h.GetRaftCluster()
-	if err != nil {
-		return false, err
-	}
-	return rc.GetCoordinator().GetSchedulersController().IsSchedulerPaused(name)
-}
-
-// IsSchedulerDisabled returns whether scheduler is disabled.
-func (h *Handler) IsSchedulerDisabled(name string) (bool, error) {
-	rc, err := h.GetRaftCluster()
-	if err != nil {
-		return false, err
-	}
-	return rc.GetCoordinator().GetSchedulersController().IsSchedulerDisabled(name)
-}
-
 // IsSchedulerExisted returns whether scheduler is existed.
 func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 	rc, err := h.GetRaftCluster()
@@ -122,24 +104,6 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 // GetScheduleConfig returns ScheduleConfig.
 func (h *Handler) GetScheduleConfig() *sc.ScheduleConfig {
 	return h.s.GetScheduleConfig()
-}
-
-// GetSchedulers returns all names of schedulers.
-func (h *Handler) GetSchedulers() ([]string, error) {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return nil, err
-	}
-	return c.GetSchedulers(), nil
-}
-
-// IsCheckerPaused returns if checker is paused
-func (h *Handler) IsCheckerPaused(name string) (bool, error) {
-	rc, err := h.GetRaftCluster()
-	if err != nil {
-		return false, err
-	}
-	return rc.GetCoordinator().IsCheckerPaused(name)
 }
 
 // GetStores returns all stores in the cluster.
@@ -264,48 +228,6 @@ func (h *Handler) RemoveScheduler(name string) error {
 			log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
 			log.Info("remove scheduler successfully", zap.String("scheduler-name", name))
-		}
-	}
-	return err
-}
-
-// PauseOrResumeScheduler pauses a scheduler for delay seconds or resume a paused scheduler.
-// t == 0 : resume scheduler.
-// t > 0 : scheduler delays t seconds.
-func (h *Handler) PauseOrResumeScheduler(name string, t int64) error {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return err
-	}
-	if err = c.PauseOrResumeScheduler(name, t); err != nil {
-		if t == 0 {
-			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
-		} else {
-			log.Error("can not pause scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
-		}
-	} else {
-		if t == 0 {
-			log.Info("resume scheduler successfully", zap.String("scheduler-name", name))
-		} else {
-			log.Info("pause scheduler successfully", zap.String("scheduler-name", name), zap.Int64("pause-seconds", t))
-		}
-	}
-	return err
-}
-
-// PauseOrResumeChecker pauses checker for delay seconds or resume checker
-// t == 0 : resume checker.
-// t > 0 : checker delays t seconds.
-func (h *Handler) PauseOrResumeChecker(name string, t int64) error {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return err
-	}
-	if err = c.PauseOrResumeChecker(name, t); err != nil {
-		if t == 0 {
-			log.Error("can not resume checker", zap.String("checker-name", name), errs.ZapError(err))
-		} else {
-			log.Error("can not pause checker", zap.String("checker-name", name), errs.ZapError(err))
 		}
 	}
 	return err
@@ -679,22 +601,4 @@ func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
 		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
 	}
 	return nil
-}
-
-// GetPausedSchedulerDelayAt returns paused unix timestamp when a scheduler is paused
-func (h *Handler) GetPausedSchedulerDelayAt(name string) (int64, error) {
-	rc, err := h.GetRaftCluster()
-	if err != nil {
-		return -1, err
-	}
-	return rc.GetPausedSchedulerDelayAt(name)
-}
-
-// GetPausedSchedulerDelayUntil returns resume unix timestamp when a scheduler is paused
-func (h *Handler) GetPausedSchedulerDelayUntil(name string) (int64, error) {
-	rc, err := h.GetRaftCluster()
-	if err != nil {
-		return -1, err
-	}
-	return rc.GetPausedSchedulerDelayUntil(name)
 }

@@ -22,8 +22,8 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/statistics/utils"
-	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -32,7 +32,7 @@ const (
 )
 
 type storeStatistics struct {
-	opt             *config.PersistOptions
+	opt             config.ConfProvider
 	Up              int
 	Disconnect      int
 	Unhealthy       int
@@ -54,7 +54,7 @@ type storeStatistics struct {
 	Removed         int
 }
 
-func newStoreStatistics(opt *config.PersistOptions) *storeStatistics {
+func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
 	return &storeStatistics{
 		opt:          opt,
 		LabelCounter: make(map[string]int),
@@ -102,7 +102,6 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	case metapb.NodeState_Removed:
 		s.Tombstone++
 		s.Removed++
-		s.resetStoreStatistics(storeAddress, id)
 		return
 	}
 
@@ -222,11 +221,10 @@ func (s *storeStatistics) Collect() {
 	configs["max-snapshot-count"] = float64(s.opt.GetMaxSnapshotCount())
 	configs["max-merge-region-size"] = float64(s.opt.GetMaxMergeRegionSize())
 	configs["max-merge-region-keys"] = float64(s.opt.GetMaxMergeRegionKeys())
-	storeConfig := s.opt.GetStoreConfig()
-	configs["region-max-size"] = float64(storeConfig.GetRegionMaxSize())
-	configs["region-split-size"] = float64(storeConfig.GetRegionSplitSize())
-	configs["region-split-keys"] = float64(storeConfig.GetRegionSplitKeys())
-	configs["region-max-keys"] = float64(storeConfig.GetRegionMaxKeys())
+	configs["region-max-size"] = float64(s.opt.GetRegionMaxSize())
+	configs["region-split-size"] = float64(s.opt.GetRegionSplitSize())
+	configs["region-split-keys"] = float64(s.opt.GetRegionSplitKeys())
+	configs["region-max-keys"] = float64(s.opt.GetRegionMaxKeys())
 
 	var enableMakeUpReplica, enableRemoveDownReplica, enableRemoveExtraReplica, enableReplaceOfflineReplica float64
 	if s.opt.IsMakeUpReplicaEnabled() {
@@ -262,7 +260,8 @@ func (s *storeStatistics) Collect() {
 	}
 }
 
-func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
+// ResetStoreStatistics resets the metrics of store.
+func ResetStoreStatistics(storeAddress string, id string) {
 	metrics := []string{
 		"region_score",
 		"leader_score",
@@ -283,6 +282,10 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 		"store_read_query_rate",
 		"store_regions_write_rate_bytes",
 		"store_regions_write_rate_keys",
+		"store_slow_trend_cause_value",
+		"store_slow_trend_cause_rate",
+		"store_slow_trend_result_value",
+		"store_slow_trend_result_rate",
 	}
 	for _, m := range metrics {
 		storeStatusGauge.DeleteLabelValues(storeAddress, id, m)
@@ -290,12 +293,12 @@ func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
 }
 
 type storeStatisticsMap struct {
-	opt   *config.PersistOptions
+	opt   config.ConfProvider
 	stats *storeStatistics
 }
 
 // NewStoreStatisticsMap creates a new storeStatisticsMap.
-func NewStoreStatisticsMap(opt *config.PersistOptions) *storeStatisticsMap {
+func NewStoreStatisticsMap(opt config.ConfProvider) *storeStatisticsMap {
 	return &storeStatisticsMap{
 		opt:   opt,
 		stats: newStoreStatistics(opt),
@@ -314,7 +317,8 @@ func (m *storeStatisticsMap) Collect() {
 	m.stats.Collect()
 }
 
-func (m *storeStatisticsMap) Reset() {
+// Reset resets the metrics.
+func Reset() {
 	storeStatusGauge.Reset()
 	clusterStatusGauge.Reset()
 	placementStatusGauge.Reset()

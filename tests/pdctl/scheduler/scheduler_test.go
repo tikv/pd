@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -32,16 +33,23 @@ import (
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func TestScheduler(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
+type schedulerTestSuite struct {
+	suite.Suite
+}
+
+func TestSchedulerTestSuite(t *testing.T) {
+	suite.Run(t, new(schedulerTestSuite))
+}
+
+func (suite *schedulerTestSuite) TestScheduler() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	// Fixme: use RunTestInTwoModes when sync deleted scheduler is supported.
+	env.RunTestInPDMode(suite.checkScheduler)
+	env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
+}
+
+func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
 
@@ -85,17 +93,13 @@ func TestScheduler(t *testing.T) {
 		}
 	}
 
-	checkSchedulerConfigCommand := func(args []string, expectedConfig map[string]interface{}, schedulerName string) {
-		if args != nil {
-			mustExec(re, cmd, args, nil)
-		}
+	checkSchedulerConfigCommand := func(expectedConfig map[string]interface{}, schedulerName string) {
 		configInfo := make(map[string]interface{})
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName}, &configInfo)
 		re.Equal(expectedConfig, configInfo)
 	}
 
 	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
 	}
@@ -116,6 +120,7 @@ func TestScheduler(t *testing.T) {
 
 	// scheduler delete command
 	args := []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
+	time.Sleep(10 * time.Second)
 	expected = map[string]bool{
 		"balance-leader-scheduler":          true,
 		"balance-hot-region-scheduler":      true,
@@ -141,7 +146,7 @@ func TestScheduler(t *testing.T) {
 		// scheduler config show command
 		expectedConfig := make(map[string]interface{})
 		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
-		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
+		checkSchedulerConfigCommand(expectedConfig, schedulers[idx])
 
 		// scheduler config update command
 		args = []string{"-u", pdAddr, "scheduler", "config", schedulers[idx], "add-store", "3"}
@@ -156,7 +161,7 @@ func TestScheduler(t *testing.T) {
 
 		// check update success
 		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "3": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
-		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
+		checkSchedulerConfigCommand(expectedConfig, schedulers[idx])
 
 		// scheduler delete command
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx]}
@@ -192,7 +197,7 @@ func TestScheduler(t *testing.T) {
 
 		// check add success
 		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "4": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
-		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
+		checkSchedulerConfigCommand(expectedConfig, schedulers[idx])
 
 		// scheduler remove command [old]
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx] + "-4"}
@@ -207,7 +212,7 @@ func TestScheduler(t *testing.T) {
 
 		// check remove success
 		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
-		checkSchedulerConfigCommand(nil, expectedConfig, schedulers[idx])
+		checkSchedulerConfigCommand(expectedConfig, schedulers[idx])
 
 		// scheduler remove command, when remove the last store, it should remove whole scheduler
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx] + "-2"}
@@ -403,10 +408,7 @@ func TestScheduler(t *testing.T) {
 	re.Contains(echo, "Success!")
 
 	// test show scheduler with paused and disabled status.
-	checkSchedulerWithStatusCommand := func(args []string, status string, expected []string) {
-		if args != nil {
-			mustExec(re, cmd, args, nil)
-		}
+	checkSchedulerWithStatusCommand := func(status string, expected []string) {
 		var schedulers []string
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show", "--status", status}, &schedulers)
 		re.Equal(expected, schedulers)
@@ -414,7 +416,7 @@ func TestScheduler(t *testing.T) {
 
 	mustUsage([]string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler"})
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
-	checkSchedulerWithStatusCommand(nil, "paused", []string{
+	checkSchedulerWithStatusCommand("paused", []string{
 		"balance-leader-scheduler",
 	})
 	result := make(map[string]interface{})
@@ -425,7 +427,7 @@ func TestScheduler(t *testing.T) {
 
 	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
-	checkSchedulerWithStatusCommand(nil, "paused", nil)
+	checkSchedulerWithStatusCommand("paused", nil)
 
 	// set label scheduler to disabled manually.
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "label-scheduler"}, nil)
@@ -433,26 +435,18 @@ func TestScheduler(t *testing.T) {
 	cfg := leaderServer.GetServer().GetScheduleConfig()
 	origin := cfg.Schedulers
 	cfg.Schedulers = sc.SchedulerConfigs{{Type: "label", Disable: true}}
-	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
+	err := leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
-	checkSchedulerWithStatusCommand(nil, "disabled", []string{"label-scheduler"})
+	checkSchedulerWithStatusCommand("disabled", []string{"label-scheduler"})
 	// reset Schedulers in ScheduleConfig
 	cfg.Schedulers = origin
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
-	checkSchedulerWithStatusCommand(nil, "disabled", nil)
+	checkSchedulerWithStatusCommand("disabled", nil)
 }
 
-func TestSchedulerDiagnostic(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer cluster.Destroy()
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
+func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestCluster) {
+	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := pdctlCmd.GetRootCmd()
 
@@ -488,8 +482,6 @@ func TestSchedulerDiagnostic(t *testing.T) {
 			LastHeartbeat: time.Now().UnixNano(),
 		},
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
 	}
@@ -503,9 +495,11 @@ func TestSchedulerDiagnostic(t *testing.T) {
 	checkSchedulerDescribeCommand("balance-region-scheduler", "pending", "1 store(s) RegionNotMatchRule; ")
 
 	// scheduler delete command
-	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
-
-	checkSchedulerDescribeCommand("balance-region-scheduler", "disabled", "")
+	// Fixme: use RunTestInTwoModes when sync deleted scheduler is supported.
+	if sche := cluster.GetSchedulingPrimaryServer(); sche == nil {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
+		checkSchedulerDescribeCommand("balance-region-scheduler", "disabled", "")
+	}
 
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
@@ -554,4 +548,20 @@ func TestForwardSchedulerRequest(t *testing.T) {
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &slice))
 	re.Contains(slice, "balance-leader-scheduler")
+
+	mustUsage := func(args []string) {
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		re.Contains(string(output), "Usage")
+	}
+	mustUsage([]string{"-u", backendEndpoints, "scheduler", "pause", "balance-leader-scheduler"})
+	mustExec(re, cmd, []string{"-u", backendEndpoints, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
+	checkSchedulerWithStatusCommand := func(status string, expected []string) {
+		var schedulers []string
+		mustExec(re, cmd, []string{"-u", backendEndpoints, "scheduler", "show", "--status", status}, &schedulers)
+		re.Equal(expected, schedulers)
+	}
+	checkSchedulerWithStatusCommand("paused", []string{
+		"balance-leader-scheduler",
+	})
 }
