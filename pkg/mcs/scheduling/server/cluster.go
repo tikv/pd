@@ -470,8 +470,7 @@ func (c *Cluster) collectClusterMetrics() {
 }
 
 func (c *Cluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.persistConfig)
-	statsMap.Reset()
+	statistics.Reset()
 
 	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
 	c.coordinator.ResetHotSpotMetrics()

@@ -102,7 +102,6 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	case metapb.NodeState_Removed:
 		s.Tombstone++
 		s.Removed++
-		s.resetStoreStatistics(storeAddress, id)
 		return
 	}
 
@@ -261,7 +260,8 @@ func (s *storeStatistics) Collect() {
 	}
 }
 
-func (s *storeStatistics) resetStoreStatistics(storeAddress string, id string) {
+// ResetStoreStatistics resets the metrics of store.
+func ResetStoreStatistics(storeAddress string, id string) {
 	metrics := []string{
 		"region_score",
 		"leader_score",
@@ -317,7 +317,8 @@ func (m *storeStatisticsMap) Collect() {
 	m.stats.Collect()
 }
 
-func (m *storeStatisticsMap) Reset() {
+// Reset resets the metrics.
+func Reset() {
 	storeStatusGauge.Reset()
 	clusterStatusGauge.Reset()
 	placementStatusGauge.Reset()
