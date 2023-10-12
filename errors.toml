@@ -566,6 +566,11 @@ error = '''
 invalid rule content, %s
 '''
 
+["PD:placement:ErrRuleNotFound"]
+error = '''
+rule not found
+'''
+
 ["PD:plugin:ErrLoadPlugin"]
 error = '''
 failed to load plugin

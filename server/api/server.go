@@ -95,7 +95,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/rule_group",
-				scheapi.APIPathPrefix+"/config/rule_group",
+				scheapi.APIPathPrefix+"/config/rule_groups", // Note: this is a typo in the original code
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(

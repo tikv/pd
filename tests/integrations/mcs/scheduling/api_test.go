@@ -10,12 +10,13 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/schedule/handler"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -40,7 +41,7 @@ func TestAPI(t *testing.T) {
 	suite.Run(t, &apiTestSuite{})
 }
 
-func (suite *apiTestSuite) SetupSuite() {
+func (suite *apiTestSuite) SetupTest() {
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
 	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
@@ -59,14 +60,19 @@ func (suite *apiTestSuite) SetupSuite() {
 	suite.cleanupFunc = func() {
 		cancel()
 	}
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.backendEndpoints)
+	suite.NoError(err)
+	suite.cluster.SetSchedulingCluster(tc)
+	tc.WaitForPrimaryServing(suite.Require())
 }
 
-func (suite *apiTestSuite) TearDownSuite() {
+func (suite *apiTestSuite) TearDownTest() {
 	suite.cluster.Destroy()
 	suite.cleanupFunc()
 }
 
 func (suite *apiTestSuite) TestGetCheckerByName() {
+	re := suite.Require()
 	testCases := []struct {
 		name string
 	}{
@@ -78,14 +84,8 @@ func (suite *apiTestSuite) TestGetCheckerByName() {
 		{name: "joint-state"},
 	}
 
-	re := suite.Require()
-	s, cleanup := tests.StartSingleSchedulingTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-	defer cleanup()
-	testutil.Eventually(re, func() bool {
-		return s.IsServing()
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-	addr := s.GetAddr()
-	urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/checkers", addr)
+	s := suite.cluster.GetSchedulingPrimaryServer()
+	urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/checkers", s.GetAddr())
 	co := s.GetCoordinator()
 
 	for _, testCase := range testCases {
@@ -120,17 +120,12 @@ func (suite *apiTestSuite) TestAPIForward() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader"))
 	}()
 
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.backendEndpoints)
-	re.NoError(err)
-	defer tc.Destroy()
-	tc.WaitForPrimaryServing(re)
-
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", suite.backendEndpoints)
 	var slice []string
 	var resp map[string]interface{}
 
 	// Test opeartor
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
+	err := testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 	re.Len(slice, 0)
@@ -216,5 +211,79 @@ func (suite *apiTestSuite) TestAPIForward() {
 	var history storage.HistoryHotRegions
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/history"), &history,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+
+	// Test rules: only forward `GET` request
+	var rules []*placement.Rule
+	tests.MustPutRegion(re, suite.cluster, 2, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
+	rules = []*placement.Rule{
+		{
+			GroupID:        "pd",
+			ID:             "default",
+			Role:           "voter",
+			Count:          3,
+			LocationLabels: []string{},
+		},
+	}
+	rulesArgs, err := json.Marshal(rules)
+	suite.NoError(err)
+
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "/config/rules"), &rules,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), rulesArgs,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/batch"), rulesArgs,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/group/pd"), &rules,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/region/2"), &rules,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	var fit placement.RegionFit
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/region/2/detail"), &fit,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/key/0000000000000001"), &rules,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule/pd/2"), nil,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule/pd/2"),
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule"), rulesArgs,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule_group/pd"), nil,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule_group/pd"),
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule_group"), rulesArgs,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule_groups"), nil,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule"), nil,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule"), rulesArgs,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule/pd"), nil,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule/pd"),
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule/pd"), rulesArgs,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
 	re.NoError(err)
 }

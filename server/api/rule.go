@@ -237,7 +237,7 @@ func (h *ruleHandler) GetRuleByGroupAndID(w http.ResponseWriter, r *http.Request
 	group, id := mux.Vars(r)["group"], mux.Vars(r)["id"]
 	rule := manager.GetRule(group, id)
 	if rule == nil {
-		h.rd.JSON(w, http.StatusNotFound, nil)
+		h.rd.JSON(w, http.StatusNotFound, errs.ErrRuleNotFound.Error())
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, rule)
