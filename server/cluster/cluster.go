@@ -1625,7 +1625,10 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
-		c.resetProgress(storeID, store.GetAddress())
+		addr := store.GetAddress()
+		c.resetProgress(storeID, addr)
+		storeIDStr := strconv.FormatUint(storeID, 10)
+		statistics.ResetStoreStatistics(addr, storeIDStr)
 		if !c.isAPIServiceMode {
 			c.hotStat.RemoveRollingStoreStats(storeID)
 			c.slowStat.RemoveSlowStoreStatus(storeID)
@@ -2169,8 +2172,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
-	statsMap.Reset()
+	statistics.Reset()
 
 	if !c.isAPIServiceMode {
 		c.coordinator.GetSchedulersController().ResetSchedulerMetrics()

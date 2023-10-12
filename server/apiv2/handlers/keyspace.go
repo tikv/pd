@@ -138,7 +138,7 @@ func LoadKeyspace(c *gin.Context) {
 // @Router   /keyspaces/id/{id} [get]
 func LoadKeyspaceByID(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, "invalid keyspace id")
 		return
 	}
@@ -158,7 +158,7 @@ func LoadKeyspaceByID(c *gin.Context) {
 
 // parseLoadAllQuery parses LoadAllKeyspaces'/GetKeyspaceGroups' query parameters.
 // page_token:
-// The keyspace/keyspace group id of the scan start. If not set, scan from keyspace/keyspace group with id 1.
+// The keyspace/keyspace group id of the scan start. If not set, scan from keyspace/keyspace group with id 0.
 // It's string of ID of the previous scan result's last element (next_page_token).
 // limit:
 // The maximum number of keyspace metas/keyspace groups to return. If not set, no limit is posed.
@@ -167,7 +167,7 @@ func LoadKeyspaceByID(c *gin.Context) {
 func parseLoadAllQuery(c *gin.Context) (scanStart uint32, scanLimit int, err error) {
 	pageToken, set := c.GetQuery("page_token")
 	if !set || pageToken == "" {
-		// If pageToken is empty or unset, then scan from ID of 1.
+		// If pageToken is empty or unset, then scan from ID of 0.
 		scanStart = 0
 	} else {
 		scanStart64, err := strconv.ParseUint(pageToken, 10, 32)

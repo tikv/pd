@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
@@ -140,17 +141,64 @@ func (suite *storeTestSuite) TestStoresList() {
 	suite.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[:3])
 
-	url = fmt.Sprintf("%s/stores?state=0", suite.urlPrefix)
+	url = fmt.Sprintf("%s/stores/check?state=up", suite.urlPrefix)
 	info = new(StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	suite.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[:2])
 
-	url = fmt.Sprintf("%s/stores?state=1", suite.urlPrefix)
+	url = fmt.Sprintf("%s/stores/check?state=offline", suite.urlPrefix)
 	info = new(StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	suite.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[2:3])
+
+	url = fmt.Sprintf("%s/stores/check?state=tombstone", suite.urlPrefix)
+	info = new(StoresInfo)
+	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	suite.NoError(err)
+	checkStoresInfo(re, info.Stores, suite.stores[3:])
+
+	url = fmt.Sprintf("%s/stores/check?state=tombstone&state=offline", suite.urlPrefix)
+	info = new(StoresInfo)
+	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	suite.NoError(err)
+	checkStoresInfo(re, info.Stores, suite.stores[2:])
+
+	// down store
+	s := &server.GrpcServer{Server: suite.svr}
+	store := &metapb.Store{
+		Id:            100,
+		Address:       fmt.Sprintf("tikv%d", 100),
+		State:         metapb.StoreState_Up,
+		Version:       versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
+		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Hour),
+	}
+	_, err = s.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+		Store:  store,
+	})
+	re.NoError(err)
+
+	url = fmt.Sprintf("%s/stores/check?state=down", suite.urlPrefix)
+	info = new(StoresInfo)
+	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	suite.NoError(err)
+	checkStoresInfo(re, info.Stores, []*metapb.Store{store})
+
+	// disconnect store
+	store.LastHeartbeat = time.Now().UnixNano() - int64(1*time.Minute)
+	_, err = s.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+		Store:  store,
+	})
+	re.NoError(err)
+
+	url = fmt.Sprintf("%s/stores/check?state=disconnected", suite.urlPrefix)
+	info = new(StoresInfo)
+	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	suite.NoError(err)
+	checkStoresInfo(re, info.Stores, []*metapb.Store{store})
 }
 
 func (suite *storeTestSuite) TestStoreGet() {
