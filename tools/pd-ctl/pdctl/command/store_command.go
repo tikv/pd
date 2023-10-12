@@ -143,7 +143,7 @@ func NewStoreLimitCommand() *cobra.Command {
 // NewStoreCheckCommand return a check subcommand of storeCmd
 func NewStoreCheckCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "check [up|offline|tombstone]",
+		Use:   "check [up|offline|tombstone|disconnected|down]",
 		Short: "Check all the stores with specified status",
 		Run:   storeCheckCommandFunc,
 	}
@@ -666,13 +666,7 @@ func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
 
 	caser := cases.Title(language.Und)
 	state := caser.String(strings.ToLower(args[0]))
-	stateValue, ok := metapb.StoreState_value[state]
-	if !ok {
-		cmd.Println("Unknown state: " + state)
-		return
-	}
-
-	prefix := fmt.Sprintf("%s?state=%d", storesPrefix, stateValue)
+	prefix := fmt.Sprintf("%s/check?state=%s", storesPrefix, state)
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
