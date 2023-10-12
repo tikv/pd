@@ -16,6 +16,7 @@ package tests
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -59,6 +60,8 @@ func (tc *TestSchedulingCluster) AddServer(addr string) error {
 	cfg.BackendEndpoints = tc.backendEndpoints
 	cfg.ListenAddr = addr
 	cfg.Name = cfg.ListenAddr
+	tempDir, _ := os.MkdirTemp("/tmp", "pd-tests")
+	cfg.DataDir = tempDir
 	generatedCfg, err := scheduling.GenerateConfig(cfg)
 	if err != nil {
 		return err

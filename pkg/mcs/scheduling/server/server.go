@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -37,6 +38,7 @@ import (
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -46,8 +48,12 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -99,9 +105,11 @@ type Server struct {
 	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 
-	cluster   *Cluster
-	hbStreams *hbstream.HeartbeatStreams
-	storage   *endpoint.StorageEndpoint
+	cluster              *Cluster
+	hbStreams            *hbstream.HeartbeatStreams
+	storage              *endpoint.StorageEndpoint
+	hotRegionStorage     *storage.HotRegionStorage
+	encryptionKeyManager *encryption.Manager
 
 	// for watching the PD API server meta info updates that are related to the scheduling.
 	configWatcher *config.Watcher
@@ -155,9 +163,10 @@ func (s *Server) Run() error {
 
 func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	s.serverLoopWg.Add(2)
+	s.serverLoopWg.Add(3)
 	go s.primaryElectionLoop()
 	go s.updateAPIServerMemberLoop()
+	go s.encryptionKeyManagerLoop()
 }
 
 func (s *Server) updateAPIServerMemberLoop() {
@@ -237,6 +246,17 @@ func (s *Server) primaryElectionLoop() {
 
 		s.campaignLeader()
 	}
+}
+
+// encryptionKeyManagerLoop is used to start monitor encryption key changes.
+func (s *Server) encryptionKeyManagerLoop() {
+	defer logutil.LogPanic()
+	defer s.serverLoopWg.Done()
+
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	s.encryptionKeyManager.StartBackgroundLoop(ctx)
+	log.Info("server is closed, exist encryption key manager loop")
 }
 
 func (s *Server) campaignLeader() {
@@ -324,6 +344,11 @@ func (s *Server) Close() {
 	if s.GetHTTPClient() != nil {
 		s.GetHTTPClient().CloseIdleConnections()
 	}
+
+	if err := s.hotRegionStorage.Close(); err != nil {
+		log.Error("close hot region storage meet error", errs.ZapError(err))
+	}
+
 	log.Info("scheduling server is closed")
 }
 
@@ -364,7 +389,21 @@ func (s *Server) GetBasicCluster() *core.BasicCluster {
 
 // GetCoordinator returns the coordinator.
 func (s *Server) GetCoordinator() *schedule.Coordinator {
-	return s.GetCluster().GetCoordinator()
+	c := s.GetCluster()
+	if c == nil {
+		return nil
+	}
+	return c.GetCoordinator()
+}
+
+// GetEncryptionKeyManager returns the encryption key manager.
+func (s *Server) GetEncryptionKeyManager() *encryption.Manager {
+	return s.encryptionKeyManager
+}
+
+// GetSharedConfig returns the shared config.
+func (s *Server) GetSharedConfig() sc.SharedConfigProvider {
+	return s.persistConfig
 }
 
 // ServerLoopWgDone decreases the server loop wait group.
@@ -392,6 +431,14 @@ func (s *Server) GetLeaderListenUrls() []string {
 	return s.participant.GetLeaderListenUrls()
 }
 
+type svr struct {
+	*Server
+}
+
+func (s *svr) GetCluster() sche.SharedCluster {
+	return s.Server.GetCluster()
+}
+
 func (s *Server) startServer() (err error) {
 	if s.clusterID, err = utils.InitClusterID(s.Context(), s.GetClient()); err != nil {
 		return err
@@ -416,6 +463,18 @@ func (s *Server) startServer() (err error) {
 	s.AddServiceReadyCallback(s.startCluster)
 	s.AddServiceExitCallback(s.stopCluster)
 	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
+		return err
+	}
+
+	s.encryptionKeyManager, err = encryption.NewManager(s.GetClient(), &s.cfg.Security.Encryption)
+	if err != nil {
+		return err
+	}
+
+	h := handler.NewHandler(&svr{s})
+	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+		s.Context(), filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, h)
+	if err != nil {
 		return err
 	}
 
@@ -487,12 +546,6 @@ func (s *Server) stopWatcher() {
 	s.ruleWatcher.Close()
 	s.configWatcher.Close()
 	s.metaWatcher.Close()
-}
-
-// GetPersistConfig returns the persist config.
-// It's used to test.
-func (s *Server) GetPersistConfig() *config.PersistConfig {
-	return s.persistConfig
 }
 
 // CreateServer creates the Server

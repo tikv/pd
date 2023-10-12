@@ -116,8 +116,11 @@ type SharedConfigProvider interface {
 	IsWitnessAllowed() bool
 	IsPlacementRulesCacheEnabled() bool
 	SetHaltScheduling(bool, string)
+	GetHotRegionsWriteInterval() time.Duration
+	GetHotRegionsReservedDays() uint64
 
 	// for test purpose
+	SetPlacementRuleEnabled(bool)
 	SetPlacementRulesCacheEnabled(bool)
 	SetEnableWitness(bool)
 }

@@ -26,14 +26,19 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
@@ -41,8 +46,11 @@ import (
 // Server is the interface for handler about schedule.
 // TODO: remove it after GetCluster is unified between PD server and Scheduling server.
 type Server interface {
+	IsServing() bool
 	GetCoordinator() *schedule.Coordinator
 	GetCluster() sche.SharedCluster
+	GetEncryptionKeyManager() *encryption.Manager
+	GetSharedConfig() sc.SharedConfigProvider
 }
 
 // Handler is a handler to handle http request about schedule.
@@ -381,6 +389,9 @@ func (h *Handler) HandleOperatorCreation(input map[string]interface{}) (int, int
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
 func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -402,6 +413,9 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 // AddTransferRegionOperator adds an operator to transfer region to the stores.
 func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]placement.PeerRoleType) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -439,6 +453,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 // AddTransferPeerOperator adds an operator to transfer peer.
 func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreID uint64) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -465,6 +482,9 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 // checkAdminAddPeerOperator checks adminAddPeer operator with given region ID and store ID.
 func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (sche.SharedCluster, *core.RegionInfo, error) {
 	c := h.GetCluster()
+	if c == nil {
+		return nil, nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return nil, nil, errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -520,6 +540,9 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 // AddRemovePeerOperator adds an operator to remove peer.
 func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -540,6 +563,9 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 // AddMergeRegionOperator adds an operator to merge region.
 func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -575,6 +601,9 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 // AddSplitRegionOperator adds an operator to split a region.
 func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys []string) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -607,6 +636,9 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 // AddScatterRegionOperator adds an operator to scatter a region.
 func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -870,4 +902,76 @@ func (h *Handler) PauseOrResumeChecker(name string, t int64) (err error) {
 		}
 	}
 	return err
+}
+
+// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
+func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
+	return h.GetSharedConfig().GetHotRegionsWriteInterval()
+}
+
+// GetHotRegionsReservedDays gets days hot region information is kept.
+func (h *Handler) GetHotRegionsReservedDays() uint64 {
+	return h.GetSharedConfig().GetHotRegionsReservedDays()
+}
+
+// GetHotRegions gets hot regions' statistics by RWType and storeIDs.
+// If storeIDs is empty, it returns all hot regions' statistics by RWType.
+func (h *Handler) GetHotRegions(typ utils.RWType, storeIDs ...uint64) (*statistics.StoreHotPeersInfos, error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	return co.GetHotRegions(typ, storeIDs...), nil
+}
+
+// GetHistoryHotRegions get hot region info in HistoryHotRegion form.
+func (h *Handler) GetHistoryHotRegions(typ utils.RWType) ([]storage.HistoryHotRegion, error) {
+	hotRegions, err := h.GetHotRegions(typ)
+	if hotRegions == nil || err != nil {
+		return nil, err
+	}
+	hotPeers := hotRegions.AsPeer
+	return h.packHotRegions(hotPeers, typ.String())
+}
+
+func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []storage.HistoryHotRegion, err error) {
+	c := h.GetCluster()
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	for _, hotPeersStat := range hotPeersStat {
+		stats := hotPeersStat.Stats
+		for _, hotPeerStat := range stats {
+			region := c.GetRegion(hotPeerStat.RegionID)
+			if region == nil {
+				continue
+			}
+			meta := region.GetMeta()
+			meta, err := encryption.EncryptRegion(meta, h.GetEncryptionKeyManager())
+			if err != nil {
+				return nil, err
+			}
+			stat := storage.HistoryHotRegion{
+				// store in ms.
+				// TODO: distinguish store heartbeat interval and region heartbeat interval
+				// read statistic from store heartbeat, write statistic from region heartbeat
+				UpdateTime:     int64(region.GetInterval().GetEndTimestamp() * 1000),
+				RegionID:       hotPeerStat.RegionID,
+				StoreID:        hotPeerStat.StoreID,
+				PeerID:         region.GetStorePeer(hotPeerStat.StoreID).GetId(),
+				IsLeader:       hotPeerStat.IsLeader,
+				IsLearner:      core.IsLearner(region.GetPeer(hotPeerStat.StoreID)),
+				HotDegree:      int64(hotPeerStat.HotDegree),
+				FlowBytes:      hotPeerStat.ByteRate,
+				KeyRate:        hotPeerStat.KeyRate,
+				QueryRate:      hotPeerStat.QueryRate,
+				StartKey:       string(region.GetStartKey()),
+				EndKey:         string(region.GetEndKey()),
+				EncryptionMeta: meta.GetEncryptionMeta(),
+				HotRegionType:  hotRegionType,
+			}
+			historyHotRegions = append(historyHotRegions, stat)
+		}
+	}
+	return
 }
