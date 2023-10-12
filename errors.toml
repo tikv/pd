@@ -541,6 +541,11 @@ error = '''
 build rule list failed, %s
 '''
 
+["PD:placement:ErrKeyFormat"]
+error = '''
+key should be in hex format
+'''
+
 ["PD:placement:ErrLoadRule"]
 error = '''
 load rule failed
@@ -549,6 +554,11 @@ load rule failed
 ["PD:placement:ErrLoadRuleGroup"]
 error = '''
 load rule group failed
+'''
+
+["PD:placement:ErrPlacementDisabled"]
+error = '''
+placement rules feature is disabled
 '''
 
 ["PD:placement:ErrRuleContent"]
@@ -604,6 +614,11 @@ failed to unmarshal proto
 ["PD:region:ErrRegionAbnormalPeer"]
 error = '''
 region %v has abnormal peer
+'''
+
+["PD:region:ErrRegionInvalidID"]
+error = '''
+invalid region id
 '''
 
 ["PD:region:ErrRegionNotAdjacent"]

@@ -150,6 +150,16 @@ func (s *Service) RegisterHotspotRouter() {
 	router.GET("/buckets", getHotBuckets)
 }
 
+// RegisterConfigRouter registers the router of the config handler.
+func (s *Service) RegisterConfigRouter() {
+	// router := s.root.Group("config")
+	// router.GET("/rule", getHotBuckets)
+	// router.GET("/rules", getHotBuckets)
+	// router.GET("/rule_group", getHotBuckets)
+	// router.GET("/rule_groups", getHotBuckets)
+	// router.GET("/placement-rule", getHotBuckets)
+}
+
 // RegisterOperatorsRouter registers the router of the operators handler.
 func (s *Service) RegisterOperatorsRouter() {
 	router := s.root.Group("operators")

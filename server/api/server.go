@@ -83,6 +83,31 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/hotspot",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rules",
+				scheapi.APIPathPrefix+"/config/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule",
+				scheapi.APIPathPrefix+"/config/rule",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule_group",
+				scheapi.APIPathPrefix+"/config/rule_group",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule_groups",
+				scheapi.APIPathPrefix+"/config/rule_groups",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/placement-rule",
+				scheapi.APIPathPrefix+"/config/placement-rule",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
 			// because the writing of all the meta information of the scheduling service is in the API server,
 			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(

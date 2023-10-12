@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1039,4 +1040,46 @@ func (h *Handler) GetHotBuckets(regionIDs ...uint64) (HotBucketsResponse, error)
 		}
 	}
 	return ret, nil
+}
+
+// GetRuleManager returns the rule manager.
+func (h *Handler) GetRuleManager() (*placement.RuleManager, error) {
+	c := h.GetCluster()
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped
+	}
+	if !c.GetSharedConfig().IsPlacementRulesEnabled() {
+		return nil, errs.ErrPlacementDisabled
+	}
+	return c.GetRuleManager(), nil
+}
+
+// PreCheckForRegion checks if the region is valid.
+func (h *Handler) PreCheckForRegion(regionStr string) (*core.RegionInfo, int, error) {
+	c := h.GetCluster()
+	if c == nil {
+		return nil, http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	regionID, err := strconv.ParseUint(regionStr, 10, 64)
+	if err != nil {
+		return nil, http.StatusBadRequest, errs.ErrRegionInvalidID.FastGenByArgs()
+	}
+	region := c.GetRegion(regionID)
+	if region == nil {
+		return nil, http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID)
+	}
+	return region, http.StatusOK, nil
+}
+
+// CheckRegionPlacementRule checks if the region matches the placement rules.
+func (h *Handler) CheckRegionPlacementRule(region *core.RegionInfo) (*placement.RegionFit, error) {
+	c := h.GetCluster()
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	manager, err := h.GetRuleManager()
+	if err != nil {
+		return nil, err
+	}
+	return manager.FitRegion(c, region), nil
 }

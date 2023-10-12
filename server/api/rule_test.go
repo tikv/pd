@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
@@ -961,7 +962,7 @@ func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
 
 	url = fmt.Sprintf("%s/config/rules/region/%s/detail", suite.urlPrefix, "id")
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest), tu.StringContain(
-		re, "invalid region id"))
+		re, errs.ErrRegionInvalidID.Error()))
 	suite.NoError(err)
 
 	suite.svr.GetRaftCluster().GetReplicationConfig().EnablePlacementRules = false
