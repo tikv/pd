@@ -227,6 +227,33 @@ func (s *Service) ScatterRegions(ctx context.Context, request *schedulingpb.Scat
 	}, nil
 }
 
+// GetOperator gets information about the operator belonging to the specify region.
+func (s *Service) GetOperator(ctx context.Context, request *schedulingpb.GetOperatorRequest) (*schedulingpb.GetOperatorResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	opController := c.GetCoordinator().GetOperatorController()
+	requestID := request.GetRegionId()
+	r := opController.GetOperatorStatus(requestID)
+	if r == nil {
+		header := s.errorHeader(&schedulingpb.Error{
+			Type:    schedulingpb.ErrorType_UNKNOWN,
+			Message: "Not Found",
+		})
+		return &schedulingpb.GetOperatorResponse{Header: header}, nil
+	}
+
+	return &schedulingpb.GetOperatorResponse{
+		Header:   s.header(),
+		RegionId: requestID,
+		Desc:     []byte(r.Desc()),
+		Kind:     []byte(r.Kind().String()),
+		Status:   r.Status,
+	}, nil
+}
+
 // RegisterGRPCService registers the service to gRPC server.
 func (s *Service) RegisterGRPCService(g *grpc.Server) {
 	schedulingpb.RegisterSchedulingServer(g, s)

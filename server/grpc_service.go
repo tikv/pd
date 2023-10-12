@@ -1989,6 +1989,25 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 
 // GetOperator gets information about the operator belonging to the specify region.
 func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
+	if s.IsAPIServiceMode() {
+		s.updateSchedulingClient(ctx)
+		if s.schedulingClient.Load() != nil {
+			req := &schedulingpb.GetOperatorRequest{
+				Header: &schedulingpb.RequestHeader{
+					ClusterId: request.GetHeader().GetClusterId(),
+					SenderId:  request.GetHeader().GetSenderId(),
+				},
+				RegionId: request.GetRegionId(),
+			}
+			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().GetOperator(ctx, req)
+			if err != nil {
+				// reset to let it be updated in the next request
+				s.schedulingClient.Store(&schedulingClient{})
+				return s.convertOperatorResponse(resp), err
+			}
+			return s.convertOperatorResponse(resp), nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetOperator(ctx, request)
 	}
@@ -2104,6 +2123,16 @@ func (s *GrpcServer) convertScatterResponse(resp *schedulingpb.ScatterRegionsRes
 	return &pdpb.ScatterRegionResponse{
 		Header:             s.convertHeader(resp.GetHeader()),
 		FinishedPercentage: resp.GetFinishedPercentage(),
+	}
+}
+
+func (s *GrpcServer) convertOperatorResponse(resp *schedulingpb.GetOperatorResponse) *pdpb.GetOperatorResponse {
+	return &pdpb.GetOperatorResponse{
+		Header:   s.convertHeader(resp.GetHeader()),
+		RegionId: resp.GetRegionId(),
+		Desc:     resp.GetDesc(),
+		Kind:     resp.GetKind(),
+		Status:   resp.GetStatus(),
 	}
 }
 
