@@ -168,41 +168,17 @@ func TestStateSwitch(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  4,
-		DRReplicas:       2,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
-	cluster.GetRuleManager().SetAllGroupBundles([]placement.GroupBundle{
-		{
-			ID: "group1",
-			Rules: []*placement.Rule{
-				{
-					ID:    "rule1",
-					Role:  placement.Voter,
-					Count: 4,
-					LabelConstraints: []placement.LabelConstraint{
-						{
-							Key:    "zone",
-							Op:     placement.In,
-							Values: []string{"zone1"},
-						},
-					},
-				},
-				{
-					ID:    "rule2",
-					Role:  placement.Voter,
-					Count: 2,
-					LabelConstraints: []placement.LabelConstraint{
-						{Key: "zone", Op: placement.In, Values: []string{"zone2"}},
-					},
-				},
-			},
-		},
-	}, true)
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 4},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 2},
+		}), true)
 
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
@@ -394,14 +370,19 @@ func TestReplicateState(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+		}), true)
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
+	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
 
 	stateID := rep.drAutoSync.StateID
 	// replicate after initialized
@@ -419,14 +400,14 @@ func TestReplicateState(t *testing.T) {
 	rep.tickUpdateState() // switch async_wait since there is only one zone
 	newStateID := rep.drAutoSync.StateID
 	rep.tickReplicateStatus()
-	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d}`, newStateID), replicator.lastData[1])
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2]}`, newStateID), replicator.lastData[1])
 	re.Equal(fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID), replicator.lastData[2])
-	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d}`, newStateID), replicator.lastData[3])
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2]}`, newStateID), replicator.lastData[3])
 
 	// clear error, replicate to node 2 next time
 	delete(replicator.errors, 2)
 	rep.tickReplicateStatus()
-	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d}`, newStateID), replicator.lastData[2])
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2]}`, newStateID), replicator.lastData[2])
 }
 
 func TestAsynctimeout(t *testing.T) {
@@ -438,11 +419,14 @@ func TestAsynctimeout(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+		}), true)
 	var replicator mockFileReplicator
 	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	re.NoError(err)
@@ -481,11 +465,14 @@ func TestRecoverProgress(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+		}), true)
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
@@ -543,11 +530,14 @@ func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+		}), true)
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
@@ -617,4 +607,27 @@ func genRegions(cluster *mockcluster.Cluster, stateID uint64, n int) []*core.Reg
 		regions = append(regions, region)
 	}
 	return regions
+}
+
+type ruleConfig struct {
+	key   string
+	value string
+	role  placement.PeerRoleType
+	count int
+}
+
+func genPlacementRuleConfig(rules []ruleConfig) []placement.GroupBundle {
+	group := placement.GroupBundle{
+		ID: "group1",
+	}
+	for i, r := range rules {
+		group.Rules = append(group.Rules, &placement.Rule{
+			ID:   fmt.Sprintf("rule%d", i),
+			Role: r.role,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: r.key, Op: placement.In, Values: []string{r.value}},
+			},
+		})
+	}
+	return []placement.GroupBundle{group}
 }

@@ -414,30 +414,31 @@ func (m *ModeManager) tickUpdateState() {
 	// totalPrimaryPeers, totalDrPeers := m.config.DRAutoSync.PrimaryReplicas, m.config.DRAutoSync.DRReplicas
 	stores := m.checkStoreStatus()
 
+	var primaryHasVoter, drHasVoter bool
+	var totalVoter, totalUpVoter int
+	for _, r := range m.cluster.GetRuleManager().GetAllRules() {
+		if len(r.StartKey) > 0 || len(r.EndKey) > 0 {
+			// All rules should be global rules. If not, skip it.
+			continue
+		}
+		if r.Role != placement.Learner {
+			totalVoter += r.Count
+		}
+		minimalUpPrimary := minimalUpVoters(r, stores[primaryUp], stores[primaryDown])
+		minimalUpDr := minimalUpVoters(r, stores[drUp], stores[drDown])
+		primaryHasVoter = primaryHasVoter || minimalUpPrimary > 0
+		drHasVoter = drHasVoter || minimalUpDr > 0
+		upVoters := minimalUpPrimary + minimalUpDr
+		if upVoters > r.Count {
+			upVoters = r.Count
+		}
+		totalUpVoter += upVoters
+	}
+
 	// canSync is true when every region has at least 1 voter replica in each DC.
 	// hasMajority is true when every region has majority peer online.
-	var canSync, hasMajority bool = true, true
-	if len(stores[primaryDown]) > 0 || len(stores[drDown]) > 0 {
-		// only use placement rules to check when some stores are down.
-		var primaryHasVoter, drHasVoter bool
-		var totalVoter, totalUpVoter int
-		for _, r := range m.cluster.GetRuleManager().GetAllRules() {
-			if r.Role != placement.Learner {
-				totalVoter += r.Count
-			}
-			minimalUpPrimary := minimalUpVoters(r, stores[primaryUp], stores[primaryDown])
-			minimalUpDr := minimalUpVoters(r, stores[drUp], stores[drDown])
-			primaryHasVoter = primaryHasVoter || minimalUpPrimary > 0
-			drHasVoter = drHasVoter || minimalUpDr > 0
-			upVoters := minimalUpPrimary + minimalUpDr
-			if upVoters > r.Count {
-				upVoters = r.Count
-			}
-			totalUpVoter += upVoters
-		}
-		canSync = primaryHasVoter && drHasVoter
-		hasMajority = totalUpVoter*2 > totalVoter
-	}
+	canSync := primaryHasVoter && drHasVoter
+	hasMajority := totalUpVoter*2 > totalVoter
 
 	log.Debug("replication store status",
 		zap.Uint64s("up-primary", storeIDs(stores[primaryUp])),
@@ -477,7 +478,7 @@ func (m *ModeManager) tickUpdateState() {
 			m.drSwitchToSync()
 			break
 		}
-		if oldAvailableStores := m.drGetAvailableStores(); !reflect.DeepEqual(oldAvailableStores, stores[primaryUp]) {
+		if oldAvailableStores := m.drGetAvailableStores(); !reflect.DeepEqual(oldAvailableStores, storeIDs(stores[primaryUp])) {
 			m.drSwitchToAsyncWait(storeIDs(stores[primaryUp]))
 			break
 		}
