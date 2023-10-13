@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -175,6 +176,33 @@ func TestStateSwitch(t *testing.T) {
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
+	cluster.GetRuleManager().SetAllGroupBundles([]placement.GroupBundle{
+		{
+			ID: "group1",
+			Rules: []*placement.Rule{
+				{
+					ID:    "rule1",
+					Role:  placement.Voter,
+					Count: 4,
+					LabelConstraints: []placement.LabelConstraint{
+						{
+							Key:    "zone",
+							Op:     placement.In,
+							Values: []string{"zone1"},
+						},
+					},
+				},
+				{
+					ID:    "rule2",
+					Role:  placement.Voter,
+					Count: 2,
+					LabelConstraints: []placement.LabelConstraint{
+						{Key: "zone", Op: placement.In, Values: []string{"zone2"}},
+					},
+				},
+			},
+		},
+	}, true)
 
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
