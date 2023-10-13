@@ -156,6 +156,7 @@ func (c *Coordinator) PatrolRegions() {
 			// Note: we reset the ticker here to support updating configuration dynamically.
 			ticker.Reset(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
+			patrolCheckRegionsGauge.Set(0)
 			log.Info("patrol regions has been stopped")
 			return
 		}

@@ -1000,7 +1000,7 @@ func (o *PersistOptions) GetRegionMaxSize() uint64 {
 	return o.GetStoreConfig().GetRegionMaxSize()
 }
 
-// GetRegionMaxKeys returns the region split keys
+// GetRegionMaxKeys returns the max region keys
 func (o *PersistOptions) GetRegionMaxKeys() uint64 {
 	return o.GetStoreConfig().GetRegionMaxKeys()
 }
