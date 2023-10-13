@@ -52,11 +52,11 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	//	"/schedulers", http.MethodGet
 	//	"/schedulers/{name}", http.MethodPost
 	//	"/schedulers/diagnostic/{name}", http.MethodGet
-	//  “/hotspot/regions/read”, http.MethodGet
-	//  “/hotspot/regions/write”, http.MethodGet
-	//  “/hotspot/regions/history, http.MethodGet
-	//  “/hotspot/stores”, http.MethodGet
-	//  “/hotspot/buckets, http.MethodGet
+	//	"/hotspot/regions/read", http.MethodGet
+	//	"/hotspot/regions/write", http.MethodGet
+	//	"/hotspot/regions/history", http.MethodGet
+	//	"/hotspot/stores", http.MethodGet
+	//	"/hotspot/buckets", http.MethodGet
 	// Following requests are **not** redirected:
 	//	"/schedulers", http.MethodPost
 	//	"/schedulers/{name}", http.MethodDelete
