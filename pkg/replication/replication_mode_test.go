@@ -589,6 +589,65 @@ func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 	re.Equal(float32(1.0), rep.estimateProgress())
 }
 
+func TestComplexPlacementRules(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := storage.NewStorageWithMemoryBackend()
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	replicator := newMockReplicator([]uint64{1})
+	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
+	re.NoError(err)
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "logic", value: "logic1", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic2", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic3", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic4", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic5", role: placement.Voter, count: 1},
+		}), true)
+
+	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1", "logic": "logic1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1", "logic": "logic1"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"zone": "zone1", "logic": "logic2"})
+	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone1", "logic": "logic2"})
+	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone1", "logic": "logic3"})
+	cluster.AddLabelsStore(6, 1, map[string]string{"zone": "zone1", "logic": "logic3"})
+	cluster.AddLabelsStore(7, 1, map[string]string{"zone": "zone2", "logic": "logic4"})
+	cluster.AddLabelsStore(8, 1, map[string]string{"zone": "zone2", "logic": "logic4"})
+	cluster.AddLabelsStore(9, 1, map[string]string{"zone": "zone2", "logic": "logic5"})
+	cluster.AddLabelsStore(10, 1, map[string]string{"zone": "zone2", "logic": "logic5"})
+
+	// initial state is sync
+	re.Equal(drStateSync, rep.drGetState())
+
+	// down logic3 + logic5, can remain sync
+	setStoreState(cluster, "up", "up", "up", "up", "down", "down", "up", "up", "down", "down")
+	rep.tickUpdateState()
+	re.Equal(drStateSync, rep.drGetState())
+
+	// down 1 tikv from logic4 + 1 tikv from logic5, cannot sync
+	setStoreState(cluster, "up", "up", "up", "up", "up", "up", "up", "down", "up", "down")
+	rep.tickUpdateState()
+	re.Equal(drStateAsyncWait, rep.drGetState())
+
+	// reset to sync
+	setStoreState(cluster, "up", "up", "up", "up", "up", "up", "up", "up", "up", "up")
+	rep.tickUpdateState()
+	re.Equal(drStateSync, rep.drGetState())
+
+	// lost majority, down 1 tikv from logic2 + 1 tikv from logic3 + 1tikv from logic5, remain sync state
+	setStoreState(cluster, "up", "up", "up", "down", "up", "down", "up", "up", "up", "down")
+	rep.tickUpdateState()
+	re.Equal(drStateSync, rep.drGetState())
+}
+
 func genRegions(cluster *mockcluster.Cluster, stateID uint64, n int) []*core.RegionInfo {
 	var regions []*core.RegionInfo
 	for i := 1; i <= n; i++ {
@@ -627,6 +686,7 @@ func genPlacementRuleConfig(rules []ruleConfig) []placement.GroupBundle {
 			LabelConstraints: []placement.LabelConstraint{
 				{Key: r.key, Op: placement.In, Values: []string{r.value}},
 			},
+			Count: r.count,
 		})
 	}
 	return []placement.GroupBundle{group}
