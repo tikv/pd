@@ -411,7 +411,6 @@ func (m *ModeManager) tickUpdateState() {
 
 	drTickCounter.Inc()
 
-	// totalPrimaryPeers, totalDrPeers := m.config.DRAutoSync.PrimaryReplicas, m.config.DRAutoSync.DRReplicas
 	stores := m.checkStoreStatus()
 
 	var primaryHasVoter, drHasVoter bool
