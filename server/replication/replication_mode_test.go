@@ -25,16 +25,10 @@ import (
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-<<<<<<< HEAD:server/replication/replication_mode_test.go
 	"github.com/tikv/pd/pkg/typeutil"
-=======
-	"github.com/tikv/pd/pkg/mock/mockconfig"
-	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/typeutil"
->>>>>>> 4176c1daa (replication_mode: use placement to determin canSync and hasMajority (#7202)):pkg/replication/replication_mode_test.go
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/storage"
 )
 
@@ -377,16 +371,12 @@ func TestReplicateState(t *testing.T) {
 		DR:               "zone2",
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-<<<<<<< HEAD:server/replication/replication_mode_test.go
 	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
-=======
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.GetRuleManager().SetAllGroupBundles(
 		genPlacementRuleConfig([]ruleConfig{
 			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
 			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
 		}), true)
->>>>>>> 4176c1daa (replication_mode: use placement to determin canSync and hasMajority (#7202)):pkg/replication/replication_mode_test.go
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
@@ -430,16 +420,12 @@ func TestAsynctimeout(t *testing.T) {
 		DR:               "zone2",
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-<<<<<<< HEAD:server/replication/replication_mode_test.go
 	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
-=======
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.GetRuleManager().SetAllGroupBundles(
 		genPlacementRuleConfig([]ruleConfig{
 			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
 			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
 		}), true)
->>>>>>> 4176c1daa (replication_mode: use placement to determin canSync and hasMajority (#7202)):pkg/replication/replication_mode_test.go
 	var replicator mockFileReplicator
 	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	re.NoError(err)
@@ -480,16 +466,12 @@ func TestRecoverProgress(t *testing.T) {
 		DR:               "zone2",
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-<<<<<<< HEAD:server/replication/replication_mode_test.go
 	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
-=======
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.GetRuleManager().SetAllGroupBundles(
 		genPlacementRuleConfig([]ruleConfig{
 			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
 			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
 		}), true)
->>>>>>> 4176c1daa (replication_mode: use placement to determin canSync and hasMajority (#7202)):pkg/replication/replication_mode_test.go
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
@@ -549,16 +531,12 @@ func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 		DR:               "zone2",
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-<<<<<<< HEAD:server/replication/replication_mode_test.go
 	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
-=======
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	cluster.GetRuleManager().SetAllGroupBundles(
 		genPlacementRuleConfig([]ruleConfig{
 			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
 			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
 		}), true)
->>>>>>> 4176c1daa (replication_mode: use placement to determin canSync and hasMajority (#7202)):pkg/replication/replication_mode_test.go
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
@@ -621,7 +599,7 @@ func TestComplexPlacementRules(t *testing.T) {
 		DR:               "zone2",
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
@@ -680,7 +658,7 @@ func TestComplexPlacementRules2(t *testing.T) {
 		DR:               "zone2",
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)

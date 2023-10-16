@@ -28,19 +28,12 @@ import (
 	pb "github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-<<<<<<< HEAD:server/replication/replication_mode.go
 	"github.com/tikv/pd/pkg/logutil"
 	"github.com/tikv/pd/pkg/syncutil"
-=======
-	sche "github.com/tikv/pd/pkg/schedule/core"
-	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
->>>>>>> 4176c1daa (replication_mode: use placement to determin canSync and hasMajority (#7202)):pkg/replication/replication_mode.go
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/schedule"
+	"github.com/tikv/pd/server/schedule/placement"
 	"github.com/tikv/pd/server/storage/endpoint"
 	"go.uber.org/zap"
 )
