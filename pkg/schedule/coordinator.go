@@ -616,6 +616,25 @@ func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHot
 	return infos
 }
 
+// GetHotRegions gets hot regions' statistics by RWType and storeIDs.
+// If storeIDs is empty, it returns all hot regions' statistics by RWType.
+func (c *Coordinator) GetHotRegions(typ utils.RWType, storeIDs ...uint64) *statistics.StoreHotPeersInfos {
+	hotRegions := c.GetHotRegionsByType(typ)
+	if len(storeIDs) > 0 && hotRegions != nil {
+		asLeader := statistics.StoreHotPeersStat{}
+		asPeer := statistics.StoreHotPeersStat{}
+		for _, storeID := range storeIDs {
+			asLeader[storeID] = hotRegions.AsLeader[storeID]
+			asPeer[storeID] = hotRegions.AsPeer[storeID]
+		}
+		return &statistics.StoreHotPeersInfos{
+			AsLeader: asLeader,
+			AsPeer:   asPeer,
+		}
+	}
+	return hotRegions
+}
+
 // GetWaitGroup returns the wait group. Only for test purpose.
 func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 	return &c.wg

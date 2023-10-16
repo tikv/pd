@@ -364,7 +364,11 @@ func (s *Server) GetBasicCluster() *core.BasicCluster {
 
 // GetCoordinator returns the coordinator.
 func (s *Server) GetCoordinator() *schedule.Coordinator {
-	return s.GetCluster().GetCoordinator()
+	c := s.GetCluster()
+	if c == nil {
+		return nil
+	}
+	return c.GetCoordinator()
 }
 
 // ServerLoopWgDone decreases the server loop wait group.

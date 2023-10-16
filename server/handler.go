@@ -36,7 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -54,10 +54,14 @@ type server struct {
 }
 
 func (s *server) GetCoordinator() *schedule.Coordinator {
-	return s.GetRaftCluster().GetCoordinator()
+	c := s.GetRaftCluster()
+	if c == nil {
+		return nil
+	}
+	return c.GetCoordinator()
 }
 
-func (s *server) GetCluster() sche.SharedCluster {
+func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.GetRaftCluster()
 }
 
@@ -106,53 +110,6 @@ func (h *Handler) GetScheduleConfig() *sc.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
 
-// GetStores returns all stores in the cluster.
-func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
-	rc := h.s.GetRaftCluster()
-	if rc == nil {
-		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
-	}
-	storeMetas := rc.GetMetaStores()
-	stores := make([]*core.StoreInfo, 0, len(storeMetas))
-	for _, s := range storeMetas {
-		storeID := s.GetId()
-		store := rc.GetStore(storeID)
-		if store == nil {
-			return nil, errs.ErrStoreNotFound.FastGenByArgs(storeID)
-		}
-		stores = append(stores, store)
-	}
-	return stores, nil
-}
-
-// GetHotWriteRegions gets all hot write regions stats.
-func (h *Handler) GetHotWriteRegions() *statistics.StoreHotPeersInfos {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return nil
-	}
-	return c.GetHotWriteRegions()
-}
-
-// GetHotBuckets returns all hot buckets stats.
-func (h *Handler) GetHotBuckets(regionIDs ...uint64) map[uint64][]*buckets.BucketStat {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return nil
-	}
-	degree := c.GetOpts().GetHotRegionCacheHitsThreshold()
-	return c.BucketsStats(degree, regionIDs...)
-}
-
-// GetHotReadRegions gets all hot read regions stats.
-func (h *Handler) GetHotReadRegions() *statistics.StoreHotPeersInfos {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return nil
-	}
-	return c.GetHotReadRegions()
-}
-
 // GetHotRegionsWriteInterval gets interval for PD to store Hot Region information..
 func (h *Handler) GetHotRegionsWriteInterval() time.Duration {
 	return h.opt.GetHotRegionsWriteInterval()
@@ -163,13 +120,68 @@ func (h *Handler) GetHotRegionsReservedDays() uint64 {
 	return h.opt.GetHotRegionsReservedDays()
 }
 
-// GetStoresLoads gets all hot write stores stats.
-func (h *Handler) GetStoresLoads() map[uint64][]float64 {
-	rc := h.s.GetRaftCluster()
-	if rc == nil {
-		return nil
+// HistoryHotRegionsRequest wrap request condition from tidb.
+// it is request from tidb
+type HistoryHotRegionsRequest struct {
+	StartTime      int64    `json:"start_time,omitempty"`
+	EndTime        int64    `json:"end_time,omitempty"`
+	RegionIDs      []uint64 `json:"region_ids,omitempty"`
+	StoreIDs       []uint64 `json:"store_ids,omitempty"`
+	PeerIDs        []uint64 `json:"peer_ids,omitempty"`
+	IsLearners     []bool   `json:"is_learners,omitempty"`
+	IsLeaders      []bool   `json:"is_leaders,omitempty"`
+	HotRegionTypes []string `json:"hot_region_type,omitempty"`
+}
+
+// GetAllRequestHistoryHotRegion gets all hot region info in HistoryHotRegion form.
+func (h *Handler) GetAllRequestHistoryHotRegion(request *HistoryHotRegionsRequest) (*storage.HistoryHotRegions, error) {
+	var hotRegionTypes = storage.HotRegionTypes
+	if len(request.HotRegionTypes) != 0 {
+		hotRegionTypes = request.HotRegionTypes
 	}
-	return rc.GetStoresLoads()
+	iter := h.GetHistoryHotRegionIter(hotRegionTypes, request.StartTime, request.EndTime)
+	var results []*storage.HistoryHotRegion
+	regionSet, storeSet, peerSet, learnerSet, leaderSet :=
+		make(map[uint64]bool), make(map[uint64]bool),
+		make(map[uint64]bool), make(map[bool]bool), make(map[bool]bool)
+	for _, id := range request.RegionIDs {
+		regionSet[id] = true
+	}
+	for _, id := range request.StoreIDs {
+		storeSet[id] = true
+	}
+	for _, id := range request.PeerIDs {
+		peerSet[id] = true
+	}
+	for _, isLearner := range request.IsLearners {
+		learnerSet[isLearner] = true
+	}
+	for _, isLeader := range request.IsLeaders {
+		leaderSet[isLeader] = true
+	}
+	var next *storage.HistoryHotRegion
+	var err error
+	for next, err = iter.Next(); next != nil && err == nil; next, err = iter.Next() {
+		if len(regionSet) != 0 && !regionSet[next.RegionID] {
+			continue
+		}
+		if len(storeSet) != 0 && !storeSet[next.StoreID] {
+			continue
+		}
+		if len(peerSet) != 0 && !peerSet[next.PeerID] {
+			continue
+		}
+		if !learnerSet[next.IsLearner] {
+			continue
+		}
+		if !leaderSet[next.IsLeader] {
+			continue
+		}
+		results = append(results, next)
+	}
+	return &storage.HistoryHotRegions{
+		HistoryHotRegion: results,
+	}, err
 }
 
 // AddScheduler adds a scheduler.
@@ -492,24 +504,14 @@ func (h *Handler) IsLeader() bool {
 	return h.s.member.IsLeader()
 }
 
-// PackHistoryHotReadRegions get read hot region info in HistoryHotRegion form.
-func (h *Handler) PackHistoryHotReadRegions() ([]storage.HistoryHotRegion, error) {
-	hotReadRegions := h.GetHotReadRegions()
-	if hotReadRegions == nil {
-		return nil, nil
+// GetHistoryHotRegions get hot region info in HistoryHotRegion form.
+func (h *Handler) GetHistoryHotRegions(typ utils.RWType) ([]storage.HistoryHotRegion, error) {
+	hotRegions, err := h.GetHotRegions(typ)
+	if hotRegions == nil || err != nil {
+		return nil, err
 	}
-	hotReadPeerRegions := hotReadRegions.AsPeer
-	return h.packHotRegions(hotReadPeerRegions, storage.ReadType.String())
-}
-
-// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion from
-func (h *Handler) PackHistoryHotWriteRegions() ([]storage.HistoryHotRegion, error) {
-	hotWriteRegions := h.GetHotWriteRegions()
-	if hotWriteRegions == nil {
-		return nil, nil
-	}
-	hotWritePeerRegions := hotWriteRegions.AsPeer
-	return h.packHotRegions(hotWritePeerRegions, storage.WriteType.String())
+	hotPeers := hotRegions.AsPeer
+	return h.packHotRegions(hotPeers, typ.String())
 }
 
 func (h *Handler) packHotRegions(hotPeersStat statistics.StoreHotPeersStat, hotRegionType string) (historyHotRegions []storage.HistoryHotRegion, err error) {
