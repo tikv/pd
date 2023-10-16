@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
@@ -167,14 +168,17 @@ func TestStateSwitch(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  4,
-		DRReplicas:       2,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 4},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 2},
+		}), true)
 
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
@@ -357,14 +361,19 @@ func TestReplicateState(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+		}), true)
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
+	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
 
 	stateID := rep.drAutoSync.StateID
 	// replicate after initialized
@@ -380,14 +389,24 @@ func TestReplicateState(t *testing.T) {
 	replicator.errors[2] = errors.New("failed to persist")
 	rep.tickDR() // switch async_wait since there is only one zone
 	newStateID := rep.drAutoSync.StateID
+<<<<<<< HEAD:server/replication/replication_mode_test.go
 	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d}`, newStateID), replicator.lastData[1])
+=======
+	rep.tickReplicateStatus()
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2]}`, newStateID), replicator.lastData[1])
+>>>>>>> 4176c1daa (replication_mode: use placement to determin canSync and hasMajority (#7202)):pkg/replication/replication_mode_test.go
 	re.Equal(fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID), replicator.lastData[2])
-	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d}`, newStateID), replicator.lastData[3])
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2]}`, newStateID), replicator.lastData[3])
 
 	// clear error, replicate to node 2 next time
 	delete(replicator.errors, 2)
+<<<<<<< HEAD:server/replication/replication_mode_test.go
 	rep.checkReplicateFile()
 	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d}`, newStateID), replicator.lastData[2])
+=======
+	rep.tickReplicateStatus()
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2]}`, newStateID), replicator.lastData[2])
+>>>>>>> 4176c1daa (replication_mode: use placement to determin canSync and hasMajority (#7202)):pkg/replication/replication_mode_test.go
 }
 
 func TestAsynctimeout(t *testing.T) {
@@ -399,11 +418,14 @@ func TestAsynctimeout(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+		}), true)
 	var replicator mockFileReplicator
 	rep, err := NewReplicationModeManager(conf, store, cluster, &replicator)
 	re.NoError(err)
@@ -442,11 +464,14 @@ func TestRecoverProgress(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+		}), true)
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
@@ -504,11 +529,14 @@ func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 		LabelKey:         "zone",
 		Primary:          "zone1",
 		DR:               "zone2",
-		PrimaryReplicas:  2,
-		DRReplicas:       1,
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
 	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+		}), true)
 	cluster.AddLabelsStore(1, 1, map[string]string{})
 	rep, err := NewReplicationModeManager(conf, store, cluster, newMockReplicator([]uint64{1}))
 	re.NoError(err)
@@ -560,6 +588,114 @@ func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 	re.Equal(float32(1.0), rep.estimateProgress())
 }
 
+func TestComplexPlacementRules(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := storage.NewStorageWithMemoryBackend()
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	replicator := newMockReplicator([]uint64{1})
+	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
+	re.NoError(err)
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "logic", value: "logic1", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic2", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic3", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic4", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic5", role: placement.Voter, count: 1},
+		}), true)
+
+	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1", "logic": "logic1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1", "logic": "logic1"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"zone": "zone1", "logic": "logic2"})
+	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone1", "logic": "logic2"})
+	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone1", "logic": "logic3"})
+	cluster.AddLabelsStore(6, 1, map[string]string{"zone": "zone1", "logic": "logic3"})
+	cluster.AddLabelsStore(7, 1, map[string]string{"zone": "zone2", "logic": "logic4"})
+	cluster.AddLabelsStore(8, 1, map[string]string{"zone": "zone2", "logic": "logic4"})
+	cluster.AddLabelsStore(9, 1, map[string]string{"zone": "zone2", "logic": "logic5"})
+	cluster.AddLabelsStore(10, 1, map[string]string{"zone": "zone2", "logic": "logic5"})
+
+	// initial state is sync
+	re.Equal(drStateSync, rep.drGetState())
+
+	// down logic3 + logic5, can remain sync
+	setStoreState(cluster, "up", "up", "up", "up", "down", "down", "up", "up", "down", "down")
+	rep.tickUpdateState()
+	re.Equal(drStateSync, rep.drGetState())
+
+	// down 1 tikv from logic4 + 1 tikv from logic5, cannot sync
+	setStoreState(cluster, "up", "up", "up", "up", "up", "up", "up", "down", "up", "down")
+	rep.tickUpdateState()
+	re.Equal(drStateAsyncWait, rep.drGetState())
+
+	// reset to sync
+	setStoreState(cluster, "up", "up", "up", "up", "up", "up", "up", "up", "up", "up")
+	rep.tickUpdateState()
+	re.Equal(drStateSync, rep.drGetState())
+
+	// lost majority, down 1 tikv from logic2 + 1 tikv from logic3 + 1tikv from logic5, remain sync state
+	setStoreState(cluster, "up", "up", "up", "down", "up", "down", "up", "up", "up", "down")
+	rep.tickUpdateState()
+	re.Equal(drStateSync, rep.drGetState())
+}
+
+func TestComplexPlacementRules2(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := storage.NewStorageWithMemoryBackend()
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	replicator := newMockReplicator([]uint64{1})
+	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
+	re.NoError(err)
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "logic", value: "logic1", role: placement.Voter, count: 2},
+			{key: "logic", value: "logic2", role: placement.Voter, count: 1},
+			{key: "logic", value: "logic3", role: placement.Voter, count: 2},
+		}), true)
+
+	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1", "logic": "logic1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1", "logic": "logic1"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"zone": "zone1", "logic": "logic2"})
+	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone1", "logic": "logic2"})
+	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2", "logic": "logic3"})
+	cluster.AddLabelsStore(6, 1, map[string]string{"zone": "zone2", "logic": "logic3"})
+	cluster.AddLabelsStore(7, 1, map[string]string{"zone": "zone2", "logic": "logic3"})
+
+	// initial state is sync
+	re.Equal(drStateSync, rep.drGetState())
+
+	// down 1 from logic3, can remain sync
+	setStoreState(cluster, "up", "up", "up", "up", "up", "down", "up")
+	rep.tickUpdateState()
+	re.Equal(drStateSync, rep.drGetState())
+
+	// down 1 from logic1, 1 from logic2, can remain sync
+	setStoreState(cluster, "up", "down", "up", "down", "up", "up", "up")
+	rep.tickUpdateState()
+	re.Equal(drStateSync, rep.drGetState())
+
+	// down another from logic3, cannot sync
+	setStoreState(cluster, "up", "up", "up", "up", "down", "down", "up")
+	rep.tickUpdateState()
+	re.Equal(drStateAsyncWait, rep.drGetState())
+}
+
 func genRegions(cluster *mockcluster.Cluster, stateID uint64, n int) []*core.RegionInfo {
 	var regions []*core.RegionInfo
 	for i := 1; i <= n; i++ {
@@ -578,4 +714,28 @@ func genRegions(cluster *mockcluster.Cluster, stateID uint64, n int) []*core.Reg
 		regions = append(regions, region)
 	}
 	return regions
+}
+
+type ruleConfig struct {
+	key   string
+	value string
+	role  placement.PeerRoleType
+	count int
+}
+
+func genPlacementRuleConfig(rules []ruleConfig) []placement.GroupBundle {
+	group := placement.GroupBundle{
+		ID: "group1",
+	}
+	for i, r := range rules {
+		group.Rules = append(group.Rules, &placement.Rule{
+			ID:   fmt.Sprintf("rule%d", i),
+			Role: r.role,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: r.key, Op: placement.In, Values: []string{r.value}},
+			},
+			Count: r.count,
+		})
+	}
+	return []placement.GroupBundle{group}
 }
