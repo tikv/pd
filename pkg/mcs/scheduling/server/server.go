@@ -364,7 +364,11 @@ func (s *Server) GetBasicCluster() *core.BasicCluster {
 
 // GetCoordinator returns the coordinator.
 func (s *Server) GetCoordinator() *schedule.Coordinator {
-	return s.GetCluster().GetCoordinator()
+	c := s.GetCluster()
+	if c == nil {
+		return nil
+	}
+	return c.GetCoordinator()
 }
 
 // ServerLoopWgDone decreases the server loop wait group.
@@ -479,7 +483,7 @@ func (s *Server) startWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID)
+	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.storage)
 	return err
 }
 

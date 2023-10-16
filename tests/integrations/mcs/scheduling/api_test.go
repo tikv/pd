@@ -11,6 +11,9 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/suite"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
+	"github.com/tikv/pd/pkg/schedule/handler"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -148,7 +151,7 @@ func (suite *apiTestSuite) TestAPIForward() {
 		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 
-	// Test checker:
+	// Test checker
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
@@ -192,5 +195,26 @@ func (suite *apiTestSuite) TestAPIForward() {
 
 	err = testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/balance-leader-scheduler"),
 		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+
+	// Test hotspot
+	var hotRegions statistics.StoreHotPeersInfos
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/write"), &hotRegions,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/read"), &hotRegions,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	var stores handler.HotStoreStats
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/stores"), &stores,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	var buckets handler.HotBucketsResponse
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/buckets"), &buckets,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	var history storage.HistoryHotRegions
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/history"), &history,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 }

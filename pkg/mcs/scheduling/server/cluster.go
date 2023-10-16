@@ -94,6 +94,12 @@ func (c *Cluster) GetHotStat() *statistics.HotStat {
 	return c.hotStat
 }
 
+// GetStoresStats returns stores' statistics from cluster.
+// And it will be unnecessary to filter unhealthy store, because it has been solved in process heartbeat
+func (c *Cluster) GetStoresStats() *statistics.StoresStats {
+	return c.hotStat.StoresStats
+}
+
 // GetRegionStats gets region statistics.
 func (c *Cluster) GetRegionStats() *statistics.RegionStatistics {
 	return c.regionStats

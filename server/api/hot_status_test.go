@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -56,13 +57,13 @@ func (suite *hotStatusTestSuite) TearDownSuite() {
 }
 
 func (suite *hotStatusTestSuite) TestGetHotStore() {
-	stat := HotStoreStats{}
+	stat := handler.HotStoreStats{}
 	err := tu.ReadGetJSON(suite.Require(), testDialClient, suite.urlPrefix+"/stores", &stat)
 	suite.NoError(err)
 }
 
 func (suite *hotStatusTestSuite) TestGetHistoryHotRegionsBasic() {
-	request := HistoryHotRegionsRequest{
+	request := server.HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 2, 0).UnixNano() / int64(time.Millisecond),
 	}
@@ -89,7 +90,7 @@ func (suite *hotStatusTestSuite) TestGetHistoryHotRegionsTimeRange() {
 			UpdateTime: now.Add(10*time.Minute).UnixNano() / int64(time.Millisecond),
 		},
 	}
-	request := HistoryHotRegionsRequest{
+	request := server.HistoryHotRegionsRequest{
 		StartTime: now.UnixNano() / int64(time.Millisecond),
 		EndTime:   now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 	}
@@ -169,7 +170,7 @@ func (suite *hotStatusTestSuite) TestGetHistoryHotRegionsIDAndTypes() {
 			UpdateTime:    now.Add(50*time.Second).UnixNano() / int64(time.Millisecond),
 		},
 	}
-	request := HistoryHotRegionsRequest{
+	request := server.HistoryHotRegionsRequest{
 		RegionIDs:      []uint64{1},
 		StoreIDs:       []uint64{1},
 		PeerIDs:        []uint64{1},
