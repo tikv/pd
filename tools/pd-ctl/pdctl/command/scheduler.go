@@ -499,6 +499,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigGrantHotRegionCommand(),
 		newConfigBalanceLeaderCommand(),
 		newSplitBucketCommand(),
+		newConfigEvictSlowTrendCommand(),
 	)
 	return c
 }
@@ -773,6 +774,25 @@ func setShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string
 		return
 	}
 	cmd.Println("Success!")
+}
+
+func newConfigEvictSlowTrendCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-slow-trend-scheduler",
+		Short: "evict-slow-trend-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+	return c
 }
 
 // NewDescribeSchedulerCommand returns command to describe the scheduler.
