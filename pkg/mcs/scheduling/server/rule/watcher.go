@@ -173,6 +173,10 @@ func (rw *Watcher) initializeGroupWatcher() error {
 		if err != nil {
 			return err
 		}
+		// Add all rule key ranges within the group to the suspect key ranges.
+		for _, rule := range rm.GetRulesByGroup(ruleGroup.ID) {
+			rw.getCheckerController().AddSuspectKeyRange(rule.StartKey, rule.EndKey)
+		}
 		return rm.SetRuleGroup(ruleGroup)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
@@ -182,6 +186,9 @@ func (rw *Watcher) initializeGroupWatcher() error {
 		trimmedKey := strings.TrimPrefix(key, prefixToTrim)
 		if rm == nil {
 			return rw.ruleStorage.DeleteRuleGroup(trimmedKey)
+		}
+		for _, rule := range rm.GetRulesByGroup(trimmedKey) {
+			rw.getCheckerController().AddSuspectKeyRange(rule.StartKey, rule.EndKey)
 		}
 		return rm.DeleteRuleGroup(trimmedKey)
 	}
