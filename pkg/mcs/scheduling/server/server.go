@@ -464,7 +464,12 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Inject the cluster components into the watchers.
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
+	s.ruleWatcher.SetClusterComponents(
+		s.cluster.GetCoordinator().GetCheckerController(),
+		s.cluster.GetRuleManager(),
+		s.cluster.GetRegionLabeler())
 	s.cluster.StartBackgroundJobs()
 	return nil
 }

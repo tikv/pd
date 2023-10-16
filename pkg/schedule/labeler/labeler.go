@@ -254,7 +254,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 		}
 	}
 
-	// update inmemory states.
+	// update in-memory states.
 	l.Lock()
 	defer l.Unlock()
 
