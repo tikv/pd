@@ -479,7 +479,7 @@ func (s *Server) startWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID)
+	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.storage)
 	return err
 }
 

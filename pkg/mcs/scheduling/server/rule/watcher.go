@@ -27,80 +27,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// ruleStorage is an in-memory storage for Placement Rules,
-// which will implement the `endpoint.RuleStorage` interface.
-type ruleStorage struct {
-	// Rule key -> rule value.
-	rules sync.Map
-	// GroupID -> rule group value.
-	groups sync.Map
-	// Region rule key -> rule value.
-	regionRules sync.Map
-}
-
-// LoadRules loads Placement Rules from storage.
-func (rs *ruleStorage) LoadRules(f func(k, v string)) error {
-	rs.rules.Range(func(k, v interface{}) bool {
-		f(k.(string), v.(string))
-		return true
-	})
-	return nil
-}
-
-// SaveRule stores a rule cfg to the rulesPathPrefix.
-func (rs *ruleStorage) SaveRule(ruleKey string, rule interface{}) error {
-	rs.rules.Store(ruleKey, rule)
-	return nil
-}
-
-// DeleteRule removes a rule from storage.
-func (rs *ruleStorage) DeleteRule(ruleKey string) error {
-	rs.rules.Delete(ruleKey)
-	return nil
-}
-
-// LoadRuleGroups loads all rule groups from storage.
-func (rs *ruleStorage) LoadRuleGroups(f func(k, v string)) error {
-	rs.groups.Range(func(k, v interface{}) bool {
-		f(k.(string), v.(string))
-		return true
-	})
-	return nil
-}
-
-// SaveRuleGroup stores a rule group config to storage.
-func (rs *ruleStorage) SaveRuleGroup(groupID string, group interface{}) error {
-	rs.groups.Store(groupID, group)
-	return nil
-}
-
-// DeleteRuleGroup removes a rule group from storage.
-func (rs *ruleStorage) DeleteRuleGroup(groupID string) error {
-	rs.groups.Delete(groupID)
-	return nil
-}
-
-// LoadRegionRules loads region rules from storage.
-func (rs *ruleStorage) LoadRegionRules(f func(k, v string)) error {
-	rs.regionRules.Range(func(k, v interface{}) bool {
-		f(k.(string), v.(string))
-		return true
-	})
-	return nil
-}
-
-// SaveRegionRule saves a region rule to the storage.
-func (rs *ruleStorage) SaveRegionRule(ruleKey string, rule interface{}) error {
-	rs.regionRules.Store(ruleKey, rule)
-	return nil
-}
-
-// DeleteRegionRule removes a region rule from storage.
-func (rs *ruleStorage) DeleteRegionRule(ruleKey string) error {
-	rs.regionRules.Delete(ruleKey)
-	return nil
-}
-
 // Watcher is used to watch the PD API server for any Placement Rule changes.
 type Watcher struct {
 	ctx    context.Context
@@ -120,8 +46,8 @@ type Watcher struct {
 	//  - Value: labeler.LabelRule
 	regionLabelPathPrefix string
 
-	etcdClient *clientv3.Client
-	ruleStore  *ruleStorage
+	etcdClient  *clientv3.Client
+	ruleStorage endpoint.RuleStorage
 
 	ruleWatcher  *etcdutil.LoopWatcher
 	groupWatcher *etcdutil.LoopWatcher
@@ -134,6 +60,7 @@ func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
 	clusterID uint64,
+	ruleStorage endpoint.RuleStorage,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	rw := &Watcher{
@@ -143,7 +70,7 @@ func NewWatcher(
 		ruleGroupPathPrefix:   endpoint.RuleGroupPathPrefix(clusterID),
 		regionLabelPathPrefix: endpoint.RegionLabelPathPrefix(clusterID),
 		etcdClient:            etcdClient,
-		ruleStore:             &ruleStorage{},
+		ruleStorage:           ruleStorage,
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
@@ -166,14 +93,14 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		// Since the PD API server will validate the rule before saving it to etcd,
 		// so we could directly save the string rule in JSON to the storage here.
 		log.Info("update placement rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
-		return rw.ruleStore.SaveRule(
+		return rw.ruleStorage.SaveRuleJSON(
 			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("delete placement rule", zap.String("key", string(kv.Key)))
-		return rw.ruleStore.DeleteRule(strings.TrimPrefix(string(kv.Key), prefixToTrim))
+		return rw.ruleStorage.DeleteRule(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {
 		return nil
@@ -193,14 +120,14 @@ func (rw *Watcher) initializeGroupWatcher() error {
 	prefixToTrim := rw.ruleGroupPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("update placement rule group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
-		return rw.ruleStore.SaveRuleGroup(
+		return rw.ruleStorage.SaveRuleGroupJSON(
 			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("delete placement rule group", zap.String("key", string(kv.Key)))
-		return rw.ruleStore.DeleteRuleGroup(strings.TrimPrefix(string(kv.Key), prefixToTrim))
+		return rw.ruleStorage.DeleteRuleGroup(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {
 		return nil
@@ -220,14 +147,14 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
-		return rw.ruleStore.SaveRegionRule(
+		return rw.ruleStorage.SaveRegionRuleJSON(
 			strings.TrimPrefix(string(kv.Key), prefixToTrim),
 			string(kv.Value),
 		)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		log.Info("delete region label rule", zap.String("key", string(kv.Key)))
-		return rw.ruleStore.DeleteRegionRule(strings.TrimPrefix(string(kv.Key), prefixToTrim))
+		return rw.ruleStorage.DeleteRegionRule(strings.TrimPrefix(string(kv.Key), prefixToTrim))
 	}
 	postEventFn := func() error {
 		return nil
@@ -247,9 +174,4 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 func (rw *Watcher) Close() {
 	rw.cancel()
 	rw.wg.Wait()
-}
-
-// GetRuleStorage returns the rule storage.
-func (rw *Watcher) GetRuleStorage() endpoint.RuleStorage {
-	return rw.ruleStore
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -99,14 +100,15 @@ func loadRegionRules(re *require.Assertions, ruleStorage endpoint.RuleStorage) (
 func (suite *ruleTestSuite) TestRuleWatch() {
 	re := suite.Require()
 
+	ruleStorage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	// Create a rule watcher.
-	watcher, err := rule.NewWatcher(
+	_, err := rule.NewWatcher(
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		suite.cluster.GetCluster().GetId(),
+		ruleStorage,
 	)
 	re.NoError(err)
-	ruleStorage := watcher.GetRuleStorage()
 	// Check the default rule.
 	rules := loadRules(re, ruleStorage)
 	re.Len(rules, 1)
