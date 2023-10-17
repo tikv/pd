@@ -13,7 +13,7 @@ replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 
 require (
 	github.com/pingcap/failpoint v0.0.0-20220801062533-2eaa32854a6c
-	github.com/pingcap/kvproto v0.0.0-20230920042517-db656f45023b
+	github.com/pingcap/kvproto v0.0.0-20231017055627-c06b434f3c3a
 	github.com/stretchr/testify v1.8.4
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
@@ -183,5 +183,3 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
-
-replace github.com/pingcap/kvproto => github.com/rleungx/kvproto v0.0.0-20231012072424-affe11d9e2e0
