@@ -82,6 +82,13 @@ func (t *regionTree) length() int {
 	return t.tree.Len()
 }
 
+func (t *regionTree) notFromStorageRegionsCount() int {
+	if t == nil {
+		return 0
+	}
+	return t.notFromStorageRegionsCnt
+}
+
 // GetOverlaps returns the range items that has some intersections with the given items.
 func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 	// note that Find() gets the last item that is less or equal than the item.
