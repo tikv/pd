@@ -1402,7 +1402,7 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
 		}
-		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0], core.SetSource(core.Heartbeat)))
 	}
 
 	time.Sleep(50 * time.Millisecond)
