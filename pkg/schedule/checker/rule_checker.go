@@ -60,6 +60,7 @@ var (
 	ruleCheckerReplaceOfflineCounter              = checkerCounter.WithLabelValues(ruleChecker, "replace-offline")
 	ruleCheckerAddRulePeerCounter                 = checkerCounter.WithLabelValues(ruleChecker, "add-rule-peer")
 	ruleCheckerNoStoreAddCounter                  = checkerCounter.WithLabelValues(ruleChecker, "no-store-add")
+	ruleCheckerNoStoreThenTryReplace              = checkerCounter.WithLabelValues(ruleChecker, "no-store-then-try-replace")
 	ruleCheckerNoStoreReplaceCounter              = checkerCounter.WithLabelValues(ruleChecker, "no-store-replace")
 	ruleCheckerFixPeerRoleCounter                 = checkerCounter.WithLabelValues(ruleChecker, "fix-peer-role")
 	ruleCheckerFixLeaderRoleCounter               = checkerCounter.WithLabelValues(ruleChecker, "fix-leader-role")
@@ -185,7 +186,7 @@ func (c *RuleChecker) isWitnessEnabled() bool {
 func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
 	// make up peers.
 	if len(rf.Peers) < rf.Rule.Count {
-		return c.addRulePeer(region, rf)
+		return c.addRulePeer(region, fit, rf)
 	}
 	// fix down/offline peers.
 	for _, peer := range rf.Peers {
@@ -220,7 +221,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 	return c.fixBetterLocation(region, rf)
 }
 
-func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit) (*operator.Operator, error) {
+func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.RegionFit, rf *placement.RuleFit) (*operator.Operator, error) {
 	ruleCheckerAddRulePeerCounter.Inc()
 	ruleStores := c.getRuleFitStores(rf)
 	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
@@ -229,6 +230,25 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, rf *placement.RuleFit
 	if store == 0 {
 		ruleCheckerNoStoreAddCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
+		// try to replace an existing peer that matches the label constraints.
+		// issue: https://github.com/tikv/pd/issues/7185
+		for _, p := range region.GetPeers() {
+			s := c.cluster.GetStore(p.GetStoreId())
+			if placement.MatchLabelConstraints(s, rf.Rule.LabelConstraints) {
+				oldPeerRuleFit := fit.GetRuleFit(p.GetId())
+				if oldPeerRuleFit == nil || !oldPeerRuleFit.IsSatisfied() || oldPeerRuleFit == rf {
+					continue
+				}
+				ruleCheckerNoStoreThenTryReplace.Inc()
+				op, err := c.replaceUnexpectRulePeer(region, oldPeerRuleFit, fit, p, "swap-fit")
+				if err != nil {
+					return nil, err
+				}
+				if op != nil {
+					return op, nil
+				}
+			}
+		}
 		return nil, errNoStoreToAdd
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
