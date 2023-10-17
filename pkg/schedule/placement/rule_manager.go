@@ -263,31 +263,6 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 	return nil
 }
 
-// Reload reloads rules from storage.
-func (m *RuleManager) Reload() error {
-	m.Lock()
-	defer m.Unlock()
-	// Only allow to reload when it is initialized.
-	if !m.initialized {
-		return nil
-	}
-	// Force the rule manager to reload rules from storage.
-	m.ruleConfig = newRuleConfig()
-	if err := m.loadRules(); err != nil {
-		return err
-	}
-	if err := m.loadGroups(); err != nil {
-		return err
-	}
-	m.ruleConfig.adjust()
-	ruleList, err := buildRuleList(m.ruleConfig)
-	if err != nil {
-		return err
-	}
-	m.ruleList = ruleList
-	return nil
-}
-
 // GetRule returns the Rule with the same (group, id).
 func (m *RuleManager) GetRule(group, id string) *Rule {
 	m.RLock()
