@@ -196,7 +196,6 @@ func (rw *Watcher) initializeGroupWatcher() error {
 		}
 		return rm.DeleteRuleGroup(trimmedKey)
 	}
-	// Trigger the rule manager to reload the rule groups.
 	postEventFn := func() error {
 		return nil
 	}
