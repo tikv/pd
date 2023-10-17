@@ -149,6 +149,14 @@ func (l *RegionLabeler) buildRangeList() {
 	l.rangeList = builder.Build()
 }
 
+// Reload loads rules from storage.
+func (l *RegionLabeler) Reload() error {
+	l.Lock()
+	defer l.Unlock()
+	l.labelRules = make(map[string]*LabelRule)
+	return l.loadRules()
+}
+
 // GetSplitKeys returns all split keys in the range (start, end).
 func (l *RegionLabeler) GetSplitKeys(start, end []byte) [][]byte {
 	l.RLock()

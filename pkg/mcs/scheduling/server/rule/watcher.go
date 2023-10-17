@@ -18,7 +18,6 @@ import (
 	"context"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -26,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
@@ -53,12 +53,16 @@ type Watcher struct {
 	etcdClient  *clientv3.Client
 	ruleStorage endpoint.RuleStorage
 
-	// checkerController is used to add the suspect key ranges to the checker when the rule changed.
-	checkerController atomic.Value
-	// ruleManager is used to manage the placement rules.
-	ruleManager atomic.Value
-	// regionLabeler is used to manage the region label rules.
-	regionLabeler atomic.Value
+	// components is used to store the cluster components and protect them with a RWMutex lock.
+	components struct {
+		syncutil.RWMutex
+		// checkerController is used to add the suspect key ranges to the checker when the rule changed.
+		checkerController *checker.Controller
+		// ruleManager is used to manage the placement rules.
+		ruleManager *placement.RuleManager
+		// regionLabeler is used to manage the region label rules.
+		regionLabeler *labeler.RegionLabeler
+	}
 
 	ruleWatcher  *etcdutil.LoopWatcher
 	groupWatcher *etcdutil.LoopWatcher
@@ -260,32 +264,33 @@ func (rw *Watcher) SetClusterComponents(
 	sc *checker.Controller,
 	rm *placement.RuleManager,
 	rl *labeler.RegionLabeler,
-) {
-	rw.checkerController.Store(sc)
-	rw.ruleManager.Store(rm)
-	rw.regionLabeler.Store(rl)
+) error {
+	rw.components.Lock()
+	defer rw.components.Unlock()
+	rw.components.checkerController = sc
+	rw.components.ruleManager = rm
+	rw.components.regionLabeler = rl
+	// Reload the rules to make sure that the rules are consistent with the storage.
+	if err := rm.Reload(); err != nil {
+		return err
+	}
+	return rl.Reload()
 }
 
 func (rw *Watcher) getCheckerController() *checker.Controller {
-	cc := rw.checkerController.Load()
-	if cc == nil {
-		return nil
-	}
-	return cc.(*checker.Controller)
+	rw.components.RLock()
+	defer rw.components.RUnlock()
+	return rw.components.checkerController
 }
 
 func (rw *Watcher) getRuleManager() *placement.RuleManager {
-	rm := rw.ruleManager.Load()
-	if rm == nil {
-		return nil
-	}
-	return rm.(*placement.RuleManager)
+	rw.components.RLock()
+	defer rw.components.RUnlock()
+	return rw.components.ruleManager
 }
 
 func (rw *Watcher) getRegionLabeler() *labeler.RegionLabeler {
-	rl := rw.regionLabeler.Load()
-	if rl == nil {
-		return nil
-	}
-	return rl.(*labeler.RegionLabeler)
+	rw.components.RLock()
+	defer rw.components.RUnlock()
+	return rw.components.regionLabeler
 }
