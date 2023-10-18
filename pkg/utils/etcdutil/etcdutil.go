@@ -393,7 +393,7 @@ func (checker *healthyChecker) update(eps []string) {
 			lastHealthy := client.(*healthyClient).lastHealth
 			if time.Since(lastHealthy) > etcdServerOfflineTimeout {
 				log.Info("some etcd server maybe offline", zap.String("endpoint", ep))
-				checker.Delete(ep)
+				checker.removeClient(ep)
 			}
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
 				// try to reset client endpoint to trigger reconnect
@@ -409,7 +409,7 @@ func (checker *healthyChecker) update(eps []string) {
 	checker.Range(func(key, value interface{}) bool {
 		ep := key.(string)
 		if _, ok := epMap[ep]; !ok {
-			log.Info("[etcd client] remove stale etcd client", zap.String("endpoint", ep))
+			log.Info("remove stale etcd client", zap.String("endpoint", ep))
 			checker.removeClient(ep)
 		}
 		return true
@@ -432,7 +432,7 @@ func (checker *healthyChecker) removeClient(ep string) {
 	if client, ok := checker.LoadAndDelete(ep); ok {
 		err := client.(*healthyClient).Close()
 		if err != nil {
-			log.Error("[etcd client] failed to close etcd healthy client", zap.Error(err))
+			log.Error("failed to close etcd healthy client", zap.Error(err))
 		}
 	}
 }
