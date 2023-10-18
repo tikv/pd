@@ -711,7 +711,7 @@ func TestComplexPlacementRules3(t *testing.T) {
 		DR:               "zone2",
 		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
 	}}
-	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
 	replicator := newMockReplicator([]uint64{1})
 	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
 	re.NoError(err)
