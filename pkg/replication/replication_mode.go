@@ -489,7 +489,7 @@ func (m *ModeManager) tickUpdateState() {
 			m.drSwitchToSyncRecover()
 			break
 		}
-		if !reflect.DeepEqual(m.drGetAvailableStores(), stores[primaryUp]) && m.drCheckStoreStateUpdated(storeIDs(stores[primaryUp])) {
+		if !reflect.DeepEqual(m.drGetAvailableStores(), storeIDs(stores[primaryUp])) && m.drCheckStoreStateUpdated(storeIDs(stores[primaryUp])) {
 			m.drSwitchToAsync(storeIDs(stores[primaryUp]))
 		}
 	case drStateSyncRecover:
@@ -575,10 +575,6 @@ func (m *ModeManager) checkStoreStatus() [][]*core.StoreInfo {
 	stores := make([][]*core.StoreInfo, storeStatusTypeCount)
 	for _, s := range m.cluster.GetStores() {
 		if s.IsRemoved() {
-			continue
-		}
-		// learner peers do not participate in major commit or vote, so it should not count in primary/dr as a normal store.
-		if s.GetRegionCount() == s.GetLearnerCount() {
 			continue
 		}
 		down := s.DownTime() >= m.config.DRAutoSync.WaitStoreTimeout.Duration
