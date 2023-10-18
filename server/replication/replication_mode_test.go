@@ -245,8 +245,8 @@ func TestStateSwitch(t *testing.T) {
 	rep.tickUpdateState()
 	re.Equal(drStateSync, rep.drGetState())
 
-	// once the voter node down, even learner node up, swith to async state.
-	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
+	// once zone2 down, swith to async state.
+	setStoreState(cluster, "up", "up", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	re.Equal(drStateAsyncWait, rep.drGetState())
 
@@ -264,18 +264,18 @@ func TestStateSwitch(t *testing.T) {
 	re.False(rep.GetReplicationStatus().GetDrAutoSync().GetPauseRegionSplit())
 
 	// async_wait -> async_wait
-	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
+	setStoreState(cluster, "up", "up", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	re.Equal(drStateAsyncWait, rep.drGetState())
 	assertStateIDUpdate()
 	rep.tickReplicateStatus()
 	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2,3,4]}`, stateID), replicator.lastData[1])
-	setStoreState(cluster, "down", "up", "up", "up", "down", "up")
+	setStoreState(cluster, "down", "up", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	assertStateIDUpdate()
 	rep.tickReplicateStatus()
 	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[2,3,4]}`, stateID), replicator.lastData[1])
-	setStoreState(cluster, "up", "down", "up", "up", "down", "up")
+	setStoreState(cluster, "up", "down", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	assertStateIDUpdate()
 	rep.tickReplicateStatus()
@@ -294,7 +294,7 @@ func TestStateSwitch(t *testing.T) {
 	re.Equal(fmt.Sprintf(`{"state":"async","state_id":%d,"available_stores":[1,3,4]}`, stateID), replicator.lastData[1])
 
 	// async -> async
-	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
+	setStoreState(cluster, "up", "up", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	// store 2 won't be available before it syncs status.
 	rep.tickReplicateStatus()
@@ -319,14 +319,14 @@ func TestStateSwitch(t *testing.T) {
 	// sync_recover -> async
 	rep.tickUpdateState()
 	re.Equal(drStateSyncRecover, rep.drGetState())
-	setStoreState(cluster, "up", "up", "up", "up", "down", "up")
+	setStoreState(cluster, "up", "up", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	re.Equal(drStateAsync, rep.drGetState())
 	assertStateIDUpdate()
 	// lost majority, does not switch to async.
 	rep.drSwitchToSyncRecover()
 	assertStateIDUpdate()
-	setStoreState(cluster, "down", "down", "up", "up", "down", "up")
+	setStoreState(cluster, "down", "down", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	re.Equal(drStateSyncRecover, rep.drGetState())
 
@@ -636,6 +636,8 @@ func TestComplexPlacementRules(t *testing.T) {
 	setStoreState(cluster, "up", "up", "up", "up", "up", "up", "up", "down", "up", "down")
 	rep.tickUpdateState()
 	re.Equal(drStateAsyncWait, rep.drGetState())
+	rep.tickReplicateStatus()
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2,3,4,5,6]}`, rep.drAutoSync.StateID), replicator.lastData[1])
 
 	// reset to sync
 	setStoreState(cluster, "up", "up", "up", "up", "up", "up", "up", "up", "up", "up")
@@ -695,6 +697,47 @@ func TestComplexPlacementRules2(t *testing.T) {
 	setStoreState(cluster, "up", "up", "up", "up", "down", "down", "up")
 	rep.tickUpdateState()
 	re.Equal(drStateAsyncWait, rep.drGetState())
+	rep.tickReplicateStatus()
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2,3,4]}`, rep.drAutoSync.StateID), replicator.lastData[1])
+}
+
+func TestComplexPlacementRules3(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := storage.NewStorageWithMemoryBackend()
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(ctx, config.NewTestOptions())
+	replicator := newMockReplicator([]uint64{1})
+	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
+	re.NoError(err)
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "logic", value: "logic1", role: placement.Voter, count: 2},
+			{key: "logic", value: "logic2", role: placement.Learner, count: 1},
+			{key: "logic", value: "logic3", role: placement.Voter, count: 1},
+		}), true)
+
+	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1", "logic": "logic1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1", "logic": "logic1"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"zone": "zone1", "logic": "logic2"})
+	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone1", "logic": "logic2"})
+	cluster.AddLabelsStore(5, 1, map[string]string{"zone": "zone2", "logic": "logic3"})
+
+	// initial state is sync
+	re.Equal(drStateSync, rep.drGetState())
+
+	// zone2 down, switch state, available stores should contain logic2 (learner)
+	setStoreState(cluster, "up", "up", "up", "up", "down")
+	rep.tickUpdateState()
+	re.Equal(drStateAsyncWait, rep.drGetState())
+	rep.tickReplicateStatus()
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2,3,4]}`, rep.drAutoSync.StateID), replicator.lastData[1])
 }
 
 func genRegions(cluster *mockcluster.Cluster, stateID uint64, n int) []*core.RegionInfo {
