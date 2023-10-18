@@ -455,7 +455,7 @@ func (s *Server) startServer() (err error) {
 func (s *Server) startCluster(context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.storage = endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	err := s.startWatcher()
+	err := s.startMetaConfWatcher()
 	if err != nil {
 		return err
 	}
@@ -464,7 +464,13 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
+	// Inject the cluster components into the config watcher after the scheduler controller is created.
 	s.configWatcher.SetSchedulersController(s.cluster.GetCoordinator().GetSchedulersController())
+	// Start the rule watcher after the cluster is created.
+	err = s.startRuleWatcher()
+	if err != nil {
+		return err
+	}
 	s.cluster.StartBackgroundJobs()
 	return nil
 }
@@ -474,7 +480,7 @@ func (s *Server) stopCluster() {
 	s.stopWatcher()
 }
 
-func (s *Server) startWatcher() (err error) {
+func (s *Server) startMetaConfWatcher() (err error) {
 	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.basicCluster)
 	if err != nil {
 		return err
@@ -483,7 +489,12 @@ func (s *Server) startWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.storage)
+	return err
+}
+
+func (s *Server) startRuleWatcher() (err error) {
+	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.storage,
+		s.cluster.GetCoordinator().GetCheckerController(), s.cluster.GetRuleManager(), s.cluster.GetRegionLabeler())
 	return err
 }
 

@@ -135,8 +135,10 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 }
 
 func (m *RuleManager) loadRules() error {
-	var toSave []*Rule
-	var toDelete []string
+	var (
+		toSave   []*Rule
+		toDelete []string
+	)
 	err := m.storage.LoadRules(func(k, v string) {
 		r, err := NewRuleFromJSON([]byte(v))
 		if err != nil {

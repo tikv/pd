@@ -140,13 +140,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 
 		c := s.GetCluster()
 		if c == nil {
-			resp := &schedulingpb.RegionHeartbeatResponse{Header: &schedulingpb.ResponseHeader{
-				ClusterId: s.clusterID,
-				Error: &schedulingpb.Error{
-					Type:    schedulingpb.ErrorType_NOT_BOOTSTRAPPED,
-					Message: "scheduling server is not initialized yet",
-				},
-			}}
+			resp := &schedulingpb.RegionHeartbeatResponse{Header: s.notBootstrappedHeader()}
 			err := server.Send(resp)
 			return errors.WithStack(err)
 		}
@@ -177,7 +171,7 @@ func (s *Service) StoreHeartbeat(ctx context.Context, request *schedulingpb.Stor
 	if c == nil {
 		// TODO: add metrics
 		log.Info("cluster isn't initialized")
-		return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
+		return &schedulingpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	if c.GetStore(request.GetStats().GetStoreId()) == nil {
@@ -191,6 +185,75 @@ func (s *Service) StoreHeartbeat(ctx context.Context, request *schedulingpb.Stor
 	return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
 }
 
+// SplitRegions split regions by the given split keys
+func (s *Service) SplitRegions(ctx context.Context, request *schedulingpb.SplitRegionsRequest) (*schedulingpb.SplitRegionsResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+	finishedPercentage, newRegionIDs := c.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
+	return &schedulingpb.SplitRegionsResponse{
+		Header:             s.header(),
+		RegionsId:          newRegionIDs,
+		FinishedPercentage: uint64(finishedPercentage),
+	}, nil
+}
+
+// ScatterRegions implements gRPC PDServer.
+func (s *Service) ScatterRegions(ctx context.Context, request *schedulingpb.ScatterRegionsRequest) (*schedulingpb.ScatterRegionsResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.ScatterRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	opsCount, failures, err := c.GetRegionScatterer().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()), request.GetSkipStoreLimit())
+	if err != nil {
+		return nil, err
+	}
+	percentage := 100
+	if len(failures) > 0 {
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
+		log.Debug("scatter regions", zap.Errors("failures", func() []error {
+			r := make([]error, 0, len(failures))
+			for _, err := range failures {
+				r = append(r, err)
+			}
+			return r
+		}()))
+	}
+	return &schedulingpb.ScatterRegionsResponse{
+		Header:             s.header(),
+		FinishedPercentage: uint64(percentage),
+	}, nil
+}
+
+// GetOperator gets information about the operator belonging to the specify region.
+func (s *Service) GetOperator(ctx context.Context, request *schedulingpb.GetOperatorRequest) (*schedulingpb.GetOperatorResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	opController := c.GetCoordinator().GetOperatorController()
+	requestID := request.GetRegionId()
+	r := opController.GetOperatorStatus(requestID)
+	if r == nil {
+		header := s.errorHeader(&schedulingpb.Error{
+			Type:    schedulingpb.ErrorType_UNKNOWN,
+			Message: "Not Found",
+		})
+		return &schedulingpb.GetOperatorResponse{Header: header}, nil
+	}
+
+	return &schedulingpb.GetOperatorResponse{
+		Header:   s.header(),
+		RegionId: requestID,
+		Desc:     []byte(r.Desc()),
+		Kind:     []byte(r.Kind().String()),
+		Status:   r.Status,
+	}, nil
+}
+
 // RegisterGRPCService registers the service to gRPC server.
 func (s *Service) RegisterGRPCService(g *grpc.Server) {
 	schedulingpb.RegisterSchedulingServer(g, s)
@@ -200,4 +263,30 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
 	handler, group := SetUpRestHandler(s)
 	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+}
+
+func (s *Service) errorHeader(err *schedulingpb.Error) *schedulingpb.ResponseHeader {
+	return &schedulingpb.ResponseHeader{
+		ClusterId: s.clusterID,
+		Error:     err,
+	}
+}
+
+func (s *Service) notBootstrappedHeader() *schedulingpb.ResponseHeader {
+	return s.errorHeader(&schedulingpb.Error{
+		Type:    schedulingpb.ErrorType_NOT_BOOTSTRAPPED,
+		Message: "cluster is not initialized",
+	})
+}
+
+func (s *Service) header() *schedulingpb.ResponseHeader {
+	if s.clusterID == 0 {
+		return s.wrapErrorToHeader(schedulingpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+	}
+	return &schedulingpb.ResponseHeader{ClusterId: s.clusterID}
+}
+
+func (s *Service) wrapErrorToHeader(
+	errorType schedulingpb.ErrorType, message string) *schedulingpb.ResponseHeader {
+	return s.errorHeader(&schedulingpb.Error{Type: errorType, Message: message})
 }

@@ -20,7 +20,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/splitter"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -128,6 +130,16 @@ func (c *Cluster) GetRuleManager() *placement.RuleManager {
 // GetRegionLabeler returns the region labeler.
 func (c *Cluster) GetRegionLabeler() *labeler.RegionLabeler {
 	return c.labelerManager
+}
+
+// GetRegionSplitter returns the region splitter.
+func (c *Cluster) GetRegionSplitter() *splitter.RegionSplitter {
+	return c.coordinator.GetRegionSplitter()
+}
+
+// GetRegionScatterer returns the region scatter.
+func (c *Cluster) GetRegionScatterer() *scatter.RegionScatterer {
+	return c.coordinator.GetRegionScatterer()
 }
 
 // GetStoresLoads returns load stats of all stores.

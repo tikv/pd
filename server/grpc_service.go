@@ -1770,6 +1770,35 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 
 // ScatterRegion implements gRPC PDServer.
 func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
+	if s.IsAPIServiceMode() {
+		s.updateSchedulingClient(ctx)
+		if s.schedulingClient.Load() != nil {
+			regionsID := request.GetRegionsId()
+			if len(regionsID) == 0 {
+				return &pdpb.ScatterRegionResponse{
+					Header: s.invalidValue("regions id is required"),
+				}, nil
+			}
+			req := &schedulingpb.ScatterRegionsRequest{
+				Header: &schedulingpb.RequestHeader{
+					ClusterId: request.GetHeader().GetClusterId(),
+					SenderId:  request.GetHeader().GetSenderId(),
+				},
+				RegionsId:      regionsID,
+				Group:          request.GetGroup(),
+				RetryLimit:     request.GetRetryLimit(),
+				SkipStoreLimit: request.GetSkipStoreLimit(),
+			}
+			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().ScatterRegions(ctx, req)
+			if err != nil {
+				// reset to let it be updated in the next request
+				s.schedulingClient.Store(&schedulingClient{})
+				return s.convertScatterResponse(resp), err
+			}
+			return s.convertScatterResponse(resp), nil
+		}
+	}
+
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ScatterRegion(ctx, request)
 	}
@@ -1960,6 +1989,25 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 
 // GetOperator gets information about the operator belonging to the specify region.
 func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
+	if s.IsAPIServiceMode() {
+		s.updateSchedulingClient(ctx)
+		if s.schedulingClient.Load() != nil {
+			req := &schedulingpb.GetOperatorRequest{
+				Header: &schedulingpb.RequestHeader{
+					ClusterId: request.GetHeader().GetClusterId(),
+					SenderId:  request.GetHeader().GetSenderId(),
+				},
+				RegionId: request.GetRegionId(),
+			}
+			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().GetOperator(ctx, req)
+			if err != nil {
+				// reset to let it be updated in the next request
+				s.schedulingClient.Store(&schedulingClient{})
+				return s.convertOperatorResponse(resp), err
+			}
+			return s.convertOperatorResponse(resp), nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetOperator(ctx, request)
 	}
@@ -2047,6 +2095,45 @@ func (s *GrpcServer) invalidValue(msg string) *pdpb.ResponseHeader {
 		Type:    pdpb.ErrorType_INVALID_VALUE,
 		Message: msg,
 	})
+}
+
+func (s *GrpcServer) convertHeader(header *schedulingpb.ResponseHeader) *pdpb.ResponseHeader {
+	switch header.GetError().GetType() {
+	case schedulingpb.ErrorType_UNKNOWN:
+		return &pdpb.ResponseHeader{
+			ClusterId: header.GetClusterId(),
+			Error: &pdpb.Error{
+				Type:    pdpb.ErrorType_UNKNOWN,
+				Message: header.GetError().GetMessage(),
+			},
+		}
+	default:
+		return &pdpb.ResponseHeader{ClusterId: header.GetClusterId()}
+	}
+}
+
+func (s *GrpcServer) convertSplitResponse(resp *schedulingpb.SplitRegionsResponse) *pdpb.SplitRegionsResponse {
+	return &pdpb.SplitRegionsResponse{
+		Header:             s.convertHeader(resp.GetHeader()),
+		FinishedPercentage: resp.GetFinishedPercentage(),
+	}
+}
+
+func (s *GrpcServer) convertScatterResponse(resp *schedulingpb.ScatterRegionsResponse) *pdpb.ScatterRegionResponse {
+	return &pdpb.ScatterRegionResponse{
+		Header:             s.convertHeader(resp.GetHeader()),
+		FinishedPercentage: resp.GetFinishedPercentage(),
+	}
+}
+
+func (s *GrpcServer) convertOperatorResponse(resp *schedulingpb.GetOperatorResponse) *pdpb.GetOperatorResponse {
+	return &pdpb.GetOperatorResponse{
+		Header:   s.convertHeader(resp.GetHeader()),
+		RegionId: resp.GetRegionId(),
+		Desc:     resp.GetDesc(),
+		Kind:     resp.GetKind(),
+		Status:   resp.GetStatus(),
+	}
 }
 
 // Only used for the TestLocalAllocatorLeaderChange.
@@ -2153,6 +2240,27 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 
 // SplitRegions split regions by the given split keys
 func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
+	if s.IsAPIServiceMode() {
+		s.updateSchedulingClient(ctx)
+		if s.schedulingClient.Load() != nil {
+			req := &schedulingpb.SplitRegionsRequest{
+				Header: &schedulingpb.RequestHeader{
+					ClusterId: request.GetHeader().GetClusterId(),
+					SenderId:  request.GetHeader().GetSenderId(),
+				},
+				SplitKeys:  request.GetSplitKeys(),
+				RetryLimit: request.GetRetryLimit(),
+			}
+			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().SplitRegions(ctx, req)
+			if err != nil {
+				// reset to let it be updated in the next request
+				s.schedulingClient.Store(&schedulingClient{})
+				return s.convertSplitResponse(resp), err
+			}
+			return s.convertSplitResponse(resp), nil
+		}
+	}
+
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).SplitRegions(ctx, request)
 	}
@@ -2175,7 +2283,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 }
 
 // SplitAndScatterRegions split regions by the given split keys, and scatter regions.
-// Only regions which splited successfully will be scattered.
+// Only regions which split successfully will be scattered.
 // scatterFinishedPercentage indicates the percentage of successfully splited regions that are scattered.
 func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
