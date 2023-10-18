@@ -408,21 +408,21 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	re.Contains(echo, "Success!")
 
 	// test evict-slow-store && evict-slow-trend schedulers config
-	evict_slowness_schedulers := []string{"evict-slow-store-scheduler", "evict-slow-trend-scheduler"}
-	for _, scheduler_name := range evict_slowness_schedulers {
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", scheduler_name}, nil)
+	evictSlownessSchedulers := []string{"evict-slow-store-scheduler", "evict-slow-trend-scheduler"}
+	for _, schedulerName := range evictSlownessSchedulers {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", schedulerName}, nil)
 		re.Contains(echo, "Success!")
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
-		re.Contains(echo, scheduler_name)
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", scheduler_name, "set", "recovery-duration", "100"}, nil)
+		re.Contains(echo, schedulerName)
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "set", "recovery-duration", "100"}, nil)
 		re.Contains(echo, "Success!")
 		conf = make(map[string]interface{})
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", scheduler_name, "show"}, &conf)
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "show"}, &conf)
 		re.Equal(100., conf["recovery-duration"])
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", scheduler_name}, nil)
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", schedulerName}, nil)
 		re.Contains(echo, "Success!")
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
-		re.NotContains(echo, scheduler_name)
+		re.NotContains(echo, schedulerName)
 	}
 
 	// test show scheduler with paused and disabled status.
