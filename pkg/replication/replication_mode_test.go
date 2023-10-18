@@ -177,7 +177,8 @@ func TestStateSwitch(t *testing.T) {
 	cluster.GetRuleManager().SetAllGroupBundles(
 		genPlacementRuleConfig([]ruleConfig{
 			{key: "zone", value: "zone1", role: placement.Voter, count: 4},
-			{key: "zone", value: "zone2", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 1},
+			{key: "zone", value: "zone2", role: placement.Learner, count: 1},
 		}), true)
 
 	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
