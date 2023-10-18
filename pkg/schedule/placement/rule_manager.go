@@ -321,6 +321,20 @@ func (m *RuleManager) GetAllRules() []*Rule {
 	return rules
 }
 
+// GetRulesCount returns the number of rules.
+func (m *RuleManager) GetRulesCount() int {
+	m.RLock()
+	defer m.RUnlock()
+	return len(m.ruleConfig.rules)
+}
+
+// GetGroupsCount returns the number of rule groups.
+func (m *RuleManager) GetGroupsCount() int {
+	m.RLock()
+	defer m.RUnlock()
+	return len(m.ruleConfig.groups)
+}
+
 // GetRulesByGroup returns sorted rules of a group.
 func (m *RuleManager) GetRulesByGroup(group string) []*Rule {
 	m.RLock()
