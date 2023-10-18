@@ -697,6 +697,59 @@ func TestComplexPlacementRules2(t *testing.T) {
 	re.Equal(drStateAsyncWait, rep.drGetState())
 }
 
+func TestLearnerCheck(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	store := storage.NewStorageWithMemoryBackend()
+	conf := config.ReplicationModeConfig{ReplicationMode: modeDRAutoSync, DRAutoSync: config.DRAutoSyncReplicationConfig{
+		LabelKey:         "zone",
+		Primary:          "zone1",
+		DR:               "zone2",
+		WaitStoreTimeout: typeutil.Duration{Duration: time.Minute},
+	}}
+	cluster := mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
+	replicator := newMockReplicator([]uint64{1})
+	rep, err := NewReplicationModeManager(conf, store, cluster, replicator)
+	re.NoError(err)
+	cluster.GetRuleManager().SetAllGroupBundles(
+		genPlacementRuleConfig([]ruleConfig{
+			{key: "zone", value: "zone1", role: placement.Voter, count: 3},
+			{key: "zone", value: "zone2", role: placement.Voter, count: 2},
+			{key: "zone", value: "zone2", role: placement.Learner, count: 1},
+		}), true)
+
+	cluster.AddLabelsStore(1, 1, map[string]string{"zone": "zone1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"zone": "zone1"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"zone": "zone1"})
+	cluster.AddLabelsStore(4, 1, map[string]string{"zone": "zone1"})
+	cluster.AddLabersStoreWithLearnerCount(4, 1, 1, map[string]string{"zone": "zone1"})
+
+	// initial state is sync
+	re.Equal(drStateSync, rep.drGetState())
+	stateID := rep.drAutoSync.StateID
+	re.NotEqual(uint64(0), stateID)
+	rep.tickReplicateStatus()
+	re.Equal(fmt.Sprintf(`{"state":"sync","state_id":%d}`, stateID), replicator.lastData[1])
+	assertStateIDUpdate := func() {
+		re.NotEqual(stateID, rep.drAutoSync.StateID)
+		stateID = rep.drAutoSync.StateID
+	}
+	syncStoreStatus := func(storeIDs ...uint64) {
+		state := rep.GetReplicationStatus()
+		for _, s := range storeIDs {
+			rep.UpdateStoreDRStatus(s, &pb.StoreDRAutoSyncStatus{State: state.GetDrAutoSync().State, StateId: state.GetDrAutoSync().GetStateId()})
+		}
+	}
+
+	// although the all peers in store 4 are learner, but it still be available.
+	syncStoreStatus(1, 2, 3, 4)
+	rep.tickUpdateState()
+	assertStateIDUpdate()
+	rep.tickReplicateStatus()
+	re.Equal(fmt.Sprintf(`{"state":"async_wait","state_id":%d,"available_stores":[1,2,3,4]}`, stateID), replicator.lastData[1])
+}
+
 func genRegions(cluster *mockcluster.Cluster, stateID uint64, n int) []*core.RegionInfo {
 	var regions []*core.RegionInfo
 	for i := 1; i <= n; i++ {
