@@ -125,7 +125,6 @@ func TestAdjustRule(t *testing.T) {
 		IsWitness:        true,
 		LabelConstraints: []LabelConstraint{{Key: "engine", Op: "in", Values: []string{"tiflash"}}},
 	}, "tiflash"))
-
 }
 
 func TestLeaderCheck(t *testing.T) {
