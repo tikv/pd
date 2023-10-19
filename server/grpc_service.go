@@ -1626,6 +1626,26 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 
 // AskBatchSplit implements gRPC PDServer.
 func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
+	if s.IsAPIServiceMode() {
+		s.updateSchedulingClient(ctx)
+		if s.schedulingClient.Load() != nil {
+			req := &schedulingpb.AskBatchSplitRequest{
+				Header: &schedulingpb.RequestHeader{
+					ClusterId: request.GetHeader().GetClusterId(),
+					SenderId:  request.GetHeader().GetSenderId(),
+				},
+				Region:     request.GetRegion(),
+				SplitCount: request.GetSplitCount(),
+			}
+			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().AskBatchSplit(ctx, req)
+			if err != nil {
+				// reset to let it be updated in the next request
+				s.schedulingClient.Store(&schedulingClient{})
+				return s.convertAskSplitResponse(resp), err
+			}
+			return s.convertAskSplitResponse(resp), nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request)
 	}
@@ -2147,6 +2167,13 @@ func (s *GrpcServer) convertOperatorResponse(resp *schedulingpb.GetOperatorRespo
 		Desc:     resp.GetDesc(),
 		Kind:     resp.GetKind(),
 		Status:   resp.GetStatus(),
+	}
+}
+
+func (s *GrpcServer) convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
+	return &pdpb.AskBatchSplitResponse{
+		Header: s.convertHeader(resp.GetHeader()),
+		Ids:    resp.GetIds(),
 	}
 }
 
