@@ -650,6 +650,11 @@ func (o *PersistConfig) IsRaftKV2() bool {
 	return o.GetStoreConfig().IsRaftKV2()
 }
 
+// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
+func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
+	return o.GetScheduleConfig().EnableTiKVSplitRegion
+}
+
 // TODO: implement the following methods
 
 // AddSchedulerCfg adds the scheduler configurations.
