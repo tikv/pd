@@ -14,7 +14,9 @@
 
 package ratelimit
 
-import "golang.org/x/time/rate"
+import (
+	"golang.org/x/time/rate"
+)
 
 // UpdateStatus is flags for updating limiter config.
 type UpdateStatus uint32
@@ -38,79 +40,91 @@ const (
 	InAllowList
 )
 
-// Option is used to create a limiter with the optional settings.
-// these setting is used to add a kind of limiter for a service
-type Option func(string, *Limiter) UpdateStatus
-
-// AddLabelAllowList adds a label into allow list.
-// It means the given label will not be limited
-func AddLabelAllowList() Option {
-	return func(label string, l *Limiter) UpdateStatus {
-		l.labelAllowList[label] = struct{}{}
-		return 0
-	}
-}
-
-func updateConcurrencyConfig(l *Limiter, label string, limit uint64) UpdateStatus {
-	oldConcurrencyLimit, _ := l.GetConcurrencyLimiterStatus(label)
+func updateConcurrencyConfig(l *limiter, limit uint64) UpdateStatus {
+	oldConcurrencyLimit, _ := l.getConcurrencyLimiterStatus()
 	if oldConcurrencyLimit == limit {
 		return ConcurrencyNoChange
 	}
 	if limit < 1 {
-		l.ConcurrencyUnlimit(label)
+		l.deleteConcurrency()
 		return ConcurrencyDeleted
 	}
-	if limiter, exist := l.concurrencyLimiter.LoadOrStore(label, newConcurrencyLimiter(limit)); exist {
-		limiter.(*concurrencyLimiter).setLimit(limit)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.concurrency != nil {
+		l.concurrency.setLimit(limit)
+	} else {
+		l.concurrency = newConcurrencyLimiter(limit)
 	}
 	return ConcurrencyChanged
 }
 
-func updateQPSConfig(l *Limiter, label string, limit float64, burst int) UpdateStatus {
-	oldQPSLimit, oldBurst := l.GetQPSLimiterStatus(label)
+func updateQPSConfig(l *limiter, limit float64, burst int) UpdateStatus {
+	oldQPSLimit, oldBurst := l.getQPSLimiterStatus()
 
 	if (float64(oldQPSLimit)-limit < eps && float64(oldQPSLimit)-limit > -eps) && oldBurst == burst {
 		return QPSNoChange
 	}
 	if limit <= eps || burst < 1 {
-		l.QPSUnlimit(label)
+		l.deleteRateLimiter()
 		return QPSDeleted
 	}
-	if limiter, exist := l.qpsLimiter.LoadOrStore(label, NewRateLimiter(limit, burst)); exist {
-		limiter.(*RateLimiter).SetLimit(rate.Limit(limit))
-		limiter.(*RateLimiter).SetBurst(burst)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.rate != nil {
+		l.rate.SetLimit(rate.Limit(limit))
+		l.rate.SetBurst(burst)
+	} else {
+		l.rate = NewRateLimiter(limit, burst)
 	}
 	return QPSChanged
 }
 
+// Option is used to create a limiter with the optional settings.
+// these setting is used to add a kind of limiter for a service
+type Option func(string, *MultiLimiter) UpdateStatus
+
+// AddLabelAllowList adds a label into allow list.
+// It means the given label will not be limited
+func AddLabelAllowList() Option {
+	return func(label string, l *MultiLimiter) UpdateStatus {
+		l.labelAllowList[label] = struct{}{}
+		return 0
+	}
+}
+
 // UpdateConcurrencyLimiter creates a concurrency limiter for a given label if it doesn't exist.
 func UpdateConcurrencyLimiter(limit uint64) Option {
-	return func(label string, l *Limiter) UpdateStatus {
+	return func(label string, l *MultiLimiter) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		return updateConcurrencyConfig(l, label, limit)
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		return updateConcurrencyConfig(lim.(*limiter), limit)
 	}
 }
 
 // UpdateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
 func UpdateQPSLimiter(limit float64, burst int) Option {
-	return func(label string, l *Limiter) UpdateStatus {
+	return func(label string, l *MultiLimiter) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		return updateQPSConfig(l, label, limit, burst)
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		return updateQPSConfig(lim.(*limiter), limit, burst)
 	}
 }
 
 // UpdateDimensionConfig creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
 func UpdateDimensionConfig(cfg *DimensionConfig) Option {
-	return func(label string, l *Limiter) UpdateStatus {
+	return func(label string, l *MultiLimiter) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		status := updateQPSConfig(l, label, cfg.QPS, cfg.QPSBurst)
-		status |= updateConcurrencyConfig(l, label, cfg.ConcurrencyLimit)
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		status := updateQPSConfig(lim.(*limiter), cfg.QPS, cfg.QPSBurst)
+		status |= updateConcurrencyConfig(lim.(*limiter), cfg.ConcurrencyLimit)
 		return status
 	}
 }
