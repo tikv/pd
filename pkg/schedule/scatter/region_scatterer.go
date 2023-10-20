@@ -192,6 +192,9 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 		region := r.cluster.GetRegion(id)
 		if region == nil {
 			scatterSkipNoRegionCounter.Inc()
+			if len(regionsID) == 1 {
+				return 0, nil, errors.New("region not found")
+			}
 			log.Warn("failed to find region during scatter", zap.Uint64("region-id", id))
 			failures[id] = errors.New(fmt.Sprintf("failed to find region %v", id))
 			continue
