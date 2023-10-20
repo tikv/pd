@@ -26,6 +26,7 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
@@ -50,6 +51,8 @@ import (
 )
 
 var _ bs.Server = (*Server)(nil)
+
+const serviceName = "Resource Manager"
 
 // Server is the resource manager server, and it implements bs.Server.
 type Server struct {
@@ -84,6 +87,17 @@ func (s *Server) Name() string {
 // GetAddr returns the server address.
 func (s *Server) GetAddr() string {
 	return s.cfg.ListenAddr
+}
+
+// SetLogLevel sets log level.
+func (s *Server) SetLogLevel(level string) error {
+	if !logutil.IsLevelLegal(level) {
+		return errors.Errorf("log level %s is illegal", level)
+	}
+	s.cfg.Log.Level = level
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+	return nil
 }
 
 // Run runs the Resource Manager server.
@@ -156,6 +170,7 @@ func (s *Server) campaignLeader() {
 	defer resetLeaderOnce.Do(func() {
 		cancel()
 		s.participant.ResetLeader()
+		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
 	})
 
 	// maintain the leadership, after this, Resource Manager could be ready to provide service.
@@ -168,6 +183,7 @@ func (s *Server) campaignLeader() {
 	}
 
 	s.participant.EnableLeader()
+	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Name()))
 
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
@@ -370,8 +386,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("Resource Manager")
-	log.Info("Resource Manager config", zap.Reflect("config", cfg))
+	versioninfo.Log(serviceName)
+	log.Info("resource manager config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 	metricutil.Push(&cfg.Metric)

@@ -246,6 +246,52 @@ func TestPrepareChecker(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
+// ref: https://github.com/tikv/pd/issues/6988
+func TestPrepareCheckerWithTransferLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+	rc := leaderServer.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	regionLen := 100
+	regions := initRegions(regionLen)
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
+	// ensure flush to region storage
+	time.Sleep(3 * time.Second)
+	re.True(leaderServer.GetRaftCluster().IsPrepared())
+
+	// join new PD
+	pd2, err := cluster.Join(ctx)
+	re.NoError(err)
+	err = pd2.Run()
+	re.NoError(err)
+	// waiting for synchronization to complete
+	time.Sleep(3 * time.Second)
+	err = cluster.ResignLeader()
+	re.NoError(err)
+	re.Equal("pd2", cluster.WaitLeader())
+
+	// transfer leader to pd1, can start coordinator immediately.
+	err = cluster.ResignLeader()
+	re.NoError(err)
+	re.Equal("pd1", cluster.WaitLeader())
+	re.True(rc.IsPrepared())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+}
+
 func initRegions(regionLen int) []*core.RegionInfo {
 	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
 	regions := make([]*core.RegionInfo, 0, regionLen)
@@ -264,7 +310,7 @@ func initRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(3)},
 			},
 		}
-		region := core.NewRegionInfo(r, r.Peers[0])
+		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.
 		if i < regionLen/2 {
 			buckets := &metapb.Buckets{

@@ -427,15 +427,15 @@ func (c *RaftCluster) runStoreConfigSync() {
 	defer c.wg.Done()
 
 	var (
-		synced, switchRaftV2Config bool
-		stores                     = c.GetStores()
+		synced, switchRaftV2Config, needPersist bool
+		stores                                  = c.GetStores()
 	)
 	// Start the ticker with a second-level timer to accelerate
 	// the bootstrap stage.
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
-		synced, switchRaftV2Config = c.syncStoreConfig(stores)
+		synced, switchRaftV2Config, needPersist = c.syncStoreConfig(stores)
 		if switchRaftV2Config {
 			if err := c.opt.SwitchRaftV2(c.GetStorage()); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
@@ -444,8 +444,11 @@ func (c *RaftCluster) runStoreConfigSync() {
 		// Update the stores if the synchronization is not completed.
 		if !synced {
 			stores = c.GetStores()
-		} else if err := c.opt.Persist(c.storage); err != nil {
-			log.Warn("store config persisted failed", zap.Error(err))
+		}
+		if needPersist {
+			if err := c.opt.Persist(c.storage); err != nil {
+				log.Warn("store config persisted failed", zap.Error(err))
+			}
 		}
 		select {
 		case <-c.ctx.Done():
@@ -459,7 +462,8 @@ func (c *RaftCluster) runStoreConfigSync() {
 // syncStoreConfig syncs the store config from TiKV.
 //   - `synced` is true if sync config from one tikv.
 //   - `switchRaftV2` is true if the config of tikv engine is change to raft-kv2.
-func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, switchRaftV2 bool) {
+func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, switchRaftV2 bool, needPersist bool) {
+	var err error
 	for index := 0; index < len(stores); index++ {
 		select {
 		case <-c.ctx.Done():
@@ -479,7 +483,7 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		switchRaftV2, err := c.observeStoreConfig(c.ctx, address)
+		switchRaftV2, needPersist, err = c.observeStoreConfig(c.ctx, address)
 		if err != nil {
 			// delete the store if it is failed and retry next store.
 			stores = append(stores[:index], stores[index+1:]...)
@@ -492,34 +496,35 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		}
 		storeSyncConfigEvent.WithLabelValues(address, "succ").Inc()
 
-		return true, switchRaftV2
+		return true, switchRaftV2, needPersist
 	}
-	return false, false
+	return false, false, needPersist
 }
 
 // observeStoreConfig is used to observe the store config changes and
 // return whether if the new config changes the engine to raft-kv2.
-func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (bool, error) {
+func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (switchRaftV2 bool, needPersist bool, err error) {
 	cfg, err := c.fetchStoreConfigFromTiKV(ctx, address)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	oldCfg := c.opt.GetStoreConfig()
 	if cfg == nil || oldCfg.Equal(cfg) {
-		return false, nil
+		return false, false, nil
 	}
 	log.Info("sync the store config successful",
 		zap.String("store-address", address),
 		zap.String("store-config", cfg.String()),
 		zap.String("old-config", oldCfg.String()))
-	return c.updateStoreConfig(oldCfg, cfg)
+	return c.updateStoreConfig(oldCfg, cfg), true, nil
 }
 
 // updateStoreConfig updates the store config. This is extracted for testing.
-func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (bool, error) {
+func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (switchRaftV2 bool) {
 	cfg.Adjust()
 	c.opt.SetStoreConfig(cfg)
-	return oldCfg.Storage.Engine != sc.RaftstoreV2 && cfg.Storage.Engine == sc.RaftstoreV2, nil
+	switchRaftV2 = oldCfg.Storage.Engine != sc.RaftstoreV2 && cfg.Storage.Engine == sc.RaftstoreV2
+	return
 }
 
 // fetchStoreConfigFromTiKV tries to fetch the config from the TiKV store URL.
@@ -588,7 +593,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -1231,6 +1236,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.core.GetRegions()
 }
 
+// ValidRegion is used to decide if the region is valid.
+func (c *RaftCluster) ValidRegion(region *metapb.Region) error {
+	return c.core.ValidRegion(region)
+}
+
 // GetTotalRegionCount returns total count of regions
 func (c *RaftCluster) GetTotalRegionCount() int {
 	return c.core.GetTotalRegionCount()
@@ -1620,7 +1630,10 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
-		c.resetProgress(storeID, store.GetAddress())
+		addr := store.GetAddress()
+		c.resetProgress(storeID, addr)
+		storeIDStr := strconv.FormatUint(storeID, 10)
+		statistics.ResetStoreStatistics(addr, storeIDStr)
 		if !c.isAPIServiceMode {
 			c.hotStat.RemoveRollingStoreStats(storeID)
 			c.slowStat.RemoveSlowStoreStatus(storeID)
@@ -2148,17 +2161,14 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
-	stores := c.GetStores()
-	for _, s := range stores {
-		statsMap.Observe(s)
-		if !c.isAPIServiceMode {
+	if !c.isAPIServiceMode {
+		statsMap := statistics.NewStoreStatisticsMap(c.opt)
+		stores := c.GetStores()
+		for _, s := range stores {
+			statsMap.Observe(s)
 			statsMap.ObserveHotStat(s, c.hotStat.StoresStats)
 		}
-	}
-	statsMap.Collect()
-
-	if !c.isAPIServiceMode {
+		statsMap.Collect()
 		c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 		c.coordinator.CollectHotSpotMetrics()
 		c.collectClusterMetrics()
@@ -2167,8 +2177,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
-	statsMap.Reset()
+	statistics.Reset()
 
 	if !c.isAPIServiceMode {
 		c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
@@ -2388,37 +2397,6 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.core.PutRegion(region)
 	return nil
-}
-
-// GetHotWriteRegions gets hot write regions' info.
-func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	hotWriteRegions := c.coordinator.GetHotRegionsByType(utils.Write)
-	if len(storeIDs) > 0 && hotWriteRegions != nil {
-		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
-	}
-	return hotWriteRegions
-}
-
-// GetHotReadRegions gets hot read regions' info.
-func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	hotReadRegions := c.coordinator.GetHotRegionsByType(utils.Read)
-	if len(storeIDs) > 0 && hotReadRegions != nil {
-		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
-	}
-	return hotReadRegions
-}
-
-func getHotRegionsByStoreIDs(hotPeerInfos *statistics.StoreHotPeersInfos, storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	asLeader := statistics.StoreHotPeersStat{}
-	asPeer := statistics.StoreHotPeersStat{}
-	for _, storeID := range storeIDs {
-		asLeader[storeID] = hotPeerInfos.AsLeader[storeID]
-		asPeer[storeID] = hotPeerInfos.AsPeer[storeID]
-	}
-	return &statistics.StoreHotPeersInfos{
-		AsLeader: asLeader,
-		AsPeer:   asPeer,
-	}
 }
 
 // GetStoreLimiter returns the dynamic adjusting limiter

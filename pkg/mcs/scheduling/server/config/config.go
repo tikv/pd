@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -232,6 +233,14 @@ func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
 	return v.(chan<- struct{})
 }
 
+func (o *PersistConfig) tryNotifySchedulersUpdating() {
+	notifier := o.getSchedulersUpdatingNotifier()
+	if notifier == nil {
+		return
+	}
+	notifier <- struct{}{}
+}
+
 // GetClusterVersion returns the cluster version.
 func (o *PersistConfig) GetClusterVersion() *semver.Version {
 	return (*semver.Version)(atomic.LoadPointer(&o.clusterVersion))
@@ -251,11 +260,10 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
-	// The coordinator is not aware of the underlying scheduler config changes, however, it
-	// should react on the scheduler number changes to handle the add/remove scheduler events.
-	if notifier := o.getSchedulersUpdatingNotifier(); notifier != nil &&
-		len(old.Schedulers) != len(cfg.Schedulers) {
-		notifier <- struct{}{}
+	// The coordinator is not aware of the underlying scheduler config changes,
+	// we should notify it to update the schedulers proactively.
+	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
+		o.tryNotifySchedulersUpdating()
 	}
 }
 
@@ -499,6 +507,11 @@ func (o *PersistConfig) IsSchedulingHalted() bool {
 	return o.GetScheduleConfig().HaltScheduling
 }
 
+// GetStoresLimit gets the stores' limit.
+func (o *PersistConfig) GetStoresLimit() map[uint64]sc.StoreLimitConfig {
+	return o.GetScheduleConfig().StoreLimit
+}
+
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	limit := o.GetStoreLimit(storeID)
@@ -620,9 +633,19 @@ func (o *PersistConfig) GetRegionMaxSize() uint64 {
 	return o.GetStoreConfig().GetRegionMaxSize()
 }
 
-// GetRegionMaxKeys returns the region split keys
+// GetRegionMaxKeys returns the max region keys
 func (o *PersistConfig) GetRegionMaxKeys() uint64 {
 	return o.GetStoreConfig().GetRegionMaxKeys()
+}
+
+// GetRegionSplitSize returns the region split size in MB
+func (o *PersistConfig) GetRegionSplitSize() uint64 {
+	return o.GetStoreConfig().GetRegionSplitSize()
+}
+
+// GetRegionSplitKeys returns the region split keys
+func (o *PersistConfig) GetRegionSplitKeys() uint64 {
+	return o.GetStoreConfig().GetRegionSplitKeys()
 }
 
 // IsEnableRegionBucket return true if the region bucket is enabled.
@@ -633,6 +656,11 @@ func (o *PersistConfig) IsEnableRegionBucket() bool {
 // IsRaftKV2 returns the whether the cluster use `raft-kv2` engine.
 func (o *PersistConfig) IsRaftKV2() bool {
 	return o.GetStoreConfig().IsRaftKV2()
+}
+
+// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
+func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
+	return o.GetScheduleConfig().EnableTiKVSplitRegion
 }
 
 // TODO: implement the following methods

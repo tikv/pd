@@ -93,7 +93,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendBasicFuncs() {
 	suite.Equal(*lastCapturedCandidate, es2.conf.evictCandidate)
 	suite.Equal(es2.conf.candidateCapturedSecs(), uint64(0))
 	suite.Equal(es2.conf.lastCandidateCapturedSecs(), uint64(0))
-	suite.False(checkStoreReadyForRecover(store, es2.conf.lastCandidateCapturedSecs()))
+	suite.False(es2.conf.readyForRecovery())
 	recoverTS := lastCapturedCandidate.recoverTS
 	suite.True(recoverTS.After(lastCapturedCandidate.captureTS))
 	// Pop captured store 1 and mark it has recovered.

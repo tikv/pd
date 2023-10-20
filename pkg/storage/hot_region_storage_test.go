@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 type MockPackHotRegionInfo struct {
@@ -36,18 +37,18 @@ type MockPackHotRegionInfo struct {
 	pullInterval     time.Duration
 }
 
-// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion from.
-func (m *MockPackHotRegionInfo) PackHistoryHotReadRegions() ([]HistoryHotRegion, error) {
-	result := make([]HistoryHotRegion, len(m.historyHotReads))
-	copy(result, m.historyHotReads)
-	return result, nil
-}
-
-// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
-func (m *MockPackHotRegionInfo) PackHistoryHotWriteRegions() ([]HistoryHotRegion, error) {
-	result := make([]HistoryHotRegion, len(m.historyHotWrites))
-	copy(result, m.historyHotWrites)
-	return result, nil
+// GetHistoryHotRegions get hot region info in HistoryHotRegion form.
+func (m *MockPackHotRegionInfo) GetHistoryHotRegions(typ utils.RWType) ([]HistoryHotRegion, error) {
+	switch typ {
+	case utils.Write:
+		result := make([]HistoryHotRegion, len(m.historyHotWrites))
+		copy(result, m.historyHotWrites)
+		return result, nil
+	default: // case utils.Read:
+		result := make([]HistoryHotRegion, len(m.historyHotReads))
+		copy(result, m.historyHotReads)
+		return result, nil
+	}
 }
 
 // IsLeader return isLeader.
@@ -115,7 +116,7 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: utils.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
@@ -123,7 +124,7 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(10*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      2,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: utils.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x15, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x2, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
@@ -131,7 +132,7 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(20*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      3,
 			StoreID:       1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: utils.Read.String(),
 			StartKey:      string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x83, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 			EndKey:        string([]byte{0x74, 0x80, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0xff, 0x83, 0x5f, 0x69, 0x80, 0x0, 0x0, 0x0, 0x0, 0xff, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x0, 0x0, 0xfa}),
 		},
@@ -149,12 +150,12 @@ func TestHotRegionWrite(t *testing.T) {
 			UpdateTime:    now.Add(30*time.Second).UnixNano() / int64(time.Millisecond),
 			RegionID:      4,
 			StoreID:       1,
-			HotRegionType: WriteType.String(),
+			HotRegionType: utils.Write.String(),
 		},
 	}
 	store.pullHotRegionInfo()
 	store.flush()
-	iter := store.NewIterator([]string{ReadType.String()},
+	iter := store.NewIterator([]string{utils.Read.String()},
 		now.UnixNano()/int64(time.Millisecond),
 		now.Add(40*time.Second).UnixNano()/int64(time.Millisecond))
 	index := 0
@@ -182,7 +183,7 @@ func TestHotRegionDelete(t *testing.T) {
 		historyHotRegion := HistoryHotRegion{
 			UpdateTime:    deleteDate.UnixNano() / int64(time.Millisecond),
 			RegionID:      1,
-			HotRegionType: ReadType.String(),
+			HotRegionType: utils.Read.String(),
 		}
 		historyHotRegions = append(historyHotRegions, historyHotRegion)
 		deleteDate = deleteDate.AddDate(0, 0, -1)

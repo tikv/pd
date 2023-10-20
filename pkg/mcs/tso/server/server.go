@@ -27,6 +27,7 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
@@ -56,6 +57,8 @@ import (
 
 var _ bs.Server = (*Server)(nil)
 var _ tso.ElectionMember = (*member.Participant)(nil)
+
+const serviceName = "TSO Service"
 
 // Server is the TSO server, and it implements bs.Server.
 type Server struct {
@@ -127,6 +130,17 @@ func (s *Server) SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup) {
 // RegisterGRPCService registers the grpc service.
 func (s *Server) RegisterGRPCService(grpcServer *grpc.Server) {
 	s.service.RegisterGRPCService(grpcServer)
+}
+
+// SetLogLevel sets log level.
+func (s *Server) SetLogLevel(level string) error {
+	if !logutil.IsLevelLegal(level) {
+		return errors.Errorf("log level %s is illegal", level)
+	}
+	s.cfg.Log.Level = level
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
+	return nil
 }
 
 // Run runs the TSO server.
@@ -438,8 +452,8 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 
-	versioninfo.Log("TSO")
-	log.Info("TSO config", zap.Reflect("config", cfg))
+	versioninfo.Log(serviceName)
+	log.Info("TSO service config", zap.Reflect("config", cfg))
 
 	grpcprometheus.EnableHandlingTimeHistogram()
 	metricutil.Push(&cfg.Metric)

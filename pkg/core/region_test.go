@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -448,6 +449,18 @@ func TestRegionKey(t *testing.T) {
 		re.Regexp(".*EndKey Changed.*", s)
 		re.Contains(s, test.expect)
 	}
+}
+
+func TestSetRegionConcurrence(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/UpdateSubTree", `return()`))
+	regions := NewRegionsInfo()
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	go func() {
+		regions.AtomicCheckAndPutRegion(region)
+	}()
+	regions.AtomicCheckAndPutRegion(region)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 
 func TestSetRegion(t *testing.T) {

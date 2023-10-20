@@ -102,7 +102,7 @@ const (
 	// PDMode represents that server is in PD mode.
 	PDMode = "PD"
 	// APIServiceMode represents that server is in API service mode.
-	APIServiceMode = "API service"
+	APIServiceMode = "API Service"
 
 	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
 	// Note: it need to be less than client.defaultPDTimeout
@@ -489,10 +489,12 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
-	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
-		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
-	if err != nil {
-		return err
+	if !s.IsAPIServiceMode() {
+		s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+			ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
+		if err != nil {
+			return err
+		}
 	}
 	// Run callbacks
 	log.Info("triggering the start callback functions")
@@ -551,8 +553,10 @@ func (s *Server) Close() {
 		log.Error("close storage meet error", errs.ZapError(err))
 	}
 
-	if err := s.hotRegionStorage.Close(); err != nil {
-		log.Error("close hot region storage meet error", errs.ZapError(err))
+	if s.hotRegionStorage != nil {
+		if err := s.hotRegionStorage.Close(); err != nil {
+			log.Error("close hot region storage meet error", errs.ZapError(err))
+		}
 	}
 
 	// Run callbacks
@@ -1494,22 +1498,13 @@ func (s *Server) GetClusterStatus() (*cluster.Status, error) {
 
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
-	if !isLevelLegal(level) {
+	if !logutil.IsLevelLegal(level) {
 		return errors.Errorf("log level %s is illegal", level)
 	}
 	s.cfg.Log.Level = level
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	log.Warn("log level changed", zap.String("level", log.GetLevel().String()))
 	return nil
-}
-
-func isLevelLegal(level string) bool {
-	switch strings.ToLower(level) {
-	case "fatal", "error", "warn", "warning", "debug", "info":
-		return true
-	default:
-		return false
-	}
 }
 
 // GetReplicationModeConfig returns the replication mode config.
@@ -1730,6 +1725,7 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
+	member.ServiceMemberGauge.WithLabelValues(s.mode).Set(1)
 	if !s.IsAPIServiceMode() {
 		// Check the cluster dc-location after the PD leader is elected.
 		go s.tsoAllocatorManager.ClusterDCLocationChecker()
@@ -1739,6 +1735,7 @@ func (s *Server) campaignLeader() {
 		// to be new leader.
 		cancel()
 		s.member.ResetLeader()
+		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
 	})
 
 	CheckPDVersion(s.persistOptions)

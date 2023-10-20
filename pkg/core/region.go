@@ -23,11 +23,13 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -71,8 +73,26 @@ type RegionInfo struct {
 	queryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets       unsafe.Pointer
-	fromHeartbeat bool
+	buckets unsafe.Pointer
+	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
+	source RegionSource
+}
+
+// RegionSource is the source of region.
+type RegionSource uint32
+
+const (
+	// Storage means this region's meta info might be stale.
+	Storage RegionSource = iota
+	// Sync means this region's meta info is relatively fresher.
+	Sync
+	// Heartbeat means this region's meta info is relatively fresher.
+	Heartbeat
+)
+
+// LoadedFromStorage means this region's meta info loaded from storage.
+func (r *RegionInfo) LoadedFromStorage() bool {
+	return r.source == Storage
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -190,6 +210,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateO
 		approximateKeys: int64(heartbeat.GetApproximateKeys()),
 		interval:        heartbeat.GetInterval(),
 		queryStats:      heartbeat.GetQueryStats(),
+		source:          Heartbeat,
 	}
 
 	// scheduling service doesn't need the following fields.
@@ -665,11 +686,6 @@ func (r *RegionInfo) IsFlashbackChanged(l *RegionInfo) bool {
 	return r.meta.FlashbackStartTs != l.meta.FlashbackStartTs || r.meta.IsInFlashback != l.meta.IsInFlashback
 }
 
-// IsFromHeartbeat returns whether the region info is from the region heartbeat.
-func (r *RegionInfo) IsFromHeartbeat() bool {
-	return r.fromHeartbeat
-}
-
 func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
 	return bytes.Compare(r.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(r.GetEndKey()) > 0 && bytes.Compare(r.GetEndKey(), endKey) <= 0))
 }
@@ -709,7 +725,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			saveKV, saveCache, isNew = true, true, true
 		} else {
-			if !origin.IsFromHeartbeat() {
+			if origin.LoadedFromStorage() {
 				isNew = true
 			}
 			r := region.GetRegionEpoch()
@@ -996,6 +1012,11 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 
 // UpdateSubTree updates the subtree.
 func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) {
+	failpoint.Inject("UpdateSubTree", func() {
+		if origin == nil {
+			time.Sleep(time.Second)
+		}
+	})
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
@@ -1004,8 +1025,17 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 			// TODO: Improve performance by deleting only the different peers.
 			r.removeRegionFromSubTreeLocked(origin)
 		} else {
-			r.updateSubTreeStat(origin, region)
-			r.subRegions[region.GetID()].RegionInfo = region
+			// The region tree and the subtree update is not atomic and the region tree is updated first.
+			// If there are two thread needs to update region tree,
+			// t1: thread-A  update region tree
+			// 										t2: thread-B: update region tree again
+			//										t3: thread-B: update subtree
+			// t4: thread-A: update region subtree
+			// to keep region tree consistent with subtree, we need to drop this update.
+			if tree, ok := r.subRegions[region.GetID()]; ok {
+				r.updateSubTreeStat(origin, region)
+				tree.RegionInfo = region
+			}
 			return
 		}
 	}
@@ -1305,6 +1335,13 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	bytesRate += storeBytesRate
 	keysRate += storeKeysRate
 	return
+}
+
+// GetClusterNotFromStorageRegionsCnt gets the total count of regions that not loaded from storage anymore
+func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.tree.notFromStorageRegionsCnt
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
@@ -1636,6 +1673,23 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 		return 0
 	}
 	return r.tree.TotalSize() / int64(r.tree.length())
+}
+
+// ValidRegion is used to decide if the region is valid.
+func (r *RegionsInfo) ValidRegion(region *metapb.Region) error {
+	startKey := region.GetStartKey()
+	currnetRegion := r.GetRegionByKey(startKey)
+	if currnetRegion == nil {
+		return errors.Errorf("region not found, request region: %v", logutil.RedactStringer(RegionToHexMeta(region)))
+	}
+	// If the request epoch is less than current region epoch, then returns an error.
+	regionEpoch := region.GetRegionEpoch()
+	currnetEpoch := currnetRegion.GetMeta().GetRegionEpoch()
+	if regionEpoch.GetVersion() < currnetEpoch.GetVersion() ||
+		regionEpoch.GetConfVer() < currnetEpoch.GetConfVer() {
+		return errors.Errorf("invalid region epoch, request: %v, current: %v", regionEpoch, currnetEpoch)
+	}
+	return nil
 }
 
 // DiffRegionPeersInfo return the difference of peers info  between two RegionInfo

@@ -112,6 +112,9 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	if len(h.microserviceRedirectRules) == 0 {
 		return false, ""
 	}
+	// Remove trailing '/' from the URL path
+	// It will be helpful when matching the redirect rules "schedulers" or "schedulers/{name}"
+	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 	for _, rule := range h.microserviceRedirectRules {
 		if strings.HasPrefix(r.URL.Path, rule.matchPath) && slice.Contains(rule.matchMethods, r.Method) {
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
@@ -131,6 +134,8 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 			} else {
 				r.URL.Path = rule.targetPath
 			}
+			log.Debug("redirect to micro service", zap.String("path", r.URL.Path), zap.String("target", addr),
+				zap.String("method", r.Method))
 			return true, addr
 		}
 	}
