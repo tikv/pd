@@ -22,13 +22,16 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -251,6 +254,74 @@ func (s *Service) GetOperator(ctx context.Context, request *schedulingpb.GetOper
 		Desc:     []byte(r.Desc()),
 		Kind:     []byte(r.Kind().String()),
 		Status:   r.Status,
+	}, nil
+}
+
+// AskBatchSplit implements gRPC PDServer.
+func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBatchSplitRequest) (*schedulingpb.AskBatchSplitResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if request.GetRegion() == nil {
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: s.wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN,
+				"missing region for split"),
+		}, nil
+	}
+
+	if c.persistConfig.IsSchedulingHalted() {
+		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
+	}
+	if !c.persistConfig.IsTikvRegionSplitEnabled() {
+		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
+	}
+	reqRegion := request.GetRegion()
+	splitCount := request.GetSplitCount()
+	err := c.ValidRegion(reqRegion)
+	if err != nil {
+		return nil, err
+	}
+	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
+	recordRegions := make([]uint64, 0, splitCount+1)
+
+	for i := 0; i < int(splitCount); i++ {
+		newRegionID, err := c.AllocID()
+		if err != nil {
+			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
+		}
+
+		peerIDs := make([]uint64, len(request.Region.Peers))
+		for i := 0; i < len(peerIDs); i++ {
+			if peerIDs[i], err = c.AllocID(); err != nil {
+				return nil, err
+			}
+		}
+
+		recordRegions = append(recordRegions, newRegionID)
+		splitIDs = append(splitIDs, &pdpb.SplitID{
+			NewRegionId: newRegionID,
+			NewPeerIds:  peerIDs,
+		})
+
+		log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
+	}
+
+	recordRegions = append(recordRegions, reqRegion.GetId())
+	if versioninfo.IsFeatureSupported(c.persistConfig.GetClusterVersion(), versioninfo.RegionMerge) {
+		// Disable merge the regions in a period of time.
+		c.GetCoordinator().GetMergeChecker().RecordRegionSplit(recordRegions)
+	}
+
+	// If region splits during the scheduling process, regions with abnormal
+	// status may be left, and these regions need to be checked with higher
+	// priority.
+	c.GetCoordinator().GetCheckerController().AddSuspectRegions(recordRegions...)
+
+	return &schedulingpb.AskBatchSplitResponse{
+		Header: s.header(),
+		Ids:    splitIDs,
 	}, nil
 }
 
