@@ -24,83 +24,168 @@ import (
 	"golang.org/x/time/rate"
 )
 
-type releaseUtil struct {
-	dones []DoneFunc
+type changeAndResult struct {
+	opt               Option
+	checkOptionStatus func(string, Option)
+	totalRequest      int
+	success           int
+	fail              int
+	release           int
+	waitDuration      time.Duration
+	checkStatusFunc   func(string)
 }
 
-func (r *releaseUtil) release() {
-	r.dones[0]()
-	r.dones = r.dones[1:]
+type labelCase struct {
+	label string
+	round []changeAndResult
 }
 
-func (r *releaseUtil) append(d DoneFunc) {
-	r.dones = append(r.dones, d)
-}
-
-func TestUpdateConcurrencyLimiter(t *testing.T) {
-	t.Parallel()
+func runMulitLabelLimiter(t *testing.T, limiter *MultiLimiter, testCase []labelCase) {
 	re := require.New(t)
-
-	opts := []Option{UpdateConcurrencyLimiter(10)}
-	limiter := NewMultiLimiter()
-
-	label := "test"
-	status := limiter.Update(label, opts...)
-	re.True(status&ConcurrencyChanged != 0)
-	var lock syncutil.Mutex
-	successCount, failedCount := 0, 0
-	var wg sync.WaitGroup
-	r := &releaseUtil{}
-	for i := 0; i < 15; i++ {
-		wg.Add(1)
+	var caseWG sync.WaitGroup
+	for _, tempCas := range testCase {
+		caseWG.Add(1)
+		cas := tempCas
 		go func() {
-			countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
+			var lock syncutil.Mutex
+			successCount, failedCount := 0, 0
+			var wg sync.WaitGroup
+			r := &releaseUtil{}
+			for _, rd := range cas.round {
+				rd.checkOptionStatus(cas.label, rd.opt)
+				time.Sleep(rd.waitDuration)
+				for i := 0; i < rd.totalRequest; i++ {
+					wg.Add(1)
+					go func() {
+						countRateLimiterHandleResult(limiter, cas.label, &successCount, &failedCount, &lock, &wg, r)
+					}()
+				}
+				wg.Wait()
+				re.Equal(rd.fail, failedCount)
+				re.Equal(rd.success, successCount)
+				for i := 0; i < rd.release; i++ {
+					r.release()
+				}
+				rd.checkStatusFunc(cas.label)
+				failedCount -= rd.fail
+				successCount -= rd.success
+			}
+			caseWG.Done()
 		}()
 	}
-	wg.Wait()
-	re.Equal(5, failedCount)
-	re.Equal(10, successCount)
-	for i := 0; i < 10; i++ {
-		r.release()
+	caseWG.Wait()
+}
+
+func TestMultiLimiterWithConcurrencyLimiter(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	limiter := NewMultiLimiter()
+	testCase := []labelCase{
+		{
+			label: "test1",
+			round: []changeAndResult{
+				{
+					opt: UpdateConcurrencyLimiter(10),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&ConcurrencyChanged != 0)
+					},
+					totalRequest: 15,
+					fail:         5,
+					success:      10,
+					release:      10,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(uint64(10), limit)
+						re.Equal(uint64(0), current)
+					},
+				},
+				{
+					opt: UpdateConcurrencyLimiter(10),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&ConcurrencyNoChange != 0)
+					},
+					checkStatusFunc: func(label string) {},
+				},
+				{
+					opt: UpdateConcurrencyLimiter(5),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&ConcurrencyChanged != 0)
+					},
+					totalRequest: 15,
+					fail:         10,
+					success:      5,
+					release:      5,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(uint64(5), limit)
+						re.Equal(uint64(0), current)
+					},
+				},
+				{
+					opt: UpdateConcurrencyLimiter(0),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&ConcurrencyDeleted != 0)
+					},
+					totalRequest: 15,
+					fail:         0,
+					success:      15,
+					release:      5,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(uint64(0), limit)
+						re.Equal(uint64(0), current)
+					},
+				},
+			},
+		},
+		{
+			label: "test2",
+			round: []changeAndResult{
+				{
+					opt: UpdateConcurrencyLimiter(15),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&ConcurrencyChanged != 0)
+					},
+					totalRequest: 10,
+					fail:         0,
+					success:      10,
+					release:      0,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(uint64(15), limit)
+						re.Equal(uint64(10), current)
+					},
+				},
+				{
+					opt: UpdateConcurrencyLimiter(10),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&ConcurrencyChanged != 0)
+					},
+					totalRequest: 10,
+					fail:         10,
+					success:      0,
+					release:      10,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(uint64(10), limit)
+						re.Equal(uint64(0), current)
+					},
+				},
+			},
+		},
 	}
-
-	limit, current := limiter.GetConcurrencyLimiterStatus(label)
-	re.Equal(uint64(10), limit)
-	re.Equal(uint64(0), current)
-
-	status = limiter.Update(label, UpdateConcurrencyLimiter(10))
-	re.True(status&ConcurrencyNoChange != 0)
-
-	status = limiter.Update(label, UpdateConcurrencyLimiter(5))
-	re.True(status&ConcurrencyChanged != 0)
-	failedCount = 0
-	successCount = 0
-	for i := 0; i < 15; i++ {
-		wg.Add(1)
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
-	}
-	wg.Wait()
-	re.Equal(10, failedCount)
-	re.Equal(5, successCount)
-	for i := 0; i < 5; i++ {
-		r.release()
-	}
-
-	status = limiter.Update(label, UpdateConcurrencyLimiter(0))
-	re.True(status&ConcurrencyDeleted != 0)
-	failedCount = 0
-	successCount = 0
-	for i := 0; i < 15; i++ {
-		wg.Add(1)
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
-	}
-	wg.Wait()
-	re.Equal(0, failedCount)
-	re.Equal(15, successCount)
-
-	limit, current = limiter.GetConcurrencyLimiterStatus(label)
-	re.Equal(uint64(0), limit)
-	re.Equal(uint64(0), current)
+	runMulitLabelLimiter(t, limiter, testCase)
 }
 
 func TestBlockList(t *testing.T) {
@@ -124,146 +209,206 @@ func TestBlockList(t *testing.T) {
 	}
 }
 
-func TestUpdateQPSLimiter(t *testing.T) {
+func TestMultiLimiterWithQPSLimiter(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	opts := []Option{UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)}
 	limiter := NewMultiLimiter()
-
-	label := "test"
-	status := limiter.Update(label, opts...)
-	re.True(status&QPSChanged != 0)
-
-	var lock syncutil.Mutex
-	successCount, failedCount := 0, 0
-	var wg sync.WaitGroup
-	r := &releaseUtil{}
-	wg.Add(3)
-	for i := 0; i < 3; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
+	testCase := []labelCase{
+		{
+			label: "test1",
+			round: []changeAndResult{
+				{
+					opt: UpdateQPSLimiter(float64(rate.Every(time.Second)), 1),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSChanged != 0)
+					},
+					totalRequest: 3,
+					fail:         2,
+					success:      1,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, burst := limiter.GetQPSLimiterStatus(label)
+						re.Equal(rate.Limit(1), limit)
+						re.Equal(1, burst)
+					},
+				},
+				{
+					opt: UpdateQPSLimiter(float64(rate.Every(time.Second)), 1),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSNoChange != 0)
+					},
+					checkStatusFunc: func(label string) {},
+				},
+				{
+					opt: UpdateQPSLimiter(5, 5),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSChanged != 0)
+					},
+					totalRequest: 10,
+					fail:         5,
+					success:      5,
+					waitDuration: time.Second,
+					checkStatusFunc: func(label string) {
+						limit, burst := limiter.GetQPSLimiterStatus(label)
+						re.Equal(rate.Limit(5), limit)
+						re.Equal(5, burst)
+					},
+				},
+				{
+					opt: UpdateQPSLimiter(0, 0),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSDeleted != 0)
+					},
+					totalRequest: 10,
+					fail:         0,
+					success:      10,
+					release:      0,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, burst := limiter.GetQPSLimiterStatus(label)
+						re.Equal(rate.Limit(0), limit)
+						re.Equal(0, burst)
+					},
+				},
+			},
+		},
+		{
+			label: "test2",
+			round: []changeAndResult{
+				{
+					opt: UpdateQPSLimiter(50, 5),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSChanged != 0)
+					},
+					totalRequest: 10,
+					fail:         5,
+					success:      5,
+					waitDuration: time.Second,
+					checkStatusFunc: func(label string) {
+						limit, burst := limiter.GetQPSLimiterStatus(label)
+						re.Equal(rate.Limit(50), limit)
+						re.Equal(5, burst)
+					},
+				},
+				{
+					opt: UpdateQPSLimiter(0, 0),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSDeleted != 0)
+					},
+					totalRequest: 10,
+					fail:         0,
+					success:      10,
+					release:      0,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, burst := limiter.GetQPSLimiterStatus(label)
+						re.Equal(rate.Limit(0), limit)
+						re.Equal(0, burst)
+					},
+				},
+			},
+		},
 	}
-	wg.Wait()
-	re.Equal(2, failedCount)
-	re.Equal(1, successCount)
-
-	limit, burst := limiter.GetQPSLimiterStatus(label)
-	re.Equal(rate.Limit(1), limit)
-	re.Equal(1, burst)
-
-	status = limiter.Update(label, UpdateQPSLimiter(float64(rate.Every(time.Second)), 1))
-	re.True(status&QPSNoChange != 0)
-
-	status = limiter.Update(label, UpdateQPSLimiter(5, 5))
-	re.True(status&QPSChanged != 0)
-	limit, burst = limiter.GetQPSLimiterStatus(label)
-	re.Equal(rate.Limit(5), limit)
-	re.Equal(5, burst)
-	time.Sleep(time.Second)
-
-	for i := 0; i < 10; i++ {
-		if i < 5 {
-			_, err := limiter.Allow(label)
-			re.NoError(err)
-		} else {
-			_, err := limiter.Allow(label)
-			re.Error(err)
-		}
-	}
-	time.Sleep(time.Second)
-
-	status = limiter.Update(label, UpdateQPSLimiter(0, 0))
-	re.True(status&QPSDeleted != 0)
-	for i := 0; i < 10; i++ {
-		_, err := limiter.Allow(label)
-		re.NoError(err)
-	}
-	qLimit, qCurrent := limiter.GetQPSLimiterStatus(label)
-	re.Equal(rate.Limit(0), qLimit)
-	re.Equal(0, qCurrent)
+	runMulitLabelLimiter(t, limiter, testCase)
 }
 
-func TestQPSLimiter(t *testing.T) {
+func TestMultiLimiterWithTwoLimiters(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	opts := []Option{UpdateQPSLimiter(float64(rate.Every(3*time.Second)), 100)}
 	limiter := NewMultiLimiter()
-
-	label := "test"
-	for _, opt := range opts {
-		opt(label, limiter)
+	testCase := []labelCase{
+		{
+			label: "test1",
+			round: []changeAndResult{
+				{
+					opt: UpdateDimensionConfig(&DimensionConfig{
+						QPS:              100,
+						QPSBurst:         100,
+						ConcurrencyLimit: 100,
+					}),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSChanged != 0)
+					},
+					totalRequest: 200,
+					fail:         100,
+					success:      100,
+					release:      100,
+					waitDuration: time.Second,
+					checkStatusFunc: func(label string) {
+						limit, burst := limiter.GetQPSLimiterStatus(label)
+						re.Equal(rate.Limit(100), limit)
+						re.Equal(100, burst)
+						climit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(uint64(100), climit)
+						re.Equal(uint64(0), current)
+					},
+				},
+				{
+					opt: UpdateQPSLimiter(float64(rate.Every(time.Second)), 1),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSChanged != 0)
+					},
+					totalRequest: 200,
+					fail:         199,
+					success:      1,
+					release:      0,
+					waitDuration: time.Second,
+					checkStatusFunc: func(label string) {
+						limit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(uint64(100), limit)
+						re.Equal(uint64(1), current)
+					},
+				},
+			},
+		},
+		{
+			label: "test2",
+			round: []changeAndResult{
+				{
+					opt: UpdateQPSLimiter(50, 5),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSChanged != 0)
+					},
+					totalRequest: 10,
+					fail:         5,
+					success:      5,
+					waitDuration: time.Second,
+					checkStatusFunc: func(label string) {
+						limit, burst := limiter.GetQPSLimiterStatus(label)
+						re.Equal(rate.Limit(50), limit)
+						re.Equal(5, burst)
+					},
+				},
+				{
+					opt: UpdateQPSLimiter(0, 0),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.True(status&QPSDeleted != 0)
+					},
+					totalRequest: 10,
+					fail:         0,
+					success:      10,
+					release:      0,
+					waitDuration: 0,
+					checkStatusFunc: func(label string) {
+						limit, burst := limiter.GetQPSLimiterStatus(label)
+						re.Equal(rate.Limit(0), limit)
+						re.Equal(0, burst)
+					},
+				},
+			},
+		},
 	}
-
-	var lock syncutil.Mutex
-	successCount, failedCount := 0, 0
-	r := &releaseUtil{}
-	var wg sync.WaitGroup
-	wg.Add(200)
-	for i := 0; i < 200; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
-	}
-	wg.Wait()
-	re.Equal(200, failedCount+successCount)
-	re.Equal(100, failedCount)
-	re.Equal(100, successCount)
-
-	time.Sleep(4 * time.Second) // 3+1
-	wg.Add(1)
-	countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
-	wg.Wait()
-	re.Equal(101, successCount)
-}
-
-func TestTwoLimiters(t *testing.T) {
-	t.Parallel()
-	re := require.New(t)
-	cfg := &DimensionConfig{
-		QPS:              100,
-		QPSBurst:         100,
-		ConcurrencyLimit: 100,
-	}
-	opts := []Option{UpdateDimensionConfig(cfg)}
-	limiter := NewMultiLimiter()
-
-	label := "test"
-	for _, opt := range opts {
-		opt(label, limiter)
-	}
-
-	var lock syncutil.Mutex
-	successCount, failedCount := 0, 0
-	var wg sync.WaitGroup
-	r := &releaseUtil{}
-	wg.Add(200)
-	for i := 0; i < 200; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
-	}
-	wg.Wait()
-	re.Equal(100, failedCount)
-	re.Equal(100, successCount)
-	time.Sleep(time.Second)
-
-	wg.Add(100)
-	for i := 0; i < 100; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
-	}
-	wg.Wait()
-	re.Equal(200, failedCount)
-	re.Equal(100, successCount)
-
-	for i := 0; i < 100; i++ {
-		r.release()
-	}
-	limiter.Update(label, UpdateQPSLimiter(float64(rate.Every(10*time.Second)), 1))
-	wg.Add(100)
-	for i := 0; i < 100; i++ {
-		go countRateLimiterHandleResult(limiter, label, &successCount, &failedCount, &lock, &wg, r)
-	}
-	wg.Wait()
-	re.Equal(101, successCount)
-	re.Equal(299, failedCount)
-	limit, current := limiter.GetConcurrencyLimiterStatus(label)
-	re.Equal(uint64(100), limit)
-	re.Equal(uint64(1), current)
+	runMulitLabelLimiter(t, limiter, testCase)
 }
 
 func countRateLimiterHandleResult(limiter *MultiLimiter, label string, successCount *int,

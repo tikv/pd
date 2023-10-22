@@ -30,8 +30,6 @@ type DimensionConfig struct {
 	QPSBurst int
 	// concurrency config
 	ConcurrencyLimit uint64
-	// bbr config
-	EnableBBR bool
 }
 
 type limiter struct {
@@ -89,6 +87,53 @@ func (l *limiter) getConcurrencyLimiterStatus() (limit uint64, current uint64) {
 		return baseLimiter.getLimit(), baseLimiter.getCurrent()
 	}
 	return 0, 0
+}
+
+func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
+	oldConcurrencyLimit, _ := l.getConcurrencyLimiterStatus()
+	if oldConcurrencyLimit == limit {
+		return ConcurrencyNoChange
+	}
+	if limit < 1 {
+		l.deleteConcurrency()
+		return ConcurrencyDeleted
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.concurrency != nil {
+		l.concurrency.setLimit(limit)
+	} else {
+		l.concurrency = newConcurrencyLimiter(limit)
+	}
+	return ConcurrencyChanged
+}
+
+func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
+	oldQPSLimit, oldBurst := l.getQPSLimiterStatus()
+
+	if (float64(oldQPSLimit)-limit < eps && float64(oldQPSLimit)-limit > -eps) && oldBurst == burst {
+		return QPSNoChange
+	}
+	if limit <= eps || burst < 1 {
+		l.deleteRateLimiter()
+		return QPSDeleted
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.rate != nil {
+		l.rate.SetLimit(rate.Limit(limit))
+		l.rate.SetBurst(burst)
+	} else {
+		l.rate = NewRateLimiter(limit, burst)
+	}
+	return QPSChanged
+}
+
+func (l *limiter) updateDimensionConfig(cfg *DimensionConfig) UpdateStatus {
+	status := l.updateQPSConfig(cfg.QPS, cfg.QPSBurst)
+	status |= l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
+	return status
 }
 
 func (l *limiter) allow() (DoneFunc, error) {

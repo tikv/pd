@@ -14,10 +14,6 @@
 
 package ratelimit
 
-import (
-	"golang.org/x/time/rate"
-)
-
 // UpdateStatus is flags for updating limiter config.
 type UpdateStatus uint32
 
@@ -40,47 +36,6 @@ const (
 	InAllowList
 )
 
-func updateConcurrencyConfig(l *limiter, limit uint64) UpdateStatus {
-	oldConcurrencyLimit, _ := l.getConcurrencyLimiterStatus()
-	if oldConcurrencyLimit == limit {
-		return ConcurrencyNoChange
-	}
-	if limit < 1 {
-		l.deleteConcurrency()
-		return ConcurrencyDeleted
-	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.concurrency != nil {
-		l.concurrency.setLimit(limit)
-	} else {
-		l.concurrency = newConcurrencyLimiter(limit)
-	}
-	return ConcurrencyChanged
-}
-
-func updateQPSConfig(l *limiter, limit float64, burst int) UpdateStatus {
-	oldQPSLimit, oldBurst := l.getQPSLimiterStatus()
-
-	if (float64(oldQPSLimit)-limit < eps && float64(oldQPSLimit)-limit > -eps) && oldBurst == burst {
-		return QPSNoChange
-	}
-	if limit <= eps || burst < 1 {
-		l.deleteRateLimiter()
-		return QPSDeleted
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.rate != nil {
-		l.rate.SetLimit(rate.Limit(limit))
-		l.rate.SetBurst(burst)
-	} else {
-		l.rate = NewRateLimiter(limit, burst)
-	}
-	return QPSChanged
-}
-
 // Option is used to create a limiter with the optional settings.
 // these setting is used to add a kind of limiter for a service
 type Option func(string, *MultiLimiter) UpdateStatus
@@ -101,7 +56,7 @@ func UpdateConcurrencyLimiter(limit uint64) Option {
 			return InAllowList
 		}
 		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
-		return updateConcurrencyConfig(lim.(*limiter), limit)
+		return lim.(*limiter).updateConcurrencyConfig(limit)
 	}
 }
 
@@ -112,7 +67,7 @@ func UpdateQPSLimiter(limit float64, burst int) Option {
 			return InAllowList
 		}
 		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
-		return updateQPSConfig(lim.(*limiter), limit, burst)
+		return lim.(*limiter).updateQPSConfig(limit, burst)
 	}
 }
 
@@ -123,8 +78,6 @@ func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 			return InAllowList
 		}
 		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
-		status := updateQPSConfig(lim.(*limiter), cfg.QPS, cfg.QPSBurst)
-		status |= updateConcurrencyConfig(lim.(*limiter), cfg.ConcurrencyLimit)
-		return status
+		return lim.(*limiter).updateDimensionConfig(cfg)
 	}
 }
