@@ -38,12 +38,12 @@ const (
 
 // Option is used to create a limiter with the optional settings.
 // these setting is used to add a kind of limiter for a service
-type Option func(string, *MultiLimiter) UpdateStatus
+type Option func(string, *Controller) UpdateStatus
 
 // AddLabelAllowList adds a label into allow list.
 // It means the given label will not be limited
 func AddLabelAllowList() Option {
-	return func(label string, l *MultiLimiter) UpdateStatus {
+	return func(label string, l *Controller) UpdateStatus {
 		l.labelAllowList[label] = struct{}{}
 		return 0
 	}
@@ -51,7 +51,7 @@ func AddLabelAllowList() Option {
 
 // UpdateConcurrencyLimiter creates a concurrency limiter for a given label if it doesn't exist.
 func UpdateConcurrencyLimiter(limit uint64) Option {
-	return func(label string, l *MultiLimiter) UpdateStatus {
+	return func(label string, l *Controller) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
@@ -62,7 +62,7 @@ func UpdateConcurrencyLimiter(limit uint64) Option {
 
 // UpdateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
 func UpdateQPSLimiter(limit float64, burst int) Option {
-	return func(label string, l *MultiLimiter) UpdateStatus {
+	return func(label string, l *Controller) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
@@ -73,7 +73,7 @@ func UpdateQPSLimiter(limit float64, burst int) Option {
 
 // UpdateDimensionConfig creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
 func UpdateDimensionConfig(cfg *DimensionConfig) Option {
-	return func(label string, l *MultiLimiter) UpdateStatus {
+	return func(label string, l *Controller) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
