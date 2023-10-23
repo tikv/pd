@@ -265,18 +265,32 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	api.MustDeleteScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName)
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// TODO: test more schedulers.
-	// Fixme: the following code will fail because the scheduler is not removed but not synced.
-	// checkDelete := func(schedulerName string) {
-	// 	re.NotNil(schedulersController.GetScheduler(schedulers.BalanceLeaderName) != nil)
-	// 	api.MustDeleteScheduler(re, suite.backendEndpoints, schedulers.BalanceLeaderName)
-	// 	testutil.Eventually(re, func() bool {
-	// 		return schedulersController.GetScheduler(schedulers.BalanceLeaderName) == nil
-	// 	})
-	// }
-	// checkDelete(schedulers.BalanceLeaderName)
-	// checkDelete(schedulers.BalanceRegionName)
-	// checkDelete(schedulers.HotRegionName)
+	// The default scheduler could not be deleted, it could only be disabled.
+	defaultSchedulerNames := []string{
+		schedulers.BalanceLeaderName,
+		schedulers.BalanceRegionName,
+		schedulers.BalanceWitnessName,
+		schedulers.HotRegionName,
+		schedulers.TransferWitnessLeaderName,
+	}
+	checkDisabled := func(name string, shouldDisabled bool) {
+		re.NotNil(schedulersController.GetScheduler(name), name)
+		testutil.Eventually(re, func() bool {
+			disabled, err := schedulersController.IsSchedulerDisabled(name)
+			re.NoError(err, name)
+			return disabled == shouldDisabled
+		})
+	}
+	for _, name := range defaultSchedulerNames {
+		checkDisabled(name, false)
+		api.MustDeleteScheduler(re, suite.backendEndpoints, name)
+		checkDisabled(name, true)
+	}
+	for _, name := range defaultSchedulerNames {
+		checkDisabled(name, true)
+		api.MustAddScheduler(re, suite.backendEndpoints, name, nil)
+		checkDisabled(name, false)
+	}
 }
 
 func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
