@@ -29,8 +29,10 @@ type releaseUtil struct {
 }
 
 func (r *releaseUtil) release() {
-	r.dones[0]()
-	r.dones = r.dones[1:]
+	if len(r.dones) > 0 {
+		r.dones[0]()
+		r.dones = r.dones[1:]
+	}
 }
 
 func (r *releaseUtil) append(d DoneFunc) {
