@@ -77,7 +77,7 @@ func TestRollingCounterReduce(t *testing.T) {
 		BucketDuration: bucketDuration,
 	}
 	r := NewRollingCounter(opts)
-	for x := 0; x < size; x = x + 1 {
+	for x := 0; x < size; x++ {
 		for i := 0; i <= x; i++ {
 			r.Add(1)
 		}
@@ -95,7 +95,7 @@ func TestRollingCounterReduce(t *testing.T) {
 	})
 	re.Less(math.Abs(result-6.), 1e-7)
 	re.Less(math.Abs((r.Sum() - 6.)), 1e-7)
-	re.Less(r.Value(), int64(6))
+	re.Less(math.Abs(float64(r.Value())-6), 1e-7)
 }
 
 func TestRollingCounterDataRace(t *testing.T) {

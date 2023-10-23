@@ -101,7 +101,7 @@ func (r *RollingPolicy) Reduce(f func(Iterator) float64) (val float64) {
 	if count := r.size - timespan; count > 0 {
 		offset := r.offset + timespan + 1
 		if offset >= r.size {
-			offset = offset - r.size
+			offset -= r.size
 		}
 		val = f(r.window.Iterator(offset, count))
 	}
