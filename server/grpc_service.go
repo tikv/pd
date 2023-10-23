@@ -2529,6 +2529,9 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 }
 
 func (s *GrpcServer) createSchedulingStream(client *grpc.ClientConn) (schedulingpb.Scheduling_RegionHeartbeatClient, context.CancelFunc, error) {
+	if client == nil {
+		return nil, nil, errors.New("connection is not set")
+	}
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go grpcutil.CheckStream(ctx, cancel, done)
