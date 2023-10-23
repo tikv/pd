@@ -62,7 +62,7 @@ const (
 type Config interface {
 	GetPreAlloc() []string
 	ToWaitRegionSplit() bool
-	GetSkipRawKVRegionSplit() bool
+	GetDisableRawKVRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
 }
@@ -311,7 +311,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	})
 
 	start := time.Now()
-	skipRawKVRegionSplit := manager.config.GetSkipRawKVRegionSplit()
+	skipRawKVRegionSplit := manager.config.GetDisableRawKVRegionSplit()
 	keyspaceRule := MakeLabelRule(id, skipRawKVRegionSplit)
 	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
 	if !ok {
