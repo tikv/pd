@@ -189,8 +189,11 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 		return 0, nil, errEmptyRegion
 	}
 	if len(regionsID) == 1 {
-		scatterSkipNoRegionCounter.Inc()
-		return 0, nil, errRegionNotFound
+		region := r.cluster.GetRegion(regionsID[0])
+		if region == nil {
+			scatterSkipNoRegionCounter.Inc()
+			return 0, nil, errRegionNotFound
+		}
 	}
 	failures := make(map[uint64]error, len(regionsID))
 	regions := make([]*core.RegionInfo, 0, len(regionsID))
