@@ -392,7 +392,26 @@ func getSchedulerConfigByName(c *gin.Context) {
 	handlers := svr.GetCoordinator().GetSchedulersController().GetSchedulerHandlers()
 	name := c.Param("name")
 	if _, ok := handlers[name]; !ok {
-		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.Error())
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
+		return
+	}
+	co := svr.GetCoordinator()
+	if co == nil {
+		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
+	sc := co.GetSchedulersController()
+	if sc == nil {
+		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
+	isDisabled, err := sc.IsSchedulerDisabled(name)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if isDisabled {
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
 		return
 	}
 	suffix := c.Param("suffix")
