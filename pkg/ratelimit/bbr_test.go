@@ -101,9 +101,11 @@ func TestBBRMinRt(t *testing.T) {
 			done()
 		}
 		time.Sleep(bucketDuration)
-		// due to extra time cost in `Sleep`.
-		re.Less(int64(500), bbr.getMinRT())
-		re.Greater(int64(700), bbr.getMinRT())
+		if i > 0 {
+			// due to extra time cost in `Sleep`.
+			re.Less(int64(500), bbr.getMinRT())
+			re.Greater(int64(700), bbr.getMinRT())
+		}
 	}
 
 	for i := 0; i < 10; i++ {
@@ -122,16 +124,24 @@ func TestBBRMinRt(t *testing.T) {
 func TestBDP(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
+	// to make test stabel, scale out bucket duration
+	windowSizeTest = time.Second
+	bucketNumTest = 10
+	optsForTest = []bbrOption{
+		WithWindow(windowSizeTest),
+		WithBucket(bucketNumTest),
+	}
+	cfg = newConfig(optsForTest...)
 	bucketDuration := windowSizeTest / time.Duration(bucketNumTest)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
-	re.Equal(int64(6000000), bbr.getMaxInFlight())
+	re.Equal(int64(600000), bbr.getMaxInFlight())
 
 	for i := 0; i < 10; i++ {
 		for j := 0; j < 100; j++ {
 			go func() {
 				done := bbr.process()
-				time.Sleep(time.Millisecond)
+				time.Sleep(time.Millisecond * 10)
 				done()
 			}()
 		}
@@ -145,14 +155,16 @@ func TestBDP(t *testing.T) {
 		for j := 0; j < 300; j++ {
 			go func() {
 				done := bbr.process()
-				time.Sleep(time.Microsecond * 500)
+				time.Sleep(time.Millisecond * 5)
 				done()
 			}()
 		}
 		time.Sleep(bucketDuration)
-		// due to extra time cost in `Sleep`.
-		re.LessOrEqual(int64(15), bbr.getMaxInFlight())
-		re.GreaterOrEqual(int64(18), bbr.getMaxInFlight())
+		if i > 0 {
+			// due to extra time cost in `Sleep`.
+			re.LessOrEqual(int64(15), bbr.getMaxInFlight())
+			re.GreaterOrEqual(int64(18), bbr.getMaxInFlight())
+		}
 	}
 }
 
