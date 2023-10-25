@@ -1609,17 +1609,34 @@ func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(regi
 }
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
-func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	r.t.RLock()
-	defer r.t.RUnlock()
+func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte, limit int) int64 {
 	var size int64
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-			return false
+	for {
+		r.t.RLock()
+		var cnt int
+		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+				startKey = region.GetEndKey()
+				return false
+			}
+			if limit > 0 && cnt >= limit {
+				startKey = region.GetEndKey()
+				return false
+			}
+			cnt++
+			size += region.GetApproximateSize()
+			return true
+		})
+		r.t.RUnlock()
+		if cnt == 0 {
+			break
 		}
-		size += region.GetApproximateSize()
-		return true
-	})
+
+		if len(startKey) == 0 {
+			break
+		}
+	}
+
 	return size
 }
 

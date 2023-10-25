@@ -108,6 +108,7 @@ const (
 	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
 	// It should enlarge the limiter if the snapshot's duration is less than this value.
 	minSnapshotDurationSec = 5
+	scanRegionLimit        = 1000
 )
 
 // Server is the interface for cluster.
@@ -1903,7 +1904,7 @@ func (c *RaftCluster) checkStores() {
 func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
-		regionSize := c.core.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())
+		regionSize := c.core.GetRegionSizeByRange([]byte(""), []byte(""), scanRegionLimit) * int64(c.opt.GetMaxReplicas())
 		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
 		return float64(regionSize) * weight * 0.9
 	}
@@ -1943,7 +1944,7 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 				matchStores = append(matchStores, s)
 			}
 		}
-		regionSize := c.core.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
+		regionSize := c.core.GetRegionSizeByRange(startKey, endKey, scanRegionLimit) * int64(rule.Count)
 		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
 		storeSize += float64(regionSize) * weight
 		log.Debug("calculate range result",
