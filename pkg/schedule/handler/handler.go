@@ -837,7 +837,19 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 		}
 		return disabledSchedulers, nil
 	default:
-		return schedulers, nil
+		// The default scheduler could not be deleted, it could only be disabled.
+		// TODO: Should we distinguish between disabled and removed schedulers?
+		var enabledSchedulers []string
+		for _, scheduler := range schedulers {
+			disabled, err := sc.IsSchedulerDisabled(scheduler)
+			if err != nil {
+				return nil, err
+			}
+			if !disabled {
+				enabledSchedulers = append(enabledSchedulers, scheduler)
+			}
+		}
+		return enabledSchedulers, nil
 	}
 }
 

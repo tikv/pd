@@ -170,6 +170,7 @@ func (suite *apiTestSuite) TestAPIForward() {
 	//	"/schedulers", http.MethodGet
 	//	"/schedulers/{name}", http.MethodPost
 	//	"/schedulers/diagnostic/{name}", http.MethodGet
+	// 	"/scheduler-config/", http.MethodGet
 	// Should not redirect:
 	//	"/schedulers", http.MethodPost
 	//	"/schedulers/{name}", http.MethodDelete
@@ -188,6 +189,17 @@ func (suite *apiTestSuite) TestAPIForward() {
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/diagnostic/balance-leader-scheduler"), &resp,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	suite.NoError(err)
+
+	schedulers := []string{
+		"balance-leader-scheduler",
+		"balance-witness-scheduler",
+		"balance-hot-region-scheduler",
+	}
+	for _, schedulerName := range schedulers {
+		err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s/%s/%s", urlPrefix, "scheduler-config", schedulerName, "list"), &resp,
+			testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+		suite.NoError(err)
+	}
 
 	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), pauseArgs,
 		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))

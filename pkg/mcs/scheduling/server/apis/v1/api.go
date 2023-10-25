@@ -26,6 +26,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -128,6 +129,7 @@ func (s *Service) RegisterSchedulersRouter() {
 	router := s.root.Group("schedulers")
 	router.GET("", getSchedulers)
 	router.GET("/diagnostic/:name", getDiagnosticResult)
+	router.GET("/config/:name/:suffix", getSchedulerConfigByName)
 	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
 	// And we need to do one-to-two forwarding in the API middleware.
 	router.POST("/:name", pauseOrResumeScheduler)
@@ -383,6 +385,19 @@ func getSchedulers(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, output)
+}
+
+func getSchedulerConfigByName(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	handlers := svr.GetCoordinator().GetSchedulersController().GetSchedulerHandlers()
+	name := c.Param("name")
+	if _, ok := handlers[name]; !ok {
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.Error())
+		return
+	}
+	suffix := c.Param("suffix")
+	c.Request.URL.Path = "/" + suffix
+	handlers[name].ServeHTTP(c.Writer, c.Request)
 }
 
 // @Tags     schedulers
