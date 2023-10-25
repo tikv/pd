@@ -44,6 +44,9 @@ func makeStores() StoreSet {
 					if x == 5 {
 						labels["engine"] = "tiflash"
 					}
+					if id == 1111 || id == 2111 || id == 3111 {
+						labels["disk"] = "ssd"
+					}
 					stores.SetStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now)))
 				}
 			}
@@ -186,6 +189,9 @@ func TestFitRegion(t *testing.T) {
 		{"1111,1112,1113,1114", []string{"3/voter//", "1/voter/id=id1/"}, "1112,1113,1114/1111"},
 		{"1111,2211,3111,3112", []string{"3/voter//zone", "1/voter/rack=rack2/"}, "1111,2211,3111//3112"},
 		{"1111,2211,3111,3112", []string{"1/voter/rack=rack2/", "3/voter//zone"}, "2211/1111,3111,3112"},
+		{"1111_leader,2111,3111", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,3111/"},
+		{"1111_leader,2111,3111,4111", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,4111/3111"},
+		{"1111_leader,2111,3111,4111_learner", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,3111//4111"},
 	}
 
 	for _, testCase := range testCases {
