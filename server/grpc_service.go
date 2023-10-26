@@ -1002,7 +1002,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 
 		s.handleDamagedStore(request.GetStats())
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
-		if s.IsAPIServiceMode() {
+		if s.IsServiceEnabled(utils.SchedulingServiceName) {
 			forwardCli, _ := s.updateSchedulingClient(ctx)
 			if forwardCli != nil {
 				req := &schedulingpb.StoreHeartbeatRequest{
@@ -1048,6 +1048,11 @@ func (s *GrpcServer) updateSchedulingClient(ctx context.Context) (schedulingpb.S
 			lastPrimary: forwardedHost,
 		}
 		s.schedulingClient.Store(forwardCli)
+		old := ""
+		if pre != nil {
+			old = pre.(*schedulingClient).getPrimaryAddr()
+		}
+		log.Info("update scheduling client", zap.String("old-forwarded-host", old), zap.String("new-forwarded-host", forwardedHost))
 		return forwardCli.getClient(), nil
 	} else if forwardedHost != "" && (pre != nil && forwardedHost == pre.(*schedulingClient).getPrimaryAddr()) {
 		return pre.(*schedulingClient).getClient(), nil
@@ -1245,7 +1250,6 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		errCh             chan error
 		schedulingStream  schedulingpb.Scheduling_RegionHeartbeatClient
 		cancel1           context.CancelFunc
-		lastPrimaryAddr   string
 	)
 	defer func() {
 		// cancel the forward stream
@@ -1360,24 +1364,20 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			continue
 		}
 
-		if s.IsAPIServiceMode() {
+		if s.IsServiceEnabled(utils.SchedulingServiceName) {
 			ctx := stream.Context()
-			primaryAddr, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
-			if schedulingStream == nil || lastPrimaryAddr != primaryAddr {
+			if schedulingStream == nil {
 				if cancel1 != nil {
 					cancel1()
 				}
-				client, err := s.getDelegateClient(ctx, primaryAddr)
+				forwardCli, err := s.updateSchedulingClient(ctx)
 				if err != nil {
-					log.Error("get delegate client failed", zap.Error(err))
+					log.Error("update scheduling client failed", zap.Error(err))
 				}
-
-				log.Info("create region heartbeat forward stream", zap.String("forwarded-host", primaryAddr))
-				schedulingStream, cancel1, err = s.createSchedulingStream(client)
+				schedulingStream, cancel1, err = s.createSchedulingStream(forwardCli)
 				if err != nil {
 					log.Error("create region heartbeat forward stream failed", zap.Error(err))
 				} else {
-					lastPrimaryAddr = primaryAddr
 					errCh = make(chan error, 1)
 					go forwardSchedulingToServer(schedulingStream, server, errCh)
 				}
@@ -1404,6 +1404,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				}
 				if err := schedulingStream.Send(req); err != nil {
 					log.Error("forward region heartbeat failed", zap.Error(err))
+					s.schedulingClient.Store(&schedulingClient{})
 				}
 			}
 		}
@@ -1632,7 +1633,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 
 // AskBatchSplit implements gRPC PDServer.
 func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if s.IsAPIServiceMode() {
+	if s.IsServiceEnabled(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.AskBatchSplitResponse{
@@ -1805,7 +1806,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 
 // ScatterRegion implements gRPC PDServer.
 func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
-	if s.IsAPIServiceMode() {
+	if s.IsServiceEnabled(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.ScatterRegionResponse{
@@ -2036,7 +2037,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 
 // GetOperator gets information about the operator belonging to the specify region.
 func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
-	if s.IsAPIServiceMode() {
+	if s.IsServiceEnabled(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.GetOperatorResponse{
@@ -2308,7 +2309,7 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 
 // SplitRegions split regions by the given split keys
 func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
-	if s.IsAPIServiceMode() {
+	if s.IsServiceEnabled(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.SplitRegionsResponse{
@@ -2528,14 +2529,14 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 	}
 }
 
-func (s *GrpcServer) createSchedulingStream(client *grpc.ClientConn) (schedulingpb.Scheduling_RegionHeartbeatClient, context.CancelFunc, error) {
+func (s *GrpcServer) createSchedulingStream(client schedulingpb.SchedulingClient) (schedulingpb.Scheduling_RegionHeartbeatClient, context.CancelFunc, error) {
 	if client == nil {
 		return nil, nil, errors.New("connection is not set")
 	}
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go grpcutil.CheckStream(ctx, cancel, done)
-	forwardStream, err := schedulingpb.NewSchedulingClient(client).RegionHeartbeat(ctx)
+	forwardStream, err := client.RegionHeartbeat(ctx)
 	done <- struct{}{}
 	return forwardStream, cancel, err
 }
