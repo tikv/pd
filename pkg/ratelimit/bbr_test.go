@@ -15,10 +15,13 @@
 package ratelimit
 
 import (
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 var (
@@ -83,12 +86,19 @@ func TestBBRMinRt(t *testing.T) {
 	re.Equal(int64(60000000000), bbr.getMinRT())
 
 	for i := 0; i < 10; i++ {
-		for j := 0; j < 2; j++ {
-			done := bbr.process()
-			time.Sleep(time.Millisecond)
-			done()
-		}
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 2; j++ {
+				done := bbr.process()
+				time.Sleep(time.Millisecond)
+				done()
+			}
+		}()
 		time.Sleep(bucketDuration)
+		wg.Wait()
+		log.Info("round ================= ", zap.Int("i", i))
 		// due to extra time cost in `Sleep`.
 		re.Less(int64(1000), bbr.getMinRT())
 		re.Greater(int64(1300), bbr.getMinRT())
@@ -125,9 +135,9 @@ func TestBDP(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	// to make test stabel, scale out bucket duration
-	windowSizeTest = time.Second
-	bucketNumTest = 10
-	optsForTest = []bbrOption{
+	windowSizeTest := time.Second
+	bucketNumTest := 10
+	optsForTest := []bbrOption{
 		WithWindow(windowSizeTest),
 		WithBucket(bucketNumTest),
 	}

@@ -23,7 +23,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/window"
+	"go.uber.org/zap"
 )
 
 const (
@@ -203,6 +205,7 @@ func (l *bbr) getMinRT() int64 {
 			for _, p := range bucket.Points {
 				total += p
 			}
+			log.Info("getMinRT", zap.Float64("total", total), zap.Int64("bucket.Count", bucket.Count))
 			avg := total / float64(bucket.Count)
 			result = math.Min(result, avg)
 		}
