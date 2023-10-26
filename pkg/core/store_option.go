@@ -228,6 +228,30 @@ func SetLastPersistTime(lastPersist time.Time) StoreCreateOption {
 	}
 }
 
+// SetStoreState sets the state for the store.
+func SetStoreState(state metapb.StoreState, physicallyDestroyed ...bool) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		switch state {
+		case metapb.StoreState_Up:
+			meta.State = metapb.StoreState_Up
+			meta.NodeState = metapb.NodeState_Serving
+		case metapb.StoreState_Offline:
+			if len(physicallyDestroyed) != 0 {
+				meta.State = metapb.StoreState_Offline
+				meta.NodeState = metapb.NodeState_Removing
+				meta.PhysicallyDestroyed = physicallyDestroyed[0]
+			} else {
+				panic("physicallyDestroyed should be set when set store state to offline")
+			}
+		case metapb.StoreState_Tombstone:
+			meta.State = metapb.StoreState_Tombstone
+			meta.NodeState = metapb.NodeState_Removed
+		}
+		store.meta = meta
+	}
+}
+
 // SetStoreStats sets the statistics information for the store.
 func SetStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	return func(store *StoreInfo) {
