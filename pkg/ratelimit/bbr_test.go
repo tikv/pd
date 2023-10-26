@@ -23,7 +23,7 @@ import (
 )
 
 var (
-	windowSizeTest = time.Millisecond * 100
+	windowSizeTest = time.Second
 	bucketNumTest  = 10
 	bucketDuration = windowSizeTest / time.Duration(bucketNumTest)
 
@@ -89,7 +89,7 @@ func TestBBRMinRt(t *testing.T) {
 			defer wg.Done()
 			for j := 0; j < 2; j++ {
 				done := bbr.process()
-				time.Sleep(time.Millisecond)
+				time.Sleep(time.Millisecond * 10)
 				done()
 			}
 		}()
@@ -97,49 +97,42 @@ func TestBBRMinRt(t *testing.T) {
 		wg.Wait()
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.Less(int64(1000), bbr.getMinRT(true))
-			re.Greater(int64(1300), bbr.getMinRT(true))
+			re.Less(int64(10000), bbr.getMinRT(true))
+			re.Greater(int64(12000), bbr.getMinRT(true))
 		}
 	}
 
 	for i := 0; i < 10; i++ {
 		for j := 0; j < 2; j++ {
 			done := bbr.process()
-			time.Sleep(time.Microsecond * 500)
+			time.Sleep(time.Millisecond * 5)
 			done()
 		}
 		time.Sleep(bucketDuration)
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.Less(int64(500), bbr.getMinRT(true))
-			re.Greater(int64(700), bbr.getMinRT(true))
+			re.Less(int64(5000), bbr.getMinRT(true))
+			re.Greater(int64(6000), bbr.getMinRT(true))
 		}
 	}
 
 	for i := 0; i < 10; i++ {
 		for j := 0; j < 2; j++ {
 			done := bbr.process()
-			time.Sleep(time.Millisecond * 2)
+			time.Sleep(time.Millisecond * 20)
 			done()
 		}
 		time.Sleep(bucketDuration)
 	}
 	// due to extra time cost in `Sleep`.
-	re.Less(int64(2000), bbr.getMinRT(true))
-	re.Greater(int64(2500), bbr.getMinRT(true))
+	re.Less(int64(20000), bbr.getMinRT(true))
+	re.Greater(int64(24000), bbr.getMinRT(true))
 }
 
 func TestBDP(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	// to make test stabel, scale out bucket duration
-	windowSizeTest := time.Second
-	bucketNumTest := 10
-	optsForTest := []bbrOption{
-		WithWindow(windowSizeTest),
-		WithBucket(bucketNumTest),
-	}
-	cfg := newConfig(optsForTest...)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	re.Equal(int64(600000), bbr.getMaxInFlight())
@@ -195,6 +188,6 @@ func TestFullStatus(t *testing.T) {
 	re.LessOrEqual(int64(7), maxInFlight)
 	re.GreaterOrEqual(int64(9), maxInFlight)
 	re.Equal(cl.limit, uint64(maxInFlight))
-	re.LessOrEqual(int64(20000), bbr.bbrStatus.getMinRT())
-	re.GreaterOrEqual(int64(22000), bbr.bbrStatus.getMinRT())
+	re.LessOrEqual(int64(200000), bbr.bbrStatus.getMinRT())
+	re.GreaterOrEqual(int64(220000), bbr.bbrStatus.getMinRT())
 }
