@@ -110,6 +110,7 @@ func NewService(srv *scheserver.Service) *Service {
 		rd:               createIndentRender(),
 	}
 	s.RegisterAdminRouter()
+	s.RegisterConfigRouter()
 	s.RegisterOperatorsRouter()
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
@@ -121,6 +122,15 @@ func NewService(srv *scheserver.Service) *Service {
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	router.PUT("/log", changeLogLevel)
+}
+
+// RegisterConfigRouter registers the router of the config handler.
+func (s *Service) RegisterConfigRouter() {
+	router := s.root.Group("config")
+	router.GET("", getConfig)
+	router.GET("/schedule", getScheduleConfig)
+	router.GET("/replicate", getReplicationConfig)
+	router.GET("/store", getStoreConfig)
 }
 
 // RegisterSchedulersRouter registers the router of the schedulers handler.
@@ -174,6 +184,50 @@ func changeLogLevel(c *gin.Context) {
 	}
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	c.String(http.StatusOK, "The log level is updated.")
+}
+
+// @Tags     config
+// @Summary  Get full config.
+// @Produce  json
+// @Success  200  {object}  config.Config
+// @Router   /config [get]
+func getConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cfg := svr.GetConfig()
+	c.IndentedJSON(http.StatusOK, cfg)
+}
+
+// @Tags     config
+// @Summary  Get schedule config.
+// @Produce  json
+// @Success  200  {object}  sc.ScheduleConfig
+// @Router   /config/schedule [get]
+func getScheduleConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cfg := svr.GetScheduleConfig()
+	c.IndentedJSON(http.StatusOK, cfg)
+}
+
+// @Tags     config
+// @Summary  Get replication config.
+// @Produce  json
+// @Success  200  {object}  sc.ReplicationConfig
+// @Router   /config/replicate [get]
+func getReplicationConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cfg := svr.GetReplicationConfig()
+	c.IndentedJSON(http.StatusOK, cfg)
+}
+
+// @Tags     config
+// @Summary  Get store config.
+// @Produce  json
+// @Success  200  {object}  sc.StoreConfig
+// @Router   /config/store [get]
+func getStoreConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cfg := svr.GetStoreConfig()
+	c.IndentedJSON(http.StatusOK, cfg)
 }
 
 // @Tags     operators

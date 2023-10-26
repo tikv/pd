@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
@@ -217,4 +220,80 @@ func (suite *apiTestSuite) TestAPIForward() {
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/history"), &history,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
+}
+
+func (suite *apiTestSuite) TestConfig() {
+	re := suite.Require()
+	s, cleanup := tests.StartSingleSchedulingTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanup()
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	addr := s.GetAddr()
+	urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
+
+	var cfg config.Config
+	testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+	suite.Equal(cfg.GetListenAddr(), s.GetConfig().GetListenAddr())
+	suite.Equal(cfg.Schedule.LeaderScheduleLimit, s.GetConfig().Schedule.LeaderScheduleLimit)
+	suite.Equal(cfg.Schedule.EnableCrossTableMerge, s.GetConfig().Schedule.EnableCrossTableMerge)
+	suite.Equal(cfg.Replication.MaxReplicas, s.GetConfig().Replication.MaxReplicas)
+	suite.Equal(cfg.Replication.LocationLabels, s.GetConfig().Replication.LocationLabels)
+	suite.Equal(cfg.DataDir, s.GetConfig().DataDir)
+
+	var scheduleCfg sc.ScheduleConfig
+	testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/schedule", &scheduleCfg)
+	suite.Equal(scheduleCfg.LeaderScheduleLimit, s.GetScheduleConfig().LeaderScheduleLimit)
+	suite.Equal(scheduleCfg.EnableCrossTableMerge, s.GetScheduleConfig().EnableCrossTableMerge)
+
+	var replicationCfg sc.ReplicationConfig
+	testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/replicate", &replicationCfg)
+	suite.Equal(replicationCfg.MaxReplicas, s.GetReplicationConfig().MaxReplicas)
+	suite.Equal(replicationCfg.LocationLabels, s.GetReplicationConfig().LocationLabels)
+
+	var storeCfg sc.StoreConfig
+	testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/store", &storeCfg)
+	suite.Equal(storeCfg.Coprocessor.RegionMaxKeys, s.GetStoreConfig().Coprocessor.RegionMaxKeys)
+	suite.Equal(storeCfg.Coprocessor.RegionSplitKeys, s.GetStoreConfig().Coprocessor.RegionSplitKeys)
+}
+
+func TestConfigForward(t *testing.T) {
+	re := require.New(t)
+	checkConfigForward := func(cluster *tests.TestCluster) {
+		sche := cluster.GetSchedulingPrimaryServer()
+		var cfg map[string]interface{}
+		addr := cluster.GetLeaderServer().GetAddr()
+
+		// Test config
+		urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", addr)
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"], float64(sche.GetScheduleConfig().LeaderScheduleLimit))
+		// Test to change config
+		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 100
+		re.Equal(100, int(sche.GetScheduleConfig().LeaderScheduleLimit))
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"], float64(sche.GetScheduleConfig().LeaderScheduleLimit))
+
+		// Test schedule
+		urlPrefix = fmt.Sprintf("%s/pd/api/v1/config/schedule", addr)
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		re.Equal(cfg["leader-schedule-limit"], float64(sche.GetScheduleConfig().LeaderScheduleLimit))
+		// Test to change config
+		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 4
+		re.Equal(4, int(sche.GetScheduleConfig().LeaderScheduleLimit))
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		re.Equal(cfg["leader-schedule-limit"], float64(sche.GetScheduleConfig().LeaderScheduleLimit))
+
+		// Test replicate
+		urlPrefix = fmt.Sprintf("%s/pd/api/v1/config/replicate", addr)
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		re.Equal(cfg["max-replicas"], float64(sche.GetReplicationConfig().MaxReplicas))
+		// Test to change config
+		sche.GetPersistConfig().GetReplicationConfig().MaxReplicas = 5
+		re.Equal(5, int(sche.GetReplicationConfig().MaxReplicas))
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		re.Equal(cfg["max-replicas"], float64(sche.GetReplicationConfig().MaxReplicas))
+	}
+	env := tests.NewSchedulingTestEnvironment(t)
+	env.RunTestInAPIMode(checkConfigForward)
 }

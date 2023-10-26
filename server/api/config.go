@@ -27,6 +27,8 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
@@ -60,7 +62,36 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 // @Router   /config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetConfig()
-	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
+	if h.svr.IsAPIServiceMode() {
+		b, err := h.GetSchedulingServerConfig("config/schedule")
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var scheduleCfg sc.ScheduleConfig
+		err = json.Unmarshal(b, &scheduleCfg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		cfg.Schedule = scheduleCfg
+		b, err = h.GetSchedulingServerConfig("config/replicate")
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var replicationCfg sc.ReplicationConfig
+		err = json.Unmarshal(b, &replicationCfg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		cfg.Replication = replicationCfg
+		// TODO: will we support config/store?
+		// TODO: after scheduler-config is supported, we need to merge the config.
+	} else {
+		cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
+	}
 	h.rd.JSON(w, http.StatusOK, cfg)
 }
 
@@ -301,6 +332,21 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 // @Success  200  {object}  sc.ScheduleConfig
 // @Router   /config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
+	if h.svr.IsAPIServiceMode() {
+		b, err := h.GetSchedulingServerConfig("config/schedule")
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var cfg sc.ScheduleConfig
+		err = json.Unmarshal(b, &cfg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, cfg)
+		return
+	}
 	cfg := h.svr.GetScheduleConfig()
 	cfg.MaxMergeRegionKeys = cfg.GetMaxMergeRegionKeys()
 	h.rd.JSON(w, http.StatusOK, cfg)
@@ -364,6 +410,21 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Success  200  {object}  sc.ReplicationConfig
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
+	if h.svr.IsAPIServiceMode() {
+		b, err := h.GetSchedulingServerConfig("config/replicate")
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		var cfg sc.ReplicationConfig
+		err = json.Unmarshal(b, &cfg)
+		if err != nil {
+			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		h.rd.JSON(w, http.StatusOK, cfg)
+		return
+	}
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())
 }
 
@@ -504,4 +565,25 @@ func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Re
 // @Router   /config/pd-server [get]
 func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetPDServerConfig())
+}
+
+func (h *confHandler) GetSchedulingServerConfig(path string) ([]byte, error) {
+	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), utils.SchedulingServiceName)
+	if !ok {
+		return nil, errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
+	}
+	url := fmt.Sprintf("%s/scheduling/api/v1/%s", addr, path)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := h.svr.GetHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
 }
