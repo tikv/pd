@@ -758,6 +758,9 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	dstStoreID := uint64(0)
 	if isSplit {
 		region := bs.GetRegion(bs.ops[0].RegionID())
+		if region == nil {
+			return false
+		}
 		for id := range region.GetStoreIDs() {
 			srcStoreIDs = append(srcStoreIDs, id)
 		}
