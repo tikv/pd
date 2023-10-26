@@ -586,3 +586,13 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 func (c *Cluster) IsPrepared() bool {
 	return c.coordinator.GetPrepareChecker().IsPrepared()
 }
+
+// DropCacheAllRegion removes all cached regions.
+func (c *Cluster) DropCacheAllRegion() {
+	c.ResetRegionCache()
+}
+
+// DropCacheRegion removes a region from the cache.
+func (c *Cluster) DropCacheRegion(id uint64) {
+	c.RemoveRegionIfExist(id)
+}
