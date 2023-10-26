@@ -52,7 +52,10 @@ type Cluster struct {
 	running           atomic.Bool
 }
 
-const regionLabelGCInterval = time.Hour
+const (
+	regionLabelGCInterval = time.Hour
+	requestTimeout        = 3 * time.Second
+)
 
 // NewCluster creates a new cluster.
 func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
@@ -199,7 +202,9 @@ func (c *Cluster) AllocID() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	resp, err := client.AllocID(c.ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
+	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
+	defer cancel()
+	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
 	if err != nil {
 		c.checkMembershipCh <- struct{}{}
 		return 0, err

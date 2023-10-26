@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -232,6 +233,14 @@ func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
 	return v.(chan<- struct{})
 }
 
+func (o *PersistConfig) tryNotifySchedulersUpdating() {
+	notifier := o.getSchedulersUpdatingNotifier()
+	if notifier == nil {
+		return
+	}
+	notifier <- struct{}{}
+}
+
 // GetClusterVersion returns the cluster version.
 func (o *PersistConfig) GetClusterVersion() *semver.Version {
 	return (*semver.Version)(atomic.LoadPointer(&o.clusterVersion))
@@ -251,11 +260,10 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
-	// The coordinator is not aware of the underlying scheduler config changes, however, it
-	// should react on the scheduler number changes to handle the add/remove scheduler events.
-	if notifier := o.getSchedulersUpdatingNotifier(); notifier != nil &&
-		len(old.Schedulers) != len(cfg.Schedulers) {
-		notifier <- struct{}{}
+	// The coordinator is not aware of the underlying scheduler config changes,
+	// we should notify it to update the schedulers proactively.
+	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
+		o.tryNotifySchedulersUpdating()
 	}
 }
 
