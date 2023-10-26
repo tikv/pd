@@ -15,6 +15,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -73,6 +74,18 @@ func (suite *operatorTestSuite) TestOperator() {
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	// pause rule checker to avoid unexpected operator
+	checkerName := "rule"
+	addr := cluster.GetLeaderServer().GetAddr()
+	resp := make(map[string]interface{})
+	url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
+	err := tu.CheckPostJSON(testDialClient, url, []byte(`{"delay":1000}`), tu.StatusOK(re))
+	re.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+	re.NoError(err)
+	re.True(resp["paused"].(bool))
+
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -106,13 +119,15 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 			ConfVer: 1,
 			Version: 1,
 		},
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
 	}
 	regionInfo := core.NewRegionInfo(region, peer1)
 	tests.MustPutRegionInfo(re, cluster, regionInfo)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
-	err := tu.CheckGetJSON(testDialClient, regionURL, nil,
+	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
 	suite.NoError(err)
 	recordURL := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
@@ -168,7 +183,7 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 
 	// Fail to get operator if from is latest.
 	time.Sleep(time.Second)
-	url := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
+	url = fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
 	err = tu.CheckGetJSON(testDialClient, url, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
 	suite.NoError(err)
@@ -176,6 +191,18 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	// pause rule checker to avoid unexpected operator
+	checkerName := "rule"
+	addr := cluster.GetLeaderServer().GetAddr()
+	resp := make(map[string]interface{})
+	url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
+	err := tu.CheckPostJSON(testDialClient, url, []byte(`{"delay":1000}`), tu.StatusOK(re))
+	re.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+	re.NoError(err)
+	re.True(resp["paused"].(bool))
+
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
@@ -184,7 +211,7 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 	tests.MustPutRegionInfo(re, cluster, r3)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
 	suite.NoError(err)
 
 	tu.CheckDelete(testDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
@@ -201,6 +228,18 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	// pause rule checker to avoid unexpected operator
+	checkerName := "rule"
+	addr := cluster.GetLeaderServer().GetAddr()
+	resp := make(map[string]interface{})
+	url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
+	err := tu.CheckPostJSON(testDialClient, url, []byte(`{"delay":1000}`), tu.StatusOK(re))
+	re.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+	re.NoError(err)
+	re.True(resp["paused"].(bool))
+
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -239,12 +278,14 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			ConfVer: 1,
 			Version: 1,
 		},
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
 	}
 	tests.MustPutRegionInfo(re, cluster, core.NewRegionInfo(region, peer1))
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
-	err := tu.CheckGetJSON(testDialClient, regionURL, nil,
+	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
 	re.NoError(err)
 	convertStepsToStr := func(steps []string) string {
@@ -408,13 +449,24 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		},
 	}
 	svr := cluster.GetLeaderServer()
+	url = fmt.Sprintf("%s/pd/api/v1/config", svr.GetAddr())
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
-		// TODO: remove this after we can sync this config to all servers.
-		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			sche.GetCluster().GetSchedulerConfig().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+		data := make(map[string]interface{})
+		if testCase.placementRuleEnable {
+			data["enable-placement-rules"] = "true"
 		} else {
-			svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+			data["enable-placement-rules"] = "false"
+		}
+		reqData, e := json.Marshal(data)
+		re.NoError(e)
+		err := tu.CheckPostJSON(testDialClient, url, reqData, tu.StatusOK(re))
+		re.NoError(err)
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			// wait for the scheduler server to update the config
+			tu.Eventually(re, func() bool {
+				return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled() == testCase.placementRuleEnable
+			})
 		}
 		manager := svr.GetRaftCluster().GetRuleManager()
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
@@ -436,7 +488,6 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			err = manager.DeleteRule("pd", "default")
 			suite.NoError(err)
 		}
-		var err error
 		if testCase.expectedError == nil {
 			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input, tu.StatusOK(re))
 		} else {
