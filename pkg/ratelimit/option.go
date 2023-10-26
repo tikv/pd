@@ -53,7 +53,6 @@ func AddLabelAllowList() Option {
 	}
 }
 
-// updateConcurrencyLimiter creates a concurrency limiter for a given label if it doesn't exist.
 func updateConcurrencyLimiter(limit uint64) Option {
 	return func(label string, l *Controller) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
@@ -64,7 +63,6 @@ func updateConcurrencyLimiter(limit uint64) Option {
 	}
 }
 
-// updateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
 func updateQPSLimiter(limit float64, burst int) Option {
 	return func(label string, l *Controller) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {

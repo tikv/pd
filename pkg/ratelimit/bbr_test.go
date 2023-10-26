@@ -80,7 +80,7 @@ func TestBBRMinRt(t *testing.T) {
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	// default max min rt is equal to maxFloat64.
-	re.Equal(int64(60000000000), bbr.getMinRT(true))
+	re.Equal(int64(60000000000), bbr.getMinRT())
 
 	for i := 0; i < 10; i++ {
 		var wg sync.WaitGroup
@@ -97,8 +97,8 @@ func TestBBRMinRt(t *testing.T) {
 		wg.Wait()
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.Less(int64(10000), bbr.getMinRT(true))
-			re.Greater(int64(12000), bbr.getMinRT(true))
+			re.Less(int64(10000), bbr.getMinRT())
+			re.Greater(int64(12000), bbr.getMinRT())
 		}
 	}
 
@@ -111,8 +111,8 @@ func TestBBRMinRt(t *testing.T) {
 		time.Sleep(bucketDuration)
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.Less(int64(5000), bbr.getMinRT(true))
-			re.Greater(int64(6000), bbr.getMinRT(true))
+			re.Less(int64(5000), bbr.getMinRT())
+			re.Greater(int64(6000), bbr.getMinRT())
 		}
 	}
 
@@ -125,14 +125,13 @@ func TestBBRMinRt(t *testing.T) {
 		time.Sleep(bucketDuration)
 	}
 	// due to extra time cost in `Sleep`.
-	re.Less(int64(20000), bbr.getMinRT(true))
-	re.Greater(int64(24000), bbr.getMinRT(true))
+	re.Less(int64(20000), bbr.getMinRT())
+	re.Greater(int64(24000), bbr.getMinRT())
 }
 
 func TestBDP(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	// to make test stabel, scale out bucket duration
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	re.Equal(int64(600000), bbr.getMaxInFlight())
