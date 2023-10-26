@@ -41,6 +41,7 @@ import (
 	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
@@ -349,11 +350,20 @@ func (c *RaftCluster) runServiceCheckJob() {
 
 	checkFn := func() {
 		if c.isAPIServiceMode {
-			once.Do(c.initSchedulers)
-			c.independentServices.Store(mcsutils.SchedulingServiceName, true)
-			return
-		}
-		if c.startSchedulingJobs() {
+			servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
+			if err != nil {
+				return
+			}
+			if len(servers) != 0 {
+				c.stopSchedulingJobs()
+				once.Do(c.initSchedulers)
+				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			} else {
+				if c.startSchedulingJobs() {
+					c.independentServices.Delete(mcsutils.SchedulingServiceName)
+				}
+			}
+		} else if c.startSchedulingJobs() {
 			c.independentServices.Delete(mcsutils.SchedulingServiceName)
 		}
 	}
