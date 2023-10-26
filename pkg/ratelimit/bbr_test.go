@@ -81,7 +81,7 @@ func TestBBRMinRt(t *testing.T) {
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	// default max min rt is equal to maxFloat64.
-	re.Equal(int64(60000000000), bbr.getMinRT())
+	re.Equal(int64(60000000000), bbr.getMinRT(true))
 
 	for i := 0; i < 10; i++ {
 		var wg sync.WaitGroup
@@ -98,8 +98,8 @@ func TestBBRMinRt(t *testing.T) {
 		wg.Wait()
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.Less(int64(1000), bbr.getMinRT())
-			re.Greater(int64(1300), bbr.getMinRT())
+			re.Less(int64(1000), bbr.getMinRT(true))
+			re.Greater(int64(1300), bbr.getMinRT(true))
 		}
 	}
 
@@ -112,8 +112,8 @@ func TestBBRMinRt(t *testing.T) {
 		time.Sleep(bucketDuration)
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.Less(int64(500), bbr.getMinRT())
-			re.Greater(int64(700), bbr.getMinRT())
+			re.Less(int64(500), bbr.getMinRT(true))
+			re.Greater(int64(700), bbr.getMinRT(true))
 		}
 	}
 
@@ -126,8 +126,8 @@ func TestBBRMinRt(t *testing.T) {
 		time.Sleep(bucketDuration)
 	}
 	// due to extra time cost in `Sleep`.
-	re.Less(int64(2000), bbr.getMinRT())
-	re.Greater(int64(2500), bbr.getMinRT())
+	re.Less(int64(2000), bbr.getMinRT(true))
+	re.Greater(int64(2500), bbr.getMinRT(true))
 }
 
 func TestBDP(t *testing.T) {

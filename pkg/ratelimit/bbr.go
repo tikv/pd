@@ -22,7 +22,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/window"
+	"go.uber.org/zap"
 )
 
 const (
@@ -147,7 +149,7 @@ func (l *bbr) timespan(lastTime time.Time) int {
 }
 
 func (l *bbr) getMaxInFlight() int64 {
-	return int64(math.Floor(float64(l.getMaxPASS()*l.getMinRT()*l.bucketPerSecond)/1e6) + 0.5)
+	return int64(math.Floor(float64(l.getMaxPASS()*l.getMinRT(false)*l.bucketPerSecond)/1e6) + 0.5)
 }
 
 func (l *bbr) getMaxPASS() int64 {
@@ -184,13 +186,19 @@ func (l *bbr) getMaxPASS() int64 {
 	return rawMaxPass
 }
 
-func (l *bbr) getMinRT() int64 {
+func (l *bbr) getMinRT(debug bool) int64 {
 	rtCache := l.minRtCache.Load()
 	if rtCache != nil {
 		rc := rtCache.(*cache)
 		if l.timespan(rc.time) < 1 {
+			if debug {
+				log.Info("cached")
+			}
 			return rc.val
 		}
+	}
+	if debug {
+		log.Info("updated")
 	}
 	rawMinRT := int64(math.Ceil(l.rtStat.Reduce(func(iterator window.Iterator) float64 {
 		var result = float64(time.Minute)
@@ -202,6 +210,9 @@ func (l *bbr) getMinRT() int64 {
 			total := 0.0
 			for _, p := range bucket.Points {
 				total += p
+			}
+			if debug {
+				log.Info("getMinRT", zap.Float64("total", total), zap.Int64("bucket.Count", bucket.Count))
 			}
 			avg := total / float64(bucket.Count)
 			result = math.Min(result, avg)
@@ -261,7 +272,7 @@ func (l *bbr) checkFullStatus() {
 	if raises > 0 && positive > negative && l.bbrStatus.getMaxInFlight() == inf {
 		maxInFlight := l.getMaxInFlight()
 		l.bbrStatus.storeMaxInFlight(maxInFlight)
-		l.bbrStatus.storeMinRT(l.getMinRT())
+		l.bbrStatus.storeMinRT(l.getMinRT(false))
 		for _, fd := range l.feedbacks {
 			fd(l.bbrStatus)
 		}

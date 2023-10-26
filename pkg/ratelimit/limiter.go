@@ -36,8 +36,6 @@ type limiter struct {
 	mu          syncutil.RWMutex
 	concurrency *concurrencyLimiter
 	rate        *RateLimiter
-
-	bbr *bbr
 }
 
 func newLimiter() *limiter {
@@ -55,12 +53,6 @@ func (l *limiter) getRateLimiter() *RateLimiter {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.rate
-}
-
-func (l *limiter) getBBR() *bbr {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.bbr
 }
 
 func (l *limiter) deleteRateLimiter() bool {
@@ -156,14 +148,9 @@ func (l *limiter) allow() (DoneFunc, error) {
 		}
 		return nil, errs.ErrRateLimitExceeded
 	}
-	bbr := l.getBBR()
-	if bbr == nil {
-		return func() {
-			if concurrency != nil {
-				concurrency.release()
-			}
-		}, nil
-	}
-	done := bbr.process()
-	return done, nil
+	return func() {
+		if concurrency != nil {
+			concurrency.release()
+		}
+	}, nil
 }
