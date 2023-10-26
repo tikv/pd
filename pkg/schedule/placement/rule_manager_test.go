@@ -163,6 +163,8 @@ func TestSaveLoad(t *testing.T) {
 	re.Equal(rules[0].String(), m2.GetRule("pd", "default").String())
 	re.Equal(rules[1].String(), m2.GetRule("foo", "baz").String())
 	re.Equal(rules[2].String(), m2.GetRule("foo", "bar").String())
+	re.Equal(manager.GetRulesCount(), 3)
+	re.Equal(manager.GetGroupsCount(), 2)
 }
 
 func TestSetAfterGet(t *testing.T) {
