@@ -19,13 +19,10 @@ package ratelimit
 
 import (
 	"math"
-	"sort"
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/window"
-	"go.uber.org/zap"
 )
 
 const (
@@ -162,23 +159,24 @@ func (l *bbr) getMaxPASS() int64 {
 		}
 	}
 	rawMaxPass := int64(l.passStat.Reduce(func(iterator window.Iterator) float64 {
-		sli := make([]float64, 0, l.cfg.Bucket-1)
-		var result = 1.0
+		var result = 0.0
 		for i := 1; iterator.Next() && i < l.cfg.Bucket; i++ {
 			bucket := iterator.Bucket()
 			count := 0.0
 			for _, p := range bucket.Points {
 				count += p
 			}
-			sli = append(sli, count)
 			result = math.Max(result, count)
 		}
-
-		sort.Slice(sli, func(i, j int) bool {
-			return sli[i] > sli[j]
-		})
 		return result
 	}))
+	// don't save cache when no update, and default is 1.
+	if rawMaxPass < 1 {
+		rawMaxPass = 1
+	}
+	if rawMaxPass == 1 {
+		return rawMaxPass
+	}
 	l.maxPASSCache.Store(&cache{
 		val:  rawMaxPass,
 		time: time.Now(),
@@ -205,12 +203,14 @@ func (l *bbr) getMinRT() int64 {
 			for _, p := range bucket.Points {
 				total += p
 			}
-			log.Info("getMinRT", zap.Float64("total", total), zap.Int64("bucket.Count", bucket.Count))
 			avg := total / float64(bucket.Count)
 			result = math.Min(result, avg)
 		}
 		return result
 	})))
+	if rawMinRT == int64(time.Minute) {
+		return rawMinRT
+	}
 	if rawMinRT <= 0 {
 		rawMinRT = 1
 	}

@@ -19,9 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 )
 
 var (
@@ -98,10 +96,11 @@ func TestBBRMinRt(t *testing.T) {
 		}()
 		time.Sleep(bucketDuration)
 		wg.Wait()
-		log.Info("round ================= ", zap.Int("i", i))
-		// due to extra time cost in `Sleep`.
-		re.Less(int64(1000), bbr.getMinRT())
-		re.Greater(int64(1300), bbr.getMinRT())
+		if i > 0 {
+			// due to extra time cost in `Sleep`.
+			re.Less(int64(1000), bbr.getMinRT())
+			re.Greater(int64(1300), bbr.getMinRT())
+		}
 	}
 
 	for i := 0; i < 10; i++ {
@@ -141,7 +140,7 @@ func TestBDP(t *testing.T) {
 		WithWindow(windowSizeTest),
 		WithBucket(bucketNumTest),
 	}
-	cfg = newConfig(optsForTest...)
+	cfg := newConfig(optsForTest...)
 	bucketDuration := windowSizeTest / time.Duration(bucketNumTest)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
