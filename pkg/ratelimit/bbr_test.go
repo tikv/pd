@@ -25,6 +25,7 @@ import (
 var (
 	windowSizeTest = time.Millisecond * 100
 	bucketNumTest  = 10
+	bucketDuration = windowSizeTest / time.Duration(bucketNumTest)
 
 	optsForTest = []bbrOption{
 		WithWindow(windowSizeTest),
@@ -43,7 +44,6 @@ func createConcurrencyFeedback() (*concurrencyLimiter, func(s *bbrStatus)) {
 func TestBBRMaxPass(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	bucketDuration := windowSizeTest / time.Duration(bucketNumTest)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	// default max pass is equal to 1.
@@ -77,7 +77,6 @@ func TestBBRMaxPass(t *testing.T) {
 func TestBBRMinRt(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	bucketDuration := windowSizeTest / time.Duration(bucketNumTest)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	// default max min rt is equal to maxFloat64.
@@ -141,7 +140,6 @@ func TestBDP(t *testing.T) {
 		WithBucket(bucketNumTest),
 	}
 	cfg := newConfig(optsForTest...)
-	bucketDuration := windowSizeTest / time.Duration(bucketNumTest)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	re.Equal(int64(600000), bbr.getMaxInFlight())
@@ -180,7 +178,6 @@ func TestBDP(t *testing.T) {
 func TestFullStatus(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	bucketDuration := windowSizeTest / time.Duration(bucketNumTest)
 	cl, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 

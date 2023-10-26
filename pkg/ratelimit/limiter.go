@@ -30,18 +30,22 @@ type DimensionConfig struct {
 	QPSBurst int
 	// concurrency config
 	ConcurrencyLimit uint64
+	// BBR config
+	EnableBBR bool
 }
 
 type limiter struct {
+	cfg         *DimensionConfig
 	mu          syncutil.RWMutex
 	concurrency *concurrencyLimiter
 	rate        *RateLimiter
-
-	bbr *bbr
+	bbr         *bbr
 }
 
 func newLimiter() *limiter {
-	lim := &limiter{}
+	lim := &limiter{
+		cfg: &DimensionConfig{},
+	}
 	return lim
 }
 
@@ -66,6 +70,8 @@ func (l *limiter) getBBR() *bbr {
 func (l *limiter) deleteRateLimiter() bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
+	l.cfg.QPS = 0
+	l.cfg.QPSBurst = 0
 	l.rate = nil
 	return l.isEmpty()
 }
@@ -74,6 +80,22 @@ func (l *limiter) deleteConcurrency() bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	l.concurrency = nil
+	l.cfg.ConcurrencyLimit = 0
+	return l.isEmpty()
+}
+
+func (l *limiter) deleteBBR() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	l.bbr = nil
+	l.cfg.EnableBBR = false
+	if l.cfg.ConcurrencyLimit > 0 {
+		if l.concurrency != nil {
+			l.concurrency.setLimit(l.cfg.ConcurrencyLimit)
+		}
+	} else {
+		l.concurrency = nil
+	}
 	return l.isEmpty()
 }
 
@@ -97,6 +119,59 @@ func (l *limiter) getConcurrencyLimiterStatus() (limit uint64, current uint64) {
 	return 0, 0
 }
 
+func (l *limiter) getBBRStatus() (enable bool, limit int64) {
+	baseLimiter := l.getBBR()
+	if baseLimiter != nil {
+		return true, baseLimiter.bbrStatus.getMaxInFlight()
+	}
+	return false, 0
+}
+
+func (l *limiter) updateBBRConfig(enable bool) UpdateStatus {
+	oldEnableBBR, _ := l.getBBRStatus()
+	if oldEnableBBR == enable {
+		return BBRNoChange
+	}
+	if !enable {
+		l.deleteBBR()
+		return BBRDeleted
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg.EnableBBR = enable
+	if l.concurrency == nil {
+		l.concurrency = newConcurrencyLimiter(uint64(inf))
+	}
+	fb := func(s *bbrStatus) {
+		l.concurrency.tryToSetLimit(uint64(s.getMaxInFlight()))
+	}
+	l.bbr = newBBR(newConfig(), fb)
+	return BBRChanged
+}
+
+// only used in test.
+func (l *limiter) updateBBRConfigForTest(enable bool, o ...bbrOption) UpdateStatus {
+	oldEnableBBR, _ := l.getBBRStatus()
+	if oldEnableBBR == enable {
+		return BBRNoChange
+	}
+	if !enable {
+		l.deleteBBR()
+		return BBRDeleted
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg.EnableBBR = enable
+	if l.concurrency == nil {
+		l.concurrency = newConcurrencyLimiter(uint64(inf))
+	}
+	fb := func(s *bbrStatus) {
+		l.concurrency.tryToSetLimit(uint64(s.getMaxInFlight()))
+	}
+	l.bbr = newBBR(newConfig(o...), fb)
+	return BBRChanged
+}
+
 func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 	oldConcurrencyLimit, _ := l.getConcurrencyLimiterStatus()
 	if oldConcurrencyLimit == limit {
@@ -109,6 +184,7 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.cfg.ConcurrencyLimit = limit
 	if l.concurrency != nil {
 		l.concurrency.setLimit(limit)
 	} else {
@@ -129,6 +205,8 @@ func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.cfg.QPS = limit
+	l.cfg.QPSBurst = burst
 	if l.rate != nil {
 		l.rate.SetLimit(rate.Limit(limit))
 		l.rate.SetBurst(burst)
@@ -141,6 +219,15 @@ func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
 func (l *limiter) updateDimensionConfig(cfg *DimensionConfig) UpdateStatus {
 	status := l.updateQPSConfig(cfg.QPS, cfg.QPSBurst)
 	status |= l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
+	status |= l.updateBBRConfig(cfg.EnableBBR)
+	return status
+}
+
+// only used in test.
+func (l *limiter) updateDimensionConfigForTest(cfg *DimensionConfig, op ...bbrOption) UpdateStatus {
+	status := l.updateQPSConfig(cfg.QPS, cfg.QPSBurst)
+	status |= l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
+	status |= l.updateBBRConfigForTest(cfg.EnableBBR, op...)
 	return status
 }
 
@@ -165,5 +252,10 @@ func (l *limiter) allow() (DoneFunc, error) {
 		}, nil
 	}
 	done := bbr.process()
-	return done, nil
+	return func() {
+		done()
+		if concurrency != nil {
+			concurrency.release()
+		}
+	}, nil
 }

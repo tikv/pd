@@ -85,7 +85,7 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 			label: "test1",
 			round: []changeAndResult{
 				{
-					opt: UpdateConcurrencyLimiter(10),
+					opt: updateConcurrencyLimiter(10),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&ConcurrencyChanged != 0)
@@ -102,7 +102,7 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateConcurrencyLimiter(10),
+					opt: updateConcurrencyLimiter(10),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&ConcurrencyNoChange != 0)
@@ -110,7 +110,7 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 					checkStatusFunc: func(label string) {},
 				},
 				{
-					opt: UpdateConcurrencyLimiter(5),
+					opt: updateConcurrencyLimiter(5),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&ConcurrencyChanged != 0)
@@ -127,7 +127,7 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateConcurrencyLimiter(0),
+					opt: updateConcurrencyLimiter(0),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&ConcurrencyDeleted != 0)
@@ -149,7 +149,7 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 			label: "test2",
 			round: []changeAndResult{
 				{
-					opt: UpdateConcurrencyLimiter(15),
+					opt: updateConcurrencyLimiter(15),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&ConcurrencyChanged != 0)
@@ -166,7 +166,7 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateConcurrencyLimiter(10),
+					opt: updateConcurrencyLimiter(10),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&ConcurrencyChanged != 0)
@@ -201,7 +201,7 @@ func TestBlockList(t *testing.T) {
 	}
 	re.True(limiter.IsInAllowList(label))
 
-	status := UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)(label, limiter)
+	status := updateQPSLimiter(float64(rate.Every(time.Second)), 1)(label, limiter)
 	re.True(status&InAllowList != 0)
 	for i := 0; i < 10; i++ {
 		_, err := limiter.Allow(label)
@@ -218,7 +218,7 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 			label: "test1",
 			round: []changeAndResult{
 				{
-					opt: UpdateQPSLimiter(float64(rate.Every(time.Second)), 1),
+					opt: updateQPSLimiter(float64(rate.Every(time.Second)), 1),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSChanged != 0)
@@ -234,7 +234,7 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateQPSLimiter(float64(rate.Every(time.Second)), 1),
+					opt: updateQPSLimiter(float64(rate.Every(time.Second)), 1),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSNoChange != 0)
@@ -242,7 +242,7 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 					checkStatusFunc: func(label string) {},
 				},
 				{
-					opt: UpdateQPSLimiter(5, 5),
+					opt: updateQPSLimiter(5, 5),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSChanged != 0)
@@ -258,7 +258,7 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateQPSLimiter(0, 0),
+					opt: updateQPSLimiter(0, 0),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSDeleted != 0)
@@ -280,7 +280,7 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 			label: "test2",
 			round: []changeAndResult{
 				{
-					opt: UpdateQPSLimiter(50, 5),
+					opt: updateQPSLimiter(50, 5),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSChanged != 0)
@@ -296,7 +296,7 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateQPSLimiter(0, 0),
+					opt: updateQPSLimiter(0, 0),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSDeleted != 0)
@@ -351,7 +351,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateQPSLimiter(float64(rate.Every(time.Second)), 1),
+					opt: updateQPSLimiter(float64(rate.Every(time.Second)), 1),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSChanged != 0)
@@ -373,7 +373,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 			label: "test2",
 			round: []changeAndResult{
 				{
-					opt: UpdateQPSLimiter(50, 5),
+					opt: updateQPSLimiter(50, 5),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSChanged != 0)
@@ -389,7 +389,7 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateQPSLimiter(0, 0),
+					opt: updateQPSLimiter(0, 0),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
 						re.True(status&QPSDeleted != 0)
