@@ -479,6 +479,13 @@ loopFits:
 				hasUnhealthyFit = true
 				break loopFits
 			}
+			// avoid to meet down store when fix orpahn peers,
+			// Isdisconnected is more strictly than IsUnhealthy.
+			if c.cluster.GetStore(p.GetStoreId()).IsDisconnected() {
+				hasUnhealthyFit = true
+				pinDownPeer = p
+				break loopFits
+			}
 		}
 	}
 
@@ -491,6 +498,9 @@ loopFits:
 	// try to use orphan peers to replace unhealthy down peers.
 	for _, orphanPeer := range fit.OrphanPeers {
 		if pinDownPeer != nil {
+			if pinDownPeer.GetId() == orphanPeer.GetId() {
+				continue
+			}
 			// make sure the orphan peer is healthy.
 			if isUnhealthyPeer(orphanPeer.GetId()) {
 				continue
@@ -514,6 +524,9 @@ loopFits:
 					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
 				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
 					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
+				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Voter &&
+					c.cluster.GetStore(pinDownPeer.GetStoreId()).IsDisconnected() && !dstStore.IsDisconnected():
+					return operator.CreateRemovePeerOperator("remove-replaced-orphan-peer", c.cluster, 0, region, pinDownPeer.GetStoreId())
 				default:
 					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
 					// destRole never be leader, so we not consider it.
