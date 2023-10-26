@@ -505,8 +505,8 @@ loopFits:
 				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
 					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
 				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Voter &&
-					c.cluster.GetStore(pinDownPeer.GetStoreId()).IsDisconnected():
-					return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, pinDownPeer.GetStoreId())
+					c.cluster.GetStore(pinDownPeer.GetStoreId()).IsDisconnected() && !dstStore.IsDisconnected():
+					return operator.CreateRemovePeerOperator("remove-replaced-orphan-peer", c.cluster, 0, region, pinDownPeer.GetStoreId())
 				default:
 					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
 					// destRole never be leader, so we not consider it.
