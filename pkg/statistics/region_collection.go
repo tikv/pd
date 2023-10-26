@@ -119,7 +119,11 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 	defer r.RUnlock()
 	res := make([]*core.RegionInfo, 0, len(r.stats[typ]))
 	for regionID := range r.stats[typ] {
-		res = append(res, r.rip.GetRegion(regionID).Clone())
+		region := r.rip.GetRegion(regionID)
+		if region == nil {
+			continue
+		}
+		res = append(res, region.Clone())
 	}
 	return res
 }
