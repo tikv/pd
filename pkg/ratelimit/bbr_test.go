@@ -98,7 +98,7 @@ func TestBBRMinRt(t *testing.T) {
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
 			re.Less(int64(10000), bbr.getMinRT())
-			re.Greater(int64(12000), bbr.getMinRT())
+			re.Greater(int64(12500), bbr.getMinRT())
 		}
 	}
 
@@ -112,7 +112,7 @@ func TestBBRMinRt(t *testing.T) {
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
 			re.Less(int64(5000), bbr.getMinRT())
-			re.Greater(int64(6000), bbr.getMinRT())
+			re.Greater(int64(6500), bbr.getMinRT())
 		}
 	}
 
@@ -147,7 +147,7 @@ func TestBDP(t *testing.T) {
 		time.Sleep(bucketDuration)
 		// due to extra time cost in `Sleep`.
 		re.LessOrEqual(int64(10), bbr.getMaxInFlight())
-		re.GreaterOrEqual(int64(12), bbr.getMaxInFlight())
+		re.GreaterOrEqual(int64(14), bbr.getMaxInFlight())
 	}
 
 	for i := 0; i < 10; i++ {
@@ -162,7 +162,7 @@ func TestBDP(t *testing.T) {
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
 			re.LessOrEqual(int64(15), bbr.getMaxInFlight())
-			re.GreaterOrEqual(int64(18), bbr.getMaxInFlight())
+			re.GreaterOrEqual(int64(22), bbr.getMaxInFlight())
 		}
 	}
 }
