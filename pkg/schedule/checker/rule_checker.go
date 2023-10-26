@@ -503,9 +503,28 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 			hasUnhealthyFit = true
 			break
 		}
+<<<<<<< HEAD
 		pinDownPeer, hasUnhealthyFit = checkDownPeer(rf.Peers)
 		if hasUnhealthyFit {
 			break
+=======
+		for _, p := range rf.Peers {
+			if isUnhealthyPeer(p.GetId()) {
+				// make sure is down peer.
+				if region.GetDownPeer(p.GetId()) != nil {
+					pinDownPeer = p
+				}
+				hasUnhealthyFit = true
+				break loopFits
+			}
+			// avoid to meet down store when fix orpahn peers,
+			// Isdisconnected is more strictly than IsUnhealthy.
+			if c.cluster.GetStore(p.GetStoreId()).IsDisconnected() {
+				hasUnhealthyFit = true
+				pinDownPeer = p
+				break loopFits
+			}
+>>>>>>> f9b476d80 (checker: add disconnected check when fix orphan peers (#7240))
 		}
 	}
 
@@ -544,7 +563,12 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
 				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
 					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
+<<<<<<< HEAD
 				case orphanPeerRole == destRole && isDisconnectedPeer(pinDownPeer) && !dstStore.IsDisconnected():
+=======
+				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Voter &&
+					c.cluster.GetStore(pinDownPeer.GetStoreId()).IsDisconnected() && !dstStore.IsDisconnected():
+>>>>>>> f9b476d80 (checker: add disconnected check when fix orphan peers (#7240))
 					return operator.CreateRemovePeerOperator("remove-replaced-orphan-peer", c.cluster, 0, region, pinDownPeer.GetStoreId())
 				default:
 					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
