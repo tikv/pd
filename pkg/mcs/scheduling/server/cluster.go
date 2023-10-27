@@ -206,7 +206,7 @@ func (c *Cluster) AllocID() (uint64, error) {
 	defer cancel()
 	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
 	if err != nil {
-		c.checkMembershipCh <- struct{}{}
+		c.triggerMembershipCheck()
 		return 0, err
 	}
 	return resp.GetId(), nil
@@ -215,10 +215,17 @@ func (c *Cluster) AllocID() (uint64, error) {
 func (c *Cluster) getAPIServerLeaderClient() (pdpb.PDClient, error) {
 	cli := c.apiServerLeader.Load()
 	if cli == nil {
-		c.checkMembershipCh <- struct{}{}
+		c.triggerMembershipCheck()
 		return nil, errors.New("API server leader is not found")
 	}
 	return cli.(pdpb.PDClient), nil
+}
+
+func (c *Cluster) triggerMembershipCheck() {
+	select {
+	case c.checkMembershipCh <- struct{}{}:
+	default: // avoid blocking
+	}
 }
 
 // SwitchAPIServerLeader switches the API server leader.

@@ -509,6 +509,6 @@ func checkOperatorFail(re *require.Assertions, oc *operator.Controller, op *oper
 
 func waitSyncFinish(re *require.Assertions, tc *tests.TestSchedulingCluster, typ storelimit.Type, expectedLimit float64) {
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetPersistConfig().GetStoreLimitByType(2, typ) == expectedLimit
+		return tc.GetPrimaryServer().GetCluster().GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
 	})
 }

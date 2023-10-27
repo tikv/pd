@@ -472,10 +472,8 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestClu
 		result := make(map[string]interface{})
 		testutil.Eventually(re, func() bool {
 			mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
-			return len(result) != 0
+			return len(result) != 0 && expectedStatus == result["status"] && expectedSummary == result["summary"]
 		}, testutil.WithTickInterval(50*time.Millisecond))
-		re.Equal(expectedStatus, result["status"])
-		re.Equal(expectedSummary, result["summary"])
 	}
 
 	stores := []*metapb.Store{
