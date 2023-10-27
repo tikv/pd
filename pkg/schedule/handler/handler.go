@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
@@ -1039,4 +1040,22 @@ func (h *Handler) GetHotBuckets(regionIDs ...uint64) (HotBucketsResponse, error)
 		}
 	}
 	return ret, nil
+}
+
+// GetRegion returns the region labeler.
+func (h *Handler) GetRegion(id uint64) *core.RegionInfo {
+	c := h.GetCluster()
+	if c == nil {
+		return nil
+	}
+	return c.GetRegion(id)
+}
+
+// GetRegionLabeler returns the region labeler.
+func (h *Handler) GetRegionLabeler() (*labeler.RegionLabeler, error) {
+	c := h.GetCluster()
+	if c == nil || c.GetRegionLabeler() == nil {
+		return nil, errs.ErrNotBootstrapped
+	}
+	return c.GetRegionLabeler(), nil
 }

@@ -79,6 +79,7 @@ type microserviceRedirectRule struct {
 	targetPath        string
 	targetServiceName string
 	matchMethods      []string
+	filter            func(*http.Request) bool
 }
 
 // NewRedirector redirects request to the leader if needs to be handled in the leader.
@@ -94,14 +95,19 @@ func NewRedirector(s *server.Server, opts ...RedirectorOption) negroni.Handler {
 type RedirectorOption func(*redirector)
 
 // MicroserviceRedirectRule new a microservice redirect rule option
-func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string, methods []string) RedirectorOption {
+func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
+	methods []string, filters ...func(*http.Request) bool) RedirectorOption {
 	return func(s *redirector) {
-		s.microserviceRedirectRules = append(s.microserviceRedirectRules, &microserviceRedirectRule{
-			matchPath,
-			targetPath,
-			targetServiceName,
-			methods,
-		})
+		rule := &microserviceRedirectRule{
+			matchPath:         matchPath,
+			targetPath:        targetPath,
+			targetServiceName: targetServiceName,
+			matchMethods:      methods,
+		}
+		if len(filters) > 0 {
+			rule.filter = filters[0]
+		}
+		s.microserviceRedirectRules = append(s.microserviceRedirectRules, rule)
 	}
 }
 
@@ -117,6 +123,9 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 	for _, rule := range h.microserviceRedirectRules {
 		if strings.HasPrefix(r.URL.Path, rule.matchPath) && slice.Contains(rule.matchMethods, r.Method) {
+			if rule.filter != nil && !rule.filter(r) {
+				continue
+			}
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !ok || addr == "" {
 				log.Warn("failed to get the service primary addr when trying to match redirect rules",

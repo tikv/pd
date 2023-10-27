@@ -88,7 +88,7 @@ func ReadGetJSON(re *require.Assertions, client *http.Client, url string, data i
 }
 
 // ReadGetJSONWithBody is used to do get request with input and check whether given data can be extracted successfully.
-func ReadGetJSONWithBody(re *require.Assertions, client *http.Client, url string, input []byte, data interface{}) error {
+func ReadGetJSONWithBody(re *require.Assertions, client *http.Client, url string, input []byte, data interface{}, checkOpts ...func([]byte, int, http.Header)) error {
 	resp, err := apiutil.GetJSON(client, url, input)
 	if err != nil {
 		return err

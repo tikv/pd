@@ -17,6 +17,7 @@ package apis
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -114,6 +116,8 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
 	s.RegisterHotspotRouter()
+	s.RegisterRegionsRouter()
+	s.RegisterRegionLabelRouter()
 	return s
 }
 
@@ -158,6 +162,21 @@ func (s *Service) RegisterOperatorsRouter() {
 	router.GET("/:id", getOperatorByRegion)
 	router.DELETE("/:id", deleteOperatorByRegion)
 	router.GET("/records", getOperatorRecords)
+}
+
+// RegisterRegionsRouter registers the router of the regions handler.
+func (s *Service) RegisterRegionsRouter() {
+	router := s.root.Group("regions")
+	router.GET("/:id/label/:key", getRegionLabelByKey)
+	router.GET("/:id/labels", getRegionLabels)
+}
+
+// RegisterRegionLabelRouter registers the router of the region label handler.
+func (s *Service) RegisterRegionLabelRouter() {
+	router := s.root.Group("config/region-label")
+	router.GET("rules", getAllRegionLabelRules)
+	router.GET("rules/ids", getRegionLabelRulesByIDs)
+	router.GET("rule/:id", getRegionLabelRuleByID)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -547,4 +566,145 @@ func getHistoryHotRegions(c *gin.Context) {
 	// Ref: https://github.com/tikv/pd/pull/7183
 	var res storage.HistoryHotRegions
 	c.IndentedJSON(http.StatusOK, res)
+}
+
+// @Tags     region_label
+// @Summary  Get label of a region.
+// @Param    id   path  integer  true  "Region Id"
+// @Param    key  path  string   true  "Label key"
+// @Produce  json
+// @Success  200  {string}  string
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  404  {string}  string  "The region does not exist."
+// @Router   /regions/{id}/label/{key} [get]
+func getRegionLabelByKey(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	idStr := c.Param("id")
+	labelKey := c.Param("key") // TODO: test https://github.com/tikv/pd/pull/4004
+
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	region := handler.GetRegion(id)
+	if region == nil {
+		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs().Error())
+		return
+	}
+
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	labelValue := l.GetRegionLabel(region, labelKey)
+	c.IndentedJSON(http.StatusOK, labelValue)
+}
+
+// @Tags     region_label
+// @Summary  Get labels of a region.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  404  {string}  string  "The region does not exist."
+// @Router   /regions/{id}/labels [get]
+func getRegionLabels(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	region := handler.GetRegion(id)
+	if region == nil {
+		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs().Error())
+		return
+	}
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	labels := l.GetRegionLabels(region)
+	c.IndentedJSON(http.StatusOK, labels)
+}
+
+// @Tags     region_label
+// @Summary  List all label rules of cluster.
+// @Produce  json
+// @Success  200  {array}  labeler.LabelRule
+// @Router   /config/region-label/rules [get]
+func getAllRegionLabelRules(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	rules := l.GetAllLabelRules()
+	c.IndentedJSON(http.StatusOK, rules)
+}
+
+// @Tags     region_label
+// @Summary  Get label rules of cluster by ids.
+// @Param    body  body  []string  true  "IDs of query rules"
+// @Produce  json
+// @Success  200  {array}   labeler.LabelRule
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rules/ids [get]
+func getRegionLabelRulesByIDs(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	var ids []string
+	if err := c.BindJSON(&ids); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	rules, err := l.GetLabelRules(ids)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, rules)
+}
+
+// @Tags     region_label
+// @Summary  Get label rule of cluster by id.
+// @Param    id  path  string  true  "Rule Id"
+// @Produce  json
+// @Success  200  {object}  labeler.LabelRule
+// @Failure  404  {string}  string  "The rule does not exist."
+// @Router   /config/region-label/rule/{id} [get]
+func getRegionLabelRuleByID(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	id, err := url.PathUnescape(c.Param("id"))
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	rule := l.GetLabelRule(id)
+	if rule == nil {
+		c.String(http.StatusNotFound, errs.ErrRegionRuleNotFound.FastGenByArgs().Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, rule)
 }
