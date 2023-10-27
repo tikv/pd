@@ -121,9 +121,8 @@ func NewService(srv *scheserver.Service) *Service {
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	router.PUT("/log", changeLogLevel)
-	cacheRouter := router.Group("cache/regions")
-	cacheRouter.DELETE("", deleteAllRegionCache)
-	cacheRouter.DELETE("/:id", deleteRegionCacheByID)
+	router.DELETE("cache/regions", deleteAllRegionCache)
+	router.DELETE("cache/regions/:id", deleteRegionCacheByID)
 }
 
 // RegisterSchedulersRouter registers the router of the schedulers handler.
