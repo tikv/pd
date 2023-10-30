@@ -17,6 +17,7 @@ package apis
 import (
 	"fmt"
 	"net/http"
+	"path"
 	"strconv"
 	"sync"
 
@@ -129,7 +130,8 @@ func (s *Service) RegisterSchedulersRouter() {
 	router := s.root.Group("schedulers")
 	router.GET("", getSchedulers)
 	router.GET("/diagnostic/:name", getDiagnosticResult)
-	router.GET("/config/:name/:suffix", getSchedulerConfigByName)
+	router.GET("/config/:name/list", getSchedulerConfigByName)
+	router.GET("/config/:name/roles", getSchedulerConfigByName) // compatibility for shuffle-region-scheduler
 	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
 	// And we need to do one-to-two forwarding in the API middleware.
 	router.POST("/:name", pauseOrResumeScheduler)
@@ -414,8 +416,7 @@ func getSchedulerConfigByName(c *gin.Context) {
 		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
 		return
 	}
-	suffix := c.Param("suffix")
-	c.Request.URL.Path = "/" + suffix
+	c.Request.URL.Path = "/" + path.Base(c.Request.URL.Path)
 	handlers[name].ServeHTTP(c.Writer, c.Request)
 }
 
