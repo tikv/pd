@@ -498,14 +498,11 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestClu
 	cmd := pdctlCmd.GetRootCmd()
 
 	checkSchedulerDescribeCommand := func(schedulerName, expectedStatus, expectedSummary string) {
+		result := make(map[string]interface{})
 		testutil.Eventually(re, func() bool {
-			result := make(map[string]interface{})
-			testutil.Eventually(re, func() bool {
-				mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
-				return len(result) != 0
-			}, testutil.WithTickInterval(50*time.Millisecond))
-			return result["status"] == expectedStatus && result["summary"] == expectedSummary
-		})
+			mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
+			return len(result) != 0 && expectedStatus == result["status"] && expectedSummary == result["summary"]
+		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
 
 	stores := []*metapb.Store{
