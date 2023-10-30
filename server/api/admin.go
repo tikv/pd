@@ -241,11 +241,8 @@ func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
 }
 
 func (h *adminHandler) buildMsg(msg string, err error) string {
-	if !h.svr.IsAPIServiceMode() {
-		return msg
-	}
-	if err != nil {
-		return fmt.Sprintf("%s But the scheduling server meets error: %s", msg, err.Error())
+	if h.svr.IsAPIServiceMode() && err != nil {
+		return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
 	}
 	return msg
 }
