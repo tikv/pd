@@ -4,8 +4,8 @@ github.com/AlekSi/gocov-xml v1.0.0 h1:4QctJBgXEkbzeKz6PJy6bt3JSPNSN4I2mITYW+eKUo
 github.com/AlekSi/gocov-xml v1.0.0/go.mod h1:J0qYeZ6tDg4oZubW9mAAgxlqw39PDfoEkzB3HXSbEuA=
 github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/Connor1996/tidb-dashboard v0.0.0-20231028154309-0aa9ee2d42a0 h1:PVbH+gPtXBkNK893XY/HaQJo4Vnyxp//j4hQlWT3dcg=
-github.com/Connor1996/tidb-dashboard v0.0.0-20231028154309-0aa9ee2d42a0/go.mod h1:trlHzyk6rcB/dRPL9t7svDI1Y3m/SgXnpkm5oDUIwvQ=
+github.com/Connor1996/tidb-dashboard v0.0.0-20231030032023-70d35a4f520c h1:5tgnfuTmqKXXu4IS+to4jVxiOLHPBpSeKQ2gTBtsi3U=
+github.com/Connor1996/tidb-dashboard v0.0.0-20231030032023-70d35a4f520c/go.mod h1:EZ90+V5S4TttbYag6oKZ3jcNKRwZe1Mc9vXwOt9JBYw=
 github.com/KyleBanks/depth v1.2.1 h1:5h8fQADFrWtarTdtDudMmGsC7GPbOAu6RVB3ffsVFHc=
 github.com/KyleBanks/depth v1.2.1/go.mod h1:jzSb9d0L43HxTQfT+oSA1EEp2q+ne2uh6XgeJcm8brE=
 github.com/Masterminds/semver v1.5.0 h1:H65muMkzWKEuNDnfl9d70GUjFniHKHRbFPGBuZ3QEww=
