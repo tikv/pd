@@ -231,18 +231,18 @@ func TestAdminRegionCache(t *testing.T) {
 		r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetRegionConfVer(100), core.SetRegionVersion(100))
 		tests.MustPutRegionInfo(re, cluster, r3)
 
-		s := cluster.GetSchedulingPrimaryServer()
-		re.Equal(3, s.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		schedulingServer := cluster.GetSchedulingPrimaryServer()
+		re.Equal(3, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
 
-		addr := s.GetAddr()
+		addr := schedulingServer.GetAddr()
 		urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions", addr)
 		err := testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "30"), testutil.StatusOK(re))
 		re.NoError(err)
-		re.Equal(2, s.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(2, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
 
 		err = testutil.CheckDelete(testDialClient, urlPrefix, testutil.StatusOK(re))
 		re.NoError(err)
-		re.Equal(0, s.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(0, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
 	}
 	env := tests.NewSchedulingTestEnvironment(t)
 	env.RunTestInAPIMode(checkAdminRegionCache)
@@ -258,18 +258,22 @@ func TestAdminRegionCacheForward(t *testing.T) {
 		r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetRegionConfVer(100), core.SetRegionVersion(100))
 		tests.MustPutRegionInfo(re, cluster, r3)
 
-		s := cluster.GetSchedulingPrimaryServer()
-		re.Equal(3, s.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		apiServer := cluster.GetLeaderServer().GetServer()
+		schedulingServer := cluster.GetSchedulingPrimaryServer()
+		re.Equal(3, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(3, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
 
 		addr := cluster.GetLeaderServer().GetAddr()
 		urlPrefix := fmt.Sprintf("%s/pd/api/v1/admin/cache/region", addr)
 		err := testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "30"), testutil.StatusOK(re))
 		re.NoError(err)
-		re.Equal(2, s.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(2, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(2, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
 
 		err = testutil.CheckDelete(testDialClient, urlPrefix+"s", testutil.StatusOK(re))
 		re.NoError(err)
-		re.Equal(0, s.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(0, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(0, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
 	}
 	env := tests.NewSchedulingTestEnvironment(t)
 	env.RunTestInAPIMode(checkAdminRegionCache)
