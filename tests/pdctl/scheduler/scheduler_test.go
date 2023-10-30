@@ -279,7 +279,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		re.Equal(expected3, conf3)
 	}
 
-	// test balance region config
+	// test remove and add scheduler
 	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
@@ -294,10 +294,12 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	re.Contains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
 	re.Contains(echo, "404")
+	testutil.Eventually(re, func() bool { // wait for removed scheduler to be synced to scheduling server.
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, nil)
+		return strings.Contains(echo, "[404] scheduler not found")
+	})
 
 	// test hot region config
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, nil)
-	re.Contains(echo, "[404] scheduler not found")
 	expected1 := map[string]interface{}{
 		"min-hot-byte-rate":          float64(100),
 		"min-hot-key-rate":           float64(10),

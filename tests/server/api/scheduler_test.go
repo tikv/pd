@@ -232,7 +232,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
 				// FIXME: remove this check after scheduler config is updated
-				if cluster.GetSchedulingPrimaryServer() == nil {
+				if cluster.GetSchedulingPrimaryServer() == nil { // "balance-hot-region-scheduler"
 					for key := range expectMap {
 						suite.Equal(expectMap[key], resp[key], "key %s", key)
 					}
@@ -473,6 +473,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			testCase.extraTestFunc(testCase.createdName)
 		}
 		suite.deleteScheduler(urlPrefix, testCase.createdName)
+		suite.assertNoScheduler(re, urlPrefix, testCase.createdName)
 	}
 
 	// test pause and resume all schedulers.
@@ -487,6 +488,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		body, err := json.Marshal(input)
 		suite.NoError(err)
 		suite.addScheduler(urlPrefix, body)
+		suite.assertSchedulerExists(re, urlPrefix, testCase.createdName) // wait for scheduler to be synced.
 		if testCase.extraTestFunc != nil {
 			testCase.extraTestFunc(testCase.createdName)
 		}
@@ -550,6 +552,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			createdName = testCase.name
 		}
 		suite.deleteScheduler(urlPrefix, createdName)
+		suite.assertNoScheduler(re, urlPrefix, createdName)
 	}
 }
 
@@ -586,7 +589,7 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	err = tu.CheckPostJSON(testDialClient, u, body, tu.StatusOK(re))
 	suite.NoError(err)
 
-	// TODO: Should we distinguish between disabled and removed schedulers?
+	suite.assertNoScheduler(re, urlPrefix, name)
 	suite.assertSchedulerExists(re, fmt.Sprintf("%s?status=disabled", urlPrefix), name)
 
 	// reset schedule config
@@ -597,6 +600,7 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	suite.NoError(err)
 
 	suite.deleteScheduler(urlPrefix, name)
+	suite.assertNoScheduler(re, urlPrefix, name)
 }
 
 func (suite *scheduleTestSuite) addScheduler(urlPrefix string, body []byte) {
@@ -621,6 +625,7 @@ func (suite *scheduleTestSuite) testPauseOrResume(urlPrefix string, name, create
 		err := tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re))
 		re.NoError(err)
 	}
+	suite.assertSchedulerExists(re, urlPrefix, createdName) // wait for scheduler to be synced.
 
 	// test pause.
 	input := make(map[string]interface{})
