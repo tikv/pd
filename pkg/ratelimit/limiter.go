@@ -127,7 +127,7 @@ func (l *limiter) getBBRStatus() (enable bool, limit int64) {
 	return false, 0
 }
 
-func (l *limiter) updateBBRConfig(enable bool) UpdateStatus {
+func (l *limiter) updateBBRConfig(enable bool, o ...bbrOption) UpdateStatus {
 	oldEnableBBR, _ := l.getBBRStatus()
 	if oldEnableBBR == enable {
 		return BBRNoChange
@@ -143,30 +143,12 @@ func (l *limiter) updateBBRConfig(enable bool) UpdateStatus {
 		l.concurrency = newConcurrencyLimiter(uint64(inf))
 	}
 	fb := func(s *bbrStatus) {
-		l.concurrency.tryToSetLimit(uint64(s.getMaxInFlight()))
-	}
-	l.bbr = newBBR(newConfig(), fb)
-	return BBRChanged
-}
-
-// only used in test.
-func (l *limiter) updateBBRConfigForTest(enable bool, o ...bbrOption) UpdateStatus {
-	oldEnableBBR, _ := l.getBBRStatus()
-	if oldEnableBBR == enable {
-		return BBRNoChange
-	}
-	if !enable {
-		l.deleteBBR()
-		return BBRDeleted
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.cfg.EnableBBR = enable
-	if l.concurrency == nil {
-		l.concurrency = newConcurrencyLimiter(uint64(inf))
-	}
-	fb := func(s *bbrStatus) {
-		l.concurrency.tryToSetLimit(uint64(s.getMaxInFlight()))
+		if s.getMinRT() == infRT {
+			current := l.concurrency.getCurrent()
+			l.concurrency.tryToSetLimit(current)
+		} else {
+			l.concurrency.tryToSetLimit(uint64(s.getMaxInFlight()))
+		}
 	}
 	l.bbr = newBBR(newConfig(o...), fb)
 	return BBRChanged
@@ -186,10 +168,17 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 	defer l.mu.Unlock()
 	l.cfg.ConcurrencyLimit = limit
 	if l.concurrency != nil {
-		l.concurrency.setLimit(limit)
-	} else {
-		l.concurrency = newConcurrencyLimiter(limit)
+		if bbr := l.bbr; bbr != nil && bbr.bbrStatus.getMaxInFlight() != inf {
+			if l.concurrency.tryToSetLimit(limit) {
+				return ConcurrencyChanged
+			}
+			return ConcurrencyNoChange
+		} else {
+			l.concurrency.setLimit(limit)
+			return ConcurrencyChanged
+		}
 	}
+	l.concurrency = newConcurrencyLimiter(limit)
 	return ConcurrencyChanged
 }
 
@@ -216,18 +205,10 @@ func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
 	return QPSChanged
 }
 
-func (l *limiter) updateDimensionConfig(cfg *DimensionConfig) UpdateStatus {
+func (l *limiter) updateDimensionConfig(cfg *DimensionConfig, op ...bbrOption) UpdateStatus {
 	status := l.updateQPSConfig(cfg.QPS, cfg.QPSBurst)
 	status |= l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
-	status |= l.updateBBRConfig(cfg.EnableBBR)
-	return status
-}
-
-// only used in test.
-func (l *limiter) updateDimensionConfigForTest(cfg *DimensionConfig, op ...bbrOption) UpdateStatus {
-	status := l.updateQPSConfig(cfg.QPS, cfg.QPSBurst)
-	status |= l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
-	status |= l.updateBBRConfigForTest(cfg.EnableBBR, op...)
+	status |= l.updateBBRConfig(cfg.EnableBBR, op...)
 	return status
 }
 

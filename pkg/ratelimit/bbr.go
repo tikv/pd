@@ -26,7 +26,8 @@ import (
 )
 
 const (
-	inf = int64(^uint64(0) >> 1)
+	inf   = int64(^uint64(0) >> 1)
+	infRT = int64(time.Hour)
 
 	defaultWindowSize = time.Second * 10
 	defaultBucketSize = 100
@@ -193,7 +194,7 @@ func (l *bbr) getMinRT() int64 {
 		}
 	}
 	rawMinRT := int64(math.Ceil(l.rtStat.Reduce(func(iterator window.Iterator) float64 {
-		var result = float64(time.Minute)
+		var result = float64(infRT)
 		for i := 1; iterator.Next() && i < l.cfg.Bucket; i++ {
 			bucket := iterator.Bucket()
 			if len(bucket.Points) == 0 {
@@ -204,15 +205,17 @@ func (l *bbr) getMinRT() int64 {
 				total += p
 			}
 			avg := total / float64(bucket.Count)
+			avg = math.Max(1., avg)
 			result = math.Min(result, avg)
 		}
 		return result
 	})))
-	if rawMinRT == int64(time.Minute) {
-		return rawMinRT
+	// if rtStat is empty, rawMinRT will be zero.
+	if rawMinRT < 1 {
+		rawMinRT = infRT
 	}
-	if rawMinRT <= 0 {
-		rawMinRT = 1
+	if rawMinRT == inf {
+		return rawMinRT
 	}
 	l.minRtCache.Store(&cache{
 		val:  rawMinRT,
@@ -236,21 +239,40 @@ func (l *bbr) checkFullStatus() {
 	negative := 0
 	raises := math.Ceil(l.inFlightStat.Reduce(func(iterator window.Iterator) float64 {
 		var result = 0.
-		for i := 1; iterator.Next() && i < l.cfg.Bucket; i++ {
+		i := 1
+		for ; iterator.Next() && i < l.cfg.Bucket/2; i++ {
 			bucket := iterator.Bucket()
 			total := 0.0
-			if len(bucket.Points) == 0 {
-				negative++
-				continue
-			}
 			for _, p := range bucket.Points {
 				total += p
 			}
 			result += total
-			if total > 0 {
+			if total > 1e-6 {
 				positive++
-			} else {
+			} else if total < -1e-6 {
 				negative++
+			}
+			if positive < negative {
+				break
+			}
+		}
+		if positive <= 0 {
+			return result
+		}
+		for ; iterator.Next() && i < l.cfg.Bucket/2; i++ {
+			bucket := iterator.Bucket()
+			total := 0.0
+			for _, p := range bucket.Points {
+				total += p
+			}
+			result += total
+			if total > 1e-6 {
+				positive++
+			} else if total < -1e-6 {
+				negative++
+			}
+			if positive < negative {
+				break
 			}
 		}
 		return result

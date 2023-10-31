@@ -185,7 +185,7 @@ func TestWithBBR(t *testing.T) {
 		EnableBBR: true,
 	}
 	limiter := newLimiter()
-	status := limiter.updateDimensionConfigForTest(cfg, optsForTest...)
+	status := limiter.updateDimensionConfig(cfg, optsForTest...)
 	re.True(status&BBRChanged != 0)
 	re.True(status&QPSNoChange != 0)
 	re.True(status&ConcurrencyNoChange != 0)
@@ -369,7 +369,7 @@ func TestWithTwoLimitersAndBBRConfig(t *testing.T) {
 	re.Equal(uint64(1), current)
 
 	cfg.EnableBBR = true
-	limiter.updateDimensionConfigForTest(cfg, optsForTest...)
+	limiter.updateDimensionConfig(cfg, optsForTest...)
 	failedCount = 0
 	successCount = 0
 	go func() {

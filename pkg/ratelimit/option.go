@@ -83,3 +83,15 @@ func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 		return lim.(*limiter).updateDimensionConfig(cfg)
 	}
 }
+
+// UpdateDimensionConfigForTest creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
+// only used in test.
+func UpdateDimensionConfigForTest(cfg *DimensionConfig, opt ...bbrOption) Option {
+	return func(label string, l *Controller) UpdateStatus {
+		if _, allow := l.labelAllowList[label]; allow {
+			return InAllowList
+		}
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		return lim.(*limiter).updateDimensionConfig(cfg, opt...)
+	}
+}

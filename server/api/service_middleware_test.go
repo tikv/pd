@@ -257,12 +257,32 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
 	suite.NoError(err)
 
+	// change bbr
+	input = make(map[string]interface{})
+	input["type"] = "path"
+	input["path"] = "/pd/api/v1/health"
+	input["method"] = http.MethodGet
+	input["bbr"] = true
+	jsonBody, err = json.Marshal(input)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(re), tu.StringContain(re, "BBR option is enabled."))
+	suite.NoError(err)
+	suite.True(suite.svr.GetRateLimitConfig().LimiterConfig["GetHealthStatus"].EnableBBR)
+	input["bbr"] = false
+	jsonBody, err = json.Marshal(input)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(re), tu.StringContain(re, "BBR option is deleted."))
+	suite.NoError(err)
+
 	// change both
 	input = make(map[string]interface{})
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/debug/pprof/profile"
 	input["qps"] = 100
 	input["concurrency"] = 100
+	input["bbr"] = true
 	jsonBody, err = json.Marshal(input)
 	suite.NoError(err)
 	result := rateLimitResult{}
@@ -274,7 +294,28 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	suite.Equal(100., result.LimiterConfig["Profile"].QPS)
 	suite.Equal(100, result.LimiterConfig["Profile"].QPSBurst)
 	suite.Equal(uint64(100), result.LimiterConfig["Profile"].ConcurrencyLimit)
+	suite.True(result.LimiterConfig["Profile"].EnableBBR)
 	suite.NoError(err)
+
+	input = make(map[string]interface{})
+	input["type"] = "path"
+	input["path"] = "/pd/api/v1/debug/pprof/profile"
+	input["qps"] = 200
+	input["concurrency"] = 200
+	jsonBody, err = json.Marshal(input)
+	suite.NoError(err)
+	result = rateLimitResult{}
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."),
+		tu.StringContain(re, "QPS rate limiter is changed."),
+		tu.StringContain(re, "BBR option is not changed."),
+		tu.ExtractJSON(re, &result),
+	)
+	suite.NoError(err)
+	suite.Equal(200., result.LimiterConfig["Profile"].QPS)
+	suite.Equal(200, result.LimiterConfig["Profile"].QPSBurst)
+	suite.Equal(uint64(200), result.LimiterConfig["Profile"].ConcurrencyLimit)
+	suite.True(result.LimiterConfig["Profile"].EnableBBR)
 
 	limiter := suite.svr.GetServiceRateLimiter()
 	limiter.Update("SetRateLimitConfig", ratelimit.AddLabelAllowList())
@@ -365,22 +406,42 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
 	suite.NoError(err)
 
+	input = make(map[string]interface{})
+	input["label"] = "StoreHeartbeat"
+	input["bbr"] = true
+	jsonBody, err = json.Marshal(input)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(re), tu.StringContain(re, "BBR option is enabled."))
+	suite.NoError(err)
+	suite.True(suite.svr.GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].EnableBBR)
+
+	input["qps"] = -1
+	jsonBody, err = json.Marshal(input)
+	suite.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
+		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
+	suite.NoError(err)
+
 	// change both
 	input = make(map[string]interface{})
 	input["label"] = "GetStore"
 	input["qps"] = 100
 	input["concurrency"] = 100
+	input["bbr"] = true
 	jsonBody, err = json.Marshal(input)
 	suite.NoError(err)
 	result := rateLimitResult{}
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."),
 		tu.StringContain(re, "QPS rate limiter is changed."),
+		tu.StringContain(re, "BBR option is enabled."),
 		tu.ExtractJSON(re, &result),
 	)
 	suite.Equal(100., result.LimiterConfig["GetStore"].QPS)
 	suite.Equal(100, result.LimiterConfig["GetStore"].QPSBurst)
 	suite.Equal(uint64(100), result.LimiterConfig["GetStore"].ConcurrencyLimit)
+	suite.True(result.LimiterConfig["GetStore"].EnableBBR)
 	suite.NoError(err)
 }
 
