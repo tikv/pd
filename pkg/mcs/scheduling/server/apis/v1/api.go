@@ -33,6 +33,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -130,6 +131,7 @@ func (s *Service) RegisterSchedulersRouter() {
 	router := s.root.Group("schedulers")
 	router.GET("", getSchedulers)
 	router.GET("/diagnostic/:name", getDiagnosticResult)
+	router.GET("/config", getSchedulerConfig)
 	router.GET("/config/:name/list", getSchedulerConfigByName)
 	router.GET("/config/:name/roles", getSchedulerConfigByName) // compatibility for shuffle-region-scheduler
 	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
@@ -389,22 +391,43 @@ func getSchedulers(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, output)
 }
 
+// @Tags     schedulers
+// @Summary  List all scheduler configs.
+// @Produce  json
+// @Success  200  {object}  map[string]interface{}
+// @Router   /schedulers/config/ [get]
+func getSchedulerConfig(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	sc, err := handler.GetSchedulersController()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	sches, configs, err := sc.GetAllSchedulerConfigs()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, schedulers.ToPayload(sches, configs))
+}
+
+// @Tags     schedulers
+// @Summary  List scheduler config by name.
+// @Produce  json
+// @Success  200  {object}  map[string]interface{}
+// @Failure  404  {string}  string  scheduler not found
+// @Router   /schedulers/config/{name}/list [get]
 func getSchedulerConfigByName(c *gin.Context) {
-	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	handlers := svr.GetCoordinator().GetSchedulersController().GetSchedulerHandlers()
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	sc, err := handler.GetSchedulersController()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	handlers := sc.GetSchedulerHandlers()
 	name := c.Param("name")
 	if _, ok := handlers[name]; !ok {
 		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
-		return
-	}
-	co := svr.GetCoordinator()
-	if co == nil {
-		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
-		return
-	}
-	sc := co.GetSchedulersController()
-	if sc == nil {
-		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
 		return
 	}
 	isDisabled, err := sc.IsSchedulerDisabled(name)

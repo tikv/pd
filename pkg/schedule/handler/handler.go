@@ -765,13 +765,22 @@ func (h *Handler) GetCheckerStatus(name string) (map[string]bool, error) {
 	}, nil
 }
 
-// GetSchedulerNames returns all names of schedulers.
-func (h *Handler) GetSchedulerNames() ([]string, error) {
+// GetSchedulersController returns controller of schedulers.
+func (h *Handler) GetSchedulersController() (*schedulers.Controller, error) {
 	co := h.GetCoordinator()
 	if co == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
-	return co.GetSchedulersController().GetSchedulerNames(), nil
+	return co.GetSchedulersController(), nil
+}
+
+// GetSchedulerNames returns all names of schedulers.
+func (h *Handler) GetSchedulerNames() ([]string, error) {
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return nil, err
+	}
+	return sc.GetSchedulerNames(), nil
 }
 
 type schedulerPausedPeriod struct {
@@ -782,11 +791,10 @@ type schedulerPausedPeriod struct {
 
 // GetSchedulerByStatus returns all names of schedulers by status.
 func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{}, error) {
-	co := h.GetCoordinator()
-	if co == nil {
-		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return nil, err
 	}
-	sc := co.GetSchedulersController()
 	schedulers := sc.GetSchedulerNames()
 	switch status {
 	case "paused":
@@ -874,11 +882,11 @@ func (h *Handler) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 // t == 0 : resume scheduler.
 // t > 0 : scheduler delays t seconds.
 func (h *Handler) PauseOrResumeScheduler(name string, t int64) (err error) {
-	co := h.GetCoordinator()
-	if co == nil {
-		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return err
 	}
-	if err = co.GetSchedulersController().PauseOrResumeScheduler(name, t); err != nil {
+	if err = sc.PauseOrResumeScheduler(name, t); err != nil {
 		if t == 0 {
 			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
