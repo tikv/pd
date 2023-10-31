@@ -84,10 +84,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	}
 
 	checkSchedulerCommand := func(args []string, expected map[string]bool) {
+		if args != nil {
+			mustExec(re, cmd, args, nil)
+		}
 		testutil.Eventually(re, func() bool {
-			if args != nil {
-				mustExec(re, cmd, args, nil)
-			}
 			var schedulers []string
 			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &schedulers)
 			if len(schedulers) != len(expected) {

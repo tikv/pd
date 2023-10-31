@@ -17,7 +17,6 @@ package apis
 import (
 	"fmt"
 	"net/http"
-	"path"
 	"strconv"
 	"sync"
 
@@ -133,7 +132,6 @@ func (s *Service) RegisterSchedulersRouter() {
 	router.GET("/diagnostic/:name", getDiagnosticResult)
 	router.GET("/config", getSchedulerConfig)
 	router.GET("/config/:name/list", getSchedulerConfigByName)
-	router.GET("/config/:name/roles", getSchedulerConfigByName) // compatibility for shuffle-region-scheduler
 	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
 	// And we need to do one-to-two forwarding in the API middleware.
 	router.POST("/:name", pauseOrResumeScheduler)
@@ -395,6 +393,7 @@ func getSchedulers(c *gin.Context) {
 // @Summary  List all scheduler configs.
 // @Produce  json
 // @Success  200  {object}  map[string]interface{}
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers/config/ [get]
 func getSchedulerConfig(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
@@ -416,6 +415,7 @@ func getSchedulerConfig(c *gin.Context) {
 // @Produce  json
 // @Success  200  {object}  map[string]interface{}
 // @Failure  404  {string}  string  scheduler not found
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers/config/{name}/list [get]
 func getSchedulerConfigByName(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
@@ -439,7 +439,7 @@ func getSchedulerConfigByName(c *gin.Context) {
 		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
 		return
 	}
-	c.Request.URL.Path = "/" + path.Base(c.Request.URL.Path)
+	c.Request.URL.Path = "/list"
 	handlers[name].ServeHTTP(c.Writer, c.Request)
 }
 
