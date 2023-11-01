@@ -289,16 +289,15 @@ func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
 	re.Contains(string(output), "is invalid")
 }
 
-func TestPlacementRules(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRules() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRules)
+}
+
+func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -306,8 +305,6 @@ func TestPlacementRules(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
@@ -386,16 +383,15 @@ func TestPlacementRules(t *testing.T) {
 	re.Equal([2]string{"pd", "test1"}, rules[0].Key())
 }
 
-func TestPlacementRuleGroups(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRuleGroups() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+}
+
+func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -403,8 +399,6 @@ func TestPlacementRuleGroups(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
@@ -460,16 +454,15 @@ func TestPlacementRuleGroups(t *testing.T) {
 	re.Contains(string(output), "404")
 }
 
-func TestPlacementRuleBundle(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRuleBundle() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+}
+
+func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -477,8 +470,6 @@ func TestPlacementRuleBundle(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
