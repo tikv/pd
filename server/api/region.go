@@ -27,21 +27,18 @@ import (
 
 	"github.com/gorilla/mux"
 	jwriter "github.com/mailru/easyjson/jwriter"
-	"github.com/pingcap/failpoint"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
-	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 // MetaPeer is api compatible with *metapb.Peer.
@@ -301,51 +298,28 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/replicated [get]
 func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r)
-
 	vars := mux.Vars(r)
-	startKeyHex := vars["startKey"]
-	startKey, err := hex.DecodeString(startKeyHex)
+	rawStartKey := vars["startKey"]
+	rawEndKey := vars["endKey"]
+	state, err := h.Handler.CheckRegionsReplicated(rawStartKey, rawEndKey)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	endKeyHex := vars["endKey"]
-	endKey, err := hex.DecodeString(endKeyHex)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	regions := rc.ScanRegions(startKey, endKey, -1)
-	state := "REPLICATED"
-	for _, region := range regions {
-		if !filter.IsRegionReplicated(rc, region) {
-			state = "INPROGRESS"
-			if rc.GetCoordinator().IsPendingRegion(region.GetID()) {
-				state = "PENDING"
-				break
-			}
-		}
-	}
-	failpoint.Inject("mockPending", func(val failpoint.Value) {
-		aok, ok := val.(bool)
-		if ok && aok {
-			state = "PENDING"
-		}
-	})
 	h.rd.JSON(w, http.StatusOK, state)
 }
 
 type regionsHandler struct {
+	*server.Handler
 	svr *server.Server
 	rd  *render.Render
 }
 
 func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	return &regionsHandler{
-		svr: svr,
-		rd:  rd,
+		Handler: svr.GetHandler(),
+		svr:     svr,
+		rd:      rd,
 	}
 }
 
@@ -422,19 +396,12 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey := r.URL.Query().Get("key")
 	endKey := r.URL.Query().Get("end_key")
+	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
-	limit := defaultRegionLimit
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if limit > maxRegionLimit {
-		limit = maxRegionLimit
-	}
 	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
 	b, err := marshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
@@ -509,16 +476,10 @@ func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	limit := defaultRegionLimit
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if limit > maxRegionLimit {
-		limit = maxRegionLimit
+	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	regionBound := keyspace.MakeRegionBound(keyspaceID)
 	regions := rc.ScanRegions(regionBound.RawLeftBound, regionBound.RawRightBound, limit)
@@ -789,8 +750,6 @@ func (h *regionsHandler) GetRegionSiblings(w http.ResponseWriter, r *http.Reques
 }
 
 const (
-	defaultRegionLimit     = 16
-	maxRegionLimit         = 10240
 	minRegionHistogramSize = 1
 	minRegionHistogramKeys = 1000
 )
@@ -892,43 +851,27 @@ func (h *regionsHandler) GetTopCPURegions(w http.ResponseWriter, r *http.Request
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/accelerate-schedule [post]
 func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r)
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	startKey, rawStartKey, err := apiutil.ParseKey("start_key", input)
+	rawStartKey, ok1 := input["start_key"].(string)
+	rawEndKey, ok2 := input["end_key"].(string)
+	if !ok1 || !ok2 {
+		h.rd.JSON(w, http.StatusBadRequest, "start_key or end_key is not string")
+		return
+	}
+
+	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"), 256 /*default limit*/)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	endKey, rawEndKey, err := apiutil.ParseKey("end_key", input)
+	err = h.Handler.AccelerateRegionsScheduleInRange(rawStartKey, rawEndKey, limit)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-
-	limit := 256
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if limit > maxRegionLimit {
-		limit = maxRegionLimit
-	}
-
-	regions := rc.ScanRegions(startKey, endKey, limit)
-	if len(regions) > 0 {
-		regionsIDList := make([]uint64, 0, len(regions))
-		for _, region := range regions {
-			regionsIDList = append(regionsIDList, region.GetID())
-		}
-		rc.AddSuspectRegions(regionsIDList...)
 	}
 	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
 }
@@ -943,27 +886,20 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/accelerate-schedule/batch [post]
 func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r)
 	var input []map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	limit := 256
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
+	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"), 256 /*default limit*/)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	if limit > maxRegionLimit {
-		limit = maxRegionLimit
-	}
+
 	var msgBuilder strings.Builder
 	msgBuilder.Grow(128)
 	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
-	var regions []*core.RegionInfo
+	var startKeys, endKeys [][]byte
 	for _, rg := range input {
 		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
 		if err != nil {
@@ -975,32 +911,24 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		regions = append(regions, rc.ScanRegions(startKey, endKey, limit)...)
+		startKeys = append(startKeys, startKey)
+		endKeys = append(endKeys, endKey)
 		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
 	}
-	if len(regions) > 0 {
-		regionsIDList := make([]uint64, 0, len(regions))
-		for _, region := range regions {
-			regionsIDList = append(regionsIDList, region.GetID())
-		}
-		rc.AddSuspectRegions(regionsIDList...)
+	err = h.Handler.AccelerateRegionsScheduleInRanges(startKeys, endKeys, limit)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	h.rd.Text(w, http.StatusOK, msgBuilder.String())
 }
 
 func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, less func(a, b *core.RegionInfo) bool) {
 	rc := getCluster(r)
-	limit := defaultRegionLimit
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		var err error
-		limit, err = strconv.Atoi(limitStr)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-	if limit > maxRegionLimit {
-		limit = maxRegionLimit
+	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"))
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	regions := TopNRegions(rc.GetRegions(), less, limit)
 	b, err := marshalRegionsInfoJSON(r.Context(), regions)
@@ -1020,69 +948,33 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/scatter [post]
 func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r)
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	_, ok1 := input["start_key"].(string)
-	_, ok2 := input["end_key"].(string)
-	group, ok := input["group"].(string)
-	if !ok {
-		group = ""
-	}
+	rawStartKey, ok1 := input["start_key"].(string)
+	rawEndKey, ok2 := input["end_key"].(string)
+	group, _ := input["group"].(string)
 	retryLimit := 5
 	if rl, ok := input["retry_limit"].(float64); ok {
 		retryLimit = int(rl)
 	}
-	opsCount := 0
-	var failures map[uint64]error
-	var err error
-	if ok1 && ok2 {
-		startKey, _, err := apiutil.ParseKey("start_key", input)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
+
+	opsCount, failures, err := func() (int, map[uint64]error, error) {
+		if ok1 && ok2 {
+			return h.ScatterRegionsByRange(rawStartKey, rawEndKey, group, retryLimit)
 		}
-		endKey, _, err := apiutil.ParseKey("end_key", input)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		opsCount, failures, err = rc.GetRegionScatterer().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-	} else {
 		ids, ok := typeutil.JSONToUint64Slice(input["regions_id"])
 		if !ok {
-			h.rd.JSON(w, http.StatusBadRequest, "regions_id is invalid")
-			return
+			return 0, nil, errors.New("regions_id is invalid")
 		}
-		opsCount, failures, err = rc.GetRegionScatterer().ScatterRegionsByID(ids, group, retryLimit, false)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+		return h.ScatterRegionsByID(ids, group, retryLimit, false)
+	}()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
-	percentage := 100
-	if len(failures) > 0 {
-		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
-		log.Debug("scatter regions", zap.Errors("failures", func() []error {
-			r := make([]error, 0, len(failures))
-			for _, err := range failures {
-				r = append(r, err)
-			}
-			return r
-		}()))
-	}
-	s := struct {
-		ProcessedPercentage int `json:"processed-percentage"`
-	}{
-		ProcessedPercentage: percentage,
-	}
+	s := h.BuildScatterRegionsResp(opsCount, failures)
 	h.rd.JSON(w, http.StatusOK, &s)
 }
 
@@ -1095,16 +987,16 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/split [post]
 func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
-	rc := getCluster(r)
 	var input map[string]interface{}
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
-	rawSplitKeys, ok := input["split_keys"].([]interface{})
+	s, ok := input["split_keys"]
 	if !ok {
 		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
+	rawSplitKeys := s.([]string)
 	if len(rawSplitKeys) < 1 {
 		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
 		return
@@ -1113,29 +1005,11 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 	if rl, ok := input["retry_limit"].(float64); ok {
 		retryLimit = int(rl)
 	}
-	splitKeys := make([][]byte, 0, len(rawSplitKeys))
-	for _, rawKey := range rawSplitKeys {
-		key, err := hex.DecodeString(rawKey.(string))
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		splitKeys = append(splitKeys, key)
+	s, err := h.Handler.SplitRegions(r.Context(), rawSplitKeys, retryLimit)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-	s := struct {
-		ProcessedPercentage int      `json:"processed-percentage"`
-		NewRegionsID        []uint64 `json:"regions-id"`
-	}{}
-	percentage, newRegionsID := rc.GetRegionSplitter().SplitRegions(r.Context(), splitKeys, retryLimit)
-	s.ProcessedPercentage = percentage
-	s.NewRegionsID = newRegionsID
-	failpoint.Inject("splitResponses", func(val failpoint.Value) {
-		rawID, ok := val.(int)
-		if ok {
-			s.ProcessedPercentage = 100
-			s.NewRegionsID = []uint64{uint64(rawID)}
-		}
-	})
 	h.rd.JSON(w, http.StatusOK, &s)
 }
 

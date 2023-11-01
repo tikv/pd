@@ -424,9 +424,9 @@ func (suite *regionTestSuite) TestSplitRegions() {
 		suite.Equal(100, s.ProcessedPercentage)
 		suite.Equal([]uint64{newRegionID}, s.NewRegionsID)
 	}
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", fmt.Sprintf("return(%v)", newRegionID)))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/splitResponses", fmt.Sprintf("return(%v)", newRegionID)))
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/split", suite.urlPrefix), []byte(body), checkOpt)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/api/splitResponses"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/splitResponses"))
 	suite.NoError(err)
 }
 
@@ -716,6 +716,8 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 
 	// correct test
 	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, suite.urlPrefix, hex.EncodeToString(r1.GetStartKey()), hex.EncodeToString(r1.GetEndKey()))
+	err = tu.CheckGetJSON(testDialClient, url, nil, tu.StatusOK(re))
+	suite.NoError(err)
 
 	// test one rule
 	data, err := json.Marshal(bundle)
@@ -727,11 +729,11 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 	suite.NoError(err)
 	suite.Equal("REPLICATED", status)
 
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/api/mockPending", "return(true)"))
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/mockPending", "return(true)"))
 	err = tu.ReadGetJSON(re, testDialClient, url, &status)
 	suite.NoError(err)
 	suite.Equal("PENDING", status)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/api/mockPending"))
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/mockPending"))
 	// test multiple rules
 	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1})
