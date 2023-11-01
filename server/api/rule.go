@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
@@ -441,6 +442,20 @@ func (h *ruleHandler) GetPlacementRules(w http.ResponseWriter, r *http.Request) 
 		h.rd.JSON(w, http.StatusPreconditionFailed, errPlacementDisabled.Error())
 		return
 	}
+
+	if groupsStr := r.URL.Query().Get("groups"); len(groupsStr) > 0 {
+		var bundles []placement.GroupBundle
+		groupIDs := strings.Split(groupsStr, ",")
+		for _, g := range groupIDs {
+			bundle := cluster.GetRuleManager().GetGroupBundle(g)
+			if bundle.Rules != nil {
+				bundles = append(bundles, bundle)
+			}
+		}
+		h.rd.JSON(w, http.StatusOK, bundles)
+		return
+	}
+
 	bundles := cluster.GetRuleManager().GetAllGroupBundles()
 	h.rd.JSON(w, http.StatusOK, bundles)
 }
