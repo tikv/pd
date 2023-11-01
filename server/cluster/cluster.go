@@ -1236,6 +1236,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.core.GetRegions()
 }
 
+// ValidRegion is used to decide if the region is valid.
+func (c *RaftCluster) ValidRegion(region *metapb.Region) error {
+	return c.core.ValidRegion(region)
+}
+
 // GetTotalRegionCount returns total count of regions
 func (c *RaftCluster) GetTotalRegionCount() int {
 	return c.core.GetTotalRegionCount()

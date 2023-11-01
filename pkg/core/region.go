@@ -1339,8 +1339,8 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 
 // GetClusterNotFromStorageRegionsCnt gets the `NotFromStorageRegionsCnt` count of regions that not loaded from storage anymore.
 func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
-	r.st.RLock()
-	defer r.st.RUnlock()
+	r.t.RLock()
+	defer r.t.RUnlock()
 	return r.tree.notFromStorageRegionsCount()
 }
 
@@ -1685,6 +1685,23 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 		return 0
 	}
 	return r.tree.TotalSize() / int64(r.tree.length())
+}
+
+// ValidRegion is used to decide if the region is valid.
+func (r *RegionsInfo) ValidRegion(region *metapb.Region) error {
+	startKey := region.GetStartKey()
+	currnetRegion := r.GetRegionByKey(startKey)
+	if currnetRegion == nil {
+		return errors.Errorf("region not found, request region: %v", logutil.RedactStringer(RegionToHexMeta(region)))
+	}
+	// If the request epoch is less than current region epoch, then returns an error.
+	regionEpoch := region.GetRegionEpoch()
+	currnetEpoch := currnetRegion.GetMeta().GetRegionEpoch()
+	if regionEpoch.GetVersion() < currnetEpoch.GetVersion() ||
+		regionEpoch.GetConfVer() < currnetEpoch.GetConfVer() {
+		return errors.Errorf("invalid region epoch, request: %v, current: %v", regionEpoch, currnetEpoch)
+	}
+	return nil
 }
 
 // DiffRegionPeersInfo return the difference of peers info  between two RegionInfo

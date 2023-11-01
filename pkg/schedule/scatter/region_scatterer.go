@@ -53,6 +53,8 @@ var (
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
 	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
+	errRegionNotFound               = errors.New("region not found")
+	errEmptyRegion                  = errors.New("empty region")
 )
 
 const (
@@ -165,7 +167,7 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 	regions := r.cluster.ScanRegions(startKey, endKey, -1)
 	if len(regions) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
-		return 0, nil, errors.New("empty region")
+		return 0, nil, errEmptyRegion
 	}
 	failures := make(map[uint64]error, len(regions))
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
@@ -184,7 +186,14 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, map[uint64]error, error) {
 	if len(regionsID) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
-		return 0, nil, errors.New("empty region")
+		return 0, nil, errEmptyRegion
+	}
+	if len(regionsID) == 1 {
+		region := r.cluster.GetRegion(regionsID[0])
+		if region == nil {
+			scatterSkipNoRegionCounter.Inc()
+			return 0, nil, errRegionNotFound
+		}
 	}
 	failures := make(map[uint64]error, len(regionsID))
 	regions := make([]*core.RegionInfo, 0, len(regionsID))
@@ -219,7 +228,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int, skipStoreLimit bool) (int, error) {
 	if len(regions) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
-		return 0, errors.New("empty region")
+		return 0, errEmptyRegion
 	}
 	if retryLimit > maxRetryLimit {
 		retryLimit = maxRetryLimit

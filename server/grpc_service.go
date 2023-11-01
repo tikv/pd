@@ -69,6 +69,7 @@ var (
 	ErrNotStarted                       = status.Errorf(codes.Unavailable, "server not started")
 	ErrSendHeartbeatTimeout             = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
 	ErrNotFoundTSOAddr                  = status.Errorf(codes.NotFound, "not found tso address")
+	ErrNotFoundSchedulingAddr           = status.Errorf(codes.NotFound, "not found scheduling address")
 	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
 	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
 	ErrTSOProxyRecvFromClientTimeout    = status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
@@ -1002,8 +1003,8 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		s.handleDamagedStore(request.GetStats())
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		if s.IsAPIServiceMode() {
-			s.updateSchedulingClient(ctx)
-			if s.schedulingClient.Load() != nil {
+			forwardCli, _ := s.updateSchedulingClient(ctx)
+			if forwardCli != nil {
 				req := &schedulingpb.StoreHeartbeatRequest{
 					Header: &schedulingpb.RequestHeader{
 						ClusterId: request.GetHeader().GetClusterId(),
@@ -1011,7 +1012,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 					},
 					Stats: request.GetStats(),
 				}
-				if _, err := s.schedulingClient.Load().(*schedulingClient).getClient().StoreHeartbeat(ctx, req); err != nil {
+				if _, err := forwardCli.StoreHeartbeat(ctx, req); err != nil {
 					// reset to let it be updated in the next request
 					s.schedulingClient.Store(&schedulingClient{})
 				}
@@ -1030,19 +1031,28 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	return resp, nil
 }
 
-func (s *GrpcServer) updateSchedulingClient(ctx context.Context) {
+func (s *GrpcServer) updateSchedulingClient(ctx context.Context) (schedulingpb.SchedulingClient, error) {
 	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
 	pre := s.schedulingClient.Load()
+	// 1. forwardedHost is not empty and pre is empty, update the schedulingClient
+	// 2. forwardedHost is not empty and forwardedHost is not equal to pre, update the schedulingClient
+	// 3. forwardedHost is not empty and forwardedHost is equal to pre, return pre
+	// 4. forwardedHost is empty, return nil
 	if forwardedHost != "" && ((pre == nil) || (pre != nil && forwardedHost != pre.(*schedulingClient).getPrimaryAddr())) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
 		if err != nil {
 			log.Error("get delegate client failed", zap.Error(err))
 		}
-		s.schedulingClient.Store(&schedulingClient{
+		forwardCli := &schedulingClient{
 			client:      schedulingpb.NewSchedulingClient(client),
 			lastPrimary: forwardedHost,
-		})
+		}
+		s.schedulingClient.Store(forwardCli)
+		return forwardCli.getClient(), nil
+	} else if forwardedHost != "" && (pre != nil && forwardedHost == pre.(*schedulingClient).getPrimaryAddr()) {
+		return pre.(*schedulingClient).getClient(), nil
 	}
+	return nil, ErrNotFoundSchedulingAddr
 }
 
 // bucketHeartbeatServer wraps PD_ReportBucketsServer to ensure when any error
@@ -1622,6 +1632,31 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 
 // AskBatchSplit implements gRPC PDServer.
 func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
+	if s.IsAPIServiceMode() {
+		forwardCli, err := s.updateSchedulingClient(ctx)
+		if err != nil {
+			return &pdpb.AskBatchSplitResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
+		}
+		if forwardCli != nil {
+			req := &schedulingpb.AskBatchSplitRequest{
+				Header: &schedulingpb.RequestHeader{
+					ClusterId: request.GetHeader().GetClusterId(),
+					SenderId:  request.GetHeader().GetSenderId(),
+				},
+				Region:     request.GetRegion(),
+				SplitCount: request.GetSplitCount(),
+			}
+			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().AskBatchSplit(ctx, req)
+			if err != nil {
+				// reset to let it be updated in the next request
+				s.schedulingClient.Store(&schedulingClient{})
+				return s.convertAskSplitResponse(resp), err
+			}
+			return s.convertAskSplitResponse(resp), nil
+		}
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request)
 	}
@@ -1771,9 +1806,21 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 // ScatterRegion implements gRPC PDServer.
 func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
 	if s.IsAPIServiceMode() {
-		s.updateSchedulingClient(ctx)
-		if s.schedulingClient.Load() != nil {
-			regionsID := request.GetRegionsId()
+		forwardCli, err := s.updateSchedulingClient(ctx)
+		if err != nil {
+			return &pdpb.ScatterRegionResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
+		}
+		if forwardCli != nil {
+			var regionsID []uint64
+			// nolint
+			if request.GetRegionId() != 0 {
+				// nolint
+				regionsID = []uint64{request.GetRegionId()}
+			} else {
+				regionsID = request.GetRegionsId()
+			}
 			if len(regionsID) == 0 {
 				return &pdpb.ScatterRegionResponse{
 					Header: s.invalidValue("regions id is required"),
@@ -1789,7 +1836,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 				RetryLimit:     request.GetRetryLimit(),
 				SkipStoreLimit: request.GetSkipStoreLimit(),
 			}
-			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().ScatterRegions(ctx, req)
+			resp, err := forwardCli.ScatterRegions(ctx, req)
 			if err != nil {
 				// reset to let it be updated in the next request
 				s.schedulingClient.Store(&schedulingClient{})
@@ -1990,8 +2037,13 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 // GetOperator gets information about the operator belonging to the specify region.
 func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
 	if s.IsAPIServiceMode() {
-		s.updateSchedulingClient(ctx)
-		if s.schedulingClient.Load() != nil {
+		forwardCli, err := s.updateSchedulingClient(ctx)
+		if err != nil {
+			return &pdpb.GetOperatorResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
+		}
+		if forwardCli != nil {
 			req := &schedulingpb.GetOperatorRequest{
 				Header: &schedulingpb.RequestHeader{
 					ClusterId: request.GetHeader().GetClusterId(),
@@ -1999,7 +2051,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 				},
 				RegionId: request.GetRegionId(),
 			}
-			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().GetOperator(ctx, req)
+			resp, err := forwardCli.GetOperator(ctx, req)
 			if err != nil {
 				// reset to let it be updated in the next request
 				s.schedulingClient.Store(&schedulingClient{})
@@ -2100,6 +2152,15 @@ func (s *GrpcServer) invalidValue(msg string) *pdpb.ResponseHeader {
 func (s *GrpcServer) convertHeader(header *schedulingpb.ResponseHeader) *pdpb.ResponseHeader {
 	switch header.GetError().GetType() {
 	case schedulingpb.ErrorType_UNKNOWN:
+		if strings.Contains(header.GetError().GetMessage(), "region not found") {
+			return &pdpb.ResponseHeader{
+				ClusterId: header.GetClusterId(),
+				Error: &pdpb.Error{
+					Type:    pdpb.ErrorType_REGION_NOT_FOUND,
+					Message: header.GetError().GetMessage(),
+				},
+			}
+		}
 		return &pdpb.ResponseHeader{
 			ClusterId: header.GetClusterId(),
 			Error: &pdpb.Error{
@@ -2133,6 +2194,13 @@ func (s *GrpcServer) convertOperatorResponse(resp *schedulingpb.GetOperatorRespo
 		Desc:     resp.GetDesc(),
 		Kind:     resp.GetKind(),
 		Status:   resp.GetStatus(),
+	}
+}
+
+func (s *GrpcServer) convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
+	return &pdpb.AskBatchSplitResponse{
+		Header: s.convertHeader(resp.GetHeader()),
+		Ids:    resp.GetIds(),
 	}
 }
 
@@ -2241,8 +2309,13 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 // SplitRegions split regions by the given split keys
 func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
 	if s.IsAPIServiceMode() {
-		s.updateSchedulingClient(ctx)
-		if s.schedulingClient.Load() != nil {
+		forwardCli, err := s.updateSchedulingClient(ctx)
+		if err != nil {
+			return &pdpb.SplitRegionsResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
+		}
+		if forwardCli != nil {
 			req := &schedulingpb.SplitRegionsRequest{
 				Header: &schedulingpb.RequestHeader{
 					ClusterId: request.GetHeader().GetClusterId(),
@@ -2251,7 +2324,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 				SplitKeys:  request.GetSplitKeys(),
 				RetryLimit: request.GetRetryLimit(),
 			}
-			resp, err := s.schedulingClient.Load().(*schedulingClient).getClient().SplitRegions(ctx, req)
+			resp, err := forwardCli.SplitRegions(ctx, req)
 			if err != nil {
 				// reset to let it be updated in the next request
 				s.schedulingClient.Store(&schedulingClient{})
@@ -2456,6 +2529,9 @@ func forwardRegionHeartbeatClientToServer(forwardStream pdpb.PD_RegionHeartbeatC
 }
 
 func (s *GrpcServer) createSchedulingStream(client *grpc.ClientConn) (schedulingpb.Scheduling_RegionHeartbeatClient, context.CancelFunc, error) {
+	if client == nil {
+		return nil, nil, errors.New("connection is not set")
+	}
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go grpcutil.CheckStream(ctx, cancel, done)

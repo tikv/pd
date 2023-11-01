@@ -407,20 +407,23 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 
-	// test evict-slow-trend scheduler config
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-trend-scheduler"}, nil)
-	re.Contains(echo, "Success!")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
-	re.Contains(echo, "evict-slow-trend-scheduler")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-trend-scheduler", "set", "recovery-duration", "100"}, nil)
-	re.Contains(echo, "Success!")
-	conf = make(map[string]interface{})
-	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-trend-scheduler", "show"}, &conf)
-	re.Equal(100., conf["recovery-duration"])
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-slow-trend-scheduler"}, nil)
-	re.Contains(echo, "Success!")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
-	re.NotContains(echo, "evict-slow-trend-scheduler")
+	// test evict-slow-store && evict-slow-trend schedulers config
+	evictSlownessSchedulers := []string{"evict-slow-store-scheduler", "evict-slow-trend-scheduler"}
+	for _, schedulerName := range evictSlownessSchedulers {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", schedulerName}, nil)
+		re.Contains(echo, "Success!")
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+		re.Contains(echo, schedulerName)
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "set", "recovery-duration", "100"}, nil)
+		re.Contains(echo, "Success!")
+		conf = make(map[string]interface{})
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "show"}, &conf)
+		re.Equal(100., conf["recovery-duration"])
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", schedulerName}, nil)
+		re.Contains(echo, "Success!")
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+		re.NotContains(echo, schedulerName)
+	}
 
 	// test show scheduler with paused and disabled status.
 	checkSchedulerWithStatusCommand := func(status string, expected []string) {
@@ -469,10 +472,8 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestClu
 		result := make(map[string]interface{})
 		testutil.Eventually(re, func() bool {
 			mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
-			return len(result) != 0
+			return len(result) != 0 && expectedStatus == result["status"] && expectedSummary == result["summary"]
 		}, testutil.WithTickInterval(50*time.Millisecond))
-		re.Equal(expectedStatus, result["status"])
-		re.Equal(expectedSummary, result["summary"])
 	}
 
 	stores := []*metapb.Store{

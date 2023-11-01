@@ -458,13 +458,16 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
 		}
-		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 		if needRun {
+			log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 			if err = c.schedulers.AddScheduler(s); err != nil {
 				log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			}
-		} else if err = c.schedulers.AddSchedulerHandler(s); err != nil {
-			log.Error("can not add scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+		} else {
+			log.Info("create scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()))
+			if err = c.schedulers.AddSchedulerHandler(s); err != nil {
+				log.Error("can not add scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+			}
 		}
 	}
 
@@ -484,8 +487,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			continue
 		}
 
-		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
 		if needRun {
+			log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
 			if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
 				log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			} else {
@@ -493,8 +496,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 				scheduleCfg.Schedulers[k] = schedulerCfg
 				k++
 			}
-		} else if err = c.schedulers.AddSchedulerHandler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+		} else {
+			log.Info("create scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
+			if err = c.schedulers.AddSchedulerHandler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+				log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+			} else {
+				scheduleCfg.Schedulers[k] = schedulerCfg
+				k++
+			}
 		}
 	}
 

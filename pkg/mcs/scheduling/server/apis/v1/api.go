@@ -15,7 +15,6 @@
 package apis
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -26,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -121,6 +121,8 @@ func NewService(srv *scheserver.Service) *Service {
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	router.PUT("/log", changeLogLevel)
+	router.DELETE("cache/regions", deleteAllRegionCache)
+	router.DELETE("cache/regions/:id", deleteRegionCacheByID)
 }
 
 // RegisterSchedulersRouter registers the router of the schedulers handler.
@@ -160,6 +162,11 @@ func (s *Service) RegisterOperatorsRouter() {
 	router.GET("/records", getOperatorRecords)
 }
 
+// @Tags     admin
+// @Summary  Change the log level.
+// @Produce  json
+// @Success  200  {string}  string  "The log level is updated."
+// @Router   /admin/log [put]
 func changeLogLevel(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	var level string
@@ -174,6 +181,46 @@ func changeLogLevel(c *gin.Context) {
 	}
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	c.String(http.StatusOK, "The log level is updated.")
+}
+
+// @Tags     admin
+// @Summary  Drop all regions from cache.
+// @Produce  json
+// @Success  200  {string}  string  "All regions are removed from server cache."
+// @Router   /admin/cache/regions [delete]
+func deleteAllRegionCache(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
+	cluster.DropCacheAllRegion()
+	c.String(http.StatusOK, "All regions are removed from server cache.")
+}
+
+// @Tags     admin
+// @Summary  Drop a specific region from cache.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string  "The region is removed from server cache."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /admin/cache/regions/{id} [delete]
+func deleteRegionCacheByID(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
+	regionIDStr := c.Param("id")
+	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	cluster.DropCacheRegion(regionID)
+	c.String(http.StatusOK, "The region is removed from server cache.")
 }
 
 // @Tags     operators
@@ -475,7 +522,7 @@ func getHotRegions(typ utils.RWType, c *gin.Context) {
 	for _, storeID := range storeIDs {
 		id, err := strconv.ParseUint(storeID, 10, 64)
 		if err != nil {
-			c.String(http.StatusBadRequest, fmt.Sprintf("invalid store id: %s", storeID))
+			c.String(http.StatusBadRequest, errs.ErrInvalidStoreID.FastGenByArgs(storeID).Error())
 			return
 		}
 		_, err = handler.GetStore(id)

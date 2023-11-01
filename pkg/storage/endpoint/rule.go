@@ -22,6 +22,7 @@ import (
 
 // RuleStorage defines the storage operations on the rule.
 type RuleStorage interface {
+	LoadRule(ruleKey string) (string, error)
 	LoadRules(f func(k, v string)) error
 	SaveRule(ruleKey string, rule interface{}) error
 	SaveRuleJSON(ruleKey, rule string) error
@@ -91,6 +92,11 @@ func (se *StorageEndpoint) SaveRegionRuleJSON(ruleKey, rule string) error {
 // DeleteRegionRule removes a region rule from storage.
 func (se *StorageEndpoint) DeleteRegionRule(ruleKey string) error {
 	return se.Remove(regionLabelKeyPath(ruleKey))
+}
+
+// LoadRule load a placement rule from storage.
+func (se *StorageEndpoint) LoadRule(ruleKey string) (string, error) {
+	return se.Load(ruleKeyPath(ruleKey))
 }
 
 // LoadRules loads placement rules from storage.

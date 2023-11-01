@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/statistics"
@@ -217,4 +219,62 @@ func (suite *apiTestSuite) TestAPIForward() {
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/history"), &history,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
+}
+
+func TestAdminRegionCache(t *testing.T) {
+	re := require.New(t)
+	checkAdminRegionCache := func(cluster *tests.TestCluster) {
+		r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetRegionConfVer(100), core.SetRegionVersion(100))
+		tests.MustPutRegionInfo(re, cluster, r1)
+		r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetRegionConfVer(100), core.SetRegionVersion(100))
+		tests.MustPutRegionInfo(re, cluster, r2)
+		r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetRegionConfVer(100), core.SetRegionVersion(100))
+		tests.MustPutRegionInfo(re, cluster, r3)
+
+		schedulingServer := cluster.GetSchedulingPrimaryServer()
+		re.Equal(3, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+
+		addr := schedulingServer.GetAddr()
+		urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions", addr)
+		err := testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "30"), testutil.StatusOK(re))
+		re.NoError(err)
+		re.Equal(2, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+
+		err = testutil.CheckDelete(testDialClient, urlPrefix, testutil.StatusOK(re))
+		re.NoError(err)
+		re.Equal(0, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+	}
+	env := tests.NewSchedulingTestEnvironment(t)
+	env.RunTestInAPIMode(checkAdminRegionCache)
+}
+
+func TestAdminRegionCacheForward(t *testing.T) {
+	re := require.New(t)
+	checkAdminRegionCache := func(cluster *tests.TestCluster) {
+		r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetRegionConfVer(100), core.SetRegionVersion(100))
+		tests.MustPutRegionInfo(re, cluster, r1)
+		r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetRegionConfVer(100), core.SetRegionVersion(100))
+		tests.MustPutRegionInfo(re, cluster, r2)
+		r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetRegionConfVer(100), core.SetRegionVersion(100))
+		tests.MustPutRegionInfo(re, cluster, r3)
+
+		apiServer := cluster.GetLeaderServer().GetServer()
+		schedulingServer := cluster.GetSchedulingPrimaryServer()
+		re.Equal(3, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(3, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
+
+		addr := cluster.GetLeaderServer().GetAddr()
+		urlPrefix := fmt.Sprintf("%s/pd/api/v1/admin/cache/region", addr)
+		err := testutil.CheckDelete(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "30"), testutil.StatusOK(re))
+		re.NoError(err)
+		re.Equal(2, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(2, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
+
+		err = testutil.CheckDelete(testDialClient, urlPrefix+"s", testutil.StatusOK(re))
+		re.NoError(err)
+		re.Equal(0, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
+		re.Equal(0, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
+	}
+	env := tests.NewSchedulingTestEnvironment(t)
+	env.RunTestInAPIMode(checkAdminRegionCache)
 }
