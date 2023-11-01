@@ -25,6 +25,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -48,24 +49,29 @@ func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.Schedule
 	}
 }
 
-func TestConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+type configTestSuite struct {
+	suite.Suite
+}
+
+func TestConfigTestSuite(t *testing.T) {
+	suite.Run(t, new(configTestSuite))
+}
+
+func (suite *configTestSuite) TestConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkConfig)
+}
+
+func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	svr := leaderServer.GetServer()
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
@@ -648,24 +654,21 @@ func TestReplicationMode(t *testing.T) {
 	check()
 }
 
-func TestUpdateDefaultReplicaConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
+}
+
+func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
@@ -764,7 +767,7 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 	checkRuleIsolationLevel("host")
 
 	// update unsuccessfully when many rule exists.
-	fname := t.TempDir()
+	fname := suite.T().TempDir()
 	rules := []placement.Rule{
 		{
 			GroupID: "pd",
@@ -791,16 +794,15 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 	checkRuleIsolationLevel("host")
 }
 
-func TestPDServerConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPDServerConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPDServerConfig)
+}
+
+func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -808,8 +810,6 @@ func TestPDServerConfig(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 

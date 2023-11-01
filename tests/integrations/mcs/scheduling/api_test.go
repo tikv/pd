@@ -245,38 +245,50 @@ func (suite *apiTestSuite) TestAPIForward() {
 }
 
 func (suite *apiTestSuite) TestConfig() {
-	re := suite.Require()
-	s, cleanup := tests.StartSingleSchedulingTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-	defer cleanup()
-	testutil.Eventually(re, func() bool {
-		return s.IsServing()
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-	addr := s.GetAddr()
-	urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
+	checkConfig := func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		s := cluster.GetSchedulingPrimaryServer()
+		testutil.Eventually(re, func() bool {
+			return s.IsServing()
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+		addr := s.GetAddr()
+		urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
 
-	var cfg config.Config
-	testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-	suite.Equal(cfg.GetListenAddr(), s.GetConfig().GetListenAddr())
-	suite.Equal(cfg.Schedule.LeaderScheduleLimit, s.GetConfig().Schedule.LeaderScheduleLimit)
-	suite.Equal(cfg.Schedule.EnableCrossTableMerge, s.GetConfig().Schedule.EnableCrossTableMerge)
-	suite.Equal(cfg.Replication.MaxReplicas, s.GetConfig().Replication.MaxReplicas)
-	suite.Equal(cfg.Replication.LocationLabels, s.GetConfig().Replication.LocationLabels)
-	suite.Equal(cfg.DataDir, s.GetConfig().DataDir)
+		var cfg config.Config
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		suite.Equal(cfg.GetListenAddr(), s.GetConfig().GetListenAddr())
+		suite.Equal(cfg.Schedule.LeaderScheduleLimit, s.GetConfig().Schedule.LeaderScheduleLimit)
+		suite.Equal(cfg.Schedule.EnableCrossTableMerge, s.GetConfig().Schedule.EnableCrossTableMerge)
+		suite.Equal(cfg.Replication.MaxReplicas, s.GetConfig().Replication.MaxReplicas)
+		suite.Equal(cfg.Replication.LocationLabels, s.GetConfig().Replication.LocationLabels)
+		suite.Equal(cfg.DataDir, s.GetConfig().DataDir)
+		testutil.Eventually(re, func() bool {
+			// wait for all schedulers to be loaded in scheduling server.
+			return len(cfg.Schedule.SchedulersPayload) == 5
+		})
+		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-leader-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-region-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-hot-region-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-witness-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "transfer-witness-leader-scheduler")
 
-	var scheduleCfg sc.ScheduleConfig
-	testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/schedule", &scheduleCfg)
-	suite.Equal(scheduleCfg.LeaderScheduleLimit, s.GetScheduleConfig().LeaderScheduleLimit)
-	suite.Equal(scheduleCfg.EnableCrossTableMerge, s.GetScheduleConfig().EnableCrossTableMerge)
+		var scheduleCfg sc.ScheduleConfig
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/schedule", &scheduleCfg)
+		suite.Equal(scheduleCfg.LeaderScheduleLimit, s.GetScheduleConfig().LeaderScheduleLimit)
+		suite.Equal(scheduleCfg.EnableCrossTableMerge, s.GetScheduleConfig().EnableCrossTableMerge)
 
-	var replicationCfg sc.ReplicationConfig
-	testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/replicate", &replicationCfg)
-	suite.Equal(replicationCfg.MaxReplicas, s.GetReplicationConfig().MaxReplicas)
-	suite.Equal(replicationCfg.LocationLabels, s.GetReplicationConfig().LocationLabels)
+		var replicationCfg sc.ReplicationConfig
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/replicate", &replicationCfg)
+		suite.Equal(replicationCfg.MaxReplicas, s.GetReplicationConfig().MaxReplicas)
+		suite.Equal(replicationCfg.LocationLabels, s.GetReplicationConfig().LocationLabels)
 
-	var storeCfg sc.StoreConfig
-	testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/store", &storeCfg)
-	suite.Equal(storeCfg.Coprocessor.RegionMaxKeys, s.GetStoreConfig().Coprocessor.RegionMaxKeys)
-	suite.Equal(storeCfg.Coprocessor.RegionSplitKeys, s.GetStoreConfig().Coprocessor.RegionSplitKeys)
+		var storeCfg sc.StoreConfig
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/store", &storeCfg)
+		suite.Equal(storeCfg.Coprocessor.RegionMaxKeys, s.GetStoreConfig().Coprocessor.RegionMaxKeys)
+		suite.Equal(storeCfg.Coprocessor.RegionSplitKeys, s.GetStoreConfig().Coprocessor.RegionSplitKeys)
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInAPIMode(checkConfig)
 }
 
 func TestConfigForward(t *testing.T) {

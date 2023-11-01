@@ -196,7 +196,6 @@ func changeLogLevel(c *gin.Context) {
 	c.String(http.StatusOK, "The log level is updated.")
 }
 
-<<<<<<< HEAD
 // @Tags     config
 // @Summary  Get full config.
 // @Produce  json
@@ -205,24 +204,26 @@ func changeLogLevel(c *gin.Context) {
 func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	cfg := svr.GetConfig()
+	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	c.IndentedJSON(http.StatusOK, cfg)
 }
 
 // @Tags     config
 // @Summary  Get schedule config.
 // @Produce  json
-// @Success  200  {object}  sc.ScheduleConfig
+// @Success  200  {object}  config.ScheduleConfig
 // @Router   /config/schedule [get]
 func getScheduleConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	cfg := svr.GetScheduleConfig()
+	cfg.MaxMergeRegionKeys = cfg.GetMaxMergeRegionKeys()
 	c.IndentedJSON(http.StatusOK, cfg)
 }
 
 // @Tags     config
 // @Summary  Get replication config.
 // @Produce  json
-// @Success  200  {object}  sc.ReplicationConfig
+// @Success  200  {object}  config.ReplicationConfig
 // @Router   /config/replicate [get]
 func getReplicationConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -233,13 +234,14 @@ func getReplicationConfig(c *gin.Context) {
 // @Tags     config
 // @Summary  Get store config.
 // @Produce  json
-// @Success  200  {object}  sc.StoreConfig
+// @Success  200  {object}  config.StoreConfig
 // @Router   /config/store [get]
 func getStoreConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	cfg := svr.GetStoreConfig()
 	c.IndentedJSON(http.StatusOK, cfg)
-=======
+}
+
 // @Tags     admin
 // @Summary  Drop all regions from cache.
 // @Produce  json
@@ -278,7 +280,6 @@ func deleteRegionCacheByID(c *gin.Context) {
 	}
 	cluster.DropCacheRegion(regionID)
 	c.String(http.StatusOK, "The region is removed from server cache.")
->>>>>>> a1a1eea8dafd7918d583378790a4bb6c39a21f97
 }
 
 // @Tags     operators

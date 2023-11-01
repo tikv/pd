@@ -63,32 +63,20 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetConfig()
 	if h.svr.IsAPIServiceMode() {
-		b, err := h.GetSchedulingServerConfig("config/schedule")
+		b, err := h.GetSchedulingServerConfig("config")
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		var scheduleCfg sc.ScheduleConfig
-		err = json.Unmarshal(b, &scheduleCfg)
+		var configSchedulingServer config.Config
+		err = json.Unmarshal(b, &configSchedulingServer)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		cfg.Schedule = scheduleCfg
-		b, err = h.GetSchedulingServerConfig("config/replicate")
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		var replicationCfg sc.ReplicationConfig
-		err = json.Unmarshal(b, &replicationCfg)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		cfg.Replication = replicationCfg
+		cfg.Schedule = configSchedulingServer.Schedule
+		cfg.Replication = configSchedulingServer.Replication
 		// TODO: will we support config/store?
-		// TODO: after scheduler-config is supported, we need to merge the config.
 	} else {
 		cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	}
