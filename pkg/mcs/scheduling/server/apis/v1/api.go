@@ -15,7 +15,6 @@
 package apis
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -26,11 +25,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -122,6 +123,8 @@ func NewService(srv *scheserver.Service) *Service {
 func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	router.PUT("/log", changeLogLevel)
+	router.DELETE("cache/regions", deleteAllRegionCache)
+	router.DELETE("cache/regions/:id", deleteRegionCacheByID)
 }
 
 // RegisterConfigRouter registers the router of the config handler.
@@ -138,6 +141,8 @@ func (s *Service) RegisterSchedulersRouter() {
 	router := s.root.Group("schedulers")
 	router.GET("", getSchedulers)
 	router.GET("/diagnostic/:name", getDiagnosticResult)
+	router.GET("/config", getSchedulerConfig)
+	router.GET("/config/:name/list", getSchedulerConfigByName)
 	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
 	// And we need to do one-to-two forwarding in the API middleware.
 	router.POST("/:name", pauseOrResumeScheduler)
@@ -170,6 +175,11 @@ func (s *Service) RegisterOperatorsRouter() {
 	router.GET("/records", getOperatorRecords)
 }
 
+// @Tags     admin
+// @Summary  Change the log level.
+// @Produce  json
+// @Success  200  {string}  string  "The log level is updated."
+// @Router   /admin/log [put]
 func changeLogLevel(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	var level string
@@ -186,6 +196,7 @@ func changeLogLevel(c *gin.Context) {
 	c.String(http.StatusOK, "The log level is updated.")
 }
 
+<<<<<<< HEAD
 // @Tags     config
 // @Summary  Get full config.
 // @Produce  json
@@ -228,6 +239,46 @@ func getStoreConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	cfg := svr.GetStoreConfig()
 	c.IndentedJSON(http.StatusOK, cfg)
+=======
+// @Tags     admin
+// @Summary  Drop all regions from cache.
+// @Produce  json
+// @Success  200  {string}  string  "All regions are removed from server cache."
+// @Router   /admin/cache/regions [delete]
+func deleteAllRegionCache(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
+	cluster.DropCacheAllRegion()
+	c.String(http.StatusOK, "All regions are removed from server cache.")
+}
+
+// @Tags     admin
+// @Summary  Drop a specific region from cache.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string  "The region is removed from server cache."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /admin/cache/regions/{id} [delete]
+func deleteRegionCacheByID(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
+	regionIDStr := c.Param("id")
+	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	cluster.DropCacheRegion(regionID)
+	c.String(http.StatusOK, "The region is removed from server cache.")
+>>>>>>> a1a1eea8dafd7918d583378790a4bb6c39a21f97
 }
 
 // @Tags     operators
@@ -440,6 +491,60 @@ func getSchedulers(c *gin.Context) {
 }
 
 // @Tags     schedulers
+// @Summary  List all scheduler configs.
+// @Produce  json
+// @Success  200  {object}  map[string]interface{}
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/config/ [get]
+func getSchedulerConfig(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	sc, err := handler.GetSchedulersController()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	sches, configs, err := sc.GetAllSchedulerConfigs()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, schedulers.ToPayload(sches, configs))
+}
+
+// @Tags     schedulers
+// @Summary  List scheduler config by name.
+// @Produce  json
+// @Success  200  {object}  map[string]interface{}
+// @Failure  404  {string}  string  scheduler not found
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/config/{name}/list [get]
+func getSchedulerConfigByName(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	sc, err := handler.GetSchedulersController()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	handlers := sc.GetSchedulerHandlers()
+	name := c.Param("name")
+	if _, ok := handlers[name]; !ok {
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
+		return
+	}
+	isDisabled, err := sc.IsSchedulerDisabled(name)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if isDisabled {
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
+		return
+	}
+	c.Request.URL.Path = "/list"
+	handlers[name].ServeHTTP(c.Writer, c.Request)
+}
+
+// @Tags     schedulers
 // @Summary  List schedulers diagnostic result.
 // @Produce  json
 // @Success  200  {array}   string
@@ -529,7 +634,7 @@ func getHotRegions(typ utils.RWType, c *gin.Context) {
 	for _, storeID := range storeIDs {
 		id, err := strconv.ParseUint(storeID, 10, 64)
 		if err != nil {
-			c.String(http.StatusBadRequest, fmt.Sprintf("invalid store id: %s", storeID))
+			c.String(http.StatusBadRequest, errs.ErrInvalidStoreID.FastGenByArgs(storeID).Error())
 			return
 		}
 		_, err = handler.GetStore(id)

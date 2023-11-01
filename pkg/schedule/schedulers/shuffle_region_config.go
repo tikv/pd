@@ -69,6 +69,7 @@ func (conf *shuffleRegionSchedulerConfig) IsRoleAllow(role string) bool {
 
 func (conf *shuffleRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
+	router.HandleFunc("/list", conf.handleGetRoles).Methods(http.MethodGet)
 	router.HandleFunc("/roles", conf.handleGetRoles).Methods(http.MethodGet)
 	router.HandleFunc("/roles", conf.handleSetRoles).Methods(http.MethodPost)
 	router.ServeHTTP(w, r)
