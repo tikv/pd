@@ -551,11 +551,11 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 		hasHealthPeer := false
 		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
-				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
+				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-unhealthy-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
 			if isDisconnectedPeer(orphanPeer) {
-				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
+				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-disconnected-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
 			if hasHealthPeer {
