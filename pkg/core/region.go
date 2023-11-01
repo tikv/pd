@@ -1347,15 +1347,15 @@ func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
 	return r.tree.notFromStorageRegionsCount()
 }
 
-// GetStoreNotFromStorageRegionsCnt gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
-func (r *RegionsInfo) GetStoreNotFromStorageRegionsCnt(storeID uint64) int {
+// GetNotFromStorageRegionsCntByStore gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
+func (r *RegionsInfo) GetNotFromStorageRegionsCntByStore(storeID uint64) int {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.getStoreNotFromStorageRegionsCntLocked(storeID)
+	return r.getNotFromStorageRegionsCntByStoreLocked(storeID)
 }
 
-// GetStoreRegionCount gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
-func (r *RegionsInfo) getStoreNotFromStorageRegionsCntLocked(storeID uint64) int {
+// getNotFromStorageRegionsCntByStoreLocked gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
+func (r *RegionsInfo) getNotFromStorageRegionsCntByStoreLocked(storeID uint64) int {
 	return r.leaders[storeID].notFromStorageRegionsCount() + r.followers[storeID].notFromStorageRegionsCount() + r.learners[storeID].notFromStorageRegionsCount()
 }
 
@@ -1392,7 +1392,7 @@ func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.getStoreRegionCountLocked(storeID)
 }
 
-// GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
+// getStoreRegionCountLocked gets the total count of a store's leader, follower and learner RegionInfo by storeID
 func (r *RegionsInfo) getStoreRegionCountLocked(storeID uint64) int {
 	return r.leaders[storeID].length() + r.followers[storeID].length() + r.learners[storeID].length()
 }
