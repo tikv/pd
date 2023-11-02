@@ -282,12 +282,19 @@ func TestConfigForward(t *testing.T) {
 		opts := sche.GetPersistConfig()
 		var cfg map[string]interface{}
 		addr := cluster.GetLeaderServer().GetAddr()
-
-		// Test config
 		urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", addr)
-		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"],
-			float64(opts.GetLeaderScheduleLimit()))
+
+		// Test config forward
+		// Expect to get same config in scheduling server and api server
+		testutil.Eventually(re, func() bool {
+			testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+			re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"],
+				float64(opts.GetLeaderScheduleLimit()))
+			re.Equal(cfg["replication"].(map[string]interface{})["max-replicas"],
+				float64(opts.GetReplicationConfig().MaxReplicas))
+			schedulers := cfg["schedule"].(map[string]interface{})["schedulers-payload"].(map[string]interface{})
+			return len(schedulers) == 5
+		})
 
 		// Test to change config only in scheduling server
 		// Expect to get new config in scheduling server but not old config in api server

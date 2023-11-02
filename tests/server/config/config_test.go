@@ -103,8 +103,11 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 
 	addr := fmt.Sprintf("%s/pd/api/v1/config", urlPrefix)
 	cfg := &config.Config{}
-	err := tu.ReadGetJSON(re, testDialClient, addr, cfg)
-	suite.NoError(err)
+	tu.Eventually(re, func() bool {
+		err := tu.ReadGetJSON(re, testDialClient, addr, cfg)
+		suite.NoError(err)
+		return cfg.PDServerCfg.DashboardAddress != "auto"
+	})
 
 	// the original way
 	r := map[string]int{"max-replicas": 5}
@@ -163,9 +166,6 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	cfg.Log.Level = "warn"
 	cfg.ReplicationMode.DRAutoSync.LabelKey = "foobar"
 	cfg.ReplicationMode.ReplicationMode = "dr-auto-sync"
-	if cfg.PDServerCfg.DashboardAddress == "auto" {
-		cfg.PDServerCfg.DashboardAddress = newCfg1.PDServerCfg.DashboardAddress
-	}
 	v, err := versioninfo.ParseVersion("v4.0.0-beta")
 	suite.NoError(err)
 	cfg.ClusterVersion = *v
