@@ -152,7 +152,7 @@ func (s *Server) primaryElectionLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
+	if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign resource manager primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()))

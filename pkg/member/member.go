@@ -42,6 +42,8 @@ const (
 	// The timeout to wait transfer etcd leader to complete.
 	moveLeaderTimeout          = 5 * time.Second
 	dcLocationConfigEtcdPrefix = "dc-location"
+	// If the campaign times is more than this value in 5min, the PD will resign and campaign again.
+	campaignLeaderFrequencyTimes = 5
 )
 
 // EmbeddedEtcdMember is used for the election related logic. It implements Member interface.
@@ -177,8 +179,13 @@ func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
 
 // CampaignLeader is used to campaign a PD member's leadership
 // and make it become a PD leader.
-func (m *EmbeddedEtcdMember) CampaignLeader(leaseTimeout int64) error {
-	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
+func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
+	// leader should be changed when campaign leader frequently.
+	if len(m.leadership.CampaignTimes) > campaignLeaderFrequencyTimes {
+		log.Error("campaign times is too much", zap.String("leader-name", m.Name()), zap.String("leader-key", m.GetLeaderPath()))
+		return m.ResignEtcdLeader(ctx, m.Name(), "")
+	}
+	return m.leadership.Campaign(ctx, leaseTimeout, m.MemberValue())
 }
 
 // KeepLeader is used to keep the PD leader's leadership.

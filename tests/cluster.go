@@ -155,6 +155,14 @@ func (s *TestServer) Destroy() error {
 	return nil
 }
 
+// TransferLeader resigns the leader of the server and transfers it to another server.
+func (s *TestServer) TransferLeader(name string) error {
+	s.Lock()
+	defer s.Unlock()
+	s.server.GetMember().ResetLeader()
+	return s.server.GetMember().ResignEtcdLeader(s.server.Context(), s.server.Name(), name)
+}
+
 // ResignLeader resigns the leader of the server.
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
