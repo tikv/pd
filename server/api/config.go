@@ -557,7 +557,6 @@ func (h *confHandler) GetSchedulingServerConfig() (*config.Config, error) {
 	}
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-
 		return nil, err
 	}
 	var schedulingServerConfig config.Config
