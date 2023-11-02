@@ -815,7 +815,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 
 	// Cluster is not bootstrapped.
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetKeyspaceGroupManager())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	raftCluster, err := rc.LoadClusterInfo()
 	re.NoError(err)
 	re.Nil(raftCluster)
@@ -853,7 +853,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	re.NoError(testStorage.Flush())
 
 	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), testStorage, basicCluster, svr.GetKeyspaceGroupManager())
+	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), testStorage, basicCluster, svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
 	re.NotNil(raftCluster)
@@ -1281,6 +1281,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	tc, err := tests.NewTestCluster(ctx, 2)
 	defer tc.Destroy()
@@ -1363,6 +1364,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
@@ -1561,7 +1563,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	leaderServer := tc.GetLeaderServer()
 	svr := leaderServer.GetServer()
 	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
-	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetKeyspaceGroupManager())
+	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}
 	re.NoError(storage.SaveMeta(meta))

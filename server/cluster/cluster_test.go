@@ -1144,7 +1144,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	re.NoError(cluster.putRegion(r))
 
 	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r})
-	counter := cluster.labelLevelStats.GetLabelCounter()
+	counter := cluster.labelStats.GetLabelCounter()
 	re.Equal(0, counter["none"])
 	re.Equal(1, counter["zone"])
 }
@@ -2130,7 +2130,7 @@ func newTestRaftCluster(
 	basicCluster *core.BasicCluster,
 ) *RaftCluster {
 	rc := &RaftCluster{serverCtx: ctx}
-	rc.InitCluster(id, opt, s, basicCluster, nil)
+	rc.InitCluster(id, opt, s, basicCluster, nil, nil)
 	rc.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
@@ -2138,6 +2138,7 @@ func newTestRaftCluster(
 			panic(err)
 		}
 	}
+	rc.schedulingController.init(basicCluster, opt, nil, rc.ruleManager)
 	return rc
 }
 
@@ -2502,11 +2503,11 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		co.CollectHotSpotMetrics()
 		controller.CollectSchedulerMetrics()
-		co.GetCluster().(*RaftCluster).collectClusterMetrics()
+		co.GetCluster().(*RaftCluster).collectStatisticsMetrics()
 	}
 	co.ResetHotSpotMetrics()
 	controller.ResetSchedulerMetrics()
-	co.GetCluster().(*RaftCluster).resetClusterMetrics()
+	co.GetCluster().(*RaftCluster).resetStatisticsMetrics()
 	wg.Wait()
 }
 
@@ -2537,7 +2538,7 @@ func TestCollectMetrics(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		co.CollectHotSpotMetrics()
 		controller.CollectSchedulerMetrics()
-		co.GetCluster().(*RaftCluster).collectClusterMetrics()
+		co.GetCluster().(*RaftCluster).collectStatisticsMetrics()
 	}
 	stores := co.GetCluster().GetStores()
 	regionStats := co.GetCluster().RegionWriteStats()
@@ -2552,7 +2553,7 @@ func TestCollectMetrics(t *testing.T) {
 	re.Equal(status1, status2)
 	co.ResetHotSpotMetrics()
 	controller.ResetSchedulerMetrics()
-	co.GetCluster().(*RaftCluster).resetClusterMetrics()
+	co.GetCluster().(*RaftCluster).resetStatisticsMetrics()
 }
 
 func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func(*schedule.Coordinator), re *require.Assertions) (*testCluster, *schedule.Coordinator, func()) {

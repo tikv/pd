@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
@@ -52,6 +53,7 @@ func TestOperatorTestSuite(t *testing.T) {
 }
 
 func (suite *operatorTestSuite) TestOperator() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob", `return(true)`))
 	opts := []tests.ConfigOption{
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 1
@@ -70,6 +72,7 @@ func (suite *operatorTestSuite) TestOperator() {
 	}
 	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
 	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob"))
 }
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
