@@ -140,8 +140,6 @@ func (suite *limitTestSuite) getHeader() *pdpb.RequestHeader {
 
 func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 	re := suite.Require()
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/slowHeartbeat", `return()`))
 	input := map[string]interface{}{
 		"enable-grpc-rate-limit": "true",
 	}
@@ -175,21 +173,8 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 	res, err := suite.rawClient.StoreHeartbeat(suite.ctx, in)
 	re.NoError(err)
 	re.Nil(res.Header.Error)
-	var breakFlag atomic.Bool
+
 	var wg sync.WaitGroup
-	for i := 0; i < 100 && !breakFlag.Load(); i++ {
-		time.Sleep(250 * time.Millisecond)
-		wg.Add(1)
-		go func() {
-			res, err = suite.rawClient.StoreHeartbeat(suite.ctx, in)
-			if err == nil && res.Header.Error != nil {
-				breakFlag.Store(true)
-			}
-			wg.Done()
-		}()
-	}
-	wg.Wait()
-	re.True(breakFlag.Load())
 	success := int32(0)
 	fail := int32(0)
 	for i := 0; i < 50; i++ {
@@ -206,9 +191,43 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 		}()
 	}
 	wg.Wait()
-	re.Less(success, int32(30))
-	re.Greater(success, int32(20))
-	re.Less(fail, int32(30))
-	re.Greater(fail, int32(20))
+	re.Equal(success, int32(50))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/slowHeartbeat", `return()`))
+	var breakFlag atomic.Bool
+
+	for i := 0; i < 50 && !breakFlag.Load(); i++ {
+		time.Sleep(250 * time.Millisecond)
+		wg.Add(1)
+		go func() {
+			res, err = suite.rawClient.StoreHeartbeat(suite.ctx, in)
+			if err == nil && res.Header.Error != nil {
+				breakFlag.Store(true)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	re.True(breakFlag.Load())
+	success = int32(0)
+	fail = int32(0)
+	for i := 0; i < 20; i++ {
+		time.Sleep(250 * time.Millisecond)
+		wg.Add(1)
+		go func() {
+			res, err = suite.rawClient.StoreHeartbeat(suite.ctx, in)
+			if err == nil && res.Header.Error != nil {
+				atomic.AddInt32(&fail, 1)
+			} else {
+				atomic.AddInt32(&success, 1)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	re.Less(success, int32(15))
+	re.Greater(success, int32(5))
+	re.Less(fail, int32(15))
+	re.Greater(fail, int32(5))
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/slowHeartbeat"))
 }

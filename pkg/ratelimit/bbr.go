@@ -147,8 +147,12 @@ func (l *bbr) timespan(lastTime time.Time) int {
 	return l.cfg.Bucket
 }
 
+func (l *bbr) getBDP() float64 {
+	return float64(l.getMaxPASS()*l.getMinRT()*l.bucketPerSecond) / 1e6
+}
+
 func (l *bbr) getMaxInFlight() int64 {
-	return int64(math.Floor(float64(l.getMaxPASS()*l.getMinRT()*l.bucketPerSecond)/1e6) + 0.5)
+	return int64(math.Floor(l.getBDP()) + 0.5)
 }
 
 func (l *bbr) getMaxPASS() int64 {
@@ -280,7 +284,9 @@ func (l *bbr) checkFullStatus() {
 
 	l.inCheck.Store(0)
 
-	if raises > 0 && positive > negative && l.bbrStatus.getMaxInFlight() == inf {
+	check1 := raises > 0 && positive > negative
+	check2 := l.getBDP() > 1.0
+	if check1 && check2 && l.bbrStatus.getMaxInFlight() == inf {
 		maxInFlight := l.getMaxInFlight()
 		l.bbrStatus.storeMaxInFlight(maxInFlight)
 		l.bbrStatus.storeMinRT(l.getMinRT())
