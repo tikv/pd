@@ -163,6 +163,9 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	cfg.Log.Level = "warn"
 	cfg.ReplicationMode.DRAutoSync.LabelKey = "foobar"
 	cfg.ReplicationMode.ReplicationMode = "dr-auto-sync"
+	if cfg.PDServerCfg.DashboardAddress == "auto" {
+		cfg.PDServerCfg.DashboardAddress = newCfg1.PDServerCfg.DashboardAddress
+	}
 	v, err := versioninfo.ParseVersion("v4.0.0-beta")
 	suite.NoError(err)
 	cfg.ClusterVersion = *v

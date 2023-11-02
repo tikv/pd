@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -669,7 +670,9 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 		re.NoError(err)
 		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Equal(expect, replicationCfg.MaxReplicas)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return replicationCfg.MaxReplicas == expect
+		})
 	}
 
 	checkLocationLabels := func(expect int) {
@@ -678,7 +681,9 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 		re.NoError(err)
 		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Len(replicationCfg.LocationLabels, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return len(replicationCfg.LocationLabels) == expect
+		})
 	}
 
 	checkIsolationLevel := func(expect string) {
@@ -687,7 +692,9 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 		re.NoError(err)
 		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Equal(replicationCfg.IsolationLevel, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return replicationCfg.IsolationLevel == expect
+		})
 	}
 
 	checkRuleCount := func(expect int) {
@@ -696,7 +703,9 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 		re.NoError(err)
 		rule := placement.Rule{}
 		re.NoError(json.Unmarshal(output, &rule))
-		re.Equal(expect, rule.Count)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return rule.Count == expect
+		})
 	}
 
 	checkRuleLocationLabels := func(expect int) {
@@ -705,7 +714,9 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 		re.NoError(err)
 		rule := placement.Rule{}
 		re.NoError(json.Unmarshal(output, &rule))
-		re.Len(rule.LocationLabels, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return len(rule.LocationLabels) == expect
+		})
 	}
 
 	checkRuleIsolationLevel := func(expect string) {
@@ -714,7 +725,9 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 		re.NoError(err)
 		rule := placement.Rule{}
 		re.NoError(json.Unmarshal(output, &rule))
-		re.Equal(rule.IsolationLevel, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return rule.IsolationLevel == expect
+		})
 	}
 
 	// update successfully when placement rules is not enabled.

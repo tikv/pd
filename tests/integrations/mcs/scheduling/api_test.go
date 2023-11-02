@@ -306,7 +306,7 @@ func TestConfigForward(t *testing.T) {
 		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 100
 		re.Equal(100, int(sche.GetScheduleConfig().LeaderScheduleLimit))
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"], float64(sche.GetScheduleConfig().LeaderScheduleLimit))
+		re.Equal(100., cfg["schedule"].(map[string]interface{})["leader-schedule-limit"])
 
 		// Test schedule
 		urlPrefix = fmt.Sprintf("%s/pd/api/v1/config/schedule", addr)
@@ -316,7 +316,7 @@ func TestConfigForward(t *testing.T) {
 		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 4
 		re.Equal(4, int(sche.GetScheduleConfig().LeaderScheduleLimit))
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(cfg["leader-schedule-limit"], float64(sche.GetScheduleConfig().LeaderScheduleLimit))
+		re.Equal(4., cfg["leader-schedule-limit"])
 
 		// Test replicate
 		urlPrefix = fmt.Sprintf("%s/pd/api/v1/config/replicate", addr)
@@ -326,7 +326,7 @@ func TestConfigForward(t *testing.T) {
 		sche.GetPersistConfig().GetReplicationConfig().MaxReplicas = 5
 		re.Equal(5, int(sche.GetReplicationConfig().MaxReplicas))
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(cfg["max-replicas"], float64(sche.GetReplicationConfig().MaxReplicas))
+		re.Equal(5., cfg["max-replicas"])
 	}
 	env := tests.NewSchedulingTestEnvironment(t)
 	env.RunTestInAPIMode(checkConfigForward)
