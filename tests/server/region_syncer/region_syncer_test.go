@@ -202,6 +202,7 @@ func TestPrepareChecker(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
@@ -243,6 +244,7 @@ func TestPrepareChecker(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 	re.True(rc.IsPrepared())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
@@ -251,6 +253,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
@@ -289,6 +292,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re.NoError(err)
 	re.Equal("pd1", cluster.WaitLeader())
 	re.True(rc.IsPrepared())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
