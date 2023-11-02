@@ -46,7 +46,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/schedule"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -526,21 +525,6 @@ func (s *Server) GetConfig() *config.Config {
 	}
 	cfg.Schedule.SchedulersPayload = schedulers.ToPayload(sches, configs)
 	return cfg
-}
-
-// GetScheduleConfig gets the schedule config.
-func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
-	return s.persistConfig.GetScheduleConfig().Clone()
-}
-
-// GetReplicationConfig gets the replication config.
-func (s *Server) GetReplicationConfig() *sc.ReplicationConfig {
-	return s.persistConfig.GetReplicationConfig().Clone()
-}
-
-// GetStoreConfig gets the store config.
-func (s *Server) GetStoreConfig() *sc.StoreConfig {
-	return s.persistConfig.GetStoreConfig().Clone()
 }
 
 // CreateServer creates the Server

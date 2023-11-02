@@ -14,7 +14,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
@@ -271,21 +270,6 @@ func (suite *apiTestSuite) TestConfig() {
 		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-hot-region-scheduler")
 		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-witness-scheduler")
 		suite.Contains(cfg.Schedule.SchedulersPayload, "transfer-witness-leader-scheduler")
-
-		var scheduleCfg sc.ScheduleConfig
-		testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/schedule", &scheduleCfg)
-		suite.Equal(scheduleCfg.LeaderScheduleLimit, s.GetScheduleConfig().LeaderScheduleLimit)
-		suite.Equal(scheduleCfg.EnableCrossTableMerge, s.GetScheduleConfig().EnableCrossTableMerge)
-
-		var replicationCfg sc.ReplicationConfig
-		testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/replicate", &replicationCfg)
-		suite.Equal(replicationCfg.MaxReplicas, s.GetReplicationConfig().MaxReplicas)
-		suite.Equal(replicationCfg.LocationLabels, s.GetReplicationConfig().LocationLabels)
-
-		var storeCfg sc.StoreConfig
-		testutil.ReadGetJSON(re, testDialClient, urlPrefix+"/store", &storeCfg)
-		suite.Equal(storeCfg.Coprocessor.RegionMaxKeys, s.GetStoreConfig().Coprocessor.RegionMaxKeys)
-		suite.Equal(storeCfg.Coprocessor.RegionSplitKeys, s.GetStoreConfig().Coprocessor.RegionSplitKeys)
 	}
 	env := tests.NewSchedulingTestEnvironment(suite.T())
 	env.RunTestInAPIMode(checkConfig)
@@ -295,38 +279,28 @@ func TestConfigForward(t *testing.T) {
 	re := require.New(t)
 	checkConfigForward := func(cluster *tests.TestCluster) {
 		sche := cluster.GetSchedulingPrimaryServer()
+		opts := sche.GetPersistConfig()
 		var cfg map[string]interface{}
 		addr := cluster.GetLeaderServer().GetAddr()
 
 		// Test config
 		urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", addr)
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"], float64(sche.GetScheduleConfig().LeaderScheduleLimit))
-		// Test to change config
-		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 100
-		re.Equal(100, int(sche.GetScheduleConfig().LeaderScheduleLimit))
+		re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"],
+			float64(opts.GetLeaderScheduleLimit()))
+
+		// Test to change config only in scheduling server
+		// Expect to get new config in scheduling server but not old config in api server
+
+		opts.GetScheduleConfig().LeaderScheduleLimit = 100
+		re.Equal(100, int(opts.GetLeaderScheduleLimit()))
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
 		re.Equal(100., cfg["schedule"].(map[string]interface{})["leader-schedule-limit"])
 
-		// Test schedule
-		urlPrefix = fmt.Sprintf("%s/pd/api/v1/config/schedule", addr)
+		opts.GetReplicationConfig().MaxReplicas = 5
+		re.Equal(5, int(opts.GetReplicationConfig().MaxReplicas))
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(cfg["leader-schedule-limit"], float64(sche.GetScheduleConfig().LeaderScheduleLimit))
-		// Test to change config
-		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 4
-		re.Equal(4, int(sche.GetScheduleConfig().LeaderScheduleLimit))
-		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(4., cfg["leader-schedule-limit"])
-
-		// Test replicate
-		urlPrefix = fmt.Sprintf("%s/pd/api/v1/config/replicate", addr)
-		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(cfg["max-replicas"], float64(sche.GetReplicationConfig().MaxReplicas))
-		// Test to change config
-		sche.GetPersistConfig().GetReplicationConfig().MaxReplicas = 5
-		re.Equal(5, int(sche.GetReplicationConfig().MaxReplicas))
-		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(5., cfg["max-replicas"])
+		re.Equal(5., cfg["replication"].(map[string]interface{})["max-replicas"])
 	}
 	env := tests.NewSchedulingTestEnvironment(t)
 	env.RunTestInAPIMode(checkConfigForward)

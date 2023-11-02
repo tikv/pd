@@ -63,20 +63,13 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetConfig()
 	if h.svr.IsAPIServiceMode() {
-		b, err := h.GetSchedulingServerConfig("config")
+		schedulingServerConfig, err := h.GetSchedulingServerConfig()
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		var configSchedulingServer config.Config
-		err = json.Unmarshal(b, &configSchedulingServer)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		cfg.Schedule = configSchedulingServer.Schedule
-		cfg.Replication = configSchedulingServer.Replication
-		// TODO: will we support config/store?
+		cfg.Schedule = schedulingServerConfig.Schedule
+		cfg.Replication = schedulingServerConfig.Replication
 	} else {
 		cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	}
@@ -321,18 +314,12 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 // @Router   /config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
 	if h.svr.IsAPIServiceMode() {
-		b, err := h.GetSchedulingServerConfig("config/schedule")
+		cfg, err := h.GetSchedulingServerConfig()
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		var cfg sc.ScheduleConfig
-		err = json.Unmarshal(b, &cfg)
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		h.rd.JSON(w, http.StatusOK, cfg)
+		h.rd.JSON(w, http.StatusOK, cfg.Schedule)
 		return
 	}
 	cfg := h.svr.GetScheduleConfig()
@@ -399,13 +386,7 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
 	if h.svr.IsAPIServiceMode() {
-		b, err := h.GetSchedulingServerConfig("config/replicate")
-		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		var cfg sc.ReplicationConfig
-		err = json.Unmarshal(b, &cfg)
+		cfg, err := h.GetSchedulingServerConfig()
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -555,12 +536,12 @@ func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, h.svr.GetPDServerConfig())
 }
 
-func (h *confHandler) GetSchedulingServerConfig(path string) ([]byte, error) {
+func (h *confHandler) GetSchedulingServerConfig() (*config.Config, error) {
 	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), utils.SchedulingServiceName)
 	if !ok {
 		return nil, errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
 	}
-	url := fmt.Sprintf("%s/scheduling/api/v1/%s", addr, path)
+	url := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -573,5 +554,15 @@ func (h *confHandler) GetSchedulingServerConfig(path string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+
+		return nil, err
+	}
+	var schedulingServerConfig config.Config
+	err = json.Unmarshal(b, &schedulingServerConfig)
+	if err != nil {
+		return nil, err
+	}
+	return &schedulingServerConfig, nil
 }

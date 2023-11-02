@@ -131,9 +131,6 @@ func (s *Service) RegisterAdminRouter() {
 func (s *Service) RegisterConfigRouter() {
 	router := s.root.Group("config")
 	router.GET("", getConfig)
-	router.GET("/schedule", getScheduleConfig)
-	router.GET("/replicate", getReplicationConfig)
-	router.GET("/store", getStoreConfig)
 }
 
 // RegisterSchedulersRouter registers the router of the schedulers handler.
@@ -205,40 +202,6 @@ func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	cfg := svr.GetConfig()
 	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
-	c.IndentedJSON(http.StatusOK, cfg)
-}
-
-// @Tags     config
-// @Summary  Get schedule config.
-// @Produce  json
-// @Success  200  {object}  config.ScheduleConfig
-// @Router   /config/schedule [get]
-func getScheduleConfig(c *gin.Context) {
-	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	cfg := svr.GetScheduleConfig()
-	cfg.MaxMergeRegionKeys = cfg.GetMaxMergeRegionKeys()
-	c.IndentedJSON(http.StatusOK, cfg)
-}
-
-// @Tags     config
-// @Summary  Get replication config.
-// @Produce  json
-// @Success  200  {object}  config.ReplicationConfig
-// @Router   /config/replicate [get]
-func getReplicationConfig(c *gin.Context) {
-	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	cfg := svr.GetReplicationConfig()
-	c.IndentedJSON(http.StatusOK, cfg)
-}
-
-// @Tags     config
-// @Summary  Get store config.
-// @Produce  json
-// @Success  200  {object}  config.StoreConfig
-// @Router   /config/store [get]
-func getStoreConfig(c *gin.Context) {
-	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
-	cfg := svr.GetStoreConfig()
 	c.IndentedJSON(http.StatusOK, cfg)
 }
 
