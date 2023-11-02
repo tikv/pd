@@ -319,6 +319,7 @@ func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		cfg.Schedule.SchedulersPayload = nil
 		h.rd.JSON(w, http.StatusOK, cfg.Schedule)
 		return
 	}
@@ -391,7 +392,7 @@ func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Reques
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		h.rd.JSON(w, http.StatusOK, cfg)
+		h.rd.JSON(w, http.StatusOK, cfg.Replication)
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())
