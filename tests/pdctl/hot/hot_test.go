@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
@@ -49,6 +50,7 @@ func TestHotTestSuite(t *testing.T) {
 }
 
 func (suite *hotTestSuite) TestHot() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob", `return(true)`))
 	var start time.Time
 	start = start.Add(time.Hour)
 	opts := []tests.ConfigOption{
@@ -66,6 +68,7 @@ func (suite *hotTestSuite) TestHot() {
 	env.RunTestInTwoModes(suite.checkHotWithoutHotPeer)
 	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
 	env.RunTestInTwoModes(suite.checkHotWithStoreID)
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob"))
 }
 
 func (suite *hotTestSuite) checkHot(cluster *tests.TestCluster) {
