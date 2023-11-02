@@ -196,11 +196,11 @@ func (m *Participant) GetLeadership() *election.Leadership {
 }
 
 // CampaignLeader is used to campaign the leadership and make it become a leader.
-func (m *Participant) CampaignLeader(leaseTimeout int64) error {
+func (m *Participant) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
 	if !m.campaignCheck() {
 		return errs.ErrCheckCampaign
 	}
-	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
+	return m.leadership.Campaign(ctx, leaseTimeout, m.MemberValue())
 }
 
 // KeepLeader is used to keep the leader's leadership.

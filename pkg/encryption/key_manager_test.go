@@ -68,9 +68,11 @@ func newTestKeyFile(t *testing.T, re *require.Assertions, key ...string) (keyFil
 }
 
 func newTestLeader(re *require.Assertions, client *clientv3.Client) *election.Leadership {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	leader := election.NewLeadership(client, "test_leader", "test")
 	timeout := int64(30000000) // about a year.
-	err := leader.Campaign(timeout, "")
+	err := leader.Campaign(ctx, timeout, "")
 	re.NoError(err)
 	return leader
 }

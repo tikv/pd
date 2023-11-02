@@ -323,6 +323,31 @@ func TestMoveLeader(t *testing.T) {
 	}
 }
 
+func TestCampaignLeaderFrequently(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 5)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	leader := cluster.GetLeader()
+	re.NotEmpty(cluster.GetLeader())
+
+	for i := 0; i < 6; i++ {
+		err := cluster.GetServers()[cluster.GetLeader()].TransferLeader(cluster.GetLeader())
+		re.NoError(err)
+		cluster.WaitLeader()
+	}
+	// leader should be changed when campaign leader frequently
+	cluster.WaitLeader()
+	re.NotEmpty(cluster.GetLeader())
+	re.NotEqual(leader, cluster.GetLeader())
+}
+
 func TestGetLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
