@@ -519,7 +519,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 			if pinDownPeer.GetIsWitness() || orphanPeer.GetIsWitness() {
 				continue
 			}
-			// down peer's store should be disconnected
+			// pinDownPeer's store should be disconnected, because we use more strict judge before.
 			if !isDisconnectedPeer(pinDownPeer) {
 				continue
 			}
@@ -534,8 +534,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
 				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
 					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
-				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Voter &&
-					isDisconnectedPeer(pinDownPeer) && !dstStore.IsDisconnected():
+				case orphanPeerRole == destRole && isDisconnectedPeer(pinDownPeer) && !dstStore.IsDisconnected():
 					return operator.CreateRemovePeerOperator("remove-replaced-orphan-peer", c.cluster, 0, region, pinDownPeer.GetStoreId())
 				default:
 					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
@@ -549,18 +548,24 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	// Ref https://github.com/tikv/pd/issues/4045
 	if len(fit.OrphanPeers) >= 2 {
 		hasHealthPeer := false
+		var disconnectedPeer *metapb.Peer
 		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
 				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-unhealthy-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
 			if isDisconnectedPeer(orphanPeer) {
-				ruleCheckerRemoveOrphanPeerCounter.Inc()
-				return operator.CreateRemovePeerOperator("remove-disconnected-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
+				// we need to be careful to remove peer, so we will not think disconnected peer is healthy.
+				disconnectedPeer = orphanPeer
+				continue
 			}
 			if hasHealthPeer {
 				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
 				ruleCheckerRemoveOrphanPeerCounter.Inc()
+				// if there exists a disconnected orphan peer, we will pick it to remove firstly.
+				if disconnectedPeer != nil {
+					return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, disconnectedPeer.StoreId)
+				}
 				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
 			hasHealthPeer = true
