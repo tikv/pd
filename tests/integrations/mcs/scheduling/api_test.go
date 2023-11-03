@@ -296,14 +296,21 @@ func TestConfigForward(t *testing.T) {
 			return len(schedulers) == 5
 		})
 
+		// Test to change config in api server
+		// Expect to get new config in scheduling server and api server
+		cluster.GetLeaderServer().GetServer().GetRaftCluster().GetReplicationConfig().MaxReplicas = 4
+		testutil.Eventually(re, func() bool {
+			testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+			return cfg["replication"].(map[string]interface{})["max-replicas"] == 4. &&
+				opts.GetReplicationConfig().MaxReplicas == 4.
+		})
+
 		// Test to change config only in scheduling server
 		// Expect to get new config in scheduling server but not old config in api server
-
 		opts.GetScheduleConfig().LeaderScheduleLimit = 100
 		re.Equal(100, int(opts.GetLeaderScheduleLimit()))
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
 		re.Equal(100., cfg["schedule"].(map[string]interface{})["leader-schedule-limit"])
-
 		opts.GetReplicationConfig().MaxReplicas = 5
 		re.Equal(5, int(opts.GetReplicationConfig().MaxReplicas))
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
