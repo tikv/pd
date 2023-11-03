@@ -263,7 +263,7 @@ func (l *bbr) checkFullStatus() {
 		if positive <= 0 {
 			return result
 		}
-		for ; iterator.Next() && i < l.cfg.Bucket/2; i++ {
+		for ; iterator.Next() && i < l.cfg.Bucket; i++ {
 			bucket := iterator.Bucket()
 			total := 0.0
 			for _, p := range bucket.Points {
