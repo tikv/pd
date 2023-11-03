@@ -196,7 +196,7 @@ func (suite *ruleCheckerTestSuite) TestFixToManyOrphanPeers() {
 	suite.cluster.PutRegion(region)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
-	suite.Equal("remove-orphan-peer", op.Desc())
+	suite.Equal("remove-unhealthy-orphan-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
 }
 
@@ -663,7 +663,7 @@ func (suite *ruleCheckerTestSuite) TestPriorityFixOrphanPeer() {
 	suite.cluster.PutRegion(testRegion)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
-	suite.Equal("remove-orphan-peer", op.Desc())
+	suite.Equal("remove-unhealthy-orphan-peer", op.Desc())
 	suite.IsType(remove, op.Step(0))
 	// Ref #3521
 	suite.cluster.SetStoreOffline(2)
@@ -682,6 +682,178 @@ func (suite *ruleCheckerTestSuite) TestPriorityFixOrphanPeer() {
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.IsType(remove, op.Step(0))
 	suite.Equal("remove-orphan-peer", op.Desc())
+}
+
+// Ref https://github.com/tikv/pd/issues/7249 https://github.com/tikv/tikv/issues/15799
+func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRuleChanged() {
+	// init cluster with 5 replicas
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	storeIDs := []uint64{1, 2, 3, 4, 5}
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", storeIDs[0], storeIDs[1:]...)
+	rule := &placement.Rule{
+		GroupID:  "pd",
+		ID:       "default",
+		Role:     placement.Voter,
+		Count:    5,
+		StartKey: []byte{},
+		EndKey:   []byte{},
+	}
+	suite.ruleManager.SetRule(rule)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.Nil(op)
+
+	// set store 1, 2 to disconnected
+	suite.cluster.SetStoreDisconnect(1)
+	suite.cluster.SetStoreDisconnect(2)
+
+	// change rule to 3 replicas
+	rule = &placement.Rule{
+		GroupID:  "pd",
+		ID:       "default",
+		Role:     placement.Voter,
+		Count:    3,
+		StartKey: []byte{},
+		EndKey:   []byte{},
+		Override: true,
+	}
+	suite.ruleManager.SetRule(rule)
+
+	// remove store 1 from region 1
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-replaced-orphan-peer", op.Desc())
+	suite.Equal(op.Len(), 2)
+	newLeaderID := op.Step(0).(operator.TransferLeader).ToStore
+	removedPeerID := op.Step(1).(operator.RemovePeer).FromStore
+	r1 := suite.cluster.GetRegion(1)
+	r1 = r1.Clone(
+		core.WithLeader(r1.GetPeer(newLeaderID)),
+		core.WithRemoveStorePeer(removedPeerID))
+	suite.cluster.PutRegion(r1)
+	r1 = suite.cluster.GetRegion(1)
+	suite.Len(r1.GetPeers(), 4)
+
+	// remove store 2 from region 1
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-replaced-orphan-peer", op.Desc())
+	suite.Equal(op.Len(), 1)
+	removedPeerID = op.Step(0).(operator.RemovePeer).FromStore
+	r1 = r1.Clone(core.WithRemoveStorePeer(removedPeerID))
+	suite.cluster.PutRegion(r1)
+	r1 = suite.cluster.GetRegion(1)
+	suite.Len(r1.GetPeers(), 3)
+	for _, p := range r1.GetPeers() {
+		suite.NotEqual(p.GetStoreId(), 1)
+		suite.NotEqual(p.GetStoreId(), 2)
+	}
+}
+
+// Ref https://github.com/tikv/pd/issues/7249 https://github.com/tikv/tikv/issues/15799
+func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRuleChanged2() {
+	// init cluster with 5 voters and 1 learner
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5"})
+	suite.cluster.AddLabelsStore(6, 1, map[string]string{"host": "host6"})
+	storeIDs := []uint64{1, 2, 3, 4, 5}
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", storeIDs[0], storeIDs[1:]...)
+	r1 := suite.cluster.GetRegion(1)
+	r1 = r1.Clone(core.WithAddPeer(&metapb.Peer{Id: 6, StoreId: 6, Role: metapb.PeerRole_Learner}))
+	suite.cluster.PutRegion(r1)
+	err := suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID:   "pd",
+			ID:        "default",
+			Index:     100,
+			Override:  true,
+			Role:      placement.Voter,
+			Count:     5,
+			IsWitness: false,
+		},
+		{
+			GroupID:   "pd",
+			ID:        "r1",
+			Index:     100,
+			Override:  false,
+			Role:      placement.Learner,
+			Count:     1,
+			IsWitness: false,
+		},
+	})
+	suite.NoError(err)
+
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.Nil(op)
+
+	// set store 1, 2 to disconnected
+	suite.cluster.SetStoreDisconnect(1)
+	suite.cluster.SetStoreDisconnect(2)
+	suite.cluster.SetStoreDisconnect(3)
+
+	// change rule to 3 replicas
+	suite.ruleManager.DeleteRuleGroup("pd")
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:  "pd",
+		ID:       "default",
+		Role:     placement.Voter,
+		Count:    2,
+		StartKey: []byte{},
+		EndKey:   []byte{},
+		Override: true,
+	})
+
+	// remove store 1 from region 1
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-replaced-orphan-peer", op.Desc())
+	suite.Equal(op.Len(), 2)
+	newLeaderID := op.Step(0).(operator.TransferLeader).ToStore
+	removedPeerID := op.Step(1).(operator.RemovePeer).FromStore
+	r1 = suite.cluster.GetRegion(1)
+	r1 = r1.Clone(
+		core.WithLeader(r1.GetPeer(newLeaderID)),
+		core.WithRemoveStorePeer(removedPeerID))
+	suite.cluster.PutRegion(r1)
+	r1 = suite.cluster.GetRegion(1)
+	suite.Len(r1.GetPeers(), 5)
+
+	// remove store 2 from region 1
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-replaced-orphan-peer", op.Desc())
+	suite.Equal(op.Len(), 1)
+	removedPeerID = op.Step(0).(operator.RemovePeer).FromStore
+	r1 = r1.Clone(core.WithRemoveStorePeer(removedPeerID))
+	suite.cluster.PutRegion(r1)
+	r1 = suite.cluster.GetRegion(1)
+	suite.Len(r1.GetPeers(), 4)
+	for _, p := range r1.GetPeers() {
+		fmt.Println(p.GetStoreId(), p.Role.String())
+	}
+
+	// remove store 3 from region 1
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.NotNil(op)
+	suite.Equal("remove-replaced-orphan-peer", op.Desc())
+	suite.Equal(op.Len(), 1)
+	removedPeerID = op.Step(0).(operator.RemovePeer).FromStore
+	r1 = r1.Clone(core.WithRemoveStorePeer(removedPeerID))
+	suite.cluster.PutRegion(r1)
+	r1 = suite.cluster.GetRegion(1)
+	suite.Len(r1.GetPeers(), 3)
+
+	for _, p := range r1.GetPeers() {
+		suite.NotEqual(p.GetStoreId(), 1)
+		suite.NotEqual(p.GetStoreId(), 2)
+		suite.NotEqual(p.GetStoreId(), 3)
+	}
 }
 
 func (suite *ruleCheckerTestSuite) TestPriorityFitHealthWithDifferentRole1() {
