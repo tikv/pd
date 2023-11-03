@@ -138,7 +138,7 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 // RequestRU requests the RU of the resource group.
 func (rg *ResourceGroup) RequestRU(
 	now time.Time,
-	neededTokens float64,
+	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
@@ -147,7 +147,7 @@ func (rg *ResourceGroup) RequestRU(
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
-	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs, clientUniqueID)
+	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 
