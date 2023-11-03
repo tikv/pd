@@ -640,7 +640,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 			}
 		}
 	})
-	if err := allocator.CampaignAllocatorLeader(am.ctx, am.leaderLease, cmps...); err != nil {
+	if err := allocator.CampaignAllocatorLeader(am.leaderLease, cmps...); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("failed to campaign local tso allocator leader due to txn conflict, another allocator may campaign successfully",
 				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),

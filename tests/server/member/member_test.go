@@ -338,8 +338,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	re.NotEmpty(cluster.GetLeader())
 
 	for i := 0; i < 6; i++ {
-		err := cluster.GetServers()[cluster.GetLeader()].TransferLeader(cluster.GetLeader())
-		re.NoError(err)
+		cluster.GetServers()[cluster.GetLeader()].ResetPDLeader()
 		cluster.WaitLeader()
 	}
 	// leader should be changed when campaign leader frequently

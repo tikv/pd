@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -63,23 +62,24 @@ type Leadership struct {
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
 	keepAliveCancelFuncLock syncutil.Mutex
-	// CampaignTimes is used to record the campaign times of the leader in 5min.
-	// To avoid the leader campaign too frequently.
-	CampaignTimes []cache.TTLString
+	// CampaignTimes is used to record the campaign times of the leader within 5 minutes.
+	// It is ordered by time to prevent the leader from campaigning too frequently.
+	CampaignTimes []time.Time
 }
 
 // NewLeadership creates a new Leadership.
 func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadership {
 	leadership := &Leadership{
-		purpose:   purpose,
-		client:    client,
-		leaderKey: leaderKey,
+		purpose:       purpose,
+		client:        client,
+		leaderKey:     leaderKey,
+		CampaignTimes: make([]time.Time, 0, 10),
 	}
 	return leadership
 }
 
 // getLease gets the lease of leadership, only if leadership is valid,
-// i.e the owner is a true leader, the lease is not nil.
+// i.e. the owner is a true leader, the lease is not nil.
 func (ls *Leadership) getLease() *lease {
 	l := ls.lease.Load()
 	if l == nil {
@@ -108,9 +108,24 @@ func (ls *Leadership) GetLeaderKey() string {
 	return ls.leaderKey
 }
 
+// addCampaignTimes is used to add the campaign times of the leader.
+func (ls *Leadership) addCampaignTimes() {
+	// delete the time which is more than 5min
+	for i := len(ls.CampaignTimes) - 1; i >= 0; i-- {
+		if time.Since(ls.CampaignTimes[i]) > time.Minute*5 {
+			// remove the time which is more than 5min
+			// array is sorted by time
+			ls.CampaignTimes = ls.CampaignTimes[i:]
+			break
+		}
+	}
+
+	ls.CampaignTimes = append(ls.CampaignTimes, time.Now())
+}
+
 // Campaign is used to campaign the leader with given lease and returns a leadership
-func (ls *Leadership) Campaign(ctx context.Context, leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
-	ls.CampaignTimes = append(ls.CampaignTimes, *cache.NewStringTTL(ctx, 5*time.Second, 5*time.Minute))
+func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
+	ls.addCampaignTimes()
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
 	newLease := &lease{

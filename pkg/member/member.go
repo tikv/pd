@@ -179,13 +179,16 @@ func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
 
 // CampaignLeader is used to campaign a PD member's leadership
 // and make it become a PD leader.
+// leader should be changed when campaign leader frequently.
 func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
-	// leader should be changed when campaign leader frequently.
 	if len(m.leadership.CampaignTimes) > campaignLeaderFrequencyTimes {
-		log.Error("campaign times is too much", zap.String("leader-name", m.Name()), zap.String("leader-key", m.GetLeaderPath()))
+		log.Error("campaign times is too much", zap.String("leader-name", m.Name()),
+			zap.Int("campaign-times", len(m.leadership.CampaignTimes)), zap.String("leader-key", m.GetLeaderPath()))
+		// remove all campaign times
+		m.leadership.CampaignTimes = nil
 		return m.ResignEtcdLeader(ctx, m.Name(), "")
 	}
-	return m.leadership.Campaign(ctx, leaseTimeout, m.MemberValue())
+	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
 // KeepLeader is used to keep the PD leader's leadership.
