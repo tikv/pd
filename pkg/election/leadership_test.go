@@ -33,8 +33,6 @@ const defaultLeaseTimeout = 1
 
 func TestLeadership(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
 
@@ -43,10 +41,10 @@ func TestLeadership(t *testing.T) {
 	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2")
 
 	// leadership1 starts first and get the leadership
-	err := leadership1.Campaign(ctx, defaultLeaseTimeout, "test_leader_1")
+	err := leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	// leadership2 starts then and can not get the leadership
-	err = leadership2.Campaign(ctx, defaultLeaseTimeout, "test_leader_2")
+	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
 	re.Error(err)
 
 	re.True(leadership1.Check())
@@ -62,9 +60,11 @@ func TestLeadership(t *testing.T) {
 	// Delete the leader key and campaign for leadership1
 	err = leadership1.DeleteLeaderKey()
 	re.NoError(err)
-	err = leadership1.Campaign(ctx, defaultLeaseTimeout, "test_leader_1")
+	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	re.True(leadership1.Check())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go leadership1.Keep(ctx)
 
 	// Sleep longer than the defaultLeaseTimeout
@@ -76,7 +76,7 @@ func TestLeadership(t *testing.T) {
 	// Delete the leader key and re-campaign for leadership2
 	err = leadership1.DeleteLeaderKey()
 	re.NoError(err)
-	err = leadership2.Campaign(ctx, defaultLeaseTimeout, "test_leader_2")
+	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
 	re.NoError(err)
 	re.True(leadership2.Check())
 	ctx, cancel = context.WithCancel(context.Background())
@@ -187,8 +187,6 @@ func TestExitWatch(t *testing.T) {
 
 func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embed.Etcd, client *clientv3.Client) func()) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
 	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
@@ -197,7 +195,7 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 
 	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
 	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
-	err = leadership1.Campaign(ctx, defaultLeaseTimeout, "test_leader_1")
+	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	resp, err := client2.Get(context.Background(), leaderKey)
 	re.NoError(err)
@@ -223,8 +221,6 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 func TestRequestProgress(t *testing.T) {
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		re := require.New(t)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 		fname := testutil.InitTempFileLogger("debug")
 		defer os.RemoveAll(fname)
 		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
@@ -236,9 +232,11 @@ func TestRequestProgress(t *testing.T) {
 		leaderKey := "/test_leader"
 		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
 		leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
-		err = leadership1.Campaign(ctx, defaultLeaseTimeout, "test_leader_1")
+		err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 		re.NoError(err)
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		resp, err := client2.Get(ctx, leaderKey)
 		re.NoError(err)
 		go func() {
