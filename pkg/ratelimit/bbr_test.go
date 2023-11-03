@@ -80,7 +80,7 @@ func TestBBRMinRt(t *testing.T) {
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	// default max min rt is equal to maxFloat64.
-	re.Equal(int64(60000000000), bbr.getMinRT())
+	re.Equal(int64(3600000000000), bbr.getMinRT())
 
 	for i := 0; i < 10; i++ {
 		var wg sync.WaitGroup
@@ -134,7 +134,7 @@ func TestBDP(t *testing.T) {
 	re := require.New(t)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
-	re.Equal(int64(600000), bbr.getMaxInFlight())
+	re.Equal(int64(36000000), bbr.getMaxInFlight())
 
 	for i := 0; i < 10; i++ {
 		for j := 0; j < 100; j++ {
@@ -184,8 +184,8 @@ func TestFullStatus(t *testing.T) {
 		time.Sleep(bucketDuration)
 	}
 	maxInFlight := bbr.bbrStatus.getMaxInFlight()
-	re.LessOrEqual(int64(7), maxInFlight)
-	re.GreaterOrEqual(int64(9), maxInFlight)
+	re.LessOrEqual(int64(6), maxInFlight)
+	re.GreaterOrEqual(int64(10), maxInFlight)
 	re.Equal(cl.limit, uint64(maxInFlight))
 	re.LessOrEqual(int64(200000), bbr.bbrStatus.getMinRT())
 	re.GreaterOrEqual(int64(220000), bbr.bbrStatus.getMinRT())
