@@ -818,8 +818,8 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 
 			r1 := suite.cluster.GetRegion(1)
 			for _, p := range r1.GetPeers() {
-				suite.NotEqual(p.GetStoreId(), uint64(testCase[0]))
-				suite.NotEqual(p.GetStoreId(), uint64(testCase[1]))
+				suite.NotEqual(p.GetStoreId(), testCase[0])
+				suite.NotEqual(p.GetStoreId(), testCase[1])
 			}
 			suite.TearDownTest()
 			suite.SetupTest()
@@ -941,9 +941,9 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 
 				r1 = suite.cluster.GetRegion(1)
 				for _, p := range r1.GetPeers() {
-					suite.NotEqual(p.GetStoreId(), uint64(testCase[0]))
-					suite.NotEqual(p.GetStoreId(), uint64(testCase[1]))
-					suite.NotEqual(p.GetStoreId(), uint64(testCase[2]))
+					suite.NotEqual(p.GetStoreId(), testCase[0])
+					suite.NotEqual(p.GetStoreId(), testCase[1])
+					suite.NotEqual(p.GetStoreId(), testCase[2])
 				}
 				suite.TearDownTest()
 				suite.SetupTest()
