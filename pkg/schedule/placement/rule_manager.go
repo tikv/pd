@@ -135,8 +135,10 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 }
 
 func (m *RuleManager) loadRules() error {
-	var toSave []*Rule
-	var toDelete []string
+	var (
+		toSave   []*Rule
+		toDelete []string
+	)
 	err := m.storage.LoadRules(func(k, v string) {
 		r, err := NewRuleFromJSON([]byte(v))
 		if err != nil {
@@ -317,6 +319,20 @@ func (m *RuleManager) GetAllRules() []*Rule {
 	}
 	sortRules(rules)
 	return rules
+}
+
+// GetRulesCount returns the number of rules.
+func (m *RuleManager) GetRulesCount() int {
+	m.RLock()
+	defer m.RUnlock()
+	return len(m.ruleConfig.rules)
+}
+
+// GetGroupsCount returns the number of rule groups.
+func (m *RuleManager) GetGroupsCount() int {
+	m.RLock()
+	defer m.RUnlock()
+	return len(m.ruleConfig.groups)
 }
 
 // GetRulesByGroup returns sorted rules of a group.

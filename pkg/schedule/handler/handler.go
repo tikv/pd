@@ -34,6 +34,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
@@ -42,7 +45,7 @@ import (
 // TODO: remove it after GetCluster is unified between PD server and Scheduling server.
 type Server interface {
 	GetCoordinator() *schedule.Coordinator
-	GetCluster() sche.SharedCluster
+	GetCluster() sche.SchedulerCluster
 }
 
 // Handler is a handler to handle http request about schedule.
@@ -381,6 +384,9 @@ func (h *Handler) HandleOperatorCreation(input map[string]interface{}) (int, int
 // AddTransferLeaderOperator adds an operator to transfer leader to the store.
 func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -402,6 +408,9 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 // AddTransferRegionOperator adds an operator to transfer region to the stores.
 func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64]placement.PeerRoleType) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -439,6 +448,9 @@ func (h *Handler) AddTransferRegionOperator(regionID uint64, storeIDs map[uint64
 // AddTransferPeerOperator adds an operator to transfer peer.
 func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreID uint64) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -465,6 +477,9 @@ func (h *Handler) AddTransferPeerOperator(regionID uint64, fromStoreID, toStoreI
 // checkAdminAddPeerOperator checks adminAddPeer operator with given region ID and store ID.
 func (h *Handler) checkAdminAddPeerOperator(regionID uint64, toStoreID uint64) (sche.SharedCluster, *core.RegionInfo, error) {
 	c := h.GetCluster()
+	if c == nil {
+		return nil, nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return nil, nil, errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -520,6 +535,9 @@ func (h *Handler) AddAddLearnerOperator(regionID uint64, toStoreID uint64) error
 // AddRemovePeerOperator adds an operator to remove peer.
 func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -540,6 +558,9 @@ func (h *Handler) AddRemovePeerOperator(regionID uint64, fromStoreID uint64) err
 // AddMergeRegionOperator adds an operator to merge region.
 func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -575,6 +596,9 @@ func (h *Handler) AddMergeRegionOperator(regionID uint64, targetID uint64) error
 // AddSplitRegionOperator adds an operator to split a region.
 func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys []string) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -607,6 +631,9 @@ func (h *Handler) AddSplitRegionOperator(regionID uint64, policyStr string, keys
 // AddScatterRegionOperator adds an operator to scatter a region.
 func (h *Handler) AddScatterRegionOperator(regionID uint64, group string) error {
 	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
 	region := c.GetRegion(regionID)
 	if region == nil {
 		return errs.ErrRegionNotFound.FastGenByArgs(regionID)
@@ -738,13 +765,22 @@ func (h *Handler) GetCheckerStatus(name string) (map[string]bool, error) {
 	}, nil
 }
 
-// GetSchedulerNames returns all names of schedulers.
-func (h *Handler) GetSchedulerNames() ([]string, error) {
+// GetSchedulersController returns controller of schedulers.
+func (h *Handler) GetSchedulersController() (*schedulers.Controller, error) {
 	co := h.GetCoordinator()
 	if co == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
-	return co.GetSchedulersController().GetSchedulerNames(), nil
+	return co.GetSchedulersController(), nil
+}
+
+// GetSchedulerNames returns all names of schedulers.
+func (h *Handler) GetSchedulerNames() ([]string, error) {
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return nil, err
+	}
+	return sc.GetSchedulerNames(), nil
 }
 
 type schedulerPausedPeriod struct {
@@ -755,11 +791,10 @@ type schedulerPausedPeriod struct {
 
 // GetSchedulerByStatus returns all names of schedulers by status.
 func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{}, error) {
-	co := h.GetCoordinator()
-	if co == nil {
-		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return nil, err
 	}
-	sc := co.GetSchedulersController()
 	schedulers := sc.GetSchedulerNames()
 	switch status {
 	case "paused":
@@ -810,7 +845,20 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 		}
 		return disabledSchedulers, nil
 	default:
-		return schedulers, nil
+		// The default scheduler could not be deleted in scheduling server,
+		// so schedulers could only be disabled.
+		// We should not return the disabled schedulers here.
+		var enabledSchedulers []string
+		for _, scheduler := range schedulers {
+			disabled, err := sc.IsSchedulerDisabled(scheduler)
+			if err != nil {
+				return nil, err
+			}
+			if !disabled {
+				enabledSchedulers = append(enabledSchedulers, scheduler)
+			}
+		}
+		return enabledSchedulers, nil
 	}
 }
 
@@ -834,11 +882,11 @@ func (h *Handler) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 // t == 0 : resume scheduler.
 // t > 0 : scheduler delays t seconds.
 func (h *Handler) PauseOrResumeScheduler(name string, t int64) (err error) {
-	co := h.GetCoordinator()
-	if co == nil {
-		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return err
 	}
-	if err = co.GetSchedulersController().PauseOrResumeScheduler(name, t); err != nil {
+	if err = sc.PauseOrResumeScheduler(name, t); err != nil {
 		if t == 0 {
 			log.Error("can not resume scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
@@ -870,4 +918,146 @@ func (h *Handler) PauseOrResumeChecker(name string, t int64) (err error) {
 		}
 	}
 	return err
+}
+
+// GetStore returns a store.
+// If store does not exist, return error.
+func (h *Handler) GetStore(storeID uint64) (*core.StoreInfo, error) {
+	c := h.GetCluster()
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	store := c.GetStore(storeID)
+	if store == nil {
+		return nil, errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	return store, nil
+}
+
+// GetStores returns all stores in the cluster.
+func (h *Handler) GetStores() ([]*core.StoreInfo, error) {
+	c := h.GetCluster()
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	storeMetas := c.GetStores()
+	stores := make([]*core.StoreInfo, 0, len(storeMetas))
+	for _, store := range storeMetas {
+		store, err := h.GetStore(store.GetID())
+		if err != nil {
+			return nil, err
+		}
+		stores = append(stores, store)
+	}
+	return stores, nil
+}
+
+// GetHotRegions gets hot regions' statistics by RWType and storeIDs.
+// If storeIDs is empty, it returns all hot regions' statistics by RWType.
+func (h *Handler) GetHotRegions(typ utils.RWType, storeIDs ...uint64) (*statistics.StoreHotPeersInfos, error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	return co.GetHotRegions(typ, storeIDs...), nil
+}
+
+// HotStoreStats is used to record the status of hot stores.
+type HotStoreStats struct {
+	BytesWriteStats map[uint64]float64 `json:"bytes-write-rate,omitempty"`
+	BytesReadStats  map[uint64]float64 `json:"bytes-read-rate,omitempty"`
+	KeysWriteStats  map[uint64]float64 `json:"keys-write-rate,omitempty"`
+	KeysReadStats   map[uint64]float64 `json:"keys-read-rate,omitempty"`
+	QueryWriteStats map[uint64]float64 `json:"query-write-rate,omitempty"`
+	QueryReadStats  map[uint64]float64 `json:"query-read-rate,omitempty"`
+}
+
+// GetHotStores gets all hot stores stats.
+func (h *Handler) GetHotStores() (*HotStoreStats, error) {
+	stats := &HotStoreStats{
+		BytesWriteStats: make(map[uint64]float64),
+		BytesReadStats:  make(map[uint64]float64),
+		KeysWriteStats:  make(map[uint64]float64),
+		KeysReadStats:   make(map[uint64]float64),
+		QueryWriteStats: make(map[uint64]float64),
+		QueryReadStats:  make(map[uint64]float64),
+	}
+	stores, error := h.GetStores()
+	if error != nil {
+		return nil, error
+	}
+	storesLoads, error := h.GetStoresLoads()
+	if error != nil {
+		return nil, error
+	}
+	for _, store := range stores {
+		id := store.GetID()
+		if loads, ok := storesLoads[id]; ok {
+			if store.IsTiFlash() {
+				stats.BytesWriteStats[id] = loads[utils.StoreRegionsWriteBytes]
+				stats.KeysWriteStats[id] = loads[utils.StoreRegionsWriteKeys]
+			} else {
+				stats.BytesWriteStats[id] = loads[utils.StoreWriteBytes]
+				stats.KeysWriteStats[id] = loads[utils.StoreWriteKeys]
+			}
+			stats.BytesReadStats[id] = loads[utils.StoreReadBytes]
+			stats.KeysReadStats[id] = loads[utils.StoreReadKeys]
+			stats.QueryWriteStats[id] = loads[utils.StoreWriteQuery]
+			stats.QueryReadStats[id] = loads[utils.StoreReadQuery]
+		}
+	}
+	return stats, nil
+}
+
+// GetStoresLoads gets all hot write stores stats.
+func (h *Handler) GetStoresLoads() (map[uint64][]float64, error) {
+	c := h.GetCluster()
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	return c.GetStoresLoads(), nil
+}
+
+// HotBucketsResponse is the response for hot buckets.
+type HotBucketsResponse map[uint64][]*HotBucketsItem
+
+// HotBucketsItem is the item of hot buckets.
+type HotBucketsItem struct {
+	StartKey   string `json:"start_key"`
+	EndKey     string `json:"end_key"`
+	HotDegree  int    `json:"hot_degree"`
+	ReadBytes  uint64 `json:"read_bytes"`
+	ReadKeys   uint64 `json:"read_keys"`
+	WriteBytes uint64 `json:"write_bytes"`
+	WriteKeys  uint64 `json:"write_keys"`
+}
+
+func convert(buckets *buckets.BucketStat) *HotBucketsItem {
+	return &HotBucketsItem{
+		StartKey:   core.HexRegionKeyStr(buckets.StartKey),
+		EndKey:     core.HexRegionKeyStr(buckets.EndKey),
+		HotDegree:  buckets.HotDegree,
+		ReadBytes:  buckets.Loads[utils.RegionReadBytes],
+		ReadKeys:   buckets.Loads[utils.RegionReadKeys],
+		WriteBytes: buckets.Loads[utils.RegionWriteBytes],
+		WriteKeys:  buckets.Loads[utils.RegionWriteKeys],
+	}
+}
+
+// GetHotBuckets returns all hot buckets stats.
+func (h *Handler) GetHotBuckets(regionIDs ...uint64) (HotBucketsResponse, error) {
+	c := h.GetCluster()
+	if c == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	degree := c.GetSharedConfig().GetHotRegionCacheHitsThreshold()
+	stats := c.BucketsStats(degree, regionIDs...)
+	ret := HotBucketsResponse{}
+	for regionID, stats := range stats {
+		ret[regionID] = make([]*HotBucketsItem, len(stats))
+		for i, stat := range stats {
+			ret[regionID][i] = convert(stat)
+		}
+	}
+	return ret, nil
 }

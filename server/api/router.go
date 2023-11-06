@@ -226,6 +226,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/stores/limit/scene", storesHandler.SetStoreLimitScene, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/stores/limit/scene", storesHandler.GetStoreLimitScene, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/stores/progress", storesHandler.GetStoresProgress, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/stores/check", storesHandler.GetStoresByState, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	labelsHandler := newLabelsHandler(svr, rd)
 	registerFunc(clusterRouter, "/labels", labelsHandler.GetLabels, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -333,16 +334,16 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	pprofHandler := newPprofHandler(svr, rd)
 	// profile API
-	registerFunc(apiRouter, "/debug/pprof/profile", pprof.Profile)
-	registerFunc(apiRouter, "/debug/pprof/trace", pprof.Trace)
-	registerFunc(apiRouter, "/debug/pprof/symbol", pprof.Symbol)
-	registerFunc(apiRouter, "/debug/pprof/heap", pprofHandler.PProfHeap)
-	registerFunc(apiRouter, "/debug/pprof/mutex", pprofHandler.PProfMutex)
-	registerFunc(apiRouter, "/debug/pprof/allocs", pprofHandler.PProfAllocs)
-	registerFunc(apiRouter, "/debug/pprof/block", pprofHandler.PProfBlock)
-	registerFunc(apiRouter, "/debug/pprof/goroutine", pprofHandler.PProfGoroutine)
-	registerFunc(apiRouter, "/debug/pprof/threadcreate", pprofHandler.PProfThreadcreate)
-	registerFunc(apiRouter, "/debug/pprof/zip", pprofHandler.PProfZip)
+	registerFunc(apiRouter, "/debug/pprof/profile", pprof.Profile, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/trace", pprof.Trace, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/symbol", pprof.Symbol, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/heap", pprofHandler.PProfHeap, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/mutex", pprofHandler.PProfMutex, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/allocs", pprofHandler.PProfAllocs, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/block", pprofHandler.PProfBlock, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/goroutine", pprofHandler.PProfGoroutine, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/threadcreate", pprofHandler.PProfThreadcreate, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/zip", pprofHandler.PProfZip, setAuditBackend(localLog))
 
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)

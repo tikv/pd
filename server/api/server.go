@@ -52,6 +52,12 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	//	"/schedulers", http.MethodGet
 	//	"/schedulers/{name}", http.MethodPost
 	//	"/schedulers/diagnostic/{name}", http.MethodGet
+	//	"/scheduler-config", http.MethodGet
+	//	"/hotspot/regions/read", http.MethodGet
+	//	"/hotspot/regions/write", http.MethodGet
+	//	"/hotspot/regions/history", http.MethodGet
+	//	"/hotspot/stores", http.MethodGet
+	//	"/hotspot/buckets", http.MethodGet
 	// Following requests are **not** redirected:
 	//	"/schedulers", http.MethodPost
 	//	"/schedulers/{name}", http.MethodDelete
@@ -73,11 +79,21 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/checkers",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodPost, http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/hotspot",
+				scheapi.APIPathPrefix+"/hotspot",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
 			// because the writing of all the meta information of the scheduling service is in the API server,
 			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",
 				scheapi.APIPathPrefix+"/schedulers",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/scheduler-config",
+				scheapi.APIPathPrefix+"/schedulers/config",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(

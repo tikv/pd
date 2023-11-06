@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
@@ -740,6 +741,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 // @Success  200  {object}  StoresInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores [get]
+// @Deprecated Better to use /stores/check instead.
 func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	stores := rc.GetMetaStores()
@@ -753,7 +755,7 @@ func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stores = urlFilter.filter(rc.GetMetaStores())
+	stores = urlFilter.filter(stores)
 	for _, s := range stores {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
@@ -763,6 +765,57 @@ func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 		}
 
 		storeInfo := newStoreInfo(h.GetScheduleConfig(), store)
+		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
+	}
+	StoresInfo.Count = len(StoresInfo.Stores)
+
+	h.rd.JSON(w, http.StatusOK, StoresInfo)
+}
+
+// @Tags     store
+// @Summary  Get all stores by states in the cluster.
+// @Param    state  query  array  true  "Specify accepted store states."
+// @Produce  json
+// @Success  200  {object}  StoresInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /stores/check [get]
+func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	stores := rc.GetMetaStores()
+	StoresInfo := &StoresInfo{
+		Stores: make([]*StoreInfo, 0, len(stores)),
+	}
+
+	lowerStateName := []string{strings.ToLower(downStateName), strings.ToLower(disconnectedName)}
+	for _, v := range metapb.StoreState_name {
+		lowerStateName = append(lowerStateName, strings.ToLower(v))
+	}
+
+	var queryStates []string
+	if v, ok := r.URL.Query()["state"]; ok {
+		for _, s := range v {
+			stateName := strings.ToLower(s)
+			if stateName != "" && !slice.Contains(lowerStateName, stateName) {
+				h.rd.JSON(w, http.StatusBadRequest, "unknown StoreState: "+s)
+				return
+			} else if stateName != "" {
+				queryStates = append(queryStates, stateName)
+			}
+		}
+	}
+
+	for _, s := range stores {
+		storeID := s.GetId()
+		store := rc.GetStore(storeID)
+		if store == nil {
+			h.rd.JSON(w, http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
+			return
+		}
+
+		storeInfo := newStoreInfo(h.GetScheduleConfig(), store)
+		if queryStates != nil && !slice.Contains(queryStates, strings.ToLower(storeInfo.Store.StateName)) {
+			continue
+		}
 		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
 	}
 	StoresInfo.Count = len(StoresInfo.Stores)

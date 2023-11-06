@@ -593,7 +593,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -1236,6 +1236,11 @@ func (c *RaftCluster) GetRegions() []*core.RegionInfo {
 	return c.core.GetRegions()
 }
 
+// ValidRegion is used to decide if the region is valid.
+func (c *RaftCluster) ValidRegion(region *metapb.Region) error {
+	return c.core.ValidRegion(region)
+}
+
 // GetTotalRegionCount returns total count of regions
 func (c *RaftCluster) GetTotalRegionCount() int {
 	return c.core.GetTotalRegionCount()
@@ -1625,7 +1630,10 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
-		c.resetProgress(storeID, store.GetAddress())
+		addr := store.GetAddress()
+		c.resetProgress(storeID, addr)
+		storeIDStr := strconv.FormatUint(storeID, 10)
+		statistics.ResetStoreStatistics(addr, storeIDStr)
 		if !c.isAPIServiceMode {
 			c.hotStat.RemoveRollingStoreStats(storeID)
 			c.slowStat.RemoveSlowStoreStatus(storeID)
@@ -2153,17 +2161,14 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) collectMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
-	stores := c.GetStores()
-	for _, s := range stores {
-		statsMap.Observe(s)
-		if !c.isAPIServiceMode {
+	if !c.isAPIServiceMode {
+		statsMap := statistics.NewStoreStatisticsMap(c.opt)
+		stores := c.GetStores()
+		for _, s := range stores {
+			statsMap.Observe(s)
 			statsMap.ObserveHotStat(s, c.hotStat.StoresStats)
 		}
-	}
-	statsMap.Collect()
-
-	if !c.isAPIServiceMode {
+		statsMap.Collect()
 		c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 		c.coordinator.CollectHotSpotMetrics()
 		c.collectClusterMetrics()
@@ -2172,8 +2177,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	statsMap := statistics.NewStoreStatisticsMap(c.opt)
-	statsMap.Reset()
+	statistics.Reset()
 
 	if !c.isAPIServiceMode {
 		c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
@@ -2393,37 +2397,6 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.core.PutRegion(region)
 	return nil
-}
-
-// GetHotWriteRegions gets hot write regions' info.
-func (c *RaftCluster) GetHotWriteRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	hotWriteRegions := c.coordinator.GetHotRegionsByType(utils.Write)
-	if len(storeIDs) > 0 && hotWriteRegions != nil {
-		hotWriteRegions = getHotRegionsByStoreIDs(hotWriteRegions, storeIDs...)
-	}
-	return hotWriteRegions
-}
-
-// GetHotReadRegions gets hot read regions' info.
-func (c *RaftCluster) GetHotReadRegions(storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	hotReadRegions := c.coordinator.GetHotRegionsByType(utils.Read)
-	if len(storeIDs) > 0 && hotReadRegions != nil {
-		hotReadRegions = getHotRegionsByStoreIDs(hotReadRegions, storeIDs...)
-	}
-	return hotReadRegions
-}
-
-func getHotRegionsByStoreIDs(hotPeerInfos *statistics.StoreHotPeersInfos, storeIDs ...uint64) *statistics.StoreHotPeersInfos {
-	asLeader := statistics.StoreHotPeersStat{}
-	asPeer := statistics.StoreHotPeersStat{}
-	for _, storeID := range storeIDs {
-		asLeader[storeID] = hotPeerInfos.AsLeader[storeID]
-		asPeer[storeID] = hotPeerInfos.AsPeer[storeID]
-	}
-	return &statistics.StoreHotPeersInfos{
-		AsLeader: asLeader,
-		AsPeer:   asPeer,
-	}
 }
 
 // GetStoreLimiter returns the dynamic adjusting limiter
