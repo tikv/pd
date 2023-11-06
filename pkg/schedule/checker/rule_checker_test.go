@@ -17,6 +17,7 @@ package checker
 import (
 	"context"
 	"fmt"
+
 	"strconv"
 	"strings"
 	"testing"
@@ -244,7 +245,6 @@ func (suite *ruleCheckerTestSuite) TestFixToManyOrphanPeers() {
 	region = region.Clone(
 		core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(3), DownSeconds: 60000}}),
 		core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
-	fmt.Println(len(region.GetPeers()))
 	suite.cluster.PutRegion(region)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
