@@ -42,6 +42,40 @@ var (
 	errPeerCannotBeWitness = errors.New("peer cannot be witness")
 	errNoNewLeader         = errors.New("no new leader")
 	errRegionNoLeader      = errors.New("region no leader")
+<<<<<<< HEAD:server/schedule/checker/rule_checker.go
+=======
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	ruleCheckerCounter                            = checkerCounter.WithLabelValues(ruleChecker, "check")
+	ruleCheckerPausedCounter                      = checkerCounter.WithLabelValues(ruleChecker, "paused")
+	ruleCheckerRegionNoLeaderCounter              = checkerCounter.WithLabelValues(ruleChecker, "region-no-leader")
+	ruleCheckerGetCacheCounter                    = checkerCounter.WithLabelValues(ruleChecker, "get-cache")
+	ruleCheckerNeedSplitCounter                   = checkerCounter.WithLabelValues(ruleChecker, "need-split")
+	ruleCheckerSetCacheCounter                    = checkerCounter.WithLabelValues(ruleChecker, "set-cache")
+	ruleCheckerReplaceDownCounter                 = checkerCounter.WithLabelValues(ruleChecker, "replace-down")
+	ruleCheckerPromoteWitnessCounter              = checkerCounter.WithLabelValues(ruleChecker, "promote-witness")
+	ruleCheckerReplaceOfflineCounter              = checkerCounter.WithLabelValues(ruleChecker, "replace-offline")
+	ruleCheckerAddRulePeerCounter                 = checkerCounter.WithLabelValues(ruleChecker, "add-rule-peer")
+	ruleCheckerNoStoreAddCounter                  = checkerCounter.WithLabelValues(ruleChecker, "no-store-add")
+	ruleCheckerNoStoreThenTryReplace              = checkerCounter.WithLabelValues(ruleChecker, "no-store-then-try-replace")
+	ruleCheckerNoStoreReplaceCounter              = checkerCounter.WithLabelValues(ruleChecker, "no-store-replace")
+	ruleCheckerFixPeerRoleCounter                 = checkerCounter.WithLabelValues(ruleChecker, "fix-peer-role")
+	ruleCheckerFixLeaderRoleCounter               = checkerCounter.WithLabelValues(ruleChecker, "fix-leader-role")
+	ruleCheckerNotAllowLeaderCounter              = checkerCounter.WithLabelValues(ruleChecker, "not-allow-leader")
+	ruleCheckerFixFollowerRoleCounter             = checkerCounter.WithLabelValues(ruleChecker, "fix-follower-role")
+	ruleCheckerNoNewLeaderCounter                 = checkerCounter.WithLabelValues(ruleChecker, "no-new-leader")
+	ruleCheckerDemoteVoterRoleCounter             = checkerCounter.WithLabelValues(ruleChecker, "demote-voter-role")
+	ruleCheckerRecentlyPromoteToNonWitnessCounter = checkerCounter.WithLabelValues(ruleChecker, "recently-promote-to-non-witness")
+	ruleCheckerCancelSwitchToWitnessCounter       = checkerCounter.WithLabelValues(ruleChecker, "cancel-switch-to-witness")
+	ruleCheckerSetVoterWitnessCounter             = checkerCounter.WithLabelValues(ruleChecker, "set-voter-witness")
+	ruleCheckerSetLearnerWitnessCounter           = checkerCounter.WithLabelValues(ruleChecker, "set-learner-witness")
+	ruleCheckerSetVoterNonWitnessCounter          = checkerCounter.WithLabelValues(ruleChecker, "set-voter-non-witness")
+	ruleCheckerSetLearnerNonWitnessCounter        = checkerCounter.WithLabelValues(ruleChecker, "set-learner-non-witness")
+	ruleCheckerMoveToBetterLocationCounter        = checkerCounter.WithLabelValues(ruleChecker, "move-to-better-location")
+	ruleCheckerSkipRemoveOrphanPeerCounter        = checkerCounter.WithLabelValues(ruleChecker, "skip-remove-orphan-peer")
+	ruleCheckerRemoveOrphanPeerCounter            = checkerCounter.WithLabelValues(ruleChecker, "remove-orphan-peer")
+	ruleCheckerReplaceOrphanPeerCounter           = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer")
+	ruleCheckerReplaceOrphanPeerNoFitCounter      = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer-no-fit")
+>>>>>>> c332ddce9 (checker: avoid unnecessary remove disconnected peer with multi orphan peers (#7315)):pkg/schedule/checker/rule_checker.go
 )
 
 const maxPendingListLen = 100000
@@ -408,7 +442,11 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	isDisconnectedPeer := func(p *metapb.Peer) bool {
 		// avoid to meet down store when fix orphan peers,
 		// Isdisconnected is more strictly than IsUnhealthy.
-		return c.cluster.GetStore(p.GetStoreId()).IsDisconnected()
+		store := c.cluster.GetStore(p.GetStoreId())
+		if store == nil {
+			return true
+		}
+		return store.IsDisconnected()
 	}
 
 	checkDownPeer := func(peers []*metapb.Peer) (*metapb.Peer, bool) {
@@ -462,7 +500,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 			if pinDownPeer.GetIsWitness() || orphanPeer.GetIsWitness() {
 				continue
 			}
-			// down peer's store should be disconnected
+			// pinDownPeer's store should be disconnected, because we use more strict judge before.
 			if !isDisconnectedPeer(pinDownPeer) {
 				continue
 			}
@@ -477,13 +515,14 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
 				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
 					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
-				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Voter &&
-					isDisconnectedPeer(pinDownPeer) && !dstStore.IsDisconnected():
+				case orphanPeerRole == destRole && isDisconnectedPeer(pinDownPeer) && !dstStore.IsDisconnected():
 					return operator.CreateRemovePeerOperator("remove-replaced-orphan-peer", c.cluster, 0, region, pinDownPeer.GetStoreId())
 				default:
 					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
 					// destRole never be leader, so we not consider it.
 				}
+			} else {
+				ruleCheckerReplaceOrphanPeerNoFitCounter.Inc()
 			}
 		}
 	}
@@ -492,11 +531,19 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	// Ref https://github.com/tikv/pd/issues/4045
 	if len(fit.OrphanPeers) >= 2 {
 		hasHealthPeer := false
+		var disconnectedPeer *metapb.Peer
+		for _, orphanPeer := range fit.OrphanPeers {
+			if isDisconnectedPeer(orphanPeer) {
+				disconnectedPeer = orphanPeer
+				break
+			}
+		}
 		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
 				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 				return operator.CreateRemovePeerOperator("remove-unhealthy-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
+<<<<<<< HEAD:server/schedule/checker/rule_checker.go
 			if isDisconnectedPeer(orphanPeer) {
 				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 				return operator.CreateRemovePeerOperator("remove-disconnected-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
@@ -504,6 +551,15 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 			if hasHealthPeer {
 				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
 				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
+=======
+			if hasHealthPeer {
+				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
+				ruleCheckerRemoveOrphanPeerCounter.Inc()
+				// if there exists a disconnected orphan peer, we will pick it to remove firstly.
+				if disconnectedPeer != nil {
+					return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, disconnectedPeer.StoreId)
+				}
+>>>>>>> c332ddce9 (checker: avoid unnecessary remove disconnected peer with multi orphan peers (#7315)):pkg/schedule/checker/rule_checker.go
 				return operator.CreateRemovePeerOperator("remove-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
 			hasHealthPeer = true

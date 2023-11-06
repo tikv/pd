@@ -496,9 +496,6 @@ var (
 // tikv's store heartbeat for a short time, maybe caused by process restart or
 // temporary network failure.
 func (s *StoreInfo) IsDisconnected() bool {
-	if s == nil {
-		return true
-	}
 	return s.DownTime() > storeDisconnectDuration
 }
 
