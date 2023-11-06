@@ -238,18 +238,62 @@ func (suite *ruleCheckerTestSuite) TestFixToManyOrphanPeers() {
 	suite.Equal("remove-unhealthy-orphan-peer", op.Desc())
 	suite.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
 	// Case3:
-	// store 4, 5, 6 are orphan peers, and peer on store 5 is disconnect peer
+	// store 4, 5, 6 are orphan peers, and peer on one of stores is disconnect peer
 	// we should remove disconnect peer first.
-	region = suite.cluster.GetRegion(1)
+	for i := uint64(4); i <= 6; i++ {
+		region = suite.cluster.GetRegion(1)
+		suite.cluster.SetStoreDisconnect(i)
+		region = region.Clone(
+			core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(3), DownSeconds: 60000}}),
+			core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
+		suite.cluster.PutRegion(region)
+		op = suite.rc.Check(suite.cluster.GetRegion(1))
+		suite.NotNil(op)
+		suite.Equal("remove-orphan-peer", op.Desc())
+		suite.Equal(i, op.Step(0).(operator.RemovePeer).FromStore)
+		suite.cluster.SetStoreUp(i)
+	}
+}
+
+func (suite *ruleCheckerTestSuite) TestFixToManyOrphanPeers2() {
+	suite.cluster.AddLeaderStore(1, 1)
+	suite.cluster.AddLeaderStore(2, 1)
+	suite.cluster.AddLeaderStore(3, 1)
+	suite.cluster.AddLeaderStore(4, 1)
+	suite.cluster.AddLeaderStore(5, 1)
+	suite.cluster.AddRegionWithLearner(1, 1, []uint64{2, 3}, []uint64{4, 5})
+
+	// Case1:
+	// store 4, 5 are orphan peers, and peer on one of stores is disconnect peer
+	// we should remove disconnect peer first.
+	for i := uint64(4); i <= 5; i++ {
+		region := suite.cluster.GetRegion(1)
+		suite.cluster.SetStoreDisconnect(i)
+		region = region.Clone(
+			core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(3), DownSeconds: 60000}}),
+			core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
+		suite.cluster.PutRegion(region)
+		op := suite.rc.Check(suite.cluster.GetRegion(1))
+		suite.NotNil(op)
+		suite.Equal("remove-orphan-peer", op.Desc())
+		suite.Equal(i, op.Step(0).(operator.RemovePeer).FromStore)
+		suite.cluster.SetStoreUp(i)
+	}
+
+	// Case2:
+	// store 4, 5 are orphan peers, and they are disconnect peers
+	// we should remove the peer on disconnect stores at least.
+	region := suite.cluster.GetRegion(1)
+	suite.cluster.SetStoreDisconnect(4)
 	suite.cluster.SetStoreDisconnect(5)
 	region = region.Clone(
 		core.WithDownPeers([]*pdpb.PeerStats{{Peer: region.GetStorePeer(3), DownSeconds: 60000}}),
 		core.WithPendingPeers([]*metapb.Peer{region.GetStorePeer(3)}))
 	suite.cluster.PutRegion(region)
-	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("remove-orphan-peer", op.Desc())
-	suite.Equal(uint64(5), op.Step(0).(operator.RemovePeer).FromStore)
+	suite.Equal(uint64(4), op.Step(0).(operator.RemovePeer).FromStore)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixOrphanPeers2() {

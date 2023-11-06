@@ -554,14 +554,15 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 		hasHealthPeer := false
 		var disconnectedPeer *metapb.Peer
 		for _, orphanPeer := range fit.OrphanPeers {
+			if isDisconnectedPeer(orphanPeer) {
+				disconnectedPeer = orphanPeer
+				break
+			}
+		}
+		for _, orphanPeer := range fit.OrphanPeers {
 			if isUnhealthyPeer(orphanPeer.GetId()) {
 				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-unhealthy-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
-			}
-			if isDisconnectedPeer(orphanPeer) {
-				// we need to be careful to remove peer, so we will not think disconnected peer is healthy.
-				disconnectedPeer = orphanPeer
-				continue
 			}
 			if hasHealthPeer {
 				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
