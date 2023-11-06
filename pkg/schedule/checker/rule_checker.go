@@ -78,6 +78,7 @@ var (
 	ruleCheckerSkipRemoveOrphanPeerCounter        = checkerCounter.WithLabelValues(ruleChecker, "skip-remove-orphan-peer")
 	ruleCheckerRemoveOrphanPeerCounter            = checkerCounter.WithLabelValues(ruleChecker, "remove-orphan-peer")
 	ruleCheckerReplaceOrphanPeerCounter           = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer")
+	ruleCheckerReplaceOrphanPeerNoFitCounter      = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer-no-fit")
 )
 
 // RuleChecker fix/improve region by placement rules.
@@ -544,6 +545,8 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
 					// destRole never be leader, so we not consider it.
 				}
+			} else {
+				ruleCheckerReplaceOrphanPeerNoFitCounter.Inc()
 			}
 		}
 	}
