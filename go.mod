@@ -36,7 +36,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20230920042517-db656f45023b
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20230911054332-22add1e00511
+	github.com/pingcap/tidb-dashboard v0.0.0-20231106050510-13ee5c8b6103
 	github.com/prometheus/client_golang v1.11.1
 	github.com/prometheus/common v0.26.0
 	github.com/sasha-s/go-deadlock v0.2.0
@@ -200,8 +200,6 @@ require (
 )
 
 replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
-
-replace github.com/pingcap/tidb-dashboard => github.com/Connor1996/tidb-dashboard v0.0.0-20231030032023-70d35a4f520c
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
