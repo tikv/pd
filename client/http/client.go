@@ -94,12 +94,12 @@ func NewClient(
 	}
 	c.pdAddrs = pdAddrs
 	// Init the HTTP client if it's not configured.
-	if c.cli != nil {
-		cli := &http.Client{Timeout: defaultTimeout}
+	if c.cli == nil {
+		c.cli = &http.Client{Timeout: defaultTimeout}
 		if c.tlsConf != nil {
 			transport := http.DefaultTransport.(*http.Transport).Clone()
 			transport.TLSClientConfig = c.tlsConf
-			cli.Transport = transport
+			c.cli.Transport = transport
 		}
 	}
 
