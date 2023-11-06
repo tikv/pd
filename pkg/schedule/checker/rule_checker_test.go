@@ -269,7 +269,17 @@ func (suite *ruleCheckerTestSuite) TestFixToManyOrphanPeers() {
 		op = suite.rc.Check(suite.cluster.GetRegion(1))
 		suite.NotNil(op)
 		suite.Equal("remove-orphan-peer", op.Desc())
-		suite.NotEqual(i, op.Step(0).(operator.RemovePeer).FromStore)
+		removedPeerStoreID := op.Step(0).(operator.RemovePeer).FromStore
+		suite.NotEqual(i, removedPeerStoreID)
+		region = suite.cluster.GetRegion(1)
+		newRegion := region.Clone(core.WithRemoveStorePeer(removedPeerStoreID))
+		suite.cluster.PutRegion(newRegion)
+		op = suite.rc.Check(suite.cluster.GetRegion(1))
+		suite.NotNil(op)
+		suite.Equal("remove-orphan-peer", op.Desc())
+		removedPeerStoreID = op.Step(0).(operator.RemovePeer).FromStore
+		suite.NotEqual(i, removedPeerStoreID)
+		suite.cluster.PutRegion(region)
 	}
 }
 
