@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
@@ -112,7 +113,7 @@ func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 }
 
 func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsAPIServiceMode() {
+	if !h.s.IsServiceEnabled(utils.SchedulingServiceName) {
 		return false, ""
 	}
 	if len(h.microserviceRedirectRules) == 0 {
