@@ -31,8 +31,8 @@ import (
 
 const defaultTimeout = 30 * time.Second
 
-// HTTPClient is a PD (Placement Driver) HTTP client.
-type HTTPClient interface {
+// Client is a PD (Placement Driver) HTTP client.
+type Client interface {
 	GetRegionByID(context.Context, uint64) (*RegionInfo, error)
 	GetRegionByKey(context.Context, []byte) (*RegionInfo, error)
 	GetRegions(context.Context) (*RegionsInfo, error)
@@ -45,46 +45,46 @@ type HTTPClient interface {
 	Close()
 }
 
-var _ HTTPClient = (*httpClient)(nil)
+var _ Client = (*client)(nil)
 
-type httpClient struct {
+type client struct {
 	pdAddrs []string
 	tlsConf *tls.Config
 	cli     *http.Client
 }
 
-// HTTPClientOption configures the HTTP client.
-type HTTPClientOption func(hc *httpClient)
+// ClientOption configures the HTTP client.
+type ClientOption func(c *client)
 
 // WithHTTPClient configures the client with the given initialized HTTP client.
-func WithHTTPClient(cli *http.Client) HTTPClientOption {
-	return func(hc *httpClient) {
-		hc.cli = cli
+func WithHTTPClient(cli *http.Client) ClientOption {
+	return func(c *client) {
+		c.cli = cli
 	}
 }
 
 // WithTLSConfig configures the client with the given TLS config.
 // This option won't work if the client is configured with WithHTTPClient.
-func WithTLSConfig(tlsConf *tls.Config) HTTPClientOption {
-	return func(hc *httpClient) {
-		hc.tlsConf = tlsConf
+func WithTLSConfig(tlsConf *tls.Config) ClientOption {
+	return func(c *client) {
+		c.tlsConf = tlsConf
 	}
 }
 
-// NewHTTPClient creates a PD HTTP client with the given PD addresses and TLS config.
-func NewHTTPClient(
+// NewClient creates a PD HTTP client with the given PD addresses and TLS config.
+func NewClient(
 	pdAddrs []string,
-	opts ...HTTPClientOption,
-) HTTPClient {
-	hc := &httpClient{}
+	opts ...ClientOption,
+) Client {
+	c := &client{}
 	// Apply the options first.
 	for _, opt := range opts {
-		opt(hc)
+		opt(c)
 	}
 	// Normalize the addresses with correct scheme prefix.
 	for i, addr := range pdAddrs {
 		if !strings.HasPrefix(addr, "http") {
-			if hc.tlsConf != nil {
+			if c.tlsConf != nil {
 				addr = "https://" + addr
 			} else {
 				addr = "http://" + addr
@@ -92,39 +92,39 @@ func NewHTTPClient(
 			pdAddrs[i] = addr
 		}
 	}
-	hc.pdAddrs = pdAddrs
-	// Init the HTTP client.
-	if hc.cli != nil {
+	c.pdAddrs = pdAddrs
+	// Init the HTTP client if it's not configured.
+	if c.cli != nil {
 		cli := &http.Client{Timeout: defaultTimeout}
-		if hc.tlsConf != nil {
+		if c.tlsConf != nil {
 			transport := http.DefaultTransport.(*http.Transport).Clone()
-			transport.TLSClientConfig = hc.tlsConf
+			transport.TLSClientConfig = c.tlsConf
 			cli.Transport = transport
 		}
 	}
 
-	return hc
+	return c
 }
 
 // Close closes the HTTP client.
-func (hc *httpClient) Close() {
-	if hc.cli != nil {
-		hc.cli.CloseIdleConnections()
+func (c *client) Close() {
+	if c.cli != nil {
+		c.cli.CloseIdleConnections()
 	}
 	log.Info("[pd] http client closed")
 }
 
-func (hc *httpClient) pdAddr() string {
+func (c *client) pdAddr() string {
 	// TODO: support the customized PD address selection strategy.
-	return hc.pdAddrs[0]
+	return c.pdAddrs[0]
 }
 
-func (hc *httpClient) request(
+func (c *client) request(
 	ctx context.Context,
 	name, uri string,
 	res interface{},
 ) error {
-	reqURL := fmt.Sprintf("%s%s", hc.pdAddr(), uri)
+	reqURL := fmt.Sprintf("%s%s", c.pdAddr(), uri)
 	logFields := []zap.Field{
 		zap.String("name", name),
 		zap.String("url", reqURL),
@@ -136,7 +136,7 @@ func (hc *httpClient) request(
 		return errors.Trace(err)
 	}
 	// TODO: integrate the metrics.
-	resp, err := hc.cli.Do(req)
+	resp, err := c.cli.Do(req)
 	if err != nil {
 		log.Error("[pd] do http request failed", append(logFields, zap.Error(err))...)
 		return errors.Trace(err)
@@ -170,9 +170,9 @@ func (hc *httpClient) request(
 }
 
 // GetRegionByID gets the region info by ID.
-func (hc *httpClient) GetRegionByID(ctx context.Context, regionID uint64) (*RegionInfo, error) {
+func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*RegionInfo, error) {
 	var region RegionInfo
-	err := hc.request(ctx, "GetRegionByID", RegionByID(regionID), &region)
+	err := c.request(ctx, "GetRegionByID", RegionByID(regionID), &region)
 	if err != nil {
 		return nil, err
 	}
@@ -180,9 +180,9 @@ func (hc *httpClient) GetRegionByID(ctx context.Context, regionID uint64) (*Regi
 }
 
 // GetRegionByKey gets the region info by key.
-func (hc *httpClient) GetRegionByKey(ctx context.Context, key []byte) (*RegionInfo, error) {
+func (c *client) GetRegionByKey(ctx context.Context, key []byte) (*RegionInfo, error) {
 	var region RegionInfo
-	err := hc.request(ctx, "GetRegionByKey", RegionByKey(key), &region)
+	err := c.request(ctx, "GetRegionByKey", RegionByKey(key), &region)
 	if err != nil {
 		return nil, err
 	}
@@ -190,9 +190,9 @@ func (hc *httpClient) GetRegionByKey(ctx context.Context, key []byte) (*RegionIn
 }
 
 // GetRegions gets the regions info.
-func (hc *httpClient) GetRegions(ctx context.Context) (*RegionsInfo, error) {
+func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 	var regions RegionsInfo
-	err := hc.request(ctx, "GetRegions", Regions, &regions)
+	err := c.request(ctx, "GetRegions", Regions, &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -200,9 +200,9 @@ func (hc *httpClient) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 }
 
 // GetRegionsByKey gets the regions info by key range. If the limit is -1, it will return all regions within the range.
-func (hc *httpClient) GetRegionsByKey(ctx context.Context, startKey, endKey []byte, limit int) (*RegionsInfo, error) {
+func (c *client) GetRegionsByKey(ctx context.Context, startKey, endKey []byte, limit int) (*RegionsInfo, error) {
 	var regions RegionsInfo
-	err := hc.request(ctx, "GetRegionsByKey", RegionsByKey(startKey, endKey, limit), &regions)
+	err := c.request(ctx, "GetRegionsByKey", RegionsByKey(startKey, endKey, limit), &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -210,9 +210,9 @@ func (hc *httpClient) GetRegionsByKey(ctx context.Context, startKey, endKey []by
 }
 
 // GetRegionsByStoreID gets the regions info by store ID.
-func (hc *httpClient) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*RegionsInfo, error) {
+func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*RegionsInfo, error) {
 	var regions RegionsInfo
-	err := hc.request(ctx, "GetRegionsByStoreID", RegionsByStoreID(storeID), &regions)
+	err := c.request(ctx, "GetRegionsByStoreID", RegionsByStoreID(storeID), &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -220,9 +220,9 @@ func (hc *httpClient) GetRegionsByStoreID(ctx context.Context, storeID uint64) (
 }
 
 // GetHotReadRegions gets the hot read region statistics info.
-func (hc *httpClient) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
+func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotReadRegions StoreHotPeersInfos
-	err := hc.request(ctx, "GetHotReadRegions", HotRead, &hotReadRegions)
+	err := c.request(ctx, "GetHotReadRegions", HotRead, &hotReadRegions)
 	if err != nil {
 		return nil, err
 	}
@@ -230,9 +230,9 @@ func (hc *httpClient) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfo
 }
 
 // GetHotWriteRegions gets the hot write region statistics info.
-func (hc *httpClient) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
+func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotWriteRegions StoreHotPeersInfos
-	err := hc.request(ctx, "GetHotWriteRegions", HotWrite, &hotWriteRegions)
+	err := c.request(ctx, "GetHotWriteRegions", HotWrite, &hotWriteRegions)
 	if err != nil {
 		return nil, err
 	}
@@ -240,9 +240,9 @@ func (hc *httpClient) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInf
 }
 
 // GetStores gets the stores info.
-func (hc *httpClient) GetStores(ctx context.Context) (*StoresInfo, error) {
+func (c *client) GetStores(ctx context.Context) (*StoresInfo, error) {
 	var stores StoresInfo
-	err := hc.request(ctx, "GetStores", Stores, &stores)
+	err := c.request(ctx, "GetStores", Stores, &stores)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +250,7 @@ func (hc *httpClient) GetStores(ctx context.Context) (*StoresInfo, error) {
 }
 
 // GetMinResolvedTSByStoresIDs get min-resolved-ts by stores IDs.
-func (hc *httpClient) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []string) (uint64, map[uint64]uint64, error) {
+func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []string) (uint64, map[uint64]uint64, error) {
 	uri := MinResolvedTSPrefix
 	// scope is an optional parameter, it can be `cluster` or specified store IDs.
 	// - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
@@ -265,7 +265,7 @@ func (hc *httpClient) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs 
 		IsRealTime          bool              `json:"is_real_time,omitempty"`
 		StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 	}{}
-	err := hc.request(ctx, "GetMinResolvedTSByStoresIDs", uri, &resp)
+	err := c.request(ctx, "GetMinResolvedTSByStoresIDs", uri, &resp)
 	if err != nil {
 		return 0, nil, err
 	}

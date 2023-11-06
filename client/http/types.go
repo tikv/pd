@@ -37,8 +37,11 @@ type RegionInfo struct {
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
 
+// GetStartKey gets the start key of the region.
 func (r *RegionInfo) GetStartKey() string { return r.StartKey }
-func (r *RegionInfo) GetEndKey() string   { return r.EndKey }
+
+// GetEndKey gets the end key of the region.
+func (r *RegionInfo) GetEndKey() string { return r.EndKey }
 
 // RegionEpoch stores the information about its epoch.
 type RegionEpoch struct {
