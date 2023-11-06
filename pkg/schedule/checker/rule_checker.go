@@ -465,7 +465,11 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 	isDisconnectedPeer := func(p *metapb.Peer) bool {
 		// avoid to meet down store when fix orphan peers,
 		// Isdisconnected is more strictly than IsUnhealthy.
-		return c.cluster.GetStore(p.GetStoreId()).IsDisconnected()
+		store := c.cluster.GetStore(p.GetStoreId())
+		if store == nil {
+			return true
+		}
+		return store.IsDisconnected()
 	}
 
 	checkDownPeer := func(peers []*metapb.Peer) (*metapb.Peer, bool) {
