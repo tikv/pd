@@ -2634,7 +2634,10 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		}
 		err := forwardStream.Send(request)
 		if err != nil {
-			return pdpb.Timestamp{}, err
+			s.tsoClientPool.Lock()
+			delete(s.tsoClientPool.clients, forwardedHost)
+			s.tsoClientPool.Unlock()
+			continue
 		}
 		ts, err = forwardStream.Recv()
 		if err != nil {
