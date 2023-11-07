@@ -345,30 +345,29 @@ func (c *RaftCluster) runServiceCheckJob() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
+	var once sync.Once
+
+	checkFn := func() {
+		if c.isAPIServiceMode {
+			once.Do(c.initSchedulers)
+			c.enabledServices.Store(mcsutils.SchedulingServiceName, true)
+		} else if !c.schedulingController.running.Load() {
+			c.startSchedulingJobs()
+			c.enabledServices.Delete(mcsutils.SchedulingServiceName)
+		}
+	}
+	checkFn()
+
 	ticker := time.NewTicker(serviceCheckInterval)
-	failpoint.Inject("highFrequencyServiceCheckJob", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
-	})
 	defer ticker.Stop()
 
-	var cancel context.CancelFunc
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("service check job is stopped")
-			if cancel != nil {
-				cancel()
-			}
 			return
 		case <-ticker.C:
-			if c.isAPIServiceMode {
-				c.initSchedulers()
-				c.enabledServices.Store(mcsutils.SchedulingServiceName, true)
-			} else if !c.schedulingController.running.Load() {
-				c.startSchedulingJobs()
-				c.enabledServices.Delete(mcsutils.SchedulingServiceName)
-			}
+			checkFn()
 		}
 	}
 }

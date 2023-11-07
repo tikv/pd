@@ -133,7 +133,6 @@ func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
 
 func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	re := suite.Require()
-
 	// Make sure the config is persisted before the watcher is created.
 	persistConfig(re, suite.pdLeaderServer)
 	// Create a config watcher.
