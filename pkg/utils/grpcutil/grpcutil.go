@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net/url"
 	"strings"
 	"time"
@@ -226,11 +227,8 @@ func CheckStream(ctx context.Context, cancel context.CancelFunc, done chan struc
 
 // NeedRebuildConnection checks if the error is a connection error.
 func NeedRebuildConnection(err error) bool {
-	// If there's no error, we definitely don't need to rebuild the connection.
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), codes.Unavailable.String()) || // Unavailable indicates the service is currently unavailable. This is a most likely a transient condition.
+	return err == io.EOF ||
+		strings.Contains(err.Error(), codes.Unavailable.String()) || // Unavailable indicates the service is currently unavailable. This is a most likely a transient condition.
 		strings.Contains(err.Error(), codes.DeadlineExceeded.String()) || // DeadlineExceeded means operation expired before completion.
 		strings.Contains(err.Error(), codes.Internal.String()) || // Internal errors.
 		strings.Contains(err.Error(), codes.Unknown.String()) || // Unknown error.
