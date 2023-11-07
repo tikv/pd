@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -28,6 +29,7 @@ import (
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 )
@@ -220,4 +222,18 @@ func CheckStream(ctx context.Context, cancel context.CancelFunc, done chan struc
 	case <-ctx.Done():
 	}
 	<-done
+}
+
+// NeedRebuildConnection checks if the error is a connection error.
+func NeedRebuildConnection(err error) bool {
+	// If there's no error, we definitely don't need to rebuild the connection.
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), codes.Unavailable.String()) || // Unavailable indicates the service is currently unavailable. This is a most likely a transient condition.
+		strings.Contains(err.Error(), codes.DeadlineExceeded.String()) || // DeadlineExceeded means operation expired before completion.
+		strings.Contains(err.Error(), codes.Internal.String()) || // Internal errors.
+		strings.Contains(err.Error(), codes.Unknown.String()) || // Unknown error.
+		strings.Contains(err.Error(), codes.ResourceExhausted.String()) // ResourceExhausted is returned when either the client or the server has exhausted their resources.
+	// Besides, we don't need to rebuild the connection if the code is Canceled, which means the client cancelled the request.
 }
