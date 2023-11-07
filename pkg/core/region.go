@@ -41,7 +41,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const randomRegionMaxRetry = 10
+const (
+	randomRegionMaxRetry = 10
+	scanRegionLimit      = 1000
+)
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
@@ -1609,7 +1612,7 @@ func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(regi
 }
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
-func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte, limit int) int64 {
+func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 	var size int64
 	for {
 		r.t.RLock()
@@ -1619,7 +1622,7 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte, limit int) i
 				startKey = region.GetEndKey()
 				return false
 			}
-			if limit > 0 && cnt >= limit {
+			if cnt >= scanRegionLimit {
 				startKey = region.GetEndKey()
 				return false
 			}
