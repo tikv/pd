@@ -298,7 +298,12 @@ func TestConfigForward(t *testing.T) {
 
 		// Test to change config in api server
 		// Expect to get new config in scheduling server and api server
-		cluster.GetLeaderServer().GetServer().GetRaftCluster().GetReplicationConfig().MaxReplicas = 4
+		reqData, err := json.Marshal(map[string]interface{}{
+			"max-replicas": 4,
+		})
+		re.NoError(err)
+		err = testutil.CheckPostJSON(testDialClient, urlPrefix, reqData, testutil.StatusOK(re))
+		re.NoError(err)
 		testutil.Eventually(re, func() bool {
 			testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
 			return cfg["replication"].(map[string]interface{})["max-replicas"] == 4. &&
