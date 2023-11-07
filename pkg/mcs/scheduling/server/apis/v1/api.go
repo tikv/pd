@@ -100,10 +100,10 @@ func NewService(srv *scheserver.Service) *Service {
 		c.Set(handlerKey, handler.NewHandler(&server{srv.Server}))
 		c.Next()
 	})
-	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
 	apiHandlerEngine.GET("metrics", mcsutils.PromHandler())
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
+	root.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		srv:              srv,
 		apiHandlerEngine: apiHandlerEngine,
