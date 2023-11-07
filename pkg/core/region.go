@@ -1633,7 +1633,7 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 		if cnt == 0 {
 			break
 		}
-		if len(startKey) == 0 || (len(endKey) > 0 && bytes.Compare(startKey, endKey) >= 0) {
+		if len(startKey) == 0 {
 			break
 		}
 	}
