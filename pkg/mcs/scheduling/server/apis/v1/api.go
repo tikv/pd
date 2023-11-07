@@ -16,7 +16,6 @@ package apis
 
 import (
 	"encoding/hex"
-	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -118,7 +117,6 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
 	s.RegisterHotspotRouter()
-	s.RegisterConfigRouter()
 	return s
 }
 
@@ -188,7 +186,7 @@ func (s *Service) RegisterConfigRouter() {
 
 	groups := router.Group("rule_groups")
 	groups.GET("", getAllGroupConfigs)
-	groups.GET("/:id", getGroupConfig)
+	groups.GET("/:id", getRuleGroupConfig)
 
 	placementRule := router.Group("placement-rule")
 	placementRule.GET("", getPlacementRules)
@@ -892,7 +890,7 @@ func getAllGroupConfigs(c *gin.Context) {
 // @Failure  412  {string}  string  "Placement rules feature is disabled."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /config/rule_groups/{id} [get]
-func getGroupConfig(c *gin.Context) {
+func getRuleGroupConfig(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 	manager, err := handler.GetRuleManager()
 	if err == errs.ErrPlacementDisabled {
