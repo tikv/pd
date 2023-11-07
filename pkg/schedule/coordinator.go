@@ -372,6 +372,9 @@ func (c *Coordinator) RunUntilStop() {
 	c.Run()
 	<-c.ctx.Done()
 	log.Info("coordinator is stopping")
+	c.GetSchedulersController().Wait()
+	c.wg.Wait()
+	log.Info("coordinator has been stopped")
 }
 
 // Run starts coordinator.
@@ -576,9 +579,6 @@ func (c *Coordinator) waitPluginUnload(pluginPath, schedulerName string, ch chan
 // Stop stops the coordinator.
 func (c *Coordinator) Stop() {
 	c.cancel()
-	c.GetSchedulersController().Wait()
-	c.wg.Wait()
-	log.Info("coordinator has been stopped")
 }
 
 // GetHotRegionsByType gets hot regions' statistics by RWType.

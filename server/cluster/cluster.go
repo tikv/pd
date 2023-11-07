@@ -716,7 +716,7 @@ func (c *RaftCluster) Stop() {
 		return
 	}
 	c.running = false
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) && c.schedulingController.running.Load() {
 		c.stopSchedulingJobs()
 	}
 	c.cancel()
