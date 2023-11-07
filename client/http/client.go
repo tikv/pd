@@ -41,7 +41,7 @@ type Client interface {
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetStores(context.Context) (*StoresInfo, error)
-	GetMinResolvedTSByStoresIDs(context.Context, []string) (uint64, map[uint64]uint64, error)
+	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	Close()
 }
 
@@ -250,7 +250,7 @@ func (c *client) GetStores(ctx context.Context) (*StoresInfo, error) {
 }
 
 // GetMinResolvedTSByStoresIDs get min-resolved-ts by stores IDs.
-func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []string) (uint64, map[uint64]uint64, error) {
+func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uint64) (uint64, map[uint64]uint64, error) {
 	uri := MinResolvedTSPrefix
 	// scope is an optional parameter, it can be `cluster` or specified store IDs.
 	// - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
@@ -258,7 +258,11 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []str
 	// - When scope given a list of stores, min_resolved_ts will be provided for each store
 	//      and the scope-specific min_resolved_ts will be returned.
 	if len(storeIDs) != 0 {
-		uri = fmt.Sprintf("%s?scope=%s", uri, strings.Join(storeIDs, ","))
+		storeIDStrs := make([]string, len(storeIDs))
+		for idx, id := range storeIDs {
+			storeIDStrs[idx] = fmt.Sprintf("%d", id)
+		}
+		uri = fmt.Sprintf("%s?scope=%s", uri, strings.Join(storeIDStrs, ","))
 	}
 	resp := struct {
 		MinResolvedTS       uint64            `json:"min_resolved_ts"`

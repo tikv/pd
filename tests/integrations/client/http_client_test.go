@@ -16,6 +16,7 @@ package client_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -65,9 +66,22 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
 	re := suite.Require()
-
+	// Get the cluster-level min resolved TS.
 	minResolvedTS, storeMinResolvedTSMap, err := suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, nil)
 	re.NoError(err)
 	re.Greater(minResolvedTS, uint64(0))
 	re.Empty(storeMinResolvedTSMap)
+	// Get the store-level min resolved TS.
+	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1})
+	re.NoError(err)
+	re.Greater(minResolvedTS, uint64(0))
+	re.Len(storeMinResolvedTSMap, 1)
+	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
+	// Get the store-level min resolved TS with an invalid store ID.
+	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1, 2})
+	re.NoError(err)
+	re.Greater(minResolvedTS, uint64(0))
+	re.Len(storeMinResolvedTSMap, 2)
+	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
+	re.Equal(uint64(math.MaxUint64), storeMinResolvedTSMap[2])
 }
