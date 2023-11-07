@@ -22,7 +22,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -579,7 +578,6 @@ func TestForwardSchedulerRequest(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob", `return(true)`))
 	cluster, err := tests.NewTestAPICluster(ctx, 1)
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
@@ -615,5 +613,4 @@ func TestForwardSchedulerRequest(t *testing.T) {
 	checkSchedulerWithStatusCommand("paused", []string{
 		"balance-leader-scheduler",
 	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyServiceCheckJob"))
 }
