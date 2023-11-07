@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -60,9 +61,9 @@ type Config struct {
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
 	// Log related config.
-	Log      log.Config `toml:"log" json:"log"`
-	Logger   *zap.Logger
-	LogProps *log.ZapProperties
+	Log      log.Config         `toml:"log" json:"log"`
+	Logger   *zap.Logger        `json:"-"`
+	LogProps *log.ZapProperties `json:"-"`
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
@@ -194,6 +195,13 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// Clone creates a copy of current config.
+func (c *Config) Clone() *Config {
+	cfg := &Config{}
+	*cfg = *c
+	return cfg
+}
+
 // PersistConfig wraps all configurations that need to persist to storage and
 // allows to access them safely.
 type PersistConfig struct {
@@ -232,6 +240,14 @@ func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
 	return v.(chan<- struct{})
 }
 
+func (o *PersistConfig) tryNotifySchedulersUpdating() {
+	notifier := o.getSchedulersUpdatingNotifier()
+	if notifier == nil {
+		return
+	}
+	notifier <- struct{}{}
+}
+
 // GetClusterVersion returns the cluster version.
 func (o *PersistConfig) GetClusterVersion() *semver.Version {
 	return (*semver.Version)(atomic.LoadPointer(&o.clusterVersion))
@@ -251,11 +267,10 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
-	// The coordinator is not aware of the underlying scheduler config changes, however, it
-	// should react on the scheduler number changes to handle the add/remove scheduler events.
-	if notifier := o.getSchedulersUpdatingNotifier(); notifier != nil &&
-		len(old.Schedulers) != len(cfg.Schedulers) {
-		notifier <- struct{}{}
+	// The coordinator is not aware of the underlying scheduler config changes,
+	// we should notify it to update the schedulers proactively.
+	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
+		o.tryNotifySchedulersUpdating()
 	}
 }
 
@@ -648,6 +663,11 @@ func (o *PersistConfig) IsEnableRegionBucket() bool {
 // IsRaftKV2 returns the whether the cluster use `raft-kv2` engine.
 func (o *PersistConfig) IsRaftKV2() bool {
 	return o.GetStoreConfig().IsRaftKV2()
+}
+
+// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
+func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
+	return o.GetScheduleConfig().EnableTiKVSplitRegion
 }
 
 // TODO: implement the following methods

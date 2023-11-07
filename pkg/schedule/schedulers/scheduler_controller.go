@@ -36,7 +36,11 @@ import (
 
 const maxScheduleRetries = 10
 
-var denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
+var (
+	denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
+	rulesCntStatusGauge            = ruleStatusGauge.WithLabelValues("rule_count")
+	groupsCntStatusGauge           = ruleStatusGauge.WithLabelValues("group_count")
+)
 
 // Controller is used to manage all schedulers.
 type Controller struct {
@@ -108,7 +112,6 @@ func (c *Controller) GetSchedulerHandlers() map[string]http.Handler {
 // CollectSchedulerMetrics collects metrics of all schedulers.
 func (c *Controller) CollectSchedulerMetrics() {
 	c.RLock()
-	defer c.RUnlock()
 	for _, s := range c.schedulers {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
@@ -118,6 +121,15 @@ func (c *Controller) CollectSchedulerMetrics() {
 		}
 		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
 	}
+	c.RUnlock()
+	ruleMgr := c.cluster.GetRuleManager()
+	if ruleMgr == nil {
+		return
+	}
+	ruleCnt := ruleMgr.GetRulesCount()
+	groupCnt := ruleMgr.GetGroupsCount()
+	rulesCntStatusGauge.Set(float64(ruleCnt))
+	groupsCntStatusGauge.Set(float64(groupCnt))
 }
 
 func (c *Controller) isSchedulingHalted() bool {
@@ -127,6 +139,10 @@ func (c *Controller) isSchedulingHalted() bool {
 // ResetSchedulerMetrics resets metrics of all schedulers.
 func (c *Controller) ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
+	ruleStatusGauge.Reset()
+	// create in map again
+	rulesCntStatusGauge = ruleStatusGauge.WithLabelValues("rule_count")
+	groupsCntStatusGauge = ruleStatusGauge.WithLabelValues("group_count")
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.
@@ -400,6 +416,11 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 			}
 		}
 	}
+}
+
+// GetAllSchedulerConfigs returns all scheduler configs.
+func (c *Controller) GetAllSchedulerConfigs() ([]string, []string, error) {
+	return c.storage.LoadAllSchedulerConfigs()
 }
 
 // ScheduleController is used to manage a scheduler.

@@ -413,7 +413,7 @@ func (am *AllocatorManager) GetClusterDCLocationsFromEtcd() (clusterDCLocations 
 		if err != nil {
 			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
 				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-				zap.Any("splitted-serverPath", serverPath),
+				zap.Any("split-serverPath", serverPath),
 				zap.String("dc-location", dcLocation),
 				errs.ZapError(err))
 			continue
@@ -973,8 +973,8 @@ func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd() (map[string]int32, 
 		if err != nil {
 			return nil, err
 		}
-		splittedKey := strings.Split(string(kv.Key), "/")
-		dcLocation := splittedKey[len(splittedKey)-1]
+		splitKey := strings.Split(string(kv.Key), "/")
+		dcLocation := splitKey[len(splitKey)-1]
 		dcLocationSuffix[dcLocation] = int32(suffix)
 	}
 	return dcLocationSuffix, nil

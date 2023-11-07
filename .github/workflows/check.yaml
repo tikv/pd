@@ -6,7 +6,7 @@ concurrency:
 jobs:
   statics:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/setup-go@v3
         with:

@@ -134,10 +134,19 @@ var (
 			Name:      "hot_pending_sum",
 			Help:      "Pending influence sum of store in hot region scheduler.",
 		}, []string{"store", "rw", "dim"})
+
+	ruleStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "rule_manager",
+			Name:      "status",
+			Help:      "Status of the rule.",
+		}, []string{"type"})
 )
 
 func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
+	prometheus.MustRegister(ruleStatusGauge)
 	prometheus.MustRegister(schedulerCounter)
 	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
