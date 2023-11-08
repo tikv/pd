@@ -496,6 +496,16 @@ error = '''
 init file log error, %s
 '''
 
+["PD:mcs:ErrNotFoundSchedulingAddr"]
+error = '''
+cannot find scheduling address
+'''
+
+["PD:mcs:ErrSchedulingServer"]
+error = '''
+scheduling server meets %v
+'''
+
 ["PD:member:ErrCheckCampaign"]
 error = '''
 check campaign failed

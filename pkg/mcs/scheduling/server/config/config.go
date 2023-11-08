@@ -61,9 +61,9 @@ type Config struct {
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
 	// Log related config.
-	Log      log.Config `toml:"log" json:"log"`
-	Logger   *zap.Logger
-	LogProps *log.ZapProperties
+	Log      log.Config         `toml:"log" json:"log"`
+	Logger   *zap.Logger        `json:"-"`
+	LogProps *log.ZapProperties `json:"-"`
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
@@ -193,6 +193,13 @@ func (c *Config) validate() error {
 	}
 
 	return nil
+}
+
+// Clone creates a copy of current config.
+func (c *Config) Clone() *Config {
+	cfg := &Config{}
+	*cfg = *c
+	return cfg
 }
 
 // PersistConfig wraps all configurations that need to persist to storage and

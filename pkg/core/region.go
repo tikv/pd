@@ -1342,8 +1342,8 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 
 // GetClusterNotFromStorageRegionsCnt gets the total count of regions that not loaded from storage anymore
 func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
-	r.st.RLock()
-	defer r.st.RUnlock()
+	r.t.RLock()
+	defer r.t.RUnlock()
 	return r.tree.notFromStorageRegionsCnt
 }
 
