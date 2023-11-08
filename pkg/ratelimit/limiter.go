@@ -173,10 +173,9 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 				return ConcurrencyChanged
 			}
 			return ConcurrencyNoChange
-		} else {
-			l.concurrency.setLimit(limit)
-			return ConcurrencyChanged
 		}
+		l.concurrency.setLimit(limit)
+		return ConcurrencyChanged
 	}
 	l.concurrency = newConcurrencyLimiter(limit)
 	return ConcurrencyChanged

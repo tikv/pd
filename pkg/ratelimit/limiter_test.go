@@ -27,10 +27,13 @@ import (
 )
 
 type releaseUtil struct {
+	mu    sync.Mutex
 	dones []DoneFunc
 }
 
 func (r *releaseUtil) release() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if len(r.dones) > 0 {
 		r.dones[0]()
 		r.dones = r.dones[1:]
@@ -38,6 +41,8 @@ func (r *releaseUtil) release() {
 }
 
 func (r *releaseUtil) append(d DoneFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.dones = append(r.dones, d)
 }
 
