@@ -111,6 +111,7 @@ func NewService(srv *scheserver.Service) *Service {
 		rd:               createIndentRender(),
 	}
 	s.RegisterAdminRouter()
+	s.RegisterConfigRouter()
 	s.RegisterOperatorsRouter()
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
@@ -124,6 +125,12 @@ func (s *Service) RegisterAdminRouter() {
 	router.PUT("/log", changeLogLevel)
 	router.DELETE("cache/regions", deleteAllRegionCache)
 	router.DELETE("cache/regions/:id", deleteRegionCacheByID)
+}
+
+// RegisterConfigRouter registers the router of the config handler.
+func (s *Service) RegisterConfigRouter() {
+	router := s.root.Group("config")
+	router.GET("", getConfig)
 }
 
 // RegisterSchedulersRouter registers the router of the schedulers handler.
@@ -184,6 +191,18 @@ func changeLogLevel(c *gin.Context) {
 	}
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	c.String(http.StatusOK, "The log level is updated.")
+}
+
+// @Tags     config
+// @Summary  Get full config.
+// @Produce  json
+// @Success  200  {object}  config.Config
+// @Router   /config [get]
+func getConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cfg := svr.GetConfig()
+	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
+	c.IndentedJSON(http.StatusOK, cfg)
 }
 
 // @Tags     admin

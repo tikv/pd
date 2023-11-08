@@ -504,6 +504,29 @@ func (s *Server) stopWatcher() {
 	s.metaWatcher.Close()
 }
 
+// GetPersistConfig returns the persist config.
+// It's used to test.
+func (s *Server) GetPersistConfig() *config.PersistConfig {
+	return s.persistConfig
+}
+
+// GetConfig gets the config.
+func (s *Server) GetConfig() *config.Config {
+	cfg := s.cfg.Clone()
+	cfg.Schedule = *s.persistConfig.GetScheduleConfig().Clone()
+	cfg.Replication = *s.persistConfig.GetReplicationConfig().Clone()
+	cfg.ClusterVersion = *s.persistConfig.GetClusterVersion()
+	if s.storage == nil {
+		return cfg
+	}
+	sches, configs, err := s.storage.LoadAllSchedulerConfigs()
+	if err != nil {
+		return cfg
+	}
+	cfg.Schedule.SchedulersPayload = schedulers.ToPayload(sches, configs)
+	return cfg
+}
+
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
