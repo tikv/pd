@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
@@ -44,7 +45,7 @@ func TestID(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	var last uint64
 	for i := uint64(0); i < allocStep; i++ {
 		id, err := leaderServer.GetAllocator().Alloc()
@@ -55,7 +56,7 @@ func TestID(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	var m sync.Mutex
+	var m syncutil.Mutex
 	ids := make(map[uint64]struct{})
 
 	for i := 0; i < 10; i++ {
@@ -90,7 +91,7 @@ func TestCommand(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(leaderServer.GetClusterID())}
 
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
@@ -116,7 +117,7 @@ func TestMonotonicID(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	var last1 uint64
 	for i := uint64(0); i < 10; i++ {
 		id, err := leaderServer.GetAllocator().Alloc()
@@ -127,7 +128,7 @@ func TestMonotonicID(t *testing.T) {
 	err = cluster.ResignLeader()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer = cluster.GetServer(cluster.GetLeader())
+	leaderServer = cluster.GetLeaderServer()
 	var last2 uint64
 	for i := uint64(0); i < 10; i++ {
 		id, err := leaderServer.GetAllocator().Alloc()
@@ -138,7 +139,7 @@ func TestMonotonicID(t *testing.T) {
 	err = cluster.ResignLeader()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer = cluster.GetServer(cluster.GetLeader())
+	leaderServer = cluster.GetLeaderServer()
 	id, err := leaderServer.GetAllocator().Alloc()
 	re.NoError(err)
 	re.Greater(id, last2)
@@ -162,7 +163,7 @@ func TestPDRestart(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 
 	var last uint64
 	for i := uint64(0); i < 10; i++ {

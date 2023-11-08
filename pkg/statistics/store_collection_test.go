@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 func TestStoreStatistics(t *testing.T) {
@@ -54,7 +55,7 @@ func TestStoreStatistics(t *testing.T) {
 		stores = append(stores, s)
 	}
 
-	store3 := stores[3].Clone(core.OfflineStore(false))
+	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	stores[3] = store3
 	store4 := stores[4].Clone(core.SetLastHeartbeatTS(stores[4].GetLastHeartbeatTS().Add(-time.Hour)))
 	stores[4] = store4
@@ -64,9 +65,10 @@ func TestStoreStatistics(t *testing.T) {
 		UsedSize:  0,
 	}))
 	stores[5] = store5
-	storeStats := NewStoreStatisticsMap(opt, nil)
+	storeStats := NewStoreStatisticsMap(opt)
 	for _, store := range stores {
-		storeStats.Observe(store, storesStats)
+		storeStats.Observe(store)
+		storeStats.ObserveHotStat(store, storesStats)
 	}
 	stats := storeStats.stats
 
@@ -93,10 +95,10 @@ func TestStoreStatistics(t *testing.T) {
 
 func TestSummaryStoreInfos(t *testing.T) {
 	re := require.New(t)
-	rw := Read
+	rw := utils.Read
 	kind := constant.LeaderKind
 	collector := newTikvCollector()
-	storeHistoryLoad := NewStoreHistoryLoads(DimLen)
+	storeHistoryLoad := NewStoreHistoryLoads(utils.DimLen)
 	storeInfos := make(map[uint64]*StoreSummaryInfo)
 	storeLoads := make(map[uint64][]float64)
 	for _, storeID := range []int{1, 3} {

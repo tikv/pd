@@ -34,6 +34,7 @@ const (
 // common error in multiple packages
 var (
 	ErrGetSourceStore      = errors.Normalize("failed to get the source store", errors.RFCCodeText("PD:common:ErrGetSourceStore"))
+	ErrGetTargetStore      = errors.Normalize("failed to get the target store", errors.RFCCodeText("PD:common:ErrGetTargetStore"))
 	ErrIncorrectSystemTime = errors.Normalize("incorrect system time", errors.RFCCodeText("PD:common:ErrIncorrectSystemTime"))
 )
 
@@ -45,6 +46,7 @@ var (
 	ErrSyncMaxTS                        = errors.Normalize("sync max ts failed, %s", errors.RFCCodeText("PD:tso:ErrSyncMaxTS"))
 	ErrResetUserTimestamp               = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
 	ErrGenerateTimestamp                = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
+	ErrUpdateTimestamp                  = errors.Normalize("update timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrUpdateTimestamp"))
 	ErrLogicOverflow                    = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
 	ErrProxyTSOTimeout                  = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:tso:ErrProxyTSOTimeout"))
 	ErrKeyspaceGroupIDInvalid           = errors.Normalize("the keyspace group id is invalid, %s", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupIDInvalid"))
@@ -88,6 +90,30 @@ var (
 	ErrClientGetLeader       = errors.Normalize("get leader failed, %v", errors.RFCCodeText("PD:client:ErrClientGetLeader"))
 	ErrClientGetMember       = errors.Normalize("get member failed", errors.RFCCodeText("PD:client:ErrClientGetMember"))
 	ErrClientGetMinTSO       = errors.Normalize("get min TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetMinTSO"))
+)
+
+// operator errors
+var (
+	// ErrOperatorNotFound is error info for operator not found.
+	ErrOperatorNotFound = errors.Normalize("operator not found", errors.RFCCodeText("PD:operator:ErrOperatorNotFound"))
+	// ErrAddOperator is error info for already have an operator when adding operator.
+	ErrAddOperator = errors.Normalize("failed to add operator, maybe already have one", errors.RFCCodeText("PD:operator:ErrAddOperator"))
+)
+
+// region errors
+var (
+	// ErrRegionNotAdjacent is error info for region not adjacent.
+	ErrRegionNotAdjacent = errors.Normalize("two regions are not adjacent", errors.RFCCodeText("PD:region:ErrRegionNotAdjacent"))
+	// ErrRegionNotFound is error info for region not found.
+	ErrRegionNotFound = errors.Normalize("region %v not found", errors.RFCCodeText("PD:region:ErrRegionNotFound"))
+	// ErrRegionAbnormalPeer is error info for region has abnormal peer.
+	ErrRegionAbnormalPeer = errors.Normalize("region %v has abnormal peer", errors.RFCCodeText("PD:region:ErrRegionAbnormalPeer"))
+)
+
+// plugin errors
+var (
+	// ErrPluginNotFound is error info for plugin not found.
+	ErrPluginNotFound = errors.Normalize("plugin is not found: %s", errors.RFCCodeText("PD:operator:ErrPluginNotFound"))
 )
 
 // schedule errors
@@ -182,6 +208,7 @@ var (
 	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
 	ErrConfigItem            = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:server:ErrConfiguration"))
 	ErrServerNotStarted      = errors.Normalize("server not started", errors.RFCCodeText("PD:server:ErrServerNotStarted"))
+	ErrRateLimitExceeded     = errors.Normalize("rate limit exceeded", errors.RFCCodeText("PD:server:ErrRateLimitExceeded"))
 )
 
 // logutil errors
@@ -375,4 +402,10 @@ var (
 	ErrResourceGroupNotExists = errors.Normalize("the %s resource group does not exist", errors.RFCCodeText("PD:resourcemanager:ErrGroupNotExists"))
 	ErrDeleteReservedGroup    = errors.Normalize("cannot delete reserved group", errors.RFCCodeText("PD:resourcemanager:ErrDeleteReservedGroup"))
 	ErrInvalidGroup           = errors.Normalize("invalid group settings, please check the group name, priority and the number of resources", errors.RFCCodeText("PD:resourcemanager:ErrInvalidGroup"))
+)
+
+// Micro service errors
+var (
+	ErrNotFoundSchedulingAddr = errors.Normalize("cannot find scheduling address", errors.RFCCodeText("PD:mcs:ErrNotFoundSchedulingAddr"))
+	ErrSchedulingServer       = errors.Normalize("scheduling server meets %v", errors.RFCCodeText("PD:mcs:ErrSchedulingServer"))
 )

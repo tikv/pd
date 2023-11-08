@@ -76,7 +76,8 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.persistLocked()
-		return http.StatusOK, "success"
+		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
+		return http.StatusOK, "Config is updated."
 	}
 	m := make(map[string]interface{})
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -84,9 +85,9 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 	}
 	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
-		return http.StatusOK, "no changed"
+		return http.StatusOK, "Config is the same with origin, so do nothing."
 	}
-	return http.StatusBadRequest, "config item not found"
+	return http.StatusBadRequest, "Config item is not found."
 }
 
 func (conf *balanceWitnessSchedulerConfig) validate() bool {
@@ -109,7 +110,7 @@ func (conf *balanceWitnessSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(BalanceWitnessName, data)
+	return conf.storage.SaveSchedulerConfig(BalanceWitnessName, data)
 }
 
 type balanceWitnessHandler struct {
@@ -117,7 +118,7 @@ type balanceWitnessHandler struct {
 	config *balanceWitnessSchedulerConfig
 }
 
-func newbalanceWitnessHandler(conf *balanceWitnessSchedulerConfig) http.Handler {
+func newBalanceWitnessHandler(conf *balanceWitnessSchedulerConfig) http.Handler {
 	handler := &balanceWitnessHandler{
 		config: conf,
 		rd:     render.New(render.Options{IndentJSON: true}),
@@ -160,7 +161,7 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 		retryQuota:    newRetryQuota(),
 		name:          BalanceWitnessName,
 		conf:          conf,
-		handler:       newbalanceWitnessHandler(conf),
+		handler:       newBalanceWitnessHandler(conf),
 		counter:       balanceWitnessCounter,
 		filterCounter: filter.NewCounter(filter.BalanceWitness.String()),
 	}
@@ -209,15 +210,34 @@ func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(b.conf)
 }
 
-func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetOpts().GetWitnessScheduleLimit()
+func (b *balanceWitnessScheduler) ReloadConfig() error {
+	b.conf.mu.Lock()
+	defer b.conf.mu.Unlock()
+	cfgData, err := b.conf.storage.LoadSchedulerConfig(b.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &balanceWitnessSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	b.conf.Ranges = newCfg.Ranges
+	b.conf.Batch = newCfg.Batch
+	return nil
+}
+
+func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetSchedulerConfig().GetWitnessScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(b.GetType(), operator.OpWitness.String()).Inc()
 	}
 	return allowed
 }
 
-func (b *balanceWitnessScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (b *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	b.conf.mu.RLock()
 	defer b.conf.mu.RUnlock()
 	basePlan := plan.NewBalanceSchedulerPlan()
@@ -236,7 +256,7 @@ func (b *balanceWitnessScheduler) Schedule(cluster sche.ScheduleCluster, dryRun 
 	scoreFunc := func(store *core.StoreInfo) float64 {
 		return store.WitnessScore(solver.GetOpInfluence(store.GetID()))
 	}
-	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, b.filters, cluster.GetOpts(), collector, b.filterCounter), false, scoreFunc)
+	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, b.filters, cluster.GetSchedulerConfig(), collector, b.filterCounter), false, scoreFunc)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
@@ -296,11 +316,11 @@ func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 	defer func() { solver.Step-- }()
 	targets := solver.GetNonWitnessVoterStores(solver.Region)
 	finalFilters := b.filters
-	opts := solver.GetOpts()
-	if witnessFilter := filter.NewPlacementWitnessSafeguard(b.GetName(), opts, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
+	conf := solver.GetSchedulerConfig()
+	if witnessFilter := filter.NewPlacementWitnessSafeguard(b.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
 		finalFilters = append(b.filters, witnessFilter)
 	}
-	targets = filter.SelectTargetStores(targets, finalFilters, opts, collector, b.filterCounter)
+	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, b.filterCounter)
 	sort.Slice(targets, func(i, j int) bool {
 		iOp := solver.GetOpInfluence(targets[i].GetID())
 		jOp := solver.GetOpInfluence(targets[j].GetID())

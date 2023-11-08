@@ -183,6 +183,14 @@ func WithDecConfVer() RegionCreateOption {
 	}
 }
 
+// WithFlashback set region flashback states.
+func WithFlashback(isInFlashback bool, flashbackTS uint64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.meta.FlashbackStartTs = flashbackTS
+		region.meta.IsInFlashback = isInFlashback
+	}
+}
+
 // SetCPUUsage sets the CPU usage of the region.
 func SetCPUUsage(v uint64) RegionCreateOption {
 	return func(region *RegionInfo) {
@@ -271,6 +279,13 @@ func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 func SetApproximateSize(v int64) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.approximateSize = v
+	}
+}
+
+// SetApproximateKvSize sets the approximate size for the region.
+func SetApproximateKvSize(v int64) RegionCreateOption {
+	return func(region *RegionInfo) {
+		region.approximateKvSize = v
 	}
 }
 
@@ -366,10 +381,10 @@ func WithInterval(interval *pdpb.TimeInterval) RegionCreateOption {
 	}
 }
 
-// SetFromHeartbeat sets if the region info comes from the region heartbeat.
-func SetFromHeartbeat(fromHeartbeat bool) RegionCreateOption {
+// SetSource sets the region info's come from.
+func SetSource(source RegionSource) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.fromHeartbeat = fromHeartbeat
+		region.source = source
 	}
 }
 

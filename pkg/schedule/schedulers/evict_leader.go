@@ -115,7 +115,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getSchedulerName() string {
@@ -181,7 +181,7 @@ func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeade
 	}
 }
 
-// EvictStores returns the IDs of the evict-stores.
+// EvictStoreIDs returns the IDs of the evict-stores.
 func (s *evictLeaderScheduler) EvictStoreIDs() []uint64 {
 	return s.conf.getStores()
 }
@@ -204,7 +204,42 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
+func (s *evictLeaderScheduler) ReloadConfig() error {
+	s.conf.mu.Lock()
+	defer s.conf.mu.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &evictLeaderSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
+	return nil
+}
+
+// pauseAndResumeLeaderTransfer checks the old and new store IDs, and pause or resume the leader transfer.
+func pauseAndResumeLeaderTransfer(cluster *core.BasicCluster, old, new map[uint64][]core.KeyRange) {
+	for id := range old {
+		if _, ok := new[id]; ok {
+			continue
+		}
+		cluster.ResumeLeaderTransfer(id)
+	}
+	for id := range new {
+		if _, ok := old[id]; ok {
+			continue
+		}
+		cluster.PauseLeaderTransfer(id)
+	}
+}
+
+func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -216,7 +251,7 @@ func (s *evictLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
+func (s *evictLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -224,15 +259,15 @@ func (s *evictLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
 	}
 }
 
-func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize), nil
 }
@@ -257,7 +292,7 @@ type evictLeaderStoresConf interface {
 	getKeyRangesByID(id uint64) []core.KeyRange
 }
 
-func scheduleEvictLeaderBatch(name, typ string, cluster sche.ScheduleCluster, conf evictLeaderStoresConf, batchSize int) []*operator.Operator {
+func scheduleEvictLeaderBatch(name, typ string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
 	for i := 0; i < batchSize; i++ {
 		once := scheduleEvictLeaderOnce(name, typ, cluster, conf)
@@ -274,7 +309,7 @@ func scheduleEvictLeaderBatch(name, typ string, cluster sche.ScheduleCluster, co
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name, typ string, cluster sche.ScheduleCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(name, typ string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -306,7 +341,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster sche.ScheduleCluster, con
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
 		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetOpts(), nil, nil, filters...)
+			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()
 		targets := candidates.PickAll()

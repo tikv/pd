@@ -33,11 +33,13 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
@@ -67,7 +69,7 @@ var (
 
 // TestServer is only for test.
 type TestServer struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
 	state      int32
@@ -242,6 +244,13 @@ func (s *TestServer) GetKeyspaceManager() *keyspace.Manager {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetKeyspaceManager()
+}
+
+// SetKeyspaceManager sets the current TestServer's Keyspace Manager.
+func (s *TestServer) SetKeyspaceManager(km *keyspace.Manager) {
+	s.RLock()
+	defer s.RUnlock()
+	s.server.SetKeyspaceManager(km)
 }
 
 // GetCluster returns PD cluster.
@@ -426,15 +435,21 @@ func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.server.GetTSOAllocatorManager()
 }
 
+// GetServicePrimaryAddr returns the primary address of the service.
+func (s *TestServer) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
+	return s.server.GetServicePrimaryAddr(ctx, serviceName)
+}
+
 // TestCluster is only for test.
 type TestCluster struct {
 	config  *clusterConfig
 	servers map[string]*TestServer
 	// tsPool is used to check the TSO uniqueness among the test cluster
 	tsPool struct {
-		sync.Mutex
+		syncutil.Mutex
 		pool map[uint64]struct{}
 	}
+	schedulingCluster *TestSchedulingCluster
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -477,7 +492,7 @@ func createTestCluster(ctx context.Context, initialServerCount int, isAPIService
 		config:  config,
 		servers: servers,
 		tsPool: struct {
-			sync.Mutex
+			syncutil.Mutex
 			pool map[uint64]struct{}
 		}{
 			pool: make(map[uint64]struct{}),
@@ -498,7 +513,7 @@ func restartTestCluster(
 		config:  cluster.config,
 		servers: make(map[string]*TestServer, len(cluster.servers)),
 		tsPool: struct {
-			sync.Mutex
+			syncutil.Mutex
 			pool map[uint64]struct{}
 		}{
 			pool: make(map[uint64]struct{}),
@@ -615,6 +630,11 @@ func (c *TestCluster) GetFollower() string {
 		}
 	}
 	return ""
+}
+
+// GetLeaderServer returns the leader server of all servers
+func (c *TestCluster) GetLeaderServer() *TestServer {
+	return c.GetServer(c.GetLeader())
 }
 
 // WaitLeader is used to get leader.
@@ -815,6 +835,9 @@ func (c *TestCluster) Destroy() {
 			log.Error("failed to destroy the cluster:", errs.ZapError(err))
 		}
 	}
+	if c.schedulingCluster != nil {
+		c.schedulingCluster.Destroy()
+	}
 }
 
 // CheckClusterDCLocation will force the cluster to do the dc-location check in order to speed up the test.
@@ -839,6 +862,19 @@ func (c *TestCluster) CheckTSOUnique(ts uint64) bool {
 	}
 	c.tsPool.pool[ts] = struct{}{}
 	return true
+}
+
+// GetSchedulingPrimaryServer returns the scheduling primary server.
+func (c *TestCluster) GetSchedulingPrimaryServer() *scheduling.Server {
+	if c.schedulingCluster == nil {
+		return nil
+	}
+	return c.schedulingCluster.GetPrimaryServer()
+}
+
+// SetSchedulingCluster sets the scheduling cluster.
+func (c *TestCluster) SetSchedulingCluster(cluster *TestSchedulingCluster) {
+	c.schedulingCluster = cluster
 }
 
 // WaitOp represent the wait configuration

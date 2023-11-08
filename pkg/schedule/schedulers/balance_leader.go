@@ -24,7 +24,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -91,7 +90,8 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.persistLocked()
-		return http.StatusOK, "success"
+		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
+		return http.StatusOK, "Config is updated."
 	}
 	m := make(map[string]interface{})
 	if err := json.Unmarshal(data, &m); err != nil {
@@ -99,9 +99,9 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	}
 	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
-		return http.StatusOK, "no changed"
+		return http.StatusOK, "Config is the same with origin, so do nothing."
 	}
-	return http.StatusBadRequest, "config item not found"
+	return http.StatusBadRequest, "Config item is not found."
 }
 
 func (conf *balanceLeaderSchedulerConfig) validate() bool {
@@ -124,7 +124,7 @@ func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(BalanceLeaderName, data)
+	return conf.storage.SaveSchedulerConfig(BalanceLeaderName, data)
 }
 
 type balanceLeaderHandler struct {
@@ -162,7 +162,6 @@ type balanceLeaderScheduler struct {
 	conf          *balanceLeaderSchedulerConfig
 	handler       http.Handler
 	filters       []filter.Filter
-	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
 }
 
@@ -176,7 +175,6 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		name:          BalanceLeaderName,
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		counter:       balanceLeaderCounter,
 		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
 	}
 	for _, option := range options {
@@ -195,13 +193,6 @@ func (l *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 // BalanceLeaderCreateOption is used to create a scheduler with an option.
 type BalanceLeaderCreateOption func(s *balanceLeaderScheduler)
-
-// WithBalanceLeaderCounter sets the counter for the scheduler.
-func WithBalanceLeaderCounter(counter *prometheus.CounterVec) BalanceLeaderCreateOption {
-	return func(s *balanceLeaderScheduler) {
-		s.counter = counter
-	}
-}
 
 // WithBalanceLeaderName sets the name for the scheduler.
 func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
@@ -224,8 +215,27 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(l.conf)
 }
 
-func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := l.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (l *balanceLeaderScheduler) ReloadConfig() error {
+	l.conf.mu.Lock()
+	defer l.conf.mu.Unlock()
+	cfgData, err := l.conf.storage.LoadSchedulerConfig(l.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &balanceLeaderSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	l.conf.Ranges = newCfg.Ranges
+	l.conf.Batch = newCfg.Batch
+	return nil
+}
+
+func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := l.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
 	}
@@ -324,7 +334,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
-func (l *balanceLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	l.conf.mu.RLock()
 	defer l.conf.mu.RUnlock()
 	basePlan := plan.NewBalanceSchedulerPlan()
@@ -335,7 +345,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun b
 	batch := l.conf.Batch
 	balanceLeaderScheduleCounter.Inc()
 
-	leaderSchedulePolicy := cluster.GetOpts().GetLeaderSchedulePolicy()
+	leaderSchedulePolicy := cluster.GetSchedulerConfig().GetLeaderSchedulePolicy()
 	opInfluence := l.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
@@ -344,8 +354,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun b
 	scoreFunc := func(store *core.StoreInfo) float64 {
 		return store.LeaderScore(solver.kind.Policy, solver.GetOpInfluence(store.GetID()))
 	}
-	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetOpts(), collector, l.filterCounter), false, scoreFunc)
-	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetOpts(), nil, l.filterCounter), true, scoreFunc)
+	sourceCandidate := newCandidateStores(filter.SelectSourceStores(stores, l.filters, cluster.GetSchedulerConfig(), collector, l.filterCounter), false, scoreFunc)
+	targetCandidate := newCandidateStores(filter.SelectTargetStores(stores, l.filters, cluster.GetSchedulerConfig(), nil, l.filterCounter), true, scoreFunc)
 	usedRegions := make(map[uint64]struct{})
 
 	result := make([]*operator.Operator, 0, batch)
@@ -419,7 +429,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 		storesIDs := candidate.binarySearchStores(plan.Source, plan.Target)
 		candidateUpdateStores[id] = storesIDs
 	}
-	operator.AddOpInfluence(op, plan.opInfluence, plan.ScheduleCluster.GetBasicCluster())
+	operator.AddOpInfluence(op, plan.opInfluence, plan.SchedulerCluster.GetBasicCluster())
 	for id, candidate := range candidates {
 		for _, pos := range candidateUpdateStores[id] {
 			candidate.resortStoreWithPos(pos)
@@ -450,7 +460,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 	defer func() { solver.Step-- }()
 	targets := solver.GetFollowerStores(solver.Region)
 	finalFilters := l.filters
-	conf := solver.GetOpts()
+	conf := solver.GetSchedulerConfig()
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
@@ -499,7 +509,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		return nil
 	}
 	finalFilters := l.filters
-	conf := solver.GetOpts()
+	conf := solver.GetSchedulerConfig()
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
@@ -544,9 +554,6 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
 		balanceDirectionCounter.WithLabelValues(l.GetName(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
-		// TODO: pre-allocate gauge metrics
-		l.counter.WithLabelValues("move-leader", solver.SourceMetricLabel()+"-out"),
-		l.counter.WithLabelValues("move-leader", solver.TargetMetricLabel()+"-in"),
 	)
 	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
 	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)

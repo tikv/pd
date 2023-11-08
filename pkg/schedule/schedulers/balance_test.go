@@ -229,7 +229,7 @@ type balanceLeaderSchedulerTestSuite struct {
 	tc     *mockcluster.Cluster
 	lb     Scheduler
 	oc     *operator.Controller
-	conf   config.Config
+	conf   config.SchedulerConfigProvider
 }
 
 func TestBalanceLeaderSchedulerTestSuite(t *testing.T) {
@@ -578,7 +578,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	suite.NotEmpty(ops)
 	suite.Len(ops, 1)
 	suite.Len(ops[0].Counters, 1)
-	suite.Len(ops[0].FinishedCounters, 3)
+	suite.Len(ops[0].FinishedCounters, 1)
 	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"h", "n"}))
 	suite.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)

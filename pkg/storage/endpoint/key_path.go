@@ -25,17 +25,17 @@ import (
 )
 
 const (
-	pdRootPath               = "/pd"
-	clusterPath              = "raft"
-	configPath               = "config"
-	serviceMiddlewarePath    = "service_middleware"
-	schedulePath             = "schedule"
-	gcPath                   = "gc"
-	rulesPath                = "rules"
-	ruleGroupPath            = "rule_group"
-	regionLabelPath          = "region_label"
-	replicationPath          = "replication_mode"
-	customScheduleConfigPath = "scheduler_config"
+	pdRootPath                = "/pd"
+	clusterPath               = "raft"
+	configPath                = "config"
+	serviceMiddlewarePath     = "service_middleware"
+	schedulePath              = "schedule"
+	gcPath                    = "gc"
+	rulesPath                 = "rules"
+	ruleGroupPath             = "rule_group"
+	regionLabelPath           = "region_label"
+	replicationPath           = "replication_mode"
+	customSchedulerConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
@@ -67,6 +67,11 @@ const (
 	keyLen = 20
 )
 
+// PDRootPath returns the PD root path.
+func PDRootPath(clusterID uint64) string {
+	return path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+}
+
 // AppendToRootPath appends the given key to the rootPath.
 func AppendToRootPath(rootPath string, key string) string {
 	return path.Join(rootPath, key)
@@ -82,13 +87,49 @@ func ClusterBootstrapTimeKey() string {
 	return path.Join(clusterPath, "status", "raft_bootstrap_time")
 }
 
-func scheduleConfigPath(scheduleName string) string {
-	return path.Join(customScheduleConfigPath, scheduleName)
+// ConfigPath returns the path to save the PD config.
+func ConfigPath(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), configPath)
+}
+
+// SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
+func SchedulerConfigPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), customSchedulerConfigPath)
+}
+
+// RulesPathPrefix returns the path prefix to save the placement rules.
+func RulesPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), rulesPath)
+}
+
+// RuleGroupPathPrefix returns the path prefix to save the placement rule groups.
+func RuleGroupPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), ruleGroupPath)
+}
+
+// RegionLabelPathPrefix returns the path prefix to save the region label.
+func RegionLabelPathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), regionLabelPath)
+}
+
+func schedulerConfigPath(schedulerName string) string {
+	return path.Join(customSchedulerConfigPath, schedulerName)
 }
 
 // StorePath returns the store meta info key path with the given store ID.
 func StorePath(storeID uint64) string {
 	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
+}
+
+// StorePathPrefix returns the store meta info key path prefix.
+func StorePathPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), clusterPath, "s") + "/"
+}
+
+// ExtractStoreIDFromPath extracts the store ID from the given path.
+func ExtractStoreIDFromPath(clusterID uint64, path string) (uint64, error) {
+	idStr := strings.TrimLeft(strings.TrimPrefix(path, StorePathPrefix(clusterID)), "0")
+	return strconv.ParseUint(idStr, 10, 64)
 }
 
 func storeLeaderWeightPath(storeID uint64) string {
@@ -281,7 +322,13 @@ func LegacyRootPath(clusterID uint64) string {
 // non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
 func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
 	electionPath := KeyspaceGroupsElectionPath(rootPath, keyspaceGroupID)
-	return path.Join(electionPath, utils.KeyspaceGroupsPrimaryKey)
+	return path.Join(electionPath, utils.PrimaryKey)
+}
+
+// SchedulingPrimaryPath returns the path of scheduling primary.
+// Path: /ms/{cluster_id}/scheduling/primary
+func SchedulingPrimaryPath(clusterID uint64) string {
+	return path.Join(SchedulingSvcRootPath(clusterID), utils.PrimaryKey)
 }
 
 // KeyspaceGroupsElectionPath returns the path of keyspace groups election.
@@ -297,7 +344,7 @@ func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string 
 // GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
 func GetCompiledNonDefaultIDRegexp(clusterID uint64) *regexp.Regexp {
 	rootPath := TSOSvcRootPath(clusterID)
-	pattern := strings.Join([]string{rootPath, utils.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, utils.KeyspaceGroupsPrimaryKey + `$`}, "/")
+	pattern := strings.Join([]string{rootPath, utils.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, utils.PrimaryKey + `$`}, "/")
 	return regexp.MustCompile(pattern)
 }
 
@@ -320,16 +367,28 @@ func buildPath(withSuffix bool, str ...string) string {
 	return sb.String()
 }
 
-// KeyspaceGroupTSPath constructs the timestampOracle path prefix, which is:
+// KeyspaceGroupGlobalTSPath constructs the timestampOracle path prefix for Global TSO, which is:
 //  1. for the default keyspace group:
 //     "" in /pd/{cluster_id}/timestamp
 //  2. for the non-default keyspace groups:
 //     {group}/gta in /ms/{cluster_id}/tso/{group}/gta/timestamp
-func KeyspaceGroupTSPath(groupID uint32) string {
+func KeyspaceGroupGlobalTSPath(groupID uint32) string {
 	if groupID == utils.DefaultKeyspaceGroupID {
 		return ""
 	}
 	return path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
+}
+
+// KeyspaceGroupLocalTSPath constructs the timestampOracle path prefix for Local TSO, which is:
+//  1. for the default keyspace group:
+//     lta/{dc-location} in /pd/{cluster_id}/lta/{dc-location}/timestamp
+//  2. for the non-default keyspace groups:
+//     {group}/lta/{dc-location} in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
+func KeyspaceGroupLocalTSPath(keyPrefix string, groupID uint32, dcLocation string) string {
+	if groupID == utils.DefaultKeyspaceGroupID {
+		return path.Join(keyPrefix, dcLocation)
+	}
+	return path.Join(fmt.Sprintf("%05d", groupID), keyPrefix, dcLocation)
 }
 
 // TimestampPath returns the timestamp path for the given timestamp oracle path prefix.
@@ -344,7 +403,7 @@ func TimestampPath(tsPath string) string {
 //     /ms/{cluster_id}/tso/{group}/gta/timestamp
 func FullTimestampPath(clusterID uint64, groupID uint32) string {
 	rootPath := TSOSvcRootPath(clusterID)
-	tsPath := TimestampPath(KeyspaceGroupTSPath(groupID))
+	tsPath := TimestampPath(KeyspaceGroupGlobalTSPath(groupID))
 	if groupID == utils.DefaultKeyspaceGroupID {
 		rootPath = LegacyRootPath(clusterID)
 	}

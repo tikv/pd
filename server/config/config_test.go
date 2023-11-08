@@ -26,6 +26,8 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/ratelimit"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
 )
@@ -78,8 +80,8 @@ func TestReloadUpgrade(t *testing.T) {
 
 	// Simulate an old configuration that only contains 2 fields.
 	type OldConfig struct {
-		Schedule    ScheduleConfig    `toml:"schedule" json:"schedule"`
-		Replication ReplicationConfig `toml:"replication" json:"replication"`
+		Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
+		Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
 	}
 	old := &OldConfig{
 		Schedule:    *opt.GetScheduleConfig(),
@@ -101,7 +103,7 @@ func TestReloadUpgrade2(t *testing.T) {
 
 	// Simulate an old configuration that does not contain ScheduleConfig.
 	type OldConfig struct {
-		Replication ReplicationConfig `toml:"replication" json:"replication"`
+		Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
 	}
 	old := &OldConfig{
 		Replication: *opt.GetReplicationConfig(),
@@ -453,12 +455,12 @@ func TestConfigClone(t *testing.T) {
 
 	emptyConfigMetaData := configutil.NewConfigMetadata(nil)
 
-	schedule := &ScheduleConfig{}
-	schedule.adjust(emptyConfigMetaData, false)
+	schedule := &sc.ScheduleConfig{}
+	schedule.Adjust(emptyConfigMetaData, false)
 	re.Equal(schedule, schedule.Clone())
 
-	replication := &ReplicationConfig{}
-	replication.adjust(emptyConfigMetaData)
+	replication := &sc.ReplicationConfig{}
+	replication.Adjust(emptyConfigMetaData)
 	re.Equal(replication, replication.Clone())
 
 	pdServer := &PDServerConfig{}
@@ -477,4 +479,29 @@ func newTestScheduleOption() (*PersistOptions, error) {
 	}
 	opt := NewPersistOptions(cfg)
 	return opt, nil
+}
+
+func TestRateLimitClone(t *testing.T) {
+	re := require.New(t)
+	cfg := &RateLimitConfig{
+		EnableRateLimit: defaultEnableRateLimitMiddleware,
+		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+	}
+	clone := cfg.Clone()
+	clone.LimiterConfig["test"] = ratelimit.DimensionConfig{
+		ConcurrencyLimit: 200,
+	}
+	dc := cfg.LimiterConfig["test"]
+	re.Equal(dc.ConcurrencyLimit, uint64(0))
+
+	gCfg := &GRPCRateLimitConfig{
+		EnableRateLimit: defaultEnableGRPCRateLimitMiddleware,
+		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+	}
+	gClone := gCfg.Clone()
+	gClone.LimiterConfig["test"] = ratelimit.DimensionConfig{
+		ConcurrencyLimit: 300,
+	}
+	gdc := gCfg.LimiterConfig["test"]
+	re.Equal(gdc.ConcurrencyLimit, uint64(0))
 }

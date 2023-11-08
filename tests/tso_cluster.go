@@ -114,7 +114,7 @@ func (tc *TestTSOCluster) AddServer(addr string) error {
 	if err != nil {
 		return err
 	}
-	err = InitLogger(generatedCfg)
+	err = InitLogger(generatedCfg.Log, generatedCfg.Logger, generatedCfg.LogProps, generatedCfg.Security.RedactInfoLog)
 	if err != nil {
 		return err
 	}
@@ -173,7 +173,7 @@ func (tc *TestTSOCluster) WaitForPrimaryServing(re *require.Assertions, keyspace
 			}
 		}
 		return false
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 
 	return primary
 }

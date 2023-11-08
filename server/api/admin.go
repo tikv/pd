@@ -16,15 +16,20 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 type adminHandler struct {
@@ -56,7 +61,51 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	rc.DropCacheRegion(regionID)
-	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache.")
+	if h.svr.IsAPIServiceMode() {
+		err = h.DeleteRegionCacheInSchedulingServer(regionID)
+	}
+	msg := "The region is removed from server cache."
+	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
+}
+
+// @Tags     admin
+// @Summary  Remove target region from region cache and storage.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string  "The region is removed from server storage."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /admin/storage/region/{id} [delete]
+func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	vars := mux.Vars(r)
+	regionIDStr := vars["id"]
+	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	targetRegion := rc.GetRegion(regionID)
+	if targetRegion == nil {
+		h.rd.JSON(w, http.StatusBadRequest, "failed to get target region from cache")
+		return
+	}
+
+	// Remove region from storage
+	if err = rc.GetStorage().DeleteRegion(targetRegion.GetMeta()); err != nil {
+		log.Error("failed to delete region from storage",
+			zap.Uint64("region-id", targetRegion.GetID()),
+			zap.Stringer("region-meta", core.RegionToHexMeta(targetRegion.GetMeta())),
+			errs.ZapError(err))
+		h.rd.JSON(w, http.StatusOK, "failed to delete region from storage.")
+		return
+	}
+	// Remove region from cache.
+	rc.DropCacheRegion(regionID)
+	if h.svr.IsAPIServiceMode() {
+		err = h.DeleteRegionCacheInSchedulingServer(regionID)
+	}
+	msg := "The region is removed from server cache and region meta storage."
+	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
 }
 
 // @Tags     admin
@@ -65,13 +114,21 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 // @Success  200  {string}  string  "All regions are removed from server cache."
 // @Router   /admin/cache/regions [delete]
 func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
+	var err error
 	rc := getCluster(r)
 	rc.DropCacheAllRegion()
-	h.rd.JSON(w, http.StatusOK, "All regions are removed from server cache.")
+	if h.svr.IsAPIServiceMode() {
+		err = h.DeleteRegionCacheInSchedulingServer()
+	}
+	msg := "All regions are removed from server cache."
+	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in
-// server-to-server. For security reason, it only accepts JSON formatted data.
+// server-to-server.
+// For security reason,
+//   - it only accepts JSON formatted data.
+//   - it only accepts file name which is `DrStatusFile`.
 func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -156,4 +213,36 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = h.rd.Text(w, http.StatusOK, "")
+}
+
+func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
+	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), utils.SchedulingServiceName)
+	if !ok {
+		return errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
+	}
+	var idStr string
+	if len(id) > 0 {
+		idStr = strconv.FormatUint(id[0], 10)
+	}
+	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := h.svr.GetHTTPClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
+	}
+	return nil
+}
+
+func (h *adminHandler) buildMsg(msg string, err error) string {
+	if h.svr.IsAPIServiceMode() && err != nil {
+		return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
+	}
+	return msg
 }

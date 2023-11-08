@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/tso"
@@ -167,15 +167,15 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	}
 
 	// Ignore the error check here
-	configutil.AdjustCommandlineString(flagSet, &c.Log.Level, "log-level")
-	configutil.AdjustCommandlineString(flagSet, &c.Log.File.Filename, "log-file")
-	configutil.AdjustCommandlineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
-	configutil.AdjustCommandlineString(flagSet, &c.Security.CAPath, "cacert")
-	configutil.AdjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
-	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
-	configutil.AdjustCommandlineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
-	configutil.AdjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
-	configutil.AdjustCommandlineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
+	configutil.AdjustCommandLineString(flagSet, &c.Log.Level, "log-level")
+	configutil.AdjustCommandLineString(flagSet, &c.Log.File.Filename, "log-file")
+	configutil.AdjustCommandLineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
+	configutil.AdjustCommandLineString(flagSet, &c.Security.CAPath, "cacert")
+	configutil.AdjustCommandLineString(flagSet, &c.Security.CertPath, "cert")
+	configutil.AdjustCommandLineString(flagSet, &c.Security.KeyPath, "key")
+	configutil.AdjustCommandLineString(flagSet, &c.BackendEndpoints, "backend-endpoints")
+	configutil.AdjustCommandLineString(flagSet, &c.ListenAddr, "listen-addr")
+	configutil.AdjustCommandLineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
 	return c.Adjust(meta, false)
 }

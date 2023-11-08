@@ -275,12 +275,13 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 	return keys, values, err
 }
 
-// commit perform the operations on etcd, with pre-condition that values observed by user has not been changed.
+// commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
 func (txn *etcdTxn) commit() error {
-	baseTxn := txn.kv.client.Txn(txn.ctx)
-	baseTxn.If(txn.conditions...)
-	baseTxn.Then(txn.operations...)
-	resp, err := baseTxn.Commit()
+	// Using slowLogTxn to commit transaction.
+	slowLogTxn := NewSlowLogTxn(txn.kv.client)
+	slowLogTxn.If(txn.conditions...)
+	slowLogTxn.Then(txn.operations...)
+	resp, err := slowLogTxn.Commit()
 	if err != nil {
 		return err
 	}

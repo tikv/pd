@@ -27,6 +27,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errcode"
@@ -47,6 +48,19 @@ var (
 )
 
 const (
+	// PDRedirectorHeader is used to mark which PD redirected this request.
+	PDRedirectorHeader = "PD-Redirector"
+	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
+	PDAllowFollowerHandleHeader = "PD-Allow-follower-handle" // #nosec G101
+	// XForwardedForHeader is used to mark the client IP.
+	XForwardedForHeader = "X-Forwarded-For"
+	// XForwardedPortHeader is used to mark the client port.
+	XForwardedPortHeader = "X-Forwarded-Port"
+	// XRealIPHeader is used to mark the real client IP.
+	XRealIPHeader = "X-Real-Ip"
+	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
+	ForwardToMicroServiceHeader = "Forward-To-Micro-Service"
+
 	// ErrRedirectFailed is the error message for redirect failed.
 	ErrRedirectFailed = "redirect failed"
 	// ErrRedirectToNotLeader is the error message for redirect to not leader.
@@ -101,26 +115,30 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 }
 
-// GetIPAddrFromHTTPRequest returns http client IP from context.
+// GetIPPortFromHTTPRequest returns http client host IP and port from context.
 // Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
 // so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
 // And both of them have the higher priority than `RemoteAddr`
-func GetIPAddrFromHTTPRequest(r *http.Request) string {
-	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-	if len(strings.Trim(ips[0], " ")) > 0 {
-		return ips[0]
+func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
+	forwardedIPs := strings.Split(r.Header.Get(XForwardedForHeader), ",")
+	if forwardedIP := strings.Trim(forwardedIPs[0], " "); len(forwardedIP) > 0 {
+		ip = forwardedIP
+		// Try to get the port from "X-Forwarded-Port" header.
+		forwardedPorts := strings.Split(r.Header.Get(XForwardedPortHeader), ",")
+		if forwardedPort := strings.Trim(forwardedPorts[0], " "); len(forwardedPort) > 0 {
+			port = forwardedPort
+		}
+	} else if realIP := r.Header.Get(XRealIPHeader); len(realIP) > 0 {
+		ip = realIP
+	} else {
+		ip = r.RemoteAddr
 	}
-
-	ip := r.Header.Get("X-Real-Ip")
-	if ip != "" {
-		return ip
-	}
-
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	splitIP, splitPort, err := net.SplitHostPort(ip)
 	if err != nil {
-		return ""
+		// Ensure we could get an IP address at least.
+		return ip, port
 	}
-	return ip
+	return splitIP, splitPort
 }
 
 // GetComponentNameOnHTTP returns component name from Request Header
@@ -209,17 +227,12 @@ func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
 }
 
 // DoDelete is used to send delete request and return http response code.
-func DoDelete(client *http.Client, url string) (int, error) {
+func DoDelete(client *http.Client, url string) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodDelete, url, nil)
 	if err != nil {
-		return http.StatusBadRequest, err
+		return nil, err
 	}
-	res, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer res.Body.Close()
-	return res.StatusCode, nil
+	return client.Do(req)
 }
 
 func checkResponse(resp *http.Response, err error) error {
@@ -420,8 +433,17 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			reader = resp.Body
 		}
 
+		// We need to copy the response headers before we write the header.
+		// Otherwise, we cannot set the header after w.WriteHeader() is called.
+		// And we need to write the header before we copy the response body.
+		// Otherwise, we cannot set the status code after w.Write() is called.
+		// In other words, we must perform the following steps strictly in order:
+		// 1. Set the response headers.
+		// 2. Write the response header.
+		// 3. Write the response body.
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
+
 		for {
 			if _, err = io.CopyN(w, reader, chunkSize); err != nil {
 				if err == io.EOF {
@@ -440,8 +462,14 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
 }
 
+// copyHeader duplicates the HTTP headers from the source `src` to the destination `dst`.
+// It skips the "Content-Encoding" and "Content-Length" headers because they should be set by `http.ResponseWriter`.
+// These headers may be modified after a redirect when gzip compression is enabled.
 func copyHeader(dst, src http.Header) {
 	for k, vv := range src {
+		if k == "Content-Encoding" || k == "Content-Length" {
+			continue
+		}
 		values := dst[k]
 		for _, v := range vv {
 			if !slice.Contains(values, v) {
@@ -449,4 +477,17 @@ func copyHeader(dst, src http.Header) {
 			}
 		}
 	}
+}
+
+// ParseTime parses a time string with the format "1694580288"
+// If the string is empty, it returns a zero time.
+func ParseTime(t string) (time.Time, error) {
+	if len(t) == 0 {
+		return time.Time{}, nil
+	}
+	i, err := strconv.ParseInt(t, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(i, 0), nil
 }

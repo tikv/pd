@@ -22,25 +22,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 )
 
 func TestLease(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	defer func() {
-		etcd.Close()
-	}()
-	re.NoError(err)
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
 
 	// Create the lease.
 	lease1 := &lease{
@@ -100,4 +87,23 @@ func TestLease(t *testing.T) {
 	re.NoError(lease1.Close())
 	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 	re.True(lease1.IsExpired())
+}
+
+func TestLeaseKeepAlive(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+
+	// Create the lease.
+	lease := &lease{
+		Purpose: "test_lease",
+		client:  client,
+		lease:   clientv3.NewLease(client),
+	}
+
+	re.NoError(lease.Grant(defaultLeaseTimeout))
+	ch := lease.keepAliveWorker(context.Background(), 2*time.Second)
+	time.Sleep(2 * time.Second)
+	<-ch
+	re.NoError(lease.Close())
 }

@@ -26,7 +26,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/statistics"
 )
 
 var (
@@ -500,6 +499,8 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigGrantHotRegionCommand(),
 		newConfigBalanceLeaderCommand(),
 		newSplitBucketCommand(),
+		newConfigEvictSlowStoreCommand(),
+		newConfigEvictSlowTrendCommand(),
 	)
 	return c
 }
@@ -714,32 +715,7 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		val = value
 	}
 	if schedulerName == "balance-hot-region-scheduler" && (key == "read-priorities" || key == "write-leader-priorities" || key == "write-peer-priorities") {
-		priorities := make([]string, 0)
-		prioritiesMap := make(map[string]struct{})
-		for _, priority := range strings.Split(value, ",") {
-			if priority != statistics.BytePriority && priority != statistics.KeyPriority && priority != statistics.QueryPriority {
-				cmd.Println(fmt.Sprintf("priority should be one of [%s, %s, %s]",
-					statistics.BytePriority,
-					statistics.QueryPriority,
-					statistics.KeyPriority))
-				return
-			}
-			if priority == statistics.QueryPriority && key == "write-peer-priorities" {
-				cmd.Println("query is not allowed to be set in priorities for write-peer-priorities")
-				return
-			}
-			priorities = append(priorities, priority)
-			prioritiesMap[priority] = struct{}{}
-		}
-		if len(priorities) < 2 {
-			cmd.Println("priorities should have at least 2 dimensions")
-			return
-		}
-		input[key] = priorities
-		if len(priorities) != len(prioritiesMap) {
-			cmd.Println("priorities shouldn't be repeated")
-			return
-		}
+		input[key] = strings.Split(value, ",")
 	} else {
 		input[key] = val
 	}
@@ -769,11 +745,17 @@ func showShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []strin
 	if p == "show-roles" {
 		p = cmd.Parent().Name()
 	}
-	path := path.Join(schedulerConfigPrefix, p, "roles")
-	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
+	url := path.Join(schedulerConfigPrefix, p, "list")
+	r, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Println(err)
-		return
+		// try to use old api
+		var err2 error
+		url := path.Join(schedulerConfigPrefix, p, "roles")
+		r, err2 = doRequest(cmd, url, http.MethodGet, http.Header{})
+		if err2 != nil {
+			cmd.Println(err, err2)
+			return
+		}
 	}
 	cmd.Println(r)
 }
@@ -799,6 +781,44 @@ func setShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []string
 		return
 	}
 	cmd.Println("Success!")
+}
+
+func newConfigEvictSlowStoreCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-slow-store-scheduler",
+		Short: "evict-slow-store-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+	return c
+}
+
+func newConfigEvictSlowTrendCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "evict-slow-trend-scheduler",
+		Short: "evict-slow-trend-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+	return c
 }
 
 // NewDescribeSchedulerCommand returns command to describe the scheduler.

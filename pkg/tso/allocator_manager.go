@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"path"
+	"runtime/trace"
 	"strconv"
 	"strings"
 	"sync"
@@ -102,7 +103,7 @@ type ElectionMember interface {
 	// server id of a cluster or the unique keyspace group replica id of the election
 	// group comprised of the replicas of a keyspace group.
 	ID() uint64
-	// ID returns the unique Name in the election group.
+	// ID returns the unique name in the election group.
 	Name() string
 	// MemberValue returns the member value.
 	MemberValue() string
@@ -281,6 +282,14 @@ func (am *AllocatorManager) getGroupID() uint32 {
 	return am.kgID
 }
 
+// getGroupIDStr returns the keyspace group ID of the allocator manager in string format.
+func (am *AllocatorManager) getGroupIDStr() string {
+	if am == nil {
+		return "0"
+	}
+	return strconv.FormatUint(uint64(am.kgID), 10)
+}
+
 // GetTimestampPath returns the timestamp path in etcd for the given DCLocation.
 func (am *AllocatorManager) GetTimestampPath(dcLocation string) string {
 	if am == nil {
@@ -404,7 +413,7 @@ func (am *AllocatorManager) GetClusterDCLocationsFromEtcd() (clusterDCLocations 
 		if err != nil {
 			log.Warn("get server id and dcLocation from etcd failed, invalid server id",
 				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-				zap.Any("splitted-serverPath", serverPath),
+				zap.Any("split-serverPath", serverPath),
 				zap.String("dc-location", dcLocation),
 				errs.ZapError(err))
 			continue
@@ -964,8 +973,8 @@ func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd() (map[string]int32, 
 		if err != nil {
 			return nil, err
 		}
-		splittedKey := strings.Split(string(kv.Key), "/")
-		dcLocation := splittedKey[len(splittedKey)-1]
+		splitKey := strings.Split(string(kv.Key), "/")
+		dcLocation := splitKey[len(splitKey)-1]
 		dcLocationSuffix[dcLocation] = int32(suffix)
 	}
 	return dcLocationSuffix, nil
@@ -1135,7 +1144,8 @@ func (am *AllocatorManager) deleteAllocatorGroup(dcLocation string) {
 }
 
 // HandleRequest forwards TSO allocation requests to correct TSO Allocators.
-func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb.Timestamp, error) {
+func (am *AllocatorManager) HandleRequest(ctx context.Context, dcLocation string, count uint32) (pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "AllocatorManager.HandleRequest").End()
 	if len(dcLocation) == 0 {
 		dcLocation = GlobalDCLocation
 	}
@@ -1145,7 +1155,7 @@ func (am *AllocatorManager) HandleRequest(dcLocation string, count uint32) (pdpb
 		return pdpb.Timestamp{}, err
 	}
 
-	return allocatorGroup.allocator.GenerateTSO(count)
+	return allocatorGroup.allocator.GenerateTSO(ctx, count)
 }
 
 // ResetAllocatorGroup will reset the allocator's leadership and TSO initialized in memory.
@@ -1188,6 +1198,9 @@ func (am *AllocatorManager) getAllocatorGroup(dcLocation string) (*allocatorGrou
 func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
+	if len(dcLocation) == 0 {
+		dcLocation = GlobalDCLocation
+	}
 	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
 	if !exist {
 		return nil, errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found", dcLocation))

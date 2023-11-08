@@ -36,7 +36,7 @@ type balanceWitnessSchedulerTestSuite struct {
 	tc     *mockcluster.Cluster
 	lb     Scheduler
 	oc     *operator.Controller
-	conf   config.Config
+	conf   config.SchedulerConfigProvider
 }
 
 func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {

@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
@@ -60,7 +61,7 @@ type GroupManager struct {
 	client    *clientv3.Client
 	clusterID uint64
 
-	sync.RWMutex
+	syncutil.RWMutex
 	// groups is the cache of keyspace group related information.
 	// user kind -> keyspace group
 	groups map[endpoint.UserKind]*indexedHeap
@@ -105,8 +106,7 @@ func NewKeyspaceGroupManager(
 	// The PD(TSO) Client relies on this info to discover tso servers.
 	if m.client != nil {
 		m.initTSONodesWatcher(m.client, m.clusterID)
-		m.wg.Add(1)
-		go m.tsoNodesWatcher.StartWatchLoop()
+		m.tsoNodesWatcher.StartWatchLoop()
 	}
 	return m
 }
@@ -168,8 +168,16 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 	log.Info("start to alloc nodes to all keyspace groups")
 	for {
 		select {
+		case <-m.ctx.Done():
+			// When the group manager is closed, we should stop to alloc nodes to all keyspace groups.
+			// Note: If raftcluster is created failed but the group manager has been bootstrapped,
+			// we need to close this goroutine by m.cancel() rather than ctx.Done() from the raftcluster.
+			// because the ctx.Done() from the raftcluster will be triggered after raftcluster is created successfully.
+			log.Info("server is closed, stop to alloc nodes to all keyspace groups")
+			return
 		case <-ctx.Done():
-			log.Info("stop to alloc nodes to all keyspace groups")
+			// When the API leader is changed, we should stop to alloc nodes to all keyspace groups.
+			log.Info("the raftcluster is closed, stop to alloc nodes to all keyspace groups")
 			return
 		case <-ticker.C:
 		}
@@ -667,6 +675,10 @@ func buildSplitKeyspaces(
 			newSplit = append(newSplit, keyspace)
 			newKeyspaceMap[keyspace] = struct{}{}
 		}
+	}
+	// Check if the new keyspace list is empty.
+	if len(newSplit) == 0 {
+		return nil, nil, ErrKeyspaceGroupWithEmptyKeyspace
 	}
 	// Get the split keyspace list for the old keyspace group.
 	oldSplit := make([]uint32, 0, oldNum-len(newSplit))

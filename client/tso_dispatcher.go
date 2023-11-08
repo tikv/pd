@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"runtime/trace"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/timerpool"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
@@ -79,6 +81,8 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		return err
 	}
+
+	defer trace.StartRegion(request.requestCtx, "tsoReqEnqueue").End()
 	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
 	return nil
 }
@@ -96,6 +100,7 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err = <-req.done:
+		defer trace.StartRegion(req.requestCtx, "tsoReqDone").End()
 		err = errors.WithStack(err)
 		defer tsoReqPool.Put(req)
 		if err != nil {
@@ -385,6 +390,7 @@ func (c *tsoClient) handleDispatcher(
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
 	defer streamLoopTimer.Stop()
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
 tsoBatchLoop:
 	for {
 		select {
@@ -494,7 +500,7 @@ tsoBatchLoop:
 			stream = nil
 			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := c.svcDiscovery.CheckMemberChanged(); err != nil {
+				if err := bo.Exec(dispatcherCtx, c.svcDiscovery.CheckMemberChanged); err != nil {
 					select {
 					case <-dispatcherCtx.Done():
 						return
@@ -741,6 +747,9 @@ func (c *tsoClient) processRequests(
 	}
 
 	requests := tbc.getCollectedRequests()
+	for _, req := range requests {
+		defer trace.StartRegion(req.requestCtx, "tsoReqSend").End()
+	}
 	count := int64(len(requests))
 	reqKeyspaceGroupID := c.svcDiscovery.GetKeyspaceGroupID()
 	respKeyspaceGroupID, physical, logical, suffixBits, err := stream.processRequests(
@@ -787,22 +796,7 @@ func (c *tsoClient) compareAndSwapTS(
 	// all TSOs we get will be [6, 7, 8, 9, 10]. lastTSOInfo.logical stores the logical part of the largest ts returned
 	// last time.
 	if tsoutil.TSLessEqual(physical, firstLogical, lastTSOInfo.physical, lastTSOInfo.logical) {
-		if !c.option.allowTSOFallback {
-			log.Panic("[tso] timestamp fallback",
-				zap.String("dc-location", dcLocation),
-				zap.Uint32("keyspace", c.svcDiscovery.GetKeyspaceID()),
-				zap.String("last-ts", fmt.Sprintf("(%d, %d)", lastTSOInfo.physical, lastTSOInfo.logical)),
-				zap.String("cur-ts", fmt.Sprintf("(%d, %d)", physical, firstLogical)),
-				zap.String("last-tso-server", lastTSOInfo.tsoServer),
-				zap.String("cur-tso-server", curTSOInfo.tsoServer),
-				zap.Uint32("last-keyspace-group-in-request", lastTSOInfo.reqKeyspaceGroupID),
-				zap.Uint32("cur-keyspace-group-in-request", curTSOInfo.reqKeyspaceGroupID),
-				zap.Uint32("last-keyspace-group-in-response", lastTSOInfo.respKeyspaceGroupID),
-				zap.Uint32("cur-keyspace-group-in-response", curTSOInfo.respKeyspaceGroupID),
-				zap.Time("last-response-received-at", lastTSOInfo.respReceivedAt),
-				zap.Time("cur-response-received-at", curTSOInfo.respReceivedAt))
-		}
-		log.Error("[tso] timestamp fallback",
+		log.Panic("[tso] timestamp fallback",
 			zap.String("dc-location", dcLocation),
 			zap.Uint32("keyspace", c.svcDiscovery.GetKeyspaceID()),
 			zap.String("last-ts", fmt.Sprintf("(%d, %d)", lastTSOInfo.physical, lastTSOInfo.logical)),
@@ -830,6 +824,7 @@ func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical
 			span.Finish()
 		}
 		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
+		defer trace.StartRegion(requests[i].requestCtx, "tsoReqDequeue").End()
 		requests[i].done <- err
 	}
 }

@@ -111,6 +111,11 @@ error = '''
 failed to get the source store
 '''
 
+["PD:common:ErrGetTargetStore"]
+error = '''
+failed to get the target store
+'''
+
 ["PD:common:ErrIncorrectSystemTime"]
 error = '''
 incorrect system time
@@ -491,6 +496,16 @@ error = '''
 init file log error, %s
 '''
 
+["PD:mcs:ErrNotFoundSchedulingAddr"]
+error = '''
+cannot find scheduling address
+'''
+
+["PD:mcs:ErrSchedulingServer"]
+error = '''
+scheduling server meets %v
+'''
+
 ["PD:member:ErrCheckCampaign"]
 error = '''
 check campaign failed
@@ -509,6 +524,21 @@ marshal leader failed
 ["PD:netstat:ErrNetstatTCPSocks"]
 error = '''
 TCP socks error
+'''
+
+["PD:operator:ErrAddOperator"]
+error = '''
+failed to add operator, maybe already have one
+'''
+
+["PD:operator:ErrOperatorNotFound"]
+error = '''
+operator not found
+'''
+
+["PD:operator:ErrPluginNotFound"]
+error = '''
+plugin is not found: %s
 '''
 
 ["PD:os:ErrOSOpen"]
@@ -579,6 +609,21 @@ failed to marshal proto
 ["PD:proto:ErrProtoUnmarshal"]
 error = '''
 failed to unmarshal proto
+'''
+
+["PD:region:ErrRegionAbnormalPeer"]
+error = '''
+region %v has abnormal peer
+'''
+
+["PD:region:ErrRegionNotAdjacent"]
+error = '''
+two regions are not adjacent
+'''
+
+["PD:region:ErrRegionNotFound"]
+error = '''
+region %v not found
 '''
 
 ["PD:region:ErrRegionRuleContent"]
@@ -701,6 +746,11 @@ error = '''
 leader is nil
 '''
 
+["PD:server:ErrRateLimitExceeded"]
+error = '''
+rate limit exceeded
+'''
+
 ["PD:server:ErrServerNotStarted"]
 error = '''
 server not started
@@ -814,6 +864,11 @@ set local tso config failed, %s
 ["PD:tso:ErrSyncMaxTS"]
 error = '''
 sync max ts failed, %s
+'''
+
+["PD:tso:ErrUpdateTimestamp"]
+error = '''
+update timestamp failed, %s
 '''
 
 ["PD:typeutil:ErrBytesToUint64"]

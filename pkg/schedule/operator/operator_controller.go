@@ -56,7 +56,7 @@ var (
 type Controller struct {
 	syncutil.RWMutex
 	ctx             context.Context
-	config          config.Config
+	config          config.SharedConfigProvider
 	cluster         *core.BasicCluster
 	operators       map[uint64]*Operator
 	hbStreams       *hbstream.HeartbeatStreams
@@ -69,7 +69,7 @@ type Controller struct {
 }
 
 // NewController creates a Controller.
-func NewController(ctx context.Context, cluster *core.BasicCluster, config config.Config, hbStreams *hbstream.HeartbeatStreams) *Controller {
+func NewController(ctx context.Context, cluster *core.BasicCluster, config config.SharedConfigProvider, hbStreams *hbstream.HeartbeatStreams) *Controller {
 	return &Controller{
 		ctx:             ctx,
 		cluster:         cluster,
@@ -125,8 +125,8 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 			if op.ContainNonWitnessStep() {
 				recordOpStepWithTTL(op.RegionID())
 			}
-			if oc.RemoveOperator(op, Succeed) {
-				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
+			if oc.RemoveOperator(op) {
+				operatorCounter.WithLabelValues(op.Desc(), "promote-success").Inc()
 				oc.PromoteWaitingOperator()
 			}
 			if time.Since(op.GetStartTime()) < FastOperatorFinishTime {
@@ -146,13 +146,12 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 					zap.Uint64("region-id", op.RegionID()),
 					zap.String("status", OpStatusToString(op.Status())),
 					zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
-				operatorWaitCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 				failpoint.Inject("unexpectedOperator", func() {
 					panic(op)
 				})
 				_ = op.Cancel(NotInRunningState)
 				oc.buryOperator(op)
-				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-unexpected").Inc()
+				operatorCounter.WithLabelValues(op.Desc(), "promote-unexpected").Inc()
 				oc.PromoteWaitingOperator()
 			}
 		}
@@ -164,8 +163,7 @@ func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core
 	if err != nil {
 		log.Info("operator is stale", zap.Uint64("region-id", op.RegionID()), errs.ZapError(err))
 		if oc.RemoveOperator(op, StaleStatus) {
-			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-			operatorWaitCounter.WithLabelValues(op.Desc(), "promote-stale").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "promote-stale").Inc()
 			oc.PromoteWaitingOperator()
 			return true
 		}
@@ -186,8 +184,7 @@ func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core
 			op,
 			EpochNotMatch,
 		) {
-			operatorCounter.WithLabelValues(op.Desc(), "stale").Inc()
-			operatorWaitCounter.WithLabelValues(op.Desc(), "promote-stale").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "promote-stale").Inc()
 			oc.PromoteWaitingOperator()
 			return true
 		}
@@ -308,14 +305,14 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 			added++
 			oc.wop.PutOperator(ops[i])
 		}
-		operatorWaitCounter.WithLabelValues(desc, "put").Inc()
+		operatorCounter.WithLabelValues(desc, "put").Inc()
 		oc.wopStatus.ops[desc]++
 		added++
 		needPromoted++
 	}
 
 	oc.Unlock()
-	operatorWaitCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
+	operatorCounter.WithLabelValues(ops[0].Desc(), "promote-add").Add(float64(needPromoted))
 	for i := 0; i < needPromoted; i++ {
 		oc.PromoteWaitingOperator()
 	}
@@ -332,6 +329,7 @@ func (oc *Controller) AddOperator(ops ...*Operator) bool {
 	// but maybe user want to add operator when waiting queue is busy
 	if oc.exceedStoreLimitLocked(ops...) {
 		for _, op := range ops {
+			operatorCounter.WithLabelValues(op.Desc(), "exceed-limit").Inc()
 			_ = op.Cancel(ExceedStoreLimit)
 			oc.buryOperator(op)
 		}
@@ -363,10 +361,10 @@ func (oc *Controller) PromoteWaitingOperator() {
 		if ops == nil {
 			return
 		}
-		operatorWaitCounter.WithLabelValues(ops[0].Desc(), "get").Inc()
+		operatorCounter.WithLabelValues(ops[0].Desc(), "get").Inc()
 		if oc.exceedStoreLimitLocked(ops...) {
 			for _, op := range ops {
-				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-canceled").Inc()
+				operatorCounter.WithLabelValues(op.Desc(), "exceed-limit").Inc()
 				_ = op.Cancel(ExceedStoreLimit)
 				oc.buryOperator(op)
 			}
@@ -376,7 +374,7 @@ func (oc *Controller) PromoteWaitingOperator() {
 
 		if pass, reason := oc.checkAddOperator(true, ops...); !pass {
 			for _, op := range ops {
-				operatorWaitCounter.WithLabelValues(op.Desc(), "promote-canceled").Inc()
+				operatorCounter.WithLabelValues(op.Desc(), "check-failed").Inc()
 				_ = op.Cancel(reason)
 				oc.buryOperator(op)
 			}
@@ -407,7 +405,7 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 		if region == nil {
 			log.Debug("region not found, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "not-found").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "not-found").Inc()
 			return false, RegionNotFound
 		}
 		if region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() ||
@@ -416,14 +414,14 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", region.GetRegionEpoch()),
 				zap.Reflect("new", op.RegionEpoch()))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
 			return false, EpochNotMatch
 		}
 		if old := oc.operators[op.RegionID()]; old != nil && !isHigherPriorityOperator(op, old) {
 			log.Debug("already have operator, cancel add operator",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Reflect("old", old))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "already-have").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "already-have").Inc()
 			return false, AlreadyExist
 		}
 		if op.Status() != CREATED {
@@ -434,12 +432,12 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 			failpoint.Inject("unexpectedOperator", func() {
 				panic(op)
 			})
-			operatorWaitCounter.WithLabelValues(op.Desc(), "unexpected-status").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "unexpected-status").Inc()
 			return false, NotInCreateStatus
 		}
 		if !isPromoting && oc.wopStatus.ops[op.Desc()] >= oc.config.GetSchedulerMaxWaitingOperator() {
 			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.config.GetSchedulerMaxWaitingOperator()))
-			operatorWaitCounter.WithLabelValues(op.Desc(), "exceed-max").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "exceed-max-waiting").Inc()
 			return false, ExceedWaitLimit
 		}
 
@@ -451,7 +449,7 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 	for _, op := range ops {
 		if op.CheckExpired() {
 			reason = Expired
-			operatorWaitCounter.WithLabelValues(op.Desc(), "expired").Inc()
+			operatorCounter.WithLabelValues(op.Desc(), "expired").Inc()
 		}
 	}
 	return reason != Expired, reason
@@ -490,7 +488,6 @@ func (oc *Controller) addOperatorLocked(op *Operator) bool {
 	oc.operators[regionID] = op
 	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
 	operatorSizeHist.WithLabelValues(op.Desc()).Observe(float64(op.ApproximateSize))
-	operatorWaitDuration.WithLabelValues(op.Desc()).Observe(op.ElapsedTime().Seconds())
 	opInfluence := NewTotalOpInfluence([]*Operator{op}, oc.cluster)
 	for storeID := range opInfluence.StoresInfluence {
 		store := oc.cluster.GetStore(storeID)
@@ -547,8 +544,6 @@ func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) 
 	var cancelReason CancelReasonType
 	if len(reasons) > 0 {
 		cancelReason = reasons[0]
-	} else {
-		cancelReason = Unknown
 	}
 	if removed {
 		if op.Cancel(cancelReason) {
@@ -691,6 +686,21 @@ func (oc *Controller) GetWaitingOperators() []*Operator {
 	oc.RLock()
 	defer oc.RUnlock()
 	return oc.wop.ListOperator()
+}
+
+// GetOperatorsOfKind returns the running operators of the kind.
+func (oc *Controller) GetOperatorsOfKind(mask OpKind) []*Operator {
+	oc.RLock()
+	defer oc.RUnlock()
+
+	operators := make([]*Operator, 0, len(oc.operators))
+	for _, op := range oc.operators {
+		if op.Kind()&mask != 0 {
+			operators = append(operators, op)
+		}
+	}
+
+	return operators
 }
 
 // SendScheduleCommand sends a command to the region.

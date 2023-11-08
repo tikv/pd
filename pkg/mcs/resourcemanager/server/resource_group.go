@@ -17,19 +17,19 @@ package server
 
 import (
 	"encoding/json"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	Name string         `json:"name"`
 	Mode rmpb.GroupMode `json:"mode"`
 	// RU settings
@@ -106,7 +106,6 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 			return errors.New("invalid resource group settings, RU mode should set RU settings")
 		}
 		rg.RUSettings.RU.patch(settings.GetRU())
-		log.Info("patch resource group ru settings", zap.String("name", rg.Name), zap.Any("settings", settings))
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}
@@ -139,7 +138,7 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 // RequestRU requests the RU of the resource group.
 func (rg *ResourceGroup) RequestRU(
 	now time.Time,
-	neededTokens float64,
+	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
@@ -148,7 +147,7 @@ func (rg *ResourceGroup) RequestRU(
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
-	tb, trickleTimeMs := rg.RUSettings.RU.request(now, neededTokens, targetPeriodMs, clientUniqueID)
+	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 

@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
@@ -79,11 +79,11 @@ func TestStore(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store.Store.Store)
+		tests.MustPutStore(re, cluster, store.Store.Store)
 	}
 	defer cluster.Destroy()
 
@@ -293,7 +293,7 @@ func TestStore(t *testing.T) {
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
 		}
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store2)
+		tests.MustPutStore(re, cluster, store2)
 	}
 
 	// store delete <store_id> command
@@ -327,7 +327,28 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "check", "Invalid_State"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "Unknown state: Invalid_state")
+	re.Contains(string(output), "unknown StoreState: Invalid_state")
+
+	// Mock a disconnected store.
+	storeCheck := &metapb.Store{
+		Id:            uint64(2000),
+		State:         metapb.StoreState_Up,
+		NodeState:     metapb.NodeState_Serving,
+		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Minute),
+	}
+	tests.MustPutStore(re, cluster, storeCheck)
+	args = []string{"-u", pdAddr, "store", "check", "Disconnected"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "\"id\": 2000,")
+	// Mock a down store.
+	storeCheck.Id = uint64(2001)
+	storeCheck.LastHeartbeat = time.Now().UnixNano() - int64(1*time.Hour)
+	tests.MustPutStore(re, cluster, storeCheck)
+	args = []string{"-u", pdAddr, "store", "check", "Down"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "\"id\": 2001,")
 
 	// store cancel-delete <store_id> command
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(1, storelimit.RemovePeer)
@@ -506,15 +527,15 @@ func TestTombstoneStore(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store.Store.Store)
+		tests.MustPutStore(re, cluster, store.Store.Store)
 	}
 	defer cluster.Destroy()
-	pdctl.MustPutRegion(re, cluster, 1, 2, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, statistics.WriteReportInterval))
-	pdctl.MustPutRegion(re, cluster, 2, 3, []byte("b"), []byte("c"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, statistics.WriteReportInterval))
+	tests.MustPutRegion(re, cluster, 1, 2, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
+	tests.MustPutRegion(re, cluster, 2, 3, []byte("b"), []byte("c"), core.SetWrittenBytes(3000000000), core.SetReportInterval(0, utils.RegionHeartBeatReportInterval))
 	// store remove-tombstone
 	args := []string{"-u", pdAddr, "store", "remove-tombstone"}
 	output, err := pdctl.ExecuteCommand(cmd, args...)

@@ -15,30 +15,35 @@
 package operator_test
 
 import (
-	"context"
 	"encoding/hex"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
-func TestOperator(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var err error
+type operatorTestSuite struct {
+	suite.Suite
+}
+
+func TestOperatorTestSuite(t *testing.T) {
+	suite.Run(t, new(operatorTestSuite))
+}
+
+func (suite *operatorTestSuite) TestOperator() {
 	var start time.Time
 	start = start.Add(time.Hour)
-	cluster, err := tests.NewTestCluster(ctx, 1,
+	opts := []tests.ConfigOption{
 		// TODO: enable placementrules
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 2
@@ -47,12 +52,14 @@ func TestOperator(t *testing.T) {
 		func(conf *config.Config, serverName string) {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
 		},
-	)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkOperator)
+}
+
+func (suite *operatorTestSuite) checkOperator(cluster *tests.TestCluster) {
+	re := suite.Require()
+
 	cmd := pdctlCmd.GetRootCmd()
 
 	stores := []*metapb.Store{
@@ -78,21 +85,30 @@ func TestOperator(t *testing.T) {
 		},
 	}
 
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
 	for _, store := range stores {
-		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+		tests.MustPutStore(re, cluster, store)
 	}
 
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetPeers([]*metapb.Peer{
 		{Id: 1, StoreId: 1},
 		{Id: 2, StoreId: 2},
 	}))
-	pdctl.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
+	tests.MustPutRegion(re, cluster, 3, 2, []byte("b"), []byte("d"), core.SetPeers([]*metapb.Peer{
 		{Id: 3, StoreId: 1},
 		{Id: 4, StoreId: 2},
 	}))
-	defer cluster.Destroy()
+
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	args := []string{"-u", pdAddr, "operator", "show"}
+	var slice []string
+	output, err := pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.NoError(json.Unmarshal(output, &slice))
+	re.Len(slice, 0)
+	args = []string{"-u", pdAddr, "operator", "check", "2"}
+	output, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "operator not found")
 
 	var testCases = []struct {
 		cmd    []string
@@ -174,9 +190,10 @@ func TestOperator(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		_, err := pdctl.ExecuteCommand(cmd, testCase.cmd...)
+		output, err = pdctl.ExecuteCommand(cmd, testCase.cmd...)
 		re.NoError(err)
-		output, err := pdctl.ExecuteCommand(cmd, testCase.show...)
+		re.NotContains(string(output), "Failed")
+		output, err = pdctl.ExecuteCommand(cmd, testCase.show...)
 		re.NoError(err)
 		re.Contains(string(output), testCase.expect)
 		start := time.Now()
@@ -189,11 +206,11 @@ func TestOperator(t *testing.T) {
 	}
 
 	// operator add merge-region <source_region_id> <target_region_id>
-	args := []string{"-u", pdAddr, "operator", "add", "merge-region", "1", "3"}
+	args = []string{"-u", pdAddr, "operator", "add", "merge-region", "1", "3"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	args = []string{"-u", pdAddr, "operator", "show"}
-	output, err := pdctl.ExecuteCommand(cmd, args...)
+	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "merge region 1 into region 3")
 	args = []string{"-u", pdAddr, "operator", "remove", "1"}
@@ -205,6 +222,13 @@ func TestOperator(t *testing.T) {
 
 	_, err = pdctl.ExecuteCommand(cmd, "config", "set", "enable-placement-rules", "true")
 	re.NoError(err)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		// wait for the scheduler server to update the config
+		testutil.Eventually(re, func() bool {
+			return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled()
+		})
+	}
+
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "3")
 	re.NoError(err)
 	re.Contains(string(output), "not supported")

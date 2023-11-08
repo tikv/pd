@@ -23,7 +23,7 @@ import (
 
 // Server defines the common basic behaviors of a server
 type Server interface {
-	// Name returns the unique Name for this server in the cluster.
+	// Name returns the unique name for this server in the cluster.
 	Name() string
 	// GetAddr returns the address of the server.
 	GetAddr() string
@@ -44,5 +44,5 @@ type Server interface {
 	// IsServing returns whether the server is the leader, if there is embedded etcd, or the primary otherwise.
 	IsServing() bool
 	// AddServiceReadyCallback adds callbacks when the server becomes the leader, if there is embedded etcd, or the primary otherwise.
-	AddServiceReadyCallback(callbacks ...func(context.Context))
+	AddServiceReadyCallback(callbacks ...func(context.Context) error)
 }

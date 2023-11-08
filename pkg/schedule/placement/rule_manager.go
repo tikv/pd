@@ -50,11 +50,11 @@ type RuleManager struct {
 	keyType          string
 	storeSetInformer core.StoreSetInformer
 	cache            *RegionRuleFitCacheManager
-	conf             config.Config
+	conf             config.SharedConfigProvider
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.Config) *RuleManager {
+func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider) *RuleManager {
 	return &RuleManager{
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
@@ -66,7 +66,7 @@ func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSet
 
 // Initialize loads rules from storage. If Placement Rules feature is never enabled, it creates default rule that is
 // compatible with previous configuration.
-func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error {
+func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolationLevel string) error {
 	m.Lock()
 	defer m.Unlock()
 	if m.initialized {
@@ -93,6 +93,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 						Role:           Voter,
 						Count:          maxReplica - witnessCount,
 						LocationLabels: locationLabels,
+						IsolationLevel: isolationLevel,
 					},
 					{
 						GroupID:        "pd",
@@ -101,6 +102,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 						Count:          witnessCount,
 						IsWitness:      true,
 						LocationLabels: locationLabels,
+						IsolationLevel: isolationLevel,
 					},
 				}...,
 			)
@@ -111,6 +113,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 				Role:           Voter,
 				Count:          maxReplica,
 				LocationLabels: locationLabels,
+				IsolationLevel: isolationLevel,
 			})
 		}
 		for _, defaultRule := range defaultRules {
@@ -132,21 +135,25 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string) error 
 }
 
 func (m *RuleManager) loadRules() error {
-	var toSave []*Rule
-	var toDelete []string
+	var (
+		toSave   []*Rule
+		toDelete []string
+	)
 	err := m.storage.LoadRules(func(k, v string) {
-		var r Rule
-		if err := json.Unmarshal([]byte(v), &r); err != nil {
+		r, err := NewRuleFromJSON([]byte(v))
+		if err != nil {
 			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
 		}
-		if err := m.adjustRule(&r, ""); err != nil {
+		err = m.adjustRule(r, "")
+		if err != nil {
 			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
 			return
 		}
-		if _, ok := m.ruleConfig.rules[r.Key()]; ok {
+		_, ok := m.ruleConfig.rules[r.Key()]
+		if ok {
 			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
 			return
@@ -154,9 +161,9 @@ func (m *RuleManager) loadRules() error {
 		if k != r.StoreKey() {
 			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
 			toDelete = append(toDelete, k)
-			toSave = append(toSave, &r)
+			toSave = append(toSave, r)
 		}
-		m.ruleConfig.rules[r.Key()] = &r
+		m.ruleConfig.rules[r.Key()] = r
 	})
 	if err != nil {
 		return err
@@ -176,12 +183,12 @@ func (m *RuleManager) loadRules() error {
 
 func (m *RuleManager) loadGroups() error {
 	return m.storage.LoadRuleGroups(func(k, v string) {
-		var g RuleGroup
-		if err := json.Unmarshal([]byte(v), &g); err != nil {
+		g, err := NewRuleGroupFromJSON([]byte(v))
+		if err != nil {
 			log.Error("failed to unmarshal rule group", zap.String("group-id", k), errs.ZapError(errs.ErrLoadRuleGroup, err))
 			return
 		}
-		m.ruleConfig.groups[g.ID] = &g
+		m.ruleConfig.groups[g.ID] = g
 	})
 }
 
@@ -312,6 +319,20 @@ func (m *RuleManager) GetAllRules() []*Rule {
 	}
 	sortRules(rules)
 	return rules
+}
+
+// GetRulesCount returns the number of rules.
+func (m *RuleManager) GetRulesCount() int {
+	m.RLock()
+	defer m.RUnlock()
+	return len(m.ruleConfig.rules)
+}
+
+// GetGroupsCount returns the number of rule groups.
+func (m *RuleManager) GetGroupsCount() int {
+	m.RLock()
+	defer m.RUnlock()
+	return len(m.ruleConfig.groups)
 }
 
 // GetRulesByGroup returns sorted rules of a group.

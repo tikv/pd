@@ -18,7 +18,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/cloudfoundry/gosigar"
+	sigar "github.com/cloudfoundry/gosigar"
 	"go.uber.org/zap"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
@@ -65,13 +65,13 @@ type ResourceCalculator interface {
 
 // KVCalculator is used to calculate the KV-side consumption.
 type KVCalculator struct {
-	*Config
+	*RUConfig
 }
 
 var _ ResourceCalculator = (*KVCalculator)(nil)
 
-func newKVCalculator(cfg *Config) *KVCalculator {
-	return &KVCalculator{Config: cfg}
+func newKVCalculator(cfg *RUConfig) *KVCalculator {
+	return &KVCalculator{RUConfig: cfg}
 }
 
 // Trickle ...
@@ -146,13 +146,13 @@ func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req Requ
 
 // SQLCalculator is used to calculate the SQL-side consumption.
 type SQLCalculator struct {
-	*Config
+	*RUConfig
 }
 
 var _ ResourceCalculator = (*SQLCalculator)(nil)
 
-func newSQLCalculator(cfg *Config) *SQLCalculator {
-	return &SQLCalculator{Config: cfg}
+func newSQLCalculator(cfg *RUConfig) *SQLCalculator {
+	return &SQLCalculator{RUConfig: cfg}
 }
 
 // Trickle update sql layer CPU consumption.
@@ -235,6 +235,43 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.SqlLayerCpuTimeMs += custom2.SqlLayerCpuTimeMs
 	custom1.KvReadRpcCount += custom2.KvReadRpcCount
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
+}
+
+func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
+	delta := &rmpb.Consumption{}
+	if now.RRU >= last.RRU {
+		delta.RRU = now.RRU - last.RRU
+		last.RRU = now.RRU
+	}
+	if now.WRU >= last.WRU {
+		delta.WRU = now.WRU - last.WRU
+		last.WRU = now.WRU
+	}
+	if now.ReadBytes >= last.ReadBytes {
+		delta.ReadBytes = now.ReadBytes - last.ReadBytes
+		last.ReadBytes = now.ReadBytes
+	}
+	if now.WriteBytes >= last.WriteBytes {
+		delta.WriteBytes = now.WriteBytes - last.WriteBytes
+		last.WriteBytes = now.WriteBytes
+	}
+	if now.TotalCpuTimeMs >= last.TotalCpuTimeMs {
+		delta.TotalCpuTimeMs = now.TotalCpuTimeMs - last.TotalCpuTimeMs
+		last.TotalCpuTimeMs = now.TotalCpuTimeMs
+	}
+	if now.SqlLayerCpuTimeMs >= last.SqlLayerCpuTimeMs {
+		delta.SqlLayerCpuTimeMs = now.SqlLayerCpuTimeMs - last.SqlLayerCpuTimeMs
+		last.SqlLayerCpuTimeMs = now.SqlLayerCpuTimeMs
+	}
+	if now.KvReadRpcCount >= last.KvReadRpcCount {
+		delta.KvReadRpcCount = now.KvReadRpcCount - last.KvReadRpcCount
+		last.KvReadRpcCount = now.KvReadRpcCount
+	}
+	if now.KvWriteRpcCount >= last.KvWriteRpcCount {
+		delta.KvWriteRpcCount = now.KvWriteRpcCount - last.KvWriteRpcCount
+		last.KvWriteRpcCount = now.KvWriteRpcCount
+	}
+	return delta
 }
 
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {

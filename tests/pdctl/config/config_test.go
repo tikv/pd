@@ -25,7 +25,10 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -36,10 +39,10 @@ import (
 type testCase struct {
 	name  string
 	value interface{}
-	read  func(scheduleConfig *config.ScheduleConfig) interface{}
+	read  func(scheduleConfig *sc.ScheduleConfig) interface{}
 }
 
-func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*config.ScheduleConfig) {
+func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.ScheduleConfig) {
 	value := t.value
 	for _, scheduleConfig := range scheduleConfigs {
 		re.NotNil(scheduleConfig)
@@ -47,26 +50,31 @@ func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*config.Sche
 	}
 }
 
-func TestConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+type configTestSuite struct {
+	suite.Suite
+}
+
+func TestConfigTestSuite(t *testing.T) {
+	suite.Run(t, new(configTestSuite))
+}
+
+func (suite *configTestSuite) TestConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkConfig)
+}
+
+func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
 	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	// config show
@@ -112,7 +120,7 @@ func TestConfig(t *testing.T) {
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	scheduleCfg := config.ScheduleConfig{}
+	scheduleCfg := sc.ScheduleConfig{}
 	re.NoError(json.Unmarshal(output, &scheduleCfg))
 	scheduleConfig = svr.GetScheduleConfig()
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
@@ -149,7 +157,7 @@ func TestConfig(t *testing.T) {
 	args = []string{"-u", pdAddr, "config", "show", "replication"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	replicationCfg := config.ReplicationConfig{}
+	replicationCfg := sc.ReplicationConfig{}
 	re.NoError(json.Unmarshal(output, &replicationCfg))
 	re.Equal(svr.GetReplicationConfig(), &replicationCfg)
 
@@ -221,20 +229,20 @@ func TestConfig(t *testing.T) {
 
 	// test config read and write
 	testCases := []testCase{
-		{"leader-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"leader-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.LeaderScheduleLimit
-		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionScheduleLimit
-		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.HotRegionCacheHitsThreshold
-		}}, {"enable-remove-down-replica", false, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		}}, {"enable-remove-down-replica", false, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableRemoveDownReplica
 		}},
-		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 		// set again
-		{"enable-debug-metrics", true, func(scheduleConfig *config.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 	}
@@ -282,16 +290,15 @@ func TestConfig(t *testing.T) {
 	re.Contains(string(output), "is invalid")
 }
 
-func TestPlacementRules(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRules() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRules)
+}
+
+func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -299,10 +306,7 @@ func TestPlacementRules(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -320,6 +324,7 @@ func TestPlacementRules(t *testing.T) {
 	f, _ := os.CreateTemp("/tmp", "pd_tests")
 	fname := f.Name()
 	f.Close()
+	defer os.RemoveAll(fname)
 
 	// test load
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
@@ -356,7 +361,7 @@ func TestPlacementRules(t *testing.T) {
 	re.Equal([2]string{"pd", "test1"}, rules2[1].Key())
 
 	// test rule region detail
-	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
 	fit := &placement.RegionFit{}
 	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
 	cmd2 := pdctlCmd.GetRootCmd()
@@ -379,16 +384,15 @@ func TestPlacementRules(t *testing.T) {
 	re.Equal([2]string{"pd", "test1"}, rules[0].Key())
 }
 
-func TestPlacementRuleGroups(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRuleGroups() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+}
+
+func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -396,10 +400,7 @@ func TestPlacementRuleGroups(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -454,16 +455,15 @@ func TestPlacementRuleGroups(t *testing.T) {
 	re.Contains(string(output), "404")
 }
 
-func TestPlacementRuleBundle(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRuleBundle() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+}
+
+func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -471,10 +471,7 @@ func TestPlacementRuleBundle(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -492,9 +489,7 @@ func TestPlacementRuleBundle(t *testing.T) {
 	re.NoError(err)
 	fname := f.Name()
 	f.Close()
-	defer func() {
-		os.RemoveAll(fname)
-	}()
+	defer os.RemoveAll(fname)
 
 	// test load
 	var bundles []placement.GroupBundle
@@ -609,10 +604,9 @@ func TestReplicationMode(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	conf := config.ReplicationModeConfig{
@@ -652,44 +646,55 @@ func TestReplicationMode(t *testing.T) {
 	check()
 }
 
-func TestUpdateDefaultReplicaConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
+}
+
+func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	checkMaxReplicas := func(expect uint64) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		replicationCfg := config.ReplicationConfig{}
+		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Equal(expect, replicationCfg.MaxReplicas)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return replicationCfg.MaxReplicas == expect
+		})
 	}
 
-	checkLocaltionLabels := func(expect int) {
+	checkLocationLabels := func(expect int) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		replicationCfg := config.ReplicationConfig{}
+		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Len(replicationCfg.LocationLabels, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return len(replicationCfg.LocationLabels) == expect
+		})
+	}
+
+	checkIsolationLevel := func(expect string) {
+		args := []string{"-u", pdAddr, "config", "show", "replication"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		replicationCfg := sc.ReplicationConfig{}
+		re.NoError(json.Unmarshal(output, &replicationCfg))
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return replicationCfg.IsolationLevel == expect
+		})
 	}
 
 	checkRuleCount := func(expect int) {
@@ -698,7 +703,9 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		re.NoError(err)
 		rule := placement.Rule{}
 		re.NoError(json.Unmarshal(output, &rule))
-		re.Equal(expect, rule.Count)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return rule.Count == expect
+		})
 	}
 
 	checkRuleLocationLabels := func(expect int) {
@@ -707,7 +714,20 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		re.NoError(err)
 		rule := placement.Rule{}
 		re.NoError(json.Unmarshal(output, &rule))
-		re.Len(rule.LocationLabels, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return len(rule.LocationLabels) == expect
+		})
+	}
+
+	checkRuleIsolationLevel := func(expect string) {
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		rule := placement.Rule{}
+		re.NoError(json.Unmarshal(output, &rule))
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return rule.IsolationLevel == expect
+		})
 	}
 
 	// update successfully when placement rules is not enabled.
@@ -718,8 +738,13 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "zone,host")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	checkLocaltionLabels(2)
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "isolation-level", "zone")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	checkLocationLabels(2)
 	checkRuleLocationLabels(2)
+	checkIsolationLevel("zone")
+	checkRuleIsolationLevel("zone")
 
 	// update successfully when only one default rule exists.
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -732,14 +757,21 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 	checkMaxReplicas(3)
 	checkRuleCount(3)
 
+	// We need to change isolation first because we will validate
+	// if the location label contains the isolation level when setting location labels.
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "isolation-level", "host")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "host")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	checkLocaltionLabels(1)
+	checkLocationLabels(1)
 	checkRuleLocationLabels(1)
+	checkIsolationLevel("host")
+	checkRuleIsolationLevel("host")
 
 	// update unsuccessfully when many rule exists.
-	fname := t.TempDir()
+	fname := suite.T().TempDir()
 	rules := []placement.Rule{
 		{
 			GroupID: "pd",
@@ -760,20 +792,21 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 	re.NoError(err)
 	checkMaxReplicas(4)
 	checkRuleCount(4)
-	checkLocaltionLabels(1)
+	checkLocationLabels(1)
 	checkRuleLocationLabels(1)
+	checkIsolationLevel("host")
+	checkRuleIsolationLevel("host")
 }
 
-func TestPDServerConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPDServerConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPDServerConfig)
+}
+
+func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -781,10 +814,7 @@ func TestPDServerConfig(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetServer(cluster.GetLeader())
-	re.NoError(leaderServer.BootstrapCluster())
-	svr := leaderServer.GetServer()
-	pdctl.MustPutStore(re, svr, store)
+	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")

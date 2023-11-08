@@ -16,11 +16,15 @@ package election
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
 )
@@ -29,27 +33,15 @@ const defaultLeaseTimeout = 1
 
 func TestLeadership(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
-	etcd, err := embed.StartEtcd(cfg)
-	defer func() {
-		etcd.Close()
-	}()
-	re.NoError(err)
-
-	ep := cfg.LCUrls[0].String()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints: []string{ep},
-	})
-	re.NoError(err)
-
-	<-etcd.Server.ReadyNotify()
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
 
 	// Campaign the same leadership
 	leadership1 := NewLeadership(client, "/test_leader", "test_leader_1")
 	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2")
 
 	// leadership1 starts first and get the leadership
-	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+	err := leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	// leadership2 starts then and can not get the leadership
 	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
@@ -117,4 +109,156 @@ func TestLeadership(t *testing.T) {
 	re.True(lease2.IsExpired())
 	re.NoError(lease1.Close())
 	re.NoError(lease2.Close())
+}
+
+func TestExitWatch(t *testing.T) {
+	re := require.New(t)
+	leaderKey := "/test_leader"
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/fastTick", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
+	// Case1: close the client before the watch loop starts
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+		client.Close()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
+		return func() {}
+	})
+	// Case2: close the client when the watch loop is running
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+		// Wait for the watch loop to start
+		time.Sleep(500 * time.Millisecond)
+		client.Close()
+		return func() {}
+	})
+	// Case3: delete the leader key
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+		leaderKey := leaderKey
+		_, err := client.Delete(context.Background(), leaderKey)
+		re.NoError(err)
+		return func() {}
+	})
+	// Case4: close the server before the watch loop starts
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
+		server.Close()
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
+		return func() {}
+	})
+	// Case5: close the server when the watch loop is running
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+		// Wait for the watch loop to start
+		time.Sleep(500 * time.Millisecond)
+		server.Close()
+		return func() {}
+	})
+	// Case6: transfer leader without client reconnection.
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+		cfg1 := server.Config()
+		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
+		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().LCUrls)
+		re.NoError(err)
+		// close the original leader
+		server.Server.HardStop()
+		// delete the leader key with the new client
+		client2.Delete(context.Background(), leaderKey)
+		return func() {
+			etcd2.Close()
+			client2.Close()
+		}
+	})
+	// Case7: loss the quorum when the watch loop is running
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+		cfg1 := server.Config()
+		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
+		cfg2 := etcd2.Config()
+		etcd3 := etcdutil.MustAddEtcdMember(t, &cfg2, client)
+
+		resp2, err := client.MemberList(context.Background())
+		re.NoError(err)
+		re.Equal(3, len(resp2.Members))
+
+		etcd2.Server.HardStop()
+		etcd3.Server.HardStop()
+		return func() {}
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/fastTick"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+}
+
+func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embed.Etcd, client *clientv3.Client) func()) {
+	re := require.New(t)
+	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
+	re.NoError(err)
+	defer client2.Close()
+
+	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
+	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
+	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+	re.NoError(err)
+	resp, err := client2.Get(context.Background(), leaderKey)
+	re.NoError(err)
+	done := make(chan struct{})
+	go func() {
+		leadership2.Watch(context.Background(), resp.Header.Revision)
+		done <- struct{}{}
+	}()
+
+	cleanFunc := injectFunc(servers[0], client2)
+	defer cleanFunc()
+
+	testutil.Eventually(re, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func TestRequestProgress(t *testing.T) {
+	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
+		re := require.New(t)
+		fname := testutil.InitTempFileLogger("debug")
+		defer os.RemoveAll(fname)
+		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
+		defer clean()
+		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
+		re.NoError(err)
+		defer client2.Close()
+
+		leaderKey := "/test_leader"
+		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
+		leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
+		err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+		re.NoError(err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		resp, err := client2.Get(ctx, leaderKey)
+		re.NoError(err)
+		go func() {
+			leadership2.Watch(ctx, resp.Header.Revision)
+		}()
+
+		if injectWatchChanBlock {
+			failpoint.Enable("github.com/tikv/pd/pkg/election/watchChanBlock", "return(true)")
+			testutil.Eventually(re, func() bool {
+				b, _ := os.ReadFile(fname)
+				l := string(b)
+				return strings.Contains(l, "watch channel is blocked for a long time")
+			})
+			failpoint.Disable("github.com/tikv/pd/pkg/election/watchChanBlock")
+		} else {
+			testutil.Eventually(re, func() bool {
+				b, _ := os.ReadFile(fname)
+				l := string(b)
+				return strings.Contains(l, "watcher receives progress notify in watch loop")
+			})
+		}
+	}
+	checkWatcherRequestProgress(false)
+	checkWatcherRequestProgress(true)
 }

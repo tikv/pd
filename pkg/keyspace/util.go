@@ -76,6 +76,8 @@ var (
 	ErrNodeNotInKeyspaceGroup = errors.New("the tso node is not in this keyspace group")
 	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
 	ErrKeyspaceGroupNotEnoughReplicas = errors.New("not enough replicas in the keyspace group")
+	// ErrKeyspaceGroupWithEmptyKeyspace is used to indicate keyspace group with empty keyspace.
+	ErrKeyspaceGroupWithEmptyKeyspace = errors.New("keyspace group with empty keyspace")
 	// ErrModifyDefaultKeyspaceGroup is used to indicate that default keyspace group cannot be modified.
 	ErrModifyDefaultKeyspaceGroup = errors.New("default keyspace group cannot be modified")
 	// ErrNoAvailableNode is used to indicate no available node in the keyspace group.
@@ -193,8 +195,8 @@ func getRegionLabelID(id uint32) string {
 	return regionLabelIDPrefix + strconv.FormatUint(uint64(id), endpoint.SpaceIDBase)
 }
 
-// makeLabelRule makes the label rule for the given keyspace id.
-func makeLabelRule(id uint32) *labeler.LabelRule {
+// MakeLabelRule makes the label rule for the given keyspace id.
+func MakeLabelRule(id uint32) *labeler.LabelRule {
 	return &labeler.LabelRule{
 		ID:    getRegionLabelID(id),
 		Index: 0,

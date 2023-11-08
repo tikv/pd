@@ -15,9 +15,7 @@
 package schedulers
 
 import (
-	"bytes"
 	"fmt"
-
 	"math"
 	"math/rand"
 	"net/http"
@@ -38,13 +36,41 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
+const (
+	// HotRegionName is balance hot region scheduler name.
+	HotRegionName = "balance-hot-region-scheduler"
+	// HotRegionType is balance hot region scheduler type.
+	HotRegionType          = "hot-region"
+	splitHotReadBuckets    = "split-hot-read-region"
+	splitHotWriteBuckets   = "split-hot-write-region"
+	splitProgressiveRank   = int64(-5)
+	minHotScheduleInterval = time.Second
+	maxHotScheduleInterval = 20 * time.Second
+)
+
 var (
+	// schedulePeerPr the probability of schedule the hot peer.
+	schedulePeerPr = 0.66
+	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
+	pendingAmpFactor = 2.0
+	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
+	// as it implies that this dimension is sufficiently uniform.
+	stddevThreshold = 0.1
+	// topnPosition is the position of the topn peer in the hot peer list.
+	// We use it to judge whether to schedule the hot peer in some cases.
+	topnPosition = 10
+	// statisticsInterval is the interval to update statistics information.
 	statisticsInterval = time.Second
+)
+
+var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	hotSchedulerCounter                     = schedulerCounter.WithLabelValues(HotRegionName, "schedule")
 	hotSchedulerSkipCounter                 = schedulerCounter.WithLabelValues(HotRegionName, "skip")
@@ -60,6 +86,8 @@ var (
 	// counter related with the split region
 	hotSchedulerNotFoundSplitKeysCounter          = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
 	hotSchedulerRegionBucketsNotHotCounter        = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
+	hotSchedulerOnlyOneBucketsHotCounter          = schedulerCounter.WithLabelValues(HotRegionName, "only_one_buckets_hot")
+	hotSchedulerHotBucketNotValidCounter          = schedulerCounter.WithLabelValues(HotRegionName, "hot_buckets_not_valid")
 	hotSchedulerRegionBucketsSingleHotSpotCounter = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_single_hot_spot")
 	hotSchedulerSplitSuccessCounter               = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
 	hotSchedulerNeedSplitBeforeScheduleCounter    = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
@@ -77,27 +105,23 @@ var (
 	writeSkipKeyDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-key-uniform-store")
 	readSkipQueryDimUniformStoreCounter  = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-query-uniform-store")
 	writeSkipQueryDimUniformStoreCounter = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-query-uniform-store")
-
-	pendingOpFails = schedulerStatus.WithLabelValues(HotRegionName, "pending_op_fails")
+	pendingOpFailsStoreCounter           = schedulerCounter.WithLabelValues(HotRegionName, "pending-op-fails")
 )
 
 type baseHotScheduler struct {
 	*BaseScheduler
-	// store information, including pending Influence by resource type
+	// stLoadInfos contain store statistics information by resource type.
+	// stLoadInfos is temporary states but exported to API or metrics.
 	// Every time `Schedule()` will recalculate it.
-	stInfos map[uint64]*statistics.StoreSummaryInfo
-	// temporary states but exported to API or metrics
-	// Every time `Schedule()` will recalculate it.
-	stLoadInfos    [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
+	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
+	// stHistoryLoads stores the history `stLoadInfos`
+	// Every time `Schedule()` will rolling update it.
 	stHistoryLoads *statistics.StoreHistoryLoads
-	// temporary states
-	// Every time `Schedule()` will recalculate it.
-	storesLoads map[uint64][]float64
-	// regionPendings stores regionID -> pendingInfluence
+	// regionPendings stores regionID -> pendingInfluence,
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
 	regionPendings  map[uint64]*pendingInfluence
-	types           []statistics.RWType
+	types           []utils.RWType
 	r               *rand.Rand
 	updateReadTime  time.Time
 	updateWriteTime time.Time
@@ -107,9 +131,9 @@ func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
-		types:          []statistics.RWType{statistics.Write, statistics.Read},
+		types:          []utils.RWType{utils.Write, utils.Read},
 		regionPendings: make(map[uint64]*pendingInfluence),
-		stHistoryLoads: statistics.NewStoreHistoryLoads(statistics.DimLen),
+		stHistoryLoads: statistics.NewStoreHistoryLoads(utils.DimLen),
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -120,24 +144,24 @@ func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store, only update read or write load detail
-func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.ScheduleCluster) {
-	h.stInfos = statistics.SummaryStoreInfos(cluster.GetStores())
-	h.summaryPendingInfluence()
-	h.storesLoads = cluster.GetStoresLoads()
-	isTraceRegionFlow := cluster.GetOpts().IsTraceRegionFlow()
+func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.SchedulerCluster) {
+	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
+	h.summaryPendingInfluence(storeInfos)
+	storesLoads := cluster.GetStoresLoads()
+	isTraceRegionFlow := cluster.GetSchedulerConfig().IsTraceRegionFlow()
 
 	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, resource constant.ResourceKind) {
 		ty := buildResourceType(rw, resource)
 		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
-			h.stInfos,
-			h.storesLoads,
+			storeInfos,
+			storesLoads,
 			h.stHistoryLoads,
 			regionStats,
 			isTraceRegionFlow,
 			rw, resource)
 	}
 	switch rw {
-	case statistics.Read:
+	case utils.Read:
 		// update read statistics
 		if time.Since(h.updateReadTime) >= statisticsInterval {
 			regionRead := cluster.RegionReadStats()
@@ -145,7 +169,7 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.
 			prepare(regionRead, constant.RegionKind)
 			h.updateReadTime = time.Now()
 		}
-	case statistics.Write:
+	case utils.Write:
 		// update write statistics
 		if time.Since(h.updateWriteTime) >= statisticsInterval {
 			regionWrite := cluster.RegionWriteStats()
@@ -159,11 +183,11 @@ func (h *baseHotScheduler) prepareForBalance(rw statistics.RWType, cluster sche.
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (h *baseHotScheduler) summaryPendingInfluence() {
+func (h *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
 	for id, p := range h.regionPendings {
 		for _, from := range p.froms {
-			from := h.stInfos[from]
-			to := h.stInfos[p.to]
+			from := storeInfos[from]
+			to := storeInfos[p.to]
 			maxZombieDur := p.maxZombieDuration
 			weight, needGC := calcPendingInfluence(p.op, maxZombieDur)
 
@@ -180,11 +204,11 @@ func (h *baseHotScheduler) summaryPendingInfluence() {
 			}
 		}
 	}
-	for storeID, info := range h.stInfos {
+	for storeID, info := range storeInfos {
 		storeLabel := strconv.FormatUint(storeID, 10)
-		if infl := info.PendingSum; infl != nil {
-			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, kind statistics.RegionStatKind) {
-				setHotPendingInfluenceMetrics(storeLabel, rwTy.String(), statistics.DimToString(dim), infl.Loads[kind])
+		if infl := info.PendingSum; infl != nil && len(infl.Loads) != 0 {
+			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
+				setHotPendingInfluenceMetrics(storeLabel, rwTy.String(), utils.DimToString(dim), infl.Loads[kind])
 			})
 		}
 	}
@@ -195,32 +219,9 @@ func setHotPendingInfluenceMetrics(storeLabel, rwTy, dim string, load float64) {
 	HotPendingSum.WithLabelValues(storeLabel, rwTy, dim).Set(load)
 }
 
-func (h *baseHotScheduler) randomRWType() statistics.RWType {
+func (h *baseHotScheduler) randomRWType() utils.RWType {
 	return h.types[h.r.Int()%len(h.types)]
 }
-
-const (
-	// HotRegionName is balance hot region scheduler name.
-	HotRegionName = "balance-hot-region-scheduler"
-	// HotRegionType is balance hot region scheduler type.
-	HotRegionType = "hot-region"
-
-	minHotScheduleInterval = time.Second
-	maxHotScheduleInterval = 20 * time.Second
-)
-
-var (
-	// schedulePeerPr the probability of schedule the hot peer.
-	schedulePeerPr = 0.66
-	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
-	pendingAmpFactor = 2.0
-	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
-	// as it implies that this dimension is sufficiently uniform.
-	stddevThreshold = 0.1
-
-	splitBucket          = "split-hot-region"
-	splitProgressiveRank = int64(-5)
-)
 
 type hotScheduler struct {
 	name string
@@ -268,21 +269,21 @@ func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
-func (h *hotScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetOpts().GetHotRegionScheduleLimit()
+func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetSchedulerConfig().GetHotRegionScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
 	}
 	return allowed
 }
 
-func (h *hotScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	hotSchedulerCounter.Inc()
 	rw := h.randomRWType()
 	return h.dispatch(rw, cluster), nil
 }
 
-func (h *hotScheduler) dispatch(typ statistics.RWType, cluster sche.ScheduleCluster) []*operator.Operator {
+func (h *hotScheduler) dispatch(typ utils.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
 	h.prepareForBalance(typ, cluster)
@@ -291,9 +292,9 @@ func (h *hotScheduler) dispatch(typ statistics.RWType, cluster sche.ScheduleClus
 		return nil
 	}
 	switch typ {
-	case statistics.Read:
+	case utils.Read:
 		return h.balanceHotReadRegions(cluster)
-	case statistics.Write:
+	case utils.Write:
 		return h.balanceHotWriteRegions(cluster)
 	}
 	return nil
@@ -303,23 +304,23 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	regionID := op.RegionID()
 	_, ok := h.regionPendings[regionID]
 	if ok {
-		pendingOpFails.Inc()
+		pendingOpFailsStoreCounter.Inc()
 		return false
 	}
 
 	influence := newPendingInfluence(op, srcStore, dstStore, infl, maxZombieDur)
 	h.regionPendings[regionID] = influence
 
-	statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, kind statistics.RegionStatKind) {
-		hotPeerHist.WithLabelValues(h.GetName(), rwTy.String(), statistics.DimToString(dim)).Observe(infl.Loads[kind])
+	utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
+		hotPeerHist.WithLabelValues(h.GetName(), rwTy.String(), utils.DimToString(dim)).Observe(infl.Loads[kind])
 	})
 	return true
 }
 
-func (h *hotScheduler) balanceHotReadRegions(cluster sche.ScheduleCluster) []*operator.Operator {
-	leaderSolver := newBalanceSolver(h, cluster, statistics.Read, transferLeader)
+func (h *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*operator.Operator {
+	leaderSolver := newBalanceSolver(h, cluster, utils.Read, transferLeader)
 	leaderOps := leaderSolver.solve()
-	peerSolver := newBalanceSolver(h, cluster, statistics.Read, movePeer)
+	peerSolver := newBalanceSolver(h, cluster, utils.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
 		hotSchedulerSkipCounter.Inc()
@@ -359,12 +360,12 @@ func (h *hotScheduler) balanceHotReadRegions(cluster sche.ScheduleCluster) []*op
 	return nil
 }
 
-func (h *hotScheduler) balanceHotWriteRegions(cluster sche.ScheduleCluster) []*operator.Operator {
+func (h *hotScheduler) balanceHotWriteRegions(cluster sche.SchedulerCluster) []*operator.Operator {
 	// prefer to balance by peer
 	s := h.r.Intn(100)
 	switch {
 	case s < int(schedulePeerPr*100):
-		peerSolver := newBalanceSolver(h, cluster, statistics.Write, movePeer)
+		peerSolver := newBalanceSolver(h, cluster, utils.Write, movePeer)
 		ops := peerSolver.solve()
 		if len(ops) > 0 && peerSolver.tryAddPendingInfluence() {
 			return ops
@@ -372,7 +373,7 @@ func (h *hotScheduler) balanceHotWriteRegions(cluster sche.ScheduleCluster) []*o
 	default:
 	}
 
-	leaderSolver := newBalanceSolver(h, cluster, statistics.Write, transferLeader)
+	leaderSolver := newBalanceSolver(h, cluster, utils.Write, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 && leaderSolver.tryAddPendingInfluence() {
 		return ops
@@ -405,7 +406,8 @@ type solution struct {
 	secondScore int
 }
 
-// getExtremeLoad returns the min load of the src store and the max load of the dst store.
+// getExtremeLoad returns the closest load in the selected src and dst statistics.
+// in other word, the min load of the src store and the max load of the dst store.
 // If peersRate is negative, the direction is reversed.
 func (s *solution) getExtremeLoad(dim int) (src float64, dst float64) {
 	if s.getPeersRateFromCache(dim) >= 0 {
@@ -426,7 +428,7 @@ func (s *solution) getPendingLoad(dim int) (src float64, dst float64) {
 
 // calcPeersRate precomputes the peer rate and stores it in cachedPeersRate.
 func (s *solution) calcPeersRate(dims ...int) {
-	s.cachedPeersRate = make([]float64, statistics.DimLen)
+	s.cachedPeersRate = make([]float64, utils.DimLen)
 	for _, dim := range dims {
 		peersRate := s.mainPeerStat.GetLoad(dim)
 		if s.revertPeerStat != nil {
@@ -448,12 +450,14 @@ func isAvailableV1(s *solution) bool {
 }
 
 type balanceSolver struct {
-	sche.ScheduleCluster
-	sche         *hotScheduler
-	stLoadDetail map[uint64]*statistics.StoreLoadDetail
-	rwTy         statistics.RWType
-	opTy         opType
-	resourceTy   resourceType
+	sche.SchedulerCluster
+	sche             *hotScheduler
+	stLoadDetail     map[uint64]*statistics.StoreLoadDetail
+	filteredHotPeers map[uint64][]*statistics.HotPeerStat // storeID -> hotPeers(filtered)
+	nthHotPeer       map[uint64][]*statistics.HotPeerStat // storeID -> [dimLen]hotPeers
+	rwTy             utils.RWType
+	opTy             opType
+	resourceTy       resourceType
 
 	cur *solution
 
@@ -473,8 +477,6 @@ type balanceSolver struct {
 	minorDecRatio float64
 	maxPeerNum    int
 	minHotDegree  int
-	// todo: remove this after testing more scene in the single rocksdb
-	isRaftKV2 bool
 
 	firstPriorityV2Ratios  *rankV2Ratios
 	secondPriorityV2Ratios *rankV2Ratios
@@ -492,50 +494,53 @@ type balanceSolver struct {
 }
 
 func (bs *balanceSolver) init() {
-	// Init store load detail according to the type.
+	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
+	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
+	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
+	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
+	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
+	switch bs.sche.conf.GetRankFormulaVersion() {
+	case "v1":
+		bs.initRankV1()
+	default:
+		bs.initRankV2()
+	}
+
+	// Init store load detail according to the type.
 	bs.stLoadDetail = bs.sche.stLoadInfos[bs.resourceTy]
 
-	bs.maxSrc = &statistics.StoreLoad{Loads: make([]float64, statistics.DimLen)}
+	bs.maxSrc = &statistics.StoreLoad{Loads: make([]float64, utils.DimLen)}
 	bs.minDst = &statistics.StoreLoad{
-		Loads: make([]float64, statistics.DimLen),
+		Loads: make([]float64, utils.DimLen),
 		Count: math.MaxFloat64,
 	}
 	for i := range bs.minDst.Loads {
 		bs.minDst.Loads[i] = math.MaxFloat64
 	}
-	maxCur := &statistics.StoreLoad{Loads: make([]float64, statistics.DimLen)}
+	maxCur := &statistics.StoreLoad{Loads: make([]float64, utils.DimLen)}
 
+	bs.filteredHotPeers = make(map[uint64][]*statistics.HotPeerStat)
+	bs.nthHotPeer = make(map[uint64][]*statistics.HotPeerStat)
 	for _, detail := range bs.stLoadDetail {
 		bs.maxSrc = statistics.MaxLoad(bs.maxSrc, detail.LoadPred.Min())
 		bs.minDst = statistics.MinLoad(bs.minDst, detail.LoadPred.Max())
 		maxCur = statistics.MaxLoad(maxCur, &detail.LoadPred.Current)
+		bs.nthHotPeer[detail.GetID()] = make([]*statistics.HotPeerStat, utils.DimLen)
+		bs.filteredHotPeers[detail.GetID()] = bs.filterHotPeers(detail)
 	}
 
 	rankStepRatios := []float64{
-		statistics.ByteDim:  bs.sche.conf.GetByteRankStepRatio(),
-		statistics.KeyDim:   bs.sche.conf.GetKeyRankStepRatio(),
-		statistics.QueryDim: bs.sche.conf.GetQueryRateRankStepRatio()}
-	stepLoads := make([]float64, statistics.DimLen)
+		utils.ByteDim:  bs.sche.conf.GetByteRankStepRatio(),
+		utils.KeyDim:   bs.sche.conf.GetKeyRankStepRatio(),
+		utils.QueryDim: bs.sche.conf.GetQueryRateRankStepRatio()}
+	stepLoads := make([]float64, utils.DimLen)
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
 	}
 	bs.rankStep = &statistics.StoreLoad{
 		Loads: stepLoads,
 		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
-	}
-
-	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
-	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
-	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
-	bs.minHotDegree = bs.GetOpts().GetHotRegionCacheHitsThreshold()
-	bs.isRaftKV2 = bs.GetStoreConfig().IsRaftKV2()
-
-	switch bs.sche.conf.GetRankFormulaVersion() {
-	case "v1":
-		bs.initRankV1()
-	default:
-		bs.initRankV2()
 	}
 }
 
@@ -569,7 +574,7 @@ func (bs *balanceSolver) isSelectedDim(dim int) bool {
 }
 
 func (bs *balanceSolver) getPriorities() []string {
-	querySupport := bs.sche.conf.checkQuerySupport(bs.ScheduleCluster)
+	querySupport := bs.sche.conf.checkQuerySupport(bs.SchedulerCluster)
 	// For read, transfer-leader and move-peer have the same priority config
 	// For write, they are different
 	switch bs.resourceTy {
@@ -584,19 +589,19 @@ func (bs *balanceSolver) getPriorities() []string {
 	return []string{}
 }
 
-func newBalanceSolver(sche *hotScheduler, cluster sche.ScheduleCluster, rwTy statistics.RWType, opTy opType) *balanceSolver {
+func newBalanceSolver(sche *hotScheduler, cluster sche.SchedulerCluster, rwTy utils.RWType, opTy opType) *balanceSolver {
 	bs := &balanceSolver{
-		ScheduleCluster: cluster,
-		sche:            sche,
-		rwTy:            rwTy,
-		opTy:            opTy,
+		SchedulerCluster: cluster,
+		sche:             sche,
+		rwTy:             rwTy,
+		opTy:             opTy,
 	}
 	bs.init()
 	return bs
 }
 
 func (bs *balanceSolver) isValid() bool {
-	if bs.ScheduleCluster == nil || bs.sche == nil || bs.stLoadDetail == nil {
+	if bs.SchedulerCluster == nil || bs.sche == nil || bs.stLoadDetail == nil {
 		return false
 	}
 	return true
@@ -606,7 +611,7 @@ func (bs *balanceSolver) filterUniformStoreV1() (string, bool) {
 	if !bs.enableExpectation() {
 		return "", false
 	}
-	// Because region is available for src and dst, so stddev is the same for both, only need to calcurate one.
+	// Because region is available for src and dst, so stddev is the same for both, only need to calculate one.
 	isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
 	if isUniformFirstPriority && isUniformSecondPriority {
 		// If both dims are enough uniform, any schedule is unnecessary.
@@ -660,7 +665,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	for _, srcStore := range bs.filterSrcStores() {
 		bs.cur.srcStore = srcStore
 		srcStoreID := srcStore.GetID()
-		for _, mainPeerStat := range bs.filterHotPeers(srcStore) {
+		for _, mainPeerStat := range bs.filteredHotPeers[srcStoreID] {
 			if bs.cur.region = bs.getRegion(mainPeerStat, srcStoreID); bs.cur.region == nil {
 				continue
 			} else if bs.opTy == movePeer {
@@ -670,9 +675,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				}
 			}
 			bs.cur.mainPeerStat = mainPeerStat
-			if tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) && bs.GetStoreConfig().IsEnableRegionBucket() {
+			if bs.GetStoreConfig().IsEnableRegionBucket() && bs.tooHotNeedSplit(srcStore, mainPeerStat, splitThresholds) {
 				hotSchedulerRegionTooHotNeedSplitCounter.Inc()
-				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, true /*too hot need to split*/)
+				ops := bs.createSplitOperator([]*core.RegionInfo{bs.cur.region}, byLoad)
 				if len(ops) > 0 {
 					bs.ops = ops
 					bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
@@ -688,7 +693,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 				if bs.needSearchRevertRegions() {
 					hotSchedulerSearchRevertRegionsCounter.Inc()
 					dstStoreID := dstStore.GetID()
-					for _, revertPeerStat := range bs.filterHotPeers(bs.cur.dstStore) {
+					for _, revertPeerStat := range bs.filteredHotPeers[dstStoreID] {
 						revertRegion := bs.getRegion(revertPeerStat, dstStoreID)
 						if revertRegion == nil || revertRegion.GetID() == bs.cur.region.GetID() ||
 							!allowRevertRegion(revertRegion, srcStoreID) {
@@ -711,7 +716,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 }
 
 func (bs *balanceSolver) skipCounter(label string) prometheus.Counter {
-	if bs.rwTy == statistics.Read {
+	if bs.rwTy == utils.Read {
 		switch label {
 		case "byte":
 			return readSkipByteDimUniformStoreCounter
@@ -753,6 +758,9 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 	dstStoreID := uint64(0)
 	if isSplit {
 		region := bs.GetRegion(bs.ops[0].RegionID())
+		if region == nil {
+			return false
+		}
 		for id := range region.GetStoreIDs() {
 			srcStoreIDs = append(srcStoreIDs, id)
 		}
@@ -779,7 +787,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 }
 
 func (bs *balanceSolver) collectPendingInfluence(peer *statistics.HotPeerStat) statistics.Influence {
-	infl := statistics.Influence{Loads: make([]float64, statistics.RegionStatCount), Count: 1}
+	infl := statistics.Influence{Loads: make([]float64, utils.RegionStatCount), Count: 1}
 	bs.rwTy.SetFullLoadRates(infl.Loads, peer.GetLoads())
 	inverse := bs.rwTy.Inverse()
 	another := bs.GetHotPeerStat(inverse, peer.RegionID, peer.StoreID)
@@ -794,7 +802,7 @@ func (bs *balanceSolver) collectPendingInfluence(peer *statistics.HotPeerStat) s
 func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 	switch bs.resourceTy {
 	case writeLeader:
-		if bs.firstPriority == statistics.QueryDim {
+		if bs.firstPriority == utils.QueryDim {
 			// We use store query info rather than total of hot write leader to guide hot write leader scheduler
 			// when its first priority is `QueryDim`, because `Write-peer` does not have `QueryDim`.
 			// The reason is the same with `tikvCollector.GetLoads`.
@@ -823,7 +831,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			if !confEnableForTiFlash {
 				continue
 			}
-			if bs.rwTy != statistics.Write || bs.opTy != movePeer {
+			if bs.rwTy != utils.Write || bs.opTy != movePeer {
 				continue
 			}
 			srcToleranceRatio += tiflashToleranceRatioCorrection
@@ -836,12 +844,9 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 			hotSchedulerResultCounter.WithLabelValues("src-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 			continue
 		}
-		// only raftkv2 needs to check the history loads.
-		if bs.isRaftKV2 {
-			if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
-				hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
-				continue
-			}
+		if !bs.checkSrcHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, srcToleranceRatio) {
+			hotSchedulerResultCounter.WithLabelValues("src-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+			continue
 		}
 
 		ret[id] = detail
@@ -869,7 +874,9 @@ func (bs *balanceSolver) checkSrcHistoryLoadsByPriorityAndTolerance(current, exp
 
 // filterHotPeers filtered hot peers from statistics.HotPeerStat and deleted the peer if its region is in pending status.
 // The returned hotPeer count in controlled by `max-peer-number`.
-func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (ret []*statistics.HotPeerStat) {
+func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) []*statistics.HotPeerStat {
+	hotPeers := storeLoad.HotPeers
+	ret := make([]*statistics.HotPeerStat, 0, len(hotPeers))
 	appendItem := func(item *statistics.HotPeerStat) {
 		if _, ok := bs.sche.regionPendings[item.ID()]; !ok && !item.IsNeedCoolDownTransferLeader(bs.minHotDegree, bs.rwTy) {
 			// no in pending operator and no need cool down after transfer leader
@@ -877,36 +884,42 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) (
 		}
 	}
 
-	src := storeLoad.HotPeers
-	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
-	if len(src) <= bs.maxPeerNum {
-		ret = make([]*statistics.HotPeerStat, 0, len(src))
-		for _, peer := range src {
-			appendItem(peer)
-		}
-	} else {
-		union := bs.sortHotPeers(src)
+	var firstSort, secondSort []*statistics.HotPeerStat
+	if len(hotPeers) >= topnPosition || len(hotPeers) > bs.maxPeerNum {
+		firstSort = make([]*statistics.HotPeerStat, len(hotPeers))
+		copy(firstSort, hotPeers)
+		sort.Slice(firstSort, func(i, j int) bool {
+			return firstSort[i].GetLoad(bs.firstPriority) > firstSort[j].GetLoad(bs.firstPriority)
+		})
+		secondSort = make([]*statistics.HotPeerStat, len(hotPeers))
+		copy(secondSort, hotPeers)
+		sort.Slice(secondSort, func(i, j int) bool {
+			return secondSort[i].GetLoad(bs.secondPriority) > secondSort[j].GetLoad(bs.secondPriority)
+		})
+	}
+	if len(hotPeers) >= topnPosition {
+		storeID := storeLoad.GetID()
+		bs.nthHotPeer[storeID][bs.firstPriority] = firstSort[topnPosition-1]
+		bs.nthHotPeer[storeID][bs.secondPriority] = secondSort[topnPosition-1]
+	}
+	if len(hotPeers) > bs.maxPeerNum {
+		union := bs.sortHotPeers(firstSort, secondSort)
 		ret = make([]*statistics.HotPeerStat, 0, len(union))
 		for peer := range union {
 			appendItem(peer)
 		}
+		return ret
 	}
 
-	return
+	for _, peer := range hotPeers {
+		appendItem(peer)
+	}
+	return ret
 }
 
-func (bs *balanceSolver) sortHotPeers(ret []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
-	firstSort := make([]*statistics.HotPeerStat, len(ret))
-	copy(firstSort, ret)
-	sort.Slice(firstSort, func(i, j int) bool {
-		return firstSort[i].GetLoad(bs.firstPriority) > firstSort[j].GetLoad(bs.firstPriority)
-	})
-	secondSort := make([]*statistics.HotPeerStat, len(ret))
-	copy(secondSort, ret)
-	sort.Slice(secondSort, func(i, j int) bool {
-		return secondSort[i].GetLoad(bs.secondPriority) > secondSort[j].GetLoad(bs.secondPriority)
-	})
+func (bs *balanceSolver) sortHotPeers(firstSort, secondSort []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
 	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
+	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
 	for len(union) < bs.maxPeerNum {
 		for len(firstSort) > 0 {
 			peer := firstSort[0]
@@ -940,7 +953,7 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 		return false
 	}
 
-	if !filter.IsRegionReplicated(bs.ScheduleCluster, region) {
+	if !filter.IsRegionReplicated(bs.SchedulerCluster, region) {
 		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
 		hotSchedulerAbnormalReplicaCounter.Inc()
 		return false
@@ -987,14 +1000,14 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 	srcStore := bs.cur.srcStore.StoreInfo
 	switch bs.opTy {
 	case movePeer:
-		if bs.rwTy == statistics.Read && bs.cur.mainPeerStat.IsLeader() { // for hot-read scheduler, only move peer
+		if bs.rwTy == utils.Read && bs.cur.mainPeerStat.IsLeader() { // for hot-read scheduler, only move peer
 			return nil
 		}
 		filters = []filter.Filter{
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
+			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
 		}
 		for _, detail := range bs.stLoadDetail {
 			candidates = append(candidates, detail)
@@ -1008,10 +1021,10 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true, OperatorLevel: constant.High},
 			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
 		}
-		if bs.rwTy == statistics.Read {
+		if bs.rwTy == utils.Read {
 			peers := bs.cur.region.GetPeers()
 			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High}}
-			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
 			for storeID, detail := range bs.stLoadDetail {
@@ -1026,12 +1039,12 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 					continue
 				}
 				// move leader
-				if filter.Target(bs.GetOpts(), detail.StoreInfo, moveLeaderFilters) {
+				if filter.Target(bs.GetSchedulerConfig(), detail.StoreInfo, moveLeaderFilters) {
 					candidates = append(candidates, detail)
 				}
 			}
 		} else {
-			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetOpts(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
 			for _, peer := range bs.cur.region.GetFollowers() {
@@ -1058,23 +1071,20 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 			if !confEnableForTiFlash {
 				continue
 			}
-			if bs.rwTy != statistics.Write || bs.opTy != movePeer {
+			if bs.rwTy != utils.Write || bs.opTy != movePeer {
 				continue
 			}
 			dstToleranceRatio += tiflashToleranceRatioCorrection
 		}
-		if filter.Target(bs.GetOpts(), store, filters) {
+		if filter.Target(bs.GetSchedulerConfig(), store, filters) {
 			id := store.GetID()
 			if !bs.checkDstByPriorityAndTolerance(detail.LoadPred.Max(), &detail.LoadPred.Expect, dstToleranceRatio) {
 				hotSchedulerResultCounter.WithLabelValues("dst-store-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
 				continue
 			}
-			// only raftkv2 needs to check history loads
-			if bs.isRaftKV2 {
-				if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
-					hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
-					continue
-				}
+			if !bs.checkDstHistoryLoadsByPriorityAndTolerance(&detail.LoadPred.Current, &detail.LoadPred.Expect, dstToleranceRatio) {
+				hotSchedulerResultCounter.WithLabelValues("dst-store-history-loads-failed-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
+				continue
 			}
 
 			hotSchedulerResultCounter.WithLabelValues("dst-store-succ-"+bs.resourceTy.String(), strconv.FormatUint(id, 10)).Inc()
@@ -1261,11 +1271,11 @@ func (bs *balanceSolver) isNotWorsened(dim int) bool {
 
 func (bs *balanceSolver) getMinRate(dim int) float64 {
 	switch dim {
-	case statistics.KeyDim:
+	case utils.KeyDim:
 		return bs.sche.conf.GetMinHotKeyRate()
-	case statistics.ByteDim:
+	case utils.ByteDim:
 		return bs.sche.conf.GetMinHotByteRate()
-	case statistics.QueryDim:
+	case utils.QueryDim:
 		return bs.sche.conf.GetMinHotQueryRate()
 	}
 	return -1
@@ -1332,10 +1342,10 @@ func (bs *balanceSolver) betterThanV1(old *solution) bool {
 	return false
 }
 
-var dimToStep = [statistics.DimLen]float64{
-	statistics.ByteDim:  100,
-	statistics.KeyDim:   10,
-	statistics.QueryDim: 10,
+var dimToStep = [utils.DimLen]float64{
+	utils.ByteDim:  100,
+	utils.KeyDim:   10,
+	utils.QueryDim: 10,
 }
 
 func (bs *balanceSolver) getRkCmpPrioritiesV1(old *solution) (firstCmp int, secondCmp int) {
@@ -1344,10 +1354,16 @@ func (bs *balanceSolver) getRkCmpPrioritiesV1(old *solution) (firstCmp int, seco
 	return
 }
 
-// smaller is better
+// compareSrcStore compares the source store of detail1, detail2, the result is:
+// 1. if detail1 is better than detail2, return -1
+// 2. if detail1 is worse than detail2, return 1
+// 3. if detail1 is equal to detail2, return 0
+// The comparison is based on the following principles:
+// 1. select the min load of store in current and future, because we want to select the store as source store;
+// 2. compare detail1 and detail2 by first priority and second priority, we pick the larger one to speed up the convergence;
+// 3. if the first priority and second priority are equal, we pick the store with the smaller difference between current and future to minimize oscillations.
 func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadDetail) int {
 	if detail1 != detail2 {
-		// compare source store
 		var lpCmp storeLPCmp
 		if bs.resourceTy == writeLeader {
 			lpCmp = sliceLPCmp(
@@ -1377,7 +1393,14 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadD
 	return 0
 }
 
-// smaller is better
+// compareDstStore compares the destination store of detail1, detail2, the result is:
+// 1. if detail1 is better than detail2, return -1
+// 2. if detail1 is worse than detail2, return 1
+// 3. if detail1 is equal to detail2, return 0
+// The comparison is based on the following principles:
+// 1. select the max load of store in current and future, because we want to select the store as destination store;
+// 2. compare detail1 and detail2 by first priority and second priority, we pick the smaller one to speed up the convergence;
+// 3. if the first priority and second priority are equal, we pick the store with the smaller difference between current and future to minimize oscillations.
 func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadDetail) int {
 	if detail1 != detail2 {
 		// compare destination store
@@ -1409,6 +1432,9 @@ func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadD
 	return 0
 }
 
+// stepRank returns a function can calculate the discretized data,
+// where `rate` will be discretized by `step`.
+// `rate` is the speed of the dim, `step` is the step size of the discretized data.
 func stepRank(rk0 float64, step float64) func(float64) int64 {
 	return func(rate float64) int64 {
 		return int64((rate - rk0) / step)
@@ -1458,14 +1484,14 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 			if region == nil {
 				continue
 			}
-			if region.GetApproximateSize() > bs.GetOpts().GetMaxMovableHotPeerSize() {
+			if region.GetApproximateSize() > bs.GetSchedulerConfig().GetMaxMovableHotPeerSize() {
 				hotSchedulerNeedSplitBeforeScheduleCounter.Inc()
 				splitRegions = append(splitRegions, region)
 			}
 		}
 	}
 	if len(splitRegions) > 0 {
-		return bs.createSplitOperator(splitRegions, false /* region is too big need split before move */)
+		return bs.createSplitOperator(splitRegions, bySize)
 	}
 
 	srcStoreID := bs.cur.srcStore.GetID()
@@ -1476,9 +1502,9 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 
 	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
 	switch bs.rwTy {
-	case statistics.Read:
+	case utils.Read:
 		createOperator = bs.createReadOperator
-	case statistics.Write:
+	case utils.Write:
 		createOperator = bs.createWriteOperator
 	}
 
@@ -1504,9 +1530,114 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	return
 }
 
+// bucketFirstStat returns the first priority statistics of the bucket.
+// if the first priority is query rate, it will return the second priority .
+func (bs *balanceSolver) bucketFirstStat() utils.RegionStatKind {
+	base := utils.RegionReadBytes
+	if bs.rwTy == utils.Write {
+		base = utils.RegionWriteBytes
+	}
+	offset := bs.firstPriority
+	// todo: remove it if bucket's qps has been supported.
+	if bs.firstPriority == utils.QueryDim {
+		offset = bs.secondPriority
+	}
+	return base + utils.RegionStatKind(offset)
+}
+
+func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]byte) *operator.Operator {
+	splitKeys := make([][]byte, 0, len(keys))
+	for _, key := range keys {
+		// make sure that this split key is in the region
+		if keyutil.Between(region.GetStartKey(), region.GetEndKey(), key) {
+			splitKeys = append(splitKeys, key)
+		}
+	}
+	if len(splitKeys) == 0 {
+		hotSchedulerNotFoundSplitKeysCounter.Inc()
+		return nil
+	}
+	desc := splitHotReadBuckets
+	if bs.rwTy == utils.Write {
+		desc = splitHotWriteBuckets
+	}
+
+	op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKeys)
+	if err != nil {
+		log.Error("fail to create split operator",
+			zap.Stringer("resource-type", bs.resourceTy),
+			errs.ZapError(err))
+		return nil
+	}
+	hotSchedulerSplitSuccessCounter.Inc()
+	return op
+}
+
+func (bs *balanceSolver) splitBucketsByLoad(region *core.RegionInfo, bucketStats []*buckets.BucketStat) *operator.Operator {
+	// bucket key range maybe not match the region key range, so we should filter the invalid buckets.
+	// filter some buckets key range not match the region start key and end key.
+	stats := make([]*buckets.BucketStat, 0, len(bucketStats))
+	startKey, endKey := region.GetStartKey(), region.GetEndKey()
+	for _, stat := range bucketStats {
+		if keyutil.Between(startKey, endKey, stat.StartKey) || keyutil.Between(startKey, endKey, stat.EndKey) {
+			stats = append(stats, stat)
+		}
+	}
+	if len(stats) == 0 {
+		hotSchedulerHotBucketNotValidCounter.Inc()
+		return nil
+	}
+
+	// if this region has only one buckets, we can't split it into two hot region, so skip it.
+	if len(stats) == 1 {
+		hotSchedulerOnlyOneBucketsHotCounter.Inc()
+		return nil
+	}
+	totalLoads := uint64(0)
+	dim := bs.bucketFirstStat()
+	for _, stat := range stats {
+		totalLoads += stat.Loads[dim]
+	}
+
+	// find the half point of the total loads.
+	acc, splitIdx := uint64(0), 0
+	for ; acc < totalLoads/2 && splitIdx < len(stats); splitIdx++ {
+		acc += stats[splitIdx].Loads[dim]
+	}
+	if splitIdx <= 0 {
+		hotSchedulerRegionBucketsSingleHotSpotCounter.Inc()
+		return nil
+	}
+	splitKey := stats[splitIdx-1].EndKey
+	// if the split key is not in the region, we should use the start key of the bucket.
+	if !keyutil.Between(region.GetStartKey(), region.GetEndKey(), splitKey) {
+		splitKey = stats[splitIdx-1].StartKey
+	}
+	op := bs.splitBucketsOperator(region, [][]byte{splitKey})
+	if op != nil {
+		op.AdditionalInfos["accLoads"] = strconv.FormatUint(acc-stats[splitIdx-1].Loads[dim], 10)
+		op.AdditionalInfos["totalLoads"] = strconv.FormatUint(totalLoads, 10)
+	}
+	return op
+}
+
+// splitBucketBySize splits the region order by bucket count if the region is too big.
+func (bs *balanceSolver) splitBucketBySize(region *core.RegionInfo) *operator.Operator {
+	splitKeys := make([][]byte, 0)
+	for _, key := range region.GetBuckets().GetKeys() {
+		if keyutil.Between(region.GetStartKey(), region.GetEndKey(), key) {
+			splitKeys = append(splitKeys, key)
+		}
+	}
+	if len(splitKeys) == 0 {
+		return nil
+	}
+	splitKey := splitKeys[len(splitKeys)/2]
+	return bs.splitBucketsOperator(region, [][]byte{splitKey})
+}
+
 // createSplitOperator creates split operators for the given regions.
-// isTooHot true indicates that the region is too hot and needs split.
-func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHot bool) []*operator.Operator {
+func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strategy splitStrategy) []*operator.Operator {
 	if len(regions) == 0 {
 		return nil
 	}
@@ -1514,58 +1645,28 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, isTooHo
 	for i, region := range regions {
 		ids[i] = region.GetID()
 	}
-	hotBuckets := bs.ScheduleCluster.BucketsStats(bs.minHotDegree, ids...)
 	operators := make([]*operator.Operator, 0)
+	var hotBuckets map[uint64][]*buckets.BucketStat
 
 	createFunc := func(region *core.RegionInfo) {
-		stats, ok := hotBuckets[region.GetID()]
-		if !ok {
-			hotSchedulerRegionBucketsNotHotCounter.Inc()
-			return
-		}
-		// skip if only one hot buckets exists on this region.
-		if len(stats) <= 1 && isTooHot {
-			hotSchedulerRegionBucketsSingleHotSpotCounter.Inc()
-			return
-		}
-		startKey, endKey := region.GetStartKey(), region.GetEndKey()
-		splitKey := make([][]byte, 0)
-		for _, stat := range stats {
-			if keyutil.Between(startKey, endKey, stat.StartKey) && keyutil.Between(startKey, endKey, stat.EndKey) {
-				if len(splitKey) == 0 {
-					splitKey = append(splitKey, stat.StartKey, stat.EndKey)
-					continue
-				}
-				// If the last split key is equal to the current start key, we can merge them.
-				// E.g. [a, b), [b, c) -> [a, c) split keys is [a,c]
-				// Otherwise, we should append the current start key and end key.
-				// E.g. [a, b), [c, d) -> [a, b), [c, d) split keys is [a,b,c,d]
-				if bytes.Equal(stat.StartKey, splitKey[len(splitKey)-1]) {
-					// If the region is too hot, we should split all the buckets to balance the load.
-					// otherwise, we should split the buckets that are too hot.
-					if isTooHot {
-						splitKey = append(splitKey, stat.EndKey)
-					} else {
-						splitKey[len(splitKey)-1] = stat.EndKey
-					}
-				} else {
-					splitKey = append(splitKey, stat.StartKey, stat.EndKey)
-				}
+		switch strategy {
+		case bySize:
+			if op := bs.splitBucketBySize(region); op != nil {
+				operators = append(operators, op)
+			}
+		case byLoad:
+			if hotBuckets == nil {
+				hotBuckets = bs.SchedulerCluster.BucketsStats(bs.minHotDegree, ids...)
+			}
+			stats, ok := hotBuckets[region.GetID()]
+			if !ok {
+				hotSchedulerRegionBucketsNotHotCounter.Inc()
+				return
+			}
+			if op := bs.splitBucketsByLoad(region, stats); op != nil {
+				operators = append(operators, op)
 			}
 		}
-		if len(splitKey) == 0 {
-			hotSchedulerNotFoundSplitKeysCounter.Inc()
-			return
-		}
-		op, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKey)
-		if err != nil {
-			log.Error("fail to create split operator",
-				zap.Stringer("resource-type", bs.resourceTy),
-				errs.ZapError(err))
-			return
-		}
-		hotSchedulerSplitSuccessCounter.Inc()
-		operators = append(operators, op)
 	}
 
 	for _, region := range regions {
@@ -1767,16 +1868,16 @@ func (ty resourceType) String() string {
 	}
 }
 
-func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
+func toResourceType(rwTy utils.RWType, opTy opType) resourceType {
 	switch rwTy {
-	case statistics.Write:
+	case utils.Write:
 		switch opTy {
 		case movePeer:
 			return writePeer
 		case transferLeader:
 			return writeLeader
 		}
-	case statistics.Read:
+	case utils.Read:
 		switch opTy {
 		case movePeer:
 			return readPeer
@@ -1787,16 +1888,16 @@ func toResourceType(rwTy statistics.RWType, opTy opType) resourceType {
 	panic(fmt.Sprintf("invalid arguments for toResourceType: rwTy = %v, opTy = %v", rwTy, opTy))
 }
 
-func buildResourceType(rwTy statistics.RWType, ty constant.ResourceKind) resourceType {
+func buildResourceType(rwTy utils.RWType, ty constant.ResourceKind) resourceType {
 	switch rwTy {
-	case statistics.Write:
+	case utils.Write:
 		switch ty {
 		case constant.RegionKind:
 			return writePeer
 		case constant.LeaderKind:
 			return writeLeader
 		}
-	case statistics.Read:
+	case utils.Read:
 		switch ty {
 		case constant.RegionKind:
 			return readPeer
@@ -1809,24 +1910,24 @@ func buildResourceType(rwTy statistics.RWType, ty constant.ResourceKind) resourc
 
 func stringToDim(name string) int {
 	switch name {
-	case statistics.BytePriority:
-		return statistics.ByteDim
-	case statistics.KeyPriority:
-		return statistics.KeyDim
-	case statistics.QueryPriority:
-		return statistics.QueryDim
+	case utils.BytePriority:
+		return utils.ByteDim
+	case utils.KeyPriority:
+		return utils.KeyDim
+	case utils.QueryPriority:
+		return utils.QueryDim
 	}
-	return statistics.ByteDim
+	return utils.ByteDim
 }
 
 func dimToString(dim int) string {
 	switch dim {
-	case statistics.ByteDim:
-		return statistics.BytePriority
-	case statistics.KeyDim:
-		return statistics.KeyPriority
-	case statistics.QueryDim:
-		return statistics.QueryPriority
+	case utils.ByteDim:
+		return utils.BytePriority
+	case utils.KeyDim:
+		return utils.KeyPriority
+	case utils.QueryDim:
+		return utils.QueryPriority
 	default:
 		return ""
 	}
@@ -1837,8 +1938,15 @@ func prioritiesToDim(priorities []string) (firstPriority int, secondPriority int
 }
 
 // tooHotNeedSplit returns true if any dim of the hot region is greater than the store threshold.
-func tooHotNeedSplit(store *statistics.StoreLoadDetail, region *statistics.HotPeerStat, splitThresholds float64) bool {
-	return slice.AnyOf(store.LoadPred.Current.Loads, func(i int) bool {
+func (bs *balanceSolver) tooHotNeedSplit(store *statistics.StoreLoadDetail, region *statistics.HotPeerStat, splitThresholds float64) bool {
+	return bs.checkByPriorityAndTolerance(store.LoadPred.Current.Loads, func(i int) bool {
 		return region.Loads[i] > store.LoadPred.Current.Loads[i]*splitThresholds
 	})
 }
+
+type splitStrategy int
+
+const (
+	byLoad splitStrategy = iota
+	bySize
+)

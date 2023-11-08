@@ -19,11 +19,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -218,7 +220,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
 	suite.NoError(err)
-	req.Header.Add("X-Forwarded-For", "127.0.0.2")
+	req.Header.Add(apiutil.XForwardedForHeader, "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
@@ -248,7 +250,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
 	suite.NoError(err)
-	req.Header.Add("X-Real-Ip", "127.0.0.2")
+	req.Header.Add(apiutil.XRealIPHeader, "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
@@ -278,8 +280,8 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), nil)
 	suite.NoError(err)
-	req.Header.Add("X-Forwarded-For", "127.0.0.2")
-	req.Header.Add("X-Real-Ip", "127.0.0.3")
+	req.Header.Add(apiutil.XForwardedForHeader, "127.0.0.2")
+	req.Header.Add(apiutil.XRealIPHeader, "127.0.0.3")
 	resp, err := http.DefaultClient.Do(req)
 	suite.NoError(err)
 	suite.Equal(http.StatusOK, resp.StatusCode)
@@ -305,4 +307,16 @@ func TestAPIService(t *testing.T) {
 	re.NoError(err)
 	MustWaitLeader(re, []*Server{svr})
 	re.True(svr.IsAPIServiceMode())
+}
+
+func TestIsPathInDirectory(t *testing.T) {
+	re := require.New(t)
+	fileName := "test"
+	directory := "/root/project"
+	path := filepath.Join(directory, fileName)
+	re.True(isPathInDirectory(path, directory))
+
+	fileName = "../../test"
+	path = filepath.Join(directory, fileName)
+	re.False(isPathInDirectory(path, directory))
 }

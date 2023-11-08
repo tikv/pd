@@ -242,7 +242,7 @@ func finishSplitKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	_, err = doRequest(cmd, fmt.Sprintf("%s/%s/split", keyspaceGroupsPrefix, args[0]), http.MethodDelete, http.Header{})
 	if err != nil {
-		cmd.Println(err)
+		cmd.Printf("Failed to finish split-keyspace-group: %s\n", err)
 		return
 	}
 	cmd.Println("Success!")
@@ -309,7 +309,7 @@ func finishMergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	_, err = doRequest(cmd, fmt.Sprintf("%s/%s/merge", keyspaceGroupsPrefix, args[0]), http.MethodDelete, http.Header{})
 	if err != nil {
-		cmd.Println(err)
+		cmd.Printf("Failed to finish merge-keyspace-group: %s\n", err)
 		return
 	}
 	cmd.Println("Success!")

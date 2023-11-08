@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -36,9 +37,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -68,9 +69,12 @@ var (
 type Coordinator struct {
 	syncutil.RWMutex
 
-	wg                sync.WaitGroup
-	ctx               context.Context
-	cancel            context.CancelFunc
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	schedulersInitialized bool
+
 	cluster           sche.ClusterInformer
 	prepareChecker    *prepareChecker
 	checkers          *checker.Controller
@@ -86,23 +90,38 @@ type Coordinator struct {
 // NewCoordinator creates a new Coordinator.
 func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
 	ctx, cancel := context.WithCancel(ctx)
-	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetOpts(), hbStreams)
+	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
-	c := &Coordinator{
-		ctx:             ctx,
-		cancel:          cancel,
-		cluster:         cluster,
-		prepareChecker:  newPrepareChecker(),
-		checkers:        checker.NewController(ctx, cluster, cluster.GetOpts(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController),
-		regionScatterer: scatter.NewRegionScatterer(ctx, cluster, opController),
-		regionSplitter:  splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController)),
-		schedulers:      schedulers,
-		opController:    opController,
-		hbStreams:       hbStreams,
-		pluginInterface: NewPluginInterface(),
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
+	return &Coordinator{
+		ctx:                   ctx,
+		cancel:                cancel,
+		schedulersInitialized: false,
+		cluster:               cluster,
+		prepareChecker:        newPrepareChecker(),
+		checkers:              checkers,
+		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddSuspectRegions),
+		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddSuspectRegions),
+		schedulers:            schedulers,
+		opController:          opController,
+		hbStreams:             hbStreams,
+		pluginInterface:       NewPluginInterface(),
+		diagnosticManager:     diagnostic.NewManager(schedulers, cluster.GetSchedulerConfig()),
 	}
-	c.diagnosticManager = diagnostic.NewManager(schedulers, cluster.GetOpts())
-	return c
+}
+
+// markSchedulersInitialized marks the scheduler initialization is finished.
+func (c *Coordinator) markSchedulersInitialized() {
+	c.Lock()
+	defer c.Unlock()
+	c.schedulersInitialized = true
+}
+
+// AreSchedulersInitialized returns whether the schedulers have been initialized.
+func (c *Coordinator) AreSchedulersInitialized() bool {
+	c.RLock()
+	defer c.RUnlock()
+	return c.schedulersInitialized
 }
 
 // GetWaitingRegions returns the regions in the waiting list.
@@ -122,10 +141,10 @@ func (c *Coordinator) PatrolRegions() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	ticker := time.NewTicker(c.cluster.GetOpts().GetPatrolRegionInterval())
+	ticker := time.NewTicker(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 	defer ticker.Stop()
 
-	log.Info("Coordinator starts patrol regions")
+	log.Info("coordinator starts patrol regions")
 	start := time.Now()
 	var (
 		key     []byte
@@ -135,8 +154,9 @@ func (c *Coordinator) PatrolRegions() {
 		select {
 		case <-ticker.C:
 			// Note: we reset the ticker here to support updating configuration dynamically.
-			ticker.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
+			ticker.Reset(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
+			patrolCheckRegionsGauge.Set(0)
 			log.Info("patrol regions has been stopped")
 			return
 		}
@@ -168,7 +188,7 @@ func (c *Coordinator) PatrolRegions() {
 }
 
 func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetPersistOptions().IsSchedulingHalted()
+	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
@@ -233,7 +253,7 @@ func (c *Coordinator) checkPriorityRegions() {
 func (c *Coordinator) checkSuspectRanges() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	log.Info("Coordinator begins to check suspect key ranges")
+	log.Info("coordinator begins to check suspect key ranges")
 	ticker := time.NewTicker(checkSuspectRangesInterval)
 	defer ticker.Stop()
 	for {
@@ -297,7 +317,7 @@ func (c *Coordinator) drivePushOperator() {
 	defer logutil.LogPanic()
 
 	defer c.wg.Done()
-	log.Info("Coordinator begins to actively drive push operator")
+	log.Info("coordinator begins to actively drive push operator")
 	ticker := time.NewTicker(pushOperatorTickInterval)
 	defer ticker.Stop()
 	for {
@@ -311,14 +331,50 @@ func (c *Coordinator) drivePushOperator() {
 	}
 }
 
+// driveSlowNodeScheduler is used to enable slow node scheduler when using `raft-kv2`.
+func (c *Coordinator) driveSlowNodeScheduler() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("drive slow node scheduler is stopped")
+			return
+		case <-ticker.C:
+			{
+				// If enabled, exit.
+				if exists, _ := c.schedulers.IsSchedulerExisted(schedulers.EvictSlowTrendName); exists {
+					return
+				}
+				// If the cluster was set up with `raft-kv2` engine, this cluster should
+				// enable `evict-slow-trend` scheduler as default.
+				if c.GetCluster().GetStoreConfig().IsRaftKV2() {
+					typ := schedulers.EvictSlowTrendType
+					args := []string{}
+
+					s, err := schedulers.CreateScheduler(typ, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(typ, args), c.schedulers.RemoveScheduler)
+					if err != nil {
+						log.Warn("initializing evict-slow-trend scheduler failed", errs.ZapError(err))
+					} else if err = c.schedulers.AddScheduler(s, args...); err != nil {
+						log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
+					}
+				}
+			}
+		}
+	}
+}
+
 // RunUntilStop runs the coordinator until receiving the stop signal.
 func (c *Coordinator) RunUntilStop() {
 	c.Run()
 	<-c.ctx.Done()
-	log.Info("Coordinator is stopping")
+	log.Info("coordinator is stopping")
 	c.GetSchedulersController().Wait()
 	c.wg.Wait()
-	log.Info("Coordinator has been stopped")
+	log.Info("coordinator has been stopped")
 }
 
 // Run starts coordinator.
@@ -328,41 +384,44 @@ func (c *Coordinator) Run() {
 		ticker = time.NewTicker(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
-	log.Info("Coordinator starts to collect cluster information")
+	log.Info("coordinator starts to collect cluster information")
 	for {
 		if c.ShouldRun() {
-			log.Info("Coordinator has finished cluster information preparation")
+			log.Info("coordinator has finished cluster information preparation")
 			break
 		}
 		select {
 		case <-ticker.C:
 		case <-c.ctx.Done():
-			log.Info("Coordinator stops running")
+			log.Info("coordinator stops running")
 			return
 		}
 	}
-	log.Info("Coordinator starts to run schedulers")
-	c.initSchedulers()
+	log.Info("coordinator starts to run schedulers")
+	c.InitSchedulers(true)
 
-	c.wg.Add(3)
+	c.wg.Add(4)
 	// Starts to patrol regions.
 	go c.PatrolRegions()
 	// Checks suspect key ranges
 	go c.checkSuspectRanges()
 	go c.drivePushOperator()
+	// Checks whether to create evict-slow-trend scheduler.
+	go c.driveSlowNodeScheduler()
 }
 
-func (c *Coordinator) initSchedulers() {
+// InitSchedulers initializes schedulers.
+func (c *Coordinator) InitSchedulers(needRun bool) {
 	var (
 		scheduleNames []string
 		configs       []string
 		err           error
 	)
 	for i := 0; i < maxLoadConfigRetries; i++ {
-		scheduleNames, configs, err = c.cluster.GetStorage().LoadAllScheduleConfig()
+		scheduleNames, configs, err = c.cluster.GetStorage().LoadAllSchedulerConfigs()
 		select {
 		case <-c.ctx.Done():
-			log.Info("Coordinator stops running")
+			log.Info("init schedulers has been stopped")
 			return
 		default:
 		}
@@ -374,13 +433,12 @@ func (c *Coordinator) initSchedulers() {
 	if err != nil {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
-
-	scheduleCfg := c.cluster.GetPersistOptions().GetScheduleConfig().Clone()
+	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.
 	for i, name := range scheduleNames {
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
-		var cfg config.SchedulerConfig
+		var cfg sc.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
 			if c.Type == typ {
 				cfg = c
@@ -400,9 +458,16 @@ func (c *Coordinator) initSchedulers() {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
 		}
-		log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
-		if err = c.schedulers.AddScheduler(s); err != nil {
-			log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+		if needRun {
+			log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
+			if err = c.schedulers.AddScheduler(s); err != nil {
+				log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+			}
+		} else {
+			log.Info("create scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()))
+			if err = c.schedulers.AddSchedulerHandler(s); err != nil {
+				log.Error("can not add scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+			}
 		}
 	}
 
@@ -422,22 +487,34 @@ func (c *Coordinator) initSchedulers() {
 			continue
 		}
 
-		log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
-		if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+		if needRun {
+			log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
+			if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+				log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+			} else {
+				// Only records the valid scheduler config.
+				scheduleCfg.Schedulers[k] = schedulerCfg
+				k++
+			}
 		} else {
-			// Only records the valid scheduler config.
-			scheduleCfg.Schedulers[k] = schedulerCfg
-			k++
+			log.Info("create scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
+			if err = c.schedulers.AddSchedulerHandler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+				log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+			} else {
+				scheduleCfg.Schedulers[k] = schedulerCfg
+				k++
+			}
 		}
 	}
 
 	// Removes the invalid scheduler config and persist.
 	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetPersistOptions().SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.GetPersistOptions().Persist(c.cluster.GetStorage()); err != nil {
+	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
+	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
+
+	c.markSchedulersInitialized()
 }
 
 // LoadPlugin load user plugin
@@ -464,6 +541,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))
+	// TODO: handle the plugin in API service mode.
 	if err = c.schedulers.AddScheduler(s); err != nil {
 		log.Error("can't add scheduler", zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
 		return
@@ -504,18 +582,18 @@ func (c *Coordinator) Stop() {
 }
 
 // GetHotRegionsByType gets hot regions' statistics by RWType.
-func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.StoreHotPeersInfos {
-	isTraceFlow := c.cluster.GetOpts().IsTraceRegionFlow()
+func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHotPeersInfos {
+	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
 	var infos *statistics.StoreHotPeersInfos
 	switch typ {
-	case statistics.Write:
+	case utils.Write:
 		regionStats := c.cluster.RegionWriteStats()
-		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Write, isTraceFlow)
-	case statistics.Read:
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, utils.Write, isTraceFlow)
+	case utils.Read:
 		regionStats := c.cluster.RegionReadStats()
-		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, statistics.Read, isTraceFlow)
+		infos = statistics.GetHotStatus(stores, storeLoads, regionStats, utils.Read, isTraceFlow)
 	default:
 	}
 	// update params `IsLearner` and `LastUpdateTime`
@@ -529,11 +607,11 @@ func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.Sto
 					h.IsLearner = core.IsLearner(region.GetPeer(h.StoreID))
 				}
 				switch typ {
-				case statistics.Write:
+				case utils.Write:
 					if region != nil {
 						h.LastUpdateTime = time.Unix(int64(region.GetInterval().GetEndTimestamp()), 0)
 					}
-				case statistics.Read:
+				case utils.Read:
 					store := c.cluster.GetStore(h.StoreID)
 					if store != nil {
 						ts := store.GetMeta().GetLastHeartbeat()
@@ -547,6 +625,25 @@ func (c *Coordinator) GetHotRegionsByType(typ statistics.RWType) *statistics.Sto
 	return infos
 }
 
+// GetHotRegions gets hot regions' statistics by RWType and storeIDs.
+// If storeIDs is empty, it returns all hot regions' statistics by RWType.
+func (c *Coordinator) GetHotRegions(typ utils.RWType, storeIDs ...uint64) *statistics.StoreHotPeersInfos {
+	hotRegions := c.GetHotRegionsByType(typ)
+	if len(storeIDs) > 0 && hotRegions != nil {
+		asLeader := statistics.StoreHotPeersStat{}
+		asPeer := statistics.StoreHotPeersStat{}
+		for _, storeID := range storeIDs {
+			asLeader[storeID] = hotRegions.AsLeader[storeID]
+			asPeer[storeID] = hotRegions.AsPeer[storeID]
+		}
+		return &statistics.StoreHotPeersInfos{
+			AsLeader: asLeader,
+			AsPeer:   asPeer,
+		}
+	}
+	return hotRegions
+}
+
 // GetWaitGroup returns the wait group. Only for test purpose.
 func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 	return &c.wg
@@ -556,24 +653,24 @@ func (c *Coordinator) GetWaitGroup() *sync.WaitGroup {
 func (c *Coordinator) CollectHotSpotMetrics() {
 	stores := c.cluster.GetStores()
 	// Collects hot write region metrics.
-	collectHotMetrics(c.cluster, stores, statistics.Write)
+	collectHotMetrics(c.cluster, stores, utils.Write)
 	// Collects hot read region metrics.
-	collectHotMetrics(c.cluster, stores, statistics.Read)
+	collectHotMetrics(c.cluster, stores, utils.Read)
 }
 
-func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ statistics.RWType) {
+func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) {
 	var (
 		kind        string
 		regionStats map[uint64][]*statistics.HotPeerStat
 	)
 
 	switch typ {
-	case statistics.Read:
+	case utils.Read:
 		regionStats = cluster.RegionReadStats()
-		kind = statistics.Read.String()
-	case statistics.Write:
+		kind = utils.Read.String()
+	case utils.Write:
 		regionStats = cluster.RegionWriteStats()
-		kind = statistics.Write.String()
+		kind = utils.Write.String()
 	}
 	status := statistics.CollectHotPeerInfos(stores, regionStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
@@ -609,8 +706,8 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 		}
 
 		if !hasHotLeader && !hasHotPeer {
-			statistics.ForeachRegionStats(func(rwTy statistics.RWType, dim int, _ statistics.RegionStatKind) {
-				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), statistics.DimToString(dim))
+			utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, _ utils.RegionStatKind) {
+				schedulers.HotPendingSum.DeleteLabelValues(storeLabel, rwTy.String(), utils.DimToString(dim))
 			})
 		}
 	}

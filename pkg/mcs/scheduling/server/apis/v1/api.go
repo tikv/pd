@@ -16,6 +16,7 @@ package apis
 
 import (
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/gin-contrib/cors"
@@ -23,15 +24,25 @@ import (
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/handler"
+	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/unrolled/render"
 )
 
 // APIPathPrefix is the prefix of the API path.
-const APIPathPrefix = "/scheduling/api/v1/"
+const APIPathPrefix = "/scheduling/api/v1"
+const handlerKey = "handler"
 
 var (
 	once            sync.Once
@@ -59,6 +70,14 @@ type Service struct {
 	rd  *render.Render
 }
 
+type server struct {
+	*scheserver.Server
+}
+
+func (s *server) GetCluster() sche.SchedulerCluster {
+	return s.Server.GetCluster()
+}
+
 func createIndentRender() *render.Render {
 	return render.New(render.Options{
 		IndentJSON: true,
@@ -77,18 +96,578 @@ func NewService(srv *scheserver.Service) *Service {
 	apiHandlerEngine.Use(cors.Default())
 	apiHandlerEngine.Use(gzip.Gzip(gzip.DefaultCompression))
 	apiHandlerEngine.Use(func(c *gin.Context) {
-		c.Set(multiservicesapi.ServiceContextKey, srv)
+		c.Set(multiservicesapi.ServiceContextKey, srv.Server)
+		c.Set(handlerKey, handler.NewHandler(&server{srv.Server}))
 		c.Next()
 	})
-	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
-	apiHandlerEngine.GET("metrics", utils.PromHandler())
+	apiHandlerEngine.GET("metrics", mcsutils.PromHandler())
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
+	root.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		srv:              srv,
 		apiHandlerEngine: apiHandlerEngine,
 		root:             root,
 		rd:               createIndentRender(),
 	}
+	s.RegisterAdminRouter()
+	s.RegisterConfigRouter()
+	s.RegisterOperatorsRouter()
+	s.RegisterSchedulersRouter()
+	s.RegisterCheckersRouter()
+	s.RegisterHotspotRouter()
 	return s
+}
+
+// RegisterAdminRouter registers the router of the admin handler.
+func (s *Service) RegisterAdminRouter() {
+	router := s.root.Group("admin")
+	router.PUT("/log", changeLogLevel)
+	router.DELETE("cache/regions", deleteAllRegionCache)
+	router.DELETE("cache/regions/:id", deleteRegionCacheByID)
+}
+
+// RegisterConfigRouter registers the router of the config handler.
+func (s *Service) RegisterConfigRouter() {
+	router := s.root.Group("config")
+	router.GET("", getConfig)
+}
+
+// RegisterSchedulersRouter registers the router of the schedulers handler.
+func (s *Service) RegisterSchedulersRouter() {
+	router := s.root.Group("schedulers")
+	router.GET("", getSchedulers)
+	router.GET("/diagnostic/:name", getDiagnosticResult)
+	router.GET("/config", getSchedulerConfig)
+	router.GET("/config/:name/list", getSchedulerConfigByName)
+	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
+	// And we need to do one-to-two forwarding in the API middleware.
+	router.POST("/:name", pauseOrResumeScheduler)
+}
+
+// RegisterCheckersRouter registers the router of the checkers handler.
+func (s *Service) RegisterCheckersRouter() {
+	router := s.root.Group("checkers")
+	router.GET("/:name", getCheckerByName)
+	router.POST("/:name", pauseOrResumeChecker)
+}
+
+// RegisterHotspotRouter registers the router of the hotspot handler.
+func (s *Service) RegisterHotspotRouter() {
+	router := s.root.Group("hotspot")
+	router.GET("/regions/write", getHotWriteRegions)
+	router.GET("/regions/read", getHotReadRegions)
+	router.GET("/regions/history", getHistoryHotRegions)
+	router.GET("/stores", getHotStores)
+	router.GET("/buckets", getHotBuckets)
+}
+
+// RegisterOperatorsRouter registers the router of the operators handler.
+func (s *Service) RegisterOperatorsRouter() {
+	router := s.root.Group("operators")
+	router.GET("", getOperators)
+	router.POST("", createOperator)
+	router.GET("/:id", getOperatorByRegion)
+	router.DELETE("/:id", deleteOperatorByRegion)
+	router.GET("/records", getOperatorRecords)
+}
+
+// @Tags     admin
+// @Summary  Change the log level.
+// @Produce  json
+// @Success  200  {string}  string  "The log level is updated."
+// @Router   /admin/log [put]
+func changeLogLevel(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	var level string
+	if err := c.Bind(&level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := svr.SetLogLevel(level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	c.String(http.StatusOK, "The log level is updated.")
+}
+
+// @Tags     config
+// @Summary  Get full config.
+// @Produce  json
+// @Success  200  {object}  config.Config
+// @Router   /config [get]
+func getConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cfg := svr.GetConfig()
+	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
+	c.IndentedJSON(http.StatusOK, cfg)
+}
+
+// @Tags     admin
+// @Summary  Drop all regions from cache.
+// @Produce  json
+// @Success  200  {string}  string  "All regions are removed from server cache."
+// @Router   /admin/cache/regions [delete]
+func deleteAllRegionCache(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
+	cluster.DropCacheAllRegion()
+	c.String(http.StatusOK, "All regions are removed from server cache.")
+}
+
+// @Tags     admin
+// @Summary  Drop a specific region from cache.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string  "The region is removed from server cache."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /admin/cache/regions/{id} [delete]
+func deleteRegionCacheByID(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	cluster := svr.GetCluster()
+	if cluster == nil {
+		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
+		return
+	}
+	regionIDStr := c.Param("id")
+	regionID, err := strconv.ParseUint(regionIDStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	cluster.DropCacheRegion(regionID)
+	c.String(http.StatusOK, "The region is removed from server cache.")
+}
+
+// @Tags     operators
+// @Summary  Get an operator by ID.
+// @Param    region_id  path  int  true  "A Region's Id"
+// @Produce  json
+// @Success  200  {object}  operator.OpWithStatus
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /operators/{id} [GET]
+func getOperatorByRegion(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	id := c.Param("id")
+
+	regionID, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	op, err := handler.GetOperatorStatus(regionID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, op)
+}
+
+// @Tags     operators
+// @Summary  List operators.
+// @Param    kind  query  string  false  "Specify the operator kind."  Enums(admin, leader, region, waiting)
+// @Produce  json
+// @Success  200  {array}   operator.Operator
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /operators [GET]
+func getOperators(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	var (
+		results []*operator.Operator
+		err     error
+	)
+
+	kinds := c.QueryArray("kind")
+	if len(kinds) == 0 {
+		results, err = handler.GetOperators()
+	} else {
+		results, err = handler.GetOperatorsByKinds(kinds)
+	}
+
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, results)
+}
+
+// @Tags     operator
+// @Summary  Cancel a Region's pending operator.
+// @Param    region_id  path  int  true  "A Region's Id"
+// @Produce  json
+// @Success  200  {string}  string  "The pending operator is canceled."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /operators/{region_id} [delete]
+func deleteOperatorByRegion(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	id := c.Param("id")
+
+	regionID, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err = handler.RemoveOperator(regionID); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.String(http.StatusOK, "The pending operator is canceled.")
+}
+
+// @Tags     operator
+// @Summary  lists the finished operators since the given timestamp in second.
+// @Param    from  query  integer  false  "From Unix timestamp"
+// @Produce  json
+// @Success  200  {object}  []operator.OpRecord
+// @Failure  400  {string}  string  "The request is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /operators/records [get]
+func getOperatorRecords(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	from, err := apiutil.ParseTime(c.Query("from"))
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	records, err := handler.GetRecords(from)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, records)
+}
+
+// FIXME: details of input json body params
+// @Tags     operator
+// @Summary  Create an operator.
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "The operator is created."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /operators [post]
+func createOperator(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	var input map[string]interface{}
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	statusCode, result, err := handler.HandleOperatorCreation(input)
+	if err != nil {
+		c.String(statusCode, err.Error())
+		return
+	}
+	if statusCode == http.StatusOK && result == nil {
+		c.String(http.StatusOK, "The operator is created.")
+		return
+	}
+	c.IndentedJSON(statusCode, result)
+}
+
+// @Tags     checkers
+// @Summary  Get checker by name
+// @Param    name  path  string  true  "The name of the checker."
+// @Produce  json
+// @Success  200  {string}  string  "The checker's status."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /checkers/{name} [get]
+func getCheckerByName(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	name := c.Param("name")
+	output, err := handler.GetCheckerStatus(name)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, output)
+}
+
+// FIXME: details of input json body params
+// @Tags     checker
+// @Summary  Pause or resume region merge.
+// @Accept   json
+// @Param    name  path  string  true  "The name of the checker."
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
+// @Failure  400  {string}  string  "Bad format request."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /checker/{name} [post]
+func pauseOrResumeChecker(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	var input map[string]int
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	name := c.Param("name")
+	t, ok := input["delay"]
+	if !ok {
+		c.String(http.StatusBadRequest, "missing pause time")
+		return
+	}
+	if t < 0 {
+		c.String(http.StatusBadRequest, "delay cannot be negative")
+		return
+	}
+	if err := handler.PauseOrResumeChecker(name, int64(t)); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if t == 0 {
+		c.String(http.StatusOK, "Resume the checker successfully.")
+	} else {
+		c.String(http.StatusOK, "Pause the checker successfully.")
+	}
+}
+
+// @Tags     schedulers
+// @Summary  List all created schedulers by status.
+// @Produce  json
+// @Success  200  {array}   string
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers [get]
+func getSchedulers(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	status := c.Query("status")
+	_, needTS := c.GetQuery("timestamp")
+	output, err := handler.GetSchedulerByStatus(status, needTS)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, output)
+}
+
+// @Tags     schedulers
+// @Summary  List all scheduler configs.
+// @Produce  json
+// @Success  200  {object}  map[string]interface{}
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/config/ [get]
+func getSchedulerConfig(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	sc, err := handler.GetSchedulersController()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	sches, configs, err := sc.GetAllSchedulerConfigs()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, schedulers.ToPayload(sches, configs))
+}
+
+// @Tags     schedulers
+// @Summary  List scheduler config by name.
+// @Produce  json
+// @Success  200  {object}  map[string]interface{}
+// @Failure  404  {string}  string  scheduler not found
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/config/{name}/list [get]
+func getSchedulerConfigByName(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	sc, err := handler.GetSchedulersController()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	handlers := sc.GetSchedulerHandlers()
+	name := c.Param("name")
+	if _, ok := handlers[name]; !ok {
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
+		return
+	}
+	isDisabled, err := sc.IsSchedulerDisabled(name)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if isDisabled {
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
+		return
+	}
+	c.Request.URL.Path = "/list"
+	handlers[name].ServeHTTP(c.Writer, c.Request)
+}
+
+// @Tags     schedulers
+// @Summary  List schedulers diagnostic result.
+// @Produce  json
+// @Success  200  {array}   string
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/diagnostic/{name} [get]
+func getDiagnosticResult(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	name := c.Param("name")
+	result, err := handler.GetDiagnosticResult(name)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, result)
+}
+
+// FIXME: details of input json body params
+// @Tags     scheduler
+// @Summary  Pause or resume a scheduler.
+// @Accept   json
+// @Param    name  path  string  true  "The name of the scheduler."
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Pause or resume the scheduler successfully."
+// @Failure  400  {string}  string  "Bad format request."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/{name} [post]
+func pauseOrResumeScheduler(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	var input map[string]int64
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	name := c.Param("name")
+	t, ok := input["delay"]
+	if !ok {
+		c.String(http.StatusBadRequest, "missing pause time")
+		return
+	}
+	if err := handler.PauseOrResumeScheduler(name, t); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.String(http.StatusOK, "Pause or resume the scheduler successfully.")
+}
+
+// @Tags     hotspot
+// @Summary  List the hot write regions.
+// @Produce  json
+// @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Failure  400  {string}  string  "The request is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /hotspot/regions/write [get]
+func getHotWriteRegions(c *gin.Context) {
+	getHotRegions(utils.Write, c)
+}
+
+// @Tags     hotspot
+// @Summary  List the hot read regions.
+// @Produce  json
+// @Success  200  {object}  statistics.StoreHotPeersInfos
+// @Failure  400  {string}  string  "The request is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /hotspot/regions/read [get]
+func getHotReadRegions(c *gin.Context) {
+	getHotRegions(utils.Read, c)
+}
+
+func getHotRegions(typ utils.RWType, c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	storeIDs := c.QueryArray("store_id")
+	if len(storeIDs) < 1 {
+		hotRegions, err := handler.GetHotRegions(typ)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.IndentedJSON(http.StatusOK, hotRegions)
+		return
+	}
+
+	var ids []uint64
+	for _, storeID := range storeIDs {
+		id, err := strconv.ParseUint(storeID, 10, 64)
+		if err != nil {
+			c.String(http.StatusBadRequest, errs.ErrInvalidStoreID.FastGenByArgs(storeID).Error())
+			return
+		}
+		_, err = handler.GetStore(id)
+		if err != nil {
+			c.String(http.StatusInternalServerError, err.Error())
+			return
+		}
+		ids = append(ids, id)
+	}
+
+	hotRegions, err := handler.GetHotRegions(typ, ids...)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, hotRegions)
+}
+
+// @Tags     hotspot
+// @Summary  List the hot stores.
+// @Produce  json
+// @Success  200  {object}  handler.HotStoreStats
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /hotspot/stores [get]
+func getHotStores(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	stores, err := handler.GetHotStores()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, stores)
+}
+
+// @Tags     hotspot
+// @Summary  List the hot buckets.
+// @Produce  json
+// @Success  200  {object}  handler.HotBucketsResponse
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /hotspot/buckets [get]
+func getHotBuckets(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	regionIDs := c.QueryArray("region_id")
+	ids := make([]uint64, len(regionIDs))
+	for i, regionID := range regionIDs {
+		if id, err := strconv.ParseUint(regionID, 10, 64); err == nil {
+			ids[i] = id
+		}
+	}
+	ret, err := handler.GetHotBuckets(ids...)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, ret)
+}
+
+// @Tags     hotspot
+// @Summary  List the history hot regions.
+// @Accept   json
+// @Produce  json
+// @Success  200  {object}  storage.HistoryHotRegions
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /hotspot/regions/history [get]
+func getHistoryHotRegions(c *gin.Context) {
+	// TODO: support history hotspot in scheduling server with stateless in the future.
+	// Ref: https://github.com/tikv/pd/pull/7183
+	var res storage.HistoryHotRegions
+	c.IndentedJSON(http.StatusOK, res)
 }

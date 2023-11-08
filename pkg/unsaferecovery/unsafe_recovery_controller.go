@@ -31,9 +31,9 @@ import (
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/server/config"
 	"go.uber.org/zap"
 )
 
@@ -109,7 +109,7 @@ type cluster interface {
 	DropCacheAllRegion()
 	AllocID() (uint64, error)
 	BuryStore(storeID uint64, forceBury bool) error
-	GetPersistOptions() *config.PersistOptions
+	GetSchedulerConfig() sc.SchedulerConfigProvider
 }
 
 // Controller is used to control the unsafe recovery process.
@@ -136,6 +136,7 @@ type Controller struct {
 	// exposed to the outside for testing
 	AffectedTableIDs    map[int64]struct{}
 	affectedMetaRegions map[uint64]struct{}
+	newlyCreatedRegions map[uint64]struct{}
 	err                 error
 }
 
@@ -167,6 +168,7 @@ func (u *Controller) reset() {
 	u.output = make([]StageOutput, 0)
 	u.AffectedTableIDs = make(map[int64]struct{}, 0)
 	u.affectedMetaRegions = make(map[uint64]struct{}, 0)
+	u.newlyCreatedRegions = make(map[uint64]struct{}, 0)
 	u.err = nil
 }
 
@@ -463,7 +465,7 @@ func (u *Controller) CollectReport(heartbeat *pdpb.StoreHeartbeatRequest) (bool,
 	}
 
 	if heartbeat.StoreReport.GetStep() != u.step {
-		log.Info("Unsafe recovery receives invalid store report",
+		log.Info("unsafe recovery receives invalid store report",
 			zap.Uint64("store-id", storeID), zap.Uint64("expected-step", u.step), zap.Uint64("obtained-step", heartbeat.StoreReport.GetStep()))
 		// invalid store report, ignore
 		return false, nil
@@ -493,7 +495,7 @@ func (u *Controller) changeStage(stage stage) {
 	u.stage = stage
 	// Halt and resume the scheduling once the running state changed.
 	running := isRunning(stage)
-	if opt := u.cluster.GetPersistOptions(); opt.IsSchedulingHalted() != running {
+	if opt := u.cluster.GetSchedulerConfig(); opt.IsSchedulingHalted() != running {
 		opt.SetHaltScheduling(running, "online-unsafe-recovery")
 	}
 
@@ -665,6 +667,15 @@ func (u *Controller) getAffectedTableDigest() []string {
 			tables += fmt.Sprintf("%d, ", t)
 		}
 		details = append(details, "affected table ids: "+strings.Trim(tables, ", "))
+	}
+	if len(u.newlyCreatedRegions) != 0 {
+		regions := ""
+		for r := range u.newlyCreatedRegions {
+			regions += fmt.Sprintf("%d, ", r)
+		}
+		details = append(details, "newly created empty regions: "+strings.Trim(regions, ", "))
+	} else {
+		details = append(details, "no newly created empty regions")
 	}
 	return details
 }
@@ -879,10 +890,11 @@ func (t *regionTree) insert(item *regionItem) (bool, error) {
 		return false, errors.Errorf("region %v shouldn't be updated twice", item.Region().GetId())
 	}
 
-	for _, old := range overlaps {
+	for _, newer := range overlaps {
+		log.Info("unsafe recovery found overlap regions", logutil.ZapRedactStringer("newer-region-meta", core.RegionToHexMeta(newer.Region())), logutil.ZapRedactStringer("older-region-meta", core.RegionToHexMeta(item.Region())))
 		// it's ensured by the `buildUpFromReports` that peers are inserted in epoch descending order.
-		if old.IsEpochStale(item) {
-			return false, errors.Errorf("region %v's epoch shouldn't be staler than old ones %v", item, old)
+		if newer.IsEpochStale(item) {
+			return false, errors.Errorf("region %v's epoch shouldn't be staler than old ones %v", item, newer)
 		}
 	}
 	if len(overlaps) != 0 {
@@ -1201,6 +1213,7 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 			storeRecoveryPlan := u.getRecoveryPlan(storeID)
 			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
 			u.recordAffectedRegion(newRegion)
+			u.newlyCreatedRegions[newRegion.GetId()] = struct{}{}
 			hasPlan = true
 		}
 		lastEnd = region.EndKey

@@ -38,12 +38,14 @@ type Scheduler interface {
 	// GetType should in accordance with the name passing to RegisterScheduler()
 	GetType() string
 	EncodeConfig() ([]byte, error)
+	// ReloadConfig reloads the config from the storage.
+	ReloadConfig() error
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster sche.ScheduleCluster) error
-	Cleanup(cluster sche.ScheduleCluster)
-	Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
-	IsScheduleAllowed(cluster sche.ScheduleCluster) bool
+	Prepare(cluster sche.SchedulerCluster) error
+	Cleanup(cluster sche.SchedulerCluster)
+	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
+	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.
@@ -62,6 +64,24 @@ func DecodeConfig(data []byte, v interface{}) error {
 		return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
 	}
 	return nil
+}
+
+// ToPayload returns the payload of config.
+func ToPayload(sches, configs []string) map[string]interface{} {
+	payload := make(map[string]interface{})
+	for i, sche := range sches {
+		var config interface{}
+		err := DecodeConfig([]byte(configs[i]), &config)
+		if err != nil {
+			log.Error("failed to decode scheduler config",
+				zap.String("config", configs[i]),
+				zap.String("scheduler", sche),
+				errs.ZapError(err))
+			continue
+		}
+		payload[sche] = config
+	}
+	return payload
 }
 
 // ConfigDecoder used to decode the config.
@@ -91,8 +111,10 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 // CreateSchedulerFunc is for creating scheduler.
 type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
 
-var schedulerMap = make(map[string]CreateSchedulerFunc)
-var schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
+var (
+	schedulerMap           = make(map[string]CreateSchedulerFunc)
+	schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
+)
 
 // RegisterScheduler binds a scheduler creator. It should be called in init()
 // func of a package.
@@ -120,16 +142,16 @@ func CreateScheduler(typ string, oc *operator.Controller, storage endpoint.Confi
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 
-	s, err := fn(oc, storage, dec, removeSchedulerCb...)
-	if err != nil {
-		return nil, err
-	}
+	return fn(oc, storage, dec, removeSchedulerCb...)
+}
+
+// SaveSchedulerConfig saves the config of the specified scheduler.
+func SaveSchedulerConfig(storage endpoint.ConfigStorage, s Scheduler) error {
 	data, err := s.EncodeConfig()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	err = storage.SaveScheduleConfig(s.GetName(), data)
-	return s, err
+	return storage.SaveSchedulerConfig(s.GetName(), data)
 }
 
 // FindSchedulerTypeByName finds the type of the specified name.

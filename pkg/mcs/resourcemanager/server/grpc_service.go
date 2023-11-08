@@ -54,13 +54,14 @@ func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Service is the gRPC service for resource manager.
 type Service struct {
-	ctx     context.Context
+	ctx context.Context
+	*Server
 	manager *Manager
 	// settings
 }
 
 // NewService creates a new resource manager service.
-func NewService[T ResourceManagerConfigProvider](svr bs.Server) registry.RegistrableService {
+func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 	manager := NewManager[T](svr)
 
 	return &Service{
@@ -190,10 +191,20 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				continue
 			}
 			// Send the consumption to update the metrics.
+			isBackground := req.GetIsBackground()
+			isTiFlash := req.GetIsTiflash()
+			if isBackground && isTiFlash {
+				return errors.New("background and tiflash cannot be true at the same time")
+			}
 			s.manager.consumptionDispatcher <- struct {
 				resourceGroupName string
 				*rmpb.Consumption
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest()}
+				isBackground bool
+				isTiFlash    bool
+			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
+			if isBackground {
+				continue
+			}
 			now := time.Now()
 			resp := &rmpb.TokenBucketResponse{
 				ResourceGroupName: rg.Name,

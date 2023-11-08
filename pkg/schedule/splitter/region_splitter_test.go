@@ -86,7 +86,7 @@ func (suite *regionSplitterTestSuite) TestRegionSplitter() {
 	tc := mockcluster.NewCluster(suite.ctx, opt)
 	handler := newMockSplitRegionsHandler()
 	tc.AddLeaderRegionWithRange(1, "eee", "hhh", 2, 3, 4)
-	splitter := NewRegionSplitter(tc, handler)
+	splitter := NewRegionSplitter(tc, handler, tc.AddSuspectRegions)
 	newRegions := map[uint64]struct{}{}
 	// assert success
 	failureKeys := splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
@@ -115,14 +115,14 @@ func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 	tc.AddLeaderRegionWithRange(1, "aaa", "ccc", 2, 3, 4)
 	tc.AddLeaderRegionWithRange(2, "ccc", "eee", 2, 3, 4)
 	tc.AddLeaderRegionWithRange(3, "fff", "ggg", 2, 3, 4)
-	splitter := NewRegionSplitter(tc, handler)
+	splitter := NewRegionSplitter(tc, handler, tc.AddSuspectRegions)
 	groupKeys := splitter.groupKeysByRegion([][]byte{
 		[]byte("bbb"),
 		[]byte("ddd"),
 		[]byte("fff"),
 		[]byte("zzz"),
 	})
-	suite.Len(groupKeys, 3)
+	suite.Len(groupKeys, 2)
 	for k, v := range groupKeys {
 		switch k {
 		case uint64(1):
@@ -131,9 +131,6 @@ func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 		case uint64(2):
 			suite.Len(v.keys, 1)
 			suite.Equal([]byte("ddd"), v.keys[0])
-		case uint64(3):
-			suite.Len(v.keys, 1)
-			suite.Equal([]byte("fff"), v.keys[0])
 		}
 	}
 }

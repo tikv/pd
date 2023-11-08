@@ -242,17 +242,3 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 		}
 	}
 }
-
-func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
-	defer logutil.LogPanic()
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	select {
-	case <-done:
-		return
-	case <-timer.C:
-		cancel()
-	case <-streamCtx.Done():
-	}
-	<-done
-}

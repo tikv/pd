@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -45,12 +46,12 @@ import (
 // Close() must be called after the use.
 type HotRegionStorage struct {
 	*kv.LevelDBKV
-	ekm                     *encryption.Manager
-	hotRegionLoopWg         sync.WaitGroup
-	batchHotInfo            map[string]*HistoryHotRegion
-	hotRegionInfoCtx        context.Context
-	hotRegionInfoCancel     context.CancelFunc
-	hotRegionStorageHandler HotRegionStorageHandler
+	ekm                    *encryption.Manager
+	hotRegionLoopWg        sync.WaitGroup
+	batchHotInfo           map[string]*HistoryHotRegion
+	hotRegionInfoCtx       context.Context
+	hotRegionInfoCancel    context.CancelFunc
+	hotRegionStorageHelper HotRegionStorageHelper
 
 	curReservedDays uint64
 	curInterval     time.Duration
@@ -88,15 +89,13 @@ type HistoryHotRegion struct {
 	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
 }
 
-// HotRegionStorageHandler help hot region storage get hot region info.
-type HotRegionStorageHandler interface {
-	// PackHistoryHotWriteRegions get read hot region info in HistoryHotRegion form.
-	PackHistoryHotReadRegions() ([]HistoryHotRegion, error)
-	// PackHistoryHotWriteRegions get write hot region info in HistoryHotRegion form.
-	PackHistoryHotWriteRegions() ([]HistoryHotRegion, error)
+// HotRegionStorageHelper help hot region storage get hot region info.
+type HotRegionStorageHelper interface {
+	// GetHistoryHotRegions get hot region info in HistoryHotRegion form.
+	GetHistoryHotRegions(typ utils.RWType) ([]HistoryHotRegion, error)
 	// IsLeader return true means this server is leader.
 	IsLeader() bool
-	// GetHotRegionWriteInterval gets interval for PD to store Hot Region information..
+	// GetHotRegionsWriteInterval gets interval for PD to store Hot Region information.
 	GetHotRegionsWriteInterval() time.Duration
 	// GetHotRegionsReservedDays gets days hot region information is kept.
 	GetHotRegionsReservedDays() uint64
@@ -107,30 +106,10 @@ const (
 	defaultDeleteTime = 4
 )
 
-// HotRegionType stands for hot type.
-type HotRegionType uint32
-
-// Flags for flow.
-const (
-	WriteType HotRegionType = iota
-	ReadType
-)
-
 // HotRegionTypes stands for hot type.
 var HotRegionTypes = []string{
-	WriteType.String(),
-	ReadType.String(),
-}
-
-// String return HotRegionType in string format.
-func (h HotRegionType) String() string {
-	switch h {
-	case WriteType:
-		return "write"
-	case ReadType:
-		return "read"
-	}
-	return "unimplemented"
+	utils.Read.String(),
+	utils.Write.String(),
 }
 
 // NewHotRegionsStorage create storage to store hot regions info.
@@ -138,7 +117,7 @@ func NewHotRegionsStorage(
 	ctx context.Context,
 	filePath string,
 	ekm *encryption.Manager,
-	hotRegionStorageHandler HotRegionStorageHandler,
+	hotRegionStorageHelper HotRegionStorageHelper,
 ) (*HotRegionStorage, error) {
 	levelDB, err := kv.NewLevelDBKV(filePath)
 	if err != nil {
@@ -146,14 +125,14 @@ func NewHotRegionsStorage(
 	}
 	hotRegionInfoCtx, hotRegionInfoCancel := context.WithCancel(ctx)
 	h := HotRegionStorage{
-		LevelDBKV:               levelDB,
-		ekm:                     ekm,
-		batchHotInfo:            make(map[string]*HistoryHotRegion),
-		hotRegionInfoCtx:        hotRegionInfoCtx,
-		hotRegionInfoCancel:     hotRegionInfoCancel,
-		hotRegionStorageHandler: hotRegionStorageHandler,
-		curReservedDays:         hotRegionStorageHandler.GetHotRegionsReservedDays(),
-		curInterval:             hotRegionStorageHandler.GetHotRegionsWriteInterval(),
+		LevelDBKV:              levelDB,
+		ekm:                    ekm,
+		batchHotInfo:           make(map[string]*HistoryHotRegion),
+		hotRegionInfoCtx:       hotRegionInfoCtx,
+		hotRegionInfoCancel:    hotRegionInfoCancel,
+		hotRegionStorageHelper: hotRegionStorageHelper,
+		curReservedDays:        hotRegionStorageHelper.GetHotRegionsReservedDays(),
+		curInterval:            hotRegionStorageHelper.GetHotRegionsWriteInterval(),
 	}
 	h.hotRegionLoopWg.Add(2)
 	go h.backgroundFlush()
@@ -218,7 +197,7 @@ func (h *HotRegionStorage) backgroundFlush() {
 			if h.getCurReservedDays() == 0 {
 				continue
 			}
-			if h.hotRegionStorageHandler.IsLeader() {
+			if h.hotRegionStorageHelper.IsLeader() {
 				if err := h.pullHotRegionInfo(); err != nil {
 					log.Error("get hot_region stat meet error", errs.ZapError(err))
 				}
@@ -259,19 +238,18 @@ func (h *HotRegionStorage) Close() error {
 }
 
 func (h *HotRegionStorage) pullHotRegionInfo() error {
-	historyHotReadRegions, err := h.hotRegionStorageHandler.PackHistoryHotReadRegions()
+	historyHotReadRegions, err := h.hotRegionStorageHelper.GetHistoryHotRegions(utils.Read)
 	if err != nil {
 		return err
 	}
-	if err := h.packHistoryHotRegions(historyHotReadRegions, ReadType.String()); err != nil {
+	if err := h.packHistoryHotRegions(historyHotReadRegions, utils.Read.String()); err != nil {
 		return err
 	}
-	historyHotWriteRegions, err := h.hotRegionStorageHandler.PackHistoryHotWriteRegions()
+	historyHotWriteRegions, err := h.hotRegionStorageHelper.GetHistoryHotRegions(utils.Write)
 	if err != nil {
 		return err
 	}
-	err = h.packHistoryHotRegions(historyHotWriteRegions, WriteType.String())
-	return err
+	return h.packHistoryHotRegions(historyHotWriteRegions, utils.Write.String())
 }
 
 func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotRegion, hotRegionType string) error {
@@ -297,7 +275,7 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 func (h *HotRegionStorage) updateInterval() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	interval := h.hotRegionStorageHandler.GetHotRegionsWriteInterval()
+	interval := h.hotRegionStorageHelper.GetHotRegionsWriteInterval()
 	if interval != h.curInterval {
 		log.Info("hot region write interval changed",
 			zap.Duration("previous-interval", h.curInterval),
@@ -315,7 +293,7 @@ func (h *HotRegionStorage) getCurInterval() time.Duration {
 func (h *HotRegionStorage) updateReservedDays() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	reservedDays := h.hotRegionStorageHandler.GetHotRegionsReservedDays()
+	reservedDays := h.hotRegionStorageHelper.GetHotRegionsReservedDays()
 	if reservedDays != h.curReservedDays {
 		log.Info("hot region reserved days changed",
 			zap.Uint64("previous-reserved-days", h.curReservedDays),

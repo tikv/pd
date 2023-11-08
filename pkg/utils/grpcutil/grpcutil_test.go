@@ -2,11 +2,18 @@ package grpcutil
 
 import (
 	"os"
+	"os/exec"
+	"path"
 	"testing"
 
 	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/errs"
+)
+
+var (
+	certPath   = "../../../tests/integrations/client/"
+	certScript = "cert_opt.sh"
 )
 
 func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
@@ -21,12 +28,21 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 }
 
 func TestToTLSConfig(t *testing.T) {
+	if err := exec.Command(certPath+certScript, "generate", certPath).Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := exec.Command(certPath+certScript, "cleanup", certPath).Run(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
 	t.Parallel()
 	re := require.New(t)
 	tlsConfig := TLSConfig{
-		KeyPath:  "../../../tests/integrations/client/cert/pd-server-key.pem",
-		CertPath: "../../../tests/integrations/client/cert/pd-server.pem",
-		CAPath:   "../../../tests/integrations/client/cert/ca.pem",
+		KeyPath:  path.Join(certPath, "pd-server-key.pem"),
+		CertPath: path.Join(certPath, "pd-server.pem"),
+		CAPath:   path.Join(certPath, "ca.pem"),
 	}
 	// test without bytes
 	_, err := tlsConfig.ToTLSConfig()

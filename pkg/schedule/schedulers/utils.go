@@ -44,7 +44,7 @@ const (
 
 type solver struct {
 	*plan.BalanceSchedulerPlan
-	sche.ScheduleCluster
+	sche.SchedulerCluster
 	kind              constant.ScheduleKind
 	opInfluence       operator.OpInfluence
 	tolerantSizeRatio float64
@@ -55,10 +55,10 @@ type solver struct {
 	targetScore float64
 }
 
-func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.ScheduleCluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence operator.OpInfluence) *solver {
 	return &solver{
 		BalanceSchedulerPlan: basePlan,
-		ScheduleCluster:      cluster,
+		SchedulerCluster:     cluster,
 		kind:                 kind,
 		opInfluence:          opInfluence,
 		tolerantSizeRatio:    adjustTolerantRatio(cluster, kind),
@@ -95,8 +95,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		influence = -influence
 	}
 
-	opts := p.GetOpts()
-	if opts.IsDebugMetricsEnabled() {
+	if p.GetSchedulerConfig().IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(influence))
 		tolerantResourceStatus.WithLabelValues(scheduleName).Set(float64(tolerantResource))
 	}
@@ -107,7 +106,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
 	case constant.RegionKind:
 		sourceDelta := influence*influenceAmp - tolerantResource
-		score = p.Source.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), sourceDelta)
+		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
 	case constant.WitnessKind:
 		sourceDelta := influence - tolerantResource
 		score = p.Source.WitnessScore(sourceDelta)
@@ -127,8 +126,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		influence = -influence
 	}
 
-	opts := p.GetOpts()
-	if opts.IsDebugMetricsEnabled() {
+	if p.GetSchedulerConfig().IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(influence))
 	}
 	var score float64
@@ -138,7 +136,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
 	case constant.RegionKind:
 		targetDelta := influence*influenceAmp + tolerantResource
-		score = p.Target.RegionScore(opts.GetRegionScoreFormulaVersion(), opts.GetHighSpaceRatio(), opts.GetLowSpaceRatio(), targetDelta)
+		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
 	case constant.WitnessKind:
 		targetDelta := influence + tolerantResource
 		score = p.Target.WitnessScore(targetDelta)
@@ -182,14 +180,14 @@ func (p *solver) getTolerantResource() int64 {
 	return p.tolerantSource
 }
 
-func adjustTolerantRatio(cluster sche.ScheduleCluster, kind constant.ScheduleKind) float64 {
+func adjustTolerantRatio(cluster sche.SchedulerCluster, kind constant.ScheduleKind) float64 {
 	var tolerantSizeRatio float64
 	switch c := cluster.(type) {
 	case *rangeCluster:
 		// range cluster use a separate configuration
 		tolerantSizeRatio = c.GetTolerantSizeRatio()
 	default:
-		tolerantSizeRatio = cluster.GetOpts().GetTolerantSizeRatio()
+		tolerantSizeRatio = cluster.GetSchedulerConfig().GetTolerantSizeRatio()
 	}
 	if kind.Resource == constant.LeaderKind && kind.Policy == constant.ByCount {
 		if tolerantSizeRatio == 0 {
@@ -253,6 +251,7 @@ func newPendingInfluence(op *operator.Operator, froms []uint64, to uint64, infl 
 	}
 }
 
+// stLdRate returns a function to get the load rate of the store with the specified dimension.
 func stLdRate(dim int) func(ld *statistics.StoreLoad) float64 {
 	return func(ld *statistics.StoreLoad) float64 {
 		return ld.Loads[dim]
@@ -265,12 +264,16 @@ func stLdCount(ld *statistics.StoreLoad) float64 {
 
 type storeLoadCmp func(ld1, ld2 *statistics.StoreLoad) int
 
+// negLoadCmp returns a cmp that returns the negation of cmps.
 func negLoadCmp(cmp storeLoadCmp) storeLoadCmp {
 	return func(ld1, ld2 *statistics.StoreLoad) int {
 		return -cmp(ld1, ld2)
 	}
 }
 
+// sliceLoadCmp returns function with running cmps in order.
+// If the cmp returns 0, which means equal, the next cmp will be used.
+// If all cmps return 0, the two loads are considered equal.
 func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 	return func(ld1, ld2 *statistics.StoreLoad) int {
 		for _, cmp := range cmps {
@@ -282,12 +285,15 @@ func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 	}
 }
 
+// stLdRankCmp returns a cmp that compares the two loads with discretized data.
+// For example, if the rank function discretice data by step 10 , the load 11 and 19 will be considered equal.
 func stLdRankCmp(dim func(ld *statistics.StoreLoad) float64, rank func(value float64) int64) storeLoadCmp {
 	return func(ld1, ld2 *statistics.StoreLoad) int {
 		return rankCmp(dim(ld1), dim(ld2), rank)
 	}
 }
 
+// rankCmp compares the two values with discretized data.
 func rankCmp(a, b float64, rank func(value float64) int64) int {
 	aRk, bRk := rank(a), rank(b)
 	if aRk < bRk {
@@ -300,6 +306,9 @@ func rankCmp(a, b float64, rank func(value float64) int64) int {
 
 type storeLPCmp func(lp1, lp2 *statistics.StoreLoadPred) int
 
+// sliceLPCmp returns function with running cmps in order.
+// If the cmp returns 0, which means equal, the next cmp will be used.
+// If all cmps return 0, the two loads are considered equal.
 func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
 	return func(lp1, lp2 *statistics.StoreLoadPred) int {
 		for _, cmp := range cmps {
@@ -311,18 +320,21 @@ func sliceLPCmp(cmps ...storeLPCmp) storeLPCmp {
 	}
 }
 
+// minLPCmp is a function to select the min load of the store between current and future when comparing.
 func minLPCmp(ldCmp storeLoadCmp) storeLPCmp {
 	return func(lp1, lp2 *statistics.StoreLoadPred) int {
 		return ldCmp(lp1.Min(), lp2.Min())
 	}
 }
 
+// maxLPCmp is a function to select the max load of the store between current and future when comparing.
 func maxLPCmp(ldCmp storeLoadCmp) storeLPCmp {
 	return func(lp1, lp2 *statistics.StoreLoadPred) int {
 		return ldCmp(lp1.Max(), lp2.Max())
 	}
 }
 
+// diffCmp is a function to select the diff load of the store between current and future when comparing.
 func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
 	return func(lp1, lp2 *statistics.StoreLoadPred) int {
 		return ldCmp(lp1.Diff(), lp2.Diff())

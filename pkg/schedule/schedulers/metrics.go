@@ -33,14 +33,6 @@ var (
 			Help:      "Counter of scheduler events.",
 		}, []string{"type", "name"})
 
-	schedulerStatus = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "inner_status",
-			Help:      "Inner status of the scheduler.",
-		}, []string{"type", "name"})
-
 	// TODO: pre-allocate gauge metrics
 	opInfluenceStatus = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -59,28 +51,12 @@ var (
 			Help:      "Store status for schedule",
 		}, []string{"scheduler"})
 
-	balanceLeaderCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "balance_leader",
-			Help:      "Counter of balance leader scheduler.",
-		}, []string{"type", "store"})
-
 	balanceWitnessCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "balance_witness",
 			Help:      "Counter of balance witness scheduler.",
-		}, []string{"type", "store"})
-
-	balanceRegionCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "balance_region",
-			Help:      "Counter of balance region scheduler.",
 		}, []string{"type", "store"})
 
 	// TODO: pre-allocate gauge metrics
@@ -108,22 +84,6 @@ var (
 			Name:      "hot_region_direction",
 			Help:      "Counter of hot region scheduler.",
 		}, []string{"type", "rw", "store", "direction", "dim"})
-
-	scatterRangeLeaderCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "scatter_range_leader",
-			Help:      "Counter of scatter range leader scheduler.",
-		}, []string{"type", "store"})
-
-	scatterRangeRegionCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "pd",
-			Subsystem: "scheduler",
-			Name:      "scatter_range_region",
-			Help:      "Counter of scatter range region scheduler.",
-		}, []string{"type", "store"})
 
 	hotPendingStatus = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -156,15 +116,15 @@ var (
 			Subsystem: "scheduler",
 			Name:      "store_slow_trend_action_status",
 			Help:      "Store trend scheduler calculating actions",
-		}, []string{"reason"})
+		}, []string{"type", "status"})
 
 	storeSlowTrendMiscGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "store_slow_trend_misc",
-			Help:      "Store trend internal uncatelogued values",
-		}, []string{"type"})
+			Help:      "Store trend internal uncatalogued values",
+		}, []string{"type", "dim"})
 
 	// HotPendingSum is the sum of pending influence in hot region scheduler.
 	HotPendingSum = prometheus.NewGaugeVec(
@@ -174,20 +134,24 @@ var (
 			Name:      "hot_pending_sum",
 			Help:      "Pending influence sum of store in hot region scheduler.",
 		}, []string{"store", "rw", "dim"})
+
+	ruleStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "rule_manager",
+			Name:      "status",
+			Help:      "Status of the rule.",
+		}, []string{"type"})
 )
 
 func init() {
 	prometheus.MustRegister(schedulerStatusGauge)
+	prometheus.MustRegister(ruleStatusGauge)
 	prometheus.MustRegister(schedulerCounter)
-	prometheus.MustRegister(schedulerStatus)
-	prometheus.MustRegister(balanceLeaderCounter)
-	prometheus.MustRegister(balanceRegionCounter)
 	prometheus.MustRegister(balanceWitnessCounter)
 	prometheus.MustRegister(hotSchedulerResultCounter)
 	prometheus.MustRegister(hotDirectionCounter)
 	prometheus.MustRegister(balanceDirectionCounter)
-	prometheus.MustRegister(scatterRangeLeaderCounter)
-	prometheus.MustRegister(scatterRangeRegionCounter)
 	prometheus.MustRegister(opInfluenceStatus)
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)

@@ -16,7 +16,9 @@ package apis
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"reflect"
 	"sync"
 
 	"github.com/gin-contrib/cors"
@@ -25,10 +27,13 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/reflectutil"
 )
 
 // APIPathPrefix is the prefix of the API path.
@@ -54,7 +59,7 @@ func init() {
 // Service is the resource group service.
 type Service struct {
 	apiHandlerEngine *gin.Engine
-	baseEndpoint     *gin.RouterGroup
+	root             *gin.RouterGroup
 
 	manager *rmserver.Manager
 }
@@ -73,36 +78,61 @@ func NewService(srv *rmserver.Service) *Service {
 	manager := srv.GetManager()
 	apiHandlerEngine.Use(func(c *gin.Context) {
 		// manager implements the interface of basicserver.Service.
-		c.Set("service", manager.GetBasicServer())
+		c.Set(multiservicesapi.ServiceContextKey, manager.GetBasicServer())
 		c.Next()
 	})
-	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	pprof.Register(apiHandlerEngine)
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
+	endpoint.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		manager:          manager,
 		apiHandlerEngine: apiHandlerEngine,
-		baseEndpoint:     endpoint,
+		root:             endpoint,
 	}
+	s.RegisterAdminRouter()
 	s.RegisterRouter()
 	return s
 }
 
+// RegisterAdminRouter registers the router of the TSO admin handler.
+func (s *Service) RegisterAdminRouter() {
+	router := s.root.Group("admin")
+	router.PUT("/log", changeLogLevel)
+}
+
 // RegisterRouter registers the router of the service.
 func (s *Service) RegisterRouter() {
-	configEndpoint := s.baseEndpoint.Group("/config")
+	configEndpoint := s.root.Group("/config")
 	configEndpoint.POST("/group", s.postResourceGroup)
 	configEndpoint.PUT("/group", s.putResourceGroup)
 	configEndpoint.GET("/group/:name", s.getResourceGroup)
 	configEndpoint.GET("/groups", s.getResourceGroupList)
 	configEndpoint.DELETE("/group/:name", s.deleteResourceGroup)
+	configEndpoint.GET("/controller", s.getControllerConfig)
+	configEndpoint.POST("/controller", s.setControllerConfig)
 }
 
 func (s *Service) handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.apiHandlerEngine.ServeHTTP(w, r)
 	})
+}
+
+func changeLogLevel(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*rmserver.Service)
+	var level string
+	if err := c.Bind(&level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := svr.SetLogLevel(level); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	log.SetLevel(logutil.StringToZapLogLevel(level))
+	c.String(http.StatusOK, "The log level is updated.")
 }
 
 // postResourceGroup
@@ -124,7 +154,7 @@ func (s *Service) postResourceGroup(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, "Success!")
+	c.String(http.StatusOK, "Success!")
 }
 
 // putResourceGroup
@@ -146,7 +176,7 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.JSON(http.StatusOK, "Success!")
+	c.String(http.StatusOK, "Success!")
 }
 
 // getResourceGroup
@@ -162,7 +192,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 	if group == nil {
 		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
 	}
-	c.JSON(http.StatusOK, group)
+	c.IndentedJSON(http.StatusOK, group)
 }
 
 // getResourceGroupList
@@ -174,7 +204,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Router		/config/groups [GET]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	groups := s.manager.GetResourceGroupList()
-	c.JSON(http.StatusOK, groups)
+	c.IndentedJSON(http.StatusOK, groups)
 }
 
 // deleteResourceGroup
@@ -189,5 +219,45 @@ func (s *Service) deleteResourceGroup(c *gin.Context) {
 	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
 	}
-	c.JSON(http.StatusOK, "Success!")
+	c.String(http.StatusOK, "Success!")
+}
+
+// GetControllerConfig
+//
+//	@Tags		ResourceManager
+//	@Summary	Get the resource controller config.
+//	@Success	200		{string}	json	format	of	rmserver.ControllerConfig
+//	@Failure	400 	{string}	error
+//	@Router		/config/controller [GET]
+func (s *Service) getControllerConfig(c *gin.Context) {
+	config := s.manager.GetControllerConfig()
+	c.IndentedJSON(http.StatusOK, config)
+}
+
+// SetControllerConfig
+//
+//	@Tags		ResourceManager
+//	@Summary	Set the resource controller config.
+//	@Param		config	body	object	true	"json params, rmserver.ControllerConfig"
+//	@Success	200		{string}	string	"Success!"
+//	@Failure	400 	{string}	error
+//	@Router		/config/controller [POST]
+func (s *Service) setControllerConfig(c *gin.Context) {
+	conf := make(map[string]interface{})
+	if err := c.ShouldBindJSON(&conf); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	for k, v := range conf {
+		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(rmserver.ControllerConfig{}), k)
+		if key == "" {
+			c.String(http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
+			return
+		}
+		if err := s.manager.UpdateControllerConfigItem(key, v); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	c.String(http.StatusOK, "Success!")
 }

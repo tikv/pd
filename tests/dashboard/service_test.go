@@ -86,7 +86,8 @@ func (suite *dashboardTestSuite) checkRespCode(url string, code int) {
 }
 
 func waitForConfigSync() {
-	time.Sleep(time.Second)
+	// Need to wait dashboard service start.
+	time.Sleep(3 * time.Second)
 }
 
 func (suite *dashboardTestSuite) checkServiceIsStarted(internalProxy bool, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
@@ -134,7 +135,7 @@ func (suite *dashboardTestSuite) testDashboard(internalProxy bool) {
 
 	cluster.WaitLeader()
 	servers := cluster.GetServers()
-	leader := cluster.GetServer(cluster.GetLeader())
+	leader := cluster.GetLeaderServer()
 	leaderAddr := leader.GetAddr()
 
 	// auto select node

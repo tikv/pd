@@ -17,6 +17,8 @@ package server
 import (
 	"context"
 	"net/http"
+	"net/http/pprof"
+	"path/filepath"
 	"strings"
 
 	"github.com/gorilla/mux"
@@ -120,7 +122,26 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 			userHandlers[pathPrefix] = handler
 		}
 	}
+
 	apiService.UseHandler(router)
 	userHandlers[pdAPIPrefix] = apiService
+
+	// fix issue https://github.com/tikv/pd/issues/7253
+	// FIXME: remove me after upgrade
+	userHandlers["/debug/pprof/trace"] = http.HandlerFunc(pprof.Trace)
 	return userHandlers, nil
+}
+
+func isPathInDirectory(path, directory string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+
+	absDir, err := filepath.Abs(directory)
+	if err != nil {
+		return false
+	}
+
+	return strings.HasPrefix(absPath, absDir)
 }

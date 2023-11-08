@@ -16,7 +16,9 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"sync"
 	"testing"
@@ -26,10 +28,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"go.uber.org/goleak"
@@ -133,6 +137,53 @@ func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
+func mustPutRegion(re *require.Assertions, svr *server.Server, regionID, storeID uint64, start, end []byte, opts ...core.RegionCreateOption) *core.RegionInfo {
+	leader := &metapb.Peer{
+		Id:      regionID,
+		StoreId: storeID,
+	}
+	metaRegion := &metapb.Region{
+		Id:          regionID,
+		StartKey:    start,
+		EndKey:      end,
+		Peers:       []*metapb.Peer{leader},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	r := core.NewRegionInfo(metaRegion, leader, opts...)
+	err := svr.GetRaftCluster().HandleRegionHeartbeat(r)
+	re.NoError(err)
+	return r
+}
+
+func mustPutStore(re *require.Assertions, svr *server.Server, id uint64, state metapb.StoreState, nodeState metapb.NodeState, labels []*metapb.StoreLabel) {
+	s := &server.GrpcServer{Server: svr}
+	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Store: &metapb.Store{
+			Id:        id,
+			Address:   fmt.Sprintf("tikv%d", id),
+			State:     state,
+			NodeState: nodeState,
+			Labels:    labels,
+			Version:   versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
+		},
+	})
+	re.NoError(err)
+	if state == metapb.StoreState_Up {
+		_, err = s.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+			Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+			Stats:  &pdpb.StoreStats{StoreId: id},
+		})
+		re.NoError(err)
+	}
+}
+
+func mustRegionHeartbeat(re *require.Assertions, svr *server.Server, region *core.RegionInfo) {
+	cluster := svr.GetRaftCluster()
+	err := cluster.HandleRegionHeartbeat(region)
+	re.NoError(err)
+}
+
 type serviceTestSuite struct {
 	suite.Suite
 	svr     *server.Server
@@ -209,4 +260,25 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
 	suite.Equal("QueryMetric", serviceLabel)
+}
+
+func (suite *adminTestSuite) TestCleanPath() {
+	re := suite.Require()
+	// transfer path to /config
+	url := fmt.Sprintf("%s/admin/persist-file/../../config", suite.urlPrefix)
+	cfg := &config.Config{}
+	err := testutil.ReadGetJSON(re, testDialClient, url, cfg)
+	suite.NoError(err)
+
+	// handled by router
+	response := httptest.NewRecorder()
+	r, _, _ := NewHandler(context.Background(), suite.svr)
+	request, err := http.NewRequest(http.MethodGet, url, nil)
+	re.NoError(err)
+	r.ServeHTTP(response, request)
+	// handled by `cleanPath` which is in `mux.ServeHTTP`
+	result := response.Result()
+	defer result.Body.Close()
+	re.NotNil(result.Header["Location"])
+	re.Contains(result.Header["Location"][0], "/pd/api/v1/config")
 }

@@ -95,7 +95,7 @@ func (conf *grantLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
@@ -178,7 +178,26 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
+func (s *grantLeaderScheduler) ReloadConfig() error {
+	s.conf.mu.Lock()
+	defer s.conf.mu.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &grantLeaderSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
+	return nil
+}
+
+func (s *grantLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -190,7 +209,7 @@ func (s *grantLeaderScheduler) Prepare(cluster sche.ScheduleCluster) error {
 	return res
 }
 
-func (s *grantLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
+func (s *grantLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
@@ -198,15 +217,15 @@ func (s *grantLeaderScheduler) Cleanup(cluster sche.ScheduleCluster) {
 	}
 }
 
-func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.ScheduleCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster sche.ScheduleCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()

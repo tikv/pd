@@ -16,7 +16,6 @@ package api
 
 import (
 	"fmt"
-	"net/http"
 	"testing"
 	"time"
 
@@ -59,7 +58,7 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	sspURL := suite.urlPrefix + "/gc/safepoint"
 
 	storage := suite.svr.GetStorage()
-	list := &listServiceGCSafepoint{
+	list := &ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
 				ServiceID: "a",
@@ -88,14 +87,13 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	res, err := testDialClient.Get(sspURL)
 	suite.NoError(err)
 	defer res.Body.Close()
-	listResp := &listServiceGCSafepoint{}
+	listResp := &ListServiceGCSafepoint{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	suite.NoError(err)
 	suite.Equal(list, listResp)
 
-	statusCode, err := apiutil.DoDelete(testDialClient, sspURL+"/a")
+	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(suite.Require()))
 	suite.NoError(err)
-	suite.Equal(http.StatusOK, statusCode)
 
 	left, err := storage.LoadAllServiceGCSafePoints()
 	suite.NoError(err)

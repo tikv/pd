@@ -95,7 +95,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		log.Info("region syncer start load region")
 		start := time.Now()
 		err := storage.TryLoadRegionsOnce(ctx, regionStorage, bc.CheckAndPutRegion)
-		log.Info("region syncer finished load region", zap.Duration("time-cost", time.Since(start)))
+		log.Info("region syncer finished load regions", zap.Duration("time-cost", time.Since(start)))
 		if err != nil {
 			log.Warn("failed to load regions", errs.ZapError(err))
 		}
@@ -183,10 +183,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
 							core.SetReadKeys(stats[i].KeysRead),
-							core.SetFromHeartbeat(false),
+							core.SetSource(core.Sync),
 						)
 					} else {
-						region = core.NewRegionInfo(r, regionLeader, core.SetFromHeartbeat(false))
+						region = core.NewRegionInfo(r, regionLeader, core.SetSource(core.Sync))
 					}
 
 					origin, _, err := bc.PreCheckPutRegion(region)

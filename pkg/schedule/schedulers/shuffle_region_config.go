@@ -69,6 +69,7 @@ func (conf *shuffleRegionSchedulerConfig) IsRoleAllow(role string) bool {
 
 func (conf *shuffleRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
+	router.HandleFunc("/list", conf.handleGetRoles).Methods(http.MethodGet)
 	router.HandleFunc("/roles", conf.handleGetRoles).Methods(http.MethodGet)
 	router.HandleFunc("/roles", conf.handleSetRoles).Methods(http.MethodPost)
 	router.ServeHTTP(w, r)
@@ -101,7 +102,7 @@ func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, 
 		rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	rd.Text(w, http.StatusOK, "")
+	rd.Text(w, http.StatusOK, "Config is updated.")
 }
 
 func (conf *shuffleRegionSchedulerConfig) persist() error {
@@ -109,5 +110,5 @@ func (conf *shuffleRegionSchedulerConfig) persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveScheduleConfig(ShuffleRegionName, data)
+	return conf.storage.SaveSchedulerConfig(ShuffleRegionName, data)
 }

@@ -173,8 +173,8 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]int
 	}
 
 	endpoints := getEndpoints(cmd)
+	var msg []byte
 	err = tryURLs(cmd, endpoints, func(endpoint string) error {
-		var msg []byte
 		var req *http.Request
 		var resp *http.Response
 		url := endpoint + "/" + prefix
@@ -194,11 +194,11 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]int
 			return err
 		}
 		defer resp.Body.Close()
+		msg, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
 		if resp.StatusCode != http.StatusOK {
-			msg, err = io.ReadAll(resp.Body)
-			if err != nil {
-				return err
-			}
 			return errors.Errorf("[%d] %s", resp.StatusCode, msg)
 		}
 		return nil
@@ -207,7 +207,7 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]int
 		cmd.Printf("Failed! %s\n", err)
 		return
 	}
-	cmd.Println("Success!")
+	cmd.Printf("Success! %s\n", strings.Trim(string(msg), "\""))
 }
 
 func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
