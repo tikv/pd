@@ -2635,6 +2635,9 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		return false
 	}
 	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
+		if i > 0 {
+			time.Sleep(retryIntervalRequestTSOServer)
+		}
 		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
 		if !ok || forwardedHost == "" {
 			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
@@ -2646,7 +2649,6 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		err = forwardStream.Send(request)
 		if err != nil {
 			if needRetry := handleStreamError(err); needRetry {
-				time.Sleep(retryIntervalRequestTSOServer)
 				continue
 			}
 			log.Error("send request to tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
@@ -2655,7 +2657,6 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		ts, err = forwardStream.Recv()
 		if err != nil {
 			if needRetry := handleStreamError(err); needRetry {
-				time.Sleep(retryIntervalRequestTSOServer)
 				continue
 			}
 			log.Error("receive response from tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
