@@ -252,8 +252,9 @@ func (s *evictSlowTrendScheduler) GetMinInterval() time.Duration {
 
 func (s *evictSlowTrendScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	var growthType intervalGrowthType
-	// If it already found slow node, the next interval should be shorter to make the
-	// next scheduling as soon as possible.
+	// If it already found a slow node as candidate, the next interval should be shorter
+	// to make the next scheduling as soon as possible. This adjustment will decrease the
+	// response time, as heartbeats from other nodes will be received and updated more quickly.
 	if !s.conf.isEmpty() {
 		growthType = zeroGrowth
 	} else {
