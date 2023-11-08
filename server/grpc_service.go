@@ -2622,7 +2622,6 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	handleStreamError := func(err error) (needRetry bool) {
 		if strings.Contains(err.Error(), errs.NotLeaderErr) {
 			s.tsoPrimaryWatcher.ForceLoad()
-			time.Sleep(retryIntervalRequestTSOServer)
 			log.Warn("force to load tso primary address due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
 			return true
 		}
@@ -2630,7 +2629,6 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 			s.tsoClientPool.Lock()
 			delete(s.tsoClientPool.clients, forwardedHost)
 			s.tsoClientPool.Unlock()
-			time.Sleep(retryIntervalRequestTSOServer)
 			log.Warn("client connection removed due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
 			return true
 		}
@@ -2648,6 +2646,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		err = forwardStream.Send(request)
 		if err != nil {
 			if needRetry := handleStreamError(err); needRetry {
+				time.Sleep(retryIntervalRequestTSOServer)
 				continue
 			}
 			log.Error("send request to tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
@@ -2656,6 +2655,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		ts, err = forwardStream.Recv()
 		if err != nil {
 			if needRetry := handleStreamError(err); needRetry {
+				time.Sleep(retryIntervalRequestTSOServer)
 				continue
 			}
 			log.Error("receive response from tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
