@@ -88,7 +88,7 @@ func TestKeyspace(t *testing.T) {
 
 	// check keyspace group in keyspace whether changed.
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName}
+		args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName, "--force_refresh_group_id"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &k))
