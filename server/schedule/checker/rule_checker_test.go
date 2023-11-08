@@ -17,7 +17,6 @@ package checker
 import (
 	"context"
 	"fmt"
-
 	"strconv"
 	"testing"
 	"time"
