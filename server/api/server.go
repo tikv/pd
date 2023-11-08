@@ -52,6 +52,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	//	"/schedulers", http.MethodGet
 	//	"/schedulers/{name}", http.MethodPost
 	//	"/schedulers/diagnostic/{name}", http.MethodGet
+	//	"/scheduler-config", http.MethodGet
 	//	"/hotspot/regions/read", http.MethodGet
 	//	"/hotspot/regions/write", http.MethodGet
 	//	"/hotspot/regions/history", http.MethodGet
@@ -88,6 +89,11 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",
 				scheapi.APIPathPrefix+"/schedulers",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/scheduler-config",
+				scheapi.APIPathPrefix+"/schedulers/config",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
