@@ -26,6 +26,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -478,4 +479,29 @@ func newTestScheduleOption() (*PersistOptions, error) {
 	}
 	opt := NewPersistOptions(cfg)
 	return opt, nil
+}
+
+func TestRateLimitClone(t *testing.T) {
+	re := require.New(t)
+	cfg := &RateLimitConfig{
+		EnableRateLimit: defaultEnableRateLimitMiddleware,
+		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+	}
+	clone := cfg.Clone()
+	clone.LimiterConfig["test"] = ratelimit.DimensionConfig{
+		ConcurrencyLimit: 200,
+	}
+	dc := cfg.LimiterConfig["test"]
+	re.Equal(dc.ConcurrencyLimit, uint64(0))
+
+	gCfg := &GRPCRateLimitConfig{
+		EnableRateLimit: defaultEnableGRPCRateLimitMiddleware,
+		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+	}
+	gClone := gCfg.Clone()
+	gClone.LimiterConfig["test"] = ratelimit.DimensionConfig{
+		ConcurrencyLimit: 300,
+	}
+	gdc := gCfg.LimiterConfig["test"]
+	re.Equal(gdc.ConcurrencyLimit, uint64(0))
 }
