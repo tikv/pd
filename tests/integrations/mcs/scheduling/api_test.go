@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
+	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
@@ -240,6 +241,88 @@ func (suite *apiTestSuite) TestAPIForward() {
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/history"), &history,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
+}
+
+func (suite *apiTestSuite) TestConfig() {
+	checkConfig := func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		s := cluster.GetSchedulingPrimaryServer()
+		testutil.Eventually(re, func() bool {
+			return s.IsServing()
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+		addr := s.GetAddr()
+		urlPrefix := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
+
+		var cfg config.Config
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		suite.Equal(cfg.GetListenAddr(), s.GetConfig().GetListenAddr())
+		suite.Equal(cfg.Schedule.LeaderScheduleLimit, s.GetConfig().Schedule.LeaderScheduleLimit)
+		suite.Equal(cfg.Schedule.EnableCrossTableMerge, s.GetConfig().Schedule.EnableCrossTableMerge)
+		suite.Equal(cfg.Replication.MaxReplicas, s.GetConfig().Replication.MaxReplicas)
+		suite.Equal(cfg.Replication.LocationLabels, s.GetConfig().Replication.LocationLabels)
+		suite.Equal(cfg.DataDir, s.GetConfig().DataDir)
+		testutil.Eventually(re, func() bool {
+			// wait for all schedulers to be loaded in scheduling server.
+			return len(cfg.Schedule.SchedulersPayload) == 5
+		})
+		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-leader-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-region-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-hot-region-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-witness-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "transfer-witness-leader-scheduler")
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInAPIMode(checkConfig)
+}
+
+func TestConfigForward(t *testing.T) {
+	re := require.New(t)
+	checkConfigForward := func(cluster *tests.TestCluster) {
+		sche := cluster.GetSchedulingPrimaryServer()
+		opts := sche.GetPersistConfig()
+		var cfg map[string]interface{}
+		addr := cluster.GetLeaderServer().GetAddr()
+		urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", addr)
+
+		// Test config forward
+		// Expect to get same config in scheduling server and api server
+		testutil.Eventually(re, func() bool {
+			testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+			re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"],
+				float64(opts.GetLeaderScheduleLimit()))
+			re.Equal(cfg["replication"].(map[string]interface{})["max-replicas"],
+				float64(opts.GetReplicationConfig().MaxReplicas))
+			schedulers := cfg["schedule"].(map[string]interface{})["schedulers-payload"].(map[string]interface{})
+			return len(schedulers) == 5
+		})
+
+		// Test to change config in api server
+		// Expect to get new config in scheduling server and api server
+		reqData, err := json.Marshal(map[string]interface{}{
+			"max-replicas": 4,
+		})
+		re.NoError(err)
+		err = testutil.CheckPostJSON(testDialClient, urlPrefix, reqData, testutil.StatusOK(re))
+		re.NoError(err)
+		testutil.Eventually(re, func() bool {
+			testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+			return cfg["replication"].(map[string]interface{})["max-replicas"] == 4. &&
+				opts.GetReplicationConfig().MaxReplicas == 4.
+		})
+
+		// Test to change config only in scheduling server
+		// Expect to get new config in scheduling server but not old config in api server
+		opts.GetScheduleConfig().LeaderScheduleLimit = 100
+		re.Equal(100, int(opts.GetLeaderScheduleLimit()))
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		re.Equal(100., cfg["schedule"].(map[string]interface{})["leader-schedule-limit"])
+		opts.GetReplicationConfig().MaxReplicas = 5
+		re.Equal(5, int(opts.GetReplicationConfig().MaxReplicas))
+		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
+		re.Equal(5., cfg["replication"].(map[string]interface{})["max-replicas"])
+	}
+	env := tests.NewSchedulingTestEnvironment(t)
+	env.RunTestInAPIMode(checkConfigForward)
 }
 
 func TestAdminRegionCache(t *testing.T) {
