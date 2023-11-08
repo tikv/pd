@@ -789,11 +789,10 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 		},
 		StoreConfig: *o.GetStoreConfig(),
 	}
-	err := storage.SaveConfig(cfg)
 	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
+		failpoint.Return(errors.New("fail to persist"))
 	})
-	return err
+	return storage.SaveConfig(cfg)
 }
 
 // Reload reloads the configuration from the storage.

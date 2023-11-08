@@ -35,8 +35,9 @@ func newServiceGCSafepointHandler(svr *server.Server, rd *render.Render) *servic
 	}
 }
 
+// ListServiceGCSafepoint is the response for list service GC safepoint.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type listServiceGCSafepoint struct {
+type ListServiceGCSafepoint struct {
 	ServiceGCSafepoints []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
 	GCSafePoint         uint64                       `json:"gc_safe_point"`
 }
@@ -44,7 +45,7 @@ type listServiceGCSafepoint struct {
 // @Tags     service_gc_safepoint
 // @Summary  Get all service GC safepoint.
 // @Produce  json
-// @Success  200  {array}   listServiceGCSafepoint
+// @Success  200  {array}   ListServiceGCSafepoint
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /gc/safepoint [get]
 func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +60,7 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *htt
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	list := listServiceGCSafepoint{
+	list := ListServiceGCSafepoint{
 		GCSafePoint:         gcSafepoint,
 		ServiceGCSafepoints: ssps,
 	}
