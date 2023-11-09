@@ -56,15 +56,15 @@ func (l *limiter) getRateLimiter() *RateLimiter {
 }
 
 func (l *limiter) deleteRateLimiter() bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.rate = nil
 	return l.isEmpty()
 }
 
 func (l *limiter) deleteConcurrency() bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.concurrency = nil
 	return l.isEmpty()
 }
