@@ -489,7 +489,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
-	if !s.IsServiceEnabled(mcs.SchedulingServiceName) {
+	if !s.IsServiceIndependent(mcs.SchedulingServiceName) {
 		s.hotRegionStorage, err = storage.NewHotRegionsStorage(
 			ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
 		if err != nil {
@@ -1394,11 +1394,11 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 	return nil
 }
 
-// IsServiceEnabled returns if the service is enabled
-func (s *Server) IsServiceEnabled(name string) bool {
+// IsServiceIndependent returns if the service is enabled
+func (s *Server) IsServiceIndependent(name string) bool {
 	rc := s.GetRaftCluster()
 	if rc != nil {
-		return rc.IsServiceEnabled(name)
+		return rc.IsServiceIndependent(name)
 	}
 	return false
 }

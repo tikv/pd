@@ -166,7 +166,7 @@ type RaftCluster struct {
 	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
 	keyspaceGroupManager     *keyspace.GroupManager
-	enabledServices          sync.Map
+	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
 }
 
@@ -350,11 +350,15 @@ func (c *RaftCluster) runServiceCheckJob() {
 	checkFn := func() {
 		if c.isAPIServiceMode {
 			once.Do(c.initSchedulers)
-			c.enabledServices.Store(mcsutils.SchedulingServiceName, true)
-		} else if !c.schedulingController.running.Load() {
-			c.startSchedulingJobs()
-			c.enabledServices.Delete(mcsutils.SchedulingServiceName)
+			c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			return
 		}
+		c.RLock()
+		if !c.schedulingController.running.Load() {
+			c.startSchedulingJobs()
+			c.independentServices.Delete(mcsutils.SchedulingServiceName)
+		}
+		c.RUnlock()
 	}
 	checkFn()
 
@@ -620,7 +624,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Int("count", c.core.GetTotalRegionCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		for _, store := range c.GetStores() {
 			storeID := store.GetID()
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
@@ -716,7 +720,7 @@ func (c *RaftCluster) Stop() {
 		return
 	}
 	c.running = false
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) && c.schedulingController.running.Load() {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) && c.schedulingController.running.Load() {
 		c.stopSchedulingJobs()
 	}
 	c.cancel()
@@ -850,7 +854,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	nowTime := time.Now()
 	var newStore *core.StoreInfo
 	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
 			log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
 			newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime), opt)
@@ -885,7 +889,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
 	)
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.hotStat.Observe(storeID, newStore.GetStoreStats())
 		c.hotStat.FilterUnhealthyStore(c)
 		c.slowStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
@@ -941,7 +945,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		e := int64(dur)*2 - int64(stat.GetTotalDurationSec())
 		store.Feedback(float64(e))
 	}
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 		c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
 	}
@@ -987,7 +991,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	}
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		cluster.HandleStatsAsync(c, region)
 	}
 
@@ -996,7 +1000,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) && !saveKV && !saveCache && !isNew {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) && !saveKV && !saveCache && !isNew {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1021,13 +1025,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		if overlaps, err = c.core.AtomicCheckAndPutRegion(region); err != nil {
 			return err
 		}
-		if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 			cluster.HandleOverlaps(c, overlaps)
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
 
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, c.IsPrepared())
 	}
 
@@ -1491,7 +1495,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		c.resetProgress(storeID, addr)
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(addr, storeIDStr)
-		if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
 		}
 	}
@@ -1667,7 +1671,7 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 		}
 	}
 	c.core.PutStore(store)
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.updateStoreStatistics(store.GetID(), store.IsSlow())
 	}
 	return nil
@@ -2522,11 +2526,11 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 	return false
 }
 
-// IsServiceEnabled returns whether the service is enabled.
-func (c *RaftCluster) IsServiceEnabled(name string) bool {
-	enabled, exist := c.enabledServices.Load(name)
+// IsServiceIndependent returns whether the service is independent.
+func (c *RaftCluster) IsServiceIndependent(name string) bool {
+	independent, exist := c.independentServices.Load(name)
 	if !exist {
 		return false
 	}
-	return enabled.(bool)
+	return independent.(bool)
 }

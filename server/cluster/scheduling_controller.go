@@ -38,9 +38,10 @@ import (
 )
 
 type schedulingController struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	parentCtx context.Context
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 	*core.BasicCluster
 	opt         *config.PersistOptions
 	coordinator *schedule.Coordinator
@@ -51,14 +52,15 @@ type schedulingController struct {
 	running     atomic.Bool
 }
 
-func newSchedulingController(ctx context.Context) *schedulingController {
-	ctx, cancel := context.WithCancel(ctx)
+func newSchedulingController(parentCtx context.Context) *schedulingController {
+	ctx, cancel := context.WithCancel(parentCtx)
 	return &schedulingController{
+		parentCtx:  parentCtx,
 		ctx:        ctx,
 		cancel:     cancel,
 		labelStats: statistics.NewLabelStatistics(),
-		hotStat:    statistics.NewHotStat(ctx),
-		slowStat:   statistics.NewSlowStat(ctx),
+		hotStat:    statistics.NewHotStat(parentCtx),
+		slowStat:   statistics.NewSlowStat(parentCtx),
 	}
 }
 
@@ -73,16 +75,17 @@ func (sc *schedulingController) stopSchedulingJobs() {
 	sc.coordinator.Stop()
 	sc.cancel()
 	sc.wg.Wait()
-	sc.running.Store(false)
+	sc.running.CompareAndSwap(true, false)
 	log.Info("scheduling service is stopped")
 }
 
 func (sc *schedulingController) startSchedulingJobs() {
+	sc.ctx, sc.cancel = context.WithCancel(sc.parentCtx)
 	sc.wg.Add(3)
 	go sc.runCoordinator()
 	go sc.runStatsBackgroundJobs()
 	go sc.runSchedulingMetricsCollectionJob()
-	sc.running.Store(true)
+	sc.running.CompareAndSwap(false, true)
 	log.Info("scheduling service is started")
 }
 

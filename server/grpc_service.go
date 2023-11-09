@@ -1002,7 +1002,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 
 		s.handleDamagedStore(request.GetStats())
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
-		if s.IsServiceEnabled(utils.SchedulingServiceName) {
+		if s.IsServiceIndependent(utils.SchedulingServiceName) {
 			forwardCli, _ := s.updateSchedulingClient(ctx)
 			if forwardCli != nil {
 				req := &schedulingpb.StoreHeartbeatRequest{
@@ -1360,7 +1360,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			continue
 		}
 
-		if s.IsServiceEnabled(utils.SchedulingServiceName) {
+		if s.IsServiceIndependent(utils.SchedulingServiceName) {
 			ctx := stream.Context()
 			primaryAddr, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
 			if schedulingStream == nil || lastPrimaryAddr != primaryAddr {
@@ -1632,7 +1632,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 
 // AskBatchSplit implements gRPC PDServer.
 func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if s.IsServiceEnabled(utils.SchedulingServiceName) {
+	if s.IsServiceIndependent(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.AskBatchSplitResponse{
@@ -1805,7 +1805,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 
 // ScatterRegion implements gRPC PDServer.
 func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterRegionRequest) (*pdpb.ScatterRegionResponse, error) {
-	if s.IsServiceEnabled(utils.SchedulingServiceName) {
+	if s.IsServiceIndependent(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.ScatterRegionResponse{
@@ -2036,7 +2036,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 
 // GetOperator gets information about the operator belonging to the specify region.
 func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorRequest) (*pdpb.GetOperatorResponse, error) {
-	if s.IsServiceEnabled(utils.SchedulingServiceName) {
+	if s.IsServiceIndependent(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.GetOperatorResponse{
@@ -2308,7 +2308,7 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 
 // SplitRegions split regions by the given split keys
 func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegionsRequest) (*pdpb.SplitRegionsResponse, error) {
-	if s.IsServiceEnabled(utils.SchedulingServiceName) {
+	if s.IsServiceIndependent(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.SplitRegionsResponse{

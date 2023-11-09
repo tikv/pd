@@ -234,7 +234,7 @@ func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
 	if err := c.processReportBuckets(b); err != nil {
 		return err
 	}
-	if !c.IsServiceEnabled(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
 	}
 	return nil
