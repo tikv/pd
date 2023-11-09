@@ -159,6 +159,22 @@ var (
 			Name:      "maxprocs",
 			Help:      "The value of GOMAXPROCS.",
 		})
+
+	apiLimiterCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "api_limit",
+			Help:      "Counter of requests denied for exceeding the limit.",
+		}, []string{"kind", "api", "type"})
+
+	limiterStatusGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "limiter_status",
+			Help:      "Status of the api limiter.",
+		}, []string{"kind", "api", "type"})
 )
 
 func init() {
@@ -179,4 +195,6 @@ func init() {
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
 	prometheus.MustRegister(serverMaxProcs)
+	prometheus.MustRegister(apiLimiterCounter)
+	prometheus.MustRegister(limiterStatusGauge)
 }

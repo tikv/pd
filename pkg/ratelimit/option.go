@@ -58,7 +58,7 @@ func updateConcurrencyLimiter(limit uint64) Option {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter(l.apiType, label, l.counter))
 		return lim.(*limiter).updateConcurrencyConfig(limit)
 	}
 }
@@ -68,7 +68,7 @@ func updateQPSLimiter(limit float64, burst int) Option {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter(l.apiType, label, l.counter))
 		return lim.(*limiter).updateQPSConfig(limit, burst)
 	}
 }
@@ -79,7 +79,7 @@ func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter(l.apiType, label, l.counter))
 		return lim.(*limiter).updateDimensionConfig(cfg)
 	}
 }
@@ -91,7 +91,7 @@ func UpdateDimensionConfigForTest(cfg *DimensionConfig, opt ...bbrOption) Option
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter(l.apiType, label, l.counter))
 		return lim.(*limiter).updateDimensionConfig(cfg, opt...)
 	}
 }

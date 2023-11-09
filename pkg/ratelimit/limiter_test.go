@@ -50,7 +50,7 @@ func TestWithConcurrencyLimiter(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 
-	limiter := newLimiter()
+	limiter := newLimiter("http", "test1", nil)
 	status := limiter.updateConcurrencyConfig(10)
 	re.True(status&ConcurrencyChanged != 0)
 	var lock syncutil.Mutex
@@ -112,7 +112,7 @@ func TestWithConcurrencyLimiter(t *testing.T) {
 func TestWithQPSLimiter(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	limiter := newLimiter()
+	limiter := newLimiter("http", "test2", nil)
 	status := limiter.updateQPSConfig(float64(rate.Every(time.Second)), 1)
 	re.True(status&QPSChanged != 0)
 
@@ -189,7 +189,8 @@ func TestWithBBR(t *testing.T) {
 	cfg := &DimensionConfig{
 		EnableBBR: true,
 	}
-	limiter := newLimiter()
+
+	limiter := newLimiter("http", "test3", nil)
 	status := limiter.updateDimensionConfig(cfg, optsForTest...)
 	re.True(status&BBRChanged != 0)
 	re.True(status&QPSNoChange != 0)
@@ -331,7 +332,7 @@ func TestWithTwoLimitersAndBBRConfig(t *testing.T) {
 		QPSBurst:         100,
 		ConcurrencyLimit: 100,
 	}
-	limiter := newLimiter()
+	limiter := newLimiter("http", "test4", nil)
 	status := limiter.updateDimensionConfig(cfg)
 	re.True(status&QPSChanged != 0)
 	re.True(status&ConcurrencyChanged != 0)

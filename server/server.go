@@ -273,8 +273,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
-	s.serviceRateLimiter = ratelimit.NewController()
-	s.grpcServiceRateLimiter = ratelimit.NewController()
+	s.serviceRateLimiter = ratelimit.NewController(s.ctx, "http", apiLimiterCounter, limiterStatusGauge)
+	s.grpcServiceRateLimiter = ratelimit.NewController(s.ctx, "grpc", apiLimiterCounter, limiterStatusGauge)
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.grpcServiceLabels = make(map[string]struct{})

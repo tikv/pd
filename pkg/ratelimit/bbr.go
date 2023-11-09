@@ -298,6 +298,9 @@ func (l *bbr) checkFullStatus() {
 }
 
 func (l *bbr) process() DoneFunc {
+	if l == nil {
+		return func() {}
+	}
 	l.inFlightStat.Add(1)
 	start := time.Now().UnixMicro()
 	l.checkFullStatus()

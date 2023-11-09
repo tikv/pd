@@ -15,8 +15,11 @@
 package ratelimit
 
 import (
+	"context"
 	"sync"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 )
 
@@ -24,15 +27,57 @@ var emptyFunc = func() {}
 
 // Controller is a controller which holds multiple limiters to manage the request rate of different objects.
 type Controller struct {
+	ctx      context.Context
+	apiType  string
 	limiters sync.Map
 	// the label which is in labelAllowList won't be limited, and only inited by hard code.
 	labelAllowList map[string]struct{}
+
+	counter *prometheus.CounterVec
+	gauge   *prometheus.GaugeVec
 }
 
 // NewController returns a global limiter which can be updated in the later.
-func NewController() *Controller {
-	return &Controller{
+func NewController(ctx context.Context, typ string, baseCounter *prometheus.CounterVec, baseGauge *prometheus.GaugeVec) *Controller {
+	l := &Controller{
+		ctx:            ctx,
+		apiType:        typ,
 		labelAllowList: make(map[string]struct{}),
+		counter:        baseCounter,
+		gauge:          baseGauge,
+	}
+	go l.collectMetrics()
+	return l
+}
+
+func (l *Controller) collectMetrics() {
+	tricker := time.NewTicker(time.Second)
+	defer tricker.Stop()
+	for {
+		select {
+		case <-l.ctx.Done():
+			return
+		case <-tricker.C:
+			if l.gauge != nil {
+				l.limiters.Range(func(key, value any) bool {
+					limiter := value.(*limiter)
+					label := key.(string)
+					// Due to not in hot path, no need to save sub Gauge.
+					if con := limiter.getConcurrencyLimiter(); con != nil {
+						l.gauge.WithLabelValues(l.apiType, label, "concurrency").Set(float64(con.getCurrent()))
+						l.gauge.WithLabelValues(l.apiType, label, "concurrency-limit").Set(float64(con.getLimit()))
+					}
+					if bbr := limiter.getBBR(); bbr != nil {
+						if bbr.bbrStatus.getMinRT() != infRT {
+							l.gauge.WithLabelValues(l.apiType, label, "bdp").Set(float64(bbr.bbrStatus.getMaxInFlight()))
+						} else {
+							l.gauge.WithLabelValues(l.apiType, label, "bdp").Set(float64(0))
+						}
+					}
+					return true
+				})
+			}
+		}
 	}
 }
 

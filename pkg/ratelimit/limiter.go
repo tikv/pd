@@ -15,6 +15,7 @@
 package ratelimit
 
 import (
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"golang.org/x/time/rate"
@@ -40,11 +41,18 @@ type limiter struct {
 	concurrency *concurrencyLimiter
 	rate        *RateLimiter
 	bbr         *bbr
+
+	rateCounter        prometheus.Counter
+	concurrencyCounter prometheus.Counter
 }
 
-func newLimiter() *limiter {
+func newLimiter(typ, api string, counter *prometheus.CounterVec) *limiter {
 	lim := &limiter{
 		cfg: &DimensionConfig{},
+	}
+	if counter != nil {
+		lim.rateCounter = counter.WithLabelValues(typ, api, "rate")
+		lim.concurrencyCounter = counter.WithLabelValues(typ, api, "concurrency")
 	}
 	return lim
 }
@@ -214,6 +222,9 @@ func (l *limiter) updateDimensionConfig(cfg *DimensionConfig, op ...bbrOption) U
 func (l *limiter) allow() (DoneFunc, error) {
 	concurrency := l.getConcurrencyLimiter()
 	if concurrency != nil && !concurrency.allow() {
+		if l.concurrencyCounter != nil {
+			l.concurrencyCounter.Add(1)
+		}
 		return nil, errs.ErrRateLimitExceeded
 	}
 	rate := l.getRateLimiter()
@@ -221,17 +232,12 @@ func (l *limiter) allow() (DoneFunc, error) {
 		if concurrency != nil {
 			concurrency.release()
 		}
+		if l.rateCounter != nil {
+			l.rateCounter.Add(1)
+		}
 		return nil, errs.ErrRateLimitExceeded
 	}
-	bbr := l.getBBR()
-	if bbr == nil {
-		return func() {
-			if concurrency != nil {
-				concurrency.release()
-			}
-		}, nil
-	}
-	done := bbr.process()
+	done := l.getBBR().process()
 	return func() {
 		done()
 		if concurrency != nil {

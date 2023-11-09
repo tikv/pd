@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -230,4 +231,13 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 	re.Less(fail, int32(15))
 	re.Greater(fail, int32(5))
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/slowHeartbeat"))
+
+	req, _ := http.NewRequest(http.MethodGet, suite.getLeader().GetAddr()+"/metrics", nil)
+	resp, err = dialClient.Do(req)
+	suite.NoError(err)
+	defer resp.Body.Close()
+	content, _ := io.ReadAll(resp.Body)
+	output := string(content)
+	fmt.Println(output)
+	suite.Contains(output, "pd_server_limiter_status{api=\"StoreHeartbeat\",kind=\"grpc\",type=\"bdp\"} 5")
 }

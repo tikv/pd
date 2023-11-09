@@ -15,10 +15,17 @@
 package ratelimit
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"golang.org/x/time/rate"
@@ -87,7 +94,20 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 func TestControllerWithConcurrencyLimiter(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	limiter := NewController()
+	pctx := context.Background()
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+	ts := httptest.NewServer(promhttp.Handler())
+	defer ts.Close()
+	apiLimiterCounter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "testn",
+			Subsystem: "server",
+			Name:      "api_limit",
+			Help:      "Counter of requests denied for exceeding the limit.",
+		}, []string{"kind", "api", "type"})
+	prometheus.MustRegister(apiLimiterCounter)
+	limiter := NewController(ctx, "grpc", apiLimiterCounter, nil)
 	testCase := []labelCase{
 		{
 			label: "test1",
@@ -194,13 +214,28 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 		},
 	}
 	runMulitLabelLimiter(t, limiter, testCase)
+	// For test, sleep time needs longer than the push interval
+	time.Sleep(time.Second)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	re.NoError(err)
+	content, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	output := string(content)
+	re.Contains(output, "testn_server_api_limit{api=\"test2\",kind=\"grpc\",type=\"concurrency\"} 10")
+	re.Contains(output, "testn_server_api_limit{api=\"test2\",kind=\"grpc\",type=\"rate\"} 0")
+	re.Contains(output, "testn_server_api_limit{api=\"test1\",kind=\"grpc\",type=\"concurrency\"} 15")
+	re.Contains(output, "testn_server_api_limit{api=\"test1\",kind=\"grpc\",type=\"rate\"} 0")
 }
 
 func TestBlockList(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	opts := []Option{AddLabelAllowList()}
-	limiter := NewController()
+	pctx := context.Background()
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+	limiter := NewController(ctx, "http", nil, nil)
 	label := "test"
 
 	re.False(limiter.IsInAllowList(label))
@@ -220,7 +255,10 @@ func TestBlockList(t *testing.T) {
 func TestControllerWithQPSLimiter(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	limiter := NewController()
+	pctx := context.Background()
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+	limiter := NewController(ctx, "grpc", nil, nil)
 	testCase := []labelCase{
 		{
 			label: "test1",
@@ -329,7 +367,10 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 func TestControllerWithTwoLimiters(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	limiter := NewController()
+	pctx := context.Background()
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+	limiter := NewController(ctx, "grpc", nil, nil)
 	testCase := []labelCase{
 		{
 			label: "test1",
@@ -422,7 +463,22 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 func TestControllerWithEnableBBR(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	limiter := NewController()
+	pctx := context.Background()
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
+	ts := httptest.NewServer(promhttp.Handler())
+	defer ts.Close()
+	limiterStatusGauge := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "testn",
+			Subsystem: "server",
+			Name:      "limiter_status",
+			Help:      "Status of the api limiter.",
+		}, []string{"kind", "api", "type"})
+	prometheus.MustRegister(limiterStatusGauge)
+
+	limiter := NewController(ctx, "grpc", nil, limiterStatusGauge)
 	testCase := []labelCase{
 		{
 			label: "test1",
@@ -451,6 +507,17 @@ func TestControllerWithEnableBBR(t *testing.T) {
 						re.Less(current, uint64(200))
 						re.Less(uint64(1), current)
 						re.Equal(climit, current)
+						// For test, sleep time needs longer than the push interval
+						time.Sleep(time.Second)
+						req, _ := http.NewRequest(http.MethodGet, ts.URL, nil)
+						resp, err := http.DefaultClient.Do(req)
+						re.NoError(err)
+						content, _ := io.ReadAll(resp.Body)
+						resp.Body.Close()
+						output := string(content)
+						re.Contains(output, fmt.Sprintf("testn_server_limiter_status{api=\"test1\",kind=\"grpc\",type=\"bdp\"} %d", 0))
+						re.Contains(output, fmt.Sprintf("testn_server_limiter_status{api=\"test1\",kind=\"grpc\",type=\"concurrency\"} %d", current))
+						re.Contains(output, fmt.Sprintf("testn_server_limiter_status{api=\"test1\",kind=\"grpc\",type=\"concurrency-limit\"} %d", climit))
 					},
 				},
 				{
@@ -518,6 +585,18 @@ func TestControllerWithEnableBBR(t *testing.T) {
 		},
 	}
 	runMulitLabelLimiter(t, limiter, testCase)
+
+	// For test, sleep time needs longer than the push interval
+	time.Sleep(time.Second)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	re.NoError(err)
+	content, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	output := string(content)
+	re.Contains(output, "testn_server_limiter_status{api=\"test1\",kind=\"grpc\",type=\"bdp\"} 0")
+	re.Contains(output, "testn_server_limiter_status{api=\"test1\",kind=\"grpc\",type=\"concurrency\"} 200")
+	re.Contains(output, "testn_server_limiter_status{api=\"test1\",kind=\"grpc\",type=\"concurrency-limit\"} 200")
 }
 
 func countRateLimiterHandleResult(limiter *Controller, label string, successCount *int,
