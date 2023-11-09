@@ -18,7 +18,6 @@ import (
 	"context"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -41,6 +40,7 @@ type schedulingController struct {
 	parentCtx context.Context
 	ctx       context.Context
 	cancel    context.CancelFunc
+	mu        sync.RWMutex
 	wg        sync.WaitGroup
 	*core.BasicCluster
 	opt         *config.PersistOptions
@@ -49,7 +49,7 @@ type schedulingController struct {
 	regionStats *statistics.RegionStatistics
 	hotStat     *statistics.HotStat
 	slowStat    *statistics.SlowStat
-	running     atomic.Bool
+	running     bool
 }
 
 func newSchedulingController(parentCtx context.Context) *schedulingController {
@@ -71,22 +71,36 @@ func (sc *schedulingController) init(basicCluster *core.BasicCluster, opt *confi
 	sc.regionStats = statistics.NewRegionStatistics(basicCluster, opt, ruleManager)
 }
 
-func (sc *schedulingController) stopSchedulingJobs() {
+func (sc *schedulingController) stopSchedulingJobs() bool {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if !sc.running {
+		log.Warn("scheduling service is already stopped")
+		return false
+	}
 	sc.coordinator.Stop()
 	sc.cancel()
 	sc.wg.Wait()
-	sc.running.CompareAndSwap(true, false)
+	sc.running = false
 	log.Info("scheduling service is stopped")
+	return true
 }
 
-func (sc *schedulingController) startSchedulingJobs() {
+func (sc *schedulingController) startSchedulingJobs() bool {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if sc.running {
+		log.Warn("scheduling service is already running")
+		return false
+	}
 	sc.ctx, sc.cancel = context.WithCancel(sc.parentCtx)
 	sc.wg.Add(3)
 	go sc.runCoordinator()
 	go sc.runStatsBackgroundJobs()
 	go sc.runSchedulingMetricsCollectionJob()
-	sc.running.CompareAndSwap(false, true)
+	sc.running = true
 	log.Info("scheduling service is started")
+	return true
 }
 
 // runCoordinator runs the main scheduling loop.

@@ -353,12 +353,9 @@ func (c *RaftCluster) runServiceCheckJob() {
 			c.independentServices.Store(mcsutils.SchedulingServiceName, true)
 			return
 		}
-		c.RLock()
-		if !c.schedulingController.running.Load() {
-			c.startSchedulingJobs()
+		if c.startSchedulingJobs() {
 			c.independentServices.Delete(mcsutils.SchedulingServiceName)
 		}
-		c.RUnlock()
 	}
 	checkFn()
 
@@ -720,7 +717,7 @@ func (c *RaftCluster) Stop() {
 		return
 	}
 	c.running = false
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) && c.schedulingController.running.Load() {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
 	c.cancel()
