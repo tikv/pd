@@ -483,10 +483,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 
 	checkDownPeer := func(peers []*metapb.Peer) (*metapb.Peer, bool) {
 		for _, p := range peers {
-			if isInDisconnectedStore(p) {
-				return p, true
-			}
-			if isDownPeer(p.GetId()) {
+			if isInDisconnectedStore(p) || isDownPeer(p.GetId()) {
 				return p, true
 			}
 			if isPendingPeer(p.GetId()) {
