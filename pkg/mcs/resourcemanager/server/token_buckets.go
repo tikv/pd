@@ -62,6 +62,7 @@ type TokenSlot struct {
 	// tokenCapacity is the number of tokens in the slot.
 	tokenCapacity     float64
 	lastTokenCapacity float64
+	lastReqTime       time.Time
 }
 
 // GroupTokenBucketState is the running state of TokenBucket.
@@ -108,10 +109,12 @@ func (gts *GroupTokenBucketState) resetLoan() {
 	}
 
 	evenTokens := gts.Tokens * evenRatio
+	now := time.Now()
 	for _, slot := range gts.tokenSlots {
 		slot.requireTokensSum = 0
 		slot.tokenCapacity = evenTokens
 		slot.lastTokenCapacity = evenTokens
+		slot.lastReqTime = now
 	}
 }
 
@@ -127,8 +130,10 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			slot = &TokenSlot{}
 			gts.tokenSlots[clientUniqueID] = slot
 			gts.clientConsumptionTokensSum = 0
+			slot.lastReqTime = time.Now()
 		}
 	} else {
+		slot.lastReqTime = time.Now()
 		if gts.clientConsumptionTokensSum >= maxAssignTokens {
 			gts.clientConsumptionTokensSum = 0
 		}
@@ -141,6 +146,11 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 
 	if len(gts.tokenSlots) == 0 {
 		return
+	}
+	for clientUniqueID, slot := range gts.tokenSlots {
+		if time.Since(slot.lastReqTime).Minutes() >= 10 {
+			delete(gts.tokenSlots, clientUniqueID)
+		}
 	}
 	evenRatio := 1 / float64(len(gts.tokenSlots))
 	if settings.GetBurstLimit() <= 0 {
