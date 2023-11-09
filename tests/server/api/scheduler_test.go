@@ -42,13 +42,9 @@ func TestScheduleTestSuite(t *testing.T) {
 	suite.Run(t, new(scheduleTestSuite))
 }
 
-func (suite *scheduleTestSuite) TestScheduler() {
+func (suite *scheduleTestSuite) TestOriginAPI() {
 	env := tests.NewSchedulingTestEnvironment(suite.T())
 	env.RunTestInTwoModes(suite.checkOriginAPI)
-	env = tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkAPI)
-	env = tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
@@ -115,6 +111,11 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	suite.NoError(err)
 }
 
+func (suite *scheduleTestSuite) TestAPI() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkAPI)
+}
+
 func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
@@ -153,9 +154,12 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				body, err := json.Marshal(dataMap)
 				suite.NoError(err)
 				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
-				resp = make(map[string]interface{})
-				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				suite.Equal(3.0, resp["batch"])
+				tu.Eventually(re, func() bool { // wait for scheduling server to be synced.
+					resp = make(map[string]interface{})
+					suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					return resp["batch"] == 3.0
+				})
+
 				// update again
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.StatusOK(re),
@@ -554,6 +558,11 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		suite.deleteScheduler(urlPrefix, createdName)
 		suite.assertNoScheduler(re, urlPrefix, createdName)
 	}
+}
+
+func (suite *scheduleTestSuite) TestDisable() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
