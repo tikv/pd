@@ -75,7 +75,6 @@ func (sc *schedulingController) stopSchedulingJobs() bool {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if !sc.running {
-		log.Warn("scheduling service is already stopped")
 		return false
 	}
 	sc.coordinator.Stop()
@@ -90,7 +89,6 @@ func (sc *schedulingController) startSchedulingJobs() bool {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if sc.running {
-		log.Warn("scheduling service is already running")
 		return false
 	}
 	sc.ctx, sc.cancel = context.WithCancel(sc.parentCtx)
