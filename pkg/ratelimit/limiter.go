@@ -15,6 +15,8 @@
 package ratelimit
 
 import (
+	"math"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"golang.org/x/time/rate"
@@ -111,8 +113,7 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 
 func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
 	oldQPSLimit, oldBurst := l.getQPSLimiterStatus()
-
-	if (float64(oldQPSLimit)-limit < eps && float64(oldQPSLimit)-limit > -eps) && oldBurst == burst {
+	if math.Abs(float64(oldQPSLimit)-limit) < eps && oldBurst == burst {
 		return QPSNoChange
 	}
 	if limit <= eps || burst < 1 {
