@@ -33,7 +33,7 @@ const (
 	defaultReserveRatio    = 0.5
 	defaultLoanCoefficient = 2
 	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
-	expireTimeoutMinute    = 10
+	slotExpireTimeout      = 10 * time.Minute
 )
 
 // GroupTokenBucket is a token bucket for a resource group.
@@ -151,10 +151,10 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		return
 	}
 	for clientUniqueID, slot := range gts.tokenSlots {
-		if time.Since(slot.lastReqTime).Minutes() >= expireTimeoutMinute {
+		if time.Since(slot.lastReqTime) >= slotExpireTimeout {
 			delete(gts.tokenSlots, clientUniqueID)
 			log.Info("delete resource group slot because expire", zap.Any("last req time", slot.lastReqTime),
-				zap.Any("expire timeout", expireTimeoutMinute), zap.Any("del client id", clientUniqueID), zap.Any("len", len(gts.tokenSlots)))
+				zap.Any("expire timeout", slotExpireTimeout), zap.Any("del client id", clientUniqueID), zap.Any("len", len(gts.tokenSlots)))
 		}
 	}
 	evenRatio := 1 / float64(len(gts.tokenSlots))
