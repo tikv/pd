@@ -428,7 +428,7 @@ func TestControllerWithEnableBBR(t *testing.T) {
 			label: "test1",
 			round: []changeAndResult{
 				{
-					opt: UpdateDimensionConfigForTest(&DimensionConfig{
+					opt: UpdateDimensionConfig(&DimensionConfig{
 						EnableBBR: true,
 					}, optsForTest...),
 					checkOptionStatus: func(label string, o Option) {
@@ -454,7 +454,7 @@ func TestControllerWithEnableBBR(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateDimensionConfigForTest(&DimensionConfig{
+					opt: UpdateDimensionConfig(&DimensionConfig{
 						ConcurrencyLimit: 200,
 						EnableBBR:        true,
 					}, optsForTest...),
@@ -474,7 +474,7 @@ func TestControllerWithEnableBBR(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateDimensionConfigForTest(&DimensionConfig{
+					opt: UpdateDimensionConfig(&DimensionConfig{
 						ConcurrencyLimit: 200,
 						EnableBBR:        true,
 					}, optsForTest...),
@@ -494,7 +494,7 @@ func TestControllerWithEnableBBR(t *testing.T) {
 					},
 				},
 				{
-					opt: UpdateDimensionConfigForTest(&DimensionConfig{
+					opt: UpdateDimensionConfig(&DimensionConfig{
 						ConcurrencyLimit: 200,
 						EnableBBR:        false,
 					}, optsForTest...),
