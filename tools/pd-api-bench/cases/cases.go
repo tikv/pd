@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pkg/errors"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -33,6 +35,8 @@ var (
 	PDAddress string
 	// Debug is the flag to print the output of api response for debug.
 	Debug bool
+	// ClusterID is the ID of cluster.
+	ClusterID uint64
 )
 
 var (
@@ -43,6 +47,7 @@ var (
 
 // InitCluster initializes the cluster.
 func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) error {
+	ClusterID = cli.GetClusterID(ctx)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		PDAddress+"/pd/api/v1/stats/region?start_key=&end_key=&count", nil)
 	resp, err := httpClit.Do(req)
@@ -113,10 +118,11 @@ type GRPCCase interface {
 
 // GRPCCaseMap is the map for all gRPC cases.
 var GRPCCaseMap = map[string]GRPCCase{
-	"GetRegion":   newGetRegion(),
-	"GetStore":    newGetStore(),
-	"GetStores":   newGetStores(),
-	"ScanRegions": newScanRegions(),
+	"StoreHeartbeat": newStoreHeartbeat(),
+	"GetRegion":      newGetRegion(),
+	"GetStore":       newGetStore(),
+	"GetStores":      newGetStores(),
+	"ScanRegions":    newScanRegions(),
 }
 
 // HTTPCase is the interface for all HTTP cases.
@@ -250,6 +256,44 @@ func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+type storeHeartbeat struct {
+	*baseCase
+}
+
+func newStoreHeartbeat() *storeHeartbeat {
+	return &storeHeartbeat{
+		baseCase: &baseCase{
+			name:  "StoreHeartbeat",
+			qps:   10000,
+			burst: 1,
+		},
+	}
+}
+
+func (c *storeHeartbeat) Unary(ctx context.Context, cli pd.Client) error {
+	sd := cli.GetServiceDiscovery()
+	conn := sd.GetServingEndpointClientConn()
+	client := pdpb.NewPDClient(conn)
+	req := &pdpb.StoreHeartbeatRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: ClusterID,
+		},
+		Stats: &pdpb.StoreStats{
+			StoreId: 1,
+		},
+	}
+	resp, err := client.StoreHeartbeat(ctx, req)
+	if err != nil {
+		return err
+	}
+	if resp != nil {
+		if resp.Header.Error != nil {
+			return errors.Errorf(resp.Header.Error.Message)
+		}
 	}
 	return nil
 }

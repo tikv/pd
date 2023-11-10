@@ -146,6 +146,9 @@ type Client interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
+	// GetServiceDiscovery returns ServiceDiscovery
+	GetServiceDiscovery() ServiceDiscovery
+
 	// TSOClient is the TSO client.
 	TSOClient
 	// MetaStorageClient is the meta storage client.

@@ -3,6 +3,8 @@ module github.com/tools/pd-api-bench
 go 1.21
 
 require (
+	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c
+	github.com/pkg/errors v0.9.1
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.24.0
@@ -69,7 +71,6 @@ require (
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00 // indirect
-	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c // indirect
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.11.1 // indirect
