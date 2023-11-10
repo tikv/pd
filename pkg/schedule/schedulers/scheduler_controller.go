@@ -418,6 +418,11 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 	}
 }
 
+// GetAllSchedulerConfigs returns all scheduler configs.
+func (c *Controller) GetAllSchedulerConfigs() ([]string, []string, error) {
+	return c.storage.LoadAllSchedulerConfigs()
+}
+
 // ScheduleController is used to manage a scheduler.
 type ScheduleController struct {
 	Scheduler

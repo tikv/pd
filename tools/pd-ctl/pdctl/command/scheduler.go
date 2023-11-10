@@ -745,11 +745,17 @@ func showShuffleRegionSchedulerRolesCommandFunc(cmd *cobra.Command, args []strin
 	if p == "show-roles" {
 		p = cmd.Parent().Name()
 	}
-	path := path.Join(schedulerConfigPrefix, p, "roles")
-	r, err := doRequest(cmd, path, http.MethodGet, http.Header{})
+	url := path.Join(schedulerConfigPrefix, p, "list")
+	r, err := doRequest(cmd, url, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Println(err)
-		return
+		// try to use old api
+		var err2 error
+		url := path.Join(schedulerConfigPrefix, p, "roles")
+		r, err2 = doRequest(cmd, url, http.MethodGet, http.Header{})
+		if err2 != nil {
+			cmd.Println(err, err2)
+			return
+		}
 	}
 	cmd.Println(r)
 }
