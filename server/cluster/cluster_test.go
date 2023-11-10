@@ -2792,7 +2792,7 @@ func TestReplica(t *testing.T) {
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	waitNoResponse(re, stream)
 
-	// Remove peer from store 4.
+	// Remove peer from store 3.
 	re.NoError(tc.addLeaderRegion(2, 1, 2, 3, 4))
 	region = tc.GetRegion(2)
 	re.NoError(dispatchHeartbeat(co, region, stream))
