@@ -990,8 +990,7 @@ func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
 		},
 	}
 	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	// FIXME: enable this test in two modes after we support region label forward.
-	env.RunTestInPDMode(suite.checkRegionPlacementRule)
+	env.RunTestInTwoModes(suite.checkRegionPlacementRule)
 }
 
 func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCluster) {

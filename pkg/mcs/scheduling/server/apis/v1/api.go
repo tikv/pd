@@ -119,7 +119,6 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterCheckersRouter()
 	s.RegisterHotspotRouter()
 	s.RegisterRegionsRouter()
-	s.RegisterRegionLabelRouter()
 	return s
 }
 
@@ -175,11 +174,6 @@ func (s *Service) RegisterRegionsRouter() {
 	router := s.root.Group("regions")
 	router.GET("/:id/label/:key", getRegionLabelByKey)
 	router.GET("/:id/labels", getRegionLabels)
-}
-
-// RegisterRegionLabelRouter registers the router of the region label handler.
-func (s *Service) RegisterRegionLabelRouter() {
-
 }
 
 // RegisterConfigRouter registers the router of the config handler.
