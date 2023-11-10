@@ -48,7 +48,7 @@ ifeq ($(PLUGIN), 1)
 	BUILD_TAGS += with_plugin
 endif
 
-ifeq ($(FIPS), 1)
+ifeq ($(ENABLE_FIPS), 1)
 	BUILD_TAGS+=boringcrypto
 	BUILD_EXPERIMENT=boringcrypto
 	BUILD_CGO_ENABLED := 1
@@ -101,7 +101,7 @@ pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
 pd-server-fips:
-	FIPS=1 $(MAKE) pd-server
+	ENABLE_FIPS=1 $(MAKE) pd-server
 
 .PHONY: build tools pd-server pd-server-basic pd-server-fips
 
@@ -110,7 +110,7 @@ pd-server-fips:
 pd-ctl:
 	GOEXPERIMENT=$(BUILD_EXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
 pd-ctl-fips:
-	FIPS=1 $(MAKE) pd-ctl
+	ENABLE_FIPS=1 $(MAKE) pd-ctl
 pd-tso-bench:
 	cd tools/pd-tso-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench main.go
 pd-api-bench:
@@ -118,7 +118,7 @@ pd-api-bench:
 pd-recover:
 	GOEXPERIMENT=$(BUILD_EXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
 pd-recover-fips:
-	FIPS=1 $(MAKE) pd-recover
+	ENABLE_FIPS=1 $(MAKE) pd-recover
 pd-analysis:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis tools/pd-analysis/main.go
 pd-heartbeat-bench:
