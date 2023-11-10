@@ -79,7 +79,8 @@ type GroupTokenBucketState struct {
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
 	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
-	settingChanged bool
+	settingChanged      bool
+	lastCheckExpireSlot time.Time
 }
 
 // Clone returns the copy of GroupTokenBucketState
@@ -99,6 +100,7 @@ func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 		Initialized:                gts.Initialized,
 		tokenSlots:                 tokenSlots,
 		clientConsumptionTokensSum: gts.clientConsumptionTokensSum,
+		lastCheckExpireSlot:        gts.lastCheckExpireSlot,
 	}
 }
 
@@ -125,6 +127,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 	clientUniqueID uint64,
 	settings *rmpb.TokenLimitSettings,
 	requiredToken, elapseTokens float64) {
+	now := time.Now()
 	slot, exist := gts.tokenSlots[clientUniqueID]
 	if !exist {
 		// Only slots that require a positive number will be considered alive,
@@ -133,10 +136,10 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			slot = &TokenSlot{}
 			gts.tokenSlots[clientUniqueID] = slot
 			gts.clientConsumptionTokensSum = 0
-			slot.lastReqTime = time.Now()
+			slot.lastReqTime = now
 		}
 	} else {
-		slot.lastReqTime = time.Now()
+		slot.lastReqTime = now
 		if gts.clientConsumptionTokensSum >= maxAssignTokens {
 			gts.clientConsumptionTokensSum = 0
 		}
@@ -147,11 +150,14 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		}
 	}
 
-	for clientUniqueID, slot := range gts.tokenSlots {
-		if time.Since(slot.lastReqTime) >= slotExpireTimeout {
-			delete(gts.tokenSlots, clientUniqueID)
-			log.Info("delete resource group slot because expire", zap.Any("last req time", slot.lastReqTime),
-				zap.Any("expire timeout", slotExpireTimeout), zap.Any("del client id", clientUniqueID), zap.Any("len", len(gts.tokenSlots)))
+	if time.Since(gts.lastCheckExpireSlot) >= slotExpireTimeout {
+		gts.lastCheckExpireSlot = now
+		for clientUniqueID, slot := range gts.tokenSlots {
+			if time.Since(slot.lastReqTime) >= slotExpireTimeout {
+				delete(gts.tokenSlots, clientUniqueID)
+				log.Info("delete resource group slot because expire", zap.Any("last req time", slot.lastReqTime),
+					zap.Any("expire timeout", slotExpireTimeout), zap.Any("del client id", clientUniqueID), zap.Any("len", len(gts.tokenSlots)))
+			}
 		}
 	}
 	if len(gts.tokenSlots) == 0 {
@@ -279,6 +285,7 @@ func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
 		lastTokenCapacity: gtb.Tokens,
 	}
 	gtb.LastUpdate = &now
+	gtb.lastCheckExpireSlot = now
 	gtb.Initialized = true
 }
 
