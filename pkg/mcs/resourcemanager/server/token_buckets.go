@@ -131,10 +131,9 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		// Only slots that require a positive number will be considered alive,
 		// but still need to allocate the elapsed tokens as well.
 		if requiredToken != 0 {
-			slot = &TokenSlot{}
+			slot = &TokenSlot{lastReqTime: now}
 			gts.tokenSlots[clientUniqueID] = slot
 			gts.clientConsumptionTokensSum = 0
-			slot.lastReqTime = now
 		}
 	} else {
 		slot.lastReqTime = now
@@ -153,7 +152,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		for clientUniqueID, slot := range gts.tokenSlots {
 			if time.Since(slot.lastReqTime) >= slotExpireTimeout {
 				delete(gts.tokenSlots, clientUniqueID)
-				log.Info("delete resource group slot because expire", zap.Any("last req time", slot.lastReqTime),
+				log.Info("delete resource group slot because expire", zap.Time("last-req-time", slot.lastReqTime),
 					zap.Any("expire timeout", slotExpireTimeout), zap.Any("del client id", clientUniqueID), zap.Any("len", len(gts.tokenSlots)))
 			}
 		}
