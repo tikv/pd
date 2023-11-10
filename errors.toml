@@ -553,7 +553,7 @@ build rule list failed, %s
 
 ["PD:placement:ErrKeyFormat"]
 error = '''
-key should be in hex format
+key should be in hex format, %s
 '''
 
 ["PD:placement:ErrLoadRule"]
