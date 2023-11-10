@@ -45,11 +45,6 @@ const (
 	alterEpsilon               = 1e-9
 	minReCheckDurationGap      = 120 // default gap for re-check the slow node, unit: s
 	defaultRecoveryDurationGap = 600 // default gap for recovery, unit: s.
-
-	// Use minimal interval of store heartbeat as interval.
-	minSlowTrendScheduleInterval = time.Second
-	// Use default interval of store heartbeat as default.
-	maxSlowTrendScheduleInterval = 10 * time.Second
 )
 
 type slowCandidate struct {
@@ -246,10 +241,6 @@ type evictSlowTrendScheduler struct {
 	handler http.Handler
 }
 
-func (s *evictSlowTrendScheduler) GetMinInterval() time.Duration {
-	return minSlowTrendScheduleInterval
-}
-
 func (s *evictSlowTrendScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	var growthType intervalGrowthType
 	// If it already found a slow node as candidate, the next interval should be shorter
@@ -260,7 +251,7 @@ func (s *evictSlowTrendScheduler) GetNextInterval(interval time.Duration) time.D
 	} else {
 		growthType = exponentialGrowth
 	}
-	return intervalGrow(s.GetMinInterval(), maxSlowTrendScheduleInterval, growthType)
+	return intervalGrow(s.GetMinInterval(), MaxScheduleInterval, growthType)
 }
 
 func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
