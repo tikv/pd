@@ -115,6 +115,7 @@ func (gts *GroupTokenBucketState) resetLoan() {
 
 	evenTokens := gts.Tokens * evenRatio
 	now := time.Now()
+	gts.lastCheckExpireSlot = now
 	for _, slot := range gts.tokenSlots {
 		slot.requireTokensSum = 0
 		slot.tokenCapacity = evenTokens
