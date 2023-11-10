@@ -160,7 +160,7 @@ var (
 	ErrLoadRuleGroup     = errors.Normalize("load rule group failed", errors.RFCCodeText("PD:placement:ErrLoadRuleGroup"))
 	ErrBuildRuleList     = errors.Normalize("build rule list failed, %s", errors.RFCCodeText("PD:placement:ErrBuildRuleList"))
 	ErrPlacementDisabled = errors.Normalize("placement rules feature is disabled", errors.RFCCodeText("PD:placement:ErrPlacementDisabled"))
-	ErrKeyFormat         = errors.Normalize("key should be in hex format", errors.RFCCodeText("PD:placement:ErrKeyFormat"))
+	ErrKeyFormat         = errors.Normalize("key should be in hex format, %s", errors.RFCCodeText("PD:placement:ErrKeyFormat"))
 	ErrRuleNotFound      = errors.Normalize("rule not found", errors.RFCCodeText("PD:placement:ErrRuleNotFound"))
 )
 

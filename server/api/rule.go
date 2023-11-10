@@ -208,7 +208,7 @@ func (h *ruleHandler) GetRulesByKey(w http.ResponseWriter, r *http.Request) {
 	keyHex := mux.Vars(r)["key"]
 	key, err := hex.DecodeString(keyHex)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, errs.ErrKeyFormat.Error())
+		h.rd.JSON(w, http.StatusBadRequest, errs.ErrKeyFormat.FastGenByArgs(err).Error())
 		return
 	}
 	rules := manager.GetRulesByKey(key)
