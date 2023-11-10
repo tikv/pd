@@ -108,8 +108,12 @@ func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 	return []core.KeyRange{core.NewKeyRange("", "")}
 }
 
+func (conf *evictSlowTrendSchedulerConfig) hasEvictedStores() bool {
+	return len(conf.EvictedStores) > 0
+}
+
 func (conf *evictSlowTrendSchedulerConfig) evictedStore() uint64 {
-	if len(conf.EvictedStores) == 0 {
+	if !conf.hasEvictedStores() {
 		return 0
 	}
 	// If a candidate passes all checks and proved to be slow, it will be
@@ -235,6 +239,19 @@ type evictSlowTrendScheduler struct {
 	*BaseScheduler
 	conf    *evictSlowTrendSchedulerConfig
 	handler http.Handler
+}
+
+func (s *evictSlowTrendScheduler) GetNextInterval(interval time.Duration) time.Duration {
+	var growthType intervalGrowthType
+	// If it already found a slow node as candidate, the next interval should be shorter
+	// to make the next scheduling as soon as possible. This adjustment will decrease the
+	// response time, as heartbeats from other nodes will be received and updated more quickly.
+	if s.conf.hasEvictedStores() {
+		growthType = zeroGrowth
+	} else {
+		growthType = exponentialGrowth
+	}
+	return intervalGrow(s.GetMinInterval(), MaxScheduleInterval, growthType)
 }
 
 func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

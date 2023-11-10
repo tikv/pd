@@ -2002,15 +2002,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 			return nil, err
 		}
 	}
-	var (
-		nowTSO pdpb.Timestamp
-		err    error
-	)
-	if s.IsAPIServiceMode() {
-		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
-	} else {
-		nowTSO, err = s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
-	}
+	nowTSO, err := s.getGlobalTSO(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2608,7 +2600,10 @@ func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient
 	}
 }
 
-func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
+func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
+	if !s.IsAPIServiceMode() {
+		return s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
+	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
@@ -2622,9 +2617,28 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		forwardStream tsopb.TSO_TsoClient
 		ts            *tsopb.TsoResponse
 		err           error
+		ok            bool
 	)
+	handleStreamError := func(err error) (needRetry bool) {
+		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+			s.tsoPrimaryWatcher.ForceLoad()
+			log.Warn("force to load tso primary address due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return true
+		}
+		if grpcutil.NeedRebuildConnection(err) {
+			s.tsoClientPool.Lock()
+			delete(s.tsoClientPool.clients, forwardedHost)
+			s.tsoClientPool.Unlock()
+			log.Warn("client connection removed due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return true
+		}
+		return false
+	}
 	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
-		forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
+		if i > 0 {
+			time.Sleep(retryIntervalRequestTSOServer)
+		}
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
 		if !ok || forwardedHost == "" {
 			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
 		}
@@ -2632,32 +2646,25 @@ func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timest
 		if err != nil {
 			return pdpb.Timestamp{}, err
 		}
-		err := forwardStream.Send(request)
+		err = forwardStream.Send(request)
 		if err != nil {
-			s.tsoClientPool.Lock()
-			delete(s.tsoClientPool.clients, forwardedHost)
-			s.tsoClientPool.Unlock()
-			continue
+			if needRetry := handleStreamError(err); needRetry {
+				continue
+			}
+			log.Error("send request to tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return pdpb.Timestamp{}, err
 		}
 		ts, err = forwardStream.Recv()
 		if err != nil {
-			if strings.Contains(err.Error(), errs.NotLeaderErr) {
-				s.tsoPrimaryWatcher.ForceLoad()
-				time.Sleep(retryIntervalRequestTSOServer)
+			if needRetry := handleStreamError(err); needRetry {
 				continue
 			}
-			if strings.Contains(err.Error(), codes.Unavailable.String()) {
-				s.tsoClientPool.Lock()
-				delete(s.tsoClientPool.clients, forwardedHost)
-				s.tsoClientPool.Unlock()
-				continue
-			}
-			log.Error("get global tso from tso service primary addr failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			log.Error("receive response from tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
 			return pdpb.Timestamp{}, err
 		}
 		return *ts.GetTimestamp(), nil
 	}
-	log.Error("get global tso from tso service primary addr failed after retry", zap.Error(err), zap.String("tso-addr", forwardedHost))
+	log.Error("get global tso from tso primary server failed after retry", zap.Error(err), zap.String("tso-addr", forwardedHost))
 	return pdpb.Timestamp{}, err
 }
 
@@ -2906,15 +2913,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 		return rsp.(*pdpb.SetExternalTimestampResponse), nil
 	}
 
-	var (
-		nowTSO pdpb.Timestamp
-		err    error
-	)
-	if s.IsAPIServiceMode() {
-		nowTSO, err = s.getGlobalTSOFromTSOServer(ctx)
-	} else {
-		nowTSO, err = s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
-	}
+	nowTSO, err := s.getGlobalTSO(ctx)
 	if err != nil {
 		return nil, err
 	}

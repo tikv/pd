@@ -164,9 +164,24 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	}
 }
 
+// GetName returns the Name
+func (c *Config) GetName() string {
+	return c.Name
+}
+
+// GeBackendEndpoints returns the BackendEndpoints
+func (c *Config) GeBackendEndpoints() string {
+	return c.BackendEndpoints
+}
+
 // GetListenAddr returns the ListenAddr
 func (c *Config) GetListenAddr() string {
 	return c.ListenAddr
+}
+
+// GetAdvertiseListenAddr returns the AdvertiseListenAddr
+func (c *Config) GetAdvertiseListenAddr() string {
+	return c.AdvertiseListenAddr
 }
 
 // GetTLSConfig returns the TLS config.
