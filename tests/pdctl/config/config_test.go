@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -409,9 +410,12 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluste
 
 	// test show
 	var group placement.RuleGroup
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "pd")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &group))
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "pd")
+		re.NoError(err)
+		return !strings.Contains(string(output), "404")
+	})
+	re.NoError(json.Unmarshal(output, &group), string(output))
 	re.Equal(placement.RuleGroup{ID: "pd"}, group)
 
 	// test set

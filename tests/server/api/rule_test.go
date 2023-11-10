@@ -25,57 +25,37 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 type ruleTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
 }
 
 func TestRuleTestSuite(t *testing.T) {
 	suite.Run(t, new(ruleTestSuite))
 }
 
-func (suite *ruleTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/config", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-	PDServerCfg := suite.svr.GetConfig().PDServerCfg
-	PDServerCfg.KeyType = "raw"
-	err := suite.svr.SetPDServerConfig(PDServerCfg)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, suite.urlPrefix, []byte(`{"enable-placement-rules":"true"}`), tu.StatusOK(re)))
-}
-
-func (suite *ruleTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *ruleTestSuite) TearDownTest() {
-	def := placement.GroupBundle{
-		ID: "pd",
-		Rules: []*placement.Rule{
-			{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+func (suite *ruleTestSuite) TestSet() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
 		},
 	}
-	data, err := json.Marshal([]placement.GroupBundle{def})
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule", data, tu.StatusOK(suite.Require()))
-	suite.NoError(err)
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkSet)
 }
 
-func (suite *ruleTestSuite) TestSet() {
+func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	successData, err := json.Marshal(rule)
 	suite.NoError(err)
@@ -159,12 +139,12 @@ func (suite *ruleTestSuite) TestSet() {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		// clear suspect keyRanges to prevent test case from others
-		suite.svr.GetRaftCluster().ClearSuspectKeyRanges()
+		leaderServer.GetRaftCluster().ClearSuspectKeyRanges()
 		if testCase.success {
-			err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", testCase.rawData, tu.StatusOK(re))
+			err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", testCase.rawData, tu.StatusOK(re))
 			popKeyRangeMap := map[string]struct{}{}
 			for i := 0; i < len(testCase.popKeyRange)/2; i++ {
-				v, got := suite.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
 				suite.True(got)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
@@ -175,7 +155,7 @@ func (suite *ruleTestSuite) TestSet() {
 				suite.True(ok)
 			}
 		} else {
-			err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", testCase.rawData,
+			err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", testCase.rawData,
 				tu.StatusNotOK(re),
 				tu.StringEqual(re, testCase.response))
 		}
@@ -184,11 +164,26 @@ func (suite *ruleTestSuite) TestSet() {
 }
 
 func (suite *ruleTestSuite) TestGet() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkGet)
+}
+
+func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	rule := placement.Rule{GroupID: "a", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	testCases := []struct {
@@ -213,7 +208,7 @@ func (suite *ruleTestSuite) TestGet() {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		var resp placement.Rule
-		url := fmt.Sprintf("%s/rule/%s/%s", suite.urlPrefix, testCase.rule.GroupID, testCase.rule.ID)
+		url := fmt.Sprintf("%s/rule/%s/%s", urlPrefix, testCase.rule.GroupID, testCase.rule.ID)
 		if testCase.found {
 			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
 			suite.compareRule(&resp, &testCase.rule)
@@ -225,20 +220,50 @@ func (suite *ruleTestSuite) TestGet() {
 }
 
 func (suite *ruleTestSuite) TestGetAll() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkGetAll)
+}
+
+func (suite *ruleTestSuite) checkGetAll(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	rule := placement.Rule{GroupID: "b", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	var resp2 []*placement.Rule
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/rules", &resp2)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rules", &resp2)
 	suite.NoError(err)
 	suite.GreaterOrEqual(len(resp2), 1)
 }
 
 func (suite *ruleTestSuite) TestSetAll() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkSetAll)
+}
+
+func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	rule1 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
@@ -247,10 +272,10 @@ func (suite *ruleTestSuite) TestSetAll() {
 		LocationLabels: []string{"host"}}
 	rule6 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 3}
 
-	suite.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
-	defaultRule := suite.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
+	leaderServer.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
+	defaultRule := leaderServer.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
 	defaultRule.LocationLabels = []string{"host"}
-	suite.svr.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
+	leaderServer.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
 
 	successData, err := json.Marshal([]*placement.Rule{&rule1, &rule2})
 	suite.NoError(err)
@@ -333,13 +358,13 @@ func (suite *ruleTestSuite) TestSetAll() {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		if testCase.success {
-			err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rules", testCase.rawData, tu.StatusOK(re))
+			err := tu.CheckPostJSON(testDialClient, urlPrefix+"/rules", testCase.rawData, tu.StatusOK(re))
 			suite.NoError(err)
 			if testCase.isDefaultRule {
-				suite.Equal(int(suite.svr.GetPersistOptions().GetReplicationConfig().MaxReplicas), testCase.count)
+				suite.Equal(int(leaderServer.GetPersistOptions().GetReplicationConfig().MaxReplicas), testCase.count)
 			}
 		} else {
-			err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rules", testCase.rawData,
+			err := tu.CheckPostJSON(testDialClient, urlPrefix+"/rules", testCase.rawData,
 				tu.StringEqual(re, testCase.response))
 			suite.NoError(err)
 		}
@@ -347,17 +372,32 @@ func (suite *ruleTestSuite) TestSetAll() {
 }
 
 func (suite *ruleTestSuite) TestGetAllByGroup() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkGetAllByGroup)
+}
+
+func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	re := suite.Require()
 	rule := placement.Rule{GroupID: "c", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	rule1 := placement.Rule{GroupID: "c", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err = json.Marshal(rule1)
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	testCases := []struct {
@@ -380,7 +420,7 @@ func (suite *ruleTestSuite) TestGetAllByGroup() {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		var resp []*placement.Rule
-		url := fmt.Sprintf("%s/rules/group/%s", suite.urlPrefix, testCase.groupID)
+		url := fmt.Sprintf("%s/rules/group/%s", urlPrefix, testCase.groupID)
 		err = tu.ReadGetJSON(re, testDialClient, url, &resp)
 		suite.NoError(err)
 		suite.Len(resp, testCase.count)
@@ -392,15 +432,30 @@ func (suite *ruleTestSuite) TestGetAllByGroup() {
 }
 
 func (suite *ruleTestSuite) TestGetAllByRegion() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkGetAllByRegion)
+}
+
+func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	rule := placement.Rule{GroupID: "e", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	r := core.NewTestRegionInfo(4, 1, []byte{0x22, 0x22}, []byte{0x33, 0x33})
-	mustRegionHeartbeat(re, suite.svr, r)
+	tests.MustPutRegionInfo(re, cluster, r)
 
 	testCases := []struct {
 		name     string
@@ -429,7 +484,7 @@ func (suite *ruleTestSuite) TestGetAllByRegion() {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		var resp []*placement.Rule
-		url := fmt.Sprintf("%s/rules/region/%s", suite.urlPrefix, testCase.regionID)
+		url := fmt.Sprintf("%s/rules/region/%s", urlPrefix, testCase.regionID)
 
 		if testCase.success {
 			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
@@ -446,11 +501,26 @@ func (suite *ruleTestSuite) TestGetAllByRegion() {
 }
 
 func (suite *ruleTestSuite) TestGetAllByKey() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkGetAllByKey)
+}
+
+func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	rule := placement.Rule{GroupID: "f", ID: "40", StartKeyHex: "8888", EndKeyHex: "9111", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	testCases := []struct {
@@ -483,7 +553,7 @@ func (suite *ruleTestSuite) TestGetAllByKey() {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		var resp []*placement.Rule
-		url := fmt.Sprintf("%s/rules/key/%s", suite.urlPrefix, testCase.key)
+		url := fmt.Sprintf("%s/rules/key/%s", urlPrefix, testCase.key)
 		if testCase.success {
 			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
 			suite.Len(resp, testCase.respSize)
@@ -495,10 +565,25 @@ func (suite *ruleTestSuite) TestGetAllByKey() {
 }
 
 func (suite *ruleTestSuite) TestDelete() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkDelete)
+}
+
+func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	rule := placement.Rule{GroupID: "g", ID: "10", StartKeyHex: "8888", EndKeyHex: "9111", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rule", data, tu.StatusOK(suite.Require()))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(suite.Require()))
 	suite.NoError(err)
 	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
 	suite.NoError(err)
@@ -529,15 +614,15 @@ func (suite *ruleTestSuite) TestDelete() {
 	}
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
-		url := fmt.Sprintf("%s/rule/%s/%s", suite.urlPrefix, testCase.groupID, testCase.id)
+		url := fmt.Sprintf("%s/rule/%s/%s", urlPrefix, testCase.groupID, testCase.id)
 		// clear suspect keyRanges to prevent test case from others
-		suite.svr.GetRaftCluster().ClearSuspectKeyRanges()
+		leaderServer.GetRaftCluster().ClearSuspectKeyRanges()
 		err = tu.CheckDelete(testDialClient, url, tu.StatusOK(suite.Require()))
 		suite.NoError(err)
 		if len(testCase.popKeyRange) > 0 {
 			popKeyRangeMap := map[string]struct{}{}
 			for i := 0; i < len(testCase.popKeyRange)/2; i++ {
-				v, got := suite.svr.GetRaftCluster().PopOneSuspectKeyRange()
+				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
 				suite.True(got)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
 				popKeyRangeMap[hex.EncodeToString(v[1])] = struct{}{}
@@ -551,16 +636,22 @@ func (suite *ruleTestSuite) TestDelete() {
 	}
 }
 
-func (suite *ruleTestSuite) compareRule(r1 *placement.Rule, r2 *placement.Rule) {
-	suite.Equal(r2.GroupID, r1.GroupID)
-	suite.Equal(r2.ID, r1.ID)
-	suite.Equal(r2.StartKeyHex, r1.StartKeyHex)
-	suite.Equal(r2.EndKeyHex, r1.EndKeyHex)
-	suite.Equal(r2.Role, r1.Role)
-	suite.Equal(r2.Count, r1.Count)
+func (suite *ruleTestSuite) TestBatch() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkBatch)
 }
 
-func (suite *ruleTestSuite) TestBatch() {
+func (suite *ruleTestSuite) checkBatch(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	opt1 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
 		Rule:   &placement.Rule{GroupID: "a", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
@@ -670,10 +761,10 @@ func (suite *ruleTestSuite) TestBatch() {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		if testCase.success {
-			err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rules/batch", testCase.rawData, tu.StatusOK(re))
+			err := tu.CheckPostJSON(testDialClient, urlPrefix+"/rules/batch", testCase.rawData, tu.StatusOK(re))
 			suite.NoError(err)
 		} else {
-			err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/rules/batch", testCase.rawData,
+			err := tu.CheckPostJSON(testDialClient, urlPrefix+"/rules/batch", testCase.rawData,
 				tu.StatusNotOK(re),
 				tu.StringEqual(re, testCase.response))
 			suite.NoError(err)
@@ -682,6 +773,21 @@ func (suite *ruleTestSuite) TestBatch() {
 }
 
 func (suite *ruleTestSuite) TestBundle() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkBundle)
+}
+
+func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	re := suite.Require()
 	// GetAll
 	b1 := placement.GroupBundle{
@@ -691,7 +797,7 @@ func (suite *ruleTestSuite) TestBundle() {
 		},
 	}
 	var bundles []placement.GroupBundle
-	err := tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
+	err := tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 1)
 	suite.compareBundle(bundles[0], b1)
@@ -707,28 +813,28 @@ func (suite *ruleTestSuite) TestBundle() {
 	}
 	data, err := json.Marshal(b2)
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule/foo", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/placement-rule/foo", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	// Get
 	var bundle placement.GroupBundle
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule/foo", &bundle)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule/foo", &bundle)
 	suite.NoError(err)
 	suite.compareBundle(bundle, b2)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 2)
 	suite.compareBundle(bundles[0], b1)
 	suite.compareBundle(bundles[1], b2)
 
 	// Delete
-	err = tu.CheckDelete(testDialClient, suite.urlPrefix+"/placement-rule/pd", tu.StatusOK(suite.Require()))
+	err = tu.CheckDelete(testDialClient, urlPrefix+"/placement-rule/pd", tu.StatusOK(suite.Require()))
 	suite.NoError(err)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 1)
 	suite.compareBundle(bundles[0], b2)
@@ -739,11 +845,11 @@ func (suite *ruleTestSuite) TestBundle() {
 	b3 := placement.GroupBundle{ID: "foobar", Index: 100}
 	data, err = json.Marshal([]placement.GroupBundle{b1, b2, b3})
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/placement-rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 3)
 	suite.compareBundle(bundles[0], b2)
@@ -751,11 +857,11 @@ func (suite *ruleTestSuite) TestBundle() {
 	suite.compareBundle(bundles[2], b3)
 
 	// Delete using regexp
-	err = tu.CheckDelete(testDialClient, suite.urlPrefix+"/placement-rule/"+url.PathEscape("foo.*")+"?regexp", tu.StatusOK(suite.Require()))
+	err = tu.CheckDelete(testDialClient, urlPrefix+"/placement-rule/"+url.PathEscape("foo.*")+"?regexp", tu.StatusOK(suite.Require()))
 	suite.NoError(err)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 1)
 	suite.compareBundle(bundles[0], b1)
@@ -770,19 +876,19 @@ func (suite *ruleTestSuite) TestBundle() {
 	}
 	data, err = json.Marshal(b4)
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule/"+id, data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/placement-rule/"+id, data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	b4.ID = id
 	b4.Rules[0].GroupID = b4.ID
 
 	// Get
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule/"+id, &bundle)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule/"+id, &bundle)
 	suite.NoError(err)
 	suite.compareBundle(bundle, b4)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 2)
 	suite.compareBundle(bundles[0], b1)
@@ -798,13 +904,13 @@ func (suite *ruleTestSuite) TestBundle() {
 	}
 	data, err = json.Marshal([]placement.GroupBundle{b1, b4, b5})
 	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/placement-rule", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/placement-rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
 	b5.Rules[0].GroupID = b5.ID
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/placement-rule", &bundles)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 3)
 	suite.compareBundle(bundles[0], b1)
@@ -813,6 +919,21 @@ func (suite *ruleTestSuite) TestBundle() {
 }
 
 func (suite *ruleTestSuite) TestBundleBadRequest() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkBundleBadRequest)
+}
+
+func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+
 	testCases := []struct {
 		uri  string
 		data string
@@ -826,7 +947,7 @@ func (suite *ruleTestSuite) TestBundleBadRequest() {
 		{"/placement-rule", `[{"group_id":"foo", "rules": [{"group_id":"bar", "id":"baz", "role":"voter", "count":1}]}]`, false},
 	}
 	for _, testCase := range testCases {
-		err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+testCase.uri, []byte(testCase.data),
+		err := tu.CheckPostJSON(testDialClient, urlPrefix+testCase.uri, []byte(testCase.data),
 			func(_ []byte, code int, _ http.Header) {
 				suite.Equal(testCase.ok, code == http.StatusOK)
 			})
@@ -844,22 +965,42 @@ func (suite *ruleTestSuite) compareBundle(b1, b2 placement.GroupBundle) {
 	}
 }
 
+func (suite *ruleTestSuite) compareRule(r1 *placement.Rule, r2 *placement.Rule) {
+	suite.Equal(r2.GroupID, r1.GroupID)
+	suite.Equal(r2.ID, r1.ID)
+	suite.Equal(r2.StartKeyHex, r1.StartKeyHex)
+	suite.Equal(r2.EndKeyHex, r1.EndKeyHex)
+	suite.Equal(r2.Role, r1.Role)
+	suite.Equal(r2.Count, r1.Count)
+}
+
 type regionRuleTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	grpcSvr   *server.GrpcServer
-	cleanup   tu.CleanupFunc
-	urlPrefix string
-	stores    []*metapb.Store
-	regions   []*core.RegionInfo
 }
 
 func TestRegionRuleTestSuite(t *testing.T) {
 	suite.Run(t, new(regionRuleTestSuite))
 }
 
-func (suite *regionRuleTestSuite) SetupSuite() {
-	suite.stores = []*metapb.Store{
+func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.Replication.EnablePlacementRules = true
+			conf.Replication.MaxReplicas = 1
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	// FIXME: enable this test in two modes after we support region label forward.
+	env.RunTestInPDMode(suite.checkRegionPlacementRule)
+}
+
+func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+
+	stores := []*metapb.Store{
 		{
 			Id:        1,
 			Address:   "tikv1",
@@ -875,49 +1016,30 @@ func (suite *regionRuleTestSuite) SetupSuite() {
 			Version:   "2.0.0",
 		},
 	}
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
-		cfg.Replication.EnablePlacementRules = true
-		cfg.Replication.MaxReplicas = 1
-	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-
-	for _, store := range suite.stores {
-		mustPutStore(re, suite.svr, store.Id, store.State, store.NodeState, nil)
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
 	}
-	suite.regions = make([]*core.RegionInfo, 0)
+	regions := make([]*core.RegionInfo, 0)
 	peers1 := []*metapb.Peer{
 		{Id: 102, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 103, StoreId: 2, Role: metapb.PeerRole_Voter}}
-	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}, peers1[0],
+	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}, peers1[0],
 		core.WithStartKey([]byte("abc")), core.WithEndKey([]byte("def"))))
 	peers2 := []*metapb.Peer{
 		{Id: 104, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 105, StoreId: 2, Role: metapb.PeerRole_Learner}}
-	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers2, RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}, peers2[0],
+	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers2, RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}, peers2[0],
 		core.WithStartKey([]byte("ghi")), core.WithEndKey([]byte("jkl"))))
 	peers3 := []*metapb.Peer{
 		{Id: 106, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 107, StoreId: 2, Role: metapb.PeerRole_Learner}}
-	suite.regions = append(suite.regions, core.NewRegionInfo(&metapb.Region{Id: 3, Peers: peers3, RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 3}}, peers3[0],
+	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 3, Peers: peers3, RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 3}}, peers3[0],
 		core.WithStartKey([]byte("mno")), core.WithEndKey([]byte("pqr"))))
-	for _, rg := range suite.regions {
-		suite.svr.GetBasicCluster().PutRegion(rg)
+	for _, rg := range regions {
+		tests.MustPutRegionInfo(re, cluster, rg)
 	}
-}
 
-func (suite *regionRuleTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
-	ruleManager := suite.svr.GetRaftCluster().GetRuleManager()
+	ruleManager := leaderServer.GetRaftCluster().GetRuleManager()
 	ruleManager.SetRule(&placement.Rule{
 		GroupID:     "test",
 		ID:          "test2",
@@ -934,38 +1056,38 @@ func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
 		Role:        placement.Learner,
 		Count:       1,
 	})
-	re := suite.Require()
-	url := fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 1)
 	fit := &placement.RegionFit{}
+
+	url := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
 	err := tu.ReadGetJSON(re, testDialClient, url, fit)
+	suite.NoError(err)
 	suite.Equal(len(fit.RuleFits), 1)
 	suite.Equal(len(fit.OrphanPeers), 1)
-	suite.NoError(err)
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 2)
+	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 2)
 	fit = &placement.RegionFit{}
 	err = tu.ReadGetJSON(re, testDialClient, url, fit)
+	suite.NoError(err)
 	suite.Equal(len(fit.RuleFits), 2)
 	suite.Equal(len(fit.OrphanPeers), 0)
-	suite.NoError(err)
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 3)
+	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 3)
 	fit = &placement.RegionFit{}
 	err = tu.ReadGetJSON(re, testDialClient, url, fit)
+	suite.NoError(err)
 	suite.Equal(len(fit.RuleFits), 0)
 	suite.Equal(len(fit.OrphanPeers), 2)
-	suite.NoError(err)
 
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 4)
+	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 4)
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusNotFound), tu.StringContain(
 		re, "region 4 not found"))
 	suite.NoError(err)
 
-	url = fmt.Sprintf("%s/config/rules/region/%s/detail", suite.urlPrefix, "id")
+	url = fmt.Sprintf("%s/config/rules/region/%s/detail", urlPrefix, "id")
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest), tu.StringContain(
-		re, "invalid region id"))
+		re, errs.ErrRegionInvalidID.Error()))
 	suite.NoError(err)
 
-	suite.svr.GetRaftCluster().GetReplicationConfig().EnablePlacementRules = false
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", suite.urlPrefix, 1)
+	leaderServer.GetRaftCluster().GetReplicationConfig().EnablePlacementRules = false
+	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusPreconditionFailed), tu.StringContain(
 		re, "placement rules feature is disabled"))
 	suite.NoError(err)
