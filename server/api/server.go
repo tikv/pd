@@ -82,7 +82,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				[]string{http.MethodPost, http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/region/id",
-				scheapi.APIPathPrefix+"/regions",
+				scheapi.APIPathPrefix+"/config/regions",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet},
 				func(r *http.Request) bool {

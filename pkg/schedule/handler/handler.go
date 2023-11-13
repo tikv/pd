@@ -1065,12 +1065,12 @@ func (h *Handler) GetHotBuckets(regionIDs ...uint64) (HotBucketsResponse, error)
 }
 
 // GetRegion returns the region labeler.
-func (h *Handler) GetRegion(id uint64) *core.RegionInfo {
+func (h *Handler) GetRegion(id uint64) (*core.RegionInfo, error) {
 	c := h.GetCluster()
 	if c == nil {
-		return nil
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
-	return c.GetRegion(id)
+	return c.GetRegion(id), nil
 }
 
 // GetRegionLabeler returns the region labeler.

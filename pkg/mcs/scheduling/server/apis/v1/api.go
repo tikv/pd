@@ -118,7 +118,6 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
 	s.RegisterHotspotRouter()
-	s.RegisterRegionsRouter()
 	return s
 }
 
@@ -169,13 +168,6 @@ func (s *Service) RegisterOperatorsRouter() {
 	router.GET("/records", getOperatorRecords)
 }
 
-// RegisterRegionsRouter registers the router of the regions handler.
-func (s *Service) RegisterRegionsRouter() {
-	router := s.root.Group("regions")
-	router.GET("/:id/label/:key", getRegionLabelByKey)
-	router.GET("/:id/labels", getRegionLabels)
-}
-
 // RegisterConfigRouter registers the router of the config handler.
 func (s *Service) RegisterConfigRouter() {
 	router := s.root.Group("config")
@@ -202,9 +194,13 @@ func (s *Service) RegisterConfigRouter() {
 	placementRule.GET("/:group", getPlacementRuleByGroup)
 
 	regionLabel := router.Group("region-label")
-	regionLabel.GET("rules", getAllRegionLabelRules)
-	regionLabel.GET("rules/ids", getRegionLabelRulesByIDs)
-	regionLabel.GET("rule/:id", getRegionLabelRuleByID)
+	regionLabel.GET("/rules", getAllRegionLabelRules)
+	regionLabel.GET("/rules/ids", getRegionLabelRulesByIDs)
+	regionLabel.GET("/rule/:id", getRegionLabelRuleByID)
+
+	regions := router.Group("regions")
+	regions.GET("/:id/label/:key", getRegionLabelByKey)
+	regions.GET("/:id/labels", getRegionLabels)
 }
 
 // @Tags     admin
@@ -991,7 +987,11 @@ func getRegionLabelByKey(c *gin.Context) {
 		return
 	}
 
-	region := handler.GetRegion(id)
+	region, err := handler.GetRegion(id)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
 	if region == nil {
 		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs().Error())
 		return
@@ -1024,7 +1024,11 @@ func getRegionLabels(c *gin.Context) {
 		return
 	}
 
-	region := handler.GetRegion(id)
+	region, err := handler.GetRegion(id)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
 	if region == nil {
 		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs().Error())
 		return
