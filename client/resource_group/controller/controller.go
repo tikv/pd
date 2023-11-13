@@ -171,12 +171,13 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 	if err != nil {
 		return nil, err
 	}
-	if len(resp.Kvs) == 0 {
+	kvs := resp.GetKvs()
+	if len(kvs) == 0 {
 		log.Warn("[resource group controller] server does not save config, load config failed")
 		return DefaultConfig(), nil
 	}
 	config := &Config{}
-	err = json.Unmarshal(resp.Kvs[0].GetValue(), config)
+	err = json.Unmarshal(kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
 	}
