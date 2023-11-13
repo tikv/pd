@@ -1052,6 +1052,7 @@ func (suite *ruleCheckerTestSuite) TestPriorityFitHealthWithDifferentRole1() {
 	suite.Equal("replace-down-peer-with-orphan-peer", op.Desc())
 
 	// set peer3 only pending
+	suite.cluster.GetStore(3).GetMeta().LastHeartbeat = time.Now().UnixNano()
 	r1 = r1.Clone(core.WithDownPeers(nil))
 	suite.cluster.PutRegion(r1)
 	op = suite.rc.Check(suite.cluster.GetRegion(1))

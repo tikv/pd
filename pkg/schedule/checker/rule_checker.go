@@ -449,12 +449,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 		return nil, nil
 	}
 
-	isUnhealthyPeer := func(id uint64) bool {
-		for _, downPeer := range region.GetDownPeers() {
-			if downPeer.Peer.GetId() == id {
-				return true
-			}
-		}
+	isPendingPeer := func(id uint64) bool {
 		for _, pendingPeer := range region.GetPendingPeers() {
 			if pendingPeer.GetId() == id {
 				return true
@@ -463,9 +458,22 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 		return false
 	}
 
-	isDisconnectedPeer := func(p *metapb.Peer) bool {
+	isDownPeer := func(id uint64) bool {
+		for _, downPeer := range region.GetDownPeers() {
+			if downPeer.Peer.GetId() == id {
+				return true
+			}
+		}
+		return false
+	}
+
+	isUnhealthyPeer := func(id uint64) bool {
+		return isPendingPeer(id) || isDownPeer(id)
+	}
+
+	isInDisconnectedStore := func(p *metapb.Peer) bool {
 		// avoid to meet down store when fix orphan peers,
-		// Isdisconnected is more strictly than IsUnhealthy.
+		// isInDisconnectedStore is usually more strictly than IsUnhealthy.
 		store := c.cluster.GetStore(p.GetStoreId())
 		if store == nil {
 			return true
@@ -475,15 +483,11 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 
 	checkDownPeer := func(peers []*metapb.Peer) (*metapb.Peer, bool) {
 		for _, p := range peers {
-			if isUnhealthyPeer(p.GetId()) {
-				// make sure is down peer.
-				if region.GetDownPeer(p.GetId()) != nil {
-					return p, true
-				}
-				return nil, true
-			}
-			if isDisconnectedPeer(p) {
+			if isInDisconnectedStore(p) || isDownPeer(p.GetId()) {
 				return p, true
+			}
+			if isPendingPeer(p.GetId()) {
+				return nil, true
 			}
 		}
 		return nil, false
@@ -517,7 +521,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 				continue
 			}
 			// make sure the orphan peer is healthy.
-			if isUnhealthyPeer(orphanPeer.GetId()) || isDisconnectedPeer(orphanPeer) {
+			if isUnhealthyPeer(orphanPeer.GetId()) || isInDisconnectedStore(orphanPeer) {
 				continue
 			}
 			// no consider witness in this path.
@@ -525,7 +529,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 				continue
 			}
 			// pinDownPeer's store should be disconnected, because we use more strict judge before.
-			if !isDisconnectedPeer(pinDownPeer) {
+			if !isInDisconnectedStore(pinDownPeer) {
 				continue
 			}
 			// check if down peer can replace with orphan peer.
@@ -539,7 +543,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 					return operator.CreatePromoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
 				case orphanPeerRole == metapb.PeerRole_Voter && destRole == metapb.PeerRole_Learner:
 					return operator.CreateDemoteLearnerOperatorAndRemovePeer("replace-down-peer-with-orphan-peer", c.cluster, region, orphanPeer, pinDownPeer)
-				case orphanPeerRole == destRole && isDisconnectedPeer(pinDownPeer) && !dstStore.IsDisconnected():
+				case orphanPeerRole == destRole && isInDisconnectedStore(pinDownPeer) && !dstStore.IsDisconnected():
 					return operator.CreateRemovePeerOperator("remove-replaced-orphan-peer", c.cluster, 0, region, pinDownPeer.GetStoreId())
 				default:
 					// destRole should not same with orphanPeerRole. if role is same, it fit with orphanPeer should be better than now.
@@ -557,7 +561,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 		hasHealthPeer := false
 		var disconnectedPeer *metapb.Peer
 		for _, orphanPeer := range fit.OrphanPeers {
-			if isDisconnectedPeer(orphanPeer) {
+			if isInDisconnectedStore(orphanPeer) {
 				disconnectedPeer = orphanPeer
 				break
 			}

@@ -28,5 +28,5 @@ func init() {
 
 // Install registers the API group and grpc service.
 func Install(register *registry.ServiceRegistry) {
-	register.RegisterService("Scheduling", server.NewService[*server.Server])
+	register.RegisterService("TSO", server.NewService[*server.Server])
 }
