@@ -991,7 +991,7 @@ func getRegionLabelByKey(c *gin.Context) {
 
 	region, err := handler.GetRegion(id)
 	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	if region == nil {
@@ -1028,7 +1028,7 @@ func getRegionLabels(c *gin.Context) {
 
 	region, err := handler.GetRegion(id)
 	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
 	if region == nil {
