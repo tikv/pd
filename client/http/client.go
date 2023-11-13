@@ -15,6 +15,7 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -49,6 +51,14 @@ type Client interface {
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+	SetStoreLabel(context.Context, int64, map[string]string) error
+
+	GetLeader(context.Context) (*pdpb.Member, error)
+	TransferLeader(context.Context, string) error
+
+	GetSchedulers(context.Context) ([]string, error)
+	AddScheduler(context.Context, string, map[string]interface{}) error
+
 	Close()
 }
 
@@ -154,7 +164,8 @@ func (c *client) execDuration(name string, duration time.Duration) {
 // it consistent with the current implementation of some clients (e.g. TiDB).
 func (c *client) requestWithRetry(
 	ctx context.Context,
-	name, uri string,
+	name, uri, method string,
+	body io.Reader,
 	res interface{},
 ) error {
 	var (
@@ -163,7 +174,7 @@ func (c *client) requestWithRetry(
 	)
 	for idx := 0; idx < len(c.pdAddrs); idx++ {
 		addr = c.pdAddrs[idx]
-		err = c.request(ctx, name, addr, uri, res)
+		err = c.request(ctx, name, addr, uri, method, body, res)
 		if err == nil {
 			break
 		}
@@ -175,16 +186,18 @@ func (c *client) requestWithRetry(
 
 func (c *client) request(
 	ctx context.Context,
-	name, addr, uri string,
+	name, addr, uri, method string,
+	body io.Reader,
 	res interface{},
 ) error {
 	reqURL := fmt.Sprintf("%s%s", addr, uri)
 	logFields := []zap.Field{
 		zap.String("name", name),
 		zap.String("url", reqURL),
+		zap.String("method", method),
 	}
 	log.Debug("[pd] request the http url", logFields...)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, method, reqURL, body)
 	if err != nil {
 		log.Error("[pd] create http request failed", append(logFields, zap.Error(err))...)
 		return errors.Trace(err)
@@ -219,9 +232,11 @@ func (c *client) request(
 		return errors.Errorf("request pd http api failed with status: '%s'", resp.Status)
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(res)
-	if err != nil {
-		return errors.Trace(err)
+	if res != nil {
+		err = json.NewDecoder(resp.Body).Decode(&res)
+		if err != nil {
+			return errors.Trace(err)
+		}
 	}
 	return nil
 }
@@ -229,7 +244,7 @@ func (c *client) request(
 // GetRegionByID gets the region info by ID.
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*RegionInfo, error) {
 	var region RegionInfo
-	err := c.requestWithRetry(ctx, "GetRegionByID", RegionByID(regionID), &region)
+	err := c.requestWithRetry(ctx, "GetRegionByID", RegionByID(regionID), http.MethodGet, nil, &region)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +254,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*RegionInf
 // GetRegionByKey gets the region info by key.
 func (c *client) GetRegionByKey(ctx context.Context, key []byte) (*RegionInfo, error) {
 	var region RegionInfo
-	err := c.requestWithRetry(ctx, "GetRegionByKey", RegionByKey(key), &region)
+	err := c.requestWithRetry(ctx, "GetRegionByKey", RegionByKey(key), http.MethodGet, nil, &region)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +264,7 @@ func (c *client) GetRegionByKey(ctx context.Context, key []byte) (*RegionInfo, e
 // GetRegions gets the regions info.
 func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 	var regions RegionsInfo
-	err := c.requestWithRetry(ctx, "GetRegions", Regions, &regions)
+	err := c.requestWithRetry(ctx, "GetRegions", Regions, http.MethodGet, nil, &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +274,7 @@ func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 // GetRegionsByKey gets the regions info by key range. If the limit is -1, it will return all regions within the range.
 func (c *client) GetRegionsByKey(ctx context.Context, startKey, endKey []byte, limit int) (*RegionsInfo, error) {
 	var regions RegionsInfo
-	err := c.requestWithRetry(ctx, "GetRegionsByKey", RegionsByKey(startKey, endKey, limit), &regions)
+	err := c.requestWithRetry(ctx, "GetRegionsByKey", RegionsByKey(startKey, endKey, limit), http.MethodGet, nil, &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +284,7 @@ func (c *client) GetRegionsByKey(ctx context.Context, startKey, endKey []byte, l
 // GetRegionsByStoreID gets the regions info by store ID.
 func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*RegionsInfo, error) {
 	var regions RegionsInfo
-	err := c.requestWithRetry(ctx, "GetRegionsByStoreID", RegionsByStoreID(storeID), &regions)
+	err := c.requestWithRetry(ctx, "GetRegionsByStoreID", RegionsByStoreID(storeID), http.MethodGet, nil, &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +294,7 @@ func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*Regi
 // GetHotReadRegions gets the hot read region statistics info.
 func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotReadRegions StoreHotPeersInfos
-	err := c.requestWithRetry(ctx, "GetHotReadRegions", HotRead, &hotReadRegions)
+	err := c.requestWithRetry(ctx, "GetHotReadRegions", HotRead, http.MethodGet, nil, &hotReadRegions)
 	if err != nil {
 		return nil, err
 	}
@@ -289,7 +304,7 @@ func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, er
 // GetHotWriteRegions gets the hot write region statistics info.
 func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotWriteRegions StoreHotPeersInfos
-	err := c.requestWithRetry(ctx, "GetHotWriteRegions", HotWrite, &hotWriteRegions)
+	err := c.requestWithRetry(ctx, "GetHotWriteRegions", HotWrite, http.MethodGet, nil, &hotWriteRegions)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +314,7 @@ func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, e
 // GetStores gets the stores info.
 func (c *client) GetStores(ctx context.Context) (*StoresInfo, error) {
 	var stores StoresInfo
-	err := c.requestWithRetry(ctx, "GetStores", Stores, &stores)
+	err := c.requestWithRetry(ctx, "GetStores", Stores, http.MethodGet, nil, &stores)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +341,7 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		IsRealTime          bool              `json:"is_real_time,omitempty"`
 		StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 	}{}
-	err := c.requestWithRetry(ctx, "GetMinResolvedTSByStoresIDs", uri, &resp)
+	err := c.requestWithRetry(ctx, "GetMinResolvedTSByStoresIDs", uri, http.MethodGet, nil, &resp)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -334,4 +349,55 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		return 0, nil, errors.Trace(errors.New("min resolved ts is not enabled"))
 	}
 	return resp.MinResolvedTS, resp.StoresMinResolvedTS, nil
+}
+
+// SetStoreLabel sets the label of a store.
+func (c *client) SetStoreLabel(ctx context.Context, storeID int64, storeLabel map[string]string) error {
+	jsonBody, err := json.Marshal(storeLabel)
+	if err != nil {
+		return err
+	}
+
+	return c.requestWithRetry(ctx, "SetStoreLabel", LabelByStore(storeID),
+		http.MethodPost, bytes.NewBuffer(jsonBody), nil)
+}
+
+// GetLeader gets the leader of PD cluster.
+func (c *client) GetLeader(context.Context) (*pdpb.Member, error) {
+	var leader pdpb.Member
+	err := c.requestWithRetry(context.Background(), "GetLeader", Leader, http.MethodGet, nil, &leader)
+	if err != nil {
+		return nil, err
+	}
+	return &leader, nil
+}
+
+// TransferLeader transfers the PD leader.
+func (c *client) TransferLeader(ctx context.Context, newLeader string) error {
+	return c.requestWithRetry(ctx, "TransferLeader", TransferLeaderID(newLeader), http.MethodPost, nil, nil)
+}
+
+// GetSchedulers gets the schedulers from PD cluster.
+func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
+	var schedulers []string
+	err := c.requestWithRetry(ctx, "GetSchedulers", Schedulers, http.MethodGet, nil, &schedulers)
+	if err != nil {
+		return nil, err
+	}
+	return schedulers, nil
+}
+
+// AddScheduler adds a scheduler to PD cluster.
+func (c *client) AddScheduler(ctx context.Context, name string, args map[string]interface{}) error {
+	request := map[string]interface{}{
+		"name": name,
+	}
+	for arg, val := range args {
+		request[arg] = val
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	return c.requestWithRetry(ctx, "AddScheduler", Schedulers, http.MethodPost, bytes.NewBuffer(data), nil)
 }

@@ -29,7 +29,13 @@ const (
 	regionsByKey        = "/pd/api/v1/regions/key"
 	regionsByStoreID    = "/pd/api/v1/regions/store"
 	Stores              = "/pd/api/v1/stores"
+	Store            = "/pd/api/v1/store"
 	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
+
+	Leader         = "/pd/api/v1/leader"
+	TransferLeader = "/pd/api/v1/leader/transfer"
+
+	Schedulers = "/pd/api/v1/schedulers"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -51,4 +57,14 @@ func RegionsByKey(startKey, endKey []byte, limit int) string {
 // RegionsByStoreID returns the path of PD HTTP API to get regions by store ID.
 func RegionsByStoreID(storeID uint64) string {
 	return fmt.Sprintf("%s/%d", regionsByStoreID, storeID)
+}
+
+// LabelByStore returns the path of PD HTTP API to set store label.
+func LabelByStore(storeID int64) string {
+	return fmt.Sprintf("%s/%d/label", Store, storeID)
+}
+
+// TransferLeaderID returns the path of PD HTTP API to transfer leader by ID.
+func TransferLeaderID(leaderID string) string {
+	return fmt.Sprintf("%s/%s", TransferLeader, leaderID)
 }
