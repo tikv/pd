@@ -864,9 +864,9 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 					Stats: request.GetStats(),
 				}
 				if _, err := cli.StoreHeartbeat(ctx, req); err != nil {
-					log.Info("forward store heartbeat failed", zap.Error(err))
+					log.Debug("forward store heartbeat failed", zap.Error(err))
 					// reset to let it be updated in the next request
-					// s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
+					s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
 				}
 			}
 		}
@@ -1063,6 +1063,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		errCh                       chan error
 		forwardStream               pdpb.PD_RegionHeartbeatClient
 		lastForwardedHost           string
+		forwardErrCh                chan error
 		forwardSchedulingStream     schedulingpb.Scheduling_RegionHeartbeatClient
 		lastForwardedSchedulingHost string
 	)
@@ -1094,7 +1095,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				if err != nil {
 					return err
 				}
-				log.Info("create bucket report forward stream", zap.String("forwarded-host", forwardedHost))
+				log.Info("create region heartbeat forward stream", zap.String("forwarded-host", forwardedHost))
 				forwardStream, cancel, err = s.createRegionHeartbeatForwardStream(client)
 				if err != nil {
 					return err
@@ -1185,9 +1186,22 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 
 		if s.IsServiceIndependent(utils.SchedulingServiceName) {
+			if forwardErrCh != nil {
+				select {
+				case err, ok := <-forwardErrCh:
+					if ok {
+						if cancel != nil {
+							cancel()
+						}
+						forwardSchedulingStream = nil
+						log.Error("meet error and need to re-establish the stream", zap.Error(err))
+					}
+				default:
+				}
+			}
 			forwardedSchedulingHost, ok := s.GetServicePrimaryAddr(stream.Context(), utils.SchedulingServiceName)
 			if !ok || len(forwardedSchedulingHost) == 0 {
-				log.Error("failed to find scheduling service primary address")
+				log.Debug("failed to find scheduling service primary address")
 				if cancel != nil {
 					cancel()
 				}
@@ -1209,8 +1223,8 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					continue
 				}
 				lastForwardedSchedulingHost = forwardedSchedulingHost
-				errCh = make(chan error, 1)
-				go forwardRegionHeartbeatToScheduling(forwardSchedulingStream, server, errCh)
+				forwardErrCh = make(chan error, 1)
+				go forwardRegionHeartbeatToScheduling(forwardSchedulingStream, server, forwardErrCh)
 			}
 			schedulingpbReq := &schedulingpb.RegionHeartbeatRequest{
 				Header: &schedulingpb.RequestHeader{
@@ -1237,11 +1251,13 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			}
 
 			select {
-			case err := <-errCh:
-				log.Error("failed to send response", zap.Error(err))
+			case err, ok := <-forwardErrCh:
+				if ok {
+					forwardSchedulingStream = nil
+					log.Error("failed to send response", zap.Error(err))
+				}
 			default:
 			}
-			continue
 		}
 	}
 }
