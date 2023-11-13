@@ -207,6 +207,7 @@ func (s *Service) RegisterConfigRouter() {
 // @Summary  Change the log level.
 // @Produce  json
 // @Success  200  {string}  string  "The log level is updated."
+// @Failure  400  {string}  string  "The input is invalid."
 // @Router   /admin/log [put]
 func changeLogLevel(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -240,6 +241,7 @@ func getConfig(c *gin.Context) {
 // @Summary  Drop all regions from cache.
 // @Produce  json
 // @Success  200  {string}  string  "All regions are removed from server cache."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /admin/cache/regions [delete]
 func deleteAllRegionCache(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -258,6 +260,7 @@ func deleteAllRegionCache(c *gin.Context) {
 // @Produce  json
 // @Success  200  {string}  string  "The region is removed from server cache."
 // @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /admin/cache/regions/{id} [delete]
 func deleteRegionCacheByID(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -693,8 +696,6 @@ func getHotBuckets(c *gin.Context) {
 // @Accept   json
 // @Produce  json
 // @Success  200  {object}  storage.HistoryHotRegions
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/regions/history [get]
 func getHistoryHotRegions(c *gin.Context) {
 	// TODO: support history hotspot in scheduling server with stateless in the future.
@@ -974,6 +975,7 @@ func getPlacementRuleByGroup(c *gin.Context) {
 // @Success  200  {string}  string
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  404  {string}  string  "The region does not exist."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/{id}/label/{key} [get]
 func getRegionLabelByKey(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
@@ -1046,6 +1048,7 @@ func getRegionLabels(c *gin.Context) {
 // @Summary  List all label rules of cluster.
 // @Produce  json
 // @Success  200  {array}  labeler.LabelRule
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /config/region-label/rules [get]
 func getAllRegionLabelRules(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
@@ -1092,6 +1095,7 @@ func getRegionLabelRulesByIDs(c *gin.Context) {
 // @Produce  json
 // @Success  200  {object}  labeler.LabelRule
 // @Failure  404  {string}  string  "The rule does not exist."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /config/region-label/rule/{id} [get]
 func getRegionLabelRuleByID(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
