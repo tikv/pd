@@ -32,7 +32,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const watchLoopUnhealthyTimeout = 60 * time.Second
+const (
+	watchLoopUnhealthyTimeout  = 60 * time.Second
+	campaignTimesRecordTimeout = 5 * time.Minute
+)
 
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
@@ -62,7 +65,7 @@ type Leadership struct {
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
 	keepAliveCancelFuncLock syncutil.Mutex
-	// CampaignTimes is used to record the campaign times of the leader within 5 minutes.
+	// CampaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	CampaignTimes []time.Time
 }
@@ -110,10 +113,9 @@ func (ls *Leadership) GetLeaderKey() string {
 
 // addCampaignTimes is used to add the campaign times of the leader.
 func (ls *Leadership) addCampaignTimes() {
-	// delete the time which is more than 5min
 	for i := len(ls.CampaignTimes) - 1; i >= 0; i-- {
-		if time.Since(ls.CampaignTimes[i]) > time.Minute*5 {
-			// remove the time which is more than 5min
+		if time.Since(ls.CampaignTimes[i]) > campaignTimesRecordTimeout {
+			// remove the time which is more than `campaignTimesRecordTimeout`
 			// array is sorted by time
 			ls.CampaignTimes = ls.CampaignTimes[i:]
 			break

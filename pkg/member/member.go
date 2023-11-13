@@ -42,7 +42,7 @@ const (
 	// The timeout to wait transfer etcd leader to complete.
 	moveLeaderTimeout          = 5 * time.Second
 	dcLocationConfigEtcdPrefix = "dc-location"
-	// If the campaign times is more than this value in 5min, the PD will resign and campaign again.
+	// If the campaign times is more than this value in `campaignTimesRecordTimeout`, the PD will resign and campaign again.
 	campaignLeaderFrequencyTimes = 5
 )
 
@@ -182,7 +182,7 @@ func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
 // leader should be changed when campaign leader frequently.
 func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
 	if len(m.leadership.CampaignTimes) > campaignLeaderFrequencyTimes {
-		log.Error("campaign times is too much", zap.String("leader-name", m.Name()),
+		log.Warn("campaign times is too frequent, resign and campaign again", zap.String("leader-name", m.Name()),
 			zap.Int("campaign-times", len(m.leadership.CampaignTimes)), zap.String("leader-key", m.GetLeaderPath()))
 		// remove all campaign times
 		m.leadership.CampaignTimes = nil
