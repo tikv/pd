@@ -29,7 +29,7 @@ const (
 	regionsByKey        = "/pd/api/v1/regions/key"
 	regionsByStoreID    = "/pd/api/v1/regions/store"
 	Stores              = "/pd/api/v1/stores"
-	Store            = "/pd/api/v1/store"
+	Store               = "/pd/api/v1/store"
 	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
 
 	Leader         = "/pd/api/v1/leader"

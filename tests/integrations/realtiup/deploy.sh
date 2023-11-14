@@ -5,7 +5,7 @@ TIUP_BIN_DIR=$HOME/.tiup/bin/tiup
 
 make clean
 cd ../../../
-#rm -rf bin
+rm -rf bin
 RUN_CI=1 make pd-server-basic
 
 
