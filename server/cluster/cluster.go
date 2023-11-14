@@ -359,11 +359,11 @@ func (c *RaftCluster) runServiceCheckJob() {
 				once.Do(c.initSchedulers)
 				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
 			} else {
-				if c.startSchedulingJobs() {
-					c.independentServices.Delete(mcsutils.SchedulingServiceName)
-				}
+				c.startSchedulingJobs()
+				c.independentServices.Delete(mcsutils.SchedulingServiceName)
 			}
-		} else if c.startSchedulingJobs() {
+		} else {
+			c.startSchedulingJobs()
 			c.independentServices.Delete(mcsutils.SchedulingServiceName)
 		}
 	}

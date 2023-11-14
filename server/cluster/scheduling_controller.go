@@ -71,25 +71,24 @@ func (sc *schedulingController) init(basicCluster *core.BasicCluster, opt *confi
 	sc.regionStats = statistics.NewRegionStatistics(basicCluster, opt, ruleManager)
 }
 
-func (sc *schedulingController) stopSchedulingJobs() bool {
+func (sc *schedulingController) stopSchedulingJobs() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if !sc.running {
-		return false
+		return
 	}
 	sc.coordinator.Stop()
 	sc.cancel()
 	sc.wg.Wait()
 	sc.running = false
 	log.Info("scheduling service is stopped")
-	return true
 }
 
-func (sc *schedulingController) startSchedulingJobs() bool {
+func (sc *schedulingController) startSchedulingJobs() {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if sc.running {
-		return false
+		return
 	}
 	sc.ctx, sc.cancel = context.WithCancel(sc.parentCtx)
 	sc.wg.Add(3)
@@ -98,7 +97,6 @@ func (sc *schedulingController) startSchedulingJobs() bool {
 	go sc.runSchedulingMetricsCollectionJob()
 	sc.running = true
 	log.Info("scheduling service is started")
-	return true
 }
 
 // runCoordinator runs the main scheduling loop.
@@ -421,4 +419,11 @@ func (sc *schedulingController) IsPrepared() bool {
 // SetPrepared set the prepare check to prepared. Only for test purpose.
 func (sc *schedulingController) SetPrepared() {
 	sc.coordinator.GetPrepareChecker().SetPrepared()
+}
+
+// IsScheduling returns whether the scheduling controller is running. Only for test purpose.
+func (sc *schedulingController) IsSchedulingControllerRunning() bool {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	return sc.running
 }

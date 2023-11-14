@@ -195,6 +195,28 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	})
 }
 
+func (suite *serverTestSuite) TestDynamicSwitch() {
+	re := suite.Require()
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	testutil.Eventually(re, func() bool {
+		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+	})
+	tc.GetPrimaryServer().Close()
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+}
+
 func (suite *serverTestSuite) TestSchedulerSync() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)

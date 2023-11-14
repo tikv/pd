@@ -538,6 +538,11 @@ func (c *Cluster) StopBackgroundJobs() {
 	c.wg.Wait()
 }
 
+// IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.
+func (c *Cluster) IsBackgroundJobsRunning() bool {
+	return c.running.Load()
+}
+
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if err := c.processRegionHeartbeat(region); err != nil {
