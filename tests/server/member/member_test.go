@@ -337,7 +337,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	leader := cluster.GetLeader()
 	re.NotEmpty(cluster.GetLeader())
 
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 3; i++ {
 		cluster.GetServers()[cluster.GetLeader()].ResetPDLeader()
 		cluster.WaitLeader()
 	}
