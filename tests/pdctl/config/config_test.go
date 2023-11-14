@@ -498,28 +498,19 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	defer os.RemoveAll(fname)
 
 	// test load
-	var bundles []placement.GroupBundle
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ := os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &bundles))
-	re.Len(bundles, 1)
-	re.Equal(placement.GroupBundle{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}}, bundles[0])
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
+	})
 
 	// test set
 	bundle.ID = "pe"
 	bundle.Rules[0].GroupID = "pe"
-	b, err = json.Marshal(bundle)
+	b, err := json.Marshal(bundle)
 	re.NoError(err)
 	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	re.NoError(err)
-
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ = os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
 		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
 	})
@@ -528,11 +519,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "pd")
 	re.NoError(err)
 
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ = os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
 	})
 
@@ -544,17 +531,18 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	re.NoError(err)
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
+	})
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "--regexp", ".*f")
 	re.NoError(err)
 
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ = os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
+	bundles := []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-	})
+	}
+	suite.checkLoadRuleBundle(pdAddr, fname, bundles)
 
 	// test save
 	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
@@ -564,13 +552,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname)
 	re.NoError(err)
-
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, err = os.ReadFile(fname)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
 		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
 		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
 	})
@@ -583,14 +565,22 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname, "--partial")
 	re.NoError(err)
 
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, err = os.ReadFile(fname)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
 		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
 	})
+}
+
+func (suite *configTestSuite) checkLoadRuleBundle(pdAddr string, fname string, expect []placement.GroupBundle) {
+	var bundles []placement.GroupBundle
+	cmd := pdctlCmd.GetRootCmd()
+	testutil.Eventually(suite.Require(), func() bool { // wait for the config to be synced to the scheduling server
+		_, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
+		suite.NoError(err)
+		b, _ := os.ReadFile(fname)
+		suite.NoError(json.Unmarshal(b, &bundles))
+		return len(bundles) == len(expect)
+	})
+	assertBundles(suite.Require(), bundles, expect)
 }
 
 func TestReplicationMode(t *testing.T) {
