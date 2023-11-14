@@ -76,14 +76,13 @@ func (sc *schedulingController) stopSchedulingJobs() bool {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if !sc.running {
-		return false
+		return
 	}
 	sc.coordinator.Stop()
 	sc.cancel()
 	sc.wg.Wait()
 	sc.running = false
 	log.Info("scheduling service is stopped")
-	return true
 }
 
 func (sc *schedulingController) startSchedulingJobs(cluster sche.ClusterInformer, hbstreams *hbstream.HeartbeatStreams) {

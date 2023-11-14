@@ -113,7 +113,7 @@ func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 }
 
 func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsServiceEnabled(utils.SchedulingServiceName) {
+	if !h.s.IsAPIServiceMode() {
 		return false, ""
 	}
 	if len(h.microserviceRedirectRules) == 0 {
@@ -123,7 +123,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	// It will be helpful when matching the redirect rules "schedulers" or "schedulers/{name}"
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 	for _, rule := range h.microserviceRedirectRules {
-		if !h.s.IsServiceIndependent(rule.targetServiceName) {
+		if rule.targetServiceName == utils.SchedulingServiceName && !h.s.IsServiceIndependent(utils.SchedulingServiceName) {
 			continue
 		}
 		if strings.HasPrefix(r.URL.Path, rule.matchPath) && slice.Contains(rule.matchMethods, r.Method) {
