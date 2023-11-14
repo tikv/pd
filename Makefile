@@ -16,7 +16,7 @@ BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
 BUILD_TOOL_CGO_ENABLED := 0
-BUILD_EXPERIMENT ?=
+BUILD_GOEXPERIMENT ?=
 PD_EDITION ?= Community
 # Ensure PD_EDITION is set to Community or Enterprise before running build process.
 ifneq "$(PD_EDITION)" "Community"
@@ -50,7 +50,7 @@ endif
 
 ifeq ($(ENABLE_FIPS), 1)
 	BUILD_TAGS+=boringcrypto
-	BUILD_EXPERIMENT=boringcrypto
+	BUILD_GOEXPERIMENT=boringcrypto
 	BUILD_CGO_ENABLED := 1
 	BUILD_TOOL_CGO_ENABLED := 1
 endif
@@ -90,7 +90,7 @@ endif
 PD_SERVER_DEP += dashboard-ui
 
 pd-server: ${PD_SERVER_DEP}
-	GOEXPERIMENT=$(BUILD_EXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-failpoint:
 	@$(FAILPOINT_ENABLE)
@@ -108,7 +108,7 @@ pd-server-fips:
 # Tools
 
 pd-ctl:
-	GOEXPERIMENT=$(BUILD_EXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
 pd-ctl-fips:
 	ENABLE_FIPS=1 $(MAKE) pd-ctl
 pd-tso-bench:
@@ -116,7 +116,7 @@ pd-tso-bench:
 pd-api-bench:
 	cd tools/pd-api-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench main.go
 pd-recover:
-	GOEXPERIMENT=$(BUILD_EXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
 pd-recover-fips:
 	ENABLE_FIPS=1 $(MAKE) pd-recover
 pd-analysis:
