@@ -431,14 +431,16 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluste
 
 	// show all
 	var groups []placement.RuleGroup
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &groups))
-	re.Equal([]placement.RuleGroup{
-		{ID: "pd", Index: 42, Override: true},
-		{ID: "group2", Index: 100, Override: false},
-		{ID: "group3", Index: 200, Override: false},
-	}, groups)
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show")
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &groups))
+		return reflect.DeepEqual([]placement.RuleGroup{
+			{ID: "pd", Index: 42, Override: true},
+			{ID: "group2", Index: 100, Override: false},
+			{ID: "group3", Index: 200, Override: false},
+		}, groups)
+	})
 
 	// delete
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "group2")
