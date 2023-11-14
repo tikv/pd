@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -233,7 +234,7 @@ func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
 	if err := c.processReportBuckets(b); err != nil {
 		return err
 	}
-	if !c.isAPIServiceMode {
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
 	}
 	return nil

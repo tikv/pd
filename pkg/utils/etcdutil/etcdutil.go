@@ -707,7 +707,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	}()
 	ticker := time.NewTicker(RequestProgressInterval)
 	defer ticker.Stop()
-	lastReceivedResponseTime := time.Now()
 
 	for {
 		if watcherCancel != nil {
@@ -736,8 +735,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				continue
 			}
 		}
+		lastReceivedResponseTime := time.Now()
 		log.Info("watch channel is created in watch loop",
 			zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+
 	watchChanLoop:
 		select {
 		case <-ctx.Done():
