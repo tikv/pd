@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
@@ -188,9 +190,24 @@ func (suite *adminTestSuite) TestResetTS() {
 	values, err := json.Marshal(args)
 	suite.NoError(err)
 	re := suite.Require()
-	err = tu.CheckPostJSON(testDialClient, url, values,
-		tu.StatusOK(re),
-		tu.StringEqual(re, "\"Reset ts successfully.\"\n"))
+	tu.Eventually(re, func() bool {
+		resp, err := apiutil.PostJSON(testDialClient, url, values)
+		re.NoError(err)
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		switch resp.StatusCode {
+		case http.StatusOK:
+			re.Contains(string(b), "Reset ts successfully.")
+			return true
+		case http.StatusForbidden:
+			re.Contains(string(b), "[PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back")
+			return false
+		default:
+			re.FailNow("unexpected status code %d", resp.StatusCode)
+			return false
+		}
+	})
 	suite.NoError(err)
 	t2 := makeTS(32 * time.Hour)
 	args["tso"] = fmt.Sprintf("%d", t2)
