@@ -156,7 +156,7 @@ type RaftCluster struct {
 	core      *core.BasicCluster // cached cluster info
 	opt       *config.PersistOptions
 	limiter   *StoreLimiter
-	*schedulingController
+	*SchedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
