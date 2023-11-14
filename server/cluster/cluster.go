@@ -46,11 +46,9 @@ import (
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/replication"
-	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
-	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
@@ -158,7 +156,7 @@ type RaftCluster struct {
 	core      *core.BasicCluster // cached cluster info
 	opt       *config.PersistOptions
 	limiter   *StoreLimiter
-	*schedulingController
+	*SchedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
@@ -272,7 +270,6 @@ func (c *RaftCluster) InitCluster(
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
-	c.schedulingController = newSchedulingController(c.ctx)
 }
 
 // Start starts a cluster.
@@ -307,12 +304,17 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 
+	c.SchedulingController = NewSchedulingController(c.ctx, c.core, c.opt, c.ruleManager)
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+		for _, store := range c.GetStores() {
+			storeID := store.GetID()
+			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
+		}
+	}
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
 		return err
 	}
-
-	c.schedulingController.init(c.core, c.opt, schedule.NewCoordinator(c.ctx, c, c.GetHeartbeatStreams()), c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.externalTS, err = c.storage.LoadExternalTS()
 	if err != nil {
@@ -356,14 +358,17 @@ func (c *RaftCluster) runServiceCheckJob() {
 			}
 			if len(servers) != 0 {
 				c.stopSchedulingJobs()
-				once.Do(c.initSchedulers)
+				once.Do(func() {
+					c.initCoordinator(c.ctx, c, c.hbstreams)
+					c.initSchedulers()
+				})
 				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
 			} else {
-				c.startSchedulingJobs()
+				c.startSchedulingJobs(c, c.hbstreams)
 				c.independentServices.Delete(mcsutils.SchedulingServiceName)
 			}
 		} else {
-			c.startSchedulingJobs()
+			c.startSchedulingJobs(c, c.hbstreams)
 			c.independentServices.Delete(mcsutils.SchedulingServiceName)
 		}
 	}
@@ -631,12 +636,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Int("count", c.core.GetTotalRegionCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		for _, store := range c.GetStores() {
-			storeID := store.GetID()
-			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
-		}
-	}
+
 	return c, nil
 }
 
@@ -757,16 +757,6 @@ func (c *RaftCluster) Context() context.Context {
 // GetHeartbeatStreams returns the heartbeat streams.
 func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 	return c.hbstreams
-}
-
-// GetCoordinator returns the coordinator.
-func (c *RaftCluster) GetCoordinator() *schedule.Coordinator {
-	return c.coordinator
-}
-
-// GetOperatorController returns the operator controller.
-func (c *RaftCluster) GetOperatorController() *operator.Controller {
-	return c.coordinator.GetOperatorController()
 }
 
 // AllocID returns a global unique ID.

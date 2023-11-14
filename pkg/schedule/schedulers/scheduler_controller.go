@@ -72,8 +72,8 @@ func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage e
 
 // Wait waits on all schedulers to exit.
 func (c *Controller) Wait() {
-	c.Lock()
-	defer c.Unlock()
+	c.RLock()
+	defer c.RUnlock()
 	c.wg.Wait()
 }
 
@@ -137,12 +137,12 @@ func (c *Controller) isSchedulingHalted() bool {
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
-func (c *Controller) ResetSchedulerMetrics() {
+func ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
 	ruleStatusGauge.Reset()
 	// create in map again
-	rulesCntStatusGauge = ruleStatusGauge.WithLabelValues("rule_count")
-	groupsCntStatusGauge = ruleStatusGauge.WithLabelValues("group_count")
+	ruleStatusGauge.WithLabelValues("rule_count").Set(0)
+	ruleStatusGauge.WithLabelValues("group_count").Set(0)
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.

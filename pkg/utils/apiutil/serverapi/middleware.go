@@ -22,7 +22,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
@@ -117,9 +116,6 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	// It will be helpful when matching the redirect rules "schedulers" or "schedulers/{name}"
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 	for _, rule := range h.microserviceRedirectRules {
-		if rule.targetServiceName == utils.SchedulingServiceName && !h.s.IsServiceIndependent(utils.SchedulingServiceName) {
-			continue
-		}
 		if strings.HasPrefix(r.URL.Path, rule.matchPath) && slice.Contains(rule.matchMethods, r.Method) {
 			origin := r.URL.Path
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)

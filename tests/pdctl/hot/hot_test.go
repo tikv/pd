@@ -349,6 +349,7 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *tests.TestCluster) {
 		hotRegion := statistics.StoreHotPeersInfos{}
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &hotRegion))
+		re.NotNil(hotRegion.AsPeer[1])
 		re.Equal(hotRegion.AsPeer[1].Count, 0)
 		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
 		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
