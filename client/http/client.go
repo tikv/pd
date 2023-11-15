@@ -305,7 +305,7 @@ func (c *client) GetRegionStatusByKey(ctx context.Context, startKey, endKey []by
 	var regionStats RegionStats
 	err := c.requestWithRetry(
 		ctx, "GetRegionStatusByKey",
-		RegionStatsByStartEndKey(string(startKey), string(endKey)), http.MethodGet,
+		RegionStatsByStartEndKey(startKey, endKey), http.MethodGet,
 		&regionStats,
 	)
 	if err != nil {

@@ -79,7 +79,10 @@ func RegionByKey(key []byte) string {
 // RegionsByKey returns the path of PD HTTP API to scan regions with given start key, end key and limit parameters.
 func RegionsByKey(startKey, endKey []byte, limit int) string {
 	return fmt.Sprintf("%s?start_key=%s&end_key=%s&limit=%d",
-		regionsByKey, url.QueryEscape(string(startKey)), url.QueryEscape(string(endKey)), limit)
+		regionsByKey,
+		url.QueryEscape(string(startKey)),
+		url.QueryEscape(string(endKey)),
+		limit)
 }
 
 // RegionsByStoreID returns the path of PD HTTP API to get regions by store ID.
@@ -88,8 +91,11 @@ func RegionsByStoreID(storeID uint64) string {
 }
 
 // RegionStatsByStartEndKey returns the path of PD HTTP API to get region stats by start key and end key.
-func RegionStatsByStartEndKey(startKey, endKey string) string {
-	return fmt.Sprintf("%s?start_key=%s&end_key=%s", StatsRegion, startKey, endKey)
+func RegionStatsByStartEndKey(startKey, endKey []byte) string {
+	return fmt.Sprintf("%s?start_key=%s&end_key=%s",
+		StatsRegion,
+		url.QueryEscape(string(startKey)),
+		url.QueryEscape(string(endKey)))
 }
 
 // StoreByID returns the store API with store ID parameter.
