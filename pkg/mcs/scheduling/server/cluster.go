@@ -485,10 +485,6 @@ func (c *Cluster) collectMetrics() {
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
-	c.collectClusterMetrics()
-}
-
-func (c *Cluster) collectClusterMetrics() {
 	if c.regionStats == nil {
 		return
 	}
@@ -500,20 +496,8 @@ func (c *Cluster) collectClusterMetrics() {
 
 func (c *Cluster) resetMetrics() {
 	statistics.Reset()
-
 	schedulers.ResetSchedulerMetrics()
 	schedule.ResetHotSpotMetrics()
-	c.resetClusterMetrics()
-}
-
-func (c *Cluster) resetClusterMetrics() {
-	if c.regionStats == nil {
-		return
-	}
-	c.regionStats.Reset()
-	c.labelStats.Reset()
-	// reset hot cache metrics
-	c.hotStat.ResetMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.

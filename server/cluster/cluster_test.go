@@ -2499,14 +2499,17 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 		}(i)
 	}
 	controller := co.GetSchedulersController()
+	rc := co.GetCluster().(*RaftCluster)
+	rc.SchedulingController = NewSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
+	rc.SchedulingController.coordinator = co
 	for i := 0; i < 1000; i++ {
 		co.CollectHotSpotMetrics()
 		controller.CollectSchedulerMetrics()
-		co.GetCluster().(*RaftCluster).collectStatisticsMetrics()
+		rc.collectSchedulingMetrics()
 	}
 	schedule.ResetHotSpotMetrics()
 	schedulers.ResetSchedulerMetrics()
-	co.GetCluster().(*RaftCluster).resetStatisticsMetrics()
+	rc.resetSchedulingMetrics()
 	wg.Wait()
 }
 
@@ -2534,10 +2537,13 @@ func TestCollectMetrics(t *testing.T) {
 		}
 	}
 	controller := co.GetSchedulersController()
+	rc := co.GetCluster().(*RaftCluster)
+	rc.SchedulingController = NewSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
+	rc.SchedulingController.coordinator = co
 	for i := 0; i < 1000; i++ {
 		co.CollectHotSpotMetrics()
 		controller.CollectSchedulerMetrics()
-		co.GetCluster().(*RaftCluster).collectStatisticsMetrics()
+		rc.collectSchedulingMetrics()
 	}
 	stores := co.GetCluster().GetStores()
 	regionStats := co.GetCluster().RegionWriteStats()
@@ -2552,7 +2558,7 @@ func TestCollectMetrics(t *testing.T) {
 	re.Equal(status1, status2)
 	schedule.ResetHotSpotMetrics()
 	schedulers.ResetSchedulerMetrics()
-	co.GetCluster().(*RaftCluster).resetStatisticsMetrics()
+	rc.resetSchedulingMetrics()
 }
 
 func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func(*schedule.Coordinator), re *require.Assertions) (*testCluster, *schedule.Coordinator, func()) {
