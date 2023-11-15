@@ -75,8 +75,6 @@ BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
 build: pd-server pd-ctl pd-recover
 
-build-fips: pd-server-fips pd-ctl-fips pd-recover-fips
-
 tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench
 
 PD_SERVER_DEP :=
@@ -100,25 +98,18 @@ pd-server-failpoint:
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
-pd-server-fips:
-	ENABLE_FIPS=1 $(MAKE) pd-server
-
-.PHONY: build tools pd-server pd-server-basic pd-server-fips
+.PHONY: build tools pd-server pd-server-basic
 
 # Tools
 
 pd-ctl:
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
-pd-ctl-fips:
-	ENABLE_FIPS=1 $(MAKE) pd-ctl
 pd-tso-bench:
 	cd tools/pd-tso-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench main.go
 pd-api-bench:
 	cd tools/pd-api-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench main.go
 pd-recover:
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
-pd-recover-fips:
-	ENABLE_FIPS=1 $(MAKE) pd-recover
 pd-analysis:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis tools/pd-analysis/main.go
 pd-heartbeat-bench:
@@ -130,7 +121,7 @@ regions-dump:
 stores-dump:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump tools/stores-dump/main.go
 
-.PHONY: pd-ctl pd-ctl-fips pd-tso-bench pd-recover pd-recover-fips pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench
+.PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench
 
 #### Docker image ####
 
