@@ -91,8 +91,13 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 					return strings.Contains(r.URL.Path, "label")
 				}),
 			serverapi.MicroserviceRedirectRule(
-				prefix+"/config/region-label",
-				scheapi.APIPathPrefix+"/config/region-label",
+				prefix+"/config/region-label/rules",
+				scheapi.APIPathPrefix+"/config/region-label/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/region-label/rule/", // Note: this is a typo in the original code
+				scheapi.APIPathPrefix+"/config/region-label/rules",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(

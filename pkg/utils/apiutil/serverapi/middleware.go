@@ -132,12 +132,17 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 				log.Warn("failed to get the service primary addr when trying to match redirect rules",
 					zap.String("path", r.URL.Path))
 			}
+			// If the URL contains escaped characters, use RawPath instead of Path
+			path := r.URL.Path
+			if r.URL.RawPath != "" {
+				path = r.URL.RawPath
+			}
 			// Extract parameters from the URL path
 			// e.g. r.URL.Path = /pd/api/v1/operators/1 (before redirect)
 			//      matchPath  = /pd/api/v1/operators
 			//      targetPath = /scheduling/api/v1/operators
 			//      r.URL.Path = /scheduling/api/v1/operator/1 (after redirect)
-			pathParams := strings.TrimPrefix(r.URL.Path, rule.matchPath)
+			pathParams := strings.TrimPrefix(path, rule.matchPath)
 			pathParams = strings.Trim(pathParams, "/") // Remove leading and trailing '/'
 			if len(pathParams) > 0 {
 				r.URL.Path = rule.targetPath + "/" + pathParams

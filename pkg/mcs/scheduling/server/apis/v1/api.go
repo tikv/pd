@@ -196,7 +196,7 @@ func (s *Service) RegisterConfigRouter() {
 	regionLabel := router.Group("region-label")
 	regionLabel.GET("/rules", getAllRegionLabelRules)
 	regionLabel.GET("/rules/ids", getRegionLabelRulesByIDs)
-	regionLabel.GET("/rule/:id", getRegionLabelRuleByID)
+	regionLabel.GET("/rules/:id", getRegionLabelRuleByID)
 
 	regions := router.Group("regions")
 	regions.GET("/:id/label/:key", getRegionLabelByKey)
@@ -1096,7 +1096,7 @@ func getRegionLabelRulesByIDs(c *gin.Context) {
 // @Success  200  {object}  labeler.LabelRule
 // @Failure  404  {string}  string  "The rule does not exist."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/region-label/rule/{id} [get]
+// @Router   /config/region-label/rules/{id} [get]
 func getRegionLabelRuleByID(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 
