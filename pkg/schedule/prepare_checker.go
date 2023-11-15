@@ -25,16 +25,13 @@ import (
 
 type prepareChecker struct {
 	syncutil.RWMutex
-	reactiveRegions map[uint64]int
-	start           time.Time
-	sum             int
-	prepared        bool
+	start    time.Time
+	prepared bool
 }
 
 func newPrepareChecker() *prepareChecker {
 	return &prepareChecker{
-		start:           time.Now(),
-		reactiveRegions: make(map[uint64]int),
+		start: time.Now(),
 	}
 }
 
@@ -51,13 +48,8 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	}
 	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
 	totalRegionsCnt := c.GetTotalRegionCount()
-	if float64(notLoadedFromRegionsCnt) > float64(totalRegionsCnt)*collectFactor {
-		log.Info("meta not loaded from region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionsCnt))
-		checker.prepared = true
-		return true
-	}
 	// The number of active regions should be more than total region of all stores * collectFactor
-	if float64(totalRegionsCnt)*collectFactor > float64(checker.sum) {
+	if float64(totalRegionsCnt)*collectFactor > float64(notLoadedFromRegionsCnt) {
 		return false
 	}
 	for _, store := range c.GetStores() {
@@ -66,21 +58,13 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		}
 		storeID := store.GetID()
 		// For each store, the number of active regions should be more than total region of the store * collectFactor
-		if float64(c.GetStoreRegionCount(storeID))*collectFactor > float64(checker.reactiveRegions[storeID]) {
+		if float64(c.GetStoreRegionCount(storeID))*collectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
 			return false
 		}
 	}
+	log.Info("not loaded from storage region number is satisfied, finish prepare checker", zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionsCnt))
 	checker.prepared = true
 	return true
-}
-
-func (checker *prepareChecker) Collect(region *core.RegionInfo) {
-	checker.Lock()
-	defer checker.Unlock()
-	for _, p := range region.GetPeers() {
-		checker.reactiveRegions[p.GetStoreId()]++
-	}
-	checker.sum++
 }
 
 func (checker *prepareChecker) IsPrepared() bool {
@@ -94,11 +78,4 @@ func (checker *prepareChecker) SetPrepared() {
 	checker.Lock()
 	defer checker.Unlock()
 	checker.prepared = true
-}
-
-// for test purpose
-func (checker *prepareChecker) GetSum() int {
-	checker.RLock()
-	defer checker.RUnlock()
-	return checker.sum
 }
