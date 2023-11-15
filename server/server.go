@@ -489,7 +489,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
-	if !s.IsAPIServiceMode() {
+	if !s.IsServiceIndependent(mcs.SchedulingServiceName) {
 		s.hotRegionStorage, err = storage.NewHotRegionsStorage(
 			ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
 		if err != nil {
@@ -948,20 +948,7 @@ func (s *Server) GetConfig() *config.Config {
 	if err != nil {
 		return cfg
 	}
-	payload := make(map[string]interface{})
-	for i, sche := range sches {
-		var config interface{}
-		err := schedulers.DecodeConfig([]byte(configs[i]), &config)
-		if err != nil {
-			log.Error("failed to decode scheduler config",
-				zap.String("config", configs[i]),
-				zap.String("scheduler", sche),
-				errs.ZapError(err))
-			continue
-		}
-		payload[sche] = config
-	}
-	cfg.Schedule.SchedulersPayload = payload
+	cfg.Schedule.SchedulersPayload = schedulers.ToPayload(sches, configs)
 	return cfg
 }
 
@@ -1405,6 +1392,15 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 		return rc.GetRegions()
 	}
 	return nil
+}
+
+// IsServiceIndependent returns if the service is enabled
+func (s *Server) IsServiceIndependent(name string) bool {
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		return rc.IsServiceIndependent(name)
+	}
+	return false
 }
 
 // GetServiceLabels returns ApiAccessPaths by given service label

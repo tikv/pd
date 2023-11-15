@@ -117,6 +117,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 	for _, rule := range h.microserviceRedirectRules {
 		if strings.HasPrefix(r.URL.Path, rule.matchPath) && slice.Contains(rule.matchMethods, r.Method) {
+			origin := r.URL.Path
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !ok || addr == "" {
 				log.Warn("failed to get the service primary addr when trying to match redirect rules",
@@ -134,8 +135,8 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 			} else {
 				r.URL.Path = rule.targetPath
 			}
-			log.Debug("redirect to micro service", zap.String("path", r.URL.Path), zap.String("target", addr),
-				zap.String("method", r.Method))
+			log.Debug("redirect to micro service", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
+				zap.String("target", addr), zap.String("method", r.Method))
 			return true, addr
 		}
 	}

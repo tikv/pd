@@ -61,9 +61,9 @@ type Config struct {
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
 	// Log related config.
-	Log      log.Config `toml:"log" json:"log"`
-	Logger   *zap.Logger
-	LogProps *log.ZapProperties
+	Log      log.Config         `toml:"log" json:"log"`
+	Logger   *zap.Logger        `json:"-"`
+	LogProps *log.ZapProperties `json:"-"`
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
@@ -164,9 +164,24 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	}
 }
 
+// GetName returns the Name
+func (c *Config) GetName() string {
+	return c.Name
+}
+
+// GeBackendEndpoints returns the BackendEndpoints
+func (c *Config) GeBackendEndpoints() string {
+	return c.BackendEndpoints
+}
+
 // GetListenAddr returns the ListenAddr
 func (c *Config) GetListenAddr() string {
 	return c.ListenAddr
+}
+
+// GetAdvertiseListenAddr returns the AdvertiseListenAddr
+func (c *Config) GetAdvertiseListenAddr() string {
+	return c.AdvertiseListenAddr
 }
 
 // GetTLSConfig returns the TLS config.
@@ -193,6 +208,13 @@ func (c *Config) validate() error {
 	}
 
 	return nil
+}
+
+// Clone creates a copy of current config.
+func (c *Config) Clone() *Config {
+	cfg := &Config{}
+	*cfg = *c
+	return cfg
 }
 
 // PersistConfig wraps all configurations that need to persist to storage and

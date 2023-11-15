@@ -37,29 +37,29 @@ func StatusOK(re *require.Assertions) func([]byte, int, http.Header) {
 
 // StatusNotOK is used to check whether http response code is not equal http.StatusOK.
 func StatusNotOK(re *require.Assertions) func([]byte, int, http.Header) {
-	return func(_ []byte, i int, _ http.Header) {
-		re.NotEqual(http.StatusOK, i)
+	return func(resp []byte, i int, _ http.Header) {
+		re.NotEqual(http.StatusOK, i, "resp: "+string(resp))
 	}
 }
 
 // ExtractJSON is used to check whether given data can be extracted successfully.
 func ExtractJSON(re *require.Assertions, data interface{}) func([]byte, int, http.Header) {
-	return func(res []byte, _ int, _ http.Header) {
-		re.NoError(json.Unmarshal(res, data))
+	return func(resp []byte, _ int, _ http.Header) {
+		re.NoError(json.Unmarshal(resp, data), "resp: "+string(resp))
 	}
 }
 
 // StringContain is used to check whether response context contains given string.
 func StringContain(re *require.Assertions, sub string) func([]byte, int, http.Header) {
-	return func(res []byte, _ int, _ http.Header) {
-		re.Contains(string(res), sub)
+	return func(resp []byte, _ int, _ http.Header) {
+		re.Contains(string(resp), sub, "resp: "+string(resp))
 	}
 }
 
 // StringEqual is used to check whether response context equal given string.
 func StringEqual(re *require.Assertions, str string) func([]byte, int, http.Header) {
-	return func(res []byte, _ int, _ http.Header) {
-		re.Contains(string(res), str)
+	return func(resp []byte, _ int, _ http.Header) {
+		re.Contains(string(resp), str, "resp: "+string(resp))
 	}
 }
 
