@@ -176,3 +176,67 @@ type StoreStatus struct {
 	LastHeartbeatTS time.Time `json:"last_heartbeat_ts"`
 	Uptime          string    `json:"uptime"`
 }
+
+// RegionStats stores the statistics of regions.
+type RegionStats struct {
+	Count            int            `json:"count"`
+	EmptyCount       int            `json:"empty_count"`
+	StorageSize      int64          `json:"storage_size"`
+	StorageKeys      int64          `json:"storage_keys"`
+	StoreLeaderCount map[uint64]int `json:"store_leader_count"`
+	StorePeerCount   map[uint64]int `json:"store_peer_count"`
+}
+
+// PeerRoleType is the expected peer type of the placement rule.
+type PeerRoleType string
+
+const (
+	// Voter can either match a leader peer or follower peer
+	Voter PeerRoleType = "voter"
+	// Leader matches a leader.
+	Leader PeerRoleType = "leader"
+	// Follower matches a follower.
+	Follower PeerRoleType = "follower"
+	// Learner matches a learner.
+	Learner PeerRoleType = "learner"
+)
+
+// LabelConstraint is used to filter store when trying to place peer of a region.
+type LabelConstraint struct {
+	Key    string            `json:"key,omitempty"`
+	Op     LabelConstraintOp `json:"op,omitempty"`
+	Values []string          `json:"values,omitempty"`
+}
+
+// LabelConstraintOp defines how a LabelConstraint matches a store. It can be one of
+// 'in', 'notIn', 'exists', or 'notExists'.
+type LabelConstraintOp string
+
+const (
+	// In restricts the store label value should in the value list.
+	// If label does not exist, `in` is always false.
+	In LabelConstraintOp = "in"
+	// NotIn restricts the store label value should not in the value list.
+	// If label does not exist, `notIn` is always true.
+	NotIn LabelConstraintOp = "notIn"
+	// Exists restricts the store should have the label.
+	Exists LabelConstraintOp = "exists"
+	// NotExists restricts the store should not have the label.
+	NotExists LabelConstraintOp = "notExists"
+)
+
+// Rule is the placement rule that can be checked against a region. When
+// applying rules (apply means schedule regions to match selected rules), the
+// apply order is defined by the tuple [GroupIndex, GroupID, Index, ID].
+type Rule struct {
+	GroupID        string          `json:"group_id"`
+	ID             string          `json:"id"`
+	Index          int             `json:"index,omitempty"`
+	Override       bool            `json:"override,omitempty"`
+	StartKeyHex    string          `json:"start_key"`
+	EndKeyHex      string          `json:"end_key"`
+	Role           PeerRoleType    `json:"role"`
+	Count          int             `json:"count"`
+	Constraints    LabelConstraint `json:"label_constraints,omitempty"`
+	LocationLabels []string        `json:"location_labels,omitempty"`
+}
