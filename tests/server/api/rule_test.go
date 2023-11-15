@@ -1085,7 +1085,19 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		re, errs.ErrRegionInvalidID.Error()))
 	suite.NoError(err)
 
-	leaderServer.GetRaftCluster().GetReplicationConfig().EnablePlacementRules = false
+	data := make(map[string]interface{})
+	data["enable-placement-rules"] = "false"
+	reqData, e := json.Marshal(data)
+	re.NoError(e)
+	url = fmt.Sprintf("%s/config", urlPrefix)
+	err = tu.CheckPostJSON(testDialClient, url, reqData, tu.StatusOK(re))
+	re.NoError(err)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		// wait for the scheduler server to update the config
+		tu.Eventually(re, func() bool {
+			return !sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled()
+		})
+	}
 	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusPreconditionFailed), tu.StringContain(
 		re, "placement rules feature is disabled"))

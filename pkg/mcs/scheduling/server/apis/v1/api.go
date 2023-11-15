@@ -976,7 +976,7 @@ func getPlacementRuleByGroup(c *gin.Context) {
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  404  {string}  string  "The region does not exist."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /regions/{id}/label/{key} [get]
+// @Router   /config/regions/{id}/label/{key} [get]
 func getRegionLabelByKey(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 
@@ -1015,7 +1015,7 @@ func getRegionLabelByKey(c *gin.Context) {
 // @Success  200  {string}  string
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  404  {string}  string  "The region does not exist."
-// @Router   /regions/{id}/labels [get]
+// @Router   /config/regions/{id}/labels [get]
 func getRegionLabels(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 
