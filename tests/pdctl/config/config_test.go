@@ -315,12 +315,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 	re.Contains(string(output), "Success!")
 
 	// test show
-	var rules []placement.Rule
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "show")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &rules))
-	re.Len(rules, 1)
-	re.Equal([2]string{"pd", "default"}, rules[0].Key())
+	suite.checkShowRuleKey(pdAddr, [][2]string{{"pd", "default"}})
 
 	f, _ := os.CreateTemp("/tmp", "pd_tests")
 	fname := f.Name()
@@ -328,12 +323,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 	defer os.RemoveAll(fname)
 
 	// test load
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ := os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &rules))
-	re.Len(rules, 1)
-	re.Equal([2]string{"pd", "default"}, rules[0].Key())
+	rules := suite.checkLoadRule(pdAddr, fname, [][2]string{{"pd", "default"}})
 
 	// test save
 	rules = append(rules, placement.Rule{
@@ -347,42 +337,26 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 		Role:    "voter",
 		Count:   2,
 	})
-	b, _ = json.Marshal(rules)
+	b, _ := json.Marshal(rules)
 	os.WriteFile(fname, b, 0600)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
 
 	// test show group
-	var rules2 []placement.Rule
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "show", "--group=pd")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &rules2))
-	re.Len(rules2, 2)
-	re.Equal([2]string{"pd", "default"}, rules2[0].Key())
-	re.Equal([2]string{"pd", "test1"}, rules2[1].Key())
+	suite.checkShowRuleKey(pdAddr, [][2]string{{"pd", "default"}, {"pd", "test1"}}, "--group=pd")
 
 	// test rule region detail
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
-	fit := &placement.RegionFit{}
-	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
-	cmd2 := pdctlCmd.GetRootCmd()
-	output, err = pdctl.ExecuteCommand(cmd2, "-u", pdAddr, "config", "placement-rules", "show", "--region=1", "--detail")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, fit))
-	re.Len(fit.RuleFits, 3)
-	re.Equal([2]string{"pd", "default"}, fit.RuleFits[0].Rule.Key())
+	suite.checkShowRuleKey(pdAddr, [][2]string{{"pd", "default"}}, "--region=1", "--detail")
 
 	// test delete
+	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
 	rules[0].Count = 0
 	b, _ = json.Marshal(rules)
 	os.WriteFile(fname, b, 0600)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "show", "--group=pd")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &rules))
-	re.Len(rules, 1)
-	re.Equal([2]string{"pd", "test1"}, rules[0].Key())
+	suite.checkShowRuleKey(pdAddr, [][2]string{{"pd", "test1"}}, "--group=pd")
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
@@ -448,17 +422,21 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluste
 	re.Contains(string(output), "Delete group and rules successfully.")
 
 	// show again
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
-	re.NoError(err)
-	re.Contains(string(output), "404")
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
+		re.NoError(err)
+		return strings.Contains(string(output), "404")
+	})
 
 	// delete using regex
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "--regexp", ".*3")
 	re.NoError(err)
 
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group3")
-	re.NoError(err)
-	re.Contains(string(output), "404")
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group3")
+		re.NoError(err)
+		return strings.Contains(string(output), "404")
+	})
 }
 
 func (suite *configTestSuite) TestPlacementRuleBundle() {
@@ -570,7 +548,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	})
 }
 
-func (suite *configTestSuite) checkLoadRuleBundle(pdAddr string, fname string, expect []placement.GroupBundle) {
+func (suite *configTestSuite) checkLoadRuleBundle(pdAddr string, fname string, expectValues []placement.GroupBundle) {
 	var bundles []placement.GroupBundle
 	cmd := pdctlCmd.GetRootCmd()
 	testutil.Eventually(suite.Require(), func() bool { // wait for the config to be synced to the scheduling server
@@ -578,9 +556,52 @@ func (suite *configTestSuite) checkLoadRuleBundle(pdAddr string, fname string, e
 		suite.NoError(err)
 		b, _ := os.ReadFile(fname)
 		suite.NoError(json.Unmarshal(b, &bundles))
-		return len(bundles) == len(expect)
+		return len(bundles) == len(expectValues)
 	})
-	assertBundles(suite.Require(), bundles, expect)
+	assertBundles(suite.Require(), bundles, expectValues)
+}
+
+func (suite *configTestSuite) checkLoadRule(pdAddr string, fname string, expectValues [][2]string) []placement.Rule {
+	var rules []placement.Rule
+	cmd := pdctlCmd.GetRootCmd()
+	testutil.Eventually(suite.Require(), func() bool { // wait for the config to be synced to the scheduling server
+		_, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
+		suite.NoError(err)
+		b, _ := os.ReadFile(fname)
+		suite.NoError(json.Unmarshal(b, &rules))
+		return len(rules) == len(expectValues)
+	})
+	for i, v := range expectValues {
+		suite.Equal(v, rules[i].Key())
+	}
+	return rules
+}
+
+func (suite *configTestSuite) checkShowRuleKey(pdAddr string, expectValues [][2]string, opts ...string) {
+	var rules []placement.Rule
+	var fit placement.RegionFit
+	cmd := pdctlCmd.GetRootCmd()
+	testutil.Eventually(suite.Require(), func() bool { // wait for the config to be synced to the scheduling server
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show"}
+		output, err := pdctl.ExecuteCommand(cmd, append(args, opts...)...)
+		suite.NoError(err)
+		err = json.Unmarshal(output, &rules)
+		if err == nil {
+			return len(rules) == len(expectValues)
+		}
+		suite.NoError(json.Unmarshal(output, &fit))
+		return len(fit.RuleFits) != 0
+	})
+	if len(rules) != 0 {
+		for i, v := range expectValues {
+			suite.Equal(v, rules[i].Key())
+		}
+	}
+	if len(fit.RuleFits) != 0 {
+		for i, v := range expectValues {
+			suite.Equal(v, fit.RuleFits[i].Rule.Key())
+		}
+	}
 }
 
 func TestReplicationMode(t *testing.T) {
