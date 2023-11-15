@@ -734,7 +734,7 @@ func (c *RaftCluster) Stop() {
 	c.Unlock()
 
 	c.wg.Wait()
-	log.Info("raftcluster is stopped")
+	log.Info("raft cluster is stopped")
 }
 
 // IsRunning return if the cluster is running.
