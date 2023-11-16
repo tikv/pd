@@ -15,6 +15,8 @@ dev-basic: build check basic-test
 BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
+BUILD_TOOL_CGO_ENABLED := 0
+BUILD_GOEXPERIMENT ?=
 PD_EDITION ?= Community
 # Ensure PD_EDITION is set to Community or Enterprise before running build process.
 ifneq "$(PD_EDITION)" "Community"
@@ -46,6 +48,13 @@ ifeq ($(PLUGIN), 1)
 	BUILD_TAGS += with_plugin
 endif
 
+ifeq ($(ENABLE_FIPS), 1)
+	BUILD_TAGS+=boringcrypto
+	BUILD_GOEXPERIMENT=boringcrypto
+	BUILD_CGO_ENABLED := 1
+	BUILD_TOOL_CGO_ENABLED := 1
+endif
+
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty --always)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
@@ -66,6 +75,8 @@ BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
 build: pd-server pd-ctl pd-recover
 
+build-fips: pd-server-fips pd-ctl-fips pd-recover-fips
+
 tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench
 
 PD_SERVER_DEP :=
@@ -79,7 +90,7 @@ endif
 PD_SERVER_DEP += dashboard-ui
 
 pd-server: ${PD_SERVER_DEP}
-	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-failpoint:
 	@$(FAILPOINT_ENABLE)
@@ -89,18 +100,25 @@ pd-server-failpoint:
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
-.PHONY: build tools pd-server pd-server-basic
+pd-server-fips:
+	ENABLE_FIPS=1 $(MAKE) pd-server
+
+.PHONY: build tools pd-server pd-server-basic pd-server-fips
 
 # Tools
 
 pd-ctl:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
+pd-ctl-fips:
+	ENABLE_FIPS=1 $(MAKE) pd-ctl
 pd-tso-bench:
 	cd tools/pd-tso-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench main.go
 pd-api-bench:
 	cd tools/pd-api-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench main.go
 pd-recover:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
+pd-recover-fips:
+	ENABLE_FIPS=1 $(MAKE) pd-recover
 pd-analysis:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis tools/pd-analysis/main.go
 pd-heartbeat-bench:
@@ -112,7 +130,7 @@ regions-dump:
 stores-dump:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump tools/stores-dump/main.go
 
-.PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench
+.PHONY: pd-ctl pd-ctl-fips pd-tso-bench pd-recover pd-recover-fips pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench
 
 #### Docker image ####
 
