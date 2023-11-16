@@ -200,11 +200,8 @@ func (suite *adminTestSuite) TestResetTS() {
 		case http.StatusOK:
 			re.Contains(string(b), "Reset ts successfully.")
 			return true
-		case http.StatusForbidden:
+		case http.StatusServiceUnavailable:
 			re.Contains(string(b), "[PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back")
-			return false
-		case http.StatusInternalServerError:
-			re.Contains(string(b), "redirect to not leader")
 			return false
 		default:
 			re.FailNow("unexpected status code %d", resp.StatusCode)

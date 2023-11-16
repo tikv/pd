@@ -96,6 +96,8 @@ func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	if err = handler.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
 		if err == errs.ErrServerNotStarted {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		} else if err == errs.ErrEtcdTxnConflict {
+			h.rd.JSON(w, http.StatusServiceUnavailable, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusForbidden, err.Error())
 		}

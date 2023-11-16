@@ -185,6 +185,8 @@ func ResetTS(c *gin.Context) {
 	if err = svr.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
 		if err == errs.ErrServerNotStarted {
 			c.String(http.StatusInternalServerError, err.Error())
+		} else if err == errs.ErrEtcdTxnConflict {
+			c.String(http.StatusServiceUnavailable, err.Error())
 		} else {
 			c.String(http.StatusForbidden, err.Error())
 		}
