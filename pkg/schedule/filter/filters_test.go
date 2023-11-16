@@ -159,7 +159,7 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetEnablePlacementRules(true)
 	ruleManager := testCluster.RuleManager
-	ruleManager.DeleteRule("pd", "default")
+	ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	err := ruleManager.SetRules([]*placement.Rule{
 		{
 			GroupID: "test",

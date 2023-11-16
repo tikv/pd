@@ -461,7 +461,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			// add customized rule first and then remove default rule
 			err := manager.SetRules(testCase.rules)
 			suite.NoError(err)
-			err = manager.DeleteRule("pd", "default")
+			err = manager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 			suite.NoError(err)
 		}
 		if testCase.expectedError == nil {

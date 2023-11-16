@@ -270,12 +270,12 @@ func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
 	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
 	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
-	rule5 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 1,
+	rule5 := placement.Rule{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 1,
 		LocationLabels: []string{"host"}}
-	rule6 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 3}
+	rule6 := placement.Rule{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 3}
 
 	leaderServer.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
-	defaultRule := leaderServer.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
+	defaultRule := leaderServer.GetRaftCluster().GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	defaultRule.LocationLabels = []string{"host"}
 	leaderServer.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
 
@@ -800,9 +800,14 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	re := suite.Require()
 	// GetAll
 	b1 := placement.GroupBundle{
-		ID: "pd",
+		ID: placement.DefaultGroupID,
 		Rules: []*placement.Rule{
-			{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+			{
+				GroupID: placement.DefaultGroupID,
+				ID:      placement.DefaultRuleID,
+				Role:    "voter",
+				Count:   3,
+			},
 		},
 	}
 	var bundles []placement.GroupBundle

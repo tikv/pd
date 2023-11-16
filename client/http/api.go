@@ -90,8 +90,8 @@ func RegionsByStoreID(storeID uint64) string {
 	return fmt.Sprintf("%s/%d", RegionsByStoreIDPrefix, storeID)
 }
 
-// RegionStatsByStartEndKey returns the path of PD HTTP API to get region stats by start key and end key.
-func RegionStatsByStartEndKey(startKey, endKey []byte) string {
+// RegionStatsByKeyRange returns the path of PD HTTP API to get region stats by start key and end key.
+func RegionStatsByKeyRange(startKey, endKey []byte) string {
 	return fmt.Sprintf("%s?start_key=%s&end_key=%s",
 		StatsRegion,
 		url.QueryEscape(string(startKey)),
