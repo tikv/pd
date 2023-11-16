@@ -15,6 +15,8 @@ dev-basic: build check basic-test
 BUILD_FLAGS ?=
 BUILD_TAGS ?=
 BUILD_CGO_ENABLED := 0
+BUILD_TOOL_CGO_ENABLED := 0
+BUILD_GOEXPERIMENT ?=
 PD_EDITION ?= Community
 # Ensure PD_EDITION is set to Community or Enterprise before running build process.
 ifneq "$(PD_EDITION)" "Community"
@@ -44,6 +46,13 @@ endif
 
 ifeq ($(PLUGIN), 1)
 	BUILD_TAGS += with_plugin
+endif
+
+ifeq ($(ENABLE_FIPS), 1)
+	BUILD_TAGS+=boringcrypto
+	BUILD_GOEXPERIMENT=boringcrypto
+	BUILD_CGO_ENABLED := 1
+	BUILD_TOOL_CGO_ENABLED := 1
 endif
 
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty --always)"
@@ -79,7 +88,7 @@ endif
 PD_SERVER_DEP += dashboard-ui
 
 pd-server: ${PD_SERVER_DEP}
-	CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-failpoint:
 	@$(FAILPOINT_ENABLE)
@@ -94,13 +103,13 @@ pd-server-basic:
 # Tools
 
 pd-ctl:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
 pd-tso-bench:
 	cd tools/pd-tso-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench main.go
 pd-api-bench:
 	cd tools/pd-api-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench main.go
 pd-recover:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
+	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
 pd-analysis:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis tools/pd-analysis/main.go
 pd-heartbeat-bench:
