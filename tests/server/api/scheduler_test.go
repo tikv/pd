@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -447,18 +448,22 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				suite.NoError(err)
 				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]interface{})
-				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				exceptMap["4"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
-				suite.Equal(exceptMap, resp["store-id-ranges"])
+				tu.Eventually(re, func() bool {
+					suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					exceptMap["4"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
+					return reflect.DeepEqual(exceptMap, resp["store-id-ranges"])
+				})
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to delete exist store from evict-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name, "4")
 				err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 				suite.NoError(err)
 				resp = make(map[string]interface{})
-				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				delete(exceptMap, "4")
-				suite.Equal(exceptMap, resp["store-id-ranges"])
+				tu.Eventually(re, func() bool {
+					suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					delete(exceptMap, "4")
+					return reflect.DeepEqual(exceptMap, resp["store-id-ranges"])
+				})
 				err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
 				suite.NoError(err)
 			},
