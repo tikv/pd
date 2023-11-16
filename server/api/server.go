@@ -52,6 +52,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	//	"/schedulers", http.MethodGet
 	//	"/schedulers/{name}", http.MethodPost
 	//	"/schedulers/diagnostic/{name}", http.MethodGet
+	//	"/scheduler-config", http.MethodGet
 	//	"/hotspot/regions/read", http.MethodGet
 	//	"/hotspot/regions/write", http.MethodGet
 	//	"/hotspot/regions/history", http.MethodGet
@@ -83,11 +84,41 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/hotspot",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rules",
+				scheapi.APIPathPrefix+"/config/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule/",
+				scheapi.APIPathPrefix+"/config/rule",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule_group/",
+				scheapi.APIPathPrefix+"/config/rule_groups", // Note: this is a typo in the original code
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule_groups",
+				scheapi.APIPathPrefix+"/config/rule_groups",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/placement-rule",
+				scheapi.APIPathPrefix+"/config/placement-rule",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
 			// because the writing of all the meta information of the scheduling service is in the API server,
 			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",
 				scheapi.APIPathPrefix+"/schedulers",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/scheduler-config",
+				scheapi.APIPathPrefix+"/schedulers/config",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(

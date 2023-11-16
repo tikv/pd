@@ -241,14 +241,14 @@ func (suite *regionTestSuite) TestRegions() {
 		mustRegionHeartbeat(re, suite.svr, r)
 	}
 	url := fmt.Sprintf("%s/regions", suite.urlPrefix)
-	RegionsInfo := &RegionsInfo{}
-	err := tu.ReadGetJSON(re, testDialClient, url, RegionsInfo)
+	regionsInfo := &RegionsInfo{}
+	err := tu.ReadGetJSON(re, testDialClient, url, regionsInfo)
 	suite.NoError(err)
-	suite.Len(regions, RegionsInfo.Count)
-	sort.Slice(RegionsInfo.Regions, func(i, j int) bool {
-		return RegionsInfo.Regions[i].ID < RegionsInfo.Regions[j].ID
+	suite.Len(regions, regionsInfo.Count)
+	sort.Slice(regionsInfo.Regions, func(i, j int) bool {
+		return regionsInfo.Regions[i].ID < regionsInfo.Regions[j].ID
 	})
-	for i, r := range RegionsInfo.Regions {
+	for i, r := range regionsInfo.Regions {
 		suite.Equal(regions[i].ID, r.ID)
 		suite.Equal(regions[i].ApproximateSize, r.ApproximateSize)
 		suite.Equal(regions[i].ApproximateKeys, r.ApproximateKeys)

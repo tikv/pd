@@ -78,9 +78,6 @@ type Server struct {
 	service              *Service
 	keyspaceGroupManager *tso.KeyspaceGroupManager
 
-	// tsoDispatcher is used to dispatch the TSO requests to
-	// the corresponding forwarding TSO channels.
-	tsoDispatcher *tsoutil.TSODispatcher
 	// tsoProtoFactory is the abstract factory for creating tso
 	// related data structures defined in the tso grpc protocol
 	tsoProtoFactory *tsoutil.TSOProtoFactory
