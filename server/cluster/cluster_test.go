@@ -2138,7 +2138,7 @@ func newTestRaftCluster(
 			panic(err)
 		}
 	}
-	rc.SchedulingController = NewSchedulingController(rc.ctx, rc.core, rc.opt, rc.ruleManager)
+	rc.schedulingController = newSchedulingController(rc.ctx, rc.core, rc.opt, rc.ruleManager)
 	return rc
 }
 

@@ -156,7 +156,7 @@ type RaftCluster struct {
 	core      *core.BasicCluster // cached cluster info
 	opt       *config.PersistOptions
 	limiter   *StoreLimiter
-	*SchedulingController
+	*schedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
@@ -277,7 +277,7 @@ func (c *RaftCluster) InitCluster(
 			return err
 		}
 	}
-	c.SchedulingController = NewSchedulingController(c.ctx, c.core, c.opt, c.ruleManager)
+	c.schedulingController = newSchedulingController(c.ctx, c.core, c.opt, c.ruleManager)
 	return nil
 }
 

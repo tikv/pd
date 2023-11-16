@@ -1562,7 +1562,6 @@ func TestTransferLeaderBack(t *testing.T) {
 	svr := leaderServer.GetServer()
 	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetStorage(), svr.GetBasicCluster(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
-	rc.SchedulingController = cluster.NewSchedulingController(ctx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}
 	re.NoError(storage.SaveMeta(meta))
