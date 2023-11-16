@@ -186,6 +186,9 @@ func ResetTS(c *gin.Context) {
 		if err == errs.ErrServerNotStarted {
 			c.String(http.StatusInternalServerError, err.Error())
 		} else if err == errs.ErrEtcdTxnConflict {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+			// Return 503 to let the client retry.
+			// Ref: https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4
 			c.String(http.StatusServiceUnavailable, err.Error())
 		} else {
 			c.String(http.StatusForbidden, err.Error())

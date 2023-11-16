@@ -97,6 +97,9 @@ func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 		if err == errs.ErrServerNotStarted {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else if err == errs.ErrEtcdTxnConflict {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+			// Return 503 to let the client retry.
+			// Ref: https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4
 			h.rd.JSON(w, http.StatusServiceUnavailable, err.Error())
 		} else {
 			h.rd.JSON(w, http.StatusForbidden, err.Error())
