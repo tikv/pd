@@ -299,18 +299,21 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
 	case apiMode:
+		re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 		s.cluster, err = NewTestAPICluster(s.ctx, 1, s.opts...)
 		re.NoError(err)
 		err = s.cluster.RunInitialServers()
 		re.NoError(err)
 		re.NotEmpty(s.cluster.WaitLeader())
 		leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
+		re.NoError(leaderServer.BootstrapCluster())
+		leaderServer.GetRaftCluster().SetPrepared()
 		// start scheduling cluster
 		tc, err := NewTestSchedulingCluster(s.ctx, 1, leaderServer.GetAddr())
 		re.NoError(err)
-		re.NoError(leaderServer.BootstrapCluster())
 		tc.WaitForPrimaryServing(re)
 		s.cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}
 }

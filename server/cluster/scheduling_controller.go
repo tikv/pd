@@ -72,17 +72,18 @@ func NewSchedulingController(parentCtx context.Context, basicCluster *core.Basic
 	}
 }
 
-func (sc *SchedulingController) stopSchedulingJobs() {
+func (sc *SchedulingController) stopSchedulingJobs() bool {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if !sc.running {
-		return
+		return false
 	}
 	sc.coordinator.Stop()
 	sc.cancel()
 	sc.wg.Wait()
 	sc.running = false
 	log.Info("scheduling service is stopped")
+	return true
 }
 
 func (sc *SchedulingController) startSchedulingJobs(cluster sche.ClusterInformer, hbstreams *hbstream.HeartbeatStreams) {
@@ -104,6 +105,7 @@ func (sc *SchedulingController) initCoordinator(ctx context.Context, cluster sch
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	sc.initCoordinatorLocked(ctx, cluster, hbstreams)
+	sc.coordinator.InitSchedulers(false)
 }
 
 func (sc *SchedulingController) initCoordinatorLocked(ctx context.Context, cluster sche.ClusterInformer, hbstreams *hbstream.HeartbeatStreams) {
@@ -453,12 +455,6 @@ func (sc *SchedulingController) AddSuspectKeyRange(start, end []byte) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	sc.coordinator.GetCheckerController().AddSuspectKeyRange(start, end)
-}
-
-func (sc *SchedulingController) initSchedulers() {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-	sc.coordinator.InitSchedulers(false)
 }
 
 func (sc *SchedulingController) getEvictLeaderStores() (evictStores []uint64) {
