@@ -46,7 +46,6 @@ func TestSchedulerTestSuite(t *testing.T) {
 func (suite *schedulerTestSuite) TestScheduler() {
 	env := tests.NewSchedulingTestEnvironment(suite.T())
 	env.RunTestInTwoModes(suite.checkScheduler)
-	env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
@@ -414,8 +413,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler", "show"}, &conf)
 	re.Equal(4., conf["batch"])
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler", "set", "batch", "3"}, nil)
-	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler"}, &conf1)
-	re.Equal(3., conf1["batch"])
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler"}, &conf1)
+		return conf1["batch"] == 3.
+	})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.NotContains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-leader-scheduler"}, nil)
@@ -494,6 +495,11 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	checkSchedulerWithStatusCommand("disabled", nil)
 }
 
+func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
+}
+
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestCluster) {
 	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
@@ -533,7 +539,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestClu
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
+	// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
 
 	echo := mustExec(re, cmd, []string{"-u", pdAddr, "config", "set", "enable-diagnostic", "true"}, nil)

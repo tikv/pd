@@ -296,14 +296,14 @@ func (s *Server) startServer() (err error) {
 	// different service modes provided by the same pd-server binary
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	uniqueName := s.cfg.ListenAddr
+	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 	s.participant = member.NewParticipant(s.GetClient(), utils.ResourceManagerServiceName)
 	p := &resource_manager.Participant{
 		Name:       uniqueName,
 		Id:         uniqueID, // id is unique among all participants
-		ListenUrls: []string{s.cfg.AdvertiseListenAddr},
+		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
 	s.participant.InitInfo(p, endpoint.ResourceManagerSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
 
@@ -312,7 +312,7 @@ func (s *Server) startServer() (err error) {
 		manager: NewManager[*Server](s),
 	}
 
-	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
+	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
 		return err
 	}
 

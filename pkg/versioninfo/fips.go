@@ -12,21 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package install
+//go:build boringcrypto
+// +build boringcrypto
+
+package versioninfo
 
 import (
-	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/mcs/tso/server"
-
-	// init API group
-	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
+	_ "crypto/tls/fipsonly"
 )
 
 func init() {
-	Install(registry.ServerServiceRegistry)
-}
-
-// Install registers the API group and grpc service.
-func Install(register *registry.ServiceRegistry) {
-	register.RegisterService("TSO", server.NewService[*server.Server])
+	PDReleaseVersion += "-fips"
 }
