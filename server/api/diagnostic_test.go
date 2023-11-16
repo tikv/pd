@@ -17,6 +17,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -63,6 +64,8 @@ func (suite *diagnosticTestSuite) TearDownSuite() {
 
 func (suite *diagnosticTestSuite) checkStatus(status string, url string) {
 	re := suite.Require()
+	err := tu.CheckGetUntilStatusCode(re, testDialClient, url, http.StatusOK)
+	suite.NoError(err)
 	suite.Eventually(func() bool {
 		result := &schedulers.DiagnosticResult{}
 		err := tu.ReadGetJSON(re, testDialClient, url, result)

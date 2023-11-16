@@ -210,8 +210,10 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 		var resp placement.Rule
 		url := fmt.Sprintf("%s/rule/%s/%s", urlPrefix, testCase.rule.GroupID, testCase.rule.ID)
 		if testCase.found {
-			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-			suite.compareRule(&resp, &testCase.rule)
+			tu.Eventually(suite.Require(), func() bool {
+				err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+				return suite.compareRule(&resp, &testCase.rule)
+			})
 		} else {
 			err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, testCase.code))
 		}
@@ -421,13 +423,17 @@ func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
 		suite.T().Log(testCase.name)
 		var resp []*placement.Rule
 		url := fmt.Sprintf("%s/rules/group/%s", urlPrefix, testCase.groupID)
-		err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-		suite.NoError(err)
-		suite.Len(resp, testCase.count)
-		if testCase.count == 2 {
-			suite.compareRule(resp[0], &rule)
-			suite.compareRule(resp[1], &rule1)
-		}
+		tu.Eventually(re, func() bool {
+			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+			suite.NoError(err)
+			if len(resp) != testCase.count {
+				return false
+			}
+			if testCase.count == 2 {
+				return suite.compareRule(resp[0], &rule) && suite.compareRule(resp[1], &rule1)
+			}
+			return true
+		})
 	}
 }
 
@@ -487,12 +493,15 @@ func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
 		url := fmt.Sprintf("%s/rules/region/%s", urlPrefix, testCase.regionID)
 
 		if testCase.success {
-			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-			for _, r := range resp {
-				if r.GroupID == "e" {
-					suite.compareRule(r, &rule)
+			tu.Eventually(suite.Require(), func() bool {
+				err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+				for _, r := range resp {
+					if r.GroupID == "e" {
+						return suite.compareRule(r, &rule)
+					}
 				}
-			}
+				return true
+			})
 		} else {
 			err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, testCase.code))
 		}
@@ -956,22 +965,26 @@ func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) compareBundle(b1, b2 placement.GroupBundle) {
-	suite.Equal(b2.ID, b1.ID)
-	suite.Equal(b2.Index, b1.Index)
-	suite.Equal(b2.Override, b1.Override)
-	suite.Len(b2.Rules, len(b1.Rules))
-	for i := range b1.Rules {
-		suite.compareRule(b1.Rules[i], b2.Rules[i])
-	}
+	tu.Eventually(suite.Require(), func() bool {
+		if b2.ID != b1.ID || b2.Index != b1.Index || b2.Override != b1.Override || len(b2.Rules) != len(b1.Rules) {
+			return false
+		}
+		for i := range b1.Rules {
+			if !suite.compareRule(b1.Rules[i], b2.Rules[i]) {
+				return false
+			}
+		}
+		return true
+	})
 }
 
-func (suite *ruleTestSuite) compareRule(r1 *placement.Rule, r2 *placement.Rule) {
-	suite.Equal(r2.GroupID, r1.GroupID)
-	suite.Equal(r2.ID, r1.ID)
-	suite.Equal(r2.StartKeyHex, r1.StartKeyHex)
-	suite.Equal(r2.EndKeyHex, r1.EndKeyHex)
-	suite.Equal(r2.Role, r1.Role)
-	suite.Equal(r2.Count, r1.Count)
+func (suite *ruleTestSuite) compareRule(r1 *placement.Rule, r2 *placement.Rule) bool {
+	return r2.GroupID == r1.GroupID &&
+		r2.ID == r1.ID &&
+		r2.StartKeyHex == r1.StartKeyHex &&
+		r2.EndKeyHex == r1.EndKeyHex &&
+		r2.Role == r1.Role &&
+		r2.Count == r1.Count
 }
 
 type regionRuleTestSuite struct {
