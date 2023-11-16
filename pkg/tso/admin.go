@@ -15,6 +15,7 @@
 package tso
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -53,6 +54,7 @@ func NewAdminHandler(handler Handler, rd *render.Render) *AdminHandler {
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  403  {string}  string  "Reset ts is forbidden."
 // @Failure  500  {string}  string  "TSO server failed to proceed the request."
+// @Failure  503  {string}  string  "It's a temporary failure, please retry."
 // @Router   /admin/reset-ts [post]
 // if force-use-larger=true:
 //
@@ -100,7 +102,8 @@ func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			// Return 503 to let the client retry.
 			// Ref: https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4
-			h.rd.JSON(w, http.StatusServiceUnavailable, err.Error())
+			h.rd.JSON(w, http.StatusServiceUnavailable,
+				fmt.Sprintf("It's a temporary failure with error %s, please retry.", err.Error()))
 		} else {
 			h.rd.JSON(w, http.StatusForbidden, err.Error())
 		}
