@@ -112,7 +112,7 @@ func TestBuildRuleList(t *testing.T) {
 	defaultRule := &Rule{
 		GroupID:  DefaultGroupID,
 		ID:       DefaultRuleID,
-		Role:     "voter",
+		Role:     Voter,
 		StartKey: []byte{},
 		EndKey:   []byte{},
 		Count:    3,
@@ -128,7 +128,7 @@ func TestBuildRuleList(t *testing.T) {
 		Override: true,
 		StartKey: byteStart,
 		EndKey:   byteEnd,
-		Role:     "voter",
+		Role:     Voter,
 		Count:    5,
 	}
 

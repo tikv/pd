@@ -93,7 +93,7 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	rule := &placement.Rule{
 		GroupID:     "2",
 		ID:          "3",
-		Role:        "voter",
+		Role:        placement.Voter,
 		Count:       1,
 		StartKeyHex: "22",
 		EndKeyHex:   "dd",

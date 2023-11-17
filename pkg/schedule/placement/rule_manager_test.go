@@ -79,16 +79,16 @@ func TestAdjustRule(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)
 	rules := []Rule{
-		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3},
-		{GroupID: "", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3},
-		{GroupID: "group", ID: "", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3},
-		{GroupID: "group", ID: "id", StartKeyHex: "123ab", EndKeyHex: "123abf", Role: "voter", Count: 3},
-		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "1123abf", Role: "voter", Count: 3},
-		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123aaa", Role: "voter", Count: 3},
+		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3},
+		{GroupID: "", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3},
+		{GroupID: "group", ID: "", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3},
+		{GroupID: "group", ID: "id", StartKeyHex: "123ab", EndKeyHex: "123abf", Role: Voter, Count: 3},
+		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "1123abf", Role: Voter, Count: 3},
+		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123aaa", Role: Voter, Count: 3},
 		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "master", Count: 3},
-		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 0},
-		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: -1},
-		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3, LabelConstraints: []LabelConstraint{{Op: "foo"}}},
+		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 0},
+		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: -1},
+		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3, LabelConstraints: []LabelConstraint{{Op: "foo"}}},
 	}
 	re.NoError(manager.adjustRule(&rules[0], "group"))
 
@@ -101,17 +101,17 @@ func TestAdjustRule(t *testing.T) {
 	}
 
 	manager.SetKeyType(constant.Table.String())
-	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"))
+	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3}, "group"))
 
 	manager.SetKeyType(constant.Txn.String())
-	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}, "group"))
+	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3}, "group"))
 
 	re.Error(manager.adjustRule(&Rule{
 		GroupID:     "group",
 		ID:          "id",
 		StartKeyHex: hex.EncodeToString(codec.EncodeBytes([]byte{0})),
 		EndKeyHex:   "123abf",
-		Role:        "voter",
+		Role:        Voter,
 		Count:       3,
 	}, "group"))
 
@@ -120,7 +120,7 @@ func TestAdjustRule(t *testing.T) {
 		ID:               "id",
 		StartKeyHex:      hex.EncodeToString(codec.EncodeBytes([]byte{0})),
 		EndKeyHex:        hex.EncodeToString(codec.EncodeBytes([]byte{1})),
-		Role:             "learner",
+		Role:             Learner,
 		Count:            1,
 		IsWitness:        true,
 		LabelConstraints: []LabelConstraint{{Key: "engine", Op: "in", Values: []string{"tiflash"}}},
@@ -130,15 +130,15 @@ func TestAdjustRule(t *testing.T) {
 func TestLeaderCheck(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)
-	re.Regexp(".*needs at least one leader or voter.*", manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: DefaultRuleID, Role: "learner", Count: 3}).Error())
-	re.Regexp(".*define multiple leaders by count 2.*", manager.SetRule(&Rule{GroupID: "g2", ID: "33", Role: "leader", Count: 2}).Error())
+	re.Regexp(".*needs at least one leader or voter.*", manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Learner, Count: 3}).Error())
+	re.Regexp(".*define multiple leaders by count 2.*", manager.SetRule(&Rule{GroupID: "g2", ID: "33", Role: Leader, Count: 2}).Error())
 	re.Regexp(".*multiple leader replicas.*", manager.Batch([]RuleOp{
 		{
-			Rule:   &Rule{GroupID: "g2", ID: "foo1", Role: "leader", Count: 1},
+			Rule:   &Rule{GroupID: "g2", ID: "foo1", Role: Leader, Count: 1},
 			Action: RuleOpAdd,
 		},
 		{
-			Rule:   &Rule{GroupID: "g2", ID: "foo2", Role: "leader", Count: 1},
+			Rule:   &Rule{GroupID: "g2", ID: "foo2", Role: Leader, Count: 1},
 			Action: RuleOpAdd,
 		},
 	}).Error())
@@ -148,9 +148,9 @@ func TestSaveLoad(t *testing.T) {
 	re := require.New(t)
 	store, manager := newTestManager(t, false)
 	rules := []*Rule{
-		{GroupID: DefaultGroupID, ID: DefaultRuleID, Role: "voter", Count: 5},
-		{GroupID: "foo", ID: "baz", StartKeyHex: "", EndKeyHex: "abcd", Role: "voter", Count: 1},
-		{GroupID: "foo", ID: "bar", Role: "learner", Count: 1},
+		{GroupID: DefaultGroupID, ID: DefaultRuleID, Role: Voter, Count: 5},
+		{GroupID: "foo", ID: "baz", StartKeyHex: "", EndKeyHex: "abcd", Role: Voter, Count: 1},
+		{GroupID: "foo", ID: "bar", Role: Learner, Count: 1},
 	}
 	for _, r := range rules {
 		re.NoError(manager.SetRule(r.Clone()))
@@ -193,9 +193,9 @@ func TestKeys(t *testing.T) {
 	re := require.New(t)
 	_, manager := newTestManager(t, false)
 	rules := []*Rule{
-		{GroupID: "1", ID: "1", Role: "voter", Count: 1, StartKeyHex: "", EndKeyHex: ""},
-		{GroupID: "2", ID: "2", Role: "voter", Count: 1, StartKeyHex: "11", EndKeyHex: "ff"},
-		{GroupID: "2", ID: "3", Role: "voter", Count: 1, StartKeyHex: "22", EndKeyHex: "dd"},
+		{GroupID: "1", ID: "1", Role: Voter, Count: 1, StartKeyHex: "", EndKeyHex: ""},
+		{GroupID: "2", ID: "2", Role: Voter, Count: 1, StartKeyHex: "11", EndKeyHex: "ff"},
+		{GroupID: "2", ID: "3", Role: Voter, Count: 1, StartKeyHex: "22", EndKeyHex: "dd"},
 	}
 
 	toDelete := []RuleOp{}
@@ -211,8 +211,8 @@ func TestKeys(t *testing.T) {
 	manager.Batch(toDelete)
 	checkRules(t, manager.GetAllRules(), [][2]string{{DefaultGroupID, DefaultRuleID}})
 
-	rules = append(rules, &Rule{GroupID: "3", ID: "4", Role: "voter", Count: 1, StartKeyHex: "44", EndKeyHex: "ee"},
-		&Rule{GroupID: "3", ID: "5", Role: "voter", Count: 1, StartKeyHex: "44", EndKeyHex: "dd"})
+	rules = append(rules, &Rule{GroupID: "3", ID: "4", Role: Voter, Count: 1, StartKeyHex: "44", EndKeyHex: "ee"},
+		&Rule{GroupID: "3", ID: "5", Role: Voter, Count: 1, StartKeyHex: "44", EndKeyHex: "dd"})
 	manager.SetRules(rules)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"1", "1"}, {"2", "2"}, {"2", "3"}, {"3", "4"}, {"3", "5"}, {DefaultGroupID, DefaultRuleID}})
 
@@ -282,10 +282,10 @@ func TestKeys(t *testing.T) {
 func TestDeleteByIDPrefix(t *testing.T) {
 	_, manager := newTestManager(t, false)
 	manager.SetRules([]*Rule{
-		{GroupID: "g1", ID: "foo1", Role: "voter", Count: 1},
-		{GroupID: "g2", ID: "foo1", Role: "voter", Count: 1},
-		{GroupID: "g2", ID: "foobar", Role: "voter", Count: 1},
-		{GroupID: "g2", ID: "baz2", Role: "voter", Count: 1},
+		{GroupID: "g1", ID: "foo1", Role: Voter, Count: 1},
+		{GroupID: "g2", ID: "foo1", Role: Voter, Count: 1},
+		{GroupID: "g2", ID: "foobar", Role: Voter, Count: 1},
+		{GroupID: "g2", ID: "baz2", Role: Voter, Count: 1},
 	})
 	manager.DeleteRule(DefaultGroupID, DefaultRuleID)
 	checkRules(t, manager.GetAllRules(), [][2]string{{"g1", "foo1"}, {"g2", "baz2"}, {"g2", "foo1"}, {"g2", "foobar"}})
@@ -304,20 +304,20 @@ func TestRangeGap(t *testing.T) {
 	err := manager.DeleteRule(DefaultGroupID, DefaultRuleID)
 	re.Error(err)
 
-	err = manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: "foo", StartKeyHex: "", EndKeyHex: "abcd", Role: "voter", Count: 1})
+	err = manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: "foo", StartKeyHex: "", EndKeyHex: "abcd", Role: Voter, Count: 1})
 	re.NoError(err)
 	// |-- default --|
 	// |-- foo --|
 	// still cannot delete default since it will cause ("abcd", "") has no rules inside.
 	err = manager.DeleteRule(DefaultGroupID, DefaultRuleID)
 	re.Error(err)
-	err = manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: "bar", StartKeyHex: "abcd", EndKeyHex: "", Role: "voter", Count: 1})
+	err = manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: "bar", StartKeyHex: "abcd", EndKeyHex: "", Role: Voter, Count: 1})
 	re.NoError(err)
 	// now default can be deleted.
 	err = manager.DeleteRule(DefaultGroupID, DefaultRuleID)
 	re.NoError(err)
 	// cannot change range since it will cause ("abaa", "abcd") has no rules inside.
-	err = manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: "foo", StartKeyHex: "", EndKeyHex: "abaa", Role: "voter", Count: 1})
+	err = manager.SetRule(&Rule{GroupID: DefaultGroupID, ID: "foo", StartKeyHex: "", EndKeyHex: "abaa", Role: Voter, Count: 1})
 	re.Error(err)
 }
 
@@ -334,7 +334,7 @@ func TestGroupConfig(t *testing.T) {
 	re.Equal(pd2, manager.GetRuleGroup(DefaultGroupID))
 
 	// new group g without config
-	err = manager.SetRule(&Rule{GroupID: "g", ID: "1", Role: "voter", Count: 1})
+	err = manager.SetRule(&Rule{GroupID: "g", ID: "1", Role: Voter, Count: 1})
 	re.NoError(err)
 	g1 := &RuleGroup{ID: "g"}
 	re.Equal(g1, manager.GetRuleGroup("g"))
@@ -363,13 +363,13 @@ func TestRuleVersion(t *testing.T) {
 	rule1 := manager.GetRule(DefaultGroupID, DefaultRuleID)
 	re.Equal(uint64(0), rule1.Version)
 	// create new rule
-	newRule := &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 3}
+	newRule := &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3}
 	err := manager.SetRule(newRule)
 	re.NoError(err)
 	newRule = manager.GetRule("g1", "id")
 	re.Equal(uint64(0), newRule.Version)
 	// update rule
-	newRule = &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: "voter", Count: 2}
+	newRule = &Rule{GroupID: "g1", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 2}
 	err = manager.SetRule(newRule)
 	re.NoError(err)
 	newRule = manager.GetRule("g1", "id")

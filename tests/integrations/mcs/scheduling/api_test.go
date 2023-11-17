@@ -243,7 +243,7 @@ func (suite *apiTestSuite) TestAPIForward() {
 		{
 			GroupID:        placement.DefaultGroupID,
 			ID:             placement.DefaultRuleID,
-			Role:           "voter",
+			Role:           placement.Voter,
 			Count:          3,
 			LocationLabels: []string{},
 		},
