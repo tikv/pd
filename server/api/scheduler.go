@@ -15,6 +15,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -310,6 +311,7 @@ func newSchedulerConfigHandler(svr *server.Server, rd *render.Render) *scheduler
 }
 
 func (h *schedulerConfigHandler) GetSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("schedulerConfigHandler GetSchedulerConfig api server")
 	handler := h.svr.GetHandler()
 	sh, err := handler.GetSchedulerConfigHandler()
 	if err == nil && sh != nil {

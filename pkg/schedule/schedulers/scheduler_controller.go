@@ -161,7 +161,8 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return err
 	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	return nil
+	err := scheduler.Prepare(c.cluster)
+	return err
 }
 
 // RemoveSchedulerHandler removes the HTTP handler for a scheduler.
@@ -188,6 +189,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
+	s.(Scheduler).Cleanup(c.cluster)
 	delete(c.schedulerHandlers, name)
 
 	return nil
