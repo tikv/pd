@@ -189,7 +189,7 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *evictSlowStoreScheduler) Prepare(cluster sche.SchedulerCluster) error {
+func (s *evictSlowStoreScheduler) ConfigPrepare(cluster sche.SchedulerCluster) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
 		return cluster.SlowStoreEvicted(evictStore)
@@ -197,7 +197,7 @@ func (s *evictSlowStoreScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) Cleanup(cluster sche.SchedulerCluster) {
+func (s *evictSlowStoreScheduler) ConfigCleanup(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 
