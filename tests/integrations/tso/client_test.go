@@ -300,7 +300,10 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 	for i := 0; i < len(suite.clients); i++ {
 		client := suite.clients[i]
 		testutil.Eventually(re, func() bool {
