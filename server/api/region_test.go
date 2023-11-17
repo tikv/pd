@@ -697,7 +697,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 			Index: 5,
 			Rules: []*placement.Rule{
 				{
-					ID: "foo", Index: 1, Role: "voter", Count: 1,
+					ID: "foo", Index: 1, Role: placement.Voter, Count: 1,
 				},
 			},
 		},
@@ -738,7 +738,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 	mustRegionHeartbeat(re, suite.svr, r1)
 
 	bundle[0].Rules = append(bundle[0].Rules, &placement.Rule{
-		ID: "bar", Index: 1, Role: "voter", Count: 1,
+		ID: "bar", Index: 1, Role: placement.Voter, Count: 1,
 	})
 	data, err = json.Marshal(bundle)
 	suite.NoError(err)
@@ -755,7 +755,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 		Index: 6,
 		Rules: []*placement.Rule{
 			{
-				ID: "foo", Index: 1, Role: "voter", Count: 2,
+				ID: "foo", Index: 1, Role: placement.Voter, Count: 2,
 			},
 		},
 	})

@@ -76,8 +76,8 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	// Check the default rule and rule group.
 	rules := ruleManager.GetAllRules()
 	re.Len(rules, 1)
-	re.Equal("pd", rules[0].GroupID)
-	re.Equal("default", rules[0].ID)
+	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
+	re.Equal(placement.DefaultRuleID, rules[0].ID)
 	re.Equal(0, rules[0].Index)
 	re.Empty(rules[0].StartKey)
 	re.Empty(rules[0].EndKey)
@@ -85,7 +85,7 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.Empty(rules[0].LocationLabels)
 	ruleGroups := ruleManager.GetRuleGroups()
 	re.Len(ruleGroups, 1)
-	re.Equal("pd", ruleGroups[0].ID)
+	re.Equal(placement.DefaultGroupID, ruleGroups[0].ID)
 	re.Equal(0, ruleGroups[0].Index)
 	re.False(ruleGroups[0].Override)
 	// Set a new rule via the PD API server.
@@ -93,7 +93,7 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	rule := &placement.Rule{
 		GroupID:     "2",
 		ID:          "3",
-		Role:        "voter",
+		Role:        placement.Voter,
 		Count:       1,
 		StartKeyHex: "22",
 		EndKeyHex:   "dd",
@@ -122,7 +122,7 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 		return len(rules) == 1
 	})
 	re.Len(rules, 1)
-	re.Equal("pd", rules[0].GroupID)
+	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
 	// Create a new rule group.
 	ruleGroup := &placement.RuleGroup{
 		ID:       "2",

@@ -241,9 +241,9 @@ func (suite *apiTestSuite) TestAPIForward() {
 	tests.MustPutRegion(re, suite.cluster, 2, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
 	rules = []*placement.Rule{
 		{
-			GroupID:        "pd",
-			ID:             "default",
-			Role:           "voter",
+			GroupID:        placement.DefaultGroupID,
+			ID:             placement.DefaultRuleID,
+			Role:           placement.Voter,
 			Count:          3,
 			LocationLabels: []string{},
 		},

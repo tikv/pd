@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -57,7 +58,7 @@ func (suite *clusterTestSuite) TestCluster() {
 	suite.svr.GetPersistOptions().SetPlacementRuleEnabled(true)
 	suite.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
 	rm := suite.svr.GetRaftCluster().GetRuleManager()
-	rule := rm.GetRule("pd", "default")
+	rule := rm.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	rule.LocationLabels = []string{"host"}
 	rule.Count = 1
 	rm.SetRule(rule)
@@ -81,7 +82,7 @@ func (suite *clusterTestSuite) TestCluster() {
 
 	c1.MaxPeerCount = 6
 	suite.Equal(c2, c1)
-	suite.Equal(int(r.MaxReplicas), suite.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default").Count)
+	suite.Equal(int(r.MaxReplicas), suite.svr.GetRaftCluster().GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID).Count)
 }
 
 func (suite *clusterTestSuite) testGetClusterStatus() {

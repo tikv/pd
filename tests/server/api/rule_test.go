@@ -56,7 +56,7 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 	pdAddr := leaderServer.GetAddr()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
 
-	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	successData, err := json.Marshal(rule)
 	suite.NoError(err)
 	oldStartKey, err := hex.DecodeString(rule.StartKeyHex)
@@ -64,13 +64,13 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 	oldEndKey, err := hex.DecodeString(rule.EndKeyHex)
 	suite.NoError(err)
 	parseErrData := []byte("foo")
-	rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule1 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	checkErrData, err := json.Marshal(rule1)
 	suite.NoError(err)
-	rule2 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
+	rule2 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: -1}
 	setErrData, err := json.Marshal(rule2)
 	suite.NoError(err)
-	rule3 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: "follower", Count: 3}
+	rule3 := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Follower, Count: 3}
 	updateData, err := json.Marshal(rule3)
 	suite.NoError(err)
 	newStartKey, err := hex.DecodeString(rule.StartKeyHex)
@@ -179,7 +179,7 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 	pdAddr := leaderServer.GetAddr()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
 
-	rule := placement.Rule{GroupID: "a", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule := placement.Rule{GroupID: "a", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
@@ -200,7 +200,7 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 		},
 		{
 			name:  "not found",
-			rule:  placement.Rule{GroupID: "a", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+			rule:  placement.Rule{GroupID: "a", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1},
 			found: false,
 			code:  http.StatusNotFound,
 		},
@@ -237,7 +237,7 @@ func (suite *ruleTestSuite) checkGetAll(cluster *tests.TestCluster) {
 	pdAddr := leaderServer.GetAddr()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
 
-	rule := placement.Rule{GroupID: "b", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule := placement.Rule{GroupID: "b", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
@@ -266,16 +266,16 @@ func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
 	pdAddr := leaderServer.GetAddr()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
 
-	rule1 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
-	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
-	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1}
-	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1}
-	rule5 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 1,
+	rule1 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
+	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
+	rule3 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
+	rule4 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: -1}
+	rule5 := placement.Rule{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, StartKeyHex: "", EndKeyHex: "", Role: placement.Voter, Count: 1,
 		LocationLabels: []string{"host"}}
-	rule6 := placement.Rule{GroupID: "pd", ID: "default", StartKeyHex: "", EndKeyHex: "", Role: "voter", Count: 3}
+	rule6 := placement.Rule{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, StartKeyHex: "", EndKeyHex: "", Role: placement.Voter, Count: 3}
 
 	leaderServer.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
-	defaultRule := leaderServer.GetRaftCluster().GetRuleManager().GetRule("pd", "default")
+	defaultRule := leaderServer.GetRaftCluster().GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	defaultRule.LocationLabels = []string{"host"}
 	leaderServer.GetRaftCluster().GetRuleManager().SetRule(defaultRule)
 
@@ -390,13 +390,13 @@ func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
 
 	re := suite.Require()
-	rule := placement.Rule{GroupID: "c", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule := placement.Rule{GroupID: "c", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
-	rule1 := placement.Rule{GroupID: "c", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule1 := placement.Rule{GroupID: "c", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err = json.Marshal(rule1)
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
@@ -453,7 +453,7 @@ func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
 	pdAddr := leaderServer.GetAddr()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
 
-	rule := placement.Rule{GroupID: "e", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule := placement.Rule{GroupID: "e", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
@@ -525,7 +525,7 @@ func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
 	pdAddr := leaderServer.GetAddr()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
 
-	rule := placement.Rule{GroupID: "f", ID: "40", StartKeyHex: "8888", EndKeyHex: "9111", Role: "voter", Count: 1}
+	rule := placement.Rule{GroupID: "f", ID: "40", StartKeyHex: "8888", EndKeyHex: "9111", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
@@ -589,7 +589,7 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 	pdAddr := leaderServer.GetAddr()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
 
-	rule := placement.Rule{GroupID: "g", ID: "10", StartKeyHex: "8888", EndKeyHex: "9111", Role: "voter", Count: 1}
+	rule := placement.Rule{GroupID: "g", ID: "10", StartKeyHex: "8888", EndKeyHex: "9111", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(suite.Require()))
@@ -663,19 +663,19 @@ func (suite *ruleTestSuite) checkBatch(cluster *tests.TestCluster) {
 
 	opt1 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
-		Rule:   &placement.Rule{GroupID: "a", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1},
 	}
 	opt2 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
-		Rule:   &placement.Rule{GroupID: "b", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+		Rule:   &placement.Rule{GroupID: "b", ID: "13", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1},
 	}
 	opt3 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
-		Rule:   &placement.Rule{GroupID: "a", ID: "14", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "14", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1},
 	}
 	opt4 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
-		Rule:   &placement.Rule{GroupID: "a", ID: "15", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "15", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1},
 	}
 	opt5 := placement.RuleOp{
 		Action: placement.RuleOpDel,
@@ -692,11 +692,11 @@ func (suite *ruleTestSuite) checkBatch(cluster *tests.TestCluster) {
 	}
 	opt8 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
-		Rule:   &placement.Rule{GroupID: "a", ID: "16", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: "voter", Count: 1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "16", StartKeyHex: "XXXX", EndKeyHex: "3333", Role: placement.Voter, Count: 1},
 	}
 	opt9 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
-		Rule:   &placement.Rule{GroupID: "a", ID: "17", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: -1},
+		Rule:   &placement.Rule{GroupID: "a", ID: "17", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: -1},
 	}
 
 	successData1, err := json.Marshal([]placement.RuleOp{opt1, opt2, opt3})
@@ -800,9 +800,14 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	re := suite.Require()
 	// GetAll
 	b1 := placement.GroupBundle{
-		ID: "pd",
+		ID: placement.DefaultGroupID,
 		Rules: []*placement.Rule{
-			{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+			{
+				GroupID: placement.DefaultGroupID,
+				ID:      placement.DefaultRuleID,
+				Role:    placement.Voter,
+				Count:   3,
+			},
 		},
 	}
 	var bundles []placement.GroupBundle
@@ -817,7 +822,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 		Index:    42,
 		Override: true,
 		Rules: []*placement.Rule{
-			{GroupID: "foo", ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
+			{GroupID: "foo", ID: "bar", Index: 1, Override: true, Role: placement.Voter, Count: 1},
 		},
 	}
 	data, err := json.Marshal(b2)
@@ -849,7 +854,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	suite.compareBundle(bundles[0], b2)
 
 	// SetAll
-	b2.Rules = append(b2.Rules, &placement.Rule{GroupID: "foo", ID: "baz", Index: 2, Role: "follower", Count: 1})
+	b2.Rules = append(b2.Rules, &placement.Rule{GroupID: "foo", ID: "baz", Index: 2, Role: placement.Follower, Count: 1})
 	b2.Index, b2.Override = 0, false
 	b3 := placement.GroupBundle{ID: "foobar", Index: 100}
 	data, err = json.Marshal([]placement.GroupBundle{b1, b2, b3})
@@ -880,7 +885,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	b4 := placement.GroupBundle{
 		Index: 4,
 		Rules: []*placement.Rule{
-			{ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
+			{ID: "bar", Index: 1, Override: true, Role: placement.Voter, Count: 1},
 		},
 	}
 	data, err = json.Marshal(b4)
@@ -908,7 +913,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 		ID:    "rule-without-group-id-2",
 		Index: 5,
 		Rules: []*placement.Rule{
-			{ID: "bar", Index: 1, Override: true, Role: "voter", Count: 1},
+			{ID: "bar", Index: 1, Override: true, Role: placement.Voter, Count: 1},
 		},
 	}
 	data, err = json.Marshal([]placement.GroupBundle{b1, b4, b5})
