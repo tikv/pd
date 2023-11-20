@@ -19,14 +19,17 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -48,24 +51,29 @@ func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.Schedule
 	}
 }
 
-func TestConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+type configTestSuite struct {
+	suite.Suite
+}
+
+func TestConfigTestSuite(t *testing.T) {
+	suite.Run(t, new(configTestSuite))
+}
+
+func (suite *configTestSuite) TestConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkConfig)
+}
+
+func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	svr := leaderServer.GetServer()
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
@@ -283,16 +291,15 @@ func TestConfig(t *testing.T) {
 	re.Contains(string(output), "is invalid")
 }
 
-func TestPlacementRules(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRules() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRules)
+}
+
+func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -300,8 +307,6 @@ func TestPlacementRules(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
@@ -310,12 +315,7 @@ func TestPlacementRules(t *testing.T) {
 	re.Contains(string(output), "Success!")
 
 	// test show
-	var rules []placement.Rule
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "show")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &rules))
-	re.Len(rules, 1)
-	re.Equal([2]string{"pd", "default"}, rules[0].Key())
+	suite.checkShowRuleKey(pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
 	f, _ := os.CreateTemp("/tmp", "pd_tests")
 	fname := f.Name()
@@ -323,73 +323,51 @@ func TestPlacementRules(t *testing.T) {
 	defer os.RemoveAll(fname)
 
 	// test load
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ := os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &rules))
-	re.Len(rules, 1)
-	re.Equal([2]string{"pd", "default"}, rules[0].Key())
+	rules := suite.checkLoadRule(pdAddr, fname, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
 	// test save
 	rules = append(rules, placement.Rule{
-		GroupID: "pd",
+		GroupID: placement.DefaultGroupID,
 		ID:      "test1",
-		Role:    "voter",
+		Role:    placement.Voter,
 		Count:   1,
 	}, placement.Rule{
 		GroupID: "test-group",
 		ID:      "test2",
-		Role:    "voter",
+		Role:    placement.Voter,
 		Count:   2,
 	})
-	b, _ = json.Marshal(rules)
+	b, _ := json.Marshal(rules)
 	os.WriteFile(fname, b, 0600)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
 
 	// test show group
-	var rules2 []placement.Rule
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "show", "--group=pd")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &rules2))
-	re.Len(rules2, 2)
-	re.Equal([2]string{"pd", "default"}, rules2[0].Key())
-	re.Equal([2]string{"pd", "test1"}, rules2[1].Key())
+	suite.checkShowRuleKey(pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}, {placement.DefaultGroupID, "test1"}}, "--group=pd")
 
 	// test rule region detail
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
-	fit := &placement.RegionFit{}
-	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
-	cmd2 := pdctlCmd.GetRootCmd()
-	output, err = pdctl.ExecuteCommand(cmd2, "-u", pdAddr, "config", "placement-rules", "show", "--region=1", "--detail")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, fit))
-	re.Len(fit.RuleFits, 3)
-	re.Equal([2]string{"pd", "default"}, fit.RuleFits[0].Rule.Key())
+	suite.checkShowRuleKey(pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}}, "--region=1", "--detail")
 
 	// test delete
+	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
 	rules[0].Count = 0
 	b, _ = json.Marshal(rules)
 	os.WriteFile(fname, b, 0600)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "show", "--group=pd")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &rules))
-	re.Len(rules, 1)
-	re.Equal([2]string{"pd", "test1"}, rules[0].Key())
+	suite.checkShowRuleKey(pdAddr, [][2]string{{placement.DefaultGroupID, "test1"}}, "--group=pd")
 }
 
-func TestPlacementRuleGroups(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRuleGroups() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+}
+
+func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -397,8 +375,6 @@ func TestPlacementRuleGroups(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
@@ -408,13 +384,16 @@ func TestPlacementRuleGroups(t *testing.T) {
 
 	// test show
 	var group placement.RuleGroup
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "pd")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &group))
-	re.Equal(placement.RuleGroup{ID: "pd"}, group)
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", placement.DefaultGroupID)
+		re.NoError(err)
+		return !strings.Contains(string(output), "404")
+	})
+	re.NoError(json.Unmarshal(output, &group), string(output))
+	re.Equal(placement.RuleGroup{ID: placement.DefaultGroupID}, group)
 
 	// test set
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "pd", "42", "true")
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", placement.DefaultGroupID, "42", "true")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "group2", "100", "false")
@@ -426,14 +405,16 @@ func TestPlacementRuleGroups(t *testing.T) {
 
 	// show all
 	var groups []placement.RuleGroup
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show")
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &groups))
-	re.Equal([]placement.RuleGroup{
-		{ID: "pd", Index: 42, Override: true},
-		{ID: "group2", Index: 100, Override: false},
-		{ID: "group3", Index: 200, Override: false},
-	}, groups)
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show")
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &groups))
+		return reflect.DeepEqual([]placement.RuleGroup{
+			{ID: placement.DefaultGroupID, Index: 42, Override: true},
+			{ID: "group2", Index: 100, Override: false},
+			{ID: "group3", Index: 200, Override: false},
+		}, groups)
+	})
 
 	// delete
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "group2")
@@ -441,29 +422,32 @@ func TestPlacementRuleGroups(t *testing.T) {
 	re.Contains(string(output), "Delete group and rules successfully.")
 
 	// show again
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
-	re.NoError(err)
-	re.Contains(string(output), "404")
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group2")
+		re.NoError(err)
+		return strings.Contains(string(output), "404")
+	})
 
 	// delete using regex
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "delete", "--regexp", ".*3")
 	re.NoError(err)
 
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group3")
-	re.NoError(err)
-	re.Contains(string(output), "404")
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "group3")
+		re.NoError(err)
+		return strings.Contains(string(output), "404")
+	})
 }
 
-func TestPlacementRuleBundle(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPlacementRuleBundle() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+}
+
+func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -471,8 +455,6 @@ func TestPlacementRuleBundle(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
@@ -482,10 +464,10 @@ func TestPlacementRuleBundle(t *testing.T) {
 
 	// test get
 	var bundle placement.GroupBundle
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pd")
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", placement.DefaultGroupID)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &bundle))
-	re.Equal(placement.GroupBundle{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}}, bundle)
+	re.Equal(placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}, bundle)
 
 	f, err := os.CreateTemp("/tmp", "pd_tests")
 	re.NoError(err)
@@ -494,81 +476,63 @@ func TestPlacementRuleBundle(t *testing.T) {
 	defer os.RemoveAll(fname)
 
 	// test load
-	var bundles []placement.GroupBundle
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ := os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &bundles))
-	re.Len(bundles, 1)
-	re.Equal(placement.GroupBundle{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}}, bundles[0])
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+	})
 
 	// test set
 	bundle.ID = "pe"
 	bundle.Rules[0].GroupID = "pe"
-	b, err = json.Marshal(bundle)
+	b, err := json.Marshal(bundle)
 	re.NoError(err)
 	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	re.NoError(err)
-
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ = os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
-		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 
 	// test delete
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "pd")
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", placement.DefaultGroupID)
 	re.NoError(err)
 
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ = os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 
 	// test delete regexp
 	bundle.ID = "pf"
-	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
+	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}
 	b, err = json.Marshal(bundle)
 	re.NoError(err)
 	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	re.NoError(err)
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+	})
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "--regexp", ".*f")
 	re.NoError(err)
 
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, _ = os.ReadFile(fname)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-	})
+	bundles := []placement.GroupBundle{
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+	}
+	suite.checkLoadRuleBundle(pdAddr, fname, bundles)
 
 	// test save
-	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
+	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}
 	bundles = append(bundles, bundle)
 	b, err = json.Marshal(bundles)
 	re.NoError(err)
 	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname)
 	re.NoError(err)
-
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, err = os.ReadFile(fname)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 
 	// partial update, so still one group is left, no error
@@ -579,14 +543,65 @@ func TestPlacementRuleBundle(t *testing.T) {
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname, "--partial")
 	re.NoError(err)
 
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
-	re.NoError(err)
-	b, err = os.ReadFile(fname)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(b, &bundles))
-	assertBundles(re, bundles, []placement.GroupBundle{
-		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
+}
+
+func (suite *configTestSuite) checkLoadRuleBundle(pdAddr string, fname string, expectValues []placement.GroupBundle) {
+	var bundles []placement.GroupBundle
+	cmd := pdctlCmd.GetRootCmd()
+	testutil.Eventually(suite.Require(), func() bool { // wait for the config to be synced to the scheduling server
+		_, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
+		suite.NoError(err)
+		b, _ := os.ReadFile(fname)
+		suite.NoError(json.Unmarshal(b, &bundles))
+		return len(bundles) == len(expectValues)
+	})
+	assertBundles(suite.Require(), bundles, expectValues)
+}
+
+func (suite *configTestSuite) checkLoadRule(pdAddr string, fname string, expectValues [][2]string) []placement.Rule {
+	var rules []placement.Rule
+	cmd := pdctlCmd.GetRootCmd()
+	testutil.Eventually(suite.Require(), func() bool { // wait for the config to be synced to the scheduling server
+		_, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "load", "--out="+fname)
+		suite.NoError(err)
+		b, _ := os.ReadFile(fname)
+		suite.NoError(json.Unmarshal(b, &rules))
+		return len(rules) == len(expectValues)
+	})
+	for i, v := range expectValues {
+		suite.Equal(v, rules[i].Key())
+	}
+	return rules
+}
+
+func (suite *configTestSuite) checkShowRuleKey(pdAddr string, expectValues [][2]string, opts ...string) {
+	var rules []placement.Rule
+	var fit placement.RegionFit
+	cmd := pdctlCmd.GetRootCmd()
+	testutil.Eventually(suite.Require(), func() bool { // wait for the config to be synced to the scheduling server
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show"}
+		output, err := pdctl.ExecuteCommand(cmd, append(args, opts...)...)
+		suite.NoError(err)
+		err = json.Unmarshal(output, &rules)
+		if err == nil {
+			return len(rules) == len(expectValues)
+		}
+		suite.NoError(json.Unmarshal(output, &fit))
+		return len(fit.RuleFits) != 0
+	})
+	if len(rules) != 0 {
+		for i, v := range expectValues {
+			suite.Equal(v, rules[i].Key())
+		}
+	}
+	if len(fit.RuleFits) != 0 {
+		for i, v := range expectValues {
+			suite.Equal(v, fit.RuleFits[i].Rule.Key())
+		}
+	}
 }
 
 func TestReplicationMode(t *testing.T) {
@@ -648,24 +663,21 @@ func TestReplicationMode(t *testing.T) {
 	check()
 }
 
-func TestUpdateDefaultReplicaConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
+}
+
+func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
 		Id:    1,
 		State: metapb.StoreState_Up,
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 
@@ -675,7 +687,9 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		re.NoError(err)
 		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Equal(expect, replicationCfg.MaxReplicas)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return replicationCfg.MaxReplicas == expect
+		})
 	}
 
 	checkLocationLabels := func(expect int) {
@@ -684,7 +698,9 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		re.NoError(err)
 		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Len(replicationCfg.LocationLabels, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return len(replicationCfg.LocationLabels) == expect
+		})
 	}
 
 	checkIsolationLevel := func(expect string) {
@@ -693,34 +709,42 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 		re.NoError(err)
 		replicationCfg := sc.ReplicationConfig{}
 		re.NoError(json.Unmarshal(output, &replicationCfg))
-		re.Equal(replicationCfg.IsolationLevel, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return replicationCfg.IsolationLevel == expect
+		})
 	}
 
 	checkRuleCount := func(expect int) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		rule := placement.Rule{}
 		re.NoError(json.Unmarshal(output, &rule))
-		re.Equal(expect, rule.Count)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return rule.Count == expect
+		})
 	}
 
 	checkRuleLocationLabels := func(expect int) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		rule := placement.Rule{}
 		re.NoError(json.Unmarshal(output, &rule))
-		re.Len(rule.LocationLabels, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return len(rule.LocationLabels) == expect
+		})
 	}
 
 	checkRuleIsolationLevel := func(expect string) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		rule := placement.Rule{}
 		re.NoError(json.Unmarshal(output, &rule))
-		re.Equal(rule.IsolationLevel, expect)
+		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			return rule.IsolationLevel == expect
+		})
 	}
 
 	// update successfully when placement rules is not enabled.
@@ -764,10 +788,10 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 	checkRuleIsolationLevel("host")
 
 	// update unsuccessfully when many rule exists.
-	fname := t.TempDir()
+	fname := suite.T().TempDir()
 	rules := []placement.Rule{
 		{
-			GroupID: "pd",
+			GroupID: placement.DefaultGroupID,
 			ID:      "test1",
 			Role:    "voter",
 			Count:   1,
@@ -791,16 +815,15 @@ func TestUpdateDefaultReplicaConfig(t *testing.T) {
 	checkRuleIsolationLevel("host")
 }
 
-func TestPDServerConfig(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
-	cluster.WaitLeader()
-	pdAddr := cluster.GetConfig().GetClientURL()
+func (suite *configTestSuite) TestPDServerConfig() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPDServerConfig)
+}
+
+func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
 	cmd := pdctlCmd.GetRootCmd()
 
 	store := &metapb.Store{
@@ -808,8 +831,6 @@ func TestPDServerConfig(t *testing.T) {
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	leaderServer := cluster.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
 	defer cluster.Destroy()
 

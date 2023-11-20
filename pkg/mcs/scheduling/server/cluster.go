@@ -502,8 +502,8 @@ func (c *Cluster) collectClusterMetrics() {
 func (c *Cluster) resetMetrics() {
 	statistics.Reset()
 
-	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
-	c.coordinator.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
 	c.resetClusterMetrics()
 }
 
@@ -536,6 +536,11 @@ func (c *Cluster) StopBackgroundJobs() {
 	c.coordinator.Stop()
 	c.cancel()
 	c.wg.Wait()
+}
+
+// IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.
+func (c *Cluster) IsBackgroundJobsRunning() bool {
+	return c.running.Load()
 }
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
@@ -592,4 +597,14 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 // IsPrepared return true if the prepare checker is ready.
 func (c *Cluster) IsPrepared() bool {
 	return c.coordinator.GetPrepareChecker().IsPrepared()
+}
+
+// DropCacheAllRegion removes all cached regions.
+func (c *Cluster) DropCacheAllRegion() {
+	c.ResetRegionCache()
+}
+
+// DropCacheRegion removes a region from the cache.
+func (c *Cluster) DropCacheRegion(id uint64) {
+	c.RemoveRegionIfExist(id)
 }

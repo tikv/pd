@@ -241,14 +241,14 @@ func (suite *regionTestSuite) TestRegions() {
 		mustRegionHeartbeat(re, suite.svr, r)
 	}
 	url := fmt.Sprintf("%s/regions", suite.urlPrefix)
-	RegionsInfo := &RegionsInfo{}
-	err := tu.ReadGetJSON(re, testDialClient, url, RegionsInfo)
+	regionsInfo := &RegionsInfo{}
+	err := tu.ReadGetJSON(re, testDialClient, url, regionsInfo)
 	suite.NoError(err)
-	suite.Len(regions, RegionsInfo.Count)
-	sort.Slice(RegionsInfo.Regions, func(i, j int) bool {
-		return RegionsInfo.Regions[i].ID < RegionsInfo.Regions[j].ID
+	suite.Len(regions, regionsInfo.Count)
+	sort.Slice(regionsInfo.Regions, func(i, j int) bool {
+		return regionsInfo.Regions[i].ID < regionsInfo.Regions[j].ID
 	})
-	for i, r := range RegionsInfo.Regions {
+	for i, r := range regionsInfo.Regions {
 		suite.Equal(regions[i].ID, r.ID)
 		suite.Equal(regions[i].ApproximateSize, r.ApproximateSize)
 		suite.Equal(regions[i].ApproximateKeys, r.ApproximateKeys)
@@ -697,7 +697,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 			Index: 5,
 			Rules: []*placement.Rule{
 				{
-					ID: "foo", Index: 1, Role: "voter", Count: 1,
+					ID: "foo", Index: 1, Role: placement.Voter, Count: 1,
 				},
 			},
 		},
@@ -740,7 +740,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 	mustRegionHeartbeat(re, suite.svr, r1)
 
 	bundle[0].Rules = append(bundle[0].Rules, &placement.Rule{
-		ID: "bar", Index: 1, Role: "voter", Count: 1,
+		ID: "bar", Index: 1, Role: placement.Voter, Count: 1,
 	})
 	data, err = json.Marshal(bundle)
 	suite.NoError(err)
@@ -757,7 +757,7 @@ func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
 		Index: 6,
 		Rules: []*placement.Rule{
 			{
-				ID: "foo", Index: 1, Role: "voter", Count: 2,
+				ID: "foo", Index: 1, Role: placement.Voter, Count: 2,
 			},
 		},
 	})

@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	pdoperator "github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -51,7 +51,7 @@ func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
-func (suite *operatorTestSuite) TestOperator() {
+func (suite *operatorTestSuite) TestAddRemovePeer() {
 	opts := []tests.ConfigOption{
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 1
@@ -59,17 +59,6 @@ func (suite *operatorTestSuite) TestOperator() {
 	}
 	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
 	env.RunTestInTwoModes(suite.checkAddRemovePeer)
-
-	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkMergeRegionOperator)
-
-	opts = []tests.ConfigOption{
-		func(conf *config.Config, serverName string) {
-			conf.Replication.MaxReplicas = 3
-		},
-	}
-	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
 }
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
@@ -178,6 +167,16 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	suite.NoError(err)
 }
 
+func (suite *operatorTestSuite) TestMergeRegionOperator() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 1
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkMergeRegionOperator)
+}
+
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
 	suite.pauseRuleChecker(cluster)
@@ -202,6 +201,16 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
 		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
 	suite.NoError(err)
+}
+
+func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 3
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
 }
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
@@ -276,10 +285,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
 			expectedError:       nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 1}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 1}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 		{
@@ -288,11 +297,11 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError:       nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 2}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
-				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 2}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
+				operator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
 			}),
 		},
 		{
@@ -307,11 +316,11 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			placementRuleEnable: true,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 3}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 3}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
 			}),
 		},
 		{
@@ -368,10 +377,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError: nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 5}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 5}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 		{
@@ -408,10 +417,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader", "follower"]}`),
 			expectedError: nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 6}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 6}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 	}
@@ -452,7 +461,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			// add customized rule first and then remove default rule
 			err := manager.SetRules(testCase.rules)
 			suite.NoError(err)
-			err = manager.DeleteRule("pd", "default")
+			err = manager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 			suite.NoError(err)
 		}
 		if testCase.expectedError == nil {

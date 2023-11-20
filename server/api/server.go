@@ -53,6 +53,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	//	"/schedulers", http.MethodGet
 	//	"/schedulers/{name}", http.MethodPost
 	//	"/schedulers/diagnostic/{name}", http.MethodGet
+	//	"/scheduler-config", http.MethodGet
 	//	"/hotspot/regions/read", http.MethodGet
 	//	"/hotspot/regions/write", http.MethodGet
 	//	"/hotspot/regions/history", http.MethodGet
@@ -81,7 +82,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				[]string{http.MethodPost, http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/region/id",
-				scheapi.APIPathPrefix+"/regions",
+				scheapi.APIPathPrefix+"/config/regions",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet},
 				func(r *http.Request) bool {
@@ -120,8 +121,43 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/region-label/rules",
+				scheapi.APIPathPrefix+"/config/region-label/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/region-label/rule/", // Note: this is a typo in the original code
+				scheapi.APIPathPrefix+"/config/region-label/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
 				prefix+"/hotspot",
 				scheapi.APIPathPrefix+"/hotspot",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rules",
+				scheapi.APIPathPrefix+"/config/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule/",
+				scheapi.APIPathPrefix+"/config/rule",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule_group/",
+				scheapi.APIPathPrefix+"/config/rule_groups", // Note: this is a typo in the original code
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule_groups",
+				scheapi.APIPathPrefix+"/config/rule_groups",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/placement-rule",
+				scheapi.APIPathPrefix+"/config/placement-rule",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			// because the writing of all the meta information of the scheduling service is in the API server,
@@ -129,6 +165,11 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",
 				scheapi.APIPathPrefix+"/schedulers",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/scheduler-config",
+				scheapi.APIPathPrefix+"/schedulers/config",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
