@@ -381,8 +381,7 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 		return errors.Errorf("store %v not found", storeID)
 	}
 
-	nowTime := time.Now()
-	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
+	newStore := store.Clone(core.SetStoreStats(stats))
 
 	if store := c.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
