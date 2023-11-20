@@ -510,6 +510,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	err = rc.PutStore(store)
 	re.NoError(err)
 	re.NotNil(tc)
+	rc.Stop()
 
 	// let the job run at small interval
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
