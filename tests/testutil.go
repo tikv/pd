@@ -311,7 +311,6 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		// start scheduling cluster
 		tc, err := NewTestSchedulingCluster(s.ctx, 1, leaderServer.GetAddr())
 		re.NoError(err)
-		re.NoError(leaderServer.BootstrapCluster())
 		tc.WaitForPrimaryServing(re)
 		s.cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
