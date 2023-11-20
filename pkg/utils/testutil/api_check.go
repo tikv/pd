@@ -114,6 +114,21 @@ func CheckGetJSON(client *http.Client, url string, data []byte, checkOpts ...fun
 	return checkResp(resp, checkOpts...)
 }
 
+// CheckGetUntilStatusCode is used to do get request and do check options.
+func CheckGetUntilStatusCode(re *require.Assertions, client *http.Client, url string, code int) error {
+	var err error
+	Eventually(re, func() bool {
+		resp, err2 := apiutil.GetJSON(client, url, nil)
+		if err2 != nil {
+			err = err2
+			return true
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == code
+	})
+	return err
+}
+
 // CheckPatchJSON is used to do patch request and do check options.
 func CheckPatchJSON(client *http.Client, url string, data []byte, checkOpts ...func([]byte, int, http.Header)) error {
 	resp, err := apiutil.PatchJSON(client, url, data)

@@ -241,7 +241,7 @@ func (s *Server) primaryElectionLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
+	if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign scheduling primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-scheduling-primary-name", s.participant.Name()))
@@ -405,6 +405,7 @@ func (s *Server) startServer() (err error) {
 	// different service modes provided by the same pd-server binary
 	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
+	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))

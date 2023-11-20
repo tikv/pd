@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/tests"
 )
 
@@ -84,4 +85,46 @@ func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
 	re.Len(storeMinResolvedTSMap, 2)
 	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
 	re.Equal(uint64(math.MaxUint64), storeMinResolvedTSMap[2])
+}
+
+func (suite *httpClientTestSuite) TestRule() {
+	re := suite.Require()
+	rules, err := suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
+	re.NoError(err)
+	re.Len(rules, 1)
+	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
+	re.Equal(placement.DefaultRuleID, rules[0].ID)
+	re.Equal(pd.Voter, rules[0].Role)
+	re.Equal(3, rules[0].Count)
+	err = suite.client.SetPlacementRule(suite.ctx, &pd.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      "test",
+		Role:    pd.Learner,
+		Count:   3,
+	})
+	re.NoError(err)
+	rules, err = suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
+	re.NoError(err)
+	re.Len(rules, 2)
+	re.Equal(placement.DefaultGroupID, rules[1].GroupID)
+	re.Equal("test", rules[1].ID)
+	re.Equal(pd.Learner, rules[1].Role)
+	re.Equal(3, rules[1].Count)
+	err = suite.client.DeletePlacementRule(suite.ctx, placement.DefaultGroupID, "test")
+	re.NoError(err)
+	rules, err = suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
+	re.NoError(err)
+	re.Len(rules, 1)
+	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
+	re.Equal(placement.DefaultRuleID, rules[0].ID)
+}
+
+func (suite *httpClientTestSuite) TestAccelerateSchedule() {
+	re := suite.Require()
+	suspectRegions := suite.cluster.GetLeaderServer().GetRaftCluster().GetSuspectRegions()
+	re.Len(suspectRegions, 0)
+	err := suite.client.AccelerateSchedule(suite.ctx, []byte("a1"), []byte("a2"))
+	re.NoError(err)
+	suspectRegions = suite.cluster.GetLeaderServer().GetRaftCluster().GetSuspectRegions()
+	re.Len(suspectRegions, 1)
 }

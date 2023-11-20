@@ -37,6 +37,15 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+const (
+	// DefaultGroupID is the default rule group ID.
+	DefaultGroupID = "pd"
+	// DefaultRuleID is the default rule ID.
+	DefaultRuleID = "default"
+	// defaultWitnessRuleID is the default witness rule ID.
+	defaultWitnessRuleID = "witness"
+)
+
 // RuleManager is responsible for the lifecycle of all placement Rules.
 // It is thread safe.
 type RuleManager struct {
@@ -88,16 +97,16 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 			defaultRules = append(defaultRules,
 				[]*Rule{
 					{
-						GroupID:        "pd",
-						ID:             "default",
+						GroupID:        DefaultGroupID,
+						ID:             DefaultRuleID,
 						Role:           Voter,
 						Count:          maxReplica - witnessCount,
 						LocationLabels: locationLabels,
 						IsolationLevel: isolationLevel,
 					},
 					{
-						GroupID:        "pd",
-						ID:             "witness",
+						GroupID:        DefaultGroupID,
+						ID:             defaultWitnessRuleID,
 						Role:           Voter,
 						Count:          witnessCount,
 						IsWitness:      true,
@@ -108,8 +117,8 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 			)
 		} else {
 			defaultRules = append(defaultRules, &Rule{
-				GroupID:        "pd",
-				ID:             "default",
+				GroupID:        DefaultGroupID,
+				ID:             DefaultRuleID,
 				Role:           Voter,
 				Count:          maxReplica,
 				LocationLabels: locationLabels,

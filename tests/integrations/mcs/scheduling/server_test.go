@@ -195,6 +195,44 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	})
 }
 
+func (suite *serverTestSuite) TestDynamicSwitch() {
+	re := suite.Require()
+	// API server will execute scheduling jobs since there is no scheduler server.
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	// After scheduling server is started, API server will not execute scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	// Scheduling server is responsible for executing scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+	})
+	tc.GetPrimaryServer().Close()
+	// Stop scheduling server. API server will execute scheduling jobs again.
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	tc1, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc1.Destroy()
+	tc1.WaitForPrimaryServing(re)
+	// After scheduling server is started, API server will not execute scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	// Scheduling server is responsible for executing scheduling jobs again.
+	testutil.Eventually(re, func() bool {
+		return tc1.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+	})
+}
+
 func (suite *serverTestSuite) TestSchedulerSync() {
 	re := suite.Require()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)

@@ -502,8 +502,8 @@ func (c *Cluster) collectClusterMetrics() {
 func (c *Cluster) resetMetrics() {
 	statistics.Reset()
 
-	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
-	c.coordinator.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
 	c.resetClusterMetrics()
 }
 
@@ -536,6 +536,11 @@ func (c *Cluster) StopBackgroundJobs() {
 	c.coordinator.Stop()
 	c.cancel()
 	c.wg.Wait()
+}
+
+// IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.
+func (c *Cluster) IsBackgroundJobsRunning() bool {
+	return c.running.Load()
 }
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.

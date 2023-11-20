@@ -582,8 +582,8 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	tc.SetHotRegionCacheHitsThreshold(0)
 	re.NoError(tc.RuleManager.SetRules([]*placement.Rule{
 		{
-			GroupID:        "pd",
-			ID:             "default",
+			GroupID:        placement.DefaultGroupID,
+			ID:             placement.DefaultRuleID,
 			Role:           placement.Voter,
 			Count:          3,
 			LocationLabels: []string{"zone", "host"},
@@ -1143,7 +1143,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	tc.AddRegionStore(3, 20)
 
 	err = tc.SetRule(&placement.Rule{
-		GroupID:  "pd",
+		GroupID:  placement.DefaultGroupID,
 		ID:       "leader",
 		Index:    1,
 		Override: true,
@@ -1161,7 +1161,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	})
 	re.NoError(err)
 	err = tc.SetRule(&placement.Rule{
-		GroupID:  "pd",
+		GroupID:  placement.DefaultGroupID,
 		ID:       "voter",
 		Index:    2,
 		Override: false,
