@@ -178,7 +178,7 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
 	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:    ctx,
@@ -186,6 +186,8 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 		regionSyncer: regionSyncer,
 		httpClient:   httpClient,
 		etcdClient:   etcdClient,
+		core:         basicCluster,
+		storage:      storage,
 	}
 }
 
@@ -258,11 +260,9 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 func (c *RaftCluster) InitCluster(
 	id id.Allocator,
 	opt sc.ConfProvider,
-	storage storage.Storage,
-	basicCluster *core.BasicCluster,
 	hbstreams *hbstream.HeartbeatStreams,
 	keyspaceGroupManager *keyspace.GroupManager) error {
-	c.core, c.opt, c.storage, c.id = basicCluster, opt.(*config.PersistOptions), storage, id
+	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
@@ -292,7 +292,7 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.isAPIServiceMode = s.IsAPIServiceMode()
-	err := c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	err := c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
 	}
@@ -380,7 +380,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 	ticker := time.NewTicker(serviceCheckInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond * 10)
+		ticker = time.NewTicker(time.Millisecond)
 	})
 	defer ticker.Stop()
 
