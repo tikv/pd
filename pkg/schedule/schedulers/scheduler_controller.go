@@ -189,7 +189,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
-	s.(Scheduler).ConfigCleanup(c.cluster)
+	s.(Scheduler).CleanConfig(c.cluster)
 	delete(c.schedulerHandlers, name)
 
 	return nil
@@ -350,7 +350,7 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 func (c *Controller) runScheduler(s *ScheduleController) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	defer s.Scheduler.ConfigCleanup(c.cluster)
+	defer s.Scheduler.CleanConfig(c.cluster)
 
 	ticker := time.NewTicker(s.GetInterval())
 	defer ticker.Stop()

@@ -197,7 +197,7 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) ConfigCleanup(cluster sche.SchedulerCluster) {
+func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 

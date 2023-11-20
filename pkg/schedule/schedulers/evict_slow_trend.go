@@ -278,7 +278,7 @@ func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	return cluster.SlowTrendEvicted(evictedStoreID)
 }
 
-func (s *evictSlowTrendScheduler) ConfigCleanup(cluster sche.SchedulerCluster) {
+func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 
