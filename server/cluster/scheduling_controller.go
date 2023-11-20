@@ -25,6 +25,10 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -33,9 +37,9 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/server/config"
 )
 
+// schedulingController is used to manage all schedulers and checkers.
 type schedulingController struct {
 	parentCtx context.Context
 	ctx       context.Context
@@ -43,7 +47,7 @@ type schedulingController struct {
 	mu        sync.RWMutex
 	wg        sync.WaitGroup
 	*core.BasicCluster
-	opt         *config.PersistOptions
+	opt         sc.ConfProvider
 	coordinator *schedule.Coordinator
 	labelStats  *statistics.LabelStatistics
 	regionStats *statistics.RegionStatistics
@@ -52,23 +56,20 @@ type schedulingController struct {
 	running     bool
 }
 
-func newSchedulingController(parentCtx context.Context) *schedulingController {
+// newSchedulingController creates a new scheduling controller.
+func newSchedulingController(parentCtx context.Context, basicCluster *core.BasicCluster, opt sc.ConfProvider, ruleManager *placement.RuleManager) *schedulingController {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &schedulingController{
-		parentCtx:  parentCtx,
-		ctx:        ctx,
-		cancel:     cancel,
-		labelStats: statistics.NewLabelStatistics(),
-		hotStat:    statistics.NewHotStat(parentCtx),
-		slowStat:   statistics.NewSlowStat(parentCtx),
+		parentCtx:    parentCtx,
+		ctx:          ctx,
+		cancel:       cancel,
+		BasicCluster: basicCluster,
+		opt:          opt,
+		labelStats:   statistics.NewLabelStatistics(),
+		hotStat:      statistics.NewHotStat(parentCtx),
+		slowStat:     statistics.NewSlowStat(parentCtx),
+		regionStats:  statistics.NewRegionStatistics(basicCluster, opt, ruleManager),
 	}
-}
-
-func (sc *schedulingController) init(basicCluster *core.BasicCluster, opt *config.PersistOptions, coordinator *schedule.Coordinator, ruleManager *placement.RuleManager) {
-	sc.BasicCluster = basicCluster
-	sc.opt = opt
-	sc.coordinator = coordinator
-	sc.regionStats = statistics.NewRegionStatistics(basicCluster, opt, ruleManager)
 }
 
 func (sc *schedulingController) stopSchedulingJobs() bool {
@@ -85,20 +86,31 @@ func (sc *schedulingController) stopSchedulingJobs() bool {
 	return true
 }
 
-func (sc *schedulingController) startSchedulingJobs() bool {
+func (sc *schedulingController) startSchedulingJobs(cluster sche.ClusterInformer, hbstreams *hbstream.HeartbeatStreams) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if sc.running {
-		return false
+		return
 	}
-	sc.ctx, sc.cancel = context.WithCancel(sc.parentCtx)
+	sc.initCoordinatorLocked(sc.parentCtx, cluster, hbstreams)
 	sc.wg.Add(3)
 	go sc.runCoordinator()
 	go sc.runStatsBackgroundJobs()
 	go sc.runSchedulingMetricsCollectionJob()
 	sc.running = true
 	log.Info("scheduling service is started")
-	return true
+}
+
+func (sc *schedulingController) initCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbstreams *hbstream.HeartbeatStreams) {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.initCoordinatorLocked(ctx, cluster, hbstreams)
+	sc.coordinator.InitSchedulers(false)
+}
+
+func (sc *schedulingController) initCoordinatorLocked(ctx context.Context, cluster sche.ClusterInformer, hbstreams *hbstream.HeartbeatStreams) {
+	sc.ctx, sc.cancel = context.WithCancel(ctx)
+	sc.coordinator = schedule.NewCoordinator(sc.ctx, cluster, hbstreams)
 }
 
 // runCoordinator runs the main scheduling loop.
@@ -156,8 +168,8 @@ func (sc *schedulingController) runSchedulingMetricsCollectionJob() {
 
 func (sc *schedulingController) resetSchedulingMetrics() {
 	statistics.Reset()
-	sc.coordinator.GetSchedulersController().ResetSchedulerMetrics()
-	sc.coordinator.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
 	sc.resetStatisticsMetrics()
 }
 
@@ -287,88 +299,136 @@ func (sc *schedulingController) BucketsStats(degree int, regionIDs ...uint64) ma
 	return sc.hotStat.BucketsStats(degree, regionIDs...)
 }
 
+// GetCoordinator returns the coordinator.
+func (sc *schedulingController) GetCoordinator() *schedule.Coordinator {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	return sc.coordinator
+}
+
 // GetPausedSchedulerDelayAt returns DelayAt of a paused scheduler
 func (sc *schedulingController) GetPausedSchedulerDelayAt(name string) (int64, error) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().GetPausedSchedulerDelayAt(name)
 }
 
 // GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
 func (sc *schedulingController) GetPausedSchedulerDelayUntil(name string) (int64, error) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().GetPausedSchedulerDelayUntil(name)
+}
+
+// GetOperatorController returns the operator controller.
+func (sc *schedulingController) GetOperatorController() *operator.Controller {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	return sc.coordinator.GetOperatorController()
 }
 
 // GetRegionScatterer returns the region scatter.
 func (sc *schedulingController) GetRegionScatterer() *scatter.RegionScatterer {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetRegionScatterer()
 }
 
 // GetRegionSplitter returns the region splitter
 func (sc *schedulingController) GetRegionSplitter() *splitter.RegionSplitter {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetRegionSplitter()
 }
 
 // GetMergeChecker returns merge checker.
 func (sc *schedulingController) GetMergeChecker() *checker.MergeChecker {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetMergeChecker()
 }
 
 // GetRuleChecker returns rule checker.
 func (sc *schedulingController) GetRuleChecker() *checker.RuleChecker {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetRuleChecker()
 }
 
 // GetSchedulers gets all schedulers.
 func (sc *schedulingController) GetSchedulers() []string {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().GetSchedulerNames()
 }
 
 // GetSchedulerHandlers gets all scheduler handlers.
 func (sc *schedulingController) GetSchedulerHandlers() map[string]http.Handler {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().GetSchedulerHandlers()
 }
 
 // AddSchedulerHandler adds a scheduler handler.
 func (sc *schedulingController) AddSchedulerHandler(scheduler schedulers.Scheduler, args ...string) error {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().AddSchedulerHandler(scheduler, args...)
 }
 
 // RemoveSchedulerHandler removes a scheduler handler.
 func (sc *schedulingController) RemoveSchedulerHandler(name string) error {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().RemoveSchedulerHandler(name)
 }
 
 // AddScheduler adds a scheduler.
 func (sc *schedulingController) AddScheduler(scheduler schedulers.Scheduler, args ...string) error {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().AddScheduler(scheduler, args...)
 }
 
 // RemoveScheduler removes a scheduler.
 func (sc *schedulingController) RemoveScheduler(name string) error {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().RemoveScheduler(name)
 }
 
 // PauseOrResumeScheduler pauses or resumes a scheduler.
 func (sc *schedulingController) PauseOrResumeScheduler(name string, t int64) error {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().PauseOrResumeScheduler(name, t)
 }
 
 // PauseOrResumeChecker pauses or resumes checker.
 func (sc *schedulingController) PauseOrResumeChecker(name string, t int64) error {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.PauseOrResumeChecker(name, t)
 }
 
 // AddSuspectRegions adds regions to suspect list.
 func (sc *schedulingController) AddSuspectRegions(regionIDs ...uint64) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	sc.coordinator.GetCheckerController().AddSuspectRegions(regionIDs...)
 }
 
 // GetSuspectRegions gets all suspect regions.
 func (sc *schedulingController) GetSuspectRegions() []uint64 {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetCheckerController().GetSuspectRegions()
 }
 
 // RemoveSuspectRegion removes region from suspect list.
 func (sc *schedulingController) RemoveSuspectRegion(id uint64) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	sc.coordinator.GetCheckerController().RemoveSuspectRegion(id)
 }
 
@@ -376,11 +436,15 @@ func (sc *schedulingController) RemoveSuspectRegion(id uint64) {
 // it would return value and true if pop success, or return empty [][2][]byte and false
 // if suspectKeyRanges couldn't pop keyRange group.
 func (sc *schedulingController) PopOneSuspectKeyRange() ([2][]byte, bool) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetCheckerController().PopOneSuspectKeyRange()
 }
 
 // ClearSuspectKeyRanges clears the suspect keyRanges, only for unit test
 func (sc *schedulingController) ClearSuspectKeyRanges() {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	sc.coordinator.GetCheckerController().ClearSuspectKeyRanges()
 }
 
@@ -388,14 +452,14 @@ func (sc *schedulingController) ClearSuspectKeyRanges() {
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/end key
 func (sc *schedulingController) AddSuspectKeyRange(start, end []byte) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	sc.coordinator.GetCheckerController().AddSuspectKeyRange(start, end)
 }
 
-func (sc *schedulingController) initSchedulers() {
-	sc.coordinator.InitSchedulers(false)
-}
-
 func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	if sc.coordinator == nil {
 		return nil
 	}
@@ -415,10 +479,21 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 
 // IsPrepared return true if the prepare checker is ready.
 func (sc *schedulingController) IsPrepared() bool {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	return sc.coordinator.GetPrepareChecker().IsPrepared()
 }
 
 // SetPrepared set the prepare check to prepared. Only for test purpose.
 func (sc *schedulingController) SetPrepared() {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
 	sc.coordinator.GetPrepareChecker().SetPrepared()
+}
+
+// IsSchedulingControllerRunning returns whether the scheduling controller is running. Only for test purpose.
+func (sc *schedulingController) IsSchedulingControllerRunning() bool {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	return sc.running
 }

@@ -38,8 +38,6 @@ const maxScheduleRetries = 10
 
 var (
 	denySchedulersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("schedulers", "deny")
-	rulesCntStatusGauge            = ruleStatusGauge.WithLabelValues("rule_count")
-	groupsCntStatusGauge           = ruleStatusGauge.WithLabelValues("group_count")
 )
 
 // Controller is used to manage all schedulers.
@@ -128,8 +126,8 @@ func (c *Controller) CollectSchedulerMetrics() {
 	}
 	ruleCnt := ruleMgr.GetRulesCount()
 	groupCnt := ruleMgr.GetGroupsCount()
-	rulesCntStatusGauge.Set(float64(ruleCnt))
-	groupsCntStatusGauge.Set(float64(groupCnt))
+	ruleStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
+	ruleStatusGauge.WithLabelValues("group_count").Set(float64(groupCnt))
 }
 
 func (c *Controller) isSchedulingHalted() bool {
@@ -137,12 +135,9 @@ func (c *Controller) isSchedulingHalted() bool {
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
-func (c *Controller) ResetSchedulerMetrics() {
+func ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
 	ruleStatusGauge.Reset()
-	// create in map again
-	rulesCntStatusGauge = ruleStatusGauge.WithLabelValues("rule_count")
-	groupsCntStatusGauge = ruleStatusGauge.WithLabelValues("group_count")
 }
 
 // AddSchedulerHandler adds the HTTP handler for a scheduler.
