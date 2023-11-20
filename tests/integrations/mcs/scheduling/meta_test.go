@@ -99,4 +99,15 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	testutil.Eventually(re, func() bool {
 		return cluster.GetStore(2) == nil
 	})
+
+	// test synchronized store labels
+	suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(
+		&metapb.Store{Id: 5, Address: "mock-5", State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(), Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}}},
+	)
+	testutil.Eventually(re, func() bool {
+		if len(cluster.GetStore(5).GetLabels()) == 0 {
+			return false
+		}
+		return cluster.GetStore(5).GetLabels()[0].GetValue() == "z1"
+	})
 }
