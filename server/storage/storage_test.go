@@ -407,6 +407,7 @@ func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 }
 
 func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
+	re := require.New(b)
 	ctx := context.Background()
 	dir := b.TempDir()
 	lb, err := newLevelDBBackend(ctx, dir, nil)
@@ -426,10 +427,8 @@ func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
 	}()
 
 	b.ResetTimer()
-	err = lb.LoadRegions(ctx, cluster.CheckAndPutRegion)
-	if err != nil {
-		b.Fatal(err)
-	}
+	err = lb.LoadRegions(context.Background(), cluster.CheckAndPutRegion)
+	re.NoError(err)
 }
 
 var volumes = []struct {
