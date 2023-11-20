@@ -176,8 +176,6 @@ func (s *Service) RegisterOperatorsRouter() {
 // RegisterRegionsRouter registers the router of the regions handler.
 func (s *Service) RegisterRegionsRouter() {
 	router := s.root.Group("regions")
-	router.GET("/:id/label/:key", getRegionLabelByKey)
-	router.GET("/:id/labels", getRegionLabels)
 	router.POST("/accelerate-schedule", accelerateRegionsScheduleInRange)
 	router.POST("/accelerate-schedule/batch", accelerateRegionsScheduleInRanges)
 	router.POST("/scatter", scatterRegions)
@@ -1144,6 +1142,7 @@ func getRegionLabelRuleByID(c *gin.Context) {
 // @Produce  json
 // @Success  200  {string}  string  "Accelerate regions scheduling in a given range [startKey, endKey)"
 // @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/accelerate-schedule [post]
 func accelerateRegionsScheduleInRange(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
@@ -1183,6 +1182,7 @@ func accelerateRegionsScheduleInRange(c *gin.Context) {
 // @Produce  json
 // @Success  200  {string}  string  "Accelerate regions scheduling in given ranges [startKey1, endKey1), [startKey2, endKey2), ..."
 // @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/accelerate-schedule/batch [post]
 func accelerateRegionsScheduleInRanges(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
@@ -1233,6 +1233,7 @@ func accelerateRegionsScheduleInRanges(c *gin.Context) {
 // @Produce  json
 // @Success  200  {string}  string  "Scatter regions by given key ranges or regions id distributed by given group with given retry limit"
 // @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/scatter [post]
 func scatterRegions(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
@@ -1275,6 +1276,7 @@ func scatterRegions(c *gin.Context) {
 // @Produce  json
 // @Success  200  {string}  string  "Split regions with given split keys"
 // @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/split [post]
 func splitRegions(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
