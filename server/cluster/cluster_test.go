@@ -989,7 +989,7 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.WithLeader(region.GetPeers()[2]),
 		core.SetApproximateSize(curMaxMergeSize-1),
 		core.SetApproximateKeys(curMaxMergeKeys-1),
-		core.SetFromHeartbeat(true),
+		core.SetSource(core.Heartbeat),
 	)
 	cluster.processRegionHeartbeat(region)
 	regionID := region.GetID()
@@ -999,7 +999,7 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.WithLeader(region.GetPeers()[2]),
 		core.SetApproximateSize(curMaxMergeSize+1),
 		core.SetApproximateKeys(curMaxMergeKeys+1),
-		core.SetFromHeartbeat(true),
+		core.SetSource(core.Heartbeat),
 	)
 	cluster.processRegionHeartbeat(region)
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
