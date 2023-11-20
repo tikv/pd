@@ -42,6 +42,7 @@ const (
 
 // Client is a PD (Placement Driver) HTTP client.
 type Client interface {
+	/* Meta-related interfaces */
 	GetRegionByID(context.Context, uint64) (*RegionInfo, error)
 	GetRegionByKey(context.Context, []byte) (*RegionInfo, error)
 	GetRegions(context.Context) (*RegionsInfo, error)
@@ -51,11 +52,24 @@ type Client interface {
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetRegionStatusByKeyRange(context.Context, []byte, []byte) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
+	/* Rule-related interfaces */
+	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
+	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
 	GetPlacementRulesByGroup(context.Context, string) ([]*Rule, error)
 	SetPlacementRule(context.Context, *Rule) error
+	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
 	DeletePlacementRule(context.Context, string, string) error
-	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+	GetAllRegionLabelRules(context.Context) ([]*LabelRule, error)
+	GetRegionLabelRulesByIDs(context.Context, []string) ([]*LabelRule, error)
+	SetRegionLabelRule(context.Context, *LabelRule) error
+	PatchRegionLabelRules(context.Context, *LabelRulePatch) error
+	/* Scheduling-related interfaces */
 	AccelerateSchedule(context.Context, []byte, []byte) error
+	/* Other interfaces */
+	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+
+	/* Client-related methods */
+	WithRespHandler(func(resp *http.Response) error) Client
 	Close()
 }
 
@@ -65,6 +79,8 @@ type client struct {
 	pdAddrs []string
 	tlsConf *tls.Config
 	cli     *http.Client
+
+	respHandler func(resp *http.Response) error
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
@@ -143,6 +159,13 @@ func (c *client) Close() {
 	log.Info("[pd] http client closed")
 }
 
+// WithRespHandler sets the client with the given HTTP response handler.
+// This allows the caller to customize how the response is handled, including error handling logic.
+func (c *client) WithRespHandler(handler func(resp *http.Response) error) Client {
+	c.respHandler = handler
+	return c
+}
+
 func (c *client) reqCounter(name, status string) {
 	if c.requestCounter == nil {
 		return
@@ -204,6 +227,12 @@ func (c *client) request(
 	}
 	c.execDuration(name, time.Since(start))
 	c.reqCounter(name, resp.Status)
+
+	// Give away the response handling to the caller if the handler is set.
+	if c.respHandler != nil {
+		return c.respHandler(resp)
+	}
+
 	defer func() {
 		err = resp.Body.Close()
 		if err != nil {
@@ -345,6 +374,30 @@ func (c *client) GetStores(ctx context.Context) (*StoresInfo, error) {
 	return &stores, nil
 }
 
+// GetAllPlacementRuleBundles gets all placement rules bundles.
+func (c *client) GetAllPlacementRuleBundles(ctx context.Context) ([]*GroupBundle, error) {
+	var bundles []*GroupBundle
+	err := c.requestWithRetry(ctx,
+		"GetPlacementRuleBundle", PlacementRuleBundle,
+		http.MethodGet, nil, &bundles)
+	if err != nil {
+		return nil, err
+	}
+	return bundles, nil
+}
+
+// GetPlacementRuleBundleByGroup gets the placement rules bundle by group.
+func (c *client) GetPlacementRuleBundleByGroup(ctx context.Context, group string) (*GroupBundle, error) {
+	var bundle GroupBundle
+	err := c.requestWithRetry(ctx,
+		"GetPlacementRuleBundleByGroup", PlacementRuleBundleByGroup(group),
+		http.MethodGet, nil, &bundle)
+	if err != nil {
+		return nil, err
+	}
+	return &bundle, nil
+}
+
 // GetPlacementRulesByGroup gets the placement rules by group.
 func (c *client) GetPlacementRulesByGroup(ctx context.Context, group string) ([]*Rule, error) {
 	var rules []*Rule
@@ -368,11 +421,88 @@ func (c *client) SetPlacementRule(ctx context.Context, rule *Rule) error {
 		http.MethodPost, bytes.NewBuffer(ruleJSON), nil)
 }
 
+// SetPlacementRuleBundles sets the placement rule bundles.
+// If `partial` is false, all old configurations will be over-written and dropped.
+func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBundle, partial bool) error {
+	bundlesJSON, err := json.Marshal(bundles)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetPlacementRuleBundles", PlacementRuleBundleWithPartialParameter(partial),
+		http.MethodPost, bytes.NewBuffer(bundlesJSON), nil)
+}
+
 // DeletePlacementRule deletes the placement rule.
 func (c *client) DeletePlacementRule(ctx context.Context, group, id string) error {
 	return c.requestWithRetry(ctx,
 		"DeletePlacementRule", PlacementRuleByGroupAndID(group, id),
 		http.MethodDelete, nil, nil)
+}
+
+// GetAllRegionLabelRules gets all region label rules.
+func (c *client) GetAllRegionLabelRules(ctx context.Context) ([]*LabelRule, error) {
+	var labelRules []*LabelRule
+	err := c.requestWithRetry(ctx,
+		"GetAllRegionLabelRules", RegionLabelRules,
+		http.MethodGet, nil, &labelRules)
+	if err != nil {
+		return nil, err
+	}
+	return labelRules, nil
+}
+
+// GetRegionLabelRulesByIDs gets the region label rules by IDs.
+func (c *client) GetRegionLabelRulesByIDs(ctx context.Context, ruleIDs []string) ([]*LabelRule, error) {
+	idsJSON, err := json.Marshal(ruleIDs)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var labelRules []*LabelRule
+	err = c.requestWithRetry(ctx,
+		"GetRegionLabelRulesByIDs", RegionLabelRulesByIDs,
+		http.MethodGet, bytes.NewBuffer(idsJSON), &labelRules)
+	if err != nil {
+		return nil, err
+	}
+	return labelRules, nil
+}
+
+// SetRegionLabelRule sets the region label rule.
+func (c *client) SetRegionLabelRule(ctx context.Context, labelRule *LabelRule) error {
+	labelRuleJSON, err := json.Marshal(labelRule)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetRegionLabelRule", RegionLabelRule,
+		http.MethodPost, bytes.NewBuffer(labelRuleJSON), nil)
+}
+
+// PatchRegionLabelRules patches the region label rules.
+func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *LabelRulePatch) error {
+	labelRulePatchJSON, err := json.Marshal(labelRulePatch)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"PatchRegionLabelRules", RegionLabelRules,
+		http.MethodPatch, bytes.NewBuffer(labelRulePatchJSON), nil)
+}
+
+// AccelerateSchedule accelerates the scheduling of the regions within the given key range.
+func (c *client) AccelerateSchedule(ctx context.Context, startKey, endKey []byte) error {
+	input := map[string]string{
+		"start_key": url.QueryEscape(string(startKey)),
+		"end_key":   url.QueryEscape(string(endKey)),
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"AccelerateSchedule", AccelerateSchedule,
+		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
 }
 
 // GetMinResolvedTSByStoresIDs get min-resolved-ts by stores IDs.
@@ -405,19 +535,4 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		return 0, nil, errors.Trace(errors.New("min resolved ts is not enabled"))
 	}
 	return resp.MinResolvedTS, resp.StoresMinResolvedTS, nil
-}
-
-// AccelerateSchedule accelerates the scheduling of the regions within the given key range.
-func (c *client) AccelerateSchedule(ctx context.Context, startKey, endKey []byte) error {
-	input := map[string]string{
-		"start_key": url.QueryEscape(string(startKey)),
-		"end_key":   url.QueryEscape(string(endKey)),
-	}
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	return c.requestWithRetry(ctx,
-		"AccelerateSchedule", accelerateSchedule,
-		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
 }
