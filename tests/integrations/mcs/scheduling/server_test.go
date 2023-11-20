@@ -59,7 +59,7 @@ func TestServerTestSuite(t *testing.T) {
 func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
-
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 3)
 	re.NoError(err)
@@ -76,6 +76,7 @@ func (suite *serverTestSuite) SetupSuite() {
 func (suite *serverTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	suite.cancel()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
