@@ -147,7 +147,8 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		name := strings.TrimPrefix(string(kv.Key), prefixToTrim)
-		log.Info("update scheduler config", zap.String("name", string(kv.Value)))
+		log.Info("update scheduler config", zap.String("name", name),
+			zap.String("value", string(kv.Value)))
 		err := cw.storage.SaveSchedulerConfig(name, kv.Value)
 		if err != nil {
 			log.Warn("failed to save scheduler config",
