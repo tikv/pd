@@ -270,7 +270,7 @@ func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *evictSlowTrendScheduler) ConfigPrepare(cluster sche.SchedulerCluster) error {
+func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictedStoreID := s.conf.evictedStore()
 	if evictedStoreID == 0 {
 		return nil

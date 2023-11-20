@@ -161,7 +161,7 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return err
 	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	err := scheduler.ConfigPrepare(c.cluster)
+	err := scheduler.PrepareConfig(c.cluster)
 	return err
 }
 
@@ -205,7 +205,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	}
 
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
-	if err := s.Scheduler.ConfigPrepare(c.cluster); err != nil {
+	if err := s.Scheduler.PrepareConfig(c.cluster); err != nil {
 		return err
 	}
 

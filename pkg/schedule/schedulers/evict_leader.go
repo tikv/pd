@@ -239,7 +239,7 @@ func pauseAndResumeLeaderTransfer(cluster *core.BasicCluster, old, new map[uint6
 	}
 }
 
-func (s *evictLeaderScheduler) ConfigPrepare(cluster sche.SchedulerCluster) error {
+func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error

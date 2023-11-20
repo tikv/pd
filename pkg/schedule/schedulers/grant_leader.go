@@ -197,7 +197,7 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 	return nil
 }
 
-func (s *grantLeaderScheduler) ConfigPrepare(cluster sche.SchedulerCluster) error {
+func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error

@@ -189,7 +189,7 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *evictSlowStoreScheduler) ConfigPrepare(cluster sche.SchedulerCluster) error {
+func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
 		return cluster.SlowStoreEvicted(evictStore)

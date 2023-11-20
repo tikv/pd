@@ -92,8 +92,8 @@ func (s *BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 	return intervalGrow(interval, MaxScheduleInterval, exponentialGrowth)
 }
 
-// ConfigPrepare does some prepare work about config.
-func (s *BaseScheduler) ConfigPrepare(cluster sche.SchedulerCluster) error { return nil }
+// PrepareConfig does some prepare work about config.
+func (s *BaseScheduler) PrepareConfig(cluster sche.SchedulerCluster) error { return nil }
 
 // ConfigCleanup does some cleanup work about config.
 func (s *BaseScheduler) ConfigCleanup(cluster sche.SchedulerCluster) {}

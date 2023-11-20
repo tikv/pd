@@ -42,7 +42,7 @@ type Scheduler interface {
 	ReloadConfig() error
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	ConfigPrepare(cluster sche.SchedulerCluster) error
+	PrepareConfig(cluster sche.SchedulerCluster) error
 	ConfigCleanup(cluster sche.SchedulerCluster)
 	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
