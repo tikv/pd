@@ -17,6 +17,7 @@ package apis
 import (
 	"encoding/hex"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 
@@ -191,12 +192,22 @@ func (s *Service) RegisterConfigRouter() {
 	placementRule := router.Group("placement-rule")
 	placementRule.GET("", getPlacementRules)
 	placementRule.GET("/:group", getPlacementRuleByGroup)
+
+	regionLabel := router.Group("region-label")
+	regionLabel.GET("/rules", getAllRegionLabelRules)
+	regionLabel.GET("/rules/ids", getRegionLabelRulesByIDs)
+	regionLabel.GET("/rules/:id", getRegionLabelRuleByID)
+
+	regions := router.Group("regions")
+	regions.GET("/:id/label/:key", getRegionLabelByKey)
+	regions.GET("/:id/labels", getRegionLabels)
 }
 
 // @Tags     admin
 // @Summary  Change the log level.
 // @Produce  json
 // @Success  200  {string}  string  "The log level is updated."
+// @Failure  400  {string}  string  "The input is invalid."
 // @Router   /admin/log [put]
 func changeLogLevel(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -230,6 +241,7 @@ func getConfig(c *gin.Context) {
 // @Summary  Drop all regions from cache.
 // @Produce  json
 // @Success  200  {string}  string  "All regions are removed from server cache."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /admin/cache/regions [delete]
 func deleteAllRegionCache(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -248,6 +260,7 @@ func deleteAllRegionCache(c *gin.Context) {
 // @Produce  json
 // @Success  200  {string}  string  "The region is removed from server cache."
 // @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /admin/cache/regions/{id} [delete]
 func deleteRegionCacheByID(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -683,8 +696,6 @@ func getHotBuckets(c *gin.Context) {
 // @Accept   json
 // @Produce  json
 // @Success  200  {object}  storage.HistoryHotRegions
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/regions/history [get]
 func getHistoryHotRegions(c *gin.Context) {
 	// TODO: support history hotspot in scheduling server with stateless in the future.
@@ -954,4 +965,156 @@ func getPlacementRuleByGroup(c *gin.Context) {
 	g := c.Param("group")
 	group := manager.GetGroupBundle(g)
 	c.IndentedJSON(http.StatusOK, group)
+}
+
+// @Tags     region_label
+// @Summary  Get label of a region.
+// @Param    id   path  integer  true  "Region Id"
+// @Param    key  path  string   true  "Label key"
+// @Produce  json
+// @Success  200  {string}  string
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  404  {string}  string  "The region does not exist."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/regions/{id}/label/{key} [get]
+func getRegionLabelByKey(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	idStr := c.Param("id")
+	labelKey := c.Param("key") // TODO: test https://github.com/tikv/pd/pull/4004
+
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	region, err := handler.GetRegion(id)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if region == nil {
+		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs().Error())
+		return
+	}
+
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	labelValue := l.GetRegionLabel(region, labelKey)
+	c.IndentedJSON(http.StatusOK, labelValue)
+}
+
+// @Tags     region_label
+// @Summary  Get labels of a region.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {string}  string
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  404  {string}  string  "The region does not exist."
+// @Router   /config/regions/{id}/labels [get]
+func getRegionLabels(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	region, err := handler.GetRegion(id)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if region == nil {
+		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs().Error())
+		return
+	}
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	labels := l.GetRegionLabels(region)
+	c.IndentedJSON(http.StatusOK, labels)
+}
+
+// @Tags     region_label
+// @Summary  List all label rules of cluster.
+// @Produce  json
+// @Success  200  {array}  labeler.LabelRule
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rules [get]
+func getAllRegionLabelRules(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	rules := l.GetAllLabelRules()
+	c.IndentedJSON(http.StatusOK, rules)
+}
+
+// @Tags     region_label
+// @Summary  Get label rules of cluster by ids.
+// @Param    body  body  []string  true  "IDs of query rules"
+// @Produce  json
+// @Success  200  {array}   labeler.LabelRule
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rules/ids [get]
+func getRegionLabelRulesByIDs(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	var ids []string
+	if err := c.BindJSON(&ids); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	rules, err := l.GetLabelRules(ids)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, rules)
+}
+
+// @Tags     region_label
+// @Summary  Get label rule of cluster by id.
+// @Param    id  path  string  true  "Rule Id"
+// @Produce  json
+// @Success  200  {object}  labeler.LabelRule
+// @Failure  404  {string}  string  "The rule does not exist."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /config/region-label/rules/{id} [get]
+func getRegionLabelRuleByID(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	id, err := url.PathUnescape(c.Param("id"))
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	l, err := handler.GetRegionLabeler()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	rule := l.GetLabelRule(id)
+	if rule == nil {
+		c.String(http.StatusNotFound, errs.ErrRegionRuleNotFound.FastGenByArgs().Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, rule)
 }

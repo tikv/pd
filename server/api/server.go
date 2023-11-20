@@ -17,6 +17,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
@@ -79,6 +80,26 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/checkers",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodPost, http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/region/id",
+				scheapi.APIPathPrefix+"/config/regions",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet},
+				func(r *http.Request) bool {
+					// The original code uses the path "/region/id" to get the region id.
+					// However, the path "/region/id" is used to get the region by id, which is not what we want.
+					return strings.Contains(r.URL.Path, "label")
+				}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/region-label/rules",
+				scheapi.APIPathPrefix+"/config/region-label/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/region-label/rule/", // Note: this is a typo in the original code
+				scheapi.APIPathPrefix+"/config/region-label/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/hotspot",
 				scheapi.APIPathPrefix+"/hotspot",
