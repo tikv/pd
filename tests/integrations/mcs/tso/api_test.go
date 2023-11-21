@@ -110,6 +110,9 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 	re.NotNil(primary)
 	url := suite.backendEndpoints + "/pd/api/v1/admin/reset-ts"
 
+	testutil.Eventually(re, func() bool {
+		return suite.pdCluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(mcsutils.TSOServiceName)
+	})
 	// Test reset ts
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
 	err := testutil.CheckPostJSON(dialClient, url, input,
