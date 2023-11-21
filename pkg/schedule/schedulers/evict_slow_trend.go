@@ -17,7 +17,6 @@ package schedulers
 import (
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -30,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -54,7 +54,7 @@ type slowCandidate struct {
 }
 
 type evictSlowTrendSchedulerConfig struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	cluster *core.BasicCluster
 	storage endpoint.ConfigStorage
 	// Candidate for eviction in current tick.
@@ -85,7 +85,7 @@ func (conf *evictSlowTrendSchedulerConfig) Clone() *evictSlowTrendSchedulerConfi
 	}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) PersistLocked() error {
+func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
 	name := EvictSlowTrendName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
@@ -203,7 +203,7 @@ func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
-	return conf.PersistLocked()
+	return conf.persistLocked()
 }
 
 func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.SchedulerCluster) (oldID uint64, err error) {
@@ -220,7 +220,7 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
-	return oldID, conf.PersistLocked()
+	return oldID, conf.persistLocked()
 }
 
 type evictSlowTrendHandler struct {
@@ -254,7 +254,7 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.PersistLocked(); err != nil {
+	if err := handler.config.persistLocked(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return

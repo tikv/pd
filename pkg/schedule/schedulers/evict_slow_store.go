@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -47,7 +47,7 @@ const (
 var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
 
 type evictSlowStoreSchedulerConfig struct {
-	sync.RWMutex
+	syncutil.RWMutex
 	cluster *core.BasicCluster
 	storage endpoint.ConfigStorage
 	// Last timestamp of the chosen slow store for eviction.
@@ -74,7 +74,7 @@ func (conf *evictSlowStoreSchedulerConfig) Clone() *evictSlowStoreSchedulerConfi
 	}
 }
 
-func (conf *evictSlowStoreSchedulerConfig) PersistLocked() error {
+func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
 	name := EvictSlowStoreName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
@@ -122,7 +122,7 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
-	return conf.PersistLocked()
+	return conf.persistLocked()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
@@ -132,7 +132,7 @@ func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err 
 	if oldID > 0 {
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
-		err = conf.PersistLocked()
+		err = conf.persistLocked()
 	}
 	return
 }
@@ -168,7 +168,7 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.PersistLocked(); err != nil {
+	if err := handler.config.persistLocked(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return

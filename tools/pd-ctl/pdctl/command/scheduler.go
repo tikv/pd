@@ -720,7 +720,6 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	} else {
 		input[key] = val
 	}
-	fmt.Println(path.Join(schedulerConfigPrefix, schedulerName, "config"))
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
