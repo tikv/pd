@@ -51,7 +51,7 @@ type Node struct {
 	cancel                   context.CancelFunc
 	raftEngine               *RaftEngine
 	limiter                  *ratelimit.RateLimiter
-	sizeMutex                sync.Mutex
+	sizeMutex                syncutil.Mutex
 	hasExtraUsedSpace        bool
 	snapStats                []*pdpb.SnapshotStat
 }
