@@ -17,11 +17,8 @@ package core
 import (
 	"fmt"
 	"math"
-<<<<<<< HEAD:server/core/region_test.go
 	"math/rand"
-=======
 	mrand "math/rand"
->>>>>>> d651c6b91 (core: batch get region size (#7252)):pkg/core/region_test.go
 	"strconv"
 	"testing"
 	"time"
@@ -661,7 +658,7 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}, peer)
-		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		items = append(items, region)
 	}
@@ -670,7 +667,7 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 		item := items[i%len(items)]
 		item.approximateKeys = int64(200000)
 		item.approximateSize = int64(20)
-		origin, overlaps, rangeChanged := regions.SetRegion(item)
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(item)
 		regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
 	}
 }
@@ -690,7 +687,7 @@ func TestGetRegionSizeByRange(t *testing.T) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   endKey,
 		}, peer, SetApproximateSize(10))
-		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
 	totalSize := regions.GetRegionSizeByRange([]byte(""), []byte(""))
@@ -714,7 +711,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}, peer, SetApproximateSize(10))
-		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		items = append(items, region)
 	}
@@ -728,7 +725,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		item := items[i%len(items)]
 		item.approximateKeys = int64(200000)
-		origin, overlaps, rangeChanged := regions.SetRegion(item)
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(item)
 		regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
 	}
 }
@@ -744,7 +741,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
 		}, peer)
-		origin, overlaps, rangeChanged := regions.SetRegion(region)
+		origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		items = append(items, region)
 	}
@@ -761,7 +758,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 			for pb.Next() {
 				item := items[mrand.Intn(len(items))]
 				n := item.Clone(SetApproximateSize(20))
-				origin, overlaps, rangeChanged := regions.SetRegion(n)
+				origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(n)
 				regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
 			}
 		},
