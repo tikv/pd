@@ -518,8 +518,6 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 		err = rc.Start(leaderServer.GetServer())
 		re.NoError(err)
 		time.Sleep(time.Millisecond)
-		rc = leaderServer.GetRaftCluster()
-		re.NotNil(rc)
 		rc.Stop()
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))

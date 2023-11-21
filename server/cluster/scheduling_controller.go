@@ -117,11 +117,6 @@ func (sc *schedulingController) initCoordinatorLocked(ctx context.Context, clust
 func (sc *schedulingController) runCoordinator() {
 	defer logutil.LogPanic()
 	defer sc.wg.Done()
-	select {
-	case <-sc.ctx.Done():
-		return
-	default:
-	}
 	sc.coordinator.RunUntilStop()
 }
 
@@ -154,7 +149,7 @@ func (sc *schedulingController) runSchedulingMetricsCollectionJob() {
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Stop()
-		ticker = time.NewTicker(time.Microsecond)
+		ticker = time.NewTicker(time.Millisecond)
 	})
 	defer ticker.Stop()
 
