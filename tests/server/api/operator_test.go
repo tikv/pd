@@ -477,9 +477,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			suite.NoError(err)
 			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 		} else {
-			// FIXME: we should check the delete result, which should be failed,
-			// but the delete operator may be success because the cluster create a new operator to remove ophan peer.
-			err = tu.CheckDelete(testDialClient, regionURL)
+			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusNotOK(re))
 		}
 		suite.NoError(err)
 	}

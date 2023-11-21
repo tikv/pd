@@ -1318,8 +1318,13 @@ func splitRegions(c *gin.Context) {
 // @Router   /regions/replicated [get]
 func checkRegionsReplicated(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
-	rawStartKey, _ := c.GetQuery("start_key")
-	rawEndKey, _ := c.GetQuery("end_key")
+	rawStartKey, ok1 := c.GetQuery("startKey")
+	rawEndKey, ok2 := c.GetQuery("endKey")
+	if !ok1 || !ok2 {
+		c.String(http.StatusBadRequest, "there is no start_key or end_key")
+		return
+	}
+
 	state, err := handler.CheckRegionsReplicated(rawStartKey, rawEndKey)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())

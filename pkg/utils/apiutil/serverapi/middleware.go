@@ -151,8 +151,8 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 			} else {
 				r.URL.Path = rule.targetPath
 			}
-			log.Debug("redirect to micro service", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
-				zap.String("target", addr), zap.String("method", r.Method))
+			log.Info("redirect to micro service", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
+				zap.String("target", addr), zap.String("method", r.Method), zap.Any("query", r.URL.Query()))
 			return true, addr
 		}
 	}
