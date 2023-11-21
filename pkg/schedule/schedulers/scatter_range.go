@@ -176,7 +176,14 @@ func (l *scatterRangeScheduler) ReloadConfig() error {
 	if len(cfgData) == 0 {
 		return nil
 	}
-	return DecodeConfig([]byte(cfgData), l.config)
+	newCfg := &scatterRangeSchedulerConfig{}
+	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	l.config.RangeName = newCfg.RangeName
+	l.config.StartKey = newCfg.StartKey
+	l.config.EndKey = newCfg.EndKey
+	return nil
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {

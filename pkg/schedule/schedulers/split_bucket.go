@@ -182,7 +182,13 @@ func (s *splitBucketScheduler) ReloadConfig() error {
 	if len(cfgData) == 0 {
 		return nil
 	}
-	return DecodeConfig([]byte(cfgData), s.conf)
+	newCfg := &splitBucketSchedulerConfig{}
+	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	s.conf.SplitLimit = newCfg.SplitLimit
+	s.conf.Degree = newCfg.Degree
+	return nil
 }
 
 // ServerHTTP implement Http server.
