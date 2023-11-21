@@ -125,8 +125,8 @@ func (w *HotCache) CollectMetrics() {
 	w.CheckReadAsync(newCollectMetricsTask())
 }
 
-// ResetMetrics resets the hot cache metrics.
-func (w *HotCache) ResetMetrics() {
+// ResetHotCacheStatusMetrics resets the hot cache metrics.
+func ResetHotCacheStatusMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 

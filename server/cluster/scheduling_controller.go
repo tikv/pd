@@ -149,7 +149,7 @@ func (sc *schedulingController) runSchedulingMetricsCollectionJob() {
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Stop()
-		ticker = time.NewTicker(time.Microsecond)
+		ticker = time.NewTicker(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -170,7 +170,10 @@ func (sc *schedulingController) resetSchedulingMetrics() {
 	statistics.Reset()
 	schedulers.ResetSchedulerMetrics()
 	schedule.ResetHotSpotMetrics()
-	sc.resetStatisticsMetrics()
+	statistics.ResetRegionStatsMetrics()
+	statistics.ResetLabelStatsMetrics()
+	// reset hot cache metrics
+	statistics.ResetHotCacheStatusMetrics()
 }
 
 func (sc *schedulingController) collectSchedulingMetrics() {
@@ -183,20 +186,6 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	statsMap.Collect()
 	sc.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	sc.coordinator.CollectHotSpotMetrics()
-	sc.collectStatisticsMetrics()
-}
-
-func (sc *schedulingController) resetStatisticsMetrics() {
-	if sc.regionStats == nil {
-		return
-	}
-	sc.regionStats.Reset()
-	sc.labelStats.Reset()
-	// reset hot cache metrics
-	sc.hotStat.ResetMetrics()
-}
-
-func (sc *schedulingController) collectStatisticsMetrics() {
 	if sc.regionStats == nil {
 		return
 	}

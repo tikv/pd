@@ -510,6 +510,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	err = rc.PutStore(store)
 	re.NoError(err)
 	re.NotNil(tc)
+	rc.Stop()
 
 	// let the job run at small interval
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
@@ -517,8 +518,6 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 		err = rc.Start(leaderServer.GetServer())
 		re.NoError(err)
 		time.Sleep(time.Millisecond)
-		rc = leaderServer.GetRaftCluster()
-		re.NotNil(rc)
 		rc.Stop()
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
@@ -1289,7 +1288,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	// start
-	leaderServer := tc.GetServer(tc.GetLeader())
+	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
@@ -1328,7 +1327,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	tc.ResignLeader()
 	rc.Stop()
 	tc.WaitLeader()
-	leaderServer = tc.GetServer(tc.GetLeader())
+	leaderServer = tc.GetLeaderServer()
 	rc1 := leaderServer.GetServer().GetRaftCluster()
 	rc1.Start(leaderServer.GetServer())
 	re.NoError(err)
@@ -1348,7 +1347,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	tc.ResignLeader()
 	rc1.Stop()
 	tc.WaitLeader()
-	leaderServer = tc.GetServer(tc.GetLeader())
+	leaderServer = tc.GetLeaderServer()
 	rc = leaderServer.GetServer().GetRaftCluster()
 	rc.Start(leaderServer.GetServer())
 	re.NotNil(rc)

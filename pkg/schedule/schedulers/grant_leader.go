@@ -197,7 +197,7 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 	return nil
 }
 
-func (s *grantLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
+func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -209,7 +209,7 @@ func (s *grantLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	return res
 }
 
-func (s *grantLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
+func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {

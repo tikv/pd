@@ -260,7 +260,7 @@ func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
 	re.NoError(err)
 
 	leader1 := cluster.WaitLeader()
-	memberID := cluster.GetServer(leader1).GetLeader().GetMemberId()
+	memberID := cluster.GetLeaderServer().GetLeader().GetMemberId()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
@@ -338,7 +338,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	re.NotEmpty(cluster.GetLeader())
 
 	for i := 0; i < 3; i++ {
-		cluster.GetServers()[cluster.GetLeader()].ResetPDLeader()
+		cluster.GetLeaderServer().ResetPDLeader()
 		cluster.WaitLeader()
 	}
 	// leader should be changed when campaign leader frequently

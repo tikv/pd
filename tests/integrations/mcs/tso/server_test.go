@@ -89,7 +89,7 @@ func (suite *tsoServerTestSuite) TearDownSuite() {
 func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("Recovered from an unexpected panic", r)
+			suite.T().Log("Recovered from an unexpected panic", r)
 			suite.T().Errorf("Expected no panic, but something bad occurred with")
 		}
 	}()
