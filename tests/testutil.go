@@ -34,6 +34,7 @@ import (
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -272,11 +273,13 @@ func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
 func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 	s.t.Log("start to run test in api mode")
 	re := require.New(s.t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
 	s.startCluster(apiMode)
 	test(s.cluster)
 	s.cleanup()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	s.t.Log("finish to run test in api mode")
 }
 
@@ -299,7 +302,6 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
 	case apiMode:
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 		s.cluster, err = NewTestAPICluster(s.ctx, 1, s.opts...)
 		re.NoError(err)
 		err = s.cluster.RunInitialServers()
@@ -314,6 +316,8 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		tc.WaitForPrimaryServing(re)
 		s.cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+		testutil.Eventually(re, func() bool {
+			return s.cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
+		})
 	}
 }
