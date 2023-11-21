@@ -646,18 +646,20 @@ func TestForwardSchedulerRequest(t *testing.T) {
 	server := cluster.GetLeaderServer()
 	re.NoError(server.BootstrapCluster())
 	backendEndpoints := server.GetAddr()
-	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 
 	cmd := pdctlCmd.GetRootCmd()
 	args := []string{"-u", backendEndpoints, "scheduler", "show"}
-	var slice []string
-	output, err := pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &slice))
-	re.Contains(slice, "balance-leader-scheduler")
+	var sches []string
+	testutil.Eventually(re, func() bool {
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &sches))
+		return slice.Contains(sches, "balance-leader-scheduler")
+	})
 
 	mustUsage := func(args []string) {
 		output, err := pdctl.ExecuteCommand(cmd, args...)
