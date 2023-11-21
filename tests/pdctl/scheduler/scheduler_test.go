@@ -285,10 +285,12 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	var roles []string
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
 	re.Equal([]string{"leader", "follower", "learner"}, roles)
-	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "set-roles", "learner"}, nil) // todo:add check output
+	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "set-roles", "learner"}, nil)
 	re.Contains(echo, "Success!")
-	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
-	re.Equal([]string{"learner"}, roles)
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
+		return reflect.DeepEqual([]string{"learner"}, roles)
+	})
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler"}, &roles)
 	re.Equal([]string{"learner"}, roles)
 
