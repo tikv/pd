@@ -122,19 +122,19 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	// It will be helpful when matching the redirect rules "schedulers" or "schedulers/{name}"
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 	for _, rule := range h.microserviceRedirectRules {
-		if h.s.IsServiceIndependent(rule.targetServiceName) &&
-			strings.HasPrefix(r.URL.Path, rule.matchPath) &&
+		if strings.HasPrefix(r.URL.Path, rule.matchPath) &&
 			slice.Contains(rule.matchMethods, r.Method) {
 			if rule.filter != nil && !rule.filter(r) {
 				continue
 			}
-			origin := r.URL.Path
+			// we check the service primary addr here, so no need to check independently again.
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !ok || addr == "" {
 				log.Warn("failed to get the service primary addr when trying to match redirect rules",
 					zap.String("path", r.URL.Path))
 			}
 			// If the URL contains escaped characters, use RawPath instead of Path
+			origin := r.URL.Path
 			path := r.URL.Path
 			if r.URL.RawPath != "" {
 				path = r.URL.RawPath
