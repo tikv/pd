@@ -500,6 +500,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigBalanceLeaderCommand(),
 		newSplitBucketCommand(),
 		newConfigEvictSlowStoreCommand(),
+		newConfigShuffleHotRegionSchedulerCommand(),
 		newConfigEvictSlowTrendCommand(),
 	)
 	return c
@@ -719,6 +720,7 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 	} else {
 		input[key] = val
 	}
+	fmt.Println(path.Join(schedulerConfigPrefix, schedulerName, "config"))
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
 }
 
@@ -787,6 +789,25 @@ func newConfigEvictSlowStoreCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "evict-slow-store-scheduler",
 		Short: "evict-slow-store-scheduler config",
+		Run:   listSchedulerConfigCommandFunc,
+	}
+
+	c.AddCommand(&cobra.Command{
+		Use:   "show",
+		Short: "list the config item",
+		Run:   listSchedulerConfigCommandFunc,
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
+	})
+	return c
+}
+
+func newConfigShuffleHotRegionSchedulerCommand() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "shuffle-hot-region-scheduler",
+		Short: "shuffle-hot-region-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
 

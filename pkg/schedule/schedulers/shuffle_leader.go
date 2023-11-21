@@ -43,6 +43,7 @@ var (
 type shuffleLeaderSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+	// TODO: whether to support reload it?
 }
 
 type shuffleLeaderScheduler struct {

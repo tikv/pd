@@ -46,6 +46,7 @@ var (
 type labelSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+	// TODO: whether to support reload it?
 }
 
 type labelScheduler struct {

@@ -236,27 +236,25 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				// FIXME: remove this check after scheduler config is updated
-				if cluster.GetSchedulingPrimaryServer() == nil { // "balance-hot-region-scheduler"
-					for key := range expectMap {
-						suite.Equal(expectMap[key], resp[key], "key %s", key)
-					}
 
-					// update again
-					err = tu.CheckPostJSON(testDialClient, updateURL, body,
-						tu.StatusOK(re),
-						tu.StringEqual(re, "Config is the same with origin, so do nothing."))
-					suite.NoError(err)
-					// config item not found
-					dataMap = map[string]interface{}{}
-					dataMap["error"] = 3
-					body, err = json.Marshal(dataMap)
-					suite.NoError(err)
-					err = tu.CheckPostJSON(testDialClient, updateURL, body,
-						tu.Status(re, http.StatusBadRequest),
-						tu.StringEqual(re, "Config item is not found."))
-					suite.NoError(err)
+				for key := range expectMap {
+					suite.Equal(expectMap[key], resp[key], "key %s", key)
 				}
+
+				// update again
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.StatusOK(re),
+					tu.StringEqual(re, "Config is the same with origin, so do nothing."))
+				suite.NoError(err)
+				// config item not found
+				dataMap = map[string]interface{}{}
+				dataMap["error"] = 3
+				body, err = json.Marshal(dataMap)
+				suite.NoError(err)
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.Status(re, http.StatusBadRequest),
+					tu.StringEqual(re, "Config item is not found."))
+				suite.NoError(err)
 			},
 		},
 		{

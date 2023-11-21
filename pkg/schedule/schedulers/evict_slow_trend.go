@@ -17,7 +17,7 @@ package schedulers
 import (
 	"net/http"
 	"strconv"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -54,6 +54,8 @@ type slowCandidate struct {
 }
 
 type evictSlowTrendSchedulerConfig struct {
+	sync.RWMutex
+	cluster *core.BasicCluster
 	storage endpoint.ConfigStorage
 	// Candidate for eviction in current tick.
 	evictCandidate slowCandidate
@@ -76,12 +78,14 @@ func initEvictSlowTrendSchedulerConfig(storage endpoint.ConfigStorage) *evictSlo
 }
 
 func (conf *evictSlowTrendSchedulerConfig) Clone() *evictSlowTrendSchedulerConfig {
+	conf.RLock()
+	defer conf.RUnlock()
 	return &evictSlowTrendSchedulerConfig{
-		RecoveryDurationGap: atomic.LoadUint64(&conf.RecoveryDurationGap),
+		RecoveryDurationGap: conf.RecoveryDurationGap,
 	}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) Persist() error {
+func (conf *evictSlowTrendSchedulerConfig) PersistLocked() error {
 	name := conf.getSchedulerName()
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
@@ -144,7 +148,9 @@ func (conf *evictSlowTrendSchedulerConfig) lastCandidateCapturedSecs() uint64 {
 
 // readyForRecovery checks whether the last cpatured candidate is ready for recovery.
 func (conf *evictSlowTrendSchedulerConfig) readyForRecovery() bool {
-	recoveryDurationGap := atomic.LoadUint64(&conf.RecoveryDurationGap)
+	conf.RLock()
+	defer conf.RUnlock()
+	recoveryDurationGap := conf.RecoveryDurationGap
 	failpoint.Inject("transientRecoveryGap", func() {
 		recoveryDurationGap = 0
 	})
@@ -179,7 +185,7 @@ func (conf *evictSlowTrendSchedulerConfig) markCandidateRecovered() {
 
 func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
 	conf.EvictedStores = []uint64{id}
-	return conf.Persist()
+	return conf.PersistLocked()
 }
 
 func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.SchedulerCluster) (oldID uint64, err error) {
@@ -194,7 +200,7 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(address, strconv.FormatUint(oldID, 10)).Set(0)
 	conf.EvictedStores = []uint64{}
-	return oldID, conf.Persist()
+	return oldID, conf.PersistLocked()
 }
 
 type evictSlowTrendHandler struct {
@@ -223,9 +229,16 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
-	recoveryDurationGap := (uint64)(recoveryDurationGapFloat)
-	prevRecoveryDurationGap := atomic.LoadUint64(&handler.config.RecoveryDurationGap)
-	atomic.StoreUint64(&handler.config.RecoveryDurationGap, recoveryDurationGap)
+	handler.config.Lock()
+	defer handler.config.Unlock()
+	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
+	recoveryDurationGap := uint64(recoveryDurationGapFloat)
+	handler.config.RecoveryDurationGap = recoveryDurationGap
+	if err := handler.config.PersistLocked(); err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
+		return
+	}
 	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
@@ -268,6 +281,34 @@ func (s *evictSlowTrendScheduler) GetType() string {
 
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
+}
+
+func (s *evictSlowTrendScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &evictSlowTrendSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	old := make(map[uint64]struct{})
+	for _, id := range s.conf.EvictedStores {
+		old[id] = struct{}{}
+	}
+	new := make(map[uint64]struct{})
+	for _, id := range newCfg.EvictedStores {
+		new[id] = struct{}{}
+	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, old, new)
+	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
+	s.conf.EvictedStores = newCfg.EvictedStores
+	return nil
 }
 
 func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {

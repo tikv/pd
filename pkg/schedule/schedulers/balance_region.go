@@ -51,6 +51,8 @@ var (
 type balanceRegionSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+	// TODO: whether to support reload it?
+	// Maybe we need to ensure whether scatter-range-scheduler?
 }
 
 type balanceRegionScheduler struct {

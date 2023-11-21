@@ -34,6 +34,7 @@ const (
 	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
 	transferWitnessLeaderBatchSize = 3
+	// TODO: whether to support reload it?
 	// TransferWitnessLeaderRecvMaxRegionSize is the max number of region can receive
 	// TODO: make it a reasonable value
 	transferWitnessLeaderRecvMaxRegionSize = 10000

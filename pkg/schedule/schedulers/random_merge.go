@@ -48,6 +48,7 @@ var (
 type randomMergeSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+	// TODO: whether to support reload it?
 }
 
 type randomMergeScheduler struct {
