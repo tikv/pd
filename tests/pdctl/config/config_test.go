@@ -832,7 +832,6 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {
 		LastHeartbeat: time.Now().UnixNano(),
 	}
 	tests.MustPutStore(re, cluster, store)
-	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
 	re.NoError(err)
@@ -844,7 +843,9 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {
 	re.Equal("table", conf.KeyType)
 	re.Equal(typeutil.StringSlice([]string{}), conf.RuntimeServices)
 	re.Equal("", conf.MetricStorage)
-	re.Equal("auto", conf.DashboardAddress)
+	if conf.DashboardAddress != "auto" { // dashboard has been assigned
+		re.Equal(leaderServer.GetAddr(), conf.DashboardAddress)
+	}
 	re.Equal(int(3), conf.FlowRoundByDigit)
 }
 

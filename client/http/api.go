@@ -32,7 +32,7 @@ const (
 	regionsByKey           = "/pd/api/v1/regions/key"
 	RegionsByStoreIDPrefix = "/pd/api/v1/regions/store"
 	EmptyRegions           = "/pd/api/v1/regions/check/empty-region"
-	accelerateSchedule     = "/pd/api/v1/regions/accelerate-schedule"
+	AccelerateSchedule     = "/pd/api/v1/regions/accelerate-schedule"
 	store                  = "/pd/api/v1/store"
 	Stores                 = "/pd/api/v1/stores"
 	StatsRegion            = "/pd/api/v1/stats/region"
@@ -45,7 +45,10 @@ const (
 	PlacementRule         = "/pd/api/v1/config/rule"
 	PlacementRules        = "/pd/api/v1/config/rules"
 	placementRulesByGroup = "/pd/api/v1/config/rules/group"
+	PlacementRuleBundle   = "/pd/api/v1/config/placement-rule"
 	RegionLabelRule       = "/pd/api/v1/config/region-label/rule"
+	RegionLabelRules      = "/pd/api/v1/config/region-label/rules"
+	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
 	// Scheduler
 	Schedulers            = "/pd/api/v1/schedulers"
 	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-"
@@ -121,6 +124,16 @@ func PlacementRulesByGroup(group string) string {
 // PlacementRuleByGroupAndID returns the path of PD HTTP API to get placement rule by group and ID.
 func PlacementRuleByGroupAndID(group, id string) string {
 	return fmt.Sprintf("%s/%s/%s", PlacementRule, group, id)
+}
+
+// PlacementRuleBundleByGroup returns the path of PD HTTP API to get placement rule bundle by group.
+func PlacementRuleBundleByGroup(group string) string {
+	return fmt.Sprintf("%s/%s", PlacementRuleBundle, group)
+}
+
+// PlacementRuleBundleWithPartialParameter returns the path of PD HTTP API to get placement rule bundle with partial parameter.
+func PlacementRuleBundleWithPartialParameter(partial bool) string {
+	return fmt.Sprintf("%s?partial=%t", PlacementRuleBundle, partial)
 }
 
 // SchedulerByName returns the scheduler API with the given scheduler name.

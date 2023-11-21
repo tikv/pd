@@ -17,7 +17,6 @@ package operator
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -514,7 +513,7 @@ func (suite *operatorTestSuite) TestOpStepTimeout() {
 		},
 	}
 	for i, v := range testData {
-		fmt.Printf("case:%d\n", i)
+		suite.T().Logf("case: %d", i)
 		for _, step := range v.step {
 			suite.Equal(v.expect, step.Timeout(v.regionSize))
 		}
