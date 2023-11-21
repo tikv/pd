@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	mrand "math/rand"
 	"strconv"
 	"testing"
 	"time"
@@ -756,7 +755,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 	b.RunParallel(
 		func(pb *testing.PB) {
 			for pb.Next() {
-				item := items[mrand.Intn(len(items))]
+				item := items[rand.Intn(len(items))]
 				n := item.Clone(SetApproximateSize(20))
 				origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(n)
 				regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
@@ -769,6 +768,7 @@ const keyLength = 100
 
 func randomBytes(n int) []byte {
 	bytes := make([]byte, n)
+
 	_, err := rand.Read(bytes)
 	if err != nil {
 		panic(err)
