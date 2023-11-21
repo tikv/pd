@@ -83,7 +83,7 @@ func (h *regionLabelHandler) PatchRegionLabelRules(w http.ResponseWriter, r *htt
 // @Success  200  {array}   labeler.LabelRule
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /config/region-label/rule/ids [get]
+// @Router   /config/region-label/rules/ids [get]
 func (h *regionLabelHandler) GetRegionLabelRulesByIDs(w http.ResponseWriter, r *http.Request) {
 	cluster := getCluster(r)
 	var ids []string

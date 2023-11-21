@@ -42,8 +42,8 @@ type Scheduler interface {
 	ReloadConfig() error
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster sche.SchedulerCluster) error
-	Cleanup(cluster sche.SchedulerCluster)
+	PrepareConfig(cluster sche.SchedulerCluster) error
+	CleanConfig(cluster sche.SchedulerCluster)
 	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
 }
@@ -64,6 +64,24 @@ func DecodeConfig(data []byte, v interface{}) error {
 		return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
 	}
 	return nil
+}
+
+// ToPayload returns the payload of config.
+func ToPayload(sches, configs []string) map[string]interface{} {
+	payload := make(map[string]interface{})
+	for i, sche := range sches {
+		var config interface{}
+		err := DecodeConfig([]byte(configs[i]), &config)
+		if err != nil {
+			log.Error("failed to decode scheduler config",
+				zap.String("config", configs[i]),
+				zap.String("scheduler", sche),
+				errs.ZapError(err))
+			continue
+		}
+		payload[sche] = config
+	}
+	return payload
 }
 
 // ConfigDecoder used to decode the config.

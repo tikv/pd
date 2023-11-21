@@ -81,7 +81,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 			w.basicCluster.PutStore(core.NewStoreInfo(store))
 			return nil
 		}
-		w.basicCluster.PutStore(origin.Clone(core.SetStoreState(store.GetState(), store.GetPhysicallyDestroyed())))
+		w.basicCluster.PutStore(origin.Clone(core.SetStoreMeta(store)))
 		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {

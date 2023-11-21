@@ -260,7 +260,7 @@ func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
 	re.NoError(err)
 
 	leader1 := cluster.WaitLeader()
-	memberID := cluster.GetServer(leader1).GetLeader().GetMemberId()
+	memberID := cluster.GetLeaderServer().GetLeader().GetMemberId()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
@@ -321,6 +321,30 @@ func TestMoveLeader(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("move etcd leader does not return in 10 seconds")
 	}
+}
+
+func TestCampaignLeaderFrequently(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 5)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	leader := cluster.GetLeader()
+	re.NotEmpty(cluster.GetLeader())
+
+	for i := 0; i < 3; i++ {
+		cluster.GetLeaderServer().ResetPDLeader()
+		cluster.WaitLeader()
+	}
+	// leader should be changed when campaign leader frequently
+	cluster.WaitLeader()
+	re.NotEmpty(cluster.GetLeader())
+	re.NotEqual(leader, cluster.GetLeader())
 }
 
 func TestGetLeader(t *testing.T) {

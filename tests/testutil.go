@@ -197,6 +197,7 @@ func MustPutRegion(re *require.Assertions, cluster *TestCluster, regionID, store
 		Peers:       []*metapb.Peer{leader},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}
+	opts = append(opts, core.SetSource(core.Heartbeat))
 	r := core.NewRegionInfo(metaRegion, leader, opts...)
 	MustPutRegionInfo(re, cluster, r)
 	return r
@@ -298,6 +299,7 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
 	case apiMode:
+		re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 		s.cluster, err = NewTestAPICluster(s.ctx, 1, s.opts...)
 		re.NoError(err)
 		err = s.cluster.RunInitialServers()
@@ -305,11 +307,13 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		re.NotEmpty(s.cluster.WaitLeader())
 		leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
+		leaderServer.GetRaftCluster().SetPrepared()
 		// start scheduling cluster
 		tc, err := NewTestSchedulingCluster(s.ctx, 1, leaderServer.GetAddr())
 		re.NoError(err)
 		tc.WaitForPrimaryServing(re)
 		s.cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}
 }

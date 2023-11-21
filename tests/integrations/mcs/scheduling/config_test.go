@@ -93,6 +93,9 @@ func (suite *configTestSuite) TestConfigWatch() {
 	re.Equal(sc.DefaultSplitMergeInterval, watcher.GetScheduleConfig().SplitMergeInterval.Duration)
 	re.Equal("0.0.0", watcher.GetClusterVersion().String())
 	// Update the config and check if the scheduling config watcher can get the latest value.
+	testutil.Eventually(re, func() bool {
+		return watcher.GetReplicationConfig().MaxReplicas == 3
+	})
 	persistOpts := suite.pdLeaderServer.GetPersistOptions()
 	persistOpts.SetMaxReplicas(5)
 	persistConfig(re, suite.pdLeaderServer)
@@ -133,7 +136,6 @@ func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
 
 func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	re := suite.Require()
-
 	// Make sure the config is persisted before the watcher is created.
 	persistConfig(re, suite.pdLeaderServer)
 	// Create a config watcher.
@@ -147,8 +149,9 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	)
 	re.NoError(err)
 	// Get all default scheduler names.
-	var namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
+	var namesFromAPIServer []string
 	testutil.Eventually(re, func() bool {
+		namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
 		return len(namesFromAPIServer) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.

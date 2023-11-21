@@ -74,7 +74,7 @@ type GlobalConfigItem struct {
 	PayLoad   []byte
 }
 
-// Client is a PD (Placement Driver) client.
+// Client is a PD (Placement Driver) RPC client.
 // It should not be used after calling Close().
 type Client interface {
 	// GetClusterID gets the cluster ID from PD.
@@ -136,7 +136,7 @@ type Client interface {
 	LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error)
 	// StoreGlobalConfig set the config from etcd
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
-	// WatchGlobalConfig returns an stream with all global config and updates
+	// WatchGlobalConfig returns a stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error)
 	// UpdateOption updates the client option.
 	UpdateOption(option DynamicOption, value interface{}) error
@@ -1062,7 +1062,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer cmdDurationScanRegions.Observe(time.Since(start).Seconds())
+	defer func() { cmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx
