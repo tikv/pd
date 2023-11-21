@@ -1291,12 +1291,11 @@ func splitRegions(c *gin.Context) {
 		c.String(http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
-	rawSplitKeys := s.([]string)
+	rawSplitKeys := s.([]interface{})
 	if len(rawSplitKeys) < 1 {
 		c.String(http.StatusBadRequest, "empty split keys.")
 		return
 	}
-	fmt.Println(rawSplitKeys)
 	retryLimit := 5
 	if rl, ok := input["retry_limit"].(float64); ok {
 		retryLimit = int(rl)

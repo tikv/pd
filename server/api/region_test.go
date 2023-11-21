@@ -406,7 +406,7 @@ func (suite *regionTestSuite) TestScatterRegions() {
 func (suite *regionTestSuite) TestSplitRegions() {
 	re := suite.Require()
 	r1 := core.NewTestRegionInfo(601, 13, []byte("aaa"), []byte("ggg"))
-	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 13}, &metapb.Peer{Id: 6, StoreId: 13})
+	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
 	mustRegionHeartbeat(re, suite.svr, r1)
 	mustPutStore(re, suite.svr, 13, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
 	newRegionID := uint64(11)

@@ -996,7 +996,7 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
-	rawSplitKeys := s.([]string)
+	rawSplitKeys := s.([]interface{})
 	if len(rawSplitKeys) < 1 {
 		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
 		return

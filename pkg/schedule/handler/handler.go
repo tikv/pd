@@ -1221,14 +1221,14 @@ type SplitRegionsResponse struct {
 }
 
 // SplitRegions splits regions by split keys.
-func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []string, retryLimit int) (*SplitRegionsResponse, error) {
+func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []interface{}, retryLimit int) (*SplitRegionsResponse, error) {
 	co := h.GetCoordinator()
 	if co == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	splitKeys := make([][]byte, 0, len(rawSplitKeys))
 	for _, rawKey := range rawSplitKeys {
-		key, err := hex.DecodeString(rawKey)
+		key, err := hex.DecodeString(rawKey.(string))
 		if err != nil {
 			return nil, err
 		}
