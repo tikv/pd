@@ -86,7 +86,7 @@ func (conf *evictSlowTrendSchedulerConfig) Clone() *evictSlowTrendSchedulerConfi
 }
 
 func (conf *evictSlowTrendSchedulerConfig) PersistLocked() error {
-	name := conf.getSchedulerName()
+	name := EvictSlowTrendName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
@@ -97,11 +97,9 @@ func (conf *evictSlowTrendSchedulerConfig) PersistLocked() error {
 	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
-func (conf *evictSlowTrendSchedulerConfig) getSchedulerName() string {
-	return EvictSlowTrendName
-}
-
 func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
 	return conf.EvictedStores
 }
 
@@ -113,6 +111,8 @@ func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 }
 
 func (conf *evictSlowTrendSchedulerConfig) hasEvictedStores() bool {
+	conf.RLock()
+	defer conf.RUnlock()
 	return len(conf.EvictedStores) > 0
 }
 
@@ -120,6 +120,8 @@ func (conf *evictSlowTrendSchedulerConfig) evictedStore() uint64 {
 	if !conf.hasEvictedStores() {
 		return 0
 	}
+	conf.RLock()
+	defer conf.RUnlock()
 	// If a candidate passes all checks and proved to be slow, it will be
 	// recorded in `conf.EvictStores`, and `conf.lastEvictCandidate` will record
 	// the captured timestamp of this store.
@@ -127,18 +129,26 @@ func (conf *evictSlowTrendSchedulerConfig) evictedStore() uint64 {
 }
 
 func (conf *evictSlowTrendSchedulerConfig) candidate() uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
 	return conf.evictCandidate.storeID
 }
 
 func (conf *evictSlowTrendSchedulerConfig) captureTS() time.Time {
+	conf.RLock()
+	defer conf.RUnlock()
 	return conf.evictCandidate.captureTS
 }
 
 func (conf *evictSlowTrendSchedulerConfig) candidateCapturedSecs() uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
 	return DurationSinceAsSecs(conf.evictCandidate.captureTS)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) lastCapturedCandidate() *slowCandidate {
+	conf.RLock()
+	defer conf.RUnlock()
 	return &conf.lastEvictCandidate
 }
 
@@ -158,6 +168,8 @@ func (conf *evictSlowTrendSchedulerConfig) readyForRecovery() bool {
 }
 
 func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
+	conf.Lock()
+	defer conf.Unlock()
 	conf.evictCandidate = slowCandidate{
 		storeID:   id,
 		captureTS: time.Now(),
@@ -169,6 +181,8 @@ func (conf *evictSlowTrendSchedulerConfig) captureCandidate(id uint64) {
 }
 
 func (conf *evictSlowTrendSchedulerConfig) popCandidate(updLast bool) uint64 {
+	conf.Lock()
+	defer conf.Unlock()
 	id := conf.evictCandidate.storeID
 	if updLast {
 		conf.lastEvictCandidate = conf.evictCandidate
@@ -178,12 +192,16 @@ func (conf *evictSlowTrendSchedulerConfig) popCandidate(updLast bool) uint64 {
 }
 
 func (conf *evictSlowTrendSchedulerConfig) markCandidateRecovered() {
+	conf.Lock()
+	defer conf.Unlock()
 	if conf.lastEvictCandidate != (slowCandidate{}) {
 		conf.lastEvictCandidate.recoverTS = time.Now()
 	}
 }
 
 func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
+	conf.Lock()
+	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	return conf.PersistLocked()
 }
@@ -199,6 +217,8 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 		address = store.GetAddress()
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(address, strconv.FormatUint(oldID, 10)).Set(0)
+	conf.Lock()
+	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
 	return oldID, conf.PersistLocked()
 }

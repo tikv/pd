@@ -75,7 +75,7 @@ func (conf *evictSlowStoreSchedulerConfig) Clone() *evictSlowStoreSchedulerConfi
 }
 
 func (conf *evictSlowStoreSchedulerConfig) PersistLocked() error {
-	name := conf.getSchedulerName()
+	name := EvictSlowStoreName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
@@ -86,11 +86,9 @@ func (conf *evictSlowStoreSchedulerConfig) PersistLocked() error {
 	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getSchedulerName() string {
-	return EvictSlowStoreName
-}
-
 func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
 	return conf.EvictedStores
 }
 
@@ -102,10 +100,10 @@ func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 }
 
 func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
-	if len(conf.EvictedStores) == 0 {
+	if len(conf.getStores()) == 0 {
 		return 0
 	}
-	return conf.EvictedStores[0]
+	return conf.getStores()[0]
 }
 
 // readyForRecovery checks whether the last cpatured candidate is ready for recovery.
@@ -120,6 +118,8 @@ func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 }
 
 func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
+	conf.Lock()
+	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
 	return conf.PersistLocked()
@@ -127,6 +127,8 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
 	oldID = conf.evictStore()
+	conf.Lock()
+	defer conf.Unlock()
 	if oldID > 0 {
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
