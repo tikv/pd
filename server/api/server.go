@@ -96,11 +96,6 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				mcs.SchedulingServiceName,
 				[]string{http.MethodPost}),
 			serverapi.MicroserviceRedirectRule(
-				prefix+"/regions/accelerate-schedule/batch",
-				scheapi.APIPathPrefix+"/regions/accelerate-schedule/batch",
-				mcs.SchedulingServiceName,
-				[]string{http.MethodPost}),
-			serverapi.MicroserviceRedirectRule(
 				prefix+"/regions/scatter",
 				scheapi.APIPathPrefix+"/regions/scatter",
 				mcs.SchedulingServiceName,
