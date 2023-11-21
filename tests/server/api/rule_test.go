@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -1008,8 +1009,7 @@ func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
 		},
 	}
 	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	// FIXME: enable this test in two modes after we support region label forward.
-	env.RunTestInPDMode(suite.checkRegionPlacementRule)
+	env.RunTestInTwoModes(suite.checkRegionPlacementRule)
 }
 
 func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCluster) {
@@ -1076,37 +1076,79 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	})
 	fit := &placement.RegionFit{}
 
-	url := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
-	err := tu.ReadGetJSON(re, testDialClient, url, fit)
+	u := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
+	err := tu.ReadGetJSON(re, testDialClient, u, fit)
 	suite.NoError(err)
 	suite.Equal(len(fit.RuleFits), 1)
 	suite.Equal(len(fit.OrphanPeers), 1)
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 2)
+	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 2)
 	fit = &placement.RegionFit{}
-	err = tu.ReadGetJSON(re, testDialClient, url, fit)
+	err = tu.ReadGetJSON(re, testDialClient, u, fit)
 	suite.NoError(err)
 	suite.Equal(len(fit.RuleFits), 2)
 	suite.Equal(len(fit.OrphanPeers), 0)
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 3)
+	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 3)
 	fit = &placement.RegionFit{}
-	err = tu.ReadGetJSON(re, testDialClient, url, fit)
+	err = tu.ReadGetJSON(re, testDialClient, u, fit)
 	suite.NoError(err)
 	suite.Equal(len(fit.RuleFits), 0)
 	suite.Equal(len(fit.OrphanPeers), 2)
 
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 4)
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusNotFound), tu.StringContain(
+	var label labeler.LabelRule
+	escapedID := url.PathEscape("keyspaces/0")
+	u = fmt.Sprintf("%s/config/region-label/rule/%s", urlPrefix, escapedID)
+	err = tu.ReadGetJSON(re, testDialClient, u, &label)
+	suite.NoError(err)
+	suite.Equal(label.ID, "keyspaces/0")
+
+	var labels []labeler.LabelRule
+	u = fmt.Sprintf("%s/config/region-label/rules", urlPrefix)
+	err = tu.ReadGetJSON(re, testDialClient, u, &labels)
+	suite.NoError(err)
+	suite.Len(labels, 1)
+	suite.Equal(labels[0].ID, "keyspaces/0")
+
+	u = fmt.Sprintf("%s/config/region-label/rules/ids", urlPrefix)
+	err = tu.CheckGetJSON(testDialClient, u, []byte(`["rule1", "rule3"]`), func(resp []byte, statusCode int, _ http.Header) {
+		err := json.Unmarshal(resp, &labels)
+		suite.NoError(err)
+		suite.Len(labels, 0)
+	})
+	suite.NoError(err)
+
+	err = tu.CheckGetJSON(testDialClient, u, []byte(`["keyspaces/0"]`), func(resp []byte, statusCode int, _ http.Header) {
+		err := json.Unmarshal(resp, &labels)
+		suite.NoError(err)
+		suite.Len(labels, 1)
+		suite.Equal(labels[0].ID, "keyspaces/0")
+	})
+	suite.NoError(err)
+
+	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 4)
+	err = tu.CheckGetJSON(testDialClient, u, nil, tu.Status(re, http.StatusNotFound), tu.StringContain(
 		re, "region 4 not found"))
 	suite.NoError(err)
 
-	url = fmt.Sprintf("%s/config/rules/region/%s/detail", urlPrefix, "id")
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest), tu.StringContain(
+	u = fmt.Sprintf("%s/config/rules/region/%s/detail", urlPrefix, "id")
+	err = tu.CheckGetJSON(testDialClient, u, nil, tu.Status(re, http.StatusBadRequest), tu.StringContain(
 		re, errs.ErrRegionInvalidID.Error()))
 	suite.NoError(err)
 
-	leaderServer.GetRaftCluster().GetReplicationConfig().EnablePlacementRules = false
-	url = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusPreconditionFailed), tu.StringContain(
+	data := make(map[string]interface{})
+	data["enable-placement-rules"] = "false"
+	reqData, e := json.Marshal(data)
+	re.NoError(e)
+	u = fmt.Sprintf("%s/config", urlPrefix)
+	err = tu.CheckPostJSON(testDialClient, u, reqData, tu.StatusOK(re))
+	re.NoError(err)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		// wait for the scheduler server to update the config
+		tu.Eventually(re, func() bool {
+			return !sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled()
+		})
+	}
+	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
+	err = tu.CheckGetJSON(testDialClient, u, nil, tu.Status(re, http.StatusPreconditionFailed), tu.StringContain(
 		re, "placement rules feature is disabled"))
 	suite.NoError(err)
 }

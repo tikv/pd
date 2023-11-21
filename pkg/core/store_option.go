@@ -274,3 +274,23 @@ func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 		store.lastAwakenTime = lastAwaken
 	}
 }
+
+// SetStoreMeta sets the meta for the store.
+func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.Version = newMeta.GetVersion()
+		meta.GitHash = newMeta.GetGitHash()
+		meta.Address = newMeta.GetAddress()
+		meta.StatusAddress = newMeta.GetStatusAddress()
+		meta.PeerAddress = newMeta.GetPeerAddress()
+		meta.StartTimestamp = newMeta.GetStartTimestamp()
+		meta.DeployPath = newMeta.GetDeployPath()
+		meta.LastHeartbeat = newMeta.GetLastHeartbeat()
+		meta.State = newMeta.GetState()
+		meta.Labels = newMeta.GetLabels()
+		meta.NodeState = newMeta.GetNodeState()
+		meta.PhysicallyDestroyed = newMeta.GetPhysicallyDestroyed()
+		store.meta = meta
+	}
+}

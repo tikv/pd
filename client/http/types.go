@@ -246,3 +246,34 @@ type Rule struct {
 	Version          uint64            `json:"version,omitempty"`           // only set at runtime, add 1 each time rules updated, begin from 0.
 	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`  // only set at runtime, recorded rule create timestamp
 }
+
+// GroupBundle represents a rule group and all rules belong to the group.
+type GroupBundle struct {
+	ID       string  `json:"group_id"`
+	Index    int     `json:"group_index"`
+	Override bool    `json:"group_override"`
+	Rules    []*Rule `json:"rules"`
+}
+
+// RegionLabel is the label of a region.
+type RegionLabel struct {
+	Key     string `json:"key"`
+	Value   string `json:"value"`
+	TTL     string `json:"ttl,omitempty"`
+	StartAt string `json:"start_at,omitempty"`
+}
+
+// LabelRule is the rule to assign labels to a region.
+type LabelRule struct {
+	ID       string        `json:"id"`
+	Index    int           `json:"index"`
+	Labels   []RegionLabel `json:"labels"`
+	RuleType string        `json:"rule_type"`
+	Data     interface{}   `json:"data"`
+}
+
+// LabelRulePatch is the patch to update the label rules.
+type LabelRulePatch struct {
+	SetRules    []*LabelRule `json:"sets"`
+	DeleteRules []string     `json:"deletes"`
+}

@@ -503,7 +503,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := tests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
+	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, serverName string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -528,7 +528,6 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		args := []string{"-u", pdAddr, "keyspace-group"}
 		output, err := pdctl.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
 		re.NoError(err)
-
 		err = json.Unmarshal(output, &keyspaceGroup)
 		re.NoError(err)
 		re.Equal(utils.DefaultKeyspaceGroupID, keyspaceGroup.ID)

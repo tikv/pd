@@ -186,7 +186,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedulers.EncodeConfig(s.conf)
 }
 
-func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
+func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	var res error
@@ -198,7 +198,7 @@ func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	return res
 }
 
-func (s *evictLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
+func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {

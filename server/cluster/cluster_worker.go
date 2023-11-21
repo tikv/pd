@@ -38,6 +38,9 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		return err
 	}
 
+	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+		return nil
+	}
 	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
 	return nil
 }

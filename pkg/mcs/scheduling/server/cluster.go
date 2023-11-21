@@ -381,8 +381,7 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 		return errors.Errorf("store %v not found", storeID)
 	}
 
-	nowTime := time.Now()
-	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
+	newStore := store.Clone(core.SetStoreStats(stats))
 
 	if store := c.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
@@ -486,10 +485,6 @@ func (c *Cluster) collectMetrics() {
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
-	c.collectClusterMetrics()
-}
-
-func (c *Cluster) collectClusterMetrics() {
 	if c.regionStats == nil {
 		return
 	}
@@ -501,20 +496,8 @@ func (c *Cluster) collectClusterMetrics() {
 
 func (c *Cluster) resetMetrics() {
 	statistics.Reset()
-
-	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
-	c.coordinator.ResetHotSpotMetrics()
-	c.resetClusterMetrics()
-}
-
-func (c *Cluster) resetClusterMetrics() {
-	if c.regionStats == nil {
-		return
-	}
-	c.regionStats.Reset()
-	c.labelStats.Reset()
-	// reset hot cache metrics
-	c.hotStat.ResetMetrics()
+	schedulers.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.
@@ -536,6 +519,11 @@ func (c *Cluster) StopBackgroundJobs() {
 	c.coordinator.Stop()
 	c.cancel()
 	c.wg.Wait()
+}
+
+// IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.
+func (c *Cluster) IsBackgroundJobsRunning() bool {
+	return c.running.Load()
 }
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
