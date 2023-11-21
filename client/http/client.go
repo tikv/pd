@@ -159,11 +159,12 @@ func (c *client) Close() {
 	log.Info("[pd] http client closed")
 }
 
-// WithRespHandler sets the client with the given HTTP response handler.
+// WithRespHandler sets and returns a new client with the given HTTP response handler.
 // This allows the caller to customize how the response is handled, including error handling logic.
 func (c *client) WithRespHandler(handler func(resp *http.Response) error) Client {
-	c.respHandler = handler
-	return c
+	newClient := *c
+	newClient.respHandler = handler
+	return &newClient
 }
 
 func (c *client) reqCounter(name, status string) {
