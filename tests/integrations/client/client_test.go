@@ -158,6 +158,10 @@ func TestLeaderTransfer(t *testing.T) {
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
 	defer cluster.Destroy()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints)
