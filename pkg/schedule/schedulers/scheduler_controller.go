@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -280,7 +281,7 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
 func (c *Controller) ReloadSchedulerConfig(name string) error {
 	if exist, _ := c.IsSchedulerExisted(name); !exist {
-		return nil
+		return fmt.Errorf("scheduler %s is not existed", name)
 	}
 	return c.GetScheduler(name).ReloadConfig()
 }
