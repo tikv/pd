@@ -24,7 +24,6 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/cache"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
@@ -155,9 +154,6 @@ func (cw *Watcher) initializeConfigWatcher() error {
 
 func (cw *Watcher) initializeTTLConfigWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
-		if cw.ttl == nil {
-			cw.ttl = cache.NewStringTTL(cw.ctx, time.Second*5, time.Minute*5)
-		}
 		key := string(kv.Key)[len(sc.TTLConfigPrefix)+1:]
 		value := string(kv.Value)
 		leaseID := kv.Lease

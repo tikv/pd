@@ -234,7 +234,7 @@ type PersistConfig struct {
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
-func NewPersistConfig(cfg *Config) *PersistConfig {
+func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 	o := &PersistConfig{}
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.schedule.Store(&cfg.Schedule)
@@ -242,7 +242,7 @@ func NewPersistConfig(cfg *Config) *PersistConfig {
 	// storeConfig will be fetched from TiKV by PD API server,
 	// so we just set an empty value here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
-	o.ttl = nil
+	o.ttl = ttl
 	return o
 }
 

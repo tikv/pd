@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/sysutil"
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -534,7 +535,7 @@ func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 		BaseServer:        server.NewBaseServer(ctx),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		cfg:               cfg,
-		persistConfig:     config.NewPersistConfig(cfg),
+		persistConfig:     config.NewPersistConfig(cfg, cache.NewStringTTL(ctx, time.Second*5, time.Minute*5)),
 		checkMembershipCh: make(chan struct{}, 1),
 	}
 	return svr
