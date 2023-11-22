@@ -127,21 +127,21 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	tc.WaitForPrimaryServing(re)
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
-	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
-		return ok && oldPrimaryAddr == watchedAddr
+		return ok && oldPrimaryAddr == watchedAddr &&
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
 	})
-	// transfer leader
+	// change primary
 	primary.Close()
 	tc.WaitForPrimaryServing(re)
 	primary = tc.GetPrimaryServer()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
-	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
-		return ok && newPrimaryAddr == watchedAddr
+		return ok && newPrimaryAddr == watchedAddr &&
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
 	})
 }
 
