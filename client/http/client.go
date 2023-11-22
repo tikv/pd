@@ -69,7 +69,11 @@ type Client interface {
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 
 	/* Client-related methods */
-	WithRespHandler(func(resp *http.Response) error) Client
+	// WithRespHandler sets and returns a new client with the given HTTP response handler.
+	// This allows the caller to customize how the response is handled, including error handling logic.
+	// Additionally, it is important for the caller to handle the content of the response body properly
+	// in order to ensure that it can be read and marshaled correctly into `res`.
+	WithRespHandler(func(resp *http.Response, res interface{}) error) Client
 	Close()
 }
 
@@ -80,7 +84,7 @@ type client struct {
 	tlsConf *tls.Config
 	cli     *http.Client
 
-	respHandler func(resp *http.Response) error
+	respHandler func(resp *http.Response, res interface{}) error
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
@@ -160,8 +164,9 @@ func (c *client) Close() {
 }
 
 // WithRespHandler sets and returns a new client with the given HTTP response handler.
-// This allows the caller to customize how the response is handled, including error handling logic.
-func (c *client) WithRespHandler(handler func(resp *http.Response) error) Client {
+func (c *client) WithRespHandler(
+	handler func(resp *http.Response, res interface{}) error,
+) Client {
 	newClient := *c
 	newClient.respHandler = handler
 	return &newClient
@@ -231,7 +236,7 @@ func (c *client) request(
 
 	// Give away the response handling to the caller if the handler is set.
 	if c.respHandler != nil {
-		return c.respHandler(resp)
+		return c.respHandler(resp, res)
 	}
 
 	defer func() {
