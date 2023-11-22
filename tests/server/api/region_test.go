@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -100,7 +101,9 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
 	}
-	suite.Len(idList, 2)
+	testutil.Eventually(re, func() bool {
+		return len(idList) == 2
+	})
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
@@ -130,7 +133,9 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
 	}
-	suite.Len(idList, 4)
+	testutil.Eventually(re, func() bool {
+		return len(idList) == 4
+	})
 }
 
 func (suite *regionTestSuite) TestScatterRegions() {
