@@ -63,6 +63,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedMode", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 
@@ -148,6 +149,7 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	suite.clean()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedMode"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 }
 
 func (suite *resourceManagerClientTestSuite) TearDownTest() {

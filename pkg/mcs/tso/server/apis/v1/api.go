@@ -15,6 +15,7 @@
 package apis
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"sync"
@@ -150,6 +151,7 @@ type ResetTSParams struct {
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  403  {string}  string  "Reset ts is forbidden."
 // @Failure  500  {string}  string  "TSO server failed to proceed the request."
+// @Failure  503  {string}  string  "It's a temporary failure, please retry."
 // @Router   /admin/reset-ts [post]
 // if force-use-larger=true:
 //
@@ -185,6 +187,12 @@ func ResetTS(c *gin.Context) {
 	if err = svr.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
 		if err == errs.ErrServerNotStarted {
 			c.String(http.StatusInternalServerError, err.Error())
+		} else if err == errs.ErrEtcdTxnConflict {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+			// Return 503 to let the client retry.
+			// Ref: https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4
+			c.String(http.StatusServiceUnavailable,
+				fmt.Sprintf("It's a temporary failure with error %s, please retry.", err.Error()))
 		} else {
 			c.String(http.StatusForbidden, err.Error())
 		}

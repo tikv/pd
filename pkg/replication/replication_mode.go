@@ -442,15 +442,6 @@ func (m *ModeManager) tickUpdateState() {
 	canSync := primaryHasVoter && drHasVoter
 	hasMajority := totalUpVoter*2 > totalVoter
 
-	log.Debug("replication store status",
-		zap.Uint64s("up-primary", storeIDs[primaryUp]),
-		zap.Uint64s("up-dr", storeIDs[drUp]),
-		zap.Uint64s("down-primary", storeIDs[primaryDown]),
-		zap.Uint64s("down-dr", storeIDs[drDown]),
-		zap.Bool("can-sync", canSync),
-		zap.Bool("has-majority", hasMajority),
-	)
-
 	/*
 
 	           +----+      all region sync     +------------+
@@ -469,7 +460,8 @@ func (m *ModeManager) tickUpdateState() {
 
 	*/
 
-	switch m.drGetState() {
+	state := m.drGetState()
+	switch state {
 	case drStateSync:
 		// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
 		if !canSync && hasMajority {
@@ -511,6 +503,19 @@ func (m *ModeManager) tickUpdateState() {
 			}
 		}
 	}
+
+	logFunc := log.Debug
+	if state != m.drGetState() {
+		logFunc = log.Info
+	}
+	logFunc("replication store status",
+		zap.Uint64s("up-primary", storeIDs[primaryUp]),
+		zap.Uint64s("up-dr", storeIDs[drUp]),
+		zap.Uint64s("down-primary", storeIDs[primaryDown]),
+		zap.Uint64s("down-dr", storeIDs[drDown]),
+		zap.Bool("can-sync", canSync),
+		zap.Bool("has-majority", hasMajority),
+	)
 }
 
 func (m *ModeManager) tickReplicateStatus() {
