@@ -392,6 +392,11 @@ func (suite *APIServerForwardTestSuite) TestResignAPIPrimaryForward() {
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
+
 	for j := 0; j < 10; j++ {
 		suite.pdLeader.ResignLeader()
 		suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
