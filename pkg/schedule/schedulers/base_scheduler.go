@@ -95,7 +95,7 @@ func (s *BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 }
 
 // Prepare does some prepare work
-func (s *BaseScheduler) Prepare(cluster sche.SchedulerCluster) error { return nil }
+func (s *BaseScheduler) PrepareConfig(cluster sche.SchedulerCluster) error { return nil }
 
 // Cleanup does some cleanup work
-func (s *BaseScheduler) Cleanup(cluster sche.SchedulerCluster) {}
+func (s *BaseScheduler) CleanupConfig(cluster sche.SchedulerCluster) {}
