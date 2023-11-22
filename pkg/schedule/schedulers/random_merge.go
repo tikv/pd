@@ -48,6 +48,7 @@ var (
 type randomMergeSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 
 type randomMergeScheduler struct {
