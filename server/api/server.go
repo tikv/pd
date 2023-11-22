@@ -111,11 +111,6 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
-				prefix+"/config/region-label",
-				scheapi.APIPathPrefix+"/config/region-label",
-				mcs.SchedulingServiceName,
-				[]string{http.MethodGet}),
-			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/region-label/rules",
 				scheapi.APIPathPrefix+"/config/region-label/rules",
 				mcs.SchedulingServiceName,
