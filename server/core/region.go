@@ -37,7 +37,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const randomRegionMaxRetry = 10
+const (
+	randomRegionMaxRetry = 10
+	scanRegionLimit      = 1000
+)
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
@@ -144,9 +147,8 @@ const (
 func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
+	// The size of empty region will be correct by the previous RegionInfo.
 	regionSize := heartbeat.GetApproximateSize() / units.MiB
-	// Due to https://github.com/tikv/tikv/pull/11170, if region size is not initialized,
-	// approximate size will be zero, and region size is zero not EmptyRegionApproximateSize
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
@@ -189,9 +191,19 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 	return region
 }
 
-// InheritBuckets inherits the buckets from the parent region if bucket enabled.
-func (r *RegionInfo) InheritBuckets(origin *RegionInfo) {
-	if origin != nil && r.buckets == nil {
+// Inherit inherits the buckets and region size from the parent region if bucket enabled.
+// correct approximate size and buckets by the previous size if here exists a reported RegionInfo.
+// See https://github.com/tikv/tikv/issues/11114
+func (r *RegionInfo) Inherit(origin *RegionInfo, bucketEnable bool) {
+	// regionSize should not be zero if region is not empty.
+	if r.GetApproximateSize() == 0 {
+		if origin != nil {
+			r.approximateSize = origin.approximateSize
+		} else {
+			r.approximateSize = EmptyRegionApproximateSize
+		}
+	}
+	if bucketEnable && origin != nil && r.buckets == nil {
 		r.buckets = origin.buckets
 	}
 }
@@ -467,13 +479,6 @@ func (r *RegionInfo) GetBuckets() *metapb.Buckets {
 // GetApproximateSize returns the approximate size of the region.
 func (r *RegionInfo) GetApproximateSize() int64 {
 	return r.approximateSize
-}
-
-// IsEmptyRegion returns whether the region is empty.
-func (r *RegionInfo) IsEmptyRegion() bool {
-	// When cluster resumes, the region size may be not initialized, but region heartbeat is send.
-	// So use `==` here.
-	return r.approximateSize == EmptyRegionApproximateSize
 }
 
 // GetApproximateKeys returns the approximate keys of the region.
@@ -1420,16 +1425,31 @@ func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(regio
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	r.t.RLock()
-	defer r.t.RUnlock()
 	var size int64
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-			return false
+	for {
+		r.t.RLock()
+		var cnt int
+		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+				return false
+			}
+			if cnt >= scanRegionLimit {
+				return false
+			}
+			cnt++
+			startKey = region.GetEndKey()
+			size += region.GetApproximateSize()
+			return true
+		})
+		r.t.RUnlock()
+		if cnt == 0 {
+			break
 		}
-		size += region.GetApproximateSize()
-		return true
-	})
+		if len(startKey) == 0 {
+			break
+		}
+	}
+
 	return size
 }
 

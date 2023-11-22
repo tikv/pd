@@ -843,9 +843,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if err != nil {
 		return err
 	}
-	if c.GetStoreConfig().IsEnableRegionBucket() {
-		region.InheritBuckets(origin)
-	}
+	region.Inherit(origin, c.storeConfigManager.GetStoreConfig().IsEnableRegionBucket())
 
 	c.hotStat.CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	c.hotStat.CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
@@ -1560,12 +1558,13 @@ func (c *RaftCluster) checkStores() {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
+						zap.Int("region-count", c.GetRegionCount()),
 						errs.ZapError(err))
 				}
 			} else if c.IsPrepared() {
 				threshold := c.getThreshold(stores, store)
-				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
 				regionSize := float64(store.GetRegionSize())
+				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
 				if regionSize >= threshold {
 					if err := c.ReadyToServe(storeID); err != nil {
 						log.Error("change store to serving failed",
