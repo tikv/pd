@@ -112,6 +112,41 @@ func (suite *ruleCheckerTestSuite) TestAddRulePeerWithIsolationLevel() {
 	suite.Equal(uint64(4), op.Step(0).(operator.AddLearner).ToStore)
 }
 
+func (suite *ruleCheckerTestSuite) TestReplaceDownPeerWithIsolationLevel() {
+	suite.cluster.SetMaxStoreDownTime(100 * time.Millisecond)
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h2"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2", "host": "h3"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2", "host": "h4"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3", "host": "h5"})
+	suite.cluster.AddLabelsStore(6, 1, map[string]string{"zone": "z3", "host": "h6"})
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 3, 5)
+	suite.ruleManager.DeleteRule("pd", "default")
+	suite.ruleManager.SetRule(&placement.Rule{
+		GroupID:        "pd",
+		ID:             "test",
+		Index:          100,
+		Override:       true,
+		Role:           placement.Voter,
+		Count:          3,
+		LocationLabels: []string{"zone", "host"},
+		IsolationLevel: "zone",
+	})
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.Nil(op)
+	region := suite.cluster.GetRegion(1)
+	downPeer := []*pdpb.PeerStats{
+		{Peer: region.GetStorePeer(5), DownSeconds: 6000},
+	}
+	region = region.Clone(core.WithDownPeers(downPeer))
+	suite.cluster.PutRegion(region)
+	suite.cluster.SetStoreDown(5)
+	suite.cluster.SetStoreDown(6)
+	time.Sleep(200 * time.Millisecond)
+	op = suite.rc.Check(suite.cluster.GetRegion(1))
+	suite.Nil(op)
+}
+
 func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	suite.cluster.AddLeaderStore(1, 1)
 	suite.cluster.AddLeaderStore(2, 1)
