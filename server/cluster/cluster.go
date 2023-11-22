@@ -41,15 +41,14 @@ import (
 	"github.com/tikv/pd/pkg/gctuner"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/replication"
-	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
-	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
@@ -179,7 +178,7 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
 	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:    ctx,
@@ -187,6 +186,8 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.
 		regionSyncer: regionSyncer,
 		httpClient:   httpClient,
 		etcdClient:   etcdClient,
+		core:         basicCluster,
+		storage:      storage,
 	}
 }
 
@@ -259,11 +260,9 @@ func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 func (c *RaftCluster) InitCluster(
 	id id.Allocator,
 	opt sc.ConfProvider,
-	storage storage.Storage,
-	basicCluster *core.BasicCluster,
 	hbstreams *hbstream.HeartbeatStreams,
-	keyspaceGroupManager *keyspace.GroupManager) {
-	c.core, c.opt, c.storage, c.id = basicCluster, opt.(*config.PersistOptions), storage, id
+	keyspaceGroupManager *keyspace.GroupManager) error {
+	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
@@ -271,7 +270,15 @@ func (c *RaftCluster) InitCluster(
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
-	c.schedulingController = newSchedulingController(c.ctx)
+	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
+	if c.opt.IsPlacementRulesEnabled() {
+		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
+		if err != nil {
+			return err
+		}
+	}
+	c.schedulingController = newSchedulingController(c.ctx, c.core, c.opt, c.ruleManager)
+	return nil
 }
 
 // Start starts a cluster.
@@ -285,7 +292,10 @@ func (c *RaftCluster) Start(s Server) error {
 	}
 
 	c.isAPIServiceMode = s.IsAPIServiceMode()
-	c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetStorage(), s.GetBasicCluster(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	err := c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	if err != nil {
+		return err
+	}
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -294,24 +304,21 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 
-	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
-	if c.opt.IsPlacementRulesEnabled() {
-		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
-		if err != nil {
-			return err
-		}
-	}
 	c.regionLabeler, err = labeler.NewRegionLabeler(c.ctx, c.storage, regionLabelGCInterval)
 	if err != nil {
 		return err
 	}
 
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+		for _, store := range c.GetStores() {
+			storeID := store.GetID()
+			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
+		}
+	}
 	c.replicationMode, err = replication.NewReplicationModeManager(s.GetConfig().ReplicationMode, c.storage, cluster, s)
 	if err != nil {
 		return err
 	}
-
-	c.schedulingController.init(c.core, c.opt, schedule.NewCoordinator(c.ctx, c, c.GetHeartbeatStreams()), c.ruleManager)
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.externalTS, err = c.storage.LoadExternalTS()
 	if err != nil {
@@ -326,6 +333,7 @@ func (c *RaftCluster) Start(s Server) error {
 			return err
 		}
 	}
+	c.checkServices()
 	c.wg.Add(9)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
@@ -341,25 +349,39 @@ func (c *RaftCluster) Start(s Server) error {
 	return nil
 }
 
+var once sync.Once
+
+func (c *RaftCluster) checkServices() {
+	if c.isAPIServiceMode {
+		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
+		if err != nil || len(servers) == 0 {
+			c.startSchedulingJobs(c, c.hbstreams)
+			c.independentServices.Delete(mcsutils.SchedulingServiceName)
+		} else {
+			if c.stopSchedulingJobs() {
+				c.initCoordinator(c.ctx, c, c.hbstreams)
+			} else {
+				once.Do(func() {
+					c.initCoordinator(c.ctx, c, c.hbstreams)
+				})
+			}
+			c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+		}
+	} else {
+		c.startSchedulingJobs(c, c.hbstreams)
+		c.independentServices.Delete(mcsutils.SchedulingServiceName)
+	}
+}
+
 func (c *RaftCluster) runServiceCheckJob() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	var once sync.Once
-
-	checkFn := func() {
-		if c.isAPIServiceMode {
-			once.Do(c.initSchedulers)
-			c.independentServices.Store(mcsutils.SchedulingServiceName, true)
-			return
-		}
-		if c.startSchedulingJobs() {
-			c.independentServices.Delete(mcsutils.SchedulingServiceName)
-		}
-	}
-	checkFn()
-
 	ticker := time.NewTicker(serviceCheckInterval)
+	failpoint.Inject("highFrequencyClusterJobs", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(time.Millisecond)
+	})
 	defer ticker.Stop()
 
 	for {
@@ -368,7 +390,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 			log.Info("service check job is stopped")
 			return
 		case <-ticker.C:
-			checkFn()
+			c.checkServices()
 		}
 	}
 }
@@ -621,12 +643,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Int("count", c.core.GetTotalRegionCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		for _, store := range c.GetStores() {
-			storeID := store.GetID()
-			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
-		}
-	}
+
 	return c, nil
 }
 
@@ -637,7 +654,7 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Stop()
-		ticker = time.NewTicker(time.Microsecond)
+		ticker = time.NewTicker(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -717,14 +734,14 @@ func (c *RaftCluster) Stop() {
 		return
 	}
 	c.running = false
+	c.cancel()
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	c.cancel()
 	c.Unlock()
 
 	c.wg.Wait()
-	log.Info("raftcluster is stopped")
+	log.Info("raft cluster is stopped")
 }
 
 // IsRunning return if the cluster is running.
@@ -747,16 +764,6 @@ func (c *RaftCluster) Context() context.Context {
 // GetHeartbeatStreams returns the heartbeat streams.
 func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 	return c.hbstreams
-}
-
-// GetCoordinator returns the coordinator.
-func (c *RaftCluster) GetCoordinator() *schedule.Coordinator {
-	return c.coordinator
-}
-
-// GetOperatorController returns the operator controller.
-func (c *RaftCluster) GetOperatorController() *operator.Controller {
-	return c.coordinator.GetOperatorController()
 }
 
 // AllocID returns a global unique ID.
@@ -997,7 +1004,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	// Mark isNew if the region in cache does not have leader.
 	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) && !saveKV && !saveCache && !isNew {
+	if !saveKV && !saveCache && !isNew {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1028,9 +1035,11 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionUpdateCacheEventCounter.Inc()
 	}
 
+	isPrepared := true
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, c.IsPrepared())
+		isPrepared = c.IsPrepared()
 	}
+	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, isPrepared)
 
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if

@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	pdoperator "github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -285,10 +285,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
 			expectedError:       nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 1}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 1}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 		{
@@ -297,11 +297,11 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError:       nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 2}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
-				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 2}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
+				operator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
 			}),
 		},
 		{
@@ -316,11 +316,11 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			placementRuleEnable: true,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 3}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 3}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
 			}),
 		},
 		{
@@ -377,10 +377,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError: nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 5}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 5}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 		{
@@ -417,10 +417,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader", "follower"]}`),
 			expectedError: nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 6}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 6}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 	}
@@ -461,7 +461,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			// add customized rule first and then remove default rule
 			err := manager.SetRules(testCase.rules)
 			suite.NoError(err)
-			err = manager.DeleteRule("pd", "default")
+			err = manager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 			suite.NoError(err)
 		}
 		if testCase.expectedError == nil {

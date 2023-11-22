@@ -473,7 +473,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -1043,7 +1043,7 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
 		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		defaultRule := rc.GetRuleManager().GetRule("pd", "default")
+		defaultRule := rc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 
 		CheckInDefaultRule := func() error {
 			// replication config won't work when placement rule is enabled and exceeds one default rule

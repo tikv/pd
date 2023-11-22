@@ -88,8 +88,8 @@ type Coordinator struct {
 }
 
 // NewCoordinator creates a new Coordinator.
-func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
-	ctx, cancel := context.WithCancel(ctx)
+func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
+	ctx, cancel := context.WithCancel(parentCtx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
 	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
@@ -714,7 +714,7 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 }
 
 // ResetHotSpotMetrics resets hot spot metrics.
-func (c *Coordinator) ResetHotSpotMetrics() {
+func ResetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
 	schedulers.HotPendingSum.Reset()
 }

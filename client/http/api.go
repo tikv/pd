@@ -17,24 +17,61 @@ package http
 import (
 	"fmt"
 	"net/url"
+	"time"
 )
 
 // The following constants are the paths of PD HTTP APIs.
 const (
-	HotRead             = "/pd/api/v1/hotspot/regions/read"
-	HotWrite            = "/pd/api/v1/hotspot/regions/write"
-	Regions             = "/pd/api/v1/regions"
-	regionByID          = "/pd/api/v1/region/id"
-	regionByKey         = "/pd/api/v1/region/key"
-	regionsByKey        = "/pd/api/v1/regions/key"
-	regionsByStoreID    = "/pd/api/v1/regions/store"
-	Stores              = "/pd/api/v1/stores"
+	// Metadata
+	HotRead                = "/pd/api/v1/hotspot/regions/read"
+	HotWrite               = "/pd/api/v1/hotspot/regions/write"
+	HotHistory             = "/pd/api/v1/hotspot/regions/history"
+	RegionByIDPrefix       = "/pd/api/v1/region/id"
+	regionByKey            = "/pd/api/v1/region/key"
+	Regions                = "/pd/api/v1/regions"
+	regionsByKey           = "/pd/api/v1/regions/key"
+	RegionsByStoreIDPrefix = "/pd/api/v1/regions/store"
+	EmptyRegions           = "/pd/api/v1/regions/check/empty-region"
+	AccelerateSchedule     = "/pd/api/v1/regions/accelerate-schedule"
+	store                  = "/pd/api/v1/store"
+	Stores                 = "/pd/api/v1/stores"
+	StatsRegion            = "/pd/api/v1/stats/region"
+	// Config
+	Config          = "/pd/api/v1/config"
+	ClusterVersion  = "/pd/api/v1/config/cluster-version"
+	ScheduleConfig  = "/pd/api/v1/config/schedule"
+	ReplicateConfig = "/pd/api/v1/config/replicate"
+	// Rule
+	PlacementRule         = "/pd/api/v1/config/rule"
+	PlacementRules        = "/pd/api/v1/config/rules"
+	placementRulesByGroup = "/pd/api/v1/config/rules/group"
+	PlacementRuleBundle   = "/pd/api/v1/config/placement-rule"
+	RegionLabelRule       = "/pd/api/v1/config/region-label/rule"
+	RegionLabelRules      = "/pd/api/v1/config/region-label/rules"
+	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
+	// Scheduler
+	Schedulers            = "/pd/api/v1/schedulers"
+	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-"
+	// Admin
+	ResetTS                = "/pd/api/v1/admin/reset-ts"
+	BaseAllocID            = "/pd/api/v1/admin/base-alloc-id"
+	SnapshotRecoveringMark = "/pd/api/v1/admin/cluster/markers/snapshot-recovering"
+	// Debug
+	PProfProfile   = "/pd/api/v1/debug/pprof/profile"
+	PProfHeap      = "/pd/api/v1/debug/pprof/heap"
+	PProfMutex     = "/pd/api/v1/debug/pprof/mutex"
+	PProfAllocs    = "/pd/api/v1/debug/pprof/allocs"
+	PProfBlock     = "/pd/api/v1/debug/pprof/block"
+	PProfGoroutine = "/pd/api/v1/debug/pprof/goroutine"
+	// Others
 	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
+	Status              = "/pd/api/v1/status"
+	Version             = "/pd/api/v1/version"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
 func RegionByID(regionID uint64) string {
-	return fmt.Sprintf("%s/%d", regionByID, regionID)
+	return fmt.Sprintf("%s/%d", RegionByIDPrefix, regionID)
 }
 
 // RegionByKey returns the path of PD HTTP API to get region by key.
@@ -45,10 +82,76 @@ func RegionByKey(key []byte) string {
 // RegionsByKey returns the path of PD HTTP API to scan regions with given start key, end key and limit parameters.
 func RegionsByKey(startKey, endKey []byte, limit int) string {
 	return fmt.Sprintf("%s?start_key=%s&end_key=%s&limit=%d",
-		regionsByKey, url.QueryEscape(string(startKey)), url.QueryEscape(string(endKey)), limit)
+		regionsByKey,
+		url.QueryEscape(string(startKey)),
+		url.QueryEscape(string(endKey)),
+		limit)
 }
 
 // RegionsByStoreID returns the path of PD HTTP API to get regions by store ID.
 func RegionsByStoreID(storeID uint64) string {
-	return fmt.Sprintf("%s/%d", regionsByStoreID, storeID)
+	return fmt.Sprintf("%s/%d", RegionsByStoreIDPrefix, storeID)
+}
+
+// RegionStatsByKeyRange returns the path of PD HTTP API to get region stats by start key and end key.
+func RegionStatsByKeyRange(startKey, endKey []byte) string {
+	return fmt.Sprintf("%s?start_key=%s&end_key=%s",
+		StatsRegion,
+		url.QueryEscape(string(startKey)),
+		url.QueryEscape(string(endKey)))
+}
+
+// StoreByID returns the store API with store ID parameter.
+func StoreByID(id uint64) string {
+	return fmt.Sprintf("%s/%d", store, id)
+}
+
+// StoreLabelByID returns the store label API with store ID parameter.
+func StoreLabelByID(id uint64) string {
+	return fmt.Sprintf("%s/%d/label", store, id)
+}
+
+// ConfigWithTTLSeconds returns the config API with the TTL seconds parameter.
+func ConfigWithTTLSeconds(ttlSeconds float64) string {
+	return fmt.Sprintf("%s?ttlSecond=%.0f", Config, ttlSeconds)
+}
+
+// PlacementRulesByGroup returns the path of PD HTTP API to get placement rules by group.
+func PlacementRulesByGroup(group string) string {
+	return fmt.Sprintf("%s/%s", placementRulesByGroup, group)
+}
+
+// PlacementRuleByGroupAndID returns the path of PD HTTP API to get placement rule by group and ID.
+func PlacementRuleByGroupAndID(group, id string) string {
+	return fmt.Sprintf("%s/%s/%s", PlacementRule, group, id)
+}
+
+// PlacementRuleBundleByGroup returns the path of PD HTTP API to get placement rule bundle by group.
+func PlacementRuleBundleByGroup(group string) string {
+	return fmt.Sprintf("%s/%s", PlacementRuleBundle, group)
+}
+
+// PlacementRuleBundleWithPartialParameter returns the path of PD HTTP API to get placement rule bundle with partial parameter.
+func PlacementRuleBundleWithPartialParameter(partial bool) string {
+	return fmt.Sprintf("%s?partial=%t", PlacementRuleBundle, partial)
+}
+
+// SchedulerByName returns the scheduler API with the given scheduler name.
+func SchedulerByName(name string) string {
+	return fmt.Sprintf("%s/%s", Schedulers, name)
+}
+
+// ScatterRangeSchedulerWithName returns the scatter range scheduler API with name parameter.
+func ScatterRangeSchedulerWithName(name string) string {
+	return fmt.Sprintf("%s%s", scatterRangeScheduler, name)
+}
+
+// PProfProfileAPIWithInterval returns the pprof profile API with interval parameter.
+func PProfProfileAPIWithInterval(interval time.Duration) string {
+	return fmt.Sprintf("%s?seconds=%d", PProfProfile, interval/time.Second)
+}
+
+// PProfGoroutineWithDebugLevel returns the pprof goroutine API with debug level parameter.
+func PProfGoroutineWithDebugLevel(level int) string {
+	return fmt.Sprintf("%s?debug=%d", PProfGoroutine, level)
 }

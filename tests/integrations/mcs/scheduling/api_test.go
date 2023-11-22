@@ -15,6 +15,7 @@ import (
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/schedule/handler"
+	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
@@ -236,14 +237,36 @@ func (suite *apiTestSuite) TestAPIForward() {
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 
+	// Test region label
+	var labelRules []*labeler.LabelRule
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/region-label/rules"), &labelRules,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.ReadGetJSONWithBody(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/region-label/rules/ids"), []byte(`["rule1", "rule3"]`),
+		&labelRules, testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/region-label/rule/rule1"), nil,
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "region/id/1"), nil,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "region/id/1/label/key"), nil,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+	err = testutil.CheckGetJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "region/id/1/labels"), nil,
+		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+
 	// Test rules: only forward `GET` request
 	var rules []*placement.Rule
 	tests.MustPutRegion(re, suite.cluster, 2, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
 	rules = []*placement.Rule{
 		{
-			GroupID:        "pd",
-			ID:             "default",
-			Role:           "voter",
+			GroupID:        placement.DefaultGroupID,
+			ID:             placement.DefaultRuleID,
+			Role:           placement.Voter,
 			Count:          3,
 			LocationLabels: []string{},
 		},

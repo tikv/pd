@@ -273,7 +273,7 @@ func (h *ruleHandler) SetRule(w http.ResponseWriter, r *http.Request) {
 // sync replicate config with default-rule
 func (h *ruleHandler) syncReplicateConfigWithDefaultRule(rule *placement.Rule) error {
 	// sync default rule with replicate config
-	if rule.GroupID == "pd" && rule.ID == "default" {
+	if rule.GroupID == placement.DefaultGroupID && rule.ID == placement.DefaultRuleID {
 		cfg := h.svr.GetReplicationConfig().Clone()
 		cfg.MaxReplicas = uint64(rule.Count)
 		if err := h.svr.SetReplicationConfig(*cfg); err != nil {

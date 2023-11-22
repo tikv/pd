@@ -1145,8 +1145,8 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 	cluster := mockcluster.NewCluster(ctx, opts)
 	re.NoError(cluster.SetRules([]*placement.Rule{
 		{
-			GroupID:     "pd",
-			ID:          "default",
+			GroupID:     placement.DefaultGroupID,
+			ID:          placement.DefaultRuleID,
 			StartKeyHex: hex.EncodeToString([]byte("")),
 			EndKeyHex:   hex.EncodeToString([]byte("")),
 			Role:        placement.Voter,

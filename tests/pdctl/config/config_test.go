@@ -315,7 +315,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 	re.Contains(string(output), "Success!")
 
 	// test show
-	suite.checkShowRuleKey(pdAddr, [][2]string{{"pd", "default"}})
+	suite.checkShowRuleKey(pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
 	f, _ := os.CreateTemp("/tmp", "pd_tests")
 	fname := f.Name()
@@ -323,18 +323,18 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 	defer os.RemoveAll(fname)
 
 	// test load
-	rules := suite.checkLoadRule(pdAddr, fname, [][2]string{{"pd", "default"}})
+	rules := suite.checkLoadRule(pdAddr, fname, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
 	// test save
 	rules = append(rules, placement.Rule{
-		GroupID: "pd",
+		GroupID: placement.DefaultGroupID,
 		ID:      "test1",
-		Role:    "voter",
+		Role:    placement.Voter,
 		Count:   1,
 	}, placement.Rule{
 		GroupID: "test-group",
 		ID:      "test2",
-		Role:    "voter",
+		Role:    placement.Voter,
 		Count:   2,
 	})
 	b, _ := json.Marshal(rules)
@@ -343,11 +343,11 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// test show group
-	suite.checkShowRuleKey(pdAddr, [][2]string{{"pd", "default"}, {"pd", "test1"}}, "--group=pd")
+	suite.checkShowRuleKey(pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}, {placement.DefaultGroupID, "test1"}}, "--group=pd")
 
 	// test rule region detail
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
-	suite.checkShowRuleKey(pdAddr, [][2]string{{"pd", "default"}}, "--region=1", "--detail")
+	suite.checkShowRuleKey(pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}}, "--region=1", "--detail")
 
 	// test delete
 	// need clear up args, so create new a cobra.Command. Otherwise gourp still exists.
@@ -356,7 +356,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 	os.WriteFile(fname, b, 0600)
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "save", "--in="+fname)
 	re.NoError(err)
-	suite.checkShowRuleKey(pdAddr, [][2]string{{"pd", "test1"}}, "--group=pd")
+	suite.checkShowRuleKey(pdAddr, [][2]string{{placement.DefaultGroupID, "test1"}}, "--group=pd")
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
@@ -385,15 +385,15 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluste
 	// test show
 	var group placement.RuleGroup
 	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
-		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", "pd")
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "show", placement.DefaultGroupID)
 		re.NoError(err)
 		return !strings.Contains(string(output), "404")
 	})
 	re.NoError(json.Unmarshal(output, &group), string(output))
-	re.Equal(placement.RuleGroup{ID: "pd"}, group)
+	re.Equal(placement.RuleGroup{ID: placement.DefaultGroupID}, group)
 
 	// test set
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "pd", "42", "true")
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", placement.DefaultGroupID, "42", "true")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-group", "set", "group2", "100", "false")
@@ -410,7 +410,7 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluste
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &groups))
 		return reflect.DeepEqual([]placement.RuleGroup{
-			{ID: "pd", Index: 42, Override: true},
+			{ID: placement.DefaultGroupID, Index: 42, Override: true},
 			{ID: "group2", Index: 100, Override: false},
 			{ID: "group3", Index: 200, Override: false},
 		}, groups)
@@ -464,10 +464,10 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 
 	// test get
 	var bundle placement.GroupBundle
-	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", "pd")
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", placement.DefaultGroupID)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &bundle))
-	re.Equal(placement.GroupBundle{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}}, bundle)
+	re.Equal(placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}, bundle)
 
 	f, err := os.CreateTemp("/tmp", "pd_tests")
 	re.NoError(err)
@@ -477,7 +477,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 
 	// test load
 	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
-		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
+		{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 
 	// test set
@@ -489,41 +489,41 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	re.NoError(err)
 	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
-		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: "default", Role: "voter", Count: 3}}},
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+		{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 
 	// test delete
-	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "pd")
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", placement.DefaultGroupID)
 	re.NoError(err)
 
 	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 
 	// test delete regexp
 	bundle.ID = "pf"
-	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
+	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}
 	b, err = json.Marshal(bundle)
 	re.NoError(err)
 	re.NoError(os.WriteFile(fname, b, 0600))
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "set", "--in="+fname)
 	re.NoError(err)
 	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "--regexp", ".*f")
 	re.NoError(err)
 
 	bundles := []placement.GroupBundle{
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	}
 	suite.checkLoadRuleBundle(pdAddr, fname, bundles)
 
 	// test save
-	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}
+	bundle.Rules = []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}
 	bundles = append(bundles, bundle)
 	b, err = json.Marshal(bundles)
 	re.NoError(err)
@@ -531,8 +531,8 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname)
 	re.NoError(err)
 	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
-		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: "default", Role: "voter", Count: 3}}},
-		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pe", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pe", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 
 	// partial update, so still one group is left, no error
@@ -544,7 +544,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	re.NoError(err)
 
 	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
-		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: "default", Role: "voter", Count: 3}}},
+		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 }
 
@@ -715,7 +715,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 	}
 
 	checkRuleCount := func(expect int) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		rule := placement.Rule{}
@@ -726,7 +726,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 	}
 
 	checkRuleLocationLabels := func(expect int) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		rule := placement.Rule{}
@@ -737,7 +737,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 	}
 
 	checkRuleIsolationLevel := func(expect string) {
-		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		rule := placement.Rule{}
@@ -791,7 +791,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 	fname := suite.T().TempDir()
 	rules := []placement.Rule{
 		{
-			GroupID: "pd",
+			GroupID: placement.DefaultGroupID,
 			ID:      "test1",
 			Role:    "voter",
 			Count:   1,
@@ -832,7 +832,6 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {
 		LastHeartbeat: time.Now().UnixNano(),
 	}
 	tests.MustPutStore(re, cluster, store)
-	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
 	re.NoError(err)
@@ -844,7 +843,9 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {
 	re.Equal("table", conf.KeyType)
 	re.Equal(typeutil.StringSlice([]string{}), conf.RuntimeServices)
 	re.Equal("", conf.MetricStorage)
-	re.Equal("auto", conf.DashboardAddress)
+	if conf.DashboardAddress != "auto" { // dashboard has been assigned
+		re.Equal(leaderServer.GetAddr(), conf.DashboardAddress)
+	}
 	re.Equal(int(3), conf.FlowRoundByDigit)
 }
 
