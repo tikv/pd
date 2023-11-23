@@ -49,7 +49,7 @@ var (
 )
 
 type scatterRangeSchedulerConfig struct {
-	mu        syncutil.RWMutex
+	syncutil.RWMutex
 	storage   endpoint.ConfigStorage
 	RangeName string `json:"range-name"`
 	StartKey  string `json:"start-key"`
@@ -60,8 +60,8 @@ func (conf *scatterRangeSchedulerConfig) BuildWithArgs(args []string) error {
 	if len(args) != 3 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("ranges and name")
 	}
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 
 	conf.RangeName = args[0]
 	conf.StartKey = args[1]
@@ -70,8 +70,8 @@ func (conf *scatterRangeSchedulerConfig) BuildWithArgs(args []string) error {
 }
 
 func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	return &scatterRangeSchedulerConfig{
 		StartKey:  conf.StartKey,
 		EndKey:    conf.EndKey,
@@ -81,8 +81,8 @@ func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
 
 func (conf *scatterRangeSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
@@ -91,26 +91,26 @@ func (conf *scatterRangeSchedulerConfig) Persist() error {
 }
 
 func (conf *scatterRangeSchedulerConfig) GetRangeName() string {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	return conf.RangeName
 }
 
 func (conf *scatterRangeSchedulerConfig) GetStartKey() []byte {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	return []byte(conf.StartKey)
 }
 
 func (conf *scatterRangeSchedulerConfig) GetEndKey() []byte {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	return []byte(conf.EndKey)
 }
 
 func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	return fmt.Sprintf("scatter-range-%s", conf.RangeName)
 }
 
@@ -161,14 +161,14 @@ func (l *scatterRangeScheduler) GetType() string {
 }
 
 func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
-	l.config.mu.RLock()
-	defer l.config.mu.RUnlock()
+	l.config.RLock()
+	defer l.config.RUnlock()
 	return EncodeConfig(l.config)
 }
 
 func (l *scatterRangeScheduler) ReloadConfig() error {
-	l.config.mu.Lock()
-	defer l.config.mu.Unlock()
+	l.config.Lock()
+	defer l.config.Unlock()
 	cfgData, err := l.config.storage.LoadSchedulerConfig(l.GetName())
 	if err != nil {
 		return err
@@ -176,7 +176,14 @@ func (l *scatterRangeScheduler) ReloadConfig() error {
 	if len(cfgData) == 0 {
 		return nil
 	}
-	return DecodeConfig([]byte(cfgData), l.config)
+	newCfg := &scatterRangeSchedulerConfig{}
+	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	l.config.RangeName = newCfg.RangeName
+	l.config.StartKey = newCfg.StartKey
+	l.config.EndKey = newCfg.EndKey
+	return nil
 }
 
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
