@@ -59,7 +59,7 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	defer ts.Close()
 
 	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", http.NoBody)
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
 	info.Component = "user1"
@@ -79,7 +79,7 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 
 	// For test, sleep time needs longer than the push interval
 	time.Sleep(time.Second)
-	req, _ = http.NewRequest(http.MethodGet, ts.URL, nil)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL, http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()

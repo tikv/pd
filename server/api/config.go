@@ -543,7 +543,7 @@ func (h *confHandler) GetSchedulingServerConfig() (*config.Config, error) {
 		return nil, errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}

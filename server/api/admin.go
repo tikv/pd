@@ -225,7 +225,7 @@ func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
 		idStr = strconv.FormatUint(id[0], 10)
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	if err != nil {
 		return err
 	}

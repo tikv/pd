@@ -3140,7 +3140,7 @@ func TestPersistScheduler(t *testing.T) {
 	// option have 6 items because the default scheduler do not remove.
 	re.Len(newOpt.GetSchedulers(), defaultCount+3)
 	re.NoError(newOpt.Persist(storage))
-	tc.RaftCluster.opt = newOpt
+	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
@@ -3153,7 +3153,7 @@ func TestPersistScheduler(t *testing.T) {
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(storage))
-	tc.RaftCluster.opt = newOpt
+	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	controller = co.GetSchedulersController()
@@ -3180,7 +3180,7 @@ func TestPersistScheduler(t *testing.T) {
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(co.GetCluster().GetStorage()))
-	tc.RaftCluster.opt = newOpt
+	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	co.Run()
@@ -3239,7 +3239,7 @@ func TestRemoveScheduler(t *testing.T) {
 	_, newOpt, err := newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(tc.storage))
-	tc.RaftCluster.opt = newOpt
+	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	re.Empty(controller.GetSchedulerNames())
