@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -72,11 +73,17 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
 	re := suite.Require()
-	// Get the cluster-level min resolved TS.
-	minResolvedTS, storeMinResolvedTSMap, err := suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, nil)
-	re.NoError(err)
-	re.Greater(minResolvedTS, uint64(0))
-	re.Empty(storeMinResolvedTSMap)
+	var (
+		minResolvedTS         uint64
+		storeMinResolvedTSMap map[uint64]uint64
+		err                   error
+	)
+	// Wait for the cluster-level min resolved TS to be initialized.
+	testutil.Eventually(re, func() bool {
+		minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, nil)
+		re.NoError(err)
+		return minResolvedTS > 0 && len(storeMinResolvedTSMap) == 0
+	})
 	// Get the store-level min resolved TS.
 	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1})
 	re.NoError(err)
