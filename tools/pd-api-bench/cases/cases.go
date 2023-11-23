@@ -44,7 +44,7 @@ var (
 // InitCluster initializes the cluster.
 func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
-		PDAddress+"/pd/api/v1/stats/region?start_key=&end_key=&count", nil)
+		PDAddress+"/pd/api/v1/stats/region?start_key=&end_key=&count", http.NoBody)
 	resp, err := httpClit.Do(req)
 	if err != nil {
 		return err

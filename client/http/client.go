@@ -276,7 +276,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*RegionInf
 	var region RegionInfo
 	err := c.requestWithRetry(ctx,
 		"GetRegionByID", RegionByID(regionID),
-		http.MethodGet, nil, &region)
+		http.MethodGet, http.NoBody, &region)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +288,7 @@ func (c *client) GetRegionByKey(ctx context.Context, key []byte) (*RegionInfo, e
 	var region RegionInfo
 	err := c.requestWithRetry(ctx,
 		"GetRegionByKey", RegionByKey(key),
-		http.MethodGet, nil, &region)
+		http.MethodGet, http.NoBody, &region)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +300,7 @@ func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 	var regions RegionsInfo
 	err := c.requestWithRetry(ctx,
 		"GetRegions", Regions,
-		http.MethodGet, nil, &regions)
+		http.MethodGet, http.NoBody, &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +312,7 @@ func (c *client) GetRegionsByKeyRange(ctx context.Context, startKey, endKey []by
 	var regions RegionsInfo
 	err := c.requestWithRetry(ctx,
 		"GetRegionsByKeyRange", RegionsByKey(startKey, endKey, limit),
-		http.MethodGet, nil, &regions)
+		http.MethodGet, http.NoBody, &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +324,7 @@ func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*Regi
 	var regions RegionsInfo
 	err := c.requestWithRetry(ctx,
 		"GetRegionsByStoreID", RegionsByStoreID(storeID),
-		http.MethodGet, nil, &regions)
+		http.MethodGet, http.NoBody, &regions)
 	if err != nil {
 		return nil, err
 	}
@@ -336,7 +336,7 @@ func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, er
 	var hotReadRegions StoreHotPeersInfos
 	err := c.requestWithRetry(ctx,
 		"GetHotReadRegions", HotRead,
-		http.MethodGet, nil, &hotReadRegions)
+		http.MethodGet, http.NoBody, &hotReadRegions)
 	if err != nil {
 		return nil, err
 	}
@@ -348,7 +348,7 @@ func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, e
 	var hotWriteRegions StoreHotPeersInfos
 	err := c.requestWithRetry(ctx,
 		"GetHotWriteRegions", HotWrite,
-		http.MethodGet, nil, &hotWriteRegions)
+		http.MethodGet, http.NoBody, &hotWriteRegions)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +360,7 @@ func (c *client) GetRegionStatusByKeyRange(ctx context.Context, startKey, endKey
 	var regionStats RegionStats
 	err := c.requestWithRetry(ctx,
 		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(startKey, endKey),
-		http.MethodGet, nil, &regionStats,
+		http.MethodGet, http.NoBody, &regionStats,
 	)
 	if err != nil {
 		return nil, err
@@ -373,7 +373,7 @@ func (c *client) GetStores(ctx context.Context) (*StoresInfo, error) {
 	var stores StoresInfo
 	err := c.requestWithRetry(ctx,
 		"GetStores", Stores,
-		http.MethodGet, nil, &stores)
+		http.MethodGet, http.NoBody, &stores)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +385,7 @@ func (c *client) GetAllPlacementRuleBundles(ctx context.Context) ([]*GroupBundle
 	var bundles []*GroupBundle
 	err := c.requestWithRetry(ctx,
 		"GetPlacementRuleBundle", PlacementRuleBundle,
-		http.MethodGet, nil, &bundles)
+		http.MethodGet, http.NoBody, &bundles)
 	if err != nil {
 		return nil, err
 	}
@@ -397,7 +397,7 @@ func (c *client) GetPlacementRuleBundleByGroup(ctx context.Context, group string
 	var bundle GroupBundle
 	err := c.requestWithRetry(ctx,
 		"GetPlacementRuleBundleByGroup", PlacementRuleBundleByGroup(group),
-		http.MethodGet, nil, &bundle)
+		http.MethodGet, http.NoBody, &bundle)
 	if err != nil {
 		return nil, err
 	}
@@ -409,7 +409,7 @@ func (c *client) GetPlacementRulesByGroup(ctx context.Context, group string) ([]
 	var rules []*Rule
 	err := c.requestWithRetry(ctx,
 		"GetPlacementRulesByGroup", PlacementRulesByGroup(group),
-		http.MethodGet, nil, &rules)
+		http.MethodGet, http.NoBody, &rules)
 	if err != nil {
 		return nil, err
 	}
@@ -443,7 +443,7 @@ func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBu
 func (c *client) DeletePlacementRule(ctx context.Context, group, id string) error {
 	return c.requestWithRetry(ctx,
 		"DeletePlacementRule", PlacementRuleByGroupAndID(group, id),
-		http.MethodDelete, nil, nil)
+		http.MethodDelete, http.NoBody, nil)
 }
 
 // GetAllRegionLabelRules gets all region label rules.
@@ -451,7 +451,7 @@ func (c *client) GetAllRegionLabelRules(ctx context.Context) ([]*LabelRule, erro
 	var labelRules []*LabelRule
 	err := c.requestWithRetry(ctx,
 		"GetAllRegionLabelRules", RegionLabelRules,
-		http.MethodGet, nil, &labelRules)
+		http.MethodGet, http.NoBody, &labelRules)
 	if err != nil {
 		return nil, err
 	}
@@ -533,7 +533,7 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 	}{}
 	err := c.requestWithRetry(ctx,
 		"GetMinResolvedTSByStoresIDs", uri,
-		http.MethodGet, nil, &resp)
+		http.MethodGet, http.NoBody, &resp)
 	if err != nil {
 		return 0, nil, err
 	}
