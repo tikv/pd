@@ -383,7 +383,9 @@ func (suite *transferRegionOperatorTestSuite) TestTransferRegionWithPlacementRul
 		if testCase.placementRuleEnable {
 			err := suite.svr.GetRaftCluster().GetRuleManager().Initialize(
 				suite.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
-				suite.svr.GetRaftCluster().GetOpts().GetLocationLabels())
+				suite.svr.GetRaftCluster().GetOpts().GetLocationLabels(),
+				suite.svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
+			)
 			suite.NoError(err)
 		}
 		if len(testCase.rules) > 0 {
