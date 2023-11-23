@@ -160,8 +160,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	redirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
-	isLeader := h.s.GetMember().IsLeader()
-	if !h.s.IsClosed() && (allowFollowerHandle || isLeader) && !redirectToMicroService {
+	if !h.s.IsClosed() && (allowFollowerHandle || h.s.GetMember().IsLeader()) && !redirectToMicroService {
 		next(w, r)
 		return
 	}
