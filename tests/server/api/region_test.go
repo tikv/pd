@@ -81,7 +81,11 @@ func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env := tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, serverName string) {
+		// FIXME: enable placement rules
+		conf.Replication.EnablePlacementRules = false
+		conf.Replication.MaxReplicas = 1
+	})
 	env.RunTestInTwoModes(suite.checkAccelerateRegionsScheduleInRange)
 }
 
@@ -89,7 +93,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	re := suite.Require()
-	for i := 13; i <= 15; i++ {
+	for i := 1; i <= 3; i++ {
 		s1 := &metapb.Store{
 			Id:        uint64(i),
 			State:     metapb.StoreState_Up,
@@ -97,16 +101,17 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 		}
 		tests.MustPutStore(re, cluster, s1)
 	}
-	r1 := core.NewTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
-	r2 := core.NewTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
-	r3 := core.NewTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
+	r1 := core.NewTestRegionInfo(557, 1, []byte("a1"), []byte("a2"))
+	r2 := core.NewTestRegionInfo(558, 2, []byte("a2"), []byte("a3"))
+	r3 := core.NewTestRegionInfo(559, 3, []byte("a3"), []byte("a4"))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	tests.MustPutRegionInfo(re, cluster, r2)
 	tests.MustPutRegionInfo(re, cluster, r3)
 	suite.checkRegionCount(cluster, 3)
 
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body), tu.StatusOK(re))
+	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
+		tu.StatusOK(re))
 	suite.NoError(err)
 	idList := leader.GetRaftCluster().GetSuspectRegions()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
@@ -116,7 +121,11 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env := tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, serverName string) {
+		// FIXME: enable placement rules
+		conf.Replication.EnablePlacementRules = false
+		conf.Replication.MaxReplicas = 1
+	})
 	env.RunTestInTwoModes(suite.checkAccelerateRegionsScheduleInRanges)
 }
 
@@ -124,7 +133,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	re := suite.Require()
-	for i := 13; i <= 17; i++ {
+	for i := 1; i <= 5; i++ {
 		s1 := &metapb.Store{
 			Id:        uint64(i),
 			State:     metapb.StoreState_Up,
@@ -132,11 +141,11 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 		}
 		tests.MustPutStore(re, cluster, s1)
 	}
-	r1 := core.NewTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
-	r2 := core.NewTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
-	r3 := core.NewTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
-	r4 := core.NewTestRegionInfo(560, 16, []byte("a4"), []byte("a5"))
-	r5 := core.NewTestRegionInfo(561, 17, []byte("a5"), []byte("a6"))
+	r1 := core.NewTestRegionInfo(557, 1, []byte("a1"), []byte("a2"))
+	r2 := core.NewTestRegionInfo(558, 2, []byte("a2"), []byte("a3"))
+	r3 := core.NewTestRegionInfo(559, 3, []byte("a3"), []byte("a4"))
+	r4 := core.NewTestRegionInfo(560, 4, []byte("a4"), []byte("a5"))
+	r5 := core.NewTestRegionInfo(561, 5, []byte("a5"), []byte("a6"))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	tests.MustPutRegionInfo(re, cluster, r2)
 	tests.MustPutRegionInfo(re, cluster, r3)
@@ -146,7 +155,8 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 
 	body := fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`,
 		hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", urlPrefix), []byte(body), tu.StatusOK(re))
+	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", urlPrefix), []byte(body),
+		tu.StatusOK(re))
 	suite.NoError(err)
 	idList := leader.GetRaftCluster().GetSuspectRegions()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {

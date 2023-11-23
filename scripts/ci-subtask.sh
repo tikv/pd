@@ -29,6 +29,7 @@ else
     weight() {
         [[ $1 == "github.com/tikv/pd/server/api" ]] && return 30
         [[ $1 == "github.com/tikv/pd/pkg/schedule" ]] && return 30
+        [[ $1 == "pd/tests/server/api" ]] && return 30
         [[ $1 =~ "pd/tests" ]] && return 5
         return 1
     }
