@@ -61,7 +61,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 3)
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -96,6 +96,10 @@ func (suite *serverTestSuite) TestAllocID() {
 func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	pd2, err := suite.cluster.Join(suite.ctx)
+	re.NoError(err)
+	err = pd2.Run()
+	re.NoError(err)
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
@@ -117,6 +121,8 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	// Update the pdLeader in test suite.
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	suite.TearDownSuite()
+	suite.SetupSuite()
 }
 
 func (suite *serverTestSuite) TestPrimaryChange() {
@@ -167,24 +173,24 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	re.NoError(err)
 	re.Empty(resp.GetHeader().GetError())
 
-	resp1, err := s.StoreHeartbeat(
-		context.Background(), &pdpb.StoreHeartbeatRequest{
-			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
-			Stats: &pdpb.StoreStats{
-				StoreId:      1,
-				Capacity:     1798985089024,
-				Available:    1709868695552,
-				UsedSize:     85150956358,
-				KeysWritten:  20000,
-				BytesWritten: 199,
-				KeysRead:     10000,
-				BytesRead:    99,
-			},
-		},
-	)
-	re.NoError(err)
-	re.Empty(resp1.GetHeader().GetError())
 	testutil.Eventually(re, func() bool {
+		resp1, err := s.StoreHeartbeat(
+			context.Background(), &pdpb.StoreHeartbeatRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Stats: &pdpb.StoreStats{
+					StoreId:      1,
+					Capacity:     1798985089024,
+					Available:    1709868695552,
+					UsedSize:     85150956358,
+					KeysWritten:  20000,
+					BytesWritten: 199,
+					KeysRead:     10000,
+					BytesRead:    99,
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp1.GetHeader().GetError())
 		store := tc.GetPrimaryServer().GetCluster().GetStore(1)
 		return store.GetStoreStats().GetCapacity() == uint64(1798985089024) &&
 			store.GetStoreStats().GetAvailable() == uint64(1709868695552) &&
