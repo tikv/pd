@@ -67,7 +67,7 @@ var (
 )
 
 type balanceLeaderSchedulerConfig struct {
-	mu      syncutil.RWMutex
+	syncutil.RWMutex
 	storage endpoint.ConfigStorage
 	Ranges  []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
@@ -75,8 +75,8 @@ type balanceLeaderSchedulerConfig struct {
 }
 
 func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{}) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 
 	oldc, _ := json.Marshal(conf)
 
@@ -109,8 +109,8 @@ func (conf *balanceLeaderSchedulerConfig) validate() bool {
 }
 
 func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceLeaderSchedulerConfig{
@@ -210,14 +210,14 @@ func (l *balanceLeaderScheduler) GetType() string {
 }
 
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
-	l.conf.mu.RLock()
-	defer l.conf.mu.RUnlock()
+	l.conf.RLock()
+	defer l.conf.RUnlock()
 	return EncodeConfig(l.conf)
 }
 
 func (l *balanceLeaderScheduler) ReloadConfig() error {
-	l.conf.mu.Lock()
-	defer l.conf.mu.Unlock()
+	l.conf.Lock()
+	defer l.conf.Unlock()
 	cfgData, err := l.conf.storage.LoadSchedulerConfig(l.GetName())
 	if err != nil {
 		return err
@@ -335,8 +335,8 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	l.conf.mu.RLock()
-	defer l.conf.mu.RUnlock()
+	l.conf.RLock()
+	defer l.conf.RUnlock()
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {
