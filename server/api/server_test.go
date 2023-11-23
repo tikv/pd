@@ -273,7 +273,7 @@ func (suite *adminTestSuite) TestCleanPath() {
 	// handled by router
 	response := httptest.NewRecorder()
 	r, _, _ := NewHandler(context.Background(), suite.svr)
-	request, err := http.NewRequest(http.MethodGet, url, nil)
+	request, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	r.ServeHTTP(response, request)
 	// handled by `cleanPath` which is in `mux.ServeHTTP`

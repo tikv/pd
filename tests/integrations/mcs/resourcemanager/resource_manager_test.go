@@ -1006,7 +1006,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 			// Delete all resource groups
 			for _, g := range groups {
-				req, err := http.NewRequest(http.MethodDelete, getAddr(i+1)+"/resource-manager/api/v1/config/group/"+g.Name, nil)
+				req, err := http.NewRequest(http.MethodDelete, getAddr(i+1)+"/resource-manager/api/v1/config/group/"+g.Name, http.NoBody)
 				re.NoError(err)
 				resp, err := http.DefaultClient.Do(req)
 				re.NoError(err)

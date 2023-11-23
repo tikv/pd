@@ -63,7 +63,7 @@ func MustAddScheduler(
 
 // MustDeleteScheduler deletes a scheduler with HTTP API.
 func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName string) {
-	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), nil)
+	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), http.NoBody)
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)

@@ -336,7 +336,7 @@ func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(request *handlers.Cr
 }
 
 func (suite *keyspaceGroupTestSuite) tryGetKeyspaceGroup(id uint32) (*endpoint.KeyspaceGroup, int) {
-	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), nil)
+	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	suite.NoError(err)
 	resp, err := suite.dialClient.Do(httpReq)
 	suite.NoError(err)

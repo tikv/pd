@@ -88,7 +88,7 @@ func TestMemberDelete(t *testing.T) {
 		t.Log(time.Now(), "try to delete:", table.path)
 		testutil.Eventually(re, func() bool {
 			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + table.path
-			req, err := http.NewRequest(http.MethodDelete, addr, nil)
+			req, err := http.NewRequest(http.MethodDelete, addr, http.NoBody)
 			re.NoError(err)
 			res, err := httpClient.Do(req)
 			re.NoError(err)
