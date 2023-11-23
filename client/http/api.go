@@ -23,19 +23,20 @@ import (
 // The following constants are the paths of PD HTTP APIs.
 const (
 	// Metadata
-	HotRead                = "/pd/api/v1/hotspot/regions/read"
-	HotWrite               = "/pd/api/v1/hotspot/regions/write"
-	HotHistory             = "/pd/api/v1/hotspot/regions/history"
-	RegionByIDPrefix       = "/pd/api/v1/region/id"
-	regionByKey            = "/pd/api/v1/region/key"
-	Regions                = "/pd/api/v1/regions"
-	regionsByKey           = "/pd/api/v1/regions/key"
-	RegionsByStoreIDPrefix = "/pd/api/v1/regions/store"
-	EmptyRegions           = "/pd/api/v1/regions/check/empty-region"
-	AccelerateSchedule     = "/pd/api/v1/regions/accelerate-schedule"
-	store                  = "/pd/api/v1/store"
-	Stores                 = "/pd/api/v1/stores"
-	StatsRegion            = "/pd/api/v1/stats/region"
+	HotRead                   = "/pd/api/v1/hotspot/regions/read"
+	HotWrite                  = "/pd/api/v1/hotspot/regions/write"
+	HotHistory                = "/pd/api/v1/hotspot/regions/history"
+	RegionByIDPrefix          = "/pd/api/v1/region/id"
+	regionByKey               = "/pd/api/v1/region/key"
+	Regions                   = "/pd/api/v1/regions"
+	regionsByKey              = "/pd/api/v1/regions/key"
+	RegionsByStoreIDPrefix    = "/pd/api/v1/regions/store"
+	EmptyRegions              = "/pd/api/v1/regions/check/empty-region"
+	AccelerateSchedule        = "/pd/api/v1/regions/accelerate-schedule"
+	AccelerateScheduleInBatch = "/pd/api/v1/regions/accelerate-schedule/batch"
+	store                     = "/pd/api/v1/store"
+	Stores                    = "/pd/api/v1/stores"
+	StatsRegion               = "/pd/api/v1/stats/region"
 	// Config
 	Config          = "/pd/api/v1/config"
 	ClusterVersion  = "/pd/api/v1/config/cluster-version"
@@ -44,8 +45,11 @@ const (
 	// Rule
 	PlacementRule         = "/pd/api/v1/config/rule"
 	PlacementRules        = "/pd/api/v1/config/rules"
+	PlacementRulesInBatch = "/pd/api/v1/config/rules/batch"
 	placementRulesByGroup = "/pd/api/v1/config/rules/group"
 	PlacementRuleBundle   = "/pd/api/v1/config/placement-rule"
+	placementRuleGroup    = "/pd/api/v1/config/rule_group"
+	placementRuleGroups   = "/pd/api/v1/config/rule_groups"
 	RegionLabelRule       = "/pd/api/v1/config/region-label/rule"
 	RegionLabelRules      = "/pd/api/v1/config/region-label/rules"
 	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
@@ -134,6 +138,11 @@ func PlacementRuleBundleByGroup(group string) string {
 // PlacementRuleBundleWithPartialParameter returns the path of PD HTTP API to get placement rule bundle with partial parameter.
 func PlacementRuleBundleWithPartialParameter(partial bool) string {
 	return fmt.Sprintf("%s?partial=%t", PlacementRuleBundle, partial)
+}
+
+// PlacementRuleGroupByID returns the path of PD HTTP API to get placement rule group by ID.
+func PlacementRuleGroupByID(id string) string {
+	return fmt.Sprintf("%s/%s", placementRuleGroup, id)
 }
 
 // SchedulerByName returns the scheduler API with the given scheduler name.

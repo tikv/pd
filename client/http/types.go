@@ -14,7 +14,10 @@
 
 package http
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // NOTICE: the structures below are copied from the PD API definitions.
 // Please make sure the consistency if any change happens to the PD API.
@@ -245,6 +248,56 @@ type Rule struct {
 	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
 	Version          uint64            `json:"version,omitempty"`           // only set at runtime, add 1 each time rules updated, begin from 0.
 	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`  // only set at runtime, recorded rule create timestamp
+}
+
+// String returns the string representation of this rule.
+func (r *Rule) String() string {
+	b, _ := json.Marshal(r)
+	return string(b)
+}
+
+// Clone returns a copy of Rule.
+func (r *Rule) Clone() *Rule {
+	var clone Rule
+	json.Unmarshal([]byte(r.String()), &clone)
+	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
+	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
+	return &clone
+}
+
+// RuleOpType indicates the operation type
+type RuleOpType string
+
+const (
+	// RuleOpAdd a placement rule, only need to specify the field *Rule
+	RuleOpAdd RuleOpType = "add"
+	// RuleOpDel a placement rule, only need to specify the field `GroupID`, `ID`, `MatchID`
+	RuleOpDel RuleOpType = "del"
+)
+
+// RuleOp is for batching placement rule actions.
+// The action type is distinguished by the field `Action`.
+type RuleOp struct {
+	*Rule                       // information of the placement rule to add/delete the operation type
+	Action           RuleOpType `json:"action"`
+	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
+}
+
+func (r RuleOp) String() string {
+	b, _ := json.Marshal(r)
+	return string(b)
+}
+
+// RuleGroup defines properties of a rule group.
+type RuleGroup struct {
+	ID       string `json:"id,omitempty"`
+	Index    int    `json:"index,omitempty"`
+	Override bool   `json:"override,omitempty"`
+}
+
+func (g *RuleGroup) String() string {
+	b, _ := json.Marshal(g)
+	return string(b)
 }
 
 // GroupBundle represents a rule group and all rules belong to the group.

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,14 +58,23 @@ type Client interface {
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
 	GetPlacementRulesByGroup(context.Context, string) ([]*Rule, error)
 	SetPlacementRule(context.Context, *Rule) error
+	SetPlacementRuleInBatch(context.Context, []*RuleOp) error
 	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
 	DeletePlacementRule(context.Context, string, string) error
+	GetAllPlacementRuleGroups(context.Context) ([]*RuleGroup, error)
+	GetPlacementRuleGroupByID(context.Context, string) (*RuleGroup, error)
+	SetPlacementRuleGroup(context.Context, *RuleGroup) error
+	DeletePlacementRuleGroupByID(context.Context, string) error
 	GetAllRegionLabelRules(context.Context) ([]*LabelRule, error)
 	GetRegionLabelRulesByIDs(context.Context, []string) ([]*LabelRule, error)
 	SetRegionLabelRule(context.Context, *LabelRule) error
 	PatchRegionLabelRules(context.Context, *LabelRulePatch) error
 	/* Scheduling-related interfaces */
 	AccelerateSchedule(context.Context, []byte, []byte) error
+	AccelerateScheduleInBatch(context.Context, []struct {
+		StartKey []byte `json:"start_key"`
+		EndKey   []byte `json:"end_key"`
+	}) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 
@@ -427,6 +437,17 @@ func (c *client) SetPlacementRule(ctx context.Context, rule *Rule) error {
 		http.MethodPost, bytes.NewBuffer(ruleJSON), nil)
 }
 
+// SetPlacementRules sets the placement rules in batch.
+func (c *client) SetPlacementRuleInBatch(ctx context.Context, ruleOps []*RuleOp) error {
+	ruleOpsJSON, err := json.Marshal(ruleOps)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetPlacementRuleInBatch", PlacementRulesInBatch,
+		http.MethodPost, bytes.NewBuffer(ruleOpsJSON), nil)
+}
+
 // SetPlacementRuleBundles sets the placement rule bundles.
 // If `partial` is false, all old configurations will be over-written and dropped.
 func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBundle, partial bool) error {
@@ -444,6 +465,48 @@ func (c *client) DeletePlacementRule(ctx context.Context, group, id string) erro
 	return c.requestWithRetry(ctx,
 		"DeletePlacementRule", PlacementRuleByGroupAndID(group, id),
 		http.MethodDelete, http.NoBody, nil)
+}
+
+// GetAllPlacementRuleGroups gets all placement rule groups.
+func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, error) {
+	var ruleGroups []*RuleGroup
+	err := c.requestWithRetry(ctx,
+		"GetAllPlacementRuleGroups", placementRuleGroups,
+		http.MethodGet, nil, &ruleGroups)
+	if err != nil {
+		return nil, err
+	}
+	return ruleGroups, nil
+}
+
+// GetPlacementRuleGroupByID gets the placement rule group by ID.
+func (c *client) GetPlacementRuleGroupByID(ctx context.Context, id string) (*RuleGroup, error) {
+	var ruleGroup RuleGroup
+	err := c.requestWithRetry(ctx,
+		"GetPlacementRuleGroupByID", PlacementRuleGroupByID(id),
+		http.MethodGet, nil, &ruleGroup)
+	if err != nil {
+		return nil, err
+	}
+	return &ruleGroup, nil
+}
+
+// SetPlacementRuleGroup sets the placement rule group.
+func (c *client) SetPlacementRuleGroup(ctx context.Context, ruleGroup *RuleGroup) error {
+	ruleGroupJSON, err := json.Marshal(ruleGroup)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetPlacementRuleGroup", placementRuleGroup,
+		http.MethodPost, bytes.NewBuffer(ruleGroupJSON), nil)
+}
+
+// DeletePlacementRuleGroupByID deletes the placement rule group by ID.
+func (c *client) DeletePlacementRuleGroupByID(ctx context.Context, id string) error {
+	return c.requestWithRetry(ctx,
+		"DeletePlacementRuleGroupByID", PlacementRuleGroupByID(id),
+		http.MethodDelete, nil, nil)
 }
 
 // GetAllRegionLabelRules gets all region label rules.
@@ -499,8 +562,8 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.
 func (c *client) AccelerateSchedule(ctx context.Context, startKey, endKey []byte) error {
 	input := map[string]string{
-		"start_key": url.QueryEscape(string(startKey)),
-		"end_key":   url.QueryEscape(string(endKey)),
+		"start_key": url.QueryEscape(hex.EncodeToString(startKey)),
+		"end_key":   url.QueryEscape(hex.EncodeToString(endKey)),
 	}
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
@@ -508,6 +571,27 @@ func (c *client) AccelerateSchedule(ctx context.Context, startKey, endKey []byte
 	}
 	return c.requestWithRetry(ctx,
 		"AccelerateSchedule", AccelerateSchedule,
+		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
+}
+
+// AccelerateScheduleInBatch accelerates the scheduling of the regions within the given key ranges in batch.
+func (c *client) AccelerateScheduleInBatch(ctx context.Context, ranges []struct {
+	StartKey []byte `json:"start_key"`
+	EndKey   []byte `json:"end_key"`
+}) error {
+	input := make([]map[string]string, 0, len(ranges))
+	for _, r := range ranges {
+		input = append(input, map[string]string{
+			"start_key": url.QueryEscape(hex.EncodeToString(r.StartKey)),
+			"end_key":   url.QueryEscape(hex.EncodeToString(r.EndKey)),
+		})
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"AccelerateScheduleInBatch", AccelerateScheduleInBatch,
 		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
 }
 

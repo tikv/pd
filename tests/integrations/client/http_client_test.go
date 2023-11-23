@@ -17,11 +17,14 @@ package client_test
 import (
 	"context"
 	"math"
+	"net/http"
 	"sort"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/tests"
@@ -98,15 +101,15 @@ func (suite *httpClientTestSuite) TestRule() {
 	bundle, err := suite.client.GetPlacementRuleBundleByGroup(suite.ctx, placement.DefaultGroupID)
 	re.NoError(err)
 	re.Equal(bundles[0], bundle)
-	rules, err := suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
-	re.NoError(err)
-	re.Len(rules, 1)
-	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
-	re.Equal(placement.DefaultRuleID, rules[0].ID)
-	re.Equal(pd.Voter, rules[0].Role)
-	re.Equal(3, rules[0].Count)
+	// Check if we have the default rule.
+	suite.checkRule(re, &pd.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    pd.Voter,
+		Count:   3,
+	}, 1, true)
 	// Should be the same as the rules in the bundle.
-	re.Equal(bundle.Rules, rules)
+	suite.checkRule(re, bundle.Rules[0], 1, true)
 	testRule := &pd.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "test",
@@ -115,20 +118,24 @@ func (suite *httpClientTestSuite) TestRule() {
 	}
 	err = suite.client.SetPlacementRule(suite.ctx, testRule)
 	re.NoError(err)
-	rules, err = suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
-	re.NoError(err)
-	re.Len(rules, 2)
-	re.Equal(placement.DefaultGroupID, rules[1].GroupID)
-	re.Equal("test", rules[1].ID)
-	re.Equal(pd.Voter, rules[1].Role)
-	re.Equal(3, rules[1].Count)
+	suite.checkRule(re, testRule, 2, true)
 	err = suite.client.DeletePlacementRule(suite.ctx, placement.DefaultGroupID, "test")
 	re.NoError(err)
-	rules, err = suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
+	suite.checkRule(re, testRule, 1, false)
+	testRuleOp := &pd.RuleOp{
+		Rule:   testRule,
+		Action: pd.RuleOpAdd,
+	}
+	err = suite.client.SetPlacementRuleInBatch(suite.ctx, []*pd.RuleOp{testRuleOp})
 	re.NoError(err)
-	re.Len(rules, 1)
-	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
-	re.Equal(placement.DefaultRuleID, rules[0].ID)
+	suite.checkRule(re, testRule, 2, true)
+	testRuleOp = &pd.RuleOp{
+		Rule:   testRule,
+		Action: pd.RuleOpDel,
+	}
+	err = suite.client.SetPlacementRuleInBatch(suite.ctx, []*pd.RuleOp{testRuleOp})
+	re.NoError(err)
+	suite.checkRule(re, testRule, 1, false)
 	err = suite.client.SetPlacementRuleBundles(suite.ctx, []*pd.GroupBundle{
 		{
 			ID:    placement.DefaultGroupID,
@@ -136,14 +143,63 @@ func (suite *httpClientTestSuite) TestRule() {
 		},
 	}, true)
 	re.NoError(err)
-	bundles, err = suite.client.GetAllPlacementRuleBundles(suite.ctx)
+	suite.checkRule(re, testRule, 1, true)
+	ruleGroups, err := suite.client.GetAllPlacementRuleGroups(suite.ctx)
 	re.NoError(err)
-	re.Len(bundles, 1)
-	re.Equal(placement.DefaultGroupID, bundles[0].ID)
-	re.Len(bundles[0].Rules, 1)
-	// Make sure the create timestamp is not zero to pass the later assertion.
-	testRule.CreateTimestamp = bundles[0].Rules[0].CreateTimestamp
-	re.Equal(testRule, bundles[0].Rules[0])
+	re.Len(ruleGroups, 1)
+	re.Equal(placement.DefaultGroupID, ruleGroups[0].ID)
+	ruleGroup, err := suite.client.GetPlacementRuleGroupByID(suite.ctx, placement.DefaultGroupID)
+	re.NoError(err)
+	re.Equal(ruleGroups[0], ruleGroup)
+	testRuleGroup := &pd.RuleGroup{
+		ID:       "test-group",
+		Index:    1,
+		Override: true,
+	}
+	err = suite.client.SetPlacementRuleGroup(suite.ctx, testRuleGroup)
+	re.NoError(err)
+	ruleGroup, err = suite.client.GetPlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	re.NoError(err)
+	re.Equal(testRuleGroup, ruleGroup)
+	err = suite.client.DeletePlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	re.NoError(err)
+	ruleGroup, err = suite.client.GetPlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
+	re.Empty(ruleGroup)
+}
+
+func (suite *httpClientTestSuite) checkRule(
+	re *require.Assertions,
+	rule *pd.Rule, totalRuleCount int, exist bool,
+) {
+	// Check through the `GetPlacementRulesByGroup` API.
+	rules, err := suite.client.GetPlacementRulesByGroup(suite.ctx, rule.GroupID)
+	re.NoError(err)
+	checkRuleFunc(re, rules, rule, totalRuleCount, exist)
+	// Check through the `GetPlacementRuleBundleByGroup` API.
+	bundle, err := suite.client.GetPlacementRuleBundleByGroup(suite.ctx, rule.GroupID)
+	re.NoError(err)
+	checkRuleFunc(re, bundle.Rules, rule, totalRuleCount, exist)
+}
+
+func checkRuleFunc(
+	re *require.Assertions,
+	rules []*pd.Rule, rule *pd.Rule, totalRuleCount int, exist bool,
+) {
+	re.Len(rules, totalRuleCount)
+	for _, r := range rules {
+		if r.ID != rule.ID {
+			continue
+		}
+		re.Equal(rule.GroupID, r.GroupID)
+		re.Equal(rule.ID, r.ID)
+		re.Equal(rule.Role, r.Role)
+		re.Equal(rule.Count, r.Count)
+		return
+	}
+	if exist {
+		re.Failf("Failed to check the rule", "rule %+v not found", rule)
+	}
 }
 
 func (suite *httpClientTestSuite) TestRegionLabel() {
@@ -202,10 +258,36 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 
 func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re := suite.Require()
-	suspectRegions := suite.cluster.GetLeaderServer().GetRaftCluster().GetSuspectRegions()
-	re.Len(suspectRegions, 0)
-	err := suite.client.AccelerateSchedule(suite.ctx, []byte("a1"), []byte("a2"))
+	r1 := core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2"))
+	r2 := core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3"))
+	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
+	err := raftCluster.HandleRegionHeartbeat(r1)
 	re.NoError(err)
-	suspectRegions = suite.cluster.GetLeaderServer().GetRaftCluster().GetSuspectRegions()
+	err = raftCluster.HandleRegionHeartbeat(r2)
+	re.NoError(err)
+	suspectRegions := raftCluster.GetSuspectRegions()
+	re.Len(suspectRegions, 0)
+	err = suite.client.AccelerateSchedule(suite.ctx, []byte("a1"), []byte("a2"))
+	re.NoError(err)
+	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 1)
+	raftCluster.ClearSuspectRegions()
+	suspectRegions = raftCluster.GetSuspectRegions()
+	re.Len(suspectRegions, 0)
+	err = suite.client.AccelerateScheduleInBatch(suite.ctx, []struct {
+		StartKey []byte `json:"start_key"`
+		EndKey   []byte `json:"end_key"`
+	}{
+		{
+			StartKey: []byte("a1"),
+			EndKey:   []byte("a2"),
+		},
+		{
+			StartKey: []byte("a2"),
+			EndKey:   []byte("a3"),
+		},
+	})
+	re.NoError(err)
+	suspectRegions = raftCluster.GetSuspectRegions()
+	re.Len(suspectRegions, 2)
 }
