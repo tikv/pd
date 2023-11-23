@@ -18,8 +18,9 @@
 package window
 
 import (
-	"sync"
 	"time"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // RollingPolicy is a policy for ring window based on time duration.
@@ -27,7 +28,7 @@ import (
 // e.g. If the last point is appended one bucket duration ago,
 // RollingPolicy will increment current offset.
 type RollingPolicy struct {
-	mu     sync.RWMutex
+	mu     syncutil.RWMutex
 	size   int
 	window *Window
 	offset int

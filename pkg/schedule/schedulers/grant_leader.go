@@ -49,7 +49,7 @@ var (
 )
 
 type grantLeaderSchedulerConfig struct {
-	mu                syncutil.RWMutex
+	syncutil.RWMutex
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
@@ -69,15 +69,15 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	if err != nil {
 		return err
 	}
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 	conf.StoreIDWithRanges[id] = ranges
 	return nil
 }
 
 func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	newStoreIDWithRanges := make(map[uint64][]core.KeyRange)
 	for k, v := range conf.StoreIDWithRanges {
 		newStoreIDWithRanges[k] = v
@@ -89,8 +89,8 @@ func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 
 func (conf *grantLeaderSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
@@ -103,8 +103,8 @@ func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	ranges := conf.StoreIDWithRanges[id]
 	res := make([]string, 0, len(ranges)*2)
 	for index := range ranges {
@@ -114,8 +114,8 @@ func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
 }
 
 func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last bool) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 	_, exists := conf.StoreIDWithRanges[id]
 	succ, last = false, false
 	if exists {
@@ -128,15 +128,15 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 }
 
 func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 	conf.cluster.PauseLeaderTransfer(id)
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
 func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	if ranges, exist := conf.StoreIDWithRanges[id]; exist {
 		return ranges
 	}
@@ -179,8 +179,8 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 }
 
 func (s *grantLeaderScheduler) ReloadConfig() error {
-	s.conf.mu.Lock()
-	defer s.conf.mu.Unlock()
+	s.conf.Lock()
+	defer s.conf.Unlock()
 	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
 	if err != nil {
 		return err
@@ -198,8 +198,8 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 }
 
 func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
+	s.conf.RLock()
+	defer s.conf.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
 		if err := cluster.PauseLeaderTransfer(id); err != nil {
@@ -210,8 +210,8 @@ func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 }
 
 func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
+	s.conf.RLock()
+	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
 		cluster.ResumeLeaderTransfer(id)
 	}
@@ -227,8 +227,8 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 
 func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
-	s.conf.mu.RLock()
-	defer s.conf.mu.RUnlock()
+	s.conf.RLock()
+	defer s.conf.RUnlock()
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
@@ -268,15 +268,15 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	idFloat, ok := input["store_id"].(float64)
 	if ok {
 		id = (uint64)(idFloat)
-		handler.config.mu.RLock()
+		handler.config.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
-				handler.config.mu.RUnlock()
+				handler.config.RUnlock()
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
-		handler.config.mu.RUnlock()
+		handler.config.RUnlock()
 		args = append(args, strconv.FormatUint(id, 10))
 	}
 
