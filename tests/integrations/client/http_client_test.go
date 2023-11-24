@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -28,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -73,27 +75,30 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
 	re := suite.Require()
-	var (
-		minResolvedTS         uint64
-		storeMinResolvedTSMap map[uint64]uint64
-		err                   error
-	)
-	// Wait for the cluster-level min resolved TS to be initialized.
+	testMinResolvedTS := tsoutil.TimeToTS(time.Now())
+	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
+	err := raftCluster.SetMinResolvedTS(1, testMinResolvedTS)
+	re.NoError(err)
+	// Make sure the min resolved TS is updated.
 	testutil.Eventually(re, func() bool {
-		minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, nil)
-		re.NoError(err)
-		return minResolvedTS > 0 && len(storeMinResolvedTSMap) == 0
+		minResolvedTS, _ := raftCluster.CheckAndUpdateMinResolvedTS()
+		return minResolvedTS == testMinResolvedTS
 	})
+	// Wait for the cluster-level min resolved TS to be initialized.
+	minResolvedTS, storeMinResolvedTSMap, err := suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, nil)
+	re.NoError(err)
+	re.Equal(testMinResolvedTS, minResolvedTS)
+	re.Empty(storeMinResolvedTSMap)
 	// Get the store-level min resolved TS.
 	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1})
 	re.NoError(err)
-	re.Greater(minResolvedTS, uint64(0))
+	re.Equal(testMinResolvedTS, minResolvedTS)
 	re.Len(storeMinResolvedTSMap, 1)
 	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
 	// Get the store-level min resolved TS with an invalid store ID.
 	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1, 2})
 	re.NoError(err)
-	re.Greater(minResolvedTS, uint64(0))
+	re.Equal(testMinResolvedTS, minResolvedTS)
 	re.Len(storeMinResolvedTSMap, 2)
 	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
 	re.Equal(uint64(math.MaxUint64), storeMinResolvedTSMap[2])
@@ -265,16 +270,17 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 
 func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re := suite.Require()
-	r1 := core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2"))
-	r2 := core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3"))
 	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
-	err := raftCluster.HandleRegionHeartbeat(r1)
-	re.NoError(err)
-	err = raftCluster.HandleRegionHeartbeat(r2)
-	re.NoError(err)
+	for _, region := range []*core.RegionInfo{
+		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
+		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+	} {
+		err := raftCluster.HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
 	suspectRegions := raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 0)
-	err = suite.client.AccelerateSchedule(suite.ctx, []byte("a1"), []byte("a2"))
+	err := suite.client.AccelerateSchedule(suite.ctx, []byte("a1"), []byte("a2"))
 	re.NoError(err)
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 1)

@@ -2241,7 +2241,9 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 	return nil
 }
 
-func (c *RaftCluster) checkAndUpdateMinResolvedTS() (uint64, bool) {
+// CheckAndUpdateMinResolvedTS checks and updates the min resolved ts of the cluster.
+// This is exported for testing purpose.
+func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -2284,7 +2286,7 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 		case <-ticker.C:
 			interval = c.opt.GetMinResolvedTSPersistenceInterval()
 			if interval != 0 {
-				if current, needPersist := c.checkAndUpdateMinResolvedTS(); needPersist {
+				if current, needPersist := c.CheckAndUpdateMinResolvedTS(); needPersist {
 					c.storage.SaveMinResolvedTS(current)
 				}
 			} else {

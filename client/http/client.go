@@ -437,7 +437,7 @@ func (c *client) SetPlacementRule(ctx context.Context, rule *Rule) error {
 		http.MethodPost, bytes.NewBuffer(ruleJSON), nil)
 }
 
-// SetPlacementRules sets the placement rules in batch.
+// SetPlacementRuleInBatch sets the placement rules in batch.
 func (c *client) SetPlacementRuleInBatch(ctx context.Context, ruleOps []*RuleOp) error {
 	ruleOpsJSON, err := json.Marshal(ruleOps)
 	if err != nil {
