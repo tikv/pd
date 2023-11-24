@@ -472,7 +472,7 @@ func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, e
 	var ruleGroups []*RuleGroup
 	err := c.requestWithRetry(ctx,
 		"GetAllPlacementRuleGroups", placementRuleGroups,
-		http.MethodGet, nil, &ruleGroups)
+		http.MethodGet, http.NoBody, &ruleGroups)
 	if err != nil {
 		return nil, err
 	}
@@ -484,7 +484,7 @@ func (c *client) GetPlacementRuleGroupByID(ctx context.Context, id string) (*Rul
 	var ruleGroup RuleGroup
 	err := c.requestWithRetry(ctx,
 		"GetPlacementRuleGroupByID", PlacementRuleGroupByID(id),
-		http.MethodGet, nil, &ruleGroup)
+		http.MethodGet, http.NoBody, &ruleGroup)
 	if err != nil {
 		return nil, err
 	}
@@ -506,7 +506,7 @@ func (c *client) SetPlacementRuleGroup(ctx context.Context, ruleGroup *RuleGroup
 func (c *client) DeletePlacementRuleGroupByID(ctx context.Context, id string) error {
 	return c.requestWithRetry(ctx,
 		"DeletePlacementRuleGroupByID", PlacementRuleGroupByID(id),
-		http.MethodDelete, nil, nil)
+		http.MethodDelete, http.NoBody, nil)
 }
 
 // GetAllRegionLabelRules gets all region label rules.
