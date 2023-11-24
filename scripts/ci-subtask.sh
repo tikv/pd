@@ -43,8 +43,7 @@ else
     done
 
     # Sort tasks by weight in descending order.
-    IFS=$'\n' tasks=($(sort -rn <<<"${tasks[*]}"))
-    unset IFS
+    tasks=($(printf "%s\n" "${tasks[@]}" | sort -rn))
 
     scores=($(seq "$1" | xargs -I{} echo 0))
 
