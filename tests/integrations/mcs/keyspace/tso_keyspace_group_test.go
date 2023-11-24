@@ -301,7 +301,10 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 		return code == http.StatusOK && kg != nil
 	}, testutil.WithWaitFor(time.Second*1))
 	suite.Equal(utils.DefaultKeyspaceGroupID, kg.ID)
-	suite.Len(kg.Members, utils.DefaultKeyspaceGroupReplicaCount)
+	// the allocNodesToAllKeyspaceGroups loop will run every 100ms.
+	testutil.Eventually(suite.Require(), func() bool {
+		return len(kg.Members) == utils.DefaultKeyspaceGroupReplicaCount
+	})
 	for _, member := range kg.Members {
 		suite.Contains(nodes, member.Address)
 	}

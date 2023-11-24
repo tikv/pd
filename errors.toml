@@ -16,6 +16,11 @@ error = '''
 redirect failed
 '''
 
+["PD:apiutil:ErrRedirectToNotLeader"]
+error = '''
+redirect to not leader
+'''
+
 ["PD:autoscaling:ErrEmptyMetricsResponse"]
 error = '''
 metrics response from Prometheus is empty

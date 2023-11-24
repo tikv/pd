@@ -61,11 +61,6 @@ const (
 	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
 	ForwardToMicroServiceHeader = "Forward-To-Micro-Service"
 
-	// ErrRedirectFailed is the error message for redirect failed.
-	ErrRedirectFailed = "redirect failed"
-	// ErrRedirectToNotLeader is the error message for redirect to not leader.
-	ErrRedirectToNotLeader = "redirect to not leader"
-
 	chunkSize = 4096
 )
 
@@ -459,7 +454,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
-	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
+	http.Error(w, errs.ErrRedirect.FastGenByArgs().Error(), http.StatusInternalServerError)
 }
 
 // copyHeader duplicates the HTTP headers from the source `src` to the destination `dst`.

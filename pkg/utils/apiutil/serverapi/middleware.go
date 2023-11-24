@@ -162,7 +162,13 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	redirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
-	if !h.s.IsClosed() && (allowFollowerHandle || h.s.GetMember().IsLeader()) && !redirectToMicroService {
+
+	if h.s.IsClosed() {
+		http.Error(w, errs.ErrServerNotStarted.FastGenByArgs().Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if (allowFollowerHandle || h.s.GetMember().IsLeader()) && !redirectToMicroService {
 		next(w, r)
 		return
 	}
@@ -170,7 +176,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	// Prevent more than one redirection.
 	if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
 		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
-		http.Error(w, apiutil.ErrRedirectToNotLeader, http.StatusInternalServerError)
+		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -189,7 +195,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	var clientUrls []string
 	if redirectToMicroService {
 		if len(targetAddr) == 0 {
-			http.Error(w, apiutil.ErrRedirectFailed, http.StatusInternalServerError)
+			http.Error(w, errs.ErrRedirect.FastGenByArgs().Error(), http.StatusInternalServerError)
 			return
 		}
 		clientUrls = append(clientUrls, targetAddr)
