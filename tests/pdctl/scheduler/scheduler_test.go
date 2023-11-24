@@ -39,15 +39,23 @@ import (
 
 type schedulerTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestSchedulerTestSuite(t *testing.T) {
 	suite.Run(t, new(schedulerTestSuite))
 }
 
+func (suite *schedulerTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *schedulerTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
 func (suite *schedulerTestSuite) TestScheduler() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkScheduler)
+	suite.env.RunTestInTwoModes(suite.checkScheduler)
 }
 
 func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
@@ -564,8 +572,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
+	suite.env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestCluster) {

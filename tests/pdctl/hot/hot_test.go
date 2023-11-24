@@ -42,30 +42,28 @@ import (
 
 type hotTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestHotTestSuite(t *testing.T) {
 	suite.Run(t, new(hotTestSuite))
 }
 
-func (suite *hotTestSuite) TestHot() {
-	var start time.Time
-	start = start.Add(time.Hour)
-	opts := []tests.ConfigOption{
+func (suite *hotTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
-			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
+			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
+			conf.Schedule.HotRegionCacheHitsThreshold = 0
 		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkHot)
+	)
+}
 
-	opts = append(opts, func(conf *config.Config, serverName string) {
-		conf.Schedule.HotRegionCacheHitsThreshold = 0
-	})
-	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkHotWithoutHotPeer)
-	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkHotWithStoreID)
+func (suite *hotTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *hotTestSuite) TestHot() {
+	suite.env.RunTestInTwoModes(suite.checkHot)
 }
 
 func (suite *hotTestSuite) checkHot(cluster *tests.TestCluster) {
@@ -229,6 +227,10 @@ func (suite *hotTestSuite) checkHot(cluster *tests.TestCluster) {
 	testCommand(reportIntervals, "read")
 }
 
+func (suite *hotTestSuite) TestHotWithStoreID() {
+	suite.env.RunTestInTwoModes(suite.checkHotWithStoreID)
+}
+
 func (suite *hotTestSuite) checkHotWithStoreID(cluster *tests.TestCluster) {
 	re := suite.Require()
 	statistics.Denoising = false
@@ -290,6 +292,10 @@ func (suite *hotTestSuite) checkHotWithStoreID(cluster *tests.TestCluster) {
 	re.Len(hotRegion.AsLeader, 1)
 	re.Equal(2, hotRegion.AsLeader[1].Count)
 	re.Equal(float64(200000000), hotRegion.AsLeader[1].TotalBytesRate)
+}
+
+func (suite *hotTestSuite) TestHotWithoutHotPeer() {
+	suite.env.RunTestInTwoModes(suite.checkHotWithoutHotPeer)
 }
 
 func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *tests.TestCluster) {

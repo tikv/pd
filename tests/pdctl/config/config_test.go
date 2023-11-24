@@ -53,15 +53,23 @@ func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.Schedule
 
 type configTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestConfigTestSuite(t *testing.T) {
 	suite.Run(t, new(configTestSuite))
 }
 
+func (suite *configTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *configTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
 func (suite *configTestSuite) TestConfig() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfig)
+	suite.env.RunTestInTwoModes(suite.checkConfig)
 }
 
 func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
@@ -292,8 +300,7 @@ func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRules)
+	suite.env.RunTestInTwoModes(suite.checkPlacementRules)
 }
 
 func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
@@ -360,8 +367,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+	suite.env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
 }
 
 func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluster) {
@@ -440,8 +446,7 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluste
 }
 
 func (suite *configTestSuite) TestPlacementRuleBundle() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+	suite.env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
 }
 
 func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluster) {
@@ -664,8 +669,7 @@ func TestReplicationMode(t *testing.T) {
 }
 
 func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
+	suite.env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
 }
 
 func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.TestCluster) {
@@ -816,8 +820,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 }
 
 func (suite *configTestSuite) TestPDServerConfig() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPDServerConfig)
+	suite.env.RunTestInTwoModes(suite.checkPDServerConfig)
 }
 
 func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {

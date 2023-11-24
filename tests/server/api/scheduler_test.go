@@ -37,15 +37,23 @@ const apiPrefix = "/pd"
 
 type scheduleTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestScheduleTestSuite(t *testing.T) {
 	suite.Run(t, new(scheduleTestSuite))
 }
 
+func (suite *scheduleTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *scheduleTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
 func (suite *scheduleTestSuite) TestOriginAPI() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkOriginAPI)
+	suite.env.RunTestInTwoModes(suite.checkOriginAPI)
 }
 
 func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
@@ -113,8 +121,7 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestAPI() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkAPI)
+	suite.env.RunTestInTwoModes(suite.checkAPI)
 }
 
 func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
@@ -564,8 +571,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestDisable() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkDisable)
+	suite.env.RunTestInTwoModes(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {

@@ -45,20 +45,25 @@ var (
 
 type operatorTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
+func (suite *operatorTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, serverName string) {
+		conf.Replication.MaxReplicas = 1
+	})
+}
+
+func (suite *operatorTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
 func (suite *operatorTestSuite) TestAddRemovePeer() {
-	opts := []tests.ConfigOption{
-		func(conf *config.Config, serverName string) {
-			conf.Replication.MaxReplicas = 1
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkAddRemovePeer)
+	suite.env.RunTestInTwoModes(suite.checkAddRemovePeer)
 }
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
@@ -168,13 +173,7 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 }
 
 func (suite *operatorTestSuite) TestMergeRegionOperator() {
-	opts := []tests.ConfigOption{
-		func(conf *config.Config, serverName string) {
-			conf.Replication.MaxReplicas = 1
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkMergeRegionOperator)
+	suite.env.RunTestInTwoModes(suite.checkMergeRegionOperator)
 }
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
@@ -204,13 +203,7 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 }
 
 func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
-	opts := []tests.ConfigOption{
-		func(conf *config.Config, serverName string) {
-			conf.Replication.MaxReplicas = 3
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+	suite.env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
 }
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
