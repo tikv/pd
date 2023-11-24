@@ -44,13 +44,6 @@ ifeq ($(PLUGIN), 1)
 	BUILD_TAGS += with_plugin
 endif
 
-<<<<<<< HEAD
-LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty --always)"
-LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
-LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
-LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
-LDFLAGS += -X "$(PD_PKG)/server/versioninfo.PDEdition=$(PD_EDITION)"
-=======
 ifeq ($(ENABLE_FIPS), 1)
 	BUILD_TAGS+=boringcrypto
 	BUILD_GOEXPERIMENT=boringcrypto
@@ -63,7 +56,6 @@ LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDEdition=$(PD_EDITION)"
->>>>>>> 181fdc95b (makefile: support build with `boringcrypto` to support Fips (#7275))
 
 ifneq ($(DASHBOARD), 0)
 	# Note: LDFLAGS must be evaluated lazily for these scripts to work correctly
@@ -78,13 +70,7 @@ BUILD_BIN_PATH := $(shell pwd)/bin
 
 build: pd-server pd-ctl pd-recover
 
-<<<<<<< HEAD
 tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump
-=======
-build-fips: pd-server-fips pd-ctl-fips pd-recover-fips
-
-tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench
->>>>>>> 181fdc95b (makefile: support build with `boringcrypto` to support Fips (#7275))
 
 PD_SERVER_DEP :=
 ifeq ($(SWAGGER), 1)
@@ -102,23 +88,16 @@ pd-server: ${PD_SERVER_DEP}
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
-pd-server-fips:
-	ENABLE_FIPS=1 $(MAKE) pd-server
-
 .PHONY: build tools pd-server pd-server-basic pd-server-fips
 
 # Tools
 
 pd-ctl:
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
-pd-ctl-fips:
-	ENABLE_FIPS=1 $(MAKE) pd-ctl
 pd-tso-bench:
 	cd tools/pd-tso-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench main.go
 pd-recover:
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
-pd-recover-fips:
-	ENABLE_FIPS=1 $(MAKE) pd-recover
 pd-analysis:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis tools/pd-analysis/main.go
 pd-heartbeat-bench:
@@ -130,11 +109,7 @@ regions-dump:
 stores-dump:
 	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump tools/stores-dump/main.go
 
-<<<<<<< HEAD
 .PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump
-=======
-.PHONY: pd-ctl pd-ctl-fips pd-tso-bench pd-recover pd-recover-fips pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench
->>>>>>> 181fdc95b (makefile: support build with `boringcrypto` to support Fips (#7275))
 
 #### Docker image ####
 
