@@ -242,7 +242,7 @@ type SchedulingTestEnvironment struct {
 	t        *testing.T
 	opts     []ConfigOption
 	clusters map[mode]*TestCluster
-	cancels  map[mode]context.CancelFunc
+	cancels  []context.CancelFunc
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
@@ -251,7 +251,7 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 		t:        t,
 		opts:     opts,
 		clusters: make(map[mode]*TestCluster),
-		cancels:  make(map[mode]context.CancelFunc),
+		cancels:  make([]context.CancelFunc, 0),
 	}
 }
 
@@ -286,19 +286,30 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 
 // Cleanup is to cleanup the environment.
 func (s *SchedulingTestEnvironment) Cleanup() {
-	if _, ok := s.clusters[pdMode]; ok {
-		s.clusters[pdMode].Destroy()
-		s.cancels[pdMode]()
+	re := require.New(s.t)
+	for _, cluster := range s.clusters {
+		leader := cluster.GetLeaderServer()
+		sche := cluster.GetSchedulingPrimaryServer()
+		cluster.Destroy()
+		testutil.Eventually(re, func() bool {
+			return leader.GetServer().IsClosed()
+		})
+		testutil.Eventually(re, func() bool {
+			if sche != nil {
+				return sche.IsClosed()
+			}
+			return true
+		})
 	}
-	if _, ok := s.clusters[apiMode]; ok {
-		s.clusters[apiMode].Destroy()
-		s.cancels[apiMode]()
+	for _, cancel := range s.cancels {
+		cancel()
 	}
 }
 
 func (s *SchedulingTestEnvironment) startCluster(m mode) {
 	re := require.New(s.t)
 	ctx, cancel := context.WithCancel(context.Background())
+	s.cancels = append(s.cancels, cancel)
 	switch m {
 	case pdMode:
 		cluster, err := NewTestCluster(ctx, 1, s.opts...)
@@ -309,7 +320,6 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
 		s.clusters[pdMode] = cluster
-		s.cancels[pdMode] = cancel
 	case apiMode:
 		cluster, err := NewTestAPICluster(ctx, 1, s.opts...)
 		re.NoError(err)
@@ -329,8 +339,5 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
 		})
 		s.clusters[apiMode] = cluster
-		s.cancels[apiMode] = cancel
-	default:
-		panic("not supported mode")
 	}
 }
