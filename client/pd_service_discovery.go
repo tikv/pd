@@ -616,7 +616,6 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) error {
 
 	if _, err := c.GetOrCreateGRPCConn(addr); err != nil {
 		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
-		return err
 	}
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
