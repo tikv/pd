@@ -61,14 +61,14 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 // @Success  200  {object}  config.Config
 // @Router   /config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	cfg, err := h.getConfig()
+	cfg, err := h.getConfigWithCurrentValue()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 	h.rd.JSON(w, http.StatusOK, cfg)
 }
 
-func (h *confHandler) getConfig() (*config.Config, error) {
+func (h *confHandler) getConfigWithCurrentValue() (*config.Config, error) {
 	cfg := h.svr.GetConfig()
 	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
 		schedulingServerConfig, err := h.GetSchedulingServerConfig()
@@ -90,7 +90,7 @@ func (h *confHandler) getConfig() (*config.Config, error) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /config/default [get]
 func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, r *http.Request) {
-	config, err := h.getDefaultConfig()
+	config, err := h.getConfigWithDefaultValue()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
@@ -98,7 +98,7 @@ func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, config)
 }
 
-func (h *confHandler) getDefaultConfig() (*config.Config, error) {
+func (h *confHandler) getConfigWithDefaultValue() (*config.Config, error) {
 	config := config.NewConfig()
 	err := config.Adjust(nil, false)
 	if err != nil {
@@ -598,7 +598,7 @@ type ConfigDetail struct {
 // @Success  200  {object}  []ConfigDetail
 // @Router   /config/detail [get]
 func (h *confHandler) GetConfigDetail(w http.ResponseWriter, r *http.Request) {
-	cfg, err := h.getConfig()
+	cfg, err := h.getConfigWithCurrentValue()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -608,7 +608,7 @@ func (h *confHandler) GetConfigDetail(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	dcf, err := h.getDefaultConfig()
+	dcf, err := h.getConfigWithDefaultValue()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
