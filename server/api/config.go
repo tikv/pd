@@ -61,19 +61,26 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 // @Success  200  {object}  config.Config
 // @Router   /config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	cfg, err := h.getConfig()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+	h.rd.JSON(w, http.StatusOK, cfg)
+}
+
+func (h *confHandler) getConfig() (*config.Config, error) {
 	cfg := h.svr.GetConfig()
 	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
 		schedulingServerConfig, err := h.GetSchedulingServerConfig()
 		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
+			return nil, err
 		}
 		cfg.Schedule = schedulingServerConfig.Schedule
 		cfg.Replication = schedulingServerConfig.Replication
 	} else {
 		cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	}
-	h.rd.JSON(w, http.StatusOK, cfg)
+	return cfg, nil
 }
 
 // @Tags     config
@@ -83,13 +90,21 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /config/default [get]
 func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, r *http.Request) {
-	config := config.NewConfig()
-	err := config.Adjust(nil, false)
+	config, err := h.getDefaultConfig()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 
 	h.rd.JSON(w, http.StatusOK, config)
+}
+
+func (h *confHandler) getDefaultConfig() (*config.Config, error) {
+	config := config.NewConfig()
+	err := config.Adjust(nil, false)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
 }
 
 // FIXME: details of input json body params
@@ -565,4 +580,51 @@ func (h *confHandler) GetSchedulingServerConfig() (*config.Config, error) {
 		return nil, err
 	}
 	return &schedulingServerConfig, nil
+}
+
+// ConfigDetail is the detail of config option with current value and default value.
+type ConfigDetail struct {
+	// config name
+	Name string `json:"name"`
+	// current config value
+	Value any `json:"value"`
+	// default config value
+	DefaultValue any `json:"default_value"`
+}
+
+// @Tags     config
+// @Summary  Get all config detail.
+// @Produce  json
+// @Success  200  {object}  []ConfigDetail
+// @Router   /config/detail [get]
+func (h *confHandler) GetConfigDetail(w http.ResponseWriter, r *http.Request) {
+	cfg, err := h.getConfig()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	cfgMap, err := config.FlattenConfigItems(cfg)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dcf, err := h.getDefaultConfig()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	dcfMap, err := config.FlattenConfigItems(dcf)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	result := make([]ConfigDetail, 0, len(cfgMap))
+	for k, v := range cfgMap {
+		result = append(result, ConfigDetail{
+			Name:         k,
+			Value:        v,
+			DefaultValue: dcfMap[k],
+		})
+	}
+	h.rd.JSON(w, http.StatusOK, result)
 }

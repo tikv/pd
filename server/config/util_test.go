@@ -15,6 +15,7 @@
 package config
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -41,4 +42,35 @@ func TestValidateURLWithScheme(t *testing.T) {
 	for _, test := range tests {
 		re.Equal(test.hasErr, ValidateURLWithScheme(test.addr) != nil)
 	}
+}
+
+func TestFlattenConfigItems(t *testing.T) {
+	toJSONStr := func(v interface{}) string {
+		str, err := json.Marshal(v)
+		require.NoError(t, err)
+		return string(str)
+	}
+
+	jsonConf := `{
+	"k0": 233333,
+	"k1": "v1",
+	"k2": ["v2-1", "v2-2", "v2-3"],
+	"k3": [{"k3-1":"v3-1"}, {"k3-2":"v3-2"}, {"k3-3":"v3-3"}],
+	"k4": {
+		"k4-1": [1, 2, 3, 4],
+		"k4-2": [5, 6, 7, 8],
+		"k4-3": [666]
+	}}`
+	nested := make(map[string]interface{})
+	require.NoError(t, json.Unmarshal([]byte(jsonConf), &nested))
+	flatMap, err := FlattenConfigItems(nested)
+	require.NoError(t, err)
+	require.Equal(t, 7, len(flatMap))
+	require.Equal(t, "233333", toJSONStr(flatMap["k0"]))
+	require.Equal(t, "v1", flatMap["k1"])
+	require.Equal(t, `["v2-1","v2-2","v2-3"]`, toJSONStr(flatMap["k2"]))
+	require.Equal(t, `[{"k3-1":"v3-1"},{"k3-2":"v3-2"},{"k3-3":"v3-3"}]`, toJSONStr(flatMap["k3"]))
+	require.Equal(t, `[1,2,3,4]`, toJSONStr(flatMap["k4.k4-1"]))
+	require.Equal(t, `[5,6,7,8]`, toJSONStr(flatMap["k4.k4-2"]))
+	require.Equal(t, `[666]`, toJSONStr(flatMap["k4.k4-3"]))
 }

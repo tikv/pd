@@ -172,6 +172,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/config/cluster-version", confHandler.SetClusterVersion, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/config/replication-mode", confHandler.GetReplicationModeConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/config/replication-mode", confHandler.SetReplicationModeConfig, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/config/detail", confHandler.GetConfigDetail, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	rulesHandler := newRulesHandler(svr, rd)
 	ruleRouter := clusterRouter.NewRoute().Subrouter()

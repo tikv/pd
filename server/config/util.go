@@ -15,6 +15,7 @@
 package config
 
 import (
+	"encoding/json"
 	"net/url"
 	"strings"
 
@@ -48,4 +49,35 @@ func parseUrls(s string) ([]url.URL, error) {
 	}
 
 	return urls, nil
+}
+
+// FlattenConfigItems flatten config to map.
+func FlattenConfigItems(nestedConfig interface{}) (map[string]interface{}, error) {
+	jsonValue, err := json.Marshal(nestedConfig)
+	if err != nil {
+		return nil, err
+	}
+	nestedConfigMap := make(map[string]interface{})
+	err = json.Unmarshal(jsonValue, &nestedConfigMap)
+	if err != nil {
+		return nil, err
+	}
+	flatMap := make(map[string]interface{})
+	flatten(flatMap, nestedConfigMap, "")
+	return flatMap, nil
+}
+
+func flatten(flatMap map[string]interface{}, nested interface{}, prefix string) {
+	switch nested := nested.(type) {
+	case map[string]interface{}:
+		for k, v := range nested {
+			path := k
+			if prefix != "" {
+				path = prefix + "." + k
+			}
+			flatten(flatMap, v, path)
+		}
+	default: // don't flatten arrays
+		flatMap[prefix] = nested
+	}
 }
