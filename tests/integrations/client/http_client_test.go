@@ -280,17 +280,16 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	}
 	suspectRegions := raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 0)
-	err := suite.client.AccelerateSchedule(suite.ctx, []byte("a1"), []byte("a2"))
+	err := suite.client.AccelerateSchedule(suite.ctx, &pd.KeyRange{
+		StartKey: []byte("a1"),
+		EndKey:   []byte("a2")})
 	re.NoError(err)
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 1)
 	raftCluster.ClearSuspectRegions()
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 0)
-	err = suite.client.AccelerateScheduleInBatch(suite.ctx, []struct {
-		StartKey []byte `json:"start_key"`
-		EndKey   []byte `json:"end_key"`
-	}{
+	err = suite.client.AccelerateScheduleInBatch(suite.ctx, []*pd.KeyRange{
 		{
 			StartKey: []byte("a1"),
 			EndKey:   []byte("a2"),

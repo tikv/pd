@@ -19,6 +19,12 @@ import (
 	"time"
 )
 
+// KeyRange defines a range of keys.
+type KeyRange struct {
+	StartKey []byte `json:"start_key"`
+	EndKey   []byte `json:"end_key"`
+}
+
 // NOTICE: the structures below are copied from the PD API definitions.
 // Please make sure the consistency if any change happens to the PD API.
 
