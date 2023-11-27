@@ -807,7 +807,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 	schedulers := sc.GetSchedulerNames()
 	switch status {
 	case "paused":
-		var pausedSchedulers []string
+		pausedSchedulers := make([]string, 0, len(schedulers))
 		pausedPeriods := []schedulerPausedPeriod{}
 		for _, scheduler := range schedulers {
 			paused, err := sc.IsSchedulerPaused(scheduler)
@@ -842,7 +842,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 		}
 		return pausedSchedulers, nil
 	case "disabled":
-		var disabledSchedulers []string
+		disabledSchedulers := make([]string, 0, len(schedulers))
 		for _, scheduler := range schedulers {
 			disabled, err := sc.IsSchedulerDisabled(scheduler)
 			if err != nil {
@@ -857,7 +857,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 		// The default scheduler could not be deleted in scheduling server,
 		// so schedulers could only be disabled.
 		// We should not return the disabled schedulers here.
-		var enabledSchedulers []string
+		enabledSchedulers := make([]string, 0, len(schedulers))
 		for _, scheduler := range schedulers {
 			disabled, err := sc.IsSchedulerDisabled(scheduler)
 			if err != nil {
