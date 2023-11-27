@@ -15,14 +15,42 @@
 package http
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"time"
 )
 
-// KeyRange defines a range of keys.
+// KeyRange defines a range of keys in bytes.
 type KeyRange struct {
-	StartKey []byte `json:"start_key"`
-	EndKey   []byte `json:"end_key"`
+	startKey []byte
+	endKey   []byte
+}
+
+// NewKeyRange creates a new key range structure with the given start key and end key bytes.
+// Notice: the actual encoding of the key range is not specified here. It should be either UTF-8 or hex.
+//   - UTF-8 means the key has already been encoded into a string with UTF-8 encoding, like:
+//     []byte{52 56 54 53 54 99 54 99 54 102 50 48 53 55 54 102 55 50 54 99 54 52}, which will later be converted to "48656c6c6f20576f726c64"
+//     by using `string()` method.
+//   - Hex means the key is just a raw hex bytes without encoding to a UTF-8 string, like:
+//     []byte{72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100}, which will later be converted to "48656c6c6f20576f726c64"
+//     by using `hex.EncodeToString()` method.
+func NewKeyRange(startKey, endKey []byte) *KeyRange {
+	return &KeyRange{startKey, endKey}
+}
+
+// EscapeAsUTF8Str returns the URL escaped key strings as they are UTF-8 encoded.
+func (r *KeyRange) EscapeAsUTF8Str() (startKeyStr, endKeyStr string) {
+	startKeyStr = url.QueryEscape(string(r.startKey))
+	endKeyStr = url.QueryEscape(string(r.endKey))
+	return
+}
+
+// EscapeAsHexStr returns the URL escaped key strings as they are hex encoded.
+func (r *KeyRange) EscapeAsHexStr() (startKeyStr, endKeyStr string) {
+	startKeyStr = url.QueryEscape(hex.EncodeToString(r.startKey))
+	endKeyStr = url.QueryEscape(hex.EncodeToString(r.endKey))
+	return
 }
 
 // NOTICE: the structures below are copied from the PD API definitions.
