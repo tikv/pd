@@ -18,12 +18,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -315,10 +313,11 @@ func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 }
 
 // GetRegionsByKeyRange gets the regions info by key range. If the limit is -1, it will return all regions within the range.
+// The keys in the key range should be encoded in the UTF-8 bytes format.
 func (c *client) GetRegionsByKeyRange(ctx context.Context, keyRange *KeyRange, limit int) (*RegionsInfo, error) {
 	var regions RegionsInfo
 	err := c.requestWithRetry(ctx,
-		"GetRegionsByKeyRange", RegionsByKey(keyRange.StartKey, keyRange.EndKey, limit),
+		"GetRegionsByKeyRange", RegionsByKeyRange(keyRange, limit),
 		http.MethodGet, http.NoBody, &regions)
 	if err != nil {
 		return nil, err
@@ -363,10 +362,11 @@ func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, e
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
+// The keys in the key range should be encoded in the UTF-8 bytes format.
 func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange) (*RegionStats, error) {
 	var regionStats RegionStats
 	err := c.requestWithRetry(ctx,
-		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(keyRange.StartKey, keyRange.StartKey),
+		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(keyRange),
 		http.MethodGet, http.NoBody, &regionStats,
 	)
 	if err != nil {
@@ -557,10 +557,12 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 }
 
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.
+// The keys in the key range should be encoded in the hex bytes format (without encoding to the UTF-8 bytes).
 func (c *client) AccelerateSchedule(ctx context.Context, keyRange *KeyRange) error {
+	startKey, endKey := keyRange.EscapeAsHexStr()
 	inputJSON, err := json.Marshal(map[string]string{
-		"start_key": url.QueryEscape(hex.EncodeToString(keyRange.StartKey)),
-		"end_key":   url.QueryEscape(hex.EncodeToString(keyRange.EndKey)),
+		"start_key": startKey,
+		"end_key":   endKey,
 	})
 	if err != nil {
 		return errors.Trace(err)
@@ -571,12 +573,14 @@ func (c *client) AccelerateSchedule(ctx context.Context, keyRange *KeyRange) err
 }
 
 // AccelerateScheduleInBatch accelerates the scheduling of the regions within the given key ranges in batch.
+// The keys in the key ranges should be encoded in the hex bytes format (without encoding to the UTF-8 bytes).
 func (c *client) AccelerateScheduleInBatch(ctx context.Context, keyRanges []*KeyRange) error {
 	input := make([]map[string]string, 0, len(keyRanges))
 	for _, keyRange := range keyRanges {
+		startKey, endKey := keyRange.EscapeAsHexStr()
 		input = append(input, map[string]string{
-			"start_key": url.QueryEscape(hex.EncodeToString(keyRange.StartKey)),
-			"end_key":   url.QueryEscape(hex.EncodeToString(keyRange.EndKey)),
+			"start_key": startKey,
+			"end_key":   endKey,
 		})
 	}
 	inputJSON, err := json.Marshal(input)
