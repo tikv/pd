@@ -54,7 +54,7 @@ func TestKeyspaceTestSuite(t *testing.T) {
 type mockConfig struct {
 	PreAlloc                 []string
 	WaitRegionSplit          bool
-	DisableRawKVRegionSplit  bool
+	SplitRawKVRegion         bool
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
 }
@@ -75,8 +75,8 @@ func (m *mockConfig) GetCheckRegionSplitInterval() time.Duration {
 	return m.CheckRegionSplitInterval.Duration
 }
 
-func (m *mockConfig) GetDisableRawKVRegionSplit() bool {
-	return m.DisableRawKVRegionSplit
+func (m *mockConfig) GetSplitRawKVRegion() bool {
+	return m.SplitRawKVRegion
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {

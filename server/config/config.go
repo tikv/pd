@@ -244,7 +244,7 @@ const (
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
-	defaultDisableRawKVRegionSplit    = false
+	defaultSplitRawKVRegion           = false
 
 	defaultWaitRegionSplitTimeout   = 30 * time.Second
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
@@ -856,8 +856,8 @@ type KeyspaceConfig struct {
 	WaitRegionSplit bool `toml:"wait-region-split" json:"wait-region-split"`
 	// WaitRegionSplitTimeout indicates the max duration to wait region split.
 	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
-	// DisableRawKVRegionSplit indicates whether to skip raw kv region split.
-	DisableRawKVRegionSplit bool `toml:"disable-raw-kv-region-split" json:"disable-raw-kv-region-split,string"`
+	// SplitRawKVRegion indicates whether to split rawKV region when creating new keyspace.
+	SplitRawKVRegion bool `toml:"split-raw-kv-region" json:"split-raw-kv-region,string"`
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
 }
@@ -884,8 +884,8 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("check-region-split-interval") {
 		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
 	}
-	if !meta.IsDefined("disable-raw-kv-region-split") {
-		c.DisableRawKVRegionSplit = defaultDisableRawKVRegionSplit
+	if !meta.IsDefined("split-raw-kv-region") {
+		c.SplitRawKVRegion = defaultSplitRawKVRegion
 	}
 }
 
@@ -907,9 +907,9 @@ func (c *KeyspaceConfig) ToWaitRegionSplit() bool {
 	return c.WaitRegionSplit
 }
 
-// GetDisableRawKVRegionSplit returns whether to skip raw kv region split.
-func (c *KeyspaceConfig) GetDisableRawKVRegionSplit() bool {
-	return c.DisableRawKVRegionSplit
+// GetSplitRawKVRegion returns whether to split rawKV regions.
+func (c *KeyspaceConfig) GetSplitRawKVRegion() bool {
+	return c.SplitRawKVRegion
 }
 
 // GetWaitRegionSplitTimeout returns the max duration to wait region split.

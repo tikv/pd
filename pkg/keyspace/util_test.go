@@ -69,12 +69,12 @@ func TestMakeLabelRule(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		id                uint32
-		skipRaw           bool
+		splitRaw          bool
 		expectedLabelRule *labeler.LabelRule
 	}{
 		{
-			id:      0,
-			skipRaw: false,
+			id:       0,
+			splitRaw: true,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/0",
 				Index: 0,
@@ -98,8 +98,8 @@ func TestMakeLabelRule(t *testing.T) {
 			},
 		},
 		{
-			id:      4242,
-			skipRaw: false,
+			id:       4242,
+			splitRaw: true,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/4242",
 				Index: 0,
@@ -123,8 +123,8 @@ func TestMakeLabelRule(t *testing.T) {
 			},
 		},
 		{
-			id:      0,
-			skipRaw: true,
+			id:       0,
+			splitRaw: false,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/0",
 				Index: 0,
@@ -144,8 +144,8 @@ func TestMakeLabelRule(t *testing.T) {
 			},
 		},
 		{
-			id:      4242,
-			skipRaw: true,
+			id:       4242,
+			splitRaw: false,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    "keyspaces/4242",
 				Index: 0,
@@ -166,6 +166,6 @@ func TestMakeLabelRule(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		re.Equal(testCase.expectedLabelRule, MakeLabelRule(testCase.id, testCase.skipRaw))
+		re.Equal(testCase.expectedLabelRule, makeLabelRule(testCase.id, testCase.splitRaw))
 	}
 }
