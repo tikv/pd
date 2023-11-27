@@ -610,7 +610,7 @@ func TestGetTsoByFollowerForwarding2(t *testing.T) {
 }
 
 // case 3: network partition between client and follower A -> transfer leader to follower A -> normal
-func TestGetTsoByFollowerForwarding3(t *testing.T) {
+func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -622,6 +622,29 @@ func TestGetTsoByFollowerForwarding3(t *testing.T) {
 	endpoints := runServer(re, cluster)
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
+	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	testutil.Eventually(re, func() bool {
+		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(ctx)
+		re.NoError(err)
+		regionID := regionIDAllocator.alloc()
+		region := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			Peers: peers,
+		}
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(leader.GetServer()),
+			Region: region,
+			Leader: peers[0],
+		}
+		err = regionHeartbeat.Send(req)
+		re.NoError(err)
+		_, err = regionHeartbeat.Recv()
+		return err == nil
+	})
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
@@ -637,7 +660,9 @@ func TestGetTsoByFollowerForwarding3(t *testing.T) {
 		return false
 	})
 	lastTS = checkTS(re, cli, lastTS)
-
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
+	re.NoError(err)
+	re.NotNil(r)
 	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(),
 		leader.GetServer().Name(), follower.GetServer().Name())
 	re.NotEmpty(cluster.WaitLeader())
@@ -651,6 +676,14 @@ func TestGetTsoByFollowerForwarding3(t *testing.T) {
 		return false
 	})
 	lastTS = checkTS(re, cli, lastTS)
+	testutil.Eventually(re, func() bool {
+		r, err = cli.GetRegion(context.Background(), []byte("a"))
+		if err == nil && r != nil {
+			return true
+		}
+		return false
+	})
+
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2"))
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
@@ -662,6 +695,13 @@ func TestGetTsoByFollowerForwarding3(t *testing.T) {
 		return false
 	})
 	lastTS = checkTS(re, cli, lastTS)
+	testutil.Eventually(re, func() bool {
+		r, err = cli.GetRegion(context.Background(), []byte("a"))
+		if err == nil && r != nil {
+			return true
+		}
+		return false
+	})
 }
 
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {
