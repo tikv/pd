@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,25 +47,31 @@ type Client interface {
 	GetRegionByID(context.Context, uint64) (*RegionInfo, error)
 	GetRegionByKey(context.Context, []byte) (*RegionInfo, error)
 	GetRegions(context.Context) (*RegionsInfo, error)
-	GetRegionsByKeyRange(context.Context, []byte, []byte, int) (*RegionsInfo, error)
+	GetRegionsByKeyRange(context.Context, *KeyRange, int) (*RegionsInfo, error)
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
-	GetRegionStatusByKeyRange(context.Context, []byte, []byte) (*RegionStats, error)
+	GetRegionStatusByKeyRange(context.Context, *KeyRange) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
 	GetPlacementRulesByGroup(context.Context, string) ([]*Rule, error)
 	SetPlacementRule(context.Context, *Rule) error
+	SetPlacementRuleInBatch(context.Context, []*RuleOp) error
 	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
 	DeletePlacementRule(context.Context, string, string) error
+	GetAllPlacementRuleGroups(context.Context) ([]*RuleGroup, error)
+	GetPlacementRuleGroupByID(context.Context, string) (*RuleGroup, error)
+	SetPlacementRuleGroup(context.Context, *RuleGroup) error
+	DeletePlacementRuleGroupByID(context.Context, string) error
 	GetAllRegionLabelRules(context.Context) ([]*LabelRule, error)
 	GetRegionLabelRulesByIDs(context.Context, []string) ([]*LabelRule, error)
 	SetRegionLabelRule(context.Context, *LabelRule) error
 	PatchRegionLabelRules(context.Context, *LabelRulePatch) error
 	/* Scheduling-related interfaces */
-	AccelerateSchedule(context.Context, []byte, []byte) error
+	AccelerateSchedule(context.Context, *KeyRange) error
+	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 
@@ -308,10 +315,10 @@ func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 }
 
 // GetRegionsByKeyRange gets the regions info by key range. If the limit is -1, it will return all regions within the range.
-func (c *client) GetRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, limit int) (*RegionsInfo, error) {
+func (c *client) GetRegionsByKeyRange(ctx context.Context, keyRange *KeyRange, limit int) (*RegionsInfo, error) {
 	var regions RegionsInfo
 	err := c.requestWithRetry(ctx,
-		"GetRegionsByKeyRange", RegionsByKey(startKey, endKey, limit),
+		"GetRegionsByKeyRange", RegionsByKey(keyRange.StartKey, keyRange.EndKey, limit),
 		http.MethodGet, http.NoBody, &regions)
 	if err != nil {
 		return nil, err
@@ -356,10 +363,10 @@ func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, e
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
-func (c *client) GetRegionStatusByKeyRange(ctx context.Context, startKey, endKey []byte) (*RegionStats, error) {
+func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange) (*RegionStats, error) {
 	var regionStats RegionStats
 	err := c.requestWithRetry(ctx,
-		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(startKey, endKey),
+		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(keyRange.StartKey, keyRange.StartKey),
 		http.MethodGet, http.NoBody, &regionStats,
 	)
 	if err != nil {
@@ -427,6 +434,17 @@ func (c *client) SetPlacementRule(ctx context.Context, rule *Rule) error {
 		http.MethodPost, bytes.NewBuffer(ruleJSON), nil)
 }
 
+// SetPlacementRuleInBatch sets the placement rules in batch.
+func (c *client) SetPlacementRuleInBatch(ctx context.Context, ruleOps []*RuleOp) error {
+	ruleOpsJSON, err := json.Marshal(ruleOps)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetPlacementRuleInBatch", PlacementRulesInBatch,
+		http.MethodPost, bytes.NewBuffer(ruleOpsJSON), nil)
+}
+
 // SetPlacementRuleBundles sets the placement rule bundles.
 // If `partial` is false, all old configurations will be over-written and dropped.
 func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBundle, partial bool) error {
@@ -443,6 +461,48 @@ func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBu
 func (c *client) DeletePlacementRule(ctx context.Context, group, id string) error {
 	return c.requestWithRetry(ctx,
 		"DeletePlacementRule", PlacementRuleByGroupAndID(group, id),
+		http.MethodDelete, http.NoBody, nil)
+}
+
+// GetAllPlacementRuleGroups gets all placement rule groups.
+func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, error) {
+	var ruleGroups []*RuleGroup
+	err := c.requestWithRetry(ctx,
+		"GetAllPlacementRuleGroups", placementRuleGroups,
+		http.MethodGet, http.NoBody, &ruleGroups)
+	if err != nil {
+		return nil, err
+	}
+	return ruleGroups, nil
+}
+
+// GetPlacementRuleGroupByID gets the placement rule group by ID.
+func (c *client) GetPlacementRuleGroupByID(ctx context.Context, id string) (*RuleGroup, error) {
+	var ruleGroup RuleGroup
+	err := c.requestWithRetry(ctx,
+		"GetPlacementRuleGroupByID", PlacementRuleGroupByID(id),
+		http.MethodGet, http.NoBody, &ruleGroup)
+	if err != nil {
+		return nil, err
+	}
+	return &ruleGroup, nil
+}
+
+// SetPlacementRuleGroup sets the placement rule group.
+func (c *client) SetPlacementRuleGroup(ctx context.Context, ruleGroup *RuleGroup) error {
+	ruleGroupJSON, err := json.Marshal(ruleGroup)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetPlacementRuleGroup", placementRuleGroup,
+		http.MethodPost, bytes.NewBuffer(ruleGroupJSON), nil)
+}
+
+// DeletePlacementRuleGroupByID deletes the placement rule group by ID.
+func (c *client) DeletePlacementRuleGroupByID(ctx context.Context, id string) error {
+	return c.requestWithRetry(ctx,
+		"DeletePlacementRuleGroupByID", PlacementRuleGroupByID(id),
 		http.MethodDelete, http.NoBody, nil)
 }
 
@@ -497,17 +557,34 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 }
 
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.
-func (c *client) AccelerateSchedule(ctx context.Context, startKey, endKey []byte) error {
-	input := map[string]string{
-		"start_key": url.QueryEscape(string(startKey)),
-		"end_key":   url.QueryEscape(string(endKey)),
+func (c *client) AccelerateSchedule(ctx context.Context, keyRange *KeyRange) error {
+	inputJSON, err := json.Marshal(map[string]string{
+		"start_key": url.QueryEscape(hex.EncodeToString(keyRange.StartKey)),
+		"end_key":   url.QueryEscape(hex.EncodeToString(keyRange.EndKey)),
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"AccelerateSchedule", AccelerateSchedule,
+		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
+}
+
+// AccelerateScheduleInBatch accelerates the scheduling of the regions within the given key ranges in batch.
+func (c *client) AccelerateScheduleInBatch(ctx context.Context, keyRanges []*KeyRange) error {
+	input := make([]map[string]string, 0, len(keyRanges))
+	for _, keyRange := range keyRanges {
+		input = append(input, map[string]string{
+			"start_key": url.QueryEscape(hex.EncodeToString(keyRange.StartKey)),
+			"end_key":   url.QueryEscape(hex.EncodeToString(keyRange.EndKey)),
+		})
 	}
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.requestWithRetry(ctx,
-		"AccelerateSchedule", AccelerateSchedule,
+		"AccelerateScheduleInBatch", AccelerateScheduleInBatch,
 		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
 }
 
