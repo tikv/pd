@@ -448,7 +448,7 @@ func (suite *configTestSuite) assertTTLConfig(
 	if !expectedEqual {
 		equality = suite.NotEqual
 	}
-	checkfunc := func(options ttlConfigInterface) {
+	checkFunc := func(options ttlConfigInterface) {
 		equality(uint64(999), options.GetMaxSnapshotCount())
 		equality(false, options.IsLocationReplacementEnabled())
 		equality(uint64(999), options.GetMaxMergeRegionSize())
@@ -461,7 +461,7 @@ func (suite *configTestSuite) assertTTLConfig(
 		equality(uint64(999), options.GetMergeScheduleLimit())
 		equality(false, options.IsTikvRegionSplitEnabled())
 	}
-	checkfunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())
+	checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		// wait for the scheduling primary server to be synced
 		options := cluster.GetSchedulingPrimaryServer().GetPersistConfig()
@@ -471,16 +471,16 @@ func (suite *configTestSuite) assertTTLConfig(
 			}
 			return uint64(999) != options.GetMaxSnapshotCount()
 		})
-		checkfunc(options)
+		checkFunc(options)
 	}
 }
 
-func (suite *configTestSuite) assertTTLConfigItemEqaul(
+func (suite *configTestSuite) assertTTLConfigItemEqual(
 	cluster *tests.TestCluster,
 	item string,
 	expectedValue interface{},
 ) {
-	checkfunc := func(options ttlConfigInterface) bool {
+	checkFunc := func(options ttlConfigInterface) bool {
 		switch item {
 		case "max-merge-region-size":
 			return expectedValue.(uint64) == options.GetMaxMergeRegionSize()
@@ -491,11 +491,11 @@ func (suite *configTestSuite) assertTTLConfigItemEqaul(
 		}
 		return false
 	}
-	suite.True(checkfunc(cluster.GetLeaderServer().GetServer().GetPersistOptions()))
+	suite.True(checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions()))
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		// wait for the scheduling primary server to be synced
 		tu.Eventually(suite.Require(), func() bool {
-			return checkfunc(cluster.GetSchedulingPrimaryServer().GetPersistConfig())
+			return checkFunc(cluster.GetSchedulingPrimaryServer().GetPersistConfig())
 		})
 	}
 }
@@ -506,8 +506,7 @@ func createTTLUrl(url string, ttl int) string {
 
 func (suite *configTestSuite) TestConfigTTL() {
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	// FIXME: enable this test in two modes after ttl config is supported.
-	env.RunTestInPDMode(suite.checkConfigTTL)
+	env.RunTestInTwoModes(suite.checkConfigTTL)
 }
 
 func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
@@ -523,14 +522,14 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 	suite.assertTTLConfig(cluster, false)
 
 	// test time goes by
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 1), postData, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 5), postData, tu.StatusOK(re))
 	suite.NoError(err)
 	suite.assertTTLConfig(cluster, true)
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 	suite.assertTTLConfig(cluster, false)
 
 	// test cleaning up
-	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 1), postData, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 5), postData, tu.StatusOK(re))
 	suite.NoError(err)
 	suite.assertTTLConfig(cluster, true)
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 0), postData, tu.StatusOK(re))
@@ -552,9 +551,9 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 1), postData, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.assertTTLConfigItemEqaul(cluster, "max-merge-region-size", uint64(999))
+	suite.assertTTLConfigItemEqual(cluster, "max-merge-region-size", uint64(999))
 	// max-merge-region-keys should keep consistence with max-merge-region-size.
-	suite.assertTTLConfigItemEqaul(cluster, "max-merge-region-keys", uint64(999*10000))
+	suite.assertTTLConfigItemEqual(cluster, "max-merge-region-keys", uint64(999*10000))
 
 	// on invalid value, we use default config
 	mergeConfig = map[string]interface{}{
@@ -564,13 +563,12 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 	suite.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 10), postData, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.assertTTLConfigItemEqaul(cluster, "enable-tikv-split-region", true)
+	suite.assertTTLConfigItemEqual(cluster, "enable-tikv-split-region", true)
 }
 
 func (suite *configTestSuite) TestTTLConflict() {
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	// FIXME: enable this test in two modes after ttl config is supported.
-	env.RunTestInPDMode(suite.checkTTLConflict)
+	env.RunTestInTwoModes(suite.checkTTLConflict)
 }
 
 func (suite *configTestSuite) checkTTLConflict(cluster *tests.TestCluster) {
