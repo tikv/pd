@@ -48,6 +48,41 @@ func (suite *regionTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
 }
 
+func (suite *regionTestSuite) TearDownTest() {
+	clearFunc := func(cluster *tests.TestCluster) {
+		// clean region cache
+		leader := cluster.GetLeaderServer()
+		re := suite.Require()
+		pdAddr := cluster.GetConfig().GetClientURL()
+		for _, region := range leader.GetRegions() {
+			url := fmt.Sprintf("%s/pd/api/v1/admin/cache/region/%d", pdAddr, region.GetID())
+			err := tu.CheckDelete(testDialClient, url, tu.StatusOK(re))
+			suite.NoError(err)
+		}
+		suite.Empty(leader.GetRegions())
+		// clean rules
+		def := placement.GroupBundle{
+			ID: "pd",
+			Rules: []*placement.Rule{
+				{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+			},
+		}
+		data, err := json.Marshal([]placement.GroupBundle{def})
+		suite.NoError(err)
+		urlPrefix := cluster.GetLeaderServer().GetAddr()
+		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(suite.Require()))
+		suite.NoError(err)
+		// clean stores
+		for _, store := range leader.GetStores() {
+			suite.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true))
+			suite.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
+		}
+		suite.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
+		suite.Empty(leader.GetStores())
+	}
+	suite.env.RunFuncInTwoModes(clearFunc)
+}
+
 func (suite *regionTestSuite) TestSplitRegions() {
 	suite.env.RunTestInTwoModes(suite.checkSplitRegions)
 }
@@ -161,6 +196,8 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 
 func (suite *regionTestSuite) TestScatterRegions() {
 	suite.env.RunTestInTwoModes(suite.checkScatterRegions)
+	suite.env.Cleanup()
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
@@ -175,11 +212,11 @@ func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
 		}
 		tests.MustPutStore(re, cluster, s1)
 	}
-	r1 := core.NewTestRegionInfo(601, 13, []byte("b1"), []byte("b2"))
+	r1 := core.NewTestRegionInfo(701, 13, []byte("b1"), []byte("b2"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
-	r2 := core.NewTestRegionInfo(602, 13, []byte("b2"), []byte("b3"))
+	r2 := core.NewTestRegionInfo(702, 13, []byte("b2"), []byte("b3"))
 	r2.GetMeta().Peers = append(r2.GetMeta().Peers, &metapb.Peer{Id: 7, StoreId: 14}, &metapb.Peer{Id: 8, StoreId: 15})
-	r3 := core.NewTestRegionInfo(603, 13, []byte("b4"), []byte("b4"))
+	r3 := core.NewTestRegionInfo(703, 13, []byte("b4"), []byte("b4"))
 	r3.GetMeta().Peers = append(r3.GetMeta().Peers, &metapb.Peer{Id: 9, StoreId: 14}, &metapb.Peer{Id: 10, StoreId: 15})
 	tests.MustPutRegionInfo(re, cluster, r1)
 	tests.MustPutRegionInfo(re, cluster, r2)
@@ -194,19 +231,19 @@ func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
 		oc = sche.GetCoordinator().GetOperatorController()
 	}
 
-	op1 := oc.GetOperator(601)
-	op2 := oc.GetOperator(602)
-	op3 := oc.GetOperator(603)
+	op1 := oc.GetOperator(701)
+	op2 := oc.GetOperator(702)
+	op3 := oc.GetOperator(703)
 	// At least one operator used to scatter region
 	suite.True(op1 != nil || op2 != nil || op3 != nil)
 
-	body = `{"regions_id": [601, 602, 603]}`
+	body = `{"regions_id": [701, 702, 703]}`
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", urlPrefix), []byte(body), tu.StatusOK(re))
 	suite.NoError(err)
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
-	// FIXME: enable this test in API mode
+	// Fixme: after delete+set rule, the key range will be empty, so the test will fail in api mode.
 	suite.env.RunTestInPDMode(suite.checkRegionsReplicated)
 }
 

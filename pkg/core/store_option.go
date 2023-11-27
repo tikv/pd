@@ -286,7 +286,6 @@ func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
 		meta.PeerAddress = newMeta.GetPeerAddress()
 		meta.StartTimestamp = newMeta.GetStartTimestamp()
 		meta.DeployPath = newMeta.GetDeployPath()
-		meta.LastHeartbeat = newMeta.GetLastHeartbeat()
 		meta.State = newMeta.GetState()
 		meta.Labels = newMeta.GetLabels()
 		meta.NodeState = newMeta.GetNodeState()

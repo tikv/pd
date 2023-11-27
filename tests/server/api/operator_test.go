@@ -53,9 +53,10 @@ func TestOperatorTestSuite(t *testing.T) {
 }
 
 func (suite *operatorTestSuite) SetupSuite() {
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, serverName string) {
-		conf.Replication.MaxReplicas = 1
-	})
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 1
+		})
 }
 
 func (suite *operatorTestSuite) TearDownSuite() {
@@ -178,6 +179,31 @@ func (suite *operatorTestSuite) TestMergeRegionOperator() {
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
 	suite.pauseRuleChecker(cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
@@ -203,6 +229,12 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 }
 
 func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
+	// use a new environment to avoid affecting other tests
+	suite.env.Cleanup()
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 3
+		})
 	suite.env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
 }
 

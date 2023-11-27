@@ -62,6 +62,18 @@ func (suite *hotTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
 }
 
+func (suite *hotTestSuite) TearDownTest() {
+	clearFunc := func(cluster *tests.TestCluster) {
+		leader := cluster.GetLeaderServer()
+		hotStat := leader.GetRaftCluster().GetHotStat()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			hotStat = sche.GetCluster().GetHotStat()
+		}
+		hotStat.HotCache = statistics.NewHotCache(leader.GetServer().Context())
+	}
+	suite.env.RunFuncInTwoModes(clearFunc)
+}
+
 func (suite *hotTestSuite) TestHot() {
 	suite.env.RunTestInTwoModes(suite.checkHot)
 }
@@ -369,10 +381,10 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *tests.TestCluster) {
 		hotRegion := statistics.StoreHotPeersInfos{}
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &hotRegion))
-		re.Equal(hotRegion.AsPeer[1].Count, 0)
+		re.Equal(0, hotRegion.AsPeer[1].Count)
 		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
 		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
-		re.Equal(hotRegion.AsLeader[1].Count, 0)
+		re.Equal(0, hotRegion.AsLeader[1].Count)
 		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
 		re.Equal(0.0, hotRegion.AsLeader[1].StoreByteRate) // write leader sum
 	}

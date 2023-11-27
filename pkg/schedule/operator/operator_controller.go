@@ -799,6 +799,12 @@ func (oc *Controller) GetFastOpInfluence(cluster *core.BasicCluster, influence O
 	}
 }
 
+// RemoveRecords removes operators' records.
+// It is used in tests only.
+func (oc *Controller) RemoveRecords(regionID uint64) {
+	oc.records.ttl.Remove(regionID)
+}
+
 // AddOpInfluence add operator influence for cluster
 func AddOpInfluence(op *Operator, influence OpInfluence, cluster *core.BasicCluster) {
 	region := cluster.GetRegion(op.RegionID())

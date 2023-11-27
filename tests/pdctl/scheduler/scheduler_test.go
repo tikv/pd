@@ -39,7 +39,8 @@ import (
 
 type schedulerTestSuite struct {
 	suite.Suite
-	env *tests.SchedulingTestEnvironment
+	env               *tests.SchedulingTestEnvironment
+	defaultSchedulers []string
 }
 
 func TestSchedulerTestSuite(t *testing.T) {
@@ -48,10 +49,45 @@ func TestSchedulerTestSuite(t *testing.T) {
 
 func (suite *schedulerTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.defaultSchedulers = []string{
+		"balance-leader-scheduler",
+		"balance-region-scheduler",
+		"balance-hot-region-scheduler",
+		"balance-witness-scheduler",
+		"transfer-witness-leader-scheduler",
+	}
 }
 
 func (suite *schedulerTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+}
+
+func (suite *schedulerTestSuite) TearDownTest() {
+	clearFunc := func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		pdAddr := cluster.GetConfig().GetClientURL()
+		cmd := pdctlCmd.GetRootCmd()
+
+		var currentSchedulers []string
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &currentSchedulers)
+		for _, scheduler := range suite.defaultSchedulers {
+			if slice.NoneOf(currentSchedulers, func(i int) bool {
+				return currentSchedulers[i] == scheduler
+			}) {
+				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", scheduler}, nil)
+				re.Contains(echo, "Success!")
+			}
+		}
+		for _, scheduler := range currentSchedulers {
+			if slice.NoneOf(suite.defaultSchedulers, func(i int) bool {
+				return suite.defaultSchedulers[i] == scheduler
+			}) {
+				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", scheduler}, nil)
+				re.Contains(echo, "Success!")
+			}
+		}
+	}
+	suite.env.RunFuncInTwoModes(clearFunc)
 }
 
 func (suite *schedulerTestSuite) TestScheduler() {
@@ -444,6 +480,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	for _, store := range stores {
 		version := versioninfo.HotScheduleWithQuery
 		store.Version = versioninfo.MinSupportedVersion(version).String()
+		store.LastHeartbeat = time.Now().UnixNano()
 		tests.MustPutStore(re, cluster, store)
 	}
 	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())

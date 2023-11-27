@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -173,12 +175,19 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 	})
 	re.NoError(err)
 
+	ts := store.GetLastHeartbeat()
+	if ts == 0 {
+		ts = time.Now().UnixNano()
+	}
 	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
-	newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
-		Capacity:  uint64(10 * units.GiB),
-		UsedSize:  uint64(9 * units.GiB),
-		Available: uint64(1 * units.GiB),
-	}))
+	newStore := storeInfo.Clone(
+		core.SetStoreStats(&pdpb.StoreStats{
+			Capacity:  uint64(10 * units.GiB),
+			UsedSize:  uint64(9 * units.GiB),
+			Available: uint64(1 * units.GiB),
+		}),
+		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
+	)
 	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
@@ -263,10 +272,25 @@ func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
 
 // RunTestInPDMode is to run test in pd mode.
 func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
-	s.t.Log("start to run test in pd mode")
-	defer s.t.Log("finish to run test in pd mode")
-	s.startCluster(pdMode)
+	s.t.Logf("start test %s in pd mode", s.getTestName())
+	if _, ok := s.clusters[pdMode]; !ok {
+		s.startCluster(pdMode)
+	}
 	test(s.clusters[pdMode])
+}
+
+func (s *SchedulingTestEnvironment) getTestName() string {
+	pc, _, _, _ := runtime.Caller(2)
+	caller := runtime.FuncForPC(pc)
+	if caller == nil || strings.Contains(caller.Name(), "RunTestInTwoModes") {
+		pc, _, _, _ = runtime.Caller(3)
+		caller = runtime.FuncForPC(pc)
+	}
+	if caller != nil {
+		elements := strings.Split(caller.Name(), ".")
+		return elements[len(elements)-1]
+	}
+	return ""
 }
 
 // RunTestInAPIMode is to run test in api mode.
@@ -274,32 +298,31 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 	re := require.New(s.t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	s.t.Log("start to run test in api mode")
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
-		s.t.Log("finish to run test in api mode")
 	}()
-	s.startCluster(apiMode)
+	s.t.Logf("start test %s in api mode", s.getTestName())
+	if _, ok := s.clusters[apiMode]; !ok {
+		s.startCluster(apiMode)
+	}
 	test(s.clusters[apiMode])
+}
+
+// RunFuncInTwoModes is to run func in two modes.
+func (s *SchedulingTestEnvironment) RunFuncInTwoModes(f func(*TestCluster)) {
+	if c, ok := s.clusters[pdMode]; ok {
+		f(c)
+	}
+	if c, ok := s.clusters[apiMode]; ok {
+		f(c)
+	}
 }
 
 // Cleanup is to cleanup the environment.
 func (s *SchedulingTestEnvironment) Cleanup() {
-	re := require.New(s.t)
 	for _, cluster := range s.clusters {
-		leader := cluster.GetLeaderServer()
-		sche := cluster.GetSchedulingPrimaryServer()
 		cluster.Destroy()
-		testutil.Eventually(re, func() bool {
-			return leader.GetServer().IsClosed()
-		})
-		testutil.Eventually(re, func() bool {
-			if sche != nil {
-				return sche.IsClosed()
-			}
-			return true
-		})
 	}
 	for _, cancel := range s.cancels {
 		cancel()
