@@ -54,7 +54,7 @@ func (suite *ruleTestSuite) TearDownSuite() {
 }
 
 func (suite *ruleTestSuite) TearDownTest() {
-	clearFunc := func(cluster *tests.TestCluster) {
+	cleanFunc := func(cluster *tests.TestCluster) {
 		def := placement.GroupBundle{
 			ID: "pd",
 			Rules: []*placement.Rule{
@@ -67,7 +67,7 @@ func (suite *ruleTestSuite) TearDownTest() {
 		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(suite.Require()))
 		suite.NoError(err)
 	}
-	suite.env.RunFuncInTwoModes(clearFunc)
+	suite.env.RunFuncInTwoModes(cleanFunc)
 }
 
 func (suite *ruleTestSuite) TestSet() {

@@ -49,7 +49,7 @@ func (suite *regionTestSuite) TearDownSuite() {
 }
 
 func (suite *regionTestSuite) TearDownTest() {
-	clearFunc := func(cluster *tests.TestCluster) {
+	cleanFunc := func(cluster *tests.TestCluster) {
 		// clean region cache
 		leader := cluster.GetLeaderServer()
 		re := suite.Require()
@@ -80,7 +80,7 @@ func (suite *regionTestSuite) TearDownTest() {
 		suite.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
 		suite.Empty(leader.GetStores())
 	}
-	suite.env.RunFuncInTwoModes(clearFunc)
+	suite.env.RunFuncInTwoModes(cleanFunc)
 }
 
 func (suite *regionTestSuite) TestSplitRegions() {

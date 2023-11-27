@@ -63,7 +63,7 @@ func (suite *schedulerTestSuite) TearDownSuite() {
 }
 
 func (suite *schedulerTestSuite) TearDownTest() {
-	clearFunc := func(cluster *tests.TestCluster) {
+	cleanFunc := func(cluster *tests.TestCluster) {
 		re := suite.Require()
 		pdAddr := cluster.GetConfig().GetClientURL()
 		cmd := pdctlCmd.GetRootCmd()
@@ -87,7 +87,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 			}
 		}
 	}
-	suite.env.RunFuncInTwoModes(clearFunc)
+	suite.env.RunFuncInTwoModes(cleanFunc)
 }
 
 func (suite *schedulerTestSuite) TestScheduler() {

@@ -78,7 +78,7 @@ func (suite *configTestSuite) TearDownSuite() {
 }
 
 func (suite *configTestSuite) TearDownTest() {
-	clearFunc := func(cluster *tests.TestCluster) {
+	cleanFunc := func(cluster *tests.TestCluster) {
 		def := placement.GroupBundle{
 			ID: "pd",
 			Rules: []*placement.Rule{
@@ -93,7 +93,7 @@ func (suite *configTestSuite) TearDownTest() {
 		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(suite.Require()))
 		suite.NoError(err)
 	}
-	suite.env.RunFuncInTwoModes(clearFunc)
+	suite.env.RunFuncInTwoModes(cleanFunc)
 }
 
 func (suite *configTestSuite) TestConfig() {
@@ -156,6 +156,13 @@ func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", strconv.Itoa(origin)}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
+		re.NoError(err)
+		var conf config.PDServerConfig
+		re.NoError(json.Unmarshal(output, &conf))
+		return conf.FlowRoundByDigit == origin
+	})
 
 	// config show schedule
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
