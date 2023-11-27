@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
+// GroupManagerUninitializedErr is the error message for uninitialized keyspace group manager.
 const GroupManagerUninitializedErr = "keyspace group manager is not initialized"
 
 // RegisterTSOKeyspaceGroup registers keyspace group handlers to the server.
