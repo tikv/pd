@@ -438,6 +438,13 @@ func (sc *schedulingController) ClearSuspectKeyRanges() {
 	sc.coordinator.GetCheckerController().ClearSuspectKeyRanges()
 }
 
+// ClearSuspectRegions clears the suspect regions, only for unit test
+func (sc *schedulingController) ClearSuspectRegions() {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	sc.coordinator.GetCheckerController().ClearSuspectRegions()
+}
+
 // AddSuspectKeyRange adds the key range with the its ruleID as the key
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/end key
