@@ -514,7 +514,7 @@ func TestCustomTimeout(t *testing.T) {
 	re.Less(time.Since(start), 2*time.Second)
 }
 
-func TestGetRegionFromFollowerClient(t *testing.T) {
+func TestGetRegionByFollowerForwarding(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -540,7 +540,7 @@ func TestGetRegionFromFollowerClient(t *testing.T) {
 }
 
 // case 1: unreachable -> normal
-func TestGetTsoFromFollowerClient1(t *testing.T) {
+func TestGetTsoByFollowerForwarding1(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -571,7 +571,7 @@ func TestGetTsoFromFollowerClient1(t *testing.T) {
 }
 
 // case 2: unreachable -> leader transfer -> normal
-func TestGetTsoFromFollowerClient2(t *testing.T) {
+func TestGetTsoByFollowerForwarding2(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -603,6 +603,61 @@ func TestGetTsoFromFollowerClient2(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
 	time.Sleep(5 * time.Second)
 	checkTS(re, cli, lastTS)
+}
+
+// case 3: network partition between client and follower A -> transfer leader to follower A -> normal
+func TestGetTsoByFollowerForwarding3(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+
+	cli := setupCli(re, ctx, endpoints, pd.WithForwardingOption(true))
+	var lastTS uint64
+	testutil.Eventually(re, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		t.Log(err)
+		return false
+	})
+	lastTS = checkTS(re, cli, lastTS)
+
+	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(),
+		leader.GetServer().Name(), follower.GetServer().Name())
+	re.NotEmpty(cluster.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		t.Log(err)
+		return false
+	})
+	lastTS = checkTS(re, cli, lastTS)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2"))
+	testutil.Eventually(re, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		t.Log(err)
+		return false
+	})
+	lastTS = checkTS(re, cli, lastTS)
 }
 
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {
