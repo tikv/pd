@@ -65,7 +65,7 @@ func newShowKeyspaceCommand() *cobra.Command {
 		Short: "show keyspace metadata specified by keyspace name",
 		Run:   showKeyspaceNameCommandFunc,
 	}
-	showByName.Flags().Bool(nmForceRefreshGroupID, false, "force refresh keyspace group id")
+	showByName.Flags().Bool(nmForceRefreshGroupID, true, "force refresh keyspace group id")
 	r.AddCommand(showByID)
 	r.AddCommand(showByName)
 	return r
@@ -99,6 +99,11 @@ func showKeyspaceNameCommandFunc(cmd *cobra.Command, args []string) {
 		url += "?force_refresh_group_id=true"
 	}
 	resp, err := doRequest(cmd, url, http.MethodGet, http.Header{})
+	// Retry without the force_refresh_group_id if the keyspace group manager is not initialized.
+	// This can happen when PD is not running in API mode.
+	if err != nil && refreshGroupID && strings.Contains(err.Error(), handlers.GroupManagerUninitializedErr) {
+		resp, err = doRequest(cmd, fmt.Sprintf("%s/%s", keyspacePrefix, args[0]), http.MethodGet, http.Header{})
+	}
 	if err != nil {
 		cmd.PrintErrln("Failed to get the keyspace information: ", err)
 		return
