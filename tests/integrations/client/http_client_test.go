@@ -55,8 +55,16 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re.NoError(err)
 	leader := suite.cluster.WaitLeader()
 	re.NotEmpty(leader)
-	err = suite.cluster.GetLeaderServer().BootstrapCluster()
+	leaderServer := suite.cluster.GetLeaderServer()
+	err = leaderServer.BootstrapCluster()
 	re.NoError(err)
+	for _, region := range []*core.RegionInfo{
+		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
+		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+	} {
+		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
 	var (
 		testServers = suite.cluster.GetServers()
 		endpoints   = make([]string, 0, len(testServers))
@@ -71,6 +79,53 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 	suite.cancelFunc()
 	suite.client.Close()
 	suite.cluster.Destroy()
+}
+
+func (suite *httpClientTestSuite) TestMeta() {
+	re := suite.Require()
+	region, err := suite.client.GetRegionByID(suite.ctx, 10)
+	re.NoError(err)
+	re.Equal(int64(10), region.ID)
+	re.Equal(core.HexRegionKeyStr([]byte("a1")), region.StartKey)
+	re.Equal(core.HexRegionKeyStr([]byte("a2")), region.EndKey)
+	region, err = suite.client.GetRegionByKey(suite.ctx, []byte("a2"))
+	re.NoError(err)
+	re.Equal(int64(11), region.ID)
+	re.Equal(core.HexRegionKeyStr([]byte("a2")), region.StartKey)
+	re.Equal(core.HexRegionKeyStr([]byte("a3")), region.EndKey)
+	regions, err := suite.client.GetRegions(suite.ctx)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regions, err = suite.client.GetRegionsByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), -1)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regions, err = suite.client.GetRegionsByStoreID(suite.ctx, 1)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regionStats, err := suite.client.GetRegionStatusByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
+	re.NoError(err)
+	re.Equal(2, regionStats.Count)
+	hotReadRegions, err := suite.client.GetHotReadRegions(suite.ctx)
+	re.NoError(err)
+	re.Len(hotReadRegions.AsPeer, 1)
+	re.Len(hotReadRegions.AsLeader, 1)
+	hotWriteRegions, err := suite.client.GetHotWriteRegions(suite.ctx)
+	re.NoError(err)
+	re.Len(hotWriteRegions.AsPeer, 1)
+	re.Len(hotWriteRegions.AsLeader, 1)
+	historyHorRegions, err := suite.client.GetHistoryHotRegions(suite.ctx, &pd.HistoryHotRegionsRequest{
+		StartTime: 0,
+		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
+	})
+	re.NoError(err)
+	re.Len(historyHorRegions.HistoryHotRegion, 0)
+	store, err := suite.client.GetStores(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, store.Count)
+	re.Len(store.Stores, 1)
 }
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
@@ -271,13 +326,6 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re := suite.Require()
 	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
-	for _, region := range []*core.RegionInfo{
-		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
-		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
-	} {
-		err := raftCluster.HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
 	suspectRegions := raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 0)
 	err := suite.client.AccelerateSchedule(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a2")))
