@@ -79,6 +79,34 @@ var (
 	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
 )
 
+// The following consts are used to identify the config item that needs to set TTL.
+const (
+	// TTLConfigPrefix is the prefix of the config item that needs to set TTL.
+	TTLConfigPrefix = "/config/ttl"
+
+	MaxSnapshotCountKey            = "schedule.max-snapshot-count"
+	MaxMergeRegionSizeKey          = "schedule.max-merge-region-size"
+	MaxPendingPeerCountKey         = "schedule.max-pending-peer-count"
+	MaxMergeRegionKeysKey          = "schedule.max-merge-region-keys"
+	LeaderScheduleLimitKey         = "schedule.leader-schedule-limit"
+	RegionScheduleLimitKey         = "schedule.region-schedule-limit"
+	WitnessScheduleLimitKey        = "schedule.witness-schedule-limit"
+	ReplicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
+	MergeScheduleLimitKey          = "schedule.merge-schedule-limit"
+	HotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
+	SchedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
+	EnableLocationReplacement      = "schedule.enable-location-replacement"
+	DefaultAddPeer                 = "default-add-peer"
+	DefaultRemovePeer              = "default-remove-peer"
+
+	// EnableTiKVSplitRegion is the option to enable tikv split region.
+	// it's related to schedule, but it's not an explicit config
+	EnableTiKVSplitRegion = "schedule.enable-tikv-split-region"
+
+	DefaultGCInterval = 5 * time.Second
+	DefaultTTL        = 5 * time.Minute
+)
+
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
 type StoreLimit struct {
 	mu syncutil.RWMutex
