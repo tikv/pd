@@ -838,7 +838,7 @@ func (o *PersistOptions) GetMinResolvedTSPersistenceInterval() time.Duration {
 // SetTTLData set temporary configuration
 func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Client, key string, value string, ttl time.Duration) error {
 	if o.ttl == nil {
-		o.ttl = cache.NewStringTTL(parCtx, time.Second*5, time.Minute*5)
+		o.ttl = cache.NewStringTTL(parCtx, sc.DefaultGCInterval, sc.DefaultTTL)
 	}
 	if ttl != 0 {
 		// the minimum ttl is 5 seconds, if the given ttl is less than 5 seconds, we will use 5 seconds instead.
@@ -932,7 +932,7 @@ func (o *PersistOptions) LoadTTLFromEtcd(ctx context.Context, client *clientv3.C
 		return err
 	}
 	if o.ttl == nil {
-		o.ttl = cache.NewStringTTL(ctx, time.Second*5, time.Minute*5)
+		o.ttl = cache.NewStringTTL(ctx, sc.DefaultGCInterval, sc.DefaultTTL)
 	}
 	for _, resp := range resps.Kvs {
 		key := string(resp.Key)[len(sc.TTLConfigPrefix)+1:]

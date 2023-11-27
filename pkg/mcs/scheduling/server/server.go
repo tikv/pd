@@ -47,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -535,7 +536,7 @@ func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 		BaseServer:        server.NewBaseServer(ctx),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		cfg:               cfg,
-		persistConfig:     config.NewPersistConfig(cfg, cache.NewStringTTL(ctx, time.Second*5, time.Minute*5)),
+		persistConfig:     config.NewPersistConfig(cfg, cache.NewStringTTL(ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
 		checkMembershipCh: make(chan struct{}, 1),
 	}
 	return svr

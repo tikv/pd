@@ -85,7 +85,7 @@ func (suite *configTestSuite) TestConfigWatch() {
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		suite.cluster.GetCluster().GetId(),
-		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, time.Second*5, time.Minute*5)),
+		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
 		endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
 	)
 	re.NoError(err)
@@ -145,7 +145,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		suite.cluster.GetCluster().GetId(),
-		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, time.Second*5, time.Minute*5)),
+		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
 		storage,
 	)
 	re.NoError(err)

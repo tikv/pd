@@ -102,6 +102,9 @@ const (
 	// EnableTiKVSplitRegion is the option to enable tikv split region.
 	// it's related to schedule, but it's not an explicit config
 	EnableTiKVSplitRegion = "schedule.enable-tikv-split-region"
+
+	DefaultGCInterval = 5 * time.Second
+	DefaultTTL        = 5 * time.Minute
 )
 
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
