@@ -683,66 +683,66 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 
 	checkMaxReplicas := func(expect uint64) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		replicationCfg := sc.ReplicationConfig{}
-		re.NoError(json.Unmarshal(output, &replicationCfg))
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			output, err := pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			replicationCfg := sc.ReplicationConfig{}
+			re.NoError(json.Unmarshal(output, &replicationCfg))
 			return replicationCfg.MaxReplicas == expect
 		})
 	}
 
 	checkLocationLabels := func(expect int) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		replicationCfg := sc.ReplicationConfig{}
-		re.NoError(json.Unmarshal(output, &replicationCfg))
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			output, err := pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			replicationCfg := sc.ReplicationConfig{}
+			re.NoError(json.Unmarshal(output, &replicationCfg))
 			return len(replicationCfg.LocationLabels) == expect
 		})
 	}
 
 	checkIsolationLevel := func(expect string) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		replicationCfg := sc.ReplicationConfig{}
-		re.NoError(json.Unmarshal(output, &replicationCfg))
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			output, err := pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			replicationCfg := sc.ReplicationConfig{}
+			re.NoError(json.Unmarshal(output, &replicationCfg))
 			return replicationCfg.IsolationLevel == expect
 		})
 	}
 
 	checkRuleCount := func(expect int) {
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		rule := placement.Rule{}
-		re.NoError(json.Unmarshal(output, &rule))
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			output, err := pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			rule := placement.Rule{}
+			re.NoError(json.Unmarshal(output, &rule))
 			return rule.Count == expect
 		})
 	}
 
 	checkRuleLocationLabels := func(expect int) {
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		rule := placement.Rule{}
-		re.NoError(json.Unmarshal(output, &rule))
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			output, err := pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			rule := placement.Rule{}
+			re.NoError(json.Unmarshal(output, &rule))
 			return len(rule.LocationLabels) == expect
 		})
 	}
 
 	checkRuleIsolationLevel := func(expect string) {
 		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", placement.DefaultGroupID, "--id", placement.DefaultRuleID}
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		rule := placement.Rule{}
-		re.NoError(json.Unmarshal(output, &rule))
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+			output, err := pdctl.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			rule := placement.Rule{}
+			re.NoError(json.Unmarshal(output, &rule))
 			return rule.IsolationLevel == expect
 		})
 	}
