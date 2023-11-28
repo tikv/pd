@@ -79,8 +79,8 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 
 var regionGuide = core.GenerateRegionGuideFunc(false)
 
-// IsRunningAsClient returns whether the region syncer client is running.
-func (s *RegionSyncer) IsRunningAsClient() bool {
+// IsRunning returns whether the region syncer client is running.
+func (s *RegionSyncer) IsRunning() bool {
 	return s.streamingRunning.Load() && s.historyLoaded.Load()
 }
 
@@ -168,7 +168,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					break
 				}
 				if s.history.GetNextIndex() != resp.GetStartIndex() {
-					log.Panic("test")
 					log.Warn("server sync index not match the leader",
 						zap.String("server", s.server.Name()),
 						zap.Uint64("own", s.history.GetNextIndex()),

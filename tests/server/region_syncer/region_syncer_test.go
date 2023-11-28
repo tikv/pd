@@ -68,12 +68,12 @@ func TestRegionSyncer(t *testing.T) {
 	followerServer := cluster.GetServer(cluster.GetFollower())
 
 	testutil.Eventually(re, func() bool {
-		return !followerServer.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunningAsClient()
+		return !followerServer.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/disableClientStreaming"))
 	re.True(cluster.WaitRegionSyncerClientsReady(2))
 	testutil.Eventually(re, func() bool {
-		return followerServer.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunningAsClient()
+		return followerServer.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
 	})
 
 	regionLen := 110
@@ -154,7 +154,7 @@ func TestRegionSyncer(t *testing.T) {
 	cluster.WaitLeader()
 	leaderServer = cluster.GetLeaderServer()
 	testutil.Eventually(re, func() bool {
-		return !leaderServer.GetServer().GetRaftCluster().GetRegionSyncer().IsRunningAsClient()
+		return !leaderServer.GetServer().GetRaftCluster().GetRegionSyncer().IsRunning()
 	})
 	re.NotNil(leaderServer)
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
