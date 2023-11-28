@@ -341,6 +341,44 @@ func (r *Rule) Clone() *Rule {
 	return &clone
 }
 
+var (
+	_ json.Marshaler   = (*Rule)(nil)
+	_ json.Unmarshaler = (*Rule)(nil)
+)
+
+// MarshalJSON implements `json.Marshaler` interface to make sure we could set the correct start/end key.
+func (r *Rule) MarshalJSON() ([]byte, error) {
+	r.StartKeyHex = hex.EncodeToString(encodeBytes(r.StartKey))
+	r.EndKeyHex = hex.EncodeToString(encodeBytes(r.EndKey))
+	return json.Marshal(r)
+}
+
+// UnmarshalJSON implements `json.Unmarshaler` interface to make sure we could get the correct start/end key.
+func (r *Rule) UnmarshalJSON(bytes []byte) error {
+	if err := json.Unmarshal(bytes, r); err != nil {
+		return err
+	}
+
+	startKey, err := hex.DecodeString(r.StartKeyHex)
+	if err != nil {
+		return err
+	}
+
+	endKey, err := hex.DecodeString(r.EndKeyHex)
+	if err != nil {
+		return err
+	}
+
+	_, r.StartKey, err = decodeBytes(startKey)
+	if err != nil {
+		return err
+	}
+
+	_, r.EndKey, err = decodeBytes(endKey)
+
+	return err
+}
+
 // RuleOpType indicates the operation type
 type RuleOpType string
 
@@ -362,6 +400,44 @@ type RuleOp struct {
 func (r RuleOp) String() string {
 	b, _ := json.Marshal(r)
 	return string(b)
+}
+
+var (
+	_ json.Marshaler   = (*RuleOp)(nil)
+	_ json.Unmarshaler = (*RuleOp)(nil)
+)
+
+// MarshalJSON implements `json.Marshaler` interface to make sure we could set the correct start/end key.
+func (r *RuleOp) MarshalJSON() ([]byte, error) {
+	r.StartKeyHex = hex.EncodeToString(encodeBytes(r.StartKey))
+	r.EndKeyHex = hex.EncodeToString(encodeBytes(r.EndKey))
+	return json.Marshal(r)
+}
+
+// UnmarshalJSON implements `json.Unmarshaler` interface to make sure we could get the correct start/end key.
+func (r *RuleOp) UnmarshalJSON(bytes []byte) error {
+	if err := json.Unmarshal(bytes, r); err != nil {
+		return err
+	}
+
+	startKey, err := hex.DecodeString(r.StartKeyHex)
+	if err != nil {
+		return err
+	}
+
+	endKey, err := hex.DecodeString(r.EndKeyHex)
+	if err != nil {
+		return err
+	}
+
+	_, r.StartKey, err = decodeBytes(startKey)
+	if err != nil {
+		return err
+	}
+
+	_, r.EndKey, err = decodeBytes(endKey)
+
+	return err
 }
 
 // RuleGroup defines properties of a rule group.
