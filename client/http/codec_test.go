@@ -39,7 +39,7 @@ func TestBytesCodec(t *testing.T) {
 		b := encodeBytes(input.enc)
 		require.Equal(t, input.dec, b)
 
-		_, d, err := decodeBytes(b)
+		d, err := decodeBytes(b)
 		require.NoError(t, err)
 		require.Equal(t, input.enc, d)
 	}
@@ -58,7 +58,7 @@ func TestBytesCodec(t *testing.T) {
 	}
 
 	for _, input := range errInputs {
-		_, _, err := decodeBytes(input)
+		_, err := decodeBytes(input)
 		require.Error(t, err)
 	}
 }

@@ -15,6 +15,8 @@
 package http
 
 import (
+	"encoding/hex"
+
 	"github.com/pingcap/errors"
 )
 
@@ -64,11 +66,11 @@ func encodeBytes(data []byte) []byte {
 	return result
 }
 
-func decodeBytes(b []byte) ([]byte, []byte, error) {
+func decodeBytes(b []byte) ([]byte, error) {
 	buf := make([]byte, 0, len(b))
 	for {
 		if len(b) < encGroupSize+1 {
-			return nil, nil, errors.New("insufficient bytes to decode value")
+			return nil, errors.New("insufficient bytes to decode value")
 		}
 
 		groupBytes := b[:encGroupSize+1]
@@ -78,7 +80,7 @@ func decodeBytes(b []byte) ([]byte, []byte, error) {
 
 		padCount := encMarker - marker
 		if padCount > encGroupSize {
-			return nil, nil, errors.Errorf("invalid marker byte, group bytes %q", groupBytes)
+			return nil, errors.Errorf("invalid marker byte, group bytes %q", groupBytes)
 		}
 
 		realGroupSize := encGroupSize - padCount
@@ -89,11 +91,31 @@ func decodeBytes(b []byte) ([]byte, []byte, error) {
 			// Check validity of padding bytes.
 			for _, v := range group[realGroupSize:] {
 				if v != encPad {
-					return nil, nil, errors.Errorf("invalid padding byte, group bytes %q", groupBytes)
+					return nil, errors.Errorf("invalid padding byte, group bytes %q", groupBytes)
 				}
 			}
 			break
 		}
 	}
-	return b, buf, nil
+	return buf, nil
+}
+
+// keyToKeyHexStr converts a raw key to a hex string after encoding.
+func rawKeyToKeyHexStr(key []byte) string {
+	if len(key) == 0 {
+		return ""
+	}
+	return hex.EncodeToString(encodeBytes(key))
+}
+
+// keyHexStrToRawKey converts a hex string to a raw key after decoding.
+func keyHexStrToRawKey(hexKey string) ([]byte, error) {
+	if len(hexKey) == 0 {
+		return make([]byte, 0), nil
+	}
+	key, err := hex.DecodeString(hexKey)
+	if err != nil {
+		return nil, err
+	}
+	return decodeBytes(key)
 }

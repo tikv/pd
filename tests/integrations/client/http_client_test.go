@@ -170,18 +170,22 @@ func (suite *httpClientTestSuite) TestRule() {
 	re.Equal(bundles[0], bundle)
 	// Check if we have the default rule.
 	suite.checkRule(re, &pd.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      placement.DefaultRuleID,
-		Role:    pd.Voter,
-		Count:   3,
+		GroupID:  placement.DefaultGroupID,
+		ID:       placement.DefaultRuleID,
+		Role:     pd.Voter,
+		Count:    3,
+		StartKey: []byte{},
+		EndKey:   []byte{},
 	}, 1, true)
 	// Should be the same as the rules in the bundle.
 	suite.checkRule(re, bundle.Rules[0], 1, true)
 	testRule := &pd.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      "test",
-		Role:    pd.Voter,
-		Count:   3,
+		GroupID:  placement.DefaultGroupID,
+		ID:       "test",
+		Role:     pd.Voter,
+		Count:    3,
+		StartKey: []byte{},
+		EndKey:   []byte{},
 	}
 	err = suite.client.SetPlacementRule(suite.ctx, testRule)
 	re.NoError(err)
@@ -233,6 +237,18 @@ func (suite *httpClientTestSuite) TestRule() {
 	ruleGroup, err = suite.client.GetPlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
 	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
 	re.Empty(ruleGroup)
+	// Test the start key and end key.
+	testRule = &pd.Rule{
+		GroupID:  placement.DefaultGroupID,
+		ID:       "test",
+		Role:     pd.Voter,
+		Count:    5,
+		StartKey: []byte("a1"),
+		EndKey:   []byte(""),
+	}
+	err = suite.client.SetPlacementRule(suite.ctx, testRule)
+	re.NoError(err)
+	suite.checkRule(re, testRule, 1, true)
 }
 
 func (suite *httpClientTestSuite) checkRule(
@@ -262,6 +278,8 @@ func checkRuleFunc(
 		re.Equal(rule.ID, r.ID)
 		re.Equal(rule.Role, r.Role)
 		re.Equal(rule.Count, r.Count)
+		re.Equal(rule.StartKey, r.StartKey)
+		re.Equal(rule.EndKey, r.EndKey)
 		return
 	}
 	if exist {

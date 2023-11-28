@@ -15,6 +15,7 @@
 package http
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -46,4 +47,66 @@ func TestMergeRegionsInfo(t *testing.T) {
 	re.Equal(int64(2), regionsInfo.Count)
 	re.Equal(2, len(regionsInfo.Regions))
 	re.Equal(append(regionsInfo1.Regions, regionsInfo2.Regions...), regionsInfo.Regions)
+}
+
+func TestRuleStartEndKey(t *testing.T) {
+	re := require.New(t)
+	// Empty start/end key and key hex.
+	ruleToMarshal := &Rule{}
+	rule := mustMarshalAndUnmarshal(re, ruleToMarshal)
+	re.Equal("", rule.StartKeyHex)
+	re.Equal("", rule.EndKeyHex)
+	re.Equal([]byte(""), rule.StartKey)
+	re.Equal([]byte(""), rule.EndKey)
+	// Empty start/end key and non-empty key hex.
+	ruleToMarshal = &Rule{
+		StartKeyHex: rawKeyToKeyHexStr([]byte("a")),
+		EndKeyHex:   rawKeyToKeyHexStr([]byte("b")),
+	}
+	rule = mustMarshalAndUnmarshal(re, ruleToMarshal)
+	re.Equal([]byte("a"), rule.StartKey)
+	re.Equal([]byte("b"), rule.EndKey)
+	re.Equal(ruleToMarshal.StartKeyHex, rule.StartKeyHex)
+	re.Equal(ruleToMarshal.EndKeyHex, rule.EndKeyHex)
+	// Non-empty start/end key and empty key hex.
+	ruleToMarshal = &Rule{
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
+	}
+	rule = mustMarshalAndUnmarshal(re, ruleToMarshal)
+	re.Equal(ruleToMarshal.StartKey, rule.StartKey)
+	re.Equal(ruleToMarshal.EndKey, rule.EndKey)
+	re.Equal(rawKeyToKeyHexStr(ruleToMarshal.StartKey), rule.StartKeyHex)
+	re.Equal(rawKeyToKeyHexStr(ruleToMarshal.EndKey), rule.EndKeyHex)
+	// Non-empty start/end key and non-empty key hex.
+	ruleToMarshal = &Rule{
+		StartKey:    []byte("a"),
+		EndKey:      []byte("b"),
+		StartKeyHex: rawKeyToKeyHexStr([]byte("c")),
+		EndKeyHex:   rawKeyToKeyHexStr([]byte("d")),
+	}
+	rule = mustMarshalAndUnmarshal(re, ruleToMarshal)
+	re.Equal([]byte("c"), rule.StartKey)
+	re.Equal([]byte("d"), rule.EndKey)
+	re.Equal(ruleToMarshal.StartKeyHex, rule.StartKeyHex)
+	re.Equal(ruleToMarshal.EndKeyHex, rule.EndKeyHex)
+	// Half of each pair of keys is empty.
+	ruleToMarshal = &Rule{
+		StartKey:  []byte("a"),
+		EndKeyHex: rawKeyToKeyHexStr([]byte("d")),
+	}
+	rule = mustMarshalAndUnmarshal(re, ruleToMarshal)
+	re.Equal(ruleToMarshal.StartKey, rule.StartKey)
+	re.Equal([]byte("d"), rule.EndKey)
+	re.Equal(rawKeyToKeyHexStr(ruleToMarshal.StartKey), rule.StartKeyHex)
+	re.Equal(ruleToMarshal.EndKeyHex, rule.EndKeyHex)
+}
+
+func mustMarshalAndUnmarshal(re *require.Assertions, rule *Rule) *Rule {
+	ruleJSON, err := json.Marshal(rule)
+	re.NoError(err)
+	var newRule *Rule
+	err = json.Unmarshal(ruleJSON, &newRule)
+	re.NoError(err)
+	return newRule
 }
