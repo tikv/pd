@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -77,6 +79,11 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 
 var regionGuide = core.GenerateRegionGuideFunc(false)
 
+// IsRunningAsClient returns whether the region syncer client is running.
+func (s *RegionSyncer) IsRunningAsClient() bool {
+	return s.streamingRunning.Load() && s.historyLoaded.Load()
+}
+
 // StartSyncWithLeader starts to sync with leader.
 func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	s.wg.Add(1)
@@ -89,6 +96,8 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	go func() {
 		defer logutil.LogPanic()
 		defer s.wg.Done()
+		defer s.streamingRunning.Store(false)
+		defer s.historyLoaded.Store(false)
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
 		regionStorage := s.server.GetStorage()
@@ -132,6 +141,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			}
 
 			stream, err := s.syncRegion(ctx, conn)
+			failpoint.Inject("disableClientStreaming", func() {
+				err = errors.Errorf("no stream")
+			})
 			if err != nil {
 				if ev, ok := status.FromError(err); ok {
 					if ev.Code() == codes.Canceled {
@@ -142,11 +154,12 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				time.Sleep(time.Second)
 				continue
 			}
-
+			s.streamingRunning.Store(true)
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.GetNextIndex()))
 			for {
 				resp, err := stream.Recv()
 				if err != nil {
+					s.streamingRunning.Store(false)
 					log.Error("region sync with leader meet error", errs.ZapError(errs.ErrGRPCRecv, err))
 					if err = stream.CloseSend(); err != nil {
 						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
@@ -155,6 +168,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					break
 				}
 				if s.history.GetNextIndex() != resp.GetStartIndex() {
+					log.Panic("test")
 					log.Warn("server sync index not match the leader",
 						zap.String("server", s.server.Name()),
 						zap.Uint64("own", s.history.GetNextIndex()),
@@ -212,6 +226,8 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						_ = regionStorage.DeleteRegion(old.GetMeta())
 					}
 				}
+				// mark the client as running status when it finished the first history region sync.
+				s.historyLoaded.Store(true)
 			}
 		}
 	}()

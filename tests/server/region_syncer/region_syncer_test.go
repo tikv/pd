@@ -47,21 +47,35 @@ func (i *idAllocator) alloc() uint64 {
 func TestRegionSyncer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
 
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
-	defer cluster.Destroy()
+	defer func() {
+		cluster.Destroy()
+		cancel()
+	}()
 	re.NoError(err)
 
 	re.NoError(cluster.RunInitialServers())
 	cluster.WaitLeader()
 	leaderServer := cluster.GetLeaderServer()
+
 	re.NoError(leaderServer.BootstrapCluster())
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
+
+	testutil.Eventually(re, func() bool {
+		follower := cluster.GetServer(cluster.GetFollower())
+		return !follower.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunningAsClient()
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/disableClientStreaming"))
 	re.True(cluster.WaitRegionSyncerClientsReady(2))
+	testutil.Eventually(re, func() bool {
+		follower := cluster.GetServer(cluster.GetFollower())
+		return follower.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunningAsClient()
+	})
 
 	regionLen := 110
 	regions := initRegions(regionLen)
