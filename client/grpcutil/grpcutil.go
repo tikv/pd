@@ -19,6 +19,12 @@ import (
 	"crypto/tls"
 	"net/url"
 
+<<<<<<< HEAD
+=======
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+>>>>>>> 54bf70e45 (client: update the leader even if the connection creation fails (#7443))
 	"github.com/tikv/pd/client/errs"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -64,3 +70,41 @@ func BuildForwardContext(ctx context.Context, addr string) context.Context {
 	md := metadata.Pairs(ForwardMetadataKey, addr)
 	return metadata.NewOutgoingContext(ctx, md)
 }
+<<<<<<< HEAD
+=======
+
+// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.
+// Returns the old one if's already existed in the clientConns; otherwise creates a new one and returns it.
+func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tlsutil.TLSConfig, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
+	conn, ok := clientConns.Load(addr)
+	if ok {
+		// TODO: check the connection state.
+		return conn.(*grpc.ClientConn), nil
+	}
+	tlsConfig, err := tlsCfg.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+	cc, err := GetClientConn(dCtx, addr, tlsConfig, opt...)
+	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
+		if val, ok := val.(string); ok && val == addr {
+			cc = nil
+			err = errors.Errorf("unreachable network")
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	conn, loaded := clientConns.LoadOrStore(addr, cc)
+	if !loaded {
+		// Successfully stored the connection.
+		return cc, nil
+	}
+	cc.Close()
+	cc = conn.(*grpc.ClientConn)
+	log.Debug("use existing connection", zap.String("target", cc.Target()), zap.String("state", cc.GetState().String()))
+	return cc, nil
+}
+>>>>>>> 54bf70e45 (client: update the leader even if the connection creation fails (#7443))
