@@ -237,9 +237,11 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	suite.NoError(err)
 
-	scheduleConfig1 := &sc.ScheduleConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, scheduleConfig1))
-	suite.Equal(*scheduleConfig1, *scheduleConfig)
+	tu.Eventually(re, func() bool {
+		scheduleConfig1 := &sc.ScheduleConfig{}
+		suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, scheduleConfig1))
+		return reflect.DeepEqual(*scheduleConfig1, *scheduleConfig)
+	})
 }
 
 func (suite *configTestSuite) TestConfigReplication() {
