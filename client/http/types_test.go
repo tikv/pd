@@ -110,3 +110,91 @@ func mustMarshalAndUnmarshal(re *require.Assertions, rule *Rule) *Rule {
 	re.NoError(err)
 	return newRule
 }
+
+func TestRuleOpStartEndKey(t *testing.T) {
+	re := require.New(t)
+	// Empty start/end key and key hex.
+	ruleOpToMarshal := &RuleOp{
+		Rule: &Rule{},
+	}
+	ruleOp := mustMarshalAndUnmarshalRuleOp(re, ruleOpToMarshal)
+	re.Equal("", ruleOp.StartKeyHex)
+	re.Equal("", ruleOp.EndKeyHex)
+	re.Equal([]byte(""), ruleOp.StartKey)
+	re.Equal([]byte(""), ruleOp.EndKey)
+	// Empty start/end key and non-empty key hex.
+	ruleOpToMarshal = &RuleOp{
+		Rule: &Rule{
+			StartKeyHex: rawKeyToKeyHexStr([]byte("a")),
+			EndKeyHex:   rawKeyToKeyHexStr([]byte("b")),
+		},
+		Action:           RuleOpAdd,
+		DeleteByIDPrefix: true,
+	}
+	ruleOp = mustMarshalAndUnmarshalRuleOp(re, ruleOpToMarshal)
+	re.Equal([]byte("a"), ruleOp.StartKey)
+	re.Equal([]byte("b"), ruleOp.EndKey)
+	re.Equal(ruleOpToMarshal.StartKeyHex, ruleOp.StartKeyHex)
+	re.Equal(ruleOpToMarshal.EndKeyHex, ruleOp.EndKeyHex)
+	re.Equal(ruleOpToMarshal.Action, ruleOp.Action)
+	re.Equal(ruleOpToMarshal.DeleteByIDPrefix, ruleOp.DeleteByIDPrefix)
+	// Non-empty start/end key and empty key hex.
+	ruleOpToMarshal = &RuleOp{
+		Rule: &Rule{
+			StartKey: []byte("a"),
+			EndKey:   []byte("b"),
+		},
+		Action:           RuleOpAdd,
+		DeleteByIDPrefix: true,
+	}
+	ruleOp = mustMarshalAndUnmarshalRuleOp(re, ruleOpToMarshal)
+	re.Equal(ruleOpToMarshal.StartKey, ruleOp.StartKey)
+	re.Equal(ruleOpToMarshal.EndKey, ruleOp.EndKey)
+	re.Equal(rawKeyToKeyHexStr(ruleOpToMarshal.StartKey), ruleOp.StartKeyHex)
+	re.Equal(rawKeyToKeyHexStr(ruleOpToMarshal.EndKey), ruleOp.EndKeyHex)
+	re.Equal(ruleOpToMarshal.Action, ruleOp.Action)
+	re.Equal(ruleOpToMarshal.DeleteByIDPrefix, ruleOp.DeleteByIDPrefix)
+	// Non-empty start/end key and non-empty key hex.
+	ruleOpToMarshal = &RuleOp{
+		Rule: &Rule{
+			StartKey:    []byte("a"),
+			EndKey:      []byte("b"),
+			StartKeyHex: rawKeyToKeyHexStr([]byte("c")),
+			EndKeyHex:   rawKeyToKeyHexStr([]byte("d")),
+		},
+		Action:           RuleOpAdd,
+		DeleteByIDPrefix: true,
+	}
+	ruleOp = mustMarshalAndUnmarshalRuleOp(re, ruleOpToMarshal)
+	re.Equal([]byte("c"), ruleOp.StartKey)
+	re.Equal([]byte("d"), ruleOp.EndKey)
+	re.Equal(ruleOpToMarshal.StartKeyHex, ruleOp.StartKeyHex)
+	re.Equal(ruleOpToMarshal.EndKeyHex, ruleOp.EndKeyHex)
+	re.Equal(ruleOpToMarshal.Action, ruleOp.Action)
+	re.Equal(ruleOpToMarshal.DeleteByIDPrefix, ruleOp.DeleteByIDPrefix)
+	// Half of each pair of keys is empty.
+	ruleOpToMarshal = &RuleOp{
+		Rule: &Rule{
+			StartKey:  []byte("a"),
+			EndKeyHex: rawKeyToKeyHexStr([]byte("d")),
+		},
+		Action:           RuleOpDel,
+		DeleteByIDPrefix: false,
+	}
+	ruleOp = mustMarshalAndUnmarshalRuleOp(re, ruleOpToMarshal)
+	re.Equal(ruleOpToMarshal.StartKey, ruleOp.StartKey)
+	re.Equal([]byte("d"), ruleOp.EndKey)
+	re.Equal(rawKeyToKeyHexStr(ruleOpToMarshal.StartKey), ruleOp.StartKeyHex)
+	re.Equal(ruleOpToMarshal.EndKeyHex, ruleOp.EndKeyHex)
+	re.Equal(ruleOpToMarshal.Action, ruleOp.Action)
+	re.Equal(ruleOpToMarshal.DeleteByIDPrefix, ruleOp.DeleteByIDPrefix)
+}
+
+func mustMarshalAndUnmarshalRuleOp(re *require.Assertions, ruleOp *RuleOp) *RuleOp {
+	ruleOpJSON, err := json.Marshal(ruleOp)
+	re.NoError(err)
+	var newRuleOp *RuleOp
+	err = json.Unmarshal(ruleOpJSON, &newRuleOp)
+	re.NoError(err)
+	return newRuleOp
+}
