@@ -1024,6 +1024,7 @@ func (o *PersistOptions) IsRaftKV2() bool {
 }
 
 // SetRegionBucketEnabled sets if the region bucket is enabled.
+// only used for test.
 func (o *PersistOptions) SetRegionBucketEnabled(enabled bool) {
 	cfg := o.GetStoreConfig().Clone()
 	cfg.SetRegionBucketEnabled(enabled)
