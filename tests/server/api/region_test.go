@@ -253,6 +253,7 @@ func (suite *regionTestSuite) TestCheckRegionsReplicated() {
 }
 
 func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster) {
+	suite.pauseRuleChecker(cluster)
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	re := suite.Require()
@@ -369,4 +370,18 @@ func (suite *regionTestSuite) checkRegionCount(cluster *tests.TestCluster, count
 			return sche.GetCluster().GetRegionCount([]byte{}, []byte{}) == int(count)
 		})
 	}
+}
+
+// pauseRuleChecker will pause rule checker to avoid unexpected operator.
+func (suite *regionTestSuite) pauseRuleChecker(cluster *tests.TestCluster) {
+	re := suite.Require()
+	checkerName := "rule"
+	addr := cluster.GetLeaderServer().GetAddr()
+	resp := make(map[string]interface{})
+	url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
+	err := tu.CheckPostJSON(testDialClient, url, []byte(`{"delay":1000}`), tu.StatusOK(re))
+	re.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+	re.NoError(err)
+	re.True(resp["paused"].(bool))
 }

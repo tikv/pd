@@ -713,7 +713,15 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 				suite.deleteScheduler(urlPrefix, scheduler)
 			}
 		}
-		suite.checkEmptySchedulersResp(urlPrefix + query)
+		tu.Eventually(re, func() bool {
+			resp, err := apiutil.GetJSON(testDialClient, urlPrefix+query, nil)
+			suite.NoError(err)
+			defer resp.Body.Close()
+			suite.Equal(http.StatusOK, resp.StatusCode)
+			b, err := io.ReadAll(resp.Body)
+			suite.NoError(err)
+			return strings.Contains(string(b), "[]") && !strings.Contains(string(b), "null")
+		})
 	}
 }
 
@@ -743,15 +751,4 @@ func (suite *scheduleTestSuite) isSchedulerPaused(urlPrefix, name string) bool {
 		}
 	}
 	return false
-}
-
-func (suite *scheduleTestSuite) checkEmptySchedulersResp(url string) {
-	resp, err := apiutil.GetJSON(testDialClient, url, nil)
-	suite.NoError(err)
-	defer resp.Body.Close()
-	suite.Equal(http.StatusOK, resp.StatusCode)
-	b, err := io.ReadAll(resp.Body)
-	suite.NoError(err)
-	suite.Contains(string(b), "[]")
-	suite.NotContains(string(b), "null")
 }
