@@ -230,12 +230,12 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 
 func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
 	// use a new environment to avoid affecting other tests
-	suite.env.Cleanup()
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
+	env := tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 3
 		})
-	suite.env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+	env.Cleanup()
 }
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {

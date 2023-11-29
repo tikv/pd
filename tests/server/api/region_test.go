@@ -73,6 +73,7 @@ func (suite *regionTestSuite) TearDownTest() {
 		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(suite.Require()))
 		suite.NoError(err)
 		// clean stores
+		// TODO: cannot sync to scheduling server?
 		for _, store := range leader.GetStores() {
 			suite.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true))
 			suite.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
@@ -84,7 +85,10 @@ func (suite *regionTestSuite) TearDownTest() {
 }
 
 func (suite *regionTestSuite) TestSplitRegions() {
-	suite.env.RunTestInTwoModes(suite.checkSplitRegions)
+	// use a new environment to avoid affecting other tests
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkSplitRegions)
+	env.Cleanup()
 }
 
 func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
@@ -195,9 +199,10 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 }
 
 func (suite *regionTestSuite) TestScatterRegions() {
-	suite.env.RunTestInTwoModes(suite.checkScatterRegions)
-	suite.env.Cleanup()
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	// use a new environment to avoid affecting other tests
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkScatterRegions)
+	env.Cleanup()
 }
 
 func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {

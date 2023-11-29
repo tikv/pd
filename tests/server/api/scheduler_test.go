@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -682,8 +683,7 @@ func (suite *scheduleTestSuite) testPauseOrResume(urlPrefix string, name, create
 }
 
 func (suite *scheduleTestSuite) TestEmptySchedulers() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkEmptySchedulers)
+	suite.env.RunTestInTwoModes(suite.checkEmptySchedulers)
 }
 
 func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster) {
@@ -699,20 +699,22 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 		}
 		tests.MustPutStore(suite.Require(), cluster, store)
 	}
-
-	// test disabled and paused schedulers
-	suite.checkEmptySchedulersResp(urlPrefix + "?status=disabled")
-	suite.checkEmptySchedulersResp(urlPrefix + "?status=paused")
-
-	// test enabled schedulers
-	schedulers := make([]string, 0)
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers))
-	for _, scheduler := range schedulers {
-		suite.deleteScheduler(urlPrefix, scheduler)
+	for _, query := range []string{"", "?status=paused", "?status=disabled"} {
+		schedulers := make([]string, 0)
+		suite.NoError(tu.ReadGetJSON(re, testDialClient, urlPrefix+query, &schedulers))
+		for _, scheduler := range schedulers {
+			if strings.Contains(query, "disable") {
+				input := make(map[string]interface{})
+				input["name"] = scheduler
+				body, err := json.Marshal(input)
+				suite.NoError(err)
+				suite.addScheduler(urlPrefix, body)
+			} else {
+				suite.deleteScheduler(urlPrefix, scheduler)
+			}
+		}
+		suite.checkEmptySchedulersResp(urlPrefix + query)
 	}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers))
-	suite.Len(schedulers, 0)
-	suite.checkEmptySchedulersResp(urlPrefix)
 }
 
 func (suite *scheduleTestSuite) assertSchedulerExists(re *require.Assertions, urlPrefix string, scheduler string) {
