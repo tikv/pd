@@ -21,9 +21,12 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+<<<<<<< HEAD
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
+=======
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 )
 
 // KeyspaceClient manages keyspace metadata.
@@ -57,7 +60,6 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 		Header: c.requestHeader(),
 		Name:   name,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.keyspaceClient().LoadKeyspace(ctx, req)
 	cancel()
 
@@ -136,7 +138,6 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 		Id:     id,
 		State:  state,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.keyspaceClient().UpdateKeyspaceState(ctx, req)
 	cancel()
 
@@ -153,3 +154,45 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 
 	return resp.Keyspace, nil
 }
+<<<<<<< HEAD
+=======
+
+// WatchKeyspaces watches keyspace meta changes.
+// It returns a stream of slices of keyspace metadata.
+// The first message in stream contains all current keyspaceMeta,
+// all subsequent messages contains new put events for all keyspaces.
+func (c *client) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.KeyspaceMeta, error) {
+	return nil, errors.Errorf("WatchKeyspaces unimplemented")
+}
+
+// GetAllKeyspaces get all keyspaces metadata.
+func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint32) ([]*keyspacepb.KeyspaceMeta, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("keyspaceClient.GetAllKeyspaces", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &keyspacepb.GetAllKeyspacesRequest{
+		Header:  c.requestHeader(),
+		StartId: startID,
+		Limit:   limit,
+	}
+	resp, err := c.keyspaceClient().GetAllKeyspaces(ctx, req)
+	cancel()
+
+	if err != nil {
+		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		return nil, err
+	}
+
+	if resp.Header.GetError() != nil {
+		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+		return nil, errors.Errorf("Get all keyspaces metadata failed: %s", resp.Header.GetError().String())
+	}
+
+	return resp.Keyspaces, nil
+}
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
