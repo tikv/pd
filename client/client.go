@@ -212,8 +212,8 @@ func WithBuckets() GetRegionOption {
 	return func(op *GetRegionOp) { op.needBuckets = true }
 }
 
-// AllowFollowerHandle means that client can send request to follower and let it handle this request.
-func AllowFollowerHandle() GetRegionOption {
+// WithAllowFollowerHandle means that client can send request to follower and let it handle this request.
+func WithAllowFollowerHandle() GetRegionOption {
 	return func(op *GetRegionOp) { op.allowFollowerHandle = true }
 }
 
