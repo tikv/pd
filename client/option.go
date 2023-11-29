@@ -100,7 +100,7 @@ func (o *option) setEnableFollowerHandle(enable bool) {
 	}
 }
 
-// getMaxTSOBatchWaitIntervalgets the Follower Handle enable option.
+// getMaxTSOBatchWaitInterval gets the Follower Handle enable option.
 func (o *option) getEnableFollowerHandle() bool {
 	return o.dynamicOptions[EnableFollowerHandle].Load().(bool)
 }
