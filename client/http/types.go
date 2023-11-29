@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"net/url"
 	"time"
+
+	"github.com/pingcap/kvproto/pkg/encryptionpb"
 )
 
 // KeyRange defines a range of keys in bytes.
@@ -164,6 +166,46 @@ type HotPeerStatShow struct {
 	QueryRate      float64   `json:"flow_query"`
 	AntiCount      int       `json:"anti_count"`
 	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
+}
+
+// HistoryHotRegionsRequest wrap the request conditions.
+type HistoryHotRegionsRequest struct {
+	StartTime      int64    `json:"start_time,omitempty"`
+	EndTime        int64    `json:"end_time,omitempty"`
+	RegionIDs      []uint64 `json:"region_ids,omitempty"`
+	StoreIDs       []uint64 `json:"store_ids,omitempty"`
+	PeerIDs        []uint64 `json:"peer_ids,omitempty"`
+	IsLearners     []bool   `json:"is_learners,omitempty"`
+	IsLeaders      []bool   `json:"is_leaders,omitempty"`
+	HotRegionTypes []string `json:"hot_region_type,omitempty"`
+}
+
+// HistoryHotRegions wraps historyHotRegion
+type HistoryHotRegions struct {
+	HistoryHotRegion []*HistoryHotRegion `json:"history_hot_region"`
+}
+
+// HistoryHotRegion wraps hot region info
+// it is storage format of hot_region_storage
+type HistoryHotRegion struct {
+	UpdateTime    int64   `json:"update_time"`
+	RegionID      uint64  `json:"region_id"`
+	PeerID        uint64  `json:"peer_id"`
+	StoreID       uint64  `json:"store_id"`
+	IsLeader      bool    `json:"is_leader"`
+	IsLearner     bool    `json:"is_learner"`
+	HotRegionType string  `json:"hot_region_type"`
+	HotDegree     int64   `json:"hot_degree"`
+	FlowBytes     float64 `json:"flow_bytes"`
+	KeyRate       float64 `json:"key_rate"`
+	QueryRate     float64 `json:"query_rate"`
+	StartKey      string  `json:"start_key"`
+	EndKey        string  `json:"end_key"`
+	// Encryption metadata for start_key and end_key. encryption_meta.iv is IV for start_key.
+	// IV for end_key is calculated from (encryption_meta.iv + len(start_key)).
+	// The field is only used by PD and should be ignored otherwise.
+	// If encryption_meta is empty (i.e. nil), it means start_key and end_key are unencrypted.
+	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
 }
 
 // StoresInfo represents the information of all TiKV/TiFlash stores.

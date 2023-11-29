@@ -49,8 +49,12 @@ type Client interface {
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
+	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
 	GetRegionStatusByKeyRange(context.Context, *KeyRange) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
+	/* Config-related interfaces */
+	GetScheduleConfig(context.Context) (map[string]interface{}, error)
+	SetScheduleConfig(context.Context, map[string]interface{}) error
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -191,12 +195,23 @@ func (c *client) execDuration(name string, duration time.Duration) {
 	c.executionDuration.WithLabelValues(name).Observe(duration.Seconds())
 }
 
+// HeaderOption configures the HTTP header.
+type HeaderOption func(header http.Header)
+
+// WithAllowFollowerHandle sets the header field to allow a PD follower to handle this request.
+func WithAllowFollowerHandle() HeaderOption {
+	return func(header http.Header) {
+		header.Set("PD-Allow-Follower-Handle", "true")
+	}
+}
+
 // At present, we will use the retry strategy of polling by default to keep
 // it consistent with the current implementation of some clients (e.g. TiDB).
 func (c *client) requestWithRetry(
 	ctx context.Context,
 	name, uri, method string,
 	body io.Reader, res interface{},
+	headerOpts ...HeaderOption,
 ) error {
 	var (
 		err  error
@@ -204,7 +219,7 @@ func (c *client) requestWithRetry(
 	)
 	for idx := 0; idx < len(c.pdAddrs); idx++ {
 		addr = c.pdAddrs[idx]
-		err = c.request(ctx, name, fmt.Sprintf("%s%s", addr, uri), method, body, res)
+		err = c.request(ctx, name, fmt.Sprintf("%s%s", addr, uri), method, body, res, headerOpts...)
 		if err == nil {
 			break
 		}
@@ -218,6 +233,7 @@ func (c *client) request(
 	ctx context.Context,
 	name, url, method string,
 	body io.Reader, res interface{},
+	headerOpts ...HeaderOption,
 ) error {
 	logFields := []zap.Field{
 		zap.String("name", name),
@@ -228,6 +244,9 @@ func (c *client) request(
 	if err != nil {
 		log.Error("[pd] create http request failed", append(logFields, zap.Error(err))...)
 		return errors.Trace(err)
+	}
+	for _, opt := range headerOpts {
+		opt(req.Header)
 	}
 	start := time.Now()
 	resp, err := c.cli.Do(req)
@@ -361,6 +380,23 @@ func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, e
 	return &hotWriteRegions, nil
 }
 
+// GetHistoryHotRegions gets the history hot region statistics info.
+func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegionsRequest) (*HistoryHotRegions, error) {
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var historyHotRegions HistoryHotRegions
+	err = c.requestWithRetry(ctx,
+		"GetHistoryHotRegions", HotHistory,
+		http.MethodGet, bytes.NewBuffer(reqJSON), &historyHotRegions,
+		WithAllowFollowerHandle())
+	if err != nil {
+		return nil, err
+	}
+	return &historyHotRegions, nil
+}
+
 // GetRegionStatusByKeyRange gets the region status by key range.
 // The keys in the key range should be encoded in the UTF-8 bytes format.
 func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange) (*RegionStats, error) {
@@ -373,6 +409,29 @@ func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRan
 		return nil, err
 	}
 	return &regionStats, nil
+}
+
+// GetScheduleConfig gets the schedule configurations.
+func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{}, error) {
+	var config map[string]interface{}
+	err := c.requestWithRetry(ctx,
+		"GetScheduleConfig", ScheduleConfig,
+		http.MethodGet, http.NoBody, &config)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// SetScheduleConfig sets the schedule configurations.
+func (c *client) SetScheduleConfig(ctx context.Context, config map[string]interface{}) error {
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetScheduleConfig", ScheduleConfig,
+		http.MethodPost, bytes.NewBuffer(configJSON), nil)
 }
 
 // GetStores gets the stores info.
