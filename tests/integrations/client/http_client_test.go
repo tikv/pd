@@ -343,3 +343,18 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 2)
 }
+
+func (suite *httpClientTestSuite) TestScheduleConfig() {
+	re := suite.Require()
+	config, err := suite.client.GetScheduleConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(float64(4), config["leader-schedule-limit"])
+	re.Equal(float64(2048), config["region-schedule-limit"])
+	config["leader-schedule-limit"] = float64(8)
+	err = suite.client.SetScheduleConfig(suite.ctx, config)
+	re.NoError(err)
+	config, err = suite.client.GetScheduleConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(float64(8), config["leader-schedule-limit"])
+	re.Equal(float64(2048), config["region-schedule-limit"])
+}
