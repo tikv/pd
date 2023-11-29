@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -31,6 +33,7 @@ import (
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"go.uber.org/zap"
 )
 
 type ruleTestSuite struct {
@@ -817,7 +820,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	err := tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 1)
-	suite.compareBundle(bundles[0], b1)
+	suite.assertBundleEqual(bundles[0], b1)
 
 	// Set
 	b2 := placement.GroupBundle{
@@ -837,14 +840,14 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	var bundle placement.GroupBundle
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule/foo", &bundle)
 	suite.NoError(err)
-	suite.compareBundle(bundle, b2)
+	suite.assertBundleEqual(bundle, b2)
 
 	// GetAll again
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 2)
-	suite.compareBundle(bundles[0], b1)
-	suite.compareBundle(bundles[1], b2)
+	suite.assertBundleEqual(bundles[0], b1)
+	suite.assertBundleEqual(bundles[1], b2)
 
 	// Delete
 	err = tu.CheckDelete(testDialClient, urlPrefix+"/placement-rule/pd", tu.StatusOK(suite.Require()))
@@ -854,7 +857,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 1)
-	suite.compareBundle(bundles[0], b2)
+	suite.assertBundleEqual(bundles[0], b2)
 
 	// SetAll
 	b2.Rules = append(b2.Rules, &placement.Rule{GroupID: "foo", ID: "baz", Index: 2, Role: placement.Follower, Count: 1})
@@ -869,9 +872,9 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 3)
-	suite.compareBundle(bundles[0], b2)
-	suite.compareBundle(bundles[1], b1)
-	suite.compareBundle(bundles[2], b3)
+	suite.assertBundleEqual(bundles[0], b2)
+	suite.assertBundleEqual(bundles[1], b1)
+	suite.assertBundleEqual(bundles[2], b3)
 
 	// Delete using regexp
 	err = tu.CheckDelete(testDialClient, urlPrefix+"/placement-rule/"+url.PathEscape("foo.*")+"?regexp", tu.StatusOK(suite.Require()))
@@ -881,7 +884,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 1)
-	suite.compareBundle(bundles[0], b1)
+	suite.assertBundleEqual(bundles[0], b1)
 
 	// Set
 	id := "rule-without-group-id"
@@ -902,14 +905,14 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	// Get
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule/"+id, &bundle)
 	suite.NoError(err)
-	suite.compareBundle(bundle, b4)
+	suite.assertBundleEqual(bundle, b4)
 
 	// GetAll again
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 2)
-	suite.compareBundle(bundles[0], b1)
-	suite.compareBundle(bundles[1], b4)
+	suite.assertBundleEqual(bundles[0], b1)
+	suite.assertBundleEqual(bundles[1], b4)
 
 	// SetAll
 	b5 := placement.GroupBundle{
@@ -930,9 +933,9 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
 	suite.NoError(err)
 	suite.Len(bundles, 3)
-	suite.compareBundle(bundles[0], b1)
-	suite.compareBundle(bundles[1], b4)
-	suite.compareBundle(bundles[2], b5)
+	suite.assertBundleEqual(bundles[0], b1)
+	suite.assertBundleEqual(bundles[1], b4)
+	suite.assertBundleEqual(bundles[2], b5)
 }
 
 func (suite *ruleTestSuite) TestBundleBadRequest() {
@@ -972,18 +975,135 @@ func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
 	}
 }
 
-func (suite *ruleTestSuite) compareBundle(b1, b2 placement.GroupBundle) {
-	tu.Eventually(suite.Require(), func() bool {
-		if b2.ID != b1.ID || b2.Index != b1.Index || b2.Override != b1.Override || len(b2.Rules) != len(b1.Rules) {
-			return false
-		}
-		for i := range b1.Rules {
-			if !suite.compareRule(b1.Rules[i], b2.Rules[i]) {
+func (suite *ruleTestSuite) TestDeleteAndUpdate() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	env.RunTestInTwoModes(suite.checkDeleteAndUpdate)
+}
+
+func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+
+	bundles := [][]placement.GroupBundle{
+		// 1 rule group with 1 rule
+		{{
+			ID:    "1",
+			Index: 1,
+			Rules: []*placement.Rule{
+				{
+					ID: "foo", Index: 1, Role: placement.Voter, Count: 1, GroupID: "1",
+				},
+			},
+		}},
+		// 2 rule groups with different range rules
+		{{
+			ID:    "1",
+			Index: 1,
+			Rules: []*placement.Rule{
+				{
+					ID: "foo", Index: 1, Role: placement.Voter, Count: 1, GroupID: "1",
+					StartKey: []byte("a"), EndKey: []byte("b"),
+				},
+			},
+		}, {
+			ID:    "2",
+			Index: 2,
+			Rules: []*placement.Rule{
+				{
+					ID: "foo", Index: 2, Role: placement.Voter, Count: 1, GroupID: "2",
+					StartKey: []byte("b"), EndKey: []byte("c"),
+				},
+			},
+		}},
+		// 2 rule groups with 1 rule and 2 rules
+		{{
+			ID:    "3",
+			Index: 3,
+			Rules: []*placement.Rule{
+				{
+					ID: "foo", Index: 3, Role: placement.Voter, Count: 1, GroupID: "3",
+				},
+			},
+		}, {
+			ID:    "4",
+			Index: 4,
+			Rules: []*placement.Rule{
+				{
+					ID: "foo", Index: 4, Role: placement.Voter, Count: 1, GroupID: "4",
+				},
+				{
+					ID: "bar", Index: 6, Role: placement.Voter, Count: 1, GroupID: "4",
+				},
+			},
+		}},
+		// 1 rule group with 2 rules
+		{{
+			ID:    "5",
+			Index: 5,
+			Rules: []*placement.Rule{
+				{
+					ID: "foo", Index: 5, Role: placement.Voter, Count: 1, GroupID: "5",
+				},
+				{
+					ID: "bar", Index: 6, Role: placement.Voter, Count: 1, GroupID: "5",
+				},
+			},
+		}},
+	}
+
+	for _, bundle := range bundles {
+		data, err := json.Marshal(bundle)
+		suite.NoError(err)
+		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
+		suite.NoError(err)
+
+		tu.Eventually(re, func() bool {
+			respBundle := make([]placement.GroupBundle, 0)
+			err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
+				tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
+			suite.NoError(err)
+			if len(respBundle) != len(bundle) {
 				return false
 			}
-		}
-		return true
+			log.Info("respBundle", zap.Any("respBundle", respBundle), zap.Any("bundle", bundle))
+			sort.Slice(respBundle, func(i, j int) bool { return respBundle[i].ID < respBundle[j].ID })
+			sort.Slice(bundle, func(i, j int) bool { return bundle[i].ID < bundle[j].ID })
+			for i := range respBundle {
+				if !suite.compareBundle(respBundle[i], bundle[i]) {
+					return false
+				}
+			}
+			return true
+		})
+	}
+}
+
+func (suite *ruleTestSuite) assertBundleEqual(b1, b2 placement.GroupBundle) {
+	tu.Eventually(suite.Require(), func() bool {
+		return suite.compareBundle(b1, b2)
 	})
+}
+
+func (suite *ruleTestSuite) compareBundle(b1, b2 placement.GroupBundle) bool {
+	if b2.ID != b1.ID || b2.Index != b1.Index || b2.Override != b1.Override || len(b2.Rules) != len(b1.Rules) {
+		return false
+	}
+	sort.Slice(b1.Rules, func(i, j int) bool { return b1.Rules[i].ID < b1.Rules[j].ID })
+	sort.Slice(b2.Rules, func(i, j int) bool { return b2.Rules[i].ID < b2.Rules[j].ID })
+	for i := range b1.Rules {
+		if !suite.compareRule(b1.Rules[i], b2.Rules[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (suite *ruleTestSuite) compareRule(r1 *placement.Rule, r2 *placement.Rule) bool {
