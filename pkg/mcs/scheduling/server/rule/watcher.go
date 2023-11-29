@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
@@ -62,6 +63,17 @@ type Watcher struct {
 	ruleWatcher  *etcdutil.LoopWatcher
 	groupWatcher *etcdutil.LoopWatcher
 	labelWatcher *etcdutil.LoopWatcher
+
+	// pendingDeletion is a structure used to track the rules or rule groups that are marked for deletion.
+	// If a rule or rule group cannot be deleted immediately due to the absence of rules,
+	// it will be held here and removed later when a new rule or rule group put event allows for its deletion.
+	pendingDeletion struct {
+		syncutil.RWMutex
+		// key: path, value: [groupID, ruleID]
+		// The map 'kvs' holds the rules or rule groups that are pending deletion.
+		// If a rule group needs to be deleted, the ruleID will be an empty string.
+		kvs map[string][2]string
+	}
 }
 
 // NewWatcher creates a new watcher to watch the Placement Rule change from PD API server.
@@ -86,6 +98,12 @@ func NewWatcher(
 		checkerController:     checkerController,
 		ruleManager:           ruleManager,
 		regionLabeler:         regionLabeler,
+		pendingDeletion: struct {
+			syncutil.RWMutex
+			kvs map[string][2]string
+		}{
+			kvs: make(map[string][2]string),
+		},
 	}
 	err := rw.initializeRuleWatcher()
 	if err != nil {
@@ -115,7 +133,11 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		if oldRule := rw.ruleManager.GetRule(rule.GroupID, rule.ID); oldRule != nil {
 			rw.checkerController.AddSuspectKeyRange(oldRule.StartKey, oldRule.EndKey)
 		}
-		return rw.ruleManager.SetRule(rule)
+		err = rw.ruleManager.SetRule(rule)
+		if err == nil && rw.hasPendingDeletion() {
+			rw.tryFinishPendingDeletion()
+		}
+		return err
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
@@ -129,7 +151,11 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			return err
 		}
 		rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
-		return rw.ruleManager.DeleteRule(rule.GroupID, rule.ID)
+		err = rw.ruleManager.DeleteRule(rule.GroupID, rule.ID)
+		if err != nil && strings.Contains(err.Error(), "no rule left") {
+			rw.addPendingDeletion(key, rule.GroupID, rule.ID)
+		}
+		return err
 	}
 	postEventFn := func() error {
 		return nil
@@ -157,7 +183,11 @@ func (rw *Watcher) initializeGroupWatcher() error {
 		for _, rule := range rw.ruleManager.GetRulesByGroup(ruleGroup.ID) {
 			rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
 		}
-		return rw.ruleManager.SetRuleGroup(ruleGroup)
+		err = rw.ruleManager.SetRuleGroup(ruleGroup)
+		if err == nil && rw.hasPendingDeletion() {
+			rw.tryFinishPendingDeletion()
+		}
+		return err
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
@@ -166,7 +196,11 @@ func (rw *Watcher) initializeGroupWatcher() error {
 		for _, rule := range rw.ruleManager.GetRulesByGroup(trimmedKey) {
 			rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
 		}
-		return rw.ruleManager.DeleteRuleGroup(trimmedKey)
+		err := rw.ruleManager.DeleteRuleGroup(trimmedKey)
+		if err != nil && strings.Contains(err.Error(), "no rule left") {
+			rw.addPendingDeletion(key, trimmedKey, "")
+		}
+		return err
 	}
 	postEventFn := func() error {
 		return nil
@@ -215,4 +249,41 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 func (rw *Watcher) Close() {
 	rw.cancel()
 	rw.wg.Wait()
+}
+
+func (rw *Watcher) hasPendingDeletion() bool {
+	rw.pendingDeletion.RLock()
+	defer rw.pendingDeletion.RUnlock()
+	return len(rw.pendingDeletion.kvs) > 0
+}
+
+func (rw *Watcher) addPendingDeletion(path, groupID, ruleID string) {
+	rw.pendingDeletion.Lock()
+	defer rw.pendingDeletion.Unlock()
+	rw.pendingDeletion.kvs[path] = [2]string{groupID, ruleID}
+}
+
+func (rw *Watcher) tryFinishPendingDeletion() {
+	rw.pendingDeletion.Lock()
+	defer rw.pendingDeletion.Unlock()
+	originLen := len(rw.pendingDeletion.kvs)
+	for k, v := range rw.pendingDeletion.kvs {
+		groupID, ruleID := v[0], v[1]
+		var err error
+		if ruleID == "" {
+			err = rw.ruleManager.DeleteRuleGroup(groupID)
+		} else {
+			err = rw.ruleManager.DeleteRule(groupID, ruleID)
+		}
+		if err == nil {
+			delete(rw.pendingDeletion.kvs, k)
+		}
+	}
+	// If the length of the map is changed, it means that some rules or rule groups have been deleted.
+	// We need to force load the rules and rule groups to make sure sync with etcd.
+	if len(rw.pendingDeletion.kvs) != originLen {
+		rw.ruleWatcher.ForceLoad()
+		rw.groupWatcher.ForceLoad()
+		log.Info("force load rules", zap.Int("pending deletion", len(rw.pendingDeletion.kvs)), zap.Int("origin", originLen))
+	}
 }
