@@ -96,8 +96,12 @@ func RegionsByStoreID(storeID uint64) string {
 }
 
 // RegionStatsByKeyRange returns the path of PD HTTP API to get region stats by start key and end key.
-func RegionStatsByKeyRange(keyRange *KeyRange) string {
+func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
+	if onlyCount {
+		return fmt.Sprintf("%s?start_key=%s&end_key=%s&count",
+			StatsRegion, startKeyStr, endKeyStr)
+	}
 	return fmt.Sprintf("%s?start_key=%s&end_key=%s",
 		StatsRegion, startKeyStr, endKeyStr)
 }

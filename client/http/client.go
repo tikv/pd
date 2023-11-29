@@ -50,7 +50,7 @@ type Client interface {
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
-	GetRegionStatusByKeyRange(context.Context, *KeyRange) (*RegionStats, error)
+	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	/* Config-related interfaces */
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
@@ -399,10 +399,10 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 
 // GetRegionStatusByKeyRange gets the region status by key range.
 // The keys in the key range should be encoded in the UTF-8 bytes format.
-func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange) (*RegionStats, error) {
+func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange, onlyCount bool) (*RegionStats, error) {
 	var regionStats RegionStats
 	err := c.requestWithRetry(ctx,
-		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(keyRange),
+		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(keyRange, onlyCount),
 		http.MethodGet, http.NoBody, &regionStats,
 	)
 	if err != nil {
