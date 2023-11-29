@@ -163,14 +163,6 @@ func (s *GrpcServer) GetMinTS(
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
-		return pdpb.NewPDClient(client).GetMinTS(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.GetMinTSResponse), nil
-	}
 
 	var (
 		minTS *pdpb.Timestamp
