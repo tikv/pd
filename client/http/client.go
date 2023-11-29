@@ -47,6 +47,7 @@ type Client interface {
 	GetRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsByKeyRange(context.Context, *KeyRange, int) (*RegionsInfo, error)
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
+	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
@@ -354,6 +355,18 @@ func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*Regi
 		return nil, err
 	}
 	return &regions, nil
+}
+
+// GetRegionsReplicatedStateByKeyRange gets the regions replicated state info by key range.
+func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRange *KeyRange) (string, error) {
+	var state string
+	err := c.requestWithRetry(ctx,
+		"GetRegionsReplicatedStateByKeyRange", RegionsReplicatedByKeyRange(keyRange),
+		http.MethodGet, http.NoBody, &state)
+	if err != nil {
+		return "", err
+	}
+	return state, nil
 }
 
 // GetHotReadRegions gets the hot read region statistics info.
