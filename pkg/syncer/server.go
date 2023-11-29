@@ -86,7 +86,6 @@ type RegionSyncer struct {
 	tlsConfig *grpcutil.TLSConfig
 	// status when as client
 	streamingRunning atomic.Bool
-	historyLoaded    atomic.Bool
 }
 
 // NewRegionSyncer returns a region syncer.

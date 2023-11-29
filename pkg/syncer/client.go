@@ -81,7 +81,7 @@ var regionGuide = core.GenerateRegionGuideFunc(false)
 
 // IsRunning returns whether the region syncer client is running.
 func (s *RegionSyncer) IsRunning() bool {
-	return s.streamingRunning.Load() && s.historyLoaded.Load()
+	return s.streamingRunning.Load()
 }
 
 // StartSyncWithLeader starts to sync with leader.
@@ -97,7 +97,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		defer logutil.LogPanic()
 		defer s.wg.Done()
 		defer s.streamingRunning.Store(false)
-		defer s.historyLoaded.Store(false)
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
 		regionStorage := s.server.GetStorage()
@@ -154,7 +153,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				time.Sleep(time.Second)
 				continue
 			}
-			s.streamingRunning.Store(true)
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.GetNextIndex()))
 			for {
 				resp, err := stream.Recv()
@@ -226,7 +224,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 				}
 				// mark the client as running status when it finished the first history region sync.
-				s.historyLoaded.Store(true)
+				s.streamingRunning.Store(true)
 			}
 		}
 	}()
