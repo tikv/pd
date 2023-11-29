@@ -594,8 +594,17 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	req := &pdpb.GetMembersRequest{Header: c.requestHeader()}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetMembers(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetMembers(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 	if err = c.respForErr(cmdFailDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1239,6 +1248,7 @@ func (c *client) getClient() pdpb.PDClient {
 	return c.leaderClient()
 }
 
+<<<<<<< HEAD
 func (c *client) getAllClients() map[string]pdpb.PDClient {
 	var (
 		addrs   = c.GetURLs()
@@ -1271,6 +1281,17 @@ var tsoReqPool = sync.Pool{
 			logical:  0,
 		}
 	},
+=======
+func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
+	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
+		backupClientConn, addr := c.backupClientConn()
+		if backupClientConn != nil {
+			log.Debug("[pd] use follower client", zap.String("addr", addr))
+			return pdpb.NewPDClient(backupClientConn), grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+		}
+	}
+	return c.leaderClient(), ctx
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
@@ -1367,6 +1388,7 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
+<<<<<<< HEAD
 func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
@@ -1395,6 +1417,8 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	return handleRegionResponse(resp), nil
 }
 
+=======
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 func isNetworkError(code codes.Code) bool {
 	return code == codes.Unavailable || code == codes.DeadlineExceeded
 }
@@ -1437,6 +1461,38 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	return handleRegionResponse(resp), nil
 }
 
+func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+
+	options := &GetRegionOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	req := &pdpb.GetRegionRequest{
+		Header:      c.requestHeader(),
+		RegionKey:   key,
+		NeedBuckets: options.needBuckets,
+	}
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetRegion(ctx, req)
+	cancel()
+
+	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+	return handleRegionResponse(resp), nil
+}
+
 func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
@@ -1455,8 +1511,17 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 		RegionKey:   key,
 		NeedBuckets: options.needBuckets,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetPrevRegion(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetPrevRegion(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 
 	if err = c.respForErr(cmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
@@ -1483,8 +1548,17 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 		RegionId:    regionID,
 		NeedBuckets: options.needBuckets,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetRegionByID(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetRegionByID(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
@@ -1513,8 +1587,17 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	}
+<<<<<<< HEAD
 	scanCtx = grpcutil.BuildForwardContext(scanCtx, c.GetLeaderAddr())
 	resp, err := c.getClient().ScanRegions(scanCtx, req)
+=======
+	protoClient, scanCtx := c.getClientAndContext(scanCtx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.ScanRegions(scanCtx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 
 	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1564,8 +1647,17 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		Header:  c.requestHeader(),
 		StoreId: storeID,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetStore(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetStore(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
@@ -1604,8 +1696,17 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 		Header:                 c.requestHeader(),
 		ExcludeTombstoneStores: options.excludeTombstone,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().GetAllStores(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetAllStores(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
@@ -1627,8 +1728,17 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		Header:    c.requestHeader(),
 		SafePoint: safePoint,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().UpdateGCSafePoint(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.UpdateGCSafePoint(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
@@ -1657,8 +1767,17 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 		TTL:       ttl,
 		SafePoint: safePoint,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().UpdateServiceGCSafePoint(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.UpdateServiceGCSafePoint(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 
 	if err = c.respForErr(cmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
@@ -1685,8 +1804,17 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 		RegionId: regionID,
 		Group:    group,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().ScatterRegion(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.ScatterRegion(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 	if err != nil {
 		return err
@@ -1725,8 +1853,17 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 		RetryLimit: options.retryLimit,
 	}
 
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	return c.getClient().SplitAndScatterRegions(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	return protoClient.SplitAndScatterRegions(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
@@ -1743,8 +1880,17 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 		Header:   c.requestHeader(),
 		RegionId: regionID,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	return c.getClient().GetOperator(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	return protoClient.GetOperator(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 }
 
 // SplitRegions split regions by given split keys
@@ -1766,8 +1912,17 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 		SplitKeys:  splitKeys,
 		RetryLimit: options.retryLimit,
 	}
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	return c.getClient().SplitRegions(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	return protoClient.SplitRegions(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 }
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
@@ -1791,8 +1946,17 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 		RetryLimit: options.retryLimit,
 	}
 
+<<<<<<< HEAD
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.getClient().ScatterRegion(ctx, req)
+=======
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.ScatterRegion(ctx, req)
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	cancel()
 
 	if err != nil {
@@ -1832,8 +1996,19 @@ func trimHTTPPrefix(str string) string {
 	return str
 }
 
+<<<<<<< HEAD
 func (c *client) LoadGlobalConfig(ctx context.Context, names []string) ([]GlobalConfigItem, error) {
 	resp, err := c.getClient().LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names})
+=======
+func (c *client) LoadGlobalConfig(ctx context.Context, names []string, configPath string) ([]GlobalConfigItem, int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		return nil, 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.LoadGlobalConfig(ctx, &pdpb.LoadGlobalConfigRequest{Names: names, ConfigPath: configPath})
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	if err != nil {
 		return nil, err
 	}
@@ -1859,7 +2034,17 @@ func (c *client) StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem
 	for i, it := range items {
 		resArr[i] = &pdpb.GlobalConfigItem{Name: it.Name, Value: it.Value}
 	}
+<<<<<<< HEAD
 	res, err := c.getClient().StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr})
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		return errs.ErrClientGetProtoClient
+	}
+	_, err := protoClient.StoreGlobalConfig(ctx, &pdpb.StoreGlobalConfigRequest{Changes: resArr, ConfigPath: configPath})
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	if err != nil {
 		return err
 	}
@@ -1872,7 +2057,20 @@ func (c *client) StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem
 
 func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem, error) {
 	globalConfigWatcherCh := make(chan []GlobalConfigItem, 16)
+<<<<<<< HEAD
 	res, err := c.getClient().WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{})
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		return nil, errs.ErrClientGetProtoClient
+	}
+	res, err := protoClient.WatchGlobalConfig(ctx, &pdpb.WatchGlobalConfigRequest{
+		ConfigPath: configPath,
+		Revision:   revision,
+	})
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	if err != nil {
 		close(globalConfigWatcherCh)
 		return nil, err
@@ -1906,7 +2104,17 @@ func (c *client) WatchGlobalConfig(ctx context.Context) (chan []GlobalConfigItem
 }
 
 func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
+<<<<<<< HEAD
 	resp, err := c.getClient().GetExternalTimestamp(ctx, &pdpb.GetExternalTimestampRequest{
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		return 0, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetExternalTimestamp(ctx, &pdpb.GetExternalTimestampRequest{
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 		Header: c.requestHeader(),
 	})
 	if err != nil {
@@ -1920,7 +2128,17 @@ func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
 }
 
 func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) error {
+<<<<<<< HEAD
 	resp, err := c.getClient().SetExternalTimestamp(ctx, &pdpb.SetExternalTimestampRequest{
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		return errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.SetExternalTimestamp(ctx, &pdpb.SetExternalTimestampRequest{
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 		Header:    c.requestHeader(),
 		Timestamp: timestamp,
 	})

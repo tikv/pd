@@ -21,10 +21,13 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+<<<<<<< HEAD
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+=======
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 )
 
 // KeyspaceClient manages keyspace metadata.
@@ -56,7 +59,6 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 		Header: c.requestHeader(),
 		Name:   name,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
 	resp, err := c.keyspaceClient().LoadKeyspace(ctx, req)
 	cancel()
 
@@ -74,6 +76,49 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	return resp.Keyspace, nil
 }
 
+<<<<<<< HEAD
+=======
+// UpdateKeyspaceState attempts to update the keyspace specified by ID to the target state,
+// it will also record StateChangedAt for the given keyspace if a state change took place.
+// Currently, legal operations includes:
+//
+//	ENABLED -> {ENABLED, DISABLED}
+//	DISABLED -> {ENABLED, DISABLED, ARCHIVED}
+//	ARCHIVED -> {ARCHIVED, TOMBSTONE}
+//	TOMBSTONE -> {TOMBSTONE}
+//
+// Updated keyspace meta will be returned.
+func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (*keyspacepb.KeyspaceMeta, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil {
+		span = opentracing.StartSpan("keyspaceClient.UpdateKeyspaceState", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &keyspacepb.UpdateKeyspaceStateRequest{
+		Header: c.requestHeader(),
+		Id:     id,
+		State:  state,
+	}
+	resp, err := c.keyspaceClient().UpdateKeyspaceState(ctx, req)
+	cancel()
+
+	if err != nil {
+		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		return nil, err
+	}
+
+	if resp.Header.GetError() != nil {
+		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+		return nil, errors.Errorf("Update state for keyspace id %d failed: %s", id, resp.Header.GetError().String())
+	}
+
+	return resp.Keyspace, nil
+}
+
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 // WatchKeyspaces watches keyspace meta changes.
 // It returns a stream of slices of keyspace metadata.
 // The first message in stream contains all current keyspaceMeta,
@@ -83,7 +128,21 @@ func (c *client) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.Keyspac
 	req := &keyspacepb.WatchKeyspacesRequest{
 		Header: c.requestHeader(),
 	}
+<<<<<<< HEAD
 	stream, err := c.keyspaceClient().WatchKeyspaces(ctx, req)
+=======
+	start := time.Now()
+	defer func() { cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	req := &keyspacepb.GetAllKeyspacesRequest{
+		Header:  c.requestHeader(),
+		StartId: startID,
+		Limit:   limit,
+	}
+	resp, err := c.keyspaceClient().GetAllKeyspaces(ctx, req)
+	cancel()
+
+>>>>>>> 180ff57af (client: avoid to add redundant grpc metadata (#7471))
 	if err != nil {
 		close(keyspaceWatcherChan)
 		return nil, err
