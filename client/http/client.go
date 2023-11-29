@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -46,25 +45,35 @@ type Client interface {
 	GetRegionByID(context.Context, uint64) (*RegionInfo, error)
 	GetRegionByKey(context.Context, []byte) (*RegionInfo, error)
 	GetRegions(context.Context) (*RegionsInfo, error)
-	GetRegionsByKeyRange(context.Context, []byte, []byte, int) (*RegionsInfo, error)
+	GetRegionsByKeyRange(context.Context, *KeyRange, int) (*RegionsInfo, error)
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
-	GetRegionStatusByKeyRange(context.Context, []byte, []byte) (*RegionStats, error)
+	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
+	GetRegionStatusByKeyRange(context.Context, *KeyRange) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
+	/* Config-related interfaces */
+	GetScheduleConfig(context.Context) (map[string]interface{}, error)
+	SetScheduleConfig(context.Context, map[string]interface{}) error
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
 	GetPlacementRulesByGroup(context.Context, string) ([]*Rule, error)
 	SetPlacementRule(context.Context, *Rule) error
+	SetPlacementRuleInBatch(context.Context, []*RuleOp) error
 	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
 	DeletePlacementRule(context.Context, string, string) error
+	GetAllPlacementRuleGroups(context.Context) ([]*RuleGroup, error)
+	GetPlacementRuleGroupByID(context.Context, string) (*RuleGroup, error)
+	SetPlacementRuleGroup(context.Context, *RuleGroup) error
+	DeletePlacementRuleGroupByID(context.Context, string) error
 	GetAllRegionLabelRules(context.Context) ([]*LabelRule, error)
 	GetRegionLabelRulesByIDs(context.Context, []string) ([]*LabelRule, error)
 	SetRegionLabelRule(context.Context, *LabelRule) error
 	PatchRegionLabelRules(context.Context, *LabelRulePatch) error
 	/* Scheduling-related interfaces */
-	AccelerateSchedule(context.Context, []byte, []byte) error
+	AccelerateSchedule(context.Context, *KeyRange) error
+	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 
@@ -186,12 +195,23 @@ func (c *client) execDuration(name string, duration time.Duration) {
 	c.executionDuration.WithLabelValues(name).Observe(duration.Seconds())
 }
 
+// HeaderOption configures the HTTP header.
+type HeaderOption func(header http.Header)
+
+// WithAllowFollowerHandle sets the header field to allow a PD follower to handle this request.
+func WithAllowFollowerHandle() HeaderOption {
+	return func(header http.Header) {
+		header.Set("PD-Allow-Follower-Handle", "true")
+	}
+}
+
 // At present, we will use the retry strategy of polling by default to keep
 // it consistent with the current implementation of some clients (e.g. TiDB).
 func (c *client) requestWithRetry(
 	ctx context.Context,
 	name, uri, method string,
 	body io.Reader, res interface{},
+	headerOpts ...HeaderOption,
 ) error {
 	var (
 		err  error
@@ -199,7 +219,7 @@ func (c *client) requestWithRetry(
 	)
 	for idx := 0; idx < len(c.pdAddrs); idx++ {
 		addr = c.pdAddrs[idx]
-		err = c.request(ctx, name, fmt.Sprintf("%s%s", addr, uri), method, body, res)
+		err = c.request(ctx, name, fmt.Sprintf("%s%s", addr, uri), method, body, res, headerOpts...)
 		if err == nil {
 			break
 		}
@@ -213,6 +233,7 @@ func (c *client) request(
 	ctx context.Context,
 	name, url, method string,
 	body io.Reader, res interface{},
+	headerOpts ...HeaderOption,
 ) error {
 	logFields := []zap.Field{
 		zap.String("name", name),
@@ -223,6 +244,9 @@ func (c *client) request(
 	if err != nil {
 		log.Error("[pd] create http request failed", append(logFields, zap.Error(err))...)
 		return errors.Trace(err)
+	}
+	for _, opt := range headerOpts {
+		opt(req.Header)
 	}
 	start := time.Now()
 	resp, err := c.cli.Do(req)
@@ -308,10 +332,11 @@ func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 }
 
 // GetRegionsByKeyRange gets the regions info by key range. If the limit is -1, it will return all regions within the range.
-func (c *client) GetRegionsByKeyRange(ctx context.Context, startKey, endKey []byte, limit int) (*RegionsInfo, error) {
+// The keys in the key range should be encoded in the UTF-8 bytes format.
+func (c *client) GetRegionsByKeyRange(ctx context.Context, keyRange *KeyRange, limit int) (*RegionsInfo, error) {
 	var regions RegionsInfo
 	err := c.requestWithRetry(ctx,
-		"GetRegionsByKeyRange", RegionsByKey(startKey, endKey, limit),
+		"GetRegionsByKeyRange", RegionsByKeyRange(keyRange, limit),
 		http.MethodGet, http.NoBody, &regions)
 	if err != nil {
 		return nil, err
@@ -355,17 +380,58 @@ func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, e
 	return &hotWriteRegions, nil
 }
 
+// GetHistoryHotRegions gets the history hot region statistics info.
+func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegionsRequest) (*HistoryHotRegions, error) {
+	reqJSON, err := json.Marshal(req)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var historyHotRegions HistoryHotRegions
+	err = c.requestWithRetry(ctx,
+		"GetHistoryHotRegions", HotHistory,
+		http.MethodGet, bytes.NewBuffer(reqJSON), &historyHotRegions,
+		WithAllowFollowerHandle())
+	if err != nil {
+		return nil, err
+	}
+	return &historyHotRegions, nil
+}
+
 // GetRegionStatusByKeyRange gets the region status by key range.
-func (c *client) GetRegionStatusByKeyRange(ctx context.Context, startKey, endKey []byte) (*RegionStats, error) {
+// The keys in the key range should be encoded in the UTF-8 bytes format.
+func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange) (*RegionStats, error) {
 	var regionStats RegionStats
 	err := c.requestWithRetry(ctx,
-		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(startKey, endKey),
+		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(keyRange),
 		http.MethodGet, http.NoBody, &regionStats,
 	)
 	if err != nil {
 		return nil, err
 	}
 	return &regionStats, nil
+}
+
+// GetScheduleConfig gets the schedule configurations.
+func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{}, error) {
+	var config map[string]interface{}
+	err := c.requestWithRetry(ctx,
+		"GetScheduleConfig", ScheduleConfig,
+		http.MethodGet, http.NoBody, &config)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// SetScheduleConfig sets the schedule configurations.
+func (c *client) SetScheduleConfig(ctx context.Context, config map[string]interface{}) error {
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetScheduleConfig", ScheduleConfig,
+		http.MethodPost, bytes.NewBuffer(configJSON), nil)
 }
 
 // GetStores gets the stores info.
@@ -427,6 +493,17 @@ func (c *client) SetPlacementRule(ctx context.Context, rule *Rule) error {
 		http.MethodPost, bytes.NewBuffer(ruleJSON), nil)
 }
 
+// SetPlacementRuleInBatch sets the placement rules in batch.
+func (c *client) SetPlacementRuleInBatch(ctx context.Context, ruleOps []*RuleOp) error {
+	ruleOpsJSON, err := json.Marshal(ruleOps)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetPlacementRuleInBatch", PlacementRulesInBatch,
+		http.MethodPost, bytes.NewBuffer(ruleOpsJSON), nil)
+}
+
 // SetPlacementRuleBundles sets the placement rule bundles.
 // If `partial` is false, all old configurations will be over-written and dropped.
 func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBundle, partial bool) error {
@@ -443,6 +520,48 @@ func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBu
 func (c *client) DeletePlacementRule(ctx context.Context, group, id string) error {
 	return c.requestWithRetry(ctx,
 		"DeletePlacementRule", PlacementRuleByGroupAndID(group, id),
+		http.MethodDelete, http.NoBody, nil)
+}
+
+// GetAllPlacementRuleGroups gets all placement rule groups.
+func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, error) {
+	var ruleGroups []*RuleGroup
+	err := c.requestWithRetry(ctx,
+		"GetAllPlacementRuleGroups", placementRuleGroups,
+		http.MethodGet, http.NoBody, &ruleGroups)
+	if err != nil {
+		return nil, err
+	}
+	return ruleGroups, nil
+}
+
+// GetPlacementRuleGroupByID gets the placement rule group by ID.
+func (c *client) GetPlacementRuleGroupByID(ctx context.Context, id string) (*RuleGroup, error) {
+	var ruleGroup RuleGroup
+	err := c.requestWithRetry(ctx,
+		"GetPlacementRuleGroupByID", PlacementRuleGroupByID(id),
+		http.MethodGet, http.NoBody, &ruleGroup)
+	if err != nil {
+		return nil, err
+	}
+	return &ruleGroup, nil
+}
+
+// SetPlacementRuleGroup sets the placement rule group.
+func (c *client) SetPlacementRuleGroup(ctx context.Context, ruleGroup *RuleGroup) error {
+	ruleGroupJSON, err := json.Marshal(ruleGroup)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"SetPlacementRuleGroup", placementRuleGroup,
+		http.MethodPost, bytes.NewBuffer(ruleGroupJSON), nil)
+}
+
+// DeletePlacementRuleGroupByID deletes the placement rule group by ID.
+func (c *client) DeletePlacementRuleGroupByID(ctx context.Context, id string) error {
+	return c.requestWithRetry(ctx,
+		"DeletePlacementRuleGroupByID", PlacementRuleGroupByID(id),
 		http.MethodDelete, http.NoBody, nil)
 }
 
@@ -497,17 +616,38 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 }
 
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.
-func (c *client) AccelerateSchedule(ctx context.Context, startKey, endKey []byte) error {
-	input := map[string]string{
-		"start_key": url.QueryEscape(string(startKey)),
-		"end_key":   url.QueryEscape(string(endKey)),
+// The keys in the key range should be encoded in the hex bytes format (without encoding to the UTF-8 bytes).
+func (c *client) AccelerateSchedule(ctx context.Context, keyRange *KeyRange) error {
+	startKey, endKey := keyRange.EscapeAsHexStr()
+	inputJSON, err := json.Marshal(map[string]string{
+		"start_key": startKey,
+		"end_key":   endKey,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"AccelerateSchedule", AccelerateSchedule,
+		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
+}
+
+// AccelerateScheduleInBatch accelerates the scheduling of the regions within the given key ranges in batch.
+// The keys in the key ranges should be encoded in the hex bytes format (without encoding to the UTF-8 bytes).
+func (c *client) AccelerateScheduleInBatch(ctx context.Context, keyRanges []*KeyRange) error {
+	input := make([]map[string]string, 0, len(keyRanges))
+	for _, keyRange := range keyRanges {
+		startKey, endKey := keyRange.EscapeAsHexStr()
+		input = append(input, map[string]string{
+			"start_key": startKey,
+			"end_key":   endKey,
+		})
 	}
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.requestWithRetry(ctx,
-		"AccelerateSchedule", AccelerateSchedule,
+		"AccelerateScheduleInBatch", AccelerateScheduleInBatch,
 		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
 }
 

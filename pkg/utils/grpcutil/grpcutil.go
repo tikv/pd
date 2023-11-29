@@ -163,6 +163,7 @@ func GetForwardedHost(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		log.Debug("failed to get forwarding metadata")
+		return ""
 	}
 	if t, ok := md[ForwardMetadataKey]; ok {
 		return t[0]

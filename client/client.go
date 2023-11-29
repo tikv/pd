@@ -91,7 +91,7 @@ type Client interface {
 	// client should retry later.
 	GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionFromMember gets a region from certain members.
-	GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error)
+	GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, opts ...GetRegionOption) (*Region, error)
 	// GetPrevRegion gets the previous region and its leader Peer of the region where the key is located.
 	GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
@@ -100,7 +100,7 @@ type Client interface {
 	// Limit limits the maximum number of regions returned.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
-	ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*Region, error)
+	ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...GetRegionOption) ([]*Region, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -200,7 +200,8 @@ func WithSkipStoreLimit() RegionsOption {
 
 // GetRegionOp represents available options when getting regions.
 type GetRegionOp struct {
-	needBuckets bool
+	needBuckets         bool
+	allowFollowerHandle bool
 }
 
 // GetRegionOption configures GetRegionOp.
@@ -209,6 +210,11 @@ type GetRegionOption func(op *GetRegionOp)
 // WithBuckets means getting region and its buckets.
 func WithBuckets() GetRegionOption {
 	return func(op *GetRegionOp) { op.needBuckets = true }
+}
+
+// WithAllowFollowerHandle means that client can send request to follower and let it handle this request.
+func WithAllowFollowerHandle() GetRegionOption {
+	return func(op *GetRegionOp) { op.allowFollowerHandle = true }
 }
 
 // LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -701,6 +707,12 @@ func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
 		}
 		c.option.setEnableTSOFollowerProxy(enable)
+	case EnableFollowerHandle:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableFollowerHandle option, it should be bool")
+		}
+		c.option.setEnableFollowerHandle(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -954,7 +966,7 @@ func isNetworkError(code codes.Code) bool {
 	return code == codes.Unavailable || code == codes.DeadlineExceeded
 }
 
-func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string) (*Region, error) {
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1058,7 +1070,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 	return handleRegionResponse(resp), nil
 }
 
-func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int) ([]*Region, error) {
+func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...GetRegionOption) ([]*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
