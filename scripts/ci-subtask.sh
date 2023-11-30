@@ -29,9 +29,21 @@ else
     weight() {
         [[ $1 == "github.com/tikv/pd/server/api" ]] && return 30
         [[ $1 == "github.com/tikv/pd/pkg/schedule" ]] && return 30
+        [[ $1 == "github.com/tikv/pd/pkg/core" ]] && return 30
+        [[ $1 == "github.com/tikv/pd/tests/server/api" ]] && return 30
         [[ $1 =~ "pd/tests" ]] && return 5
         return 1
     }
+
+    # Create an associative array to store the weight of each task.
+    declare -A task_weights
+    for t in ${tasks[@]}; do
+        weight $t
+        task_weights[$t]=$?
+    done
+
+    # Sort tasks by weight in descending order.
+    tasks=($(printf "%s\n" "${tasks[@]}" | sort -rn))
 
     scores=($(seq "$1" | xargs -I{} echo 0))
 
@@ -41,8 +53,7 @@ else
         for i in ${!scores[@]}; do
             [[ ${scores[i]} -lt ${scores[$min_i]} ]] && min_i=$i
         done
-        weight $t
-        scores[$min_i]=$((${scores[$min_i]} + $?))
+        scores[$min_i]=$((${scores[$min_i]} + ${task_weights[$t]}))
         [[ $(($min_i + 1)) -eq $2 ]] && res+=($t)
     done
     printf "%s " "${res[@]}"

@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // schedulingController is used to manage all schedulers and checkers.
@@ -44,7 +45,7 @@ type schedulingController struct {
 	parentCtx context.Context
 	ctx       context.Context
 	cancel    context.CancelFunc
-	mu        sync.RWMutex
+	mu        syncutil.RWMutex
 	wg        sync.WaitGroup
 	*core.BasicCluster
 	opt         sc.ConfProvider
@@ -435,6 +436,13 @@ func (sc *schedulingController) ClearSuspectKeyRanges() {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	sc.coordinator.GetCheckerController().ClearSuspectKeyRanges()
+}
+
+// ClearSuspectRegions clears the suspect regions, only for unit test
+func (sc *schedulingController) ClearSuspectRegions() {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	sc.coordinator.GetCheckerController().ClearSuspectRegions()
 }
 
 // AddSuspectKeyRange adds the key range with the its ruleID as the key

@@ -17,13 +17,19 @@ package client_test
 import (
 	"context"
 	"math"
+	"net/http"
 	"sort"
 	"testing"
+	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
 )
 
@@ -49,8 +55,16 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re.NoError(err)
 	leader := suite.cluster.WaitLeader()
 	re.NotEmpty(leader)
-	err = suite.cluster.GetLeaderServer().BootstrapCluster()
+	leaderServer := suite.cluster.GetLeaderServer()
+	err = leaderServer.BootstrapCluster()
 	re.NoError(err)
+	for _, region := range []*core.RegionInfo{
+		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
+		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+	} {
+		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
 	var (
 		testServers = suite.cluster.GetServers()
 		endpoints   = make([]string, 0, len(testServers))
@@ -67,23 +81,79 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 }
 
+func (suite *httpClientTestSuite) TestMeta() {
+	re := suite.Require()
+	region, err := suite.client.GetRegionByID(suite.ctx, 10)
+	re.NoError(err)
+	re.Equal(int64(10), region.ID)
+	re.Equal(core.HexRegionKeyStr([]byte("a1")), region.StartKey)
+	re.Equal(core.HexRegionKeyStr([]byte("a2")), region.EndKey)
+	region, err = suite.client.GetRegionByKey(suite.ctx, []byte("a2"))
+	re.NoError(err)
+	re.Equal(int64(11), region.ID)
+	re.Equal(core.HexRegionKeyStr([]byte("a2")), region.StartKey)
+	re.Equal(core.HexRegionKeyStr([]byte("a3")), region.EndKey)
+	regions, err := suite.client.GetRegions(suite.ctx)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regions, err = suite.client.GetRegionsByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), -1)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regions, err = suite.client.GetRegionsByStoreID(suite.ctx, 1)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regionStats, err := suite.client.GetRegionStatusByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
+	re.NoError(err)
+	re.Equal(2, regionStats.Count)
+	hotReadRegions, err := suite.client.GetHotReadRegions(suite.ctx)
+	re.NoError(err)
+	re.Len(hotReadRegions.AsPeer, 1)
+	re.Len(hotReadRegions.AsLeader, 1)
+	hotWriteRegions, err := suite.client.GetHotWriteRegions(suite.ctx)
+	re.NoError(err)
+	re.Len(hotWriteRegions.AsPeer, 1)
+	re.Len(hotWriteRegions.AsLeader, 1)
+	historyHorRegions, err := suite.client.GetHistoryHotRegions(suite.ctx, &pd.HistoryHotRegionsRequest{
+		StartTime: 0,
+		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
+	})
+	re.NoError(err)
+	re.Len(historyHorRegions.HistoryHotRegion, 0)
+	store, err := suite.client.GetStores(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, store.Count)
+	re.Len(store.Stores, 1)
+}
+
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
 	re := suite.Require()
-	// Get the cluster-level min resolved TS.
+	testMinResolvedTS := tsoutil.TimeToTS(time.Now())
+	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
+	err := raftCluster.SetMinResolvedTS(1, testMinResolvedTS)
+	re.NoError(err)
+	// Make sure the min resolved TS is updated.
+	testutil.Eventually(re, func() bool {
+		minResolvedTS, _ := raftCluster.CheckAndUpdateMinResolvedTS()
+		return minResolvedTS == testMinResolvedTS
+	})
+	// Wait for the cluster-level min resolved TS to be initialized.
 	minResolvedTS, storeMinResolvedTSMap, err := suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, nil)
 	re.NoError(err)
-	re.Greater(minResolvedTS, uint64(0))
+	re.Equal(testMinResolvedTS, minResolvedTS)
 	re.Empty(storeMinResolvedTSMap)
 	// Get the store-level min resolved TS.
 	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1})
 	re.NoError(err)
-	re.Greater(minResolvedTS, uint64(0))
+	re.Equal(testMinResolvedTS, minResolvedTS)
 	re.Len(storeMinResolvedTSMap, 1)
 	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
 	// Get the store-level min resolved TS with an invalid store ID.
 	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1, 2})
 	re.NoError(err)
-	re.Greater(minResolvedTS, uint64(0))
+	re.Equal(testMinResolvedTS, minResolvedTS)
 	re.Len(storeMinResolvedTSMap, 2)
 	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
 	re.Equal(uint64(math.MaxUint64), storeMinResolvedTSMap[2])
@@ -98,15 +168,15 @@ func (suite *httpClientTestSuite) TestRule() {
 	bundle, err := suite.client.GetPlacementRuleBundleByGroup(suite.ctx, placement.DefaultGroupID)
 	re.NoError(err)
 	re.Equal(bundles[0], bundle)
-	rules, err := suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
-	re.NoError(err)
-	re.Len(rules, 1)
-	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
-	re.Equal(placement.DefaultRuleID, rules[0].ID)
-	re.Equal(pd.Voter, rules[0].Role)
-	re.Equal(3, rules[0].Count)
+	// Check if we have the default rule.
+	suite.checkRule(re, &pd.Rule{
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
+		Role:    pd.Voter,
+		Count:   3,
+	}, 1, true)
 	// Should be the same as the rules in the bundle.
-	re.Equal(bundle.Rules, rules)
+	suite.checkRule(re, bundle.Rules[0], 1, true)
 	testRule := &pd.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "test",
@@ -115,20 +185,24 @@ func (suite *httpClientTestSuite) TestRule() {
 	}
 	err = suite.client.SetPlacementRule(suite.ctx, testRule)
 	re.NoError(err)
-	rules, err = suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
-	re.NoError(err)
-	re.Len(rules, 2)
-	re.Equal(placement.DefaultGroupID, rules[1].GroupID)
-	re.Equal("test", rules[1].ID)
-	re.Equal(pd.Voter, rules[1].Role)
-	re.Equal(3, rules[1].Count)
+	suite.checkRule(re, testRule, 2, true)
 	err = suite.client.DeletePlacementRule(suite.ctx, placement.DefaultGroupID, "test")
 	re.NoError(err)
-	rules, err = suite.client.GetPlacementRulesByGroup(suite.ctx, placement.DefaultGroupID)
+	suite.checkRule(re, testRule, 1, false)
+	testRuleOp := &pd.RuleOp{
+		Rule:   testRule,
+		Action: pd.RuleOpAdd,
+	}
+	err = suite.client.SetPlacementRuleInBatch(suite.ctx, []*pd.RuleOp{testRuleOp})
 	re.NoError(err)
-	re.Len(rules, 1)
-	re.Equal(placement.DefaultGroupID, rules[0].GroupID)
-	re.Equal(placement.DefaultRuleID, rules[0].ID)
+	suite.checkRule(re, testRule, 2, true)
+	testRuleOp = &pd.RuleOp{
+		Rule:   testRule,
+		Action: pd.RuleOpDel,
+	}
+	err = suite.client.SetPlacementRuleInBatch(suite.ctx, []*pd.RuleOp{testRuleOp})
+	re.NoError(err)
+	suite.checkRule(re, testRule, 1, false)
 	err = suite.client.SetPlacementRuleBundles(suite.ctx, []*pd.GroupBundle{
 		{
 			ID:    placement.DefaultGroupID,
@@ -136,14 +210,63 @@ func (suite *httpClientTestSuite) TestRule() {
 		},
 	}, true)
 	re.NoError(err)
-	bundles, err = suite.client.GetAllPlacementRuleBundles(suite.ctx)
+	suite.checkRule(re, testRule, 1, true)
+	ruleGroups, err := suite.client.GetAllPlacementRuleGroups(suite.ctx)
 	re.NoError(err)
-	re.Len(bundles, 1)
-	re.Equal(placement.DefaultGroupID, bundles[0].ID)
-	re.Len(bundles[0].Rules, 1)
-	// Make sure the create timestamp is not zero to pass the later assertion.
-	testRule.CreateTimestamp = bundles[0].Rules[0].CreateTimestamp
-	re.Equal(testRule, bundles[0].Rules[0])
+	re.Len(ruleGroups, 1)
+	re.Equal(placement.DefaultGroupID, ruleGroups[0].ID)
+	ruleGroup, err := suite.client.GetPlacementRuleGroupByID(suite.ctx, placement.DefaultGroupID)
+	re.NoError(err)
+	re.Equal(ruleGroups[0], ruleGroup)
+	testRuleGroup := &pd.RuleGroup{
+		ID:       "test-group",
+		Index:    1,
+		Override: true,
+	}
+	err = suite.client.SetPlacementRuleGroup(suite.ctx, testRuleGroup)
+	re.NoError(err)
+	ruleGroup, err = suite.client.GetPlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	re.NoError(err)
+	re.Equal(testRuleGroup, ruleGroup)
+	err = suite.client.DeletePlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	re.NoError(err)
+	ruleGroup, err = suite.client.GetPlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
+	re.Empty(ruleGroup)
+}
+
+func (suite *httpClientTestSuite) checkRule(
+	re *require.Assertions,
+	rule *pd.Rule, totalRuleCount int, exist bool,
+) {
+	// Check through the `GetPlacementRulesByGroup` API.
+	rules, err := suite.client.GetPlacementRulesByGroup(suite.ctx, rule.GroupID)
+	re.NoError(err)
+	checkRuleFunc(re, rules, rule, totalRuleCount, exist)
+	// Check through the `GetPlacementRuleBundleByGroup` API.
+	bundle, err := suite.client.GetPlacementRuleBundleByGroup(suite.ctx, rule.GroupID)
+	re.NoError(err)
+	checkRuleFunc(re, bundle.Rules, rule, totalRuleCount, exist)
+}
+
+func checkRuleFunc(
+	re *require.Assertions,
+	rules []*pd.Rule, rule *pd.Rule, totalRuleCount int, exist bool,
+) {
+	re.Len(rules, totalRuleCount)
+	for _, r := range rules {
+		if r.ID != rule.ID {
+			continue
+		}
+		re.Equal(rule.GroupID, r.GroupID)
+		re.Equal(rule.ID, r.ID)
+		re.Equal(rule.Role, r.Role)
+		re.Equal(rule.Count, r.Count)
+		return
+	}
+	if exist {
+		re.Failf("Failed to check the rule", "rule %+v not found", rule)
+	}
 }
 
 func (suite *httpClientTestSuite) TestRegionLabel() {
@@ -202,10 +325,36 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 
 func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re := suite.Require()
-	suspectRegions := suite.cluster.GetLeaderServer().GetRaftCluster().GetSuspectRegions()
+	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
+	suspectRegions := raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 0)
-	err := suite.client.AccelerateSchedule(suite.ctx, []byte("a1"), []byte("a2"))
+	err := suite.client.AccelerateSchedule(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a2")))
 	re.NoError(err)
-	suspectRegions = suite.cluster.GetLeaderServer().GetRaftCluster().GetSuspectRegions()
+	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 1)
+	raftCluster.ClearSuspectRegions()
+	suspectRegions = raftCluster.GetSuspectRegions()
+	re.Len(suspectRegions, 0)
+	err = suite.client.AccelerateScheduleInBatch(suite.ctx, []*pd.KeyRange{
+		pd.NewKeyRange([]byte("a1"), []byte("a2")),
+		pd.NewKeyRange([]byte("a2"), []byte("a3")),
+	})
+	re.NoError(err)
+	suspectRegions = raftCluster.GetSuspectRegions()
+	re.Len(suspectRegions, 2)
+}
+
+func (suite *httpClientTestSuite) TestScheduleConfig() {
+	re := suite.Require()
+	config, err := suite.client.GetScheduleConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(float64(4), config["leader-schedule-limit"])
+	re.Equal(float64(2048), config["region-schedule-limit"])
+	config["leader-schedule-limit"] = float64(8)
+	err = suite.client.SetScheduleConfig(suite.ctx, config)
+	re.NoError(err)
+	config, err = suite.client.GetScheduleConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(float64(8), config["leader-schedule-limit"])
+	re.Equal(float64(2048), config["region-schedule-limit"])
 }

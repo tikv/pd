@@ -565,8 +565,10 @@ func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
 		var resp []*placement.Rule
 		url := fmt.Sprintf("%s/rules/key/%s", urlPrefix, testCase.key)
 		if testCase.success {
-			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-			suite.Len(resp, testCase.respSize)
+			tu.Eventually(re, func() bool {
+				err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+				return len(resp) == testCase.respSize
+			})
 		} else {
 			err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, testCase.code))
 		}

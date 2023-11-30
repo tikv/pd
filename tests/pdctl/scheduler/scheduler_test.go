@@ -285,10 +285,12 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	var roles []string
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
 	re.Equal([]string{"leader", "follower", "learner"}, roles)
-	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "set-roles", "learner"}, nil) // todo:add check output
+	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "set-roles", "learner"}, nil)
 	re.Contains(echo, "Success!")
-	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
-	re.Equal([]string{"learner"}, roles)
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
+		return reflect.DeepEqual([]string{"learner"}, roles)
+	})
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler"}, &roles)
 	re.Equal([]string{"learner"}, roles)
 
@@ -312,11 +314,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler", "set", "2", "1,2,3"}, nil)
 	re.Contains(echo, "Success!")
 	expected3["store-leader-id"] = float64(2)
-	// FIXME: remove this check after scheduler config is updated
-	if cluster.GetSchedulingPrimaryServer() == nil { // "grant-hot-region-scheduler"
+	testutil.Eventually(re, func() bool {
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
-		re.Equal(expected3, conf3)
-	}
+		return reflect.DeepEqual(expected3, conf3)
+	})
 
 	// test remove and add scheduler
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-region-scheduler"}, nil)
@@ -361,6 +362,14 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		"rank-formula-version":       "v2",
 		"split-thresholds":           0.2,
 	}
+	checkHotSchedulerConfig := func(expect map[string]interface{}) {
+		testutil.Eventually(re, func() bool {
+			var conf1 map[string]interface{}
+			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+			return reflect.DeepEqual(expect, conf1)
+		})
+	}
+
 	var conf map[string]interface{}
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
 	re.Equal(expected1, conf)
@@ -369,92 +378,73 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "src-tolerance-ratio", "1.02"}, nil)
 	re.Contains(echo, "Success!")
 	expected1["src-tolerance-ratio"] = 1.02
-	var conf1 map[string]interface{}
-	// FIXME: remove this check after scheduler config is updated
-	if cluster.GetSchedulingPrimaryServer() == nil { // "balance-hot-region-scheduler"
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
+	checkHotSchedulerConfig(expected1)
 
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,key"}, nil)
-		re.Contains(echo, "Success!")
-		expected1["read-priorities"] = []interface{}{"byte", "key"}
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,key"}, nil)
+	re.Contains(echo, "Success!")
+	expected1["read-priorities"] = []interface{}{"byte", "key"}
+	checkHotSchedulerConfig(expected1)
 
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key"}, nil)
-		re.Contains(echo, "Failed!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,byte"}, nil)
-		re.Contains(echo, "Success!")
-		expected1["read-priorities"] = []interface{}{"key", "byte"}
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "foo,bar"}, nil)
-		re.Contains(echo, "Failed!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", ""}, nil)
-		re.Contains(echo, "Failed!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,key"}, nil)
-		re.Contains(echo, "Failed!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,byte"}, nil)
-		re.Contains(echo, "Failed!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,key,byte"}, nil)
-		re.Contains(echo, "Failed!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key"}, nil)
+	re.Contains(echo, "Failed!")
+	checkHotSchedulerConfig(expected1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,byte"}, nil)
+	re.Contains(echo, "Success!")
+	expected1["read-priorities"] = []interface{}{"key", "byte"}
+	checkHotSchedulerConfig(expected1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "foo,bar"}, nil)
+	re.Contains(echo, "Failed!")
+	checkHotSchedulerConfig(expected1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", ""}, nil)
+	re.Contains(echo, "Failed!")
+	checkHotSchedulerConfig(expected1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,key"}, nil)
+	re.Contains(echo, "Failed!")
+	checkHotSchedulerConfig(expected1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,byte"}, nil)
+	re.Contains(echo, "Failed!")
+	checkHotSchedulerConfig(expected1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,key,byte"}, nil)
+	re.Contains(echo, "Failed!")
+	checkHotSchedulerConfig(expected1)
 
-		// write-priorities is divided into write-leader-priorities and write-peer-priorities
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-priorities", "key,byte"}, nil)
-		re.Contains(echo, "Failed!")
-		re.Contains(echo, "Config item is not found.")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
+	// write-priorities is divided into write-leader-priorities and write-peer-priorities
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-priorities", "key,byte"}, nil)
+	re.Contains(echo, "Failed!")
+	re.Contains(echo, "Config item is not found.")
+	checkHotSchedulerConfig(expected1)
 
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v0"}, nil)
-		re.Contains(echo, "Failed!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		expected1["rank-formula-version"] = "v2"
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v2"}, nil)
-		re.Contains(echo, "Success!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
-		expected1["rank-formula-version"] = "v1"
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v1"}, nil)
-		re.Contains(echo, "Success!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v0"}, nil)
+	re.Contains(echo, "Failed!")
+	checkHotSchedulerConfig(expected1)
+	expected1["rank-formula-version"] = "v2"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v2"}, nil)
+	re.Contains(echo, "Success!")
+	checkHotSchedulerConfig(expected1)
+	expected1["rank-formula-version"] = "v1"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "rank-formula-version", "v1"}, nil)
+	re.Contains(echo, "Success!")
+	checkHotSchedulerConfig(expected1)
 
-		expected1["forbid-rw-type"] = "read"
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "forbid-rw-type", "read"}, nil)
-		re.Contains(echo, "Success!")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(expected1, conf1)
+	expected1["forbid-rw-type"] = "read"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "forbid-rw-type", "read"}, nil)
+	re.Contains(echo, "Success!")
+	checkHotSchedulerConfig(expected1)
 
-		// test compatibility
-		re.Equal("2.0.0", leaderServer.GetClusterVersion().String())
-		for _, store := range stores {
-			version := versioninfo.HotScheduleWithQuery
-			store.Version = versioninfo.MinSupportedVersion(version).String()
-			tests.MustPutStore(re, cluster, store)
-		}
-		re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
-		// After upgrading, we should not use query.
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(conf1["read-priorities"], []interface{}{"key", "byte"})
-		// cannot set qps as write-peer-priorities
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
-		re.Contains(echo, "query is not allowed to be set in priorities for write-peer-priorities")
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
-		re.Equal(conf1["write-peer-priorities"], []interface{}{"byte", "key"})
+	// test compatibility
+	re.Equal("2.0.0", leaderServer.GetClusterVersion().String())
+	for _, store := range stores {
+		version := versioninfo.HotScheduleWithQuery
+		store.Version = versioninfo.MinSupportedVersion(version).String()
+		tests.MustPutStore(re, cluster, store)
 	}
+	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
+	// After upgrading, we should not use query.
+	checkHotSchedulerConfig(expected1)
+	// cannot set qps as write-peer-priorities
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
+	re.Contains(echo, "query is not allowed to be set in priorities for write-peer-priorities")
+	checkHotSchedulerConfig(expected1)
 
 	// test remove and add
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, nil)
@@ -464,7 +454,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 
 	// test balance leader config
 	conf = make(map[string]interface{})
-	conf1 = make(map[string]interface{})
+	conf1 := make(map[string]interface{})
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler", "show"}, &conf)
 	re.Equal(4., conf["batch"])
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler", "set", "batch", "3"}, nil)
@@ -498,11 +488,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "set", "recovery-duration", "100"}, nil)
 		re.Contains(echo, "Success!")
 		conf = make(map[string]interface{})
-		// FIXME: remove this check after scheduler config is updated
-		if cluster.GetSchedulingPrimaryServer() == nil && schedulerName == "evict-slow-store-scheduler" {
+		testutil.Eventually(re, func() bool {
 			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "show"}, &conf)
-			re.Equal(100., conf["recovery-duration"])
-		}
+			return conf["recovery-duration"] == 100.
+		})
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", schedulerName}, nil)
 		re.Contains(echo, "Success!")
 		testutil.Eventually(re, func() bool {
@@ -510,6 +499,27 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			return !strings.Contains(echo, schedulerName)
 		})
 	}
+
+	// test shuffle hot region scheduler
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "shuffle-hot-region-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	testutil.Eventually(re, func() bool {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+		return strings.Contains(echo, "shuffle-hot-region-scheduler")
+	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-hot-region-scheduler", "set", "limit", "127"}, nil)
+	re.Contains(echo, "Success!")
+	conf = make(map[string]interface{})
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-hot-region-scheduler", "show"}, &conf)
+		return conf["limit"] == 127.
+	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "shuffle-hot-region-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	testutil.Eventually(re, func() bool {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+		return !strings.Contains(echo, "shuffle-hot-region-scheduler")
+	})
 
 	// test show scheduler with paused and disabled status.
 	checkSchedulerWithStatusCommand := func(status string, expected []string) {
@@ -535,7 +545,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
-	checkSchedulerWithStatusCommand("paused", nil)
+	checkSchedulerWithStatusCommand("paused", []string{})
 
 	// set label scheduler to disabled manually.
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "label-scheduler"}, nil)
@@ -550,7 +560,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	cfg.Schedulers = origin
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
-	checkSchedulerWithStatusCommand("disabled", nil)
+	checkSchedulerWithStatusCommand("disabled", []string{})
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
@@ -646,18 +656,20 @@ func TestForwardSchedulerRequest(t *testing.T) {
 	server := cluster.GetLeaderServer()
 	re.NoError(server.BootstrapCluster())
 	backendEndpoints := server.GetAddr()
-	tc, err := tests.NewTestSchedulingCluster(ctx, 2, backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 
 	cmd := pdctlCmd.GetRootCmd()
 	args := []string{"-u", backendEndpoints, "scheduler", "show"}
-	var slice []string
-	output, err := pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.NoError(json.Unmarshal(output, &slice))
-	re.Contains(slice, "balance-leader-scheduler")
+	var sches []string
+	testutil.Eventually(re, func() bool {
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		re.NoError(json.Unmarshal(output, &sches))
+		return slice.Contains(sches, "balance-leader-scheduler")
+	})
 
 	mustUsage := func(args []string) {
 		output, err := pdctl.ExecuteCommand(cmd, args...)

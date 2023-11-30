@@ -163,6 +163,7 @@ func schedulersRegister() {
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
+		conf.cluster = opController.GetCluster()
 		return newEvictSlowStoreScheduler(opController, conf), nil
 	})
 
@@ -378,6 +379,7 @@ func schedulersRegister() {
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
+		conf.storage = storage
 		return newShuffleHotRegionScheduler(opController, conf), nil
 	})
 

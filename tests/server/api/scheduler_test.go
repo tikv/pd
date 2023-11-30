@@ -17,6 +17,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
@@ -28,6 +29,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
@@ -236,27 +238,25 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				// FIXME: remove this check after scheduler config is updated
-				if cluster.GetSchedulingPrimaryServer() == nil { // "balance-hot-region-scheduler"
-					for key := range expectMap {
-						suite.Equal(expectMap[key], resp[key], "key %s", key)
-					}
 
-					// update again
-					err = tu.CheckPostJSON(testDialClient, updateURL, body,
-						tu.StatusOK(re),
-						tu.StringEqual(re, "Config is the same with origin, so do nothing."))
-					suite.NoError(err)
-					// config item not found
-					dataMap = map[string]interface{}{}
-					dataMap["error"] = 3
-					body, err = json.Marshal(dataMap)
-					suite.NoError(err)
-					err = tu.CheckPostJSON(testDialClient, updateURL, body,
-						tu.Status(re, http.StatusBadRequest),
-						tu.StringEqual(re, "Config item is not found."))
-					suite.NoError(err)
+				for key := range expectMap {
+					suite.Equal(expectMap[key], resp[key], "key %s", key)
 				}
+
+				// update again
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.StatusOK(re),
+					tu.StringEqual(re, "Config is the same with origin, so do nothing."))
+				suite.NoError(err)
+				// config item not found
+				dataMap = map[string]interface{}{}
+				dataMap["error"] = 3
+				body, err = json.Marshal(dataMap)
+				suite.NoError(err)
+				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+					tu.Status(re, http.StatusBadRequest),
+					tu.StringEqual(re, "Config item is not found."))
+				suite.NoError(err)
 			},
 		},
 		{
@@ -675,6 +675,40 @@ func (suite *scheduleTestSuite) testPauseOrResume(urlPrefix string, name, create
 	suite.False(isPaused)
 }
 
+func (suite *scheduleTestSuite) TestEmptySchedulers() {
+	env := tests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkEmptySchedulers)
+}
+
+func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
+	for i := 1; i <= 4; i++ {
+		store := &metapb.Store{
+			Id:            uint64(i),
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		}
+		tests.MustPutStore(suite.Require(), cluster, store)
+	}
+
+	// test disabled and paused schedulers
+	suite.checkEmptySchedulersResp(urlPrefix + "?status=disabled")
+	suite.checkEmptySchedulersResp(urlPrefix + "?status=paused")
+
+	// test enabled schedulers
+	schedulers := make([]string, 0)
+	suite.NoError(tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers))
+	for _, scheduler := range schedulers {
+		suite.deleteScheduler(urlPrefix, scheduler)
+	}
+	suite.NoError(tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers))
+	suite.Len(schedulers, 0)
+	suite.checkEmptySchedulersResp(urlPrefix)
+}
+
 func (suite *scheduleTestSuite) assertSchedulerExists(re *require.Assertions, urlPrefix string, scheduler string) {
 	var schedulers []string
 	tu.Eventually(re, func() bool {
@@ -701,4 +735,15 @@ func (suite *scheduleTestSuite) isSchedulerPaused(urlPrefix, name string) bool {
 		}
 	}
 	return false
+}
+
+func (suite *scheduleTestSuite) checkEmptySchedulersResp(url string) {
+	resp, err := apiutil.GetJSON(testDialClient, url, nil)
+	suite.NoError(err)
+	defer resp.Body.Close()
+	suite.Equal(http.StatusOK, resp.StatusCode)
+	b, err := io.ReadAll(resp.Body)
+	suite.NoError(err)
+	suite.Contains(string(b), "[]")
+	suite.NotContains(string(b), "null")
 }

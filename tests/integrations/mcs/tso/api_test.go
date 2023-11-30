@@ -124,7 +124,7 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 }
 
 func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+tsoKeyspaceGroupsPrefix+"/members", nil)
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+tsoKeyspaceGroupsPrefix+"/members", http.NoBody)
 	re.NoError(err)
 	httpResp, err := dialClient.Do(httpReq)
 	re.NoError(err)
@@ -184,7 +184,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	defer httpResp.Body.Close()
 	re.Equal(http.StatusOK, httpResp.StatusCode)
 
-	httpReq, err = http.NewRequest(http.MethodGet, addr+"/pd/api/v2/tso/keyspace-groups/0", nil)
+	httpReq, err = http.NewRequest(http.MethodGet, addr+"/pd/api/v2/tso/keyspace-groups/0", http.NoBody)
 	re.NoError(err)
 	httpResp, err = dialClient.Do(httpReq)
 	re.NoError(err)

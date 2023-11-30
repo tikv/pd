@@ -15,7 +15,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -28,13 +27,11 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
@@ -337,99 +334,6 @@ func (suite *regionTestSuite) TestTop() {
 	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{3, 2, 1})
 }
 
-func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
-	re := suite.Require()
-	r1 := core.NewTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
-	r2 := core.NewTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
-	r3 := core.NewTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
-	mustRegionHeartbeat(re, suite.svr, r1)
-	mustRegionHeartbeat(re, suite.svr, r2)
-	mustRegionHeartbeat(re, suite.svr, r3)
-	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
-
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", suite.urlPrefix), []byte(body), tu.StatusOK(re))
-	suite.NoError(err)
-	idList := suite.svr.GetRaftCluster().GetSuspectRegions()
-	suite.Len(idList, 2)
-}
-
-func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
-	re := suite.Require()
-	r1 := core.NewTestRegionInfo(557, 13, []byte("a1"), []byte("a2"))
-	r2 := core.NewTestRegionInfo(558, 14, []byte("a2"), []byte("a3"))
-	r3 := core.NewTestRegionInfo(559, 15, []byte("a3"), []byte("a4"))
-	r4 := core.NewTestRegionInfo(560, 16, []byte("a4"), []byte("a5"))
-	r5 := core.NewTestRegionInfo(561, 17, []byte("a5"), []byte("a6"))
-	mustRegionHeartbeat(re, suite.svr, r1)
-	mustRegionHeartbeat(re, suite.svr, r2)
-	mustRegionHeartbeat(re, suite.svr, r3)
-	mustRegionHeartbeat(re, suite.svr, r4)
-	mustRegionHeartbeat(re, suite.svr, r5)
-	body := fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
-
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", suite.urlPrefix), []byte(body), tu.StatusOK(re))
-	suite.NoError(err)
-	idList := suite.svr.GetRaftCluster().GetSuspectRegions()
-	suite.Len(idList, 4)
-}
-
-func (suite *regionTestSuite) TestScatterRegions() {
-	re := suite.Require()
-	r1 := core.NewTestRegionInfo(601, 13, []byte("b1"), []byte("b2"))
-	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
-	r2 := core.NewTestRegionInfo(602, 13, []byte("b2"), []byte("b3"))
-	r2.GetMeta().Peers = append(r2.GetMeta().Peers, &metapb.Peer{Id: 7, StoreId: 14}, &metapb.Peer{Id: 8, StoreId: 15})
-	r3 := core.NewTestRegionInfo(603, 13, []byte("b4"), []byte("b4"))
-	r3.GetMeta().Peers = append(r3.GetMeta().Peers, &metapb.Peer{Id: 9, StoreId: 14}, &metapb.Peer{Id: 10, StoreId: 15})
-	mustRegionHeartbeat(re, suite.svr, r1)
-	mustRegionHeartbeat(re, suite.svr, r2)
-	mustRegionHeartbeat(re, suite.svr, r3)
-	mustPutStore(re, suite.svr, 13, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
-	mustPutStore(re, suite.svr, 14, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
-	mustPutStore(re, suite.svr, 15, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
-	mustPutStore(re, suite.svr, 16, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
-	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
-
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", suite.urlPrefix), []byte(body), tu.StatusOK(re))
-	suite.NoError(err)
-	op1 := suite.svr.GetRaftCluster().GetOperatorController().GetOperator(601)
-	op2 := suite.svr.GetRaftCluster().GetOperatorController().GetOperator(602)
-	op3 := suite.svr.GetRaftCluster().GetOperatorController().GetOperator(603)
-	// At least one operator used to scatter region
-	suite.True(op1 != nil || op2 != nil || op3 != nil)
-
-	body = `{"regions_id": [601, 602, 603]}`
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", suite.urlPrefix), []byte(body), tu.StatusOK(re))
-	suite.NoError(err)
-}
-
-func (suite *regionTestSuite) TestSplitRegions() {
-	re := suite.Require()
-	r1 := core.NewTestRegionInfo(601, 13, []byte("aaa"), []byte("ggg"))
-	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 13}, &metapb.Peer{Id: 6, StoreId: 13})
-	mustRegionHeartbeat(re, suite.svr, r1)
-	mustPutStore(re, suite.svr, 13, metapb.StoreState_Up, metapb.NodeState_Serving, []*metapb.StoreLabel{})
-	newRegionID := uint64(11)
-	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 3,
-		hex.EncodeToString([]byte("bbb")),
-		hex.EncodeToString([]byte("ccc")),
-		hex.EncodeToString([]byte("ddd")))
-	checkOpt := func(res []byte, code int, _ http.Header) {
-		s := &struct {
-			ProcessedPercentage int      `json:"processed-percentage"`
-			NewRegionsID        []uint64 `json:"regions-id"`
-		}{}
-		err := json.Unmarshal(res, s)
-		suite.NoError(err)
-		suite.Equal(100, s.ProcessedPercentage)
-		suite.Equal([]uint64{newRegionID}, s.NewRegionsID)
-	}
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/api/splitResponses", fmt.Sprintf("return(%v)", newRegionID)))
-	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/split", suite.urlPrefix), []byte(body), checkOpt)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/api/splitResponses"))
-	suite.NoError(err)
-}
-
 func (suite *regionTestSuite) checkTopRegions(url string, regionIDs []uint64) {
 	regions := &RegionsInfo{}
 	err := tu.ReadGetJSON(suite.Require(), testDialClient, url, regions)
@@ -480,7 +384,7 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, bytes.NewBuffer(nil))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	respCh := make(chan *http.Response)
 	go func() {
@@ -650,131 +554,6 @@ func (suite *getRegionRangeHolesTestSuite) TestRegionRangeHoles() {
 		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r6.GetStartKey())},
 		{core.HexRegionKeyStr(r6.GetEndKey()), ""},
 	}, *rangeHoles)
-}
-
-type regionsReplicatedTestSuite struct {
-	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
-}
-
-func TestRegionsReplicatedTestSuite(t *testing.T) {
-	suite.Run(t, new(regionsReplicatedTestSuite))
-}
-
-func (suite *regionsReplicatedTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-}
-
-func (suite *regionsReplicatedTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *regionsReplicatedTestSuite) TestCheckRegionsReplicated() {
-	re := suite.Require()
-	// enable placement rule
-	suite.NoError(tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", []byte(`{"enable-placement-rules":"true"}`), tu.StatusOK(re)))
-	defer func() {
-		suite.NoError(tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", []byte(`{"enable-placement-rules":"false"}`), tu.StatusOK(re)))
-	}()
-
-	// add test region
-	r1 := core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	mustRegionHeartbeat(re, suite.svr, r1)
-
-	// set the bundle
-	bundle := []placement.GroupBundle{
-		{
-			ID:    "5",
-			Index: 5,
-			Rules: []*placement.Rule{
-				{
-					ID: "foo", Index: 1, Role: placement.Voter, Count: 1,
-				},
-			},
-		},
-	}
-
-	status := ""
-
-	// invalid url
-	url := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, suite.urlPrefix, "_", "t")
-	err := tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest))
-	suite.NoError(err)
-
-	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, suite.urlPrefix, hex.EncodeToString(r1.GetStartKey()), "_")
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest))
-	suite.NoError(err)
-
-	// correct test
-	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, suite.urlPrefix, hex.EncodeToString(r1.GetStartKey()), hex.EncodeToString(r1.GetEndKey()))
-
-	// test one rule
-	data, err := json.Marshal(bundle)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
-	suite.NoError(err)
-
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("REPLICATED", status)
-
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/api/mockPending", "return(true)"))
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("PENDING", status)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/api/mockPending"))
-	// test multiple rules
-	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1})
-	mustRegionHeartbeat(re, suite.svr, r1)
-
-	bundle[0].Rules = append(bundle[0].Rules, &placement.Rule{
-		ID: "bar", Index: 1, Role: placement.Voter, Count: 1,
-	})
-	data, err = json.Marshal(bundle)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
-	suite.NoError(err)
-
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("REPLICATED", status)
-
-	// test multiple bundles
-	bundle = append(bundle, placement.GroupBundle{
-		ID:    "6",
-		Index: 6,
-		Rules: []*placement.Rule{
-			{
-				ID: "foo", Index: 1, Role: placement.Voter, Count: 2,
-			},
-		},
-	})
-	data, err = json.Marshal(bundle)
-	suite.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
-	suite.NoError(err)
-
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("INPROGRESS", status)
-
-	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
-	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1}, &metapb.Peer{Id: 6, StoreId: 1}, &metapb.Peer{Id: 7, StoreId: 1})
-	mustRegionHeartbeat(re, suite.svr, r1)
-
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("REPLICATED", status)
 }
 
 func TestRegionsInfoMarshal(t *testing.T) {

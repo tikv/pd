@@ -51,7 +51,7 @@ func TestStoreTestSuite(t *testing.T) {
 }
 
 func (suite *storeTestSuite) requestStatusBody(client *http.Client, method string, url string) int {
-	req, err := http.NewRequest(method, url, nil)
+	req, err := http.NewRequest(method, url, http.NoBody)
 	suite.NoError(err)
 	resp, err := client.Do(req)
 	suite.NoError(err)

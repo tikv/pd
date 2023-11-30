@@ -16,9 +16,12 @@ package apis
 
 import (
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/gin-contrib/cors"
@@ -39,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/unrolled/render"
 )
 
@@ -118,6 +122,7 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterSchedulersRouter()
 	s.RegisterCheckersRouter()
 	s.RegisterHotspotRouter()
+	s.RegisterRegionsRouter()
 	return s
 }
 
@@ -166,6 +171,16 @@ func (s *Service) RegisterOperatorsRouter() {
 	router.GET("/:id", getOperatorByRegion)
 	router.DELETE("/:id", deleteOperatorByRegion)
 	router.GET("/records", getOperatorRecords)
+}
+
+// RegisterRegionsRouter registers the router of the regions handler.
+func (s *Service) RegisterRegionsRouter() {
+	router := s.root.Group("regions")
+	router.POST("/accelerate-schedule", accelerateRegionsScheduleInRange)
+	router.POST("/accelerate-schedule/batch", accelerateRegionsScheduleInRanges)
+	router.POST("/scatter", scatterRegions)
+	router.POST("/split", splitRegions)
+	router.GET("/replicated", checkRegionsReplicated)
 }
 
 // RegisterConfigRouter registers the router of the config handler.
@@ -1117,4 +1132,203 @@ func getRegionLabelRuleByID(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, rule)
+}
+
+// @Tags     region
+// @Summary  Accelerate regions scheduling a in given range, only receive hex format for keys
+// @Accept   json
+// @Param    body   body   object   true   "json params"
+// @Param    limit  query  integer  false  "Limit count"  default(256)
+// @Produce  json
+// @Success  200  {string}  string  "Accelerate regions scheduling in a given range [startKey, endKey)"
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/accelerate-schedule [post]
+func accelerateRegionsScheduleInRange(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	var input map[string]interface{}
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	rawStartKey, ok1 := input["start_key"].(string)
+	rawEndKey, ok2 := input["end_key"].(string)
+	if !ok1 || !ok2 {
+		c.String(http.StatusBadRequest, "start_key or end_key is not string")
+		return
+	}
+
+	limitStr, _ := c.GetQuery("limit")
+	limit, err := handler.AdjustLimit(limitStr, 256 /*default limit*/)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	err = handler.AccelerateRegionsScheduleInRange(rawStartKey, rawEndKey, limit)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.String(http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
+}
+
+// @Tags     region
+// @Summary  Accelerate regions scheduling in given ranges, only receive hex format for keys
+// @Accept   json
+// @Param    body   body   object   true   "json params"
+// @Param    limit  query  integer  false  "Limit count"  default(256)
+// @Produce  json
+// @Success  200  {string}  string  "Accelerate regions scheduling in given ranges [startKey1, endKey1), [startKey2, endKey2), ..."
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/accelerate-schedule/batch [post]
+func accelerateRegionsScheduleInRanges(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	var input []map[string]interface{}
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	limitStr, _ := c.GetQuery("limit")
+	limit, err := handler.AdjustLimit(limitStr, 256 /*default limit*/)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var msgBuilder strings.Builder
+	msgBuilder.Grow(128)
+	msgBuilder.WriteString("Accelerate regions scheduling in given ranges: ")
+	var startKeys, endKeys [][]byte
+	for _, rg := range input {
+		startKey, rawStartKey, err := apiutil.ParseKey("start_key", rg)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		endKey, rawEndKey, err := apiutil.ParseKey("end_key", rg)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		startKeys = append(startKeys, startKey)
+		endKeys = append(endKeys, endKey)
+		msgBuilder.WriteString(fmt.Sprintf("[%s,%s), ", rawStartKey, rawEndKey))
+	}
+	err = handler.AccelerateRegionsScheduleInRanges(startKeys, endKeys, limit)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.String(http.StatusOK, msgBuilder.String())
+}
+
+// @Tags     region
+// @Summary  Scatter regions by given key ranges or regions id distributed by given group with given retry limit
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Scatter regions by given key ranges or regions id distributed by given group with given retry limit"
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/scatter [post]
+func scatterRegions(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	var input map[string]interface{}
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	rawStartKey, ok1 := input["start_key"].(string)
+	rawEndKey, ok2 := input["end_key"].(string)
+	group, _ := input["group"].(string)
+	retryLimit := 5
+	if rl, ok := input["retry_limit"].(float64); ok {
+		retryLimit = int(rl)
+	}
+
+	opsCount, failures, err := func() (int, map[uint64]error, error) {
+		if ok1 && ok2 {
+			return handler.ScatterRegionsByRange(rawStartKey, rawEndKey, group, retryLimit)
+		}
+		ids, ok := typeutil.JSONToUint64Slice(input["regions_id"])
+		if !ok {
+			return 0, nil, errors.New("regions_id is invalid")
+		}
+		return handler.ScatterRegionsByID(ids, group, retryLimit, false)
+	}()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	s := handler.BuildScatterRegionsResp(opsCount, failures)
+	c.IndentedJSON(http.StatusOK, &s)
+}
+
+// @Tags     region
+// @Summary  Split regions with given split keys
+// @Accept   json
+// @Param    body  body  object  true  "json params"
+// @Produce  json
+// @Success  200  {string}  string  "Split regions with given split keys"
+// @Failure  400  {string}  string  "The input is invalid."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /regions/split [post]
+func splitRegions(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+
+	var input map[string]interface{}
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	s, ok := input["split_keys"]
+	if !ok {
+		c.String(http.StatusBadRequest, "split_keys should be provided.")
+		return
+	}
+	rawSplitKeys := s.([]interface{})
+	if len(rawSplitKeys) < 1 {
+		c.String(http.StatusBadRequest, "empty split keys.")
+		return
+	}
+	retryLimit := 5
+	if rl, ok := input["retry_limit"].(float64); ok {
+		retryLimit = int(rl)
+	}
+	s, err := handler.SplitRegions(c.Request.Context(), rawSplitKeys, retryLimit)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, &s)
+}
+
+// @Tags     region
+// @Summary  Check if regions in the given key ranges are replicated. Returns 'REPLICATED', 'INPROGRESS', or 'PENDING'. 'PENDING' means that there is at least one region pending for scheduling. Similarly, 'INPROGRESS' means there is at least one region in scheduling.
+// @Param    startKey  query  string  true  "Regions start key, hex encoded"
+// @Param    endKey    query  string  true  "Regions end key, hex encoded"
+// @Produce  plain
+// @Success  200  {string}  string  "INPROGRESS"
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/replicated [get]
+func checkRegionsReplicated(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	rawStartKey, ok1 := c.GetQuery("startKey")
+	rawEndKey, ok2 := c.GetQuery("endKey")
+	if !ok1 || !ok2 {
+		c.String(http.StatusBadRequest, "there is no start_key or end_key")
+		return
+	}
+
+	state, err := handler.CheckRegionsReplicated(rawStartKey, rawEndKey)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	c.String(http.StatusOK, state)
 }

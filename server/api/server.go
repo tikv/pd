@@ -91,6 +91,26 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 					return strings.Contains(r.URL.Path, "label")
 				}),
 			serverapi.MicroserviceRedirectRule(
+				prefix+"/regions/accelerate-schedule",
+				scheapi.APIPathPrefix+"/regions/accelerate-schedule",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/regions/scatter",
+				scheapi.APIPathPrefix+"/regions/scatter",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/regions/split",
+				scheapi.APIPathPrefix+"/regions/split",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/regions/replicated",
+				scheapi.APIPathPrefix+"/regions/replicated",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/region-label/rules",
 				scheapi.APIPathPrefix+"/config/region-label/rules",
 				mcs.SchedulingServiceName,
@@ -147,8 +167,6 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/schedulers",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodPost}),
-			// TODO: we need to consider the case that v1 api not support restful api.
-			// we might change the previous path parameters to query parameters.
 		),
 		negroni.Wrap(r)),
 	)

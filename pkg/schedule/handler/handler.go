@@ -16,6 +16,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"net/http"
 	"strconv"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -41,6 +43,11 @@ import (
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
+)
+
+const (
+	defaultRegionLimit = 16
+	maxRegionLimit     = 10240
 )
 
 // Server is the interface for handler about schedule.
@@ -800,7 +807,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 	schedulers := sc.GetSchedulerNames()
 	switch status {
 	case "paused":
-		var pausedSchedulers []string
+		pausedSchedulers := make([]string, 0, len(schedulers))
 		pausedPeriods := []schedulerPausedPeriod{}
 		for _, scheduler := range schedulers {
 			paused, err := sc.IsSchedulerPaused(scheduler)
@@ -835,7 +842,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 		}
 		return pausedSchedulers, nil
 	case "disabled":
-		var disabledSchedulers []string
+		disabledSchedulers := make([]string, 0, len(schedulers))
 		for _, scheduler := range schedulers {
 			disabled, err := sc.IsSchedulerDisabled(scheduler)
 			if err != nil {
@@ -850,7 +857,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 		// The default scheduler could not be deleted in scheduling server,
 		// so schedulers could only be disabled.
 		// We should not return the disabled schedulers here.
-		var enabledSchedulers []string
+		enabledSchedulers := make([]string, 0, len(schedulers))
 		for _, scheduler := range schedulers {
 			disabled, err := sc.IsSchedulerDisabled(scheduler)
 			if err != nil {
@@ -1080,6 +1087,205 @@ func (h *Handler) GetRegionLabeler() (*labeler.RegionLabeler, error) {
 		return nil, errs.ErrNotBootstrapped
 	}
 	return c.GetRegionLabeler(), nil
+}
+
+// AccelerateRegionsScheduleInRange accelerates regions scheduling in a given range.
+func (h *Handler) AccelerateRegionsScheduleInRange(rawStartKey, rawEndKey string, limit int) error {
+	startKey, err := hex.DecodeString(rawStartKey)
+	if err != nil {
+		return err
+	}
+	endKey, err := hex.DecodeString(rawEndKey)
+	if err != nil {
+		return err
+	}
+	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	co := h.GetCoordinator()
+	if co == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	regions := c.ScanRegions(startKey, endKey, limit)
+	if len(regions) > 0 {
+		regionsIDList := make([]uint64, 0, len(regions))
+		for _, region := range regions {
+			regionsIDList = append(regionsIDList, region.GetID())
+		}
+		co.GetCheckerController().AddSuspectRegions(regionsIDList...)
+	}
+	return nil
+}
+
+// AccelerateRegionsScheduleInRanges accelerates regions scheduling in given ranges.
+func (h *Handler) AccelerateRegionsScheduleInRanges(startKeys [][]byte, endKeys [][]byte, limit int) error {
+	c := h.GetCluster()
+	if c == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	co := h.GetCoordinator()
+	if co == nil {
+		return errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	if len(startKeys) != len(endKeys) {
+		return errors.New("startKeys and endKeys should have the same length")
+	}
+	var regions []*core.RegionInfo
+	for i := range startKeys {
+		regions = append(regions, c.ScanRegions(startKeys[i], endKeys[i], limit)...)
+	}
+	if len(regions) > 0 {
+		regionsIDList := make([]uint64, 0, len(regions))
+		for _, region := range regions {
+			regionsIDList = append(regionsIDList, region.GetID())
+		}
+		co.GetCheckerController().AddSuspectRegions(regionsIDList...)
+	}
+	return nil
+}
+
+// AdjustLimit adjusts the limit of regions to schedule.
+func (h *Handler) AdjustLimit(limitStr string, defaultLimits ...int) (int, error) {
+	limit := defaultRegionLimit
+	if len(defaultLimits) > 0 {
+		limit = defaultLimits[0]
+	}
+	if limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil {
+			return 0, err
+		}
+	}
+	if limit > maxRegionLimit {
+		limit = maxRegionLimit
+	}
+	return limit, nil
+}
+
+// ScatterRegionsResponse is the response for scatter regions.
+type ScatterRegionsResponse struct {
+	ProcessedPercentage int `json:"processed-percentage"`
+}
+
+// BuildScatterRegionsResp builds ScatterRegionsResponse.
+func (h *Handler) BuildScatterRegionsResp(opsCount int, failures map[uint64]error) *ScatterRegionsResponse {
+	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
+	percentage := 100
+	if len(failures) > 0 {
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
+		log.Debug("scatter regions", zap.Errors("failures", func() []error {
+			r := make([]error, 0, len(failures))
+			for _, err := range failures {
+				r = append(r, err)
+			}
+			return r
+		}()))
+	}
+	return &ScatterRegionsResponse{
+		ProcessedPercentage: percentage,
+	}
+}
+
+// ScatterRegionsByRange scatters regions by range.
+func (h *Handler) ScatterRegionsByRange(rawStartKey, rawEndKey string, group string, retryLimit int) (int, map[uint64]error, error) {
+	startKey, err := hex.DecodeString(rawStartKey)
+	if err != nil {
+		return 0, nil, err
+	}
+	endKey, err := hex.DecodeString(rawEndKey)
+	if err != nil {
+		return 0, nil, err
+	}
+	co := h.GetCoordinator()
+	if co == nil {
+		return 0, nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	return co.GetRegionScatterer().ScatterRegionsByRange(startKey, endKey, group, retryLimit)
+}
+
+// ScatterRegionsByID scatters regions by id.
+func (h *Handler) ScatterRegionsByID(ids []uint64, group string, retryLimit int, skipStoreLimit bool) (int, map[uint64]error, error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return 0, nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	return co.GetRegionScatterer().ScatterRegionsByID(ids, group, retryLimit, false)
+}
+
+// SplitRegionsResponse is the response for split regions.
+type SplitRegionsResponse struct {
+	ProcessedPercentage int      `json:"processed-percentage"`
+	NewRegionsID        []uint64 `json:"regions-id"`
+}
+
+// SplitRegions splits regions by split keys.
+func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []interface{}, retryLimit int) (*SplitRegionsResponse, error) {
+	co := h.GetCoordinator()
+	if co == nil {
+		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	splitKeys := make([][]byte, 0, len(rawSplitKeys))
+	for _, rawKey := range rawSplitKeys {
+		key, err := hex.DecodeString(rawKey.(string))
+		if err != nil {
+			return nil, err
+		}
+		splitKeys = append(splitKeys, key)
+	}
+
+	percentage, newRegionsID := co.GetRegionSplitter().SplitRegions(ctx, splitKeys, retryLimit)
+	s := &SplitRegionsResponse{
+		ProcessedPercentage: percentage,
+		NewRegionsID:        newRegionsID,
+	}
+	failpoint.Inject("splitResponses", func(val failpoint.Value) {
+		rawID, ok := val.(int)
+		if ok {
+			s.ProcessedPercentage = 100
+			s.NewRegionsID = []uint64{uint64(rawID)}
+		}
+	})
+	return s, nil
+}
+
+// CheckRegionsReplicated checks if regions are replicated.
+func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string, error) {
+	startKey, err := hex.DecodeString(rawStartKey)
+	if err != nil {
+		return "", err
+	}
+	endKey, err := hex.DecodeString(rawEndKey)
+	if err != nil {
+		return "", err
+	}
+	c := h.GetCluster()
+	if c == nil {
+		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	co := h.GetCoordinator()
+	if co == nil {
+		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	regions := c.ScanRegions(startKey, endKey, -1)
+	state := "REPLICATED"
+	for _, region := range regions {
+		if !filter.IsRegionReplicated(c, region) {
+			state = "INPROGRESS"
+			if co.IsPendingRegion(region.GetID()) {
+				state = "PENDING"
+				break
+			}
+		}
+	}
+	failpoint.Inject("mockPending", func(val failpoint.Value) {
+		aok, ok := val.(bool)
+		if ok && aok {
+			state = "PENDING"
+		}
+	})
+	return state, nil
 }
 
 // GetRuleManager returns the rule manager.

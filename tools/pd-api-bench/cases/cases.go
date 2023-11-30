@@ -44,7 +44,7 @@ var (
 // InitCluster initializes the cluster.
 func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
-		PDAddress+"/pd/api/v1/stats/region?start_key=&end_key=&count", nil)
+		PDAddress+"/pd/api/v1/stats/region?start_key=&end_key=&count", http.NoBody)
 	resp, err := httpClit.Do(req)
 	if err != nil {
 		return err
@@ -158,7 +158,7 @@ type minResolvedTSStruct struct {
 
 func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
 	url := fmt.Sprintf("%s%s", PDAddress, c.path)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	res, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 		url.QueryEscape(string(generateKeyForSimulator(startID, 56))),
 		url.QueryEscape(string(generateKeyForSimulator(endID, 56))),
 		"")
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	res, err := cli.Do(req)
 	if err != nil {
 		return err
