@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -48,6 +49,7 @@ func TestSchedulerTestSuite(t *testing.T) {
 }
 
 func (suite *schedulerTestSuite) SetupSuite() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 	suite.defaultSchedulers = []string{
 		"balance-leader-scheduler",
@@ -60,6 +62,7 @@ func (suite *schedulerTestSuite) SetupSuite() {
 
 func (suite *schedulerTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
 }
 
 func (suite *schedulerTestSuite) TearDownTest() {
