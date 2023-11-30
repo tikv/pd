@@ -813,17 +813,6 @@ func (c *client) backupClientConn() (*grpc.ClientConn, string) {
 	return nil, ""
 }
 
-func (c *client) getClient() pdpb.PDClient {
-	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
-		backupClientConn, addr := c.backupClientConn()
-		if backupClientConn != nil {
-			log.Debug("[pd] use follower client", zap.String("addr", addr))
-			return pdpb.NewPDClient(backupClientConn)
-		}
-	}
-	return c.leaderClient()
-}
-
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
 	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
 		backupClientConn, addr := c.backupClientConn()
