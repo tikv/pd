@@ -214,7 +214,7 @@ func (l *scatterRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 	if l.allowBalanceLeader(cluster) {
 		ops, _ := l.balanceLeader.Schedule(c, false)
 		if len(ops) > 0 {
-			ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.config.RangeName))
+			ops[0].SetDesc(fmt.Sprintf("scatter-range-leader-%s", l.config.GetRangeName()))
 			ops[0].AttachKind(operator.OpRange)
 			ops[0].Counters = append(ops[0].Counters,
 				scatterRangeNewOperatorCounter,
@@ -226,7 +226,7 @@ func (l *scatterRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 	if l.allowBalanceRegion(cluster) {
 		ops, _ := l.balanceRegion.Schedule(c, false)
 		if len(ops) > 0 {
-			ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.config.RangeName))
+			ops[0].SetDesc(fmt.Sprintf("scatter-range-region-%s", l.config.GetRangeName()))
 			ops[0].AttachKind(operator.OpRange)
 			ops[0].Counters = append(ops[0].Counters,
 				scatterRangeNewOperatorCounter,

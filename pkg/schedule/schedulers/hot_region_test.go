@@ -2499,32 +2499,32 @@ func TestConfigValidation(t *testing.T) {
 	re := require.New(t)
 
 	hc := initHotRegionScheduleConfig()
-	err := hc.valid()
+	err := hc.validateLocked()
 	re.NoError(err)
 
 	// priorities is illegal
 	hc.ReadPriorities = []string{"byte", "error"}
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.Error(err)
 
 	// priorities should have at least 2 dimensions
 	hc = initHotRegionScheduleConfig()
 	hc.WriteLeaderPriorities = []string{"byte"}
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.Error(err)
 
 	// query is not allowed to be set in priorities for write-peer-priorities
 	hc = initHotRegionScheduleConfig()
 	hc.WritePeerPriorities = []string{"query", "byte"}
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.Error(err)
 	// priorities shouldn't be repeated
 	hc.WritePeerPriorities = []string{"byte", "byte"}
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.Error(err)
 	// no error
 	hc.WritePeerPriorities = []string{"byte", "key"}
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.NoError(err)
 
 	// rank-formula-version
@@ -2533,17 +2533,17 @@ func TestConfigValidation(t *testing.T) {
 	re.Equal("v2", hc.GetRankFormulaVersion())
 	// v1
 	hc.RankFormulaVersion = "v1"
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.NoError(err)
 	re.Equal("v1", hc.GetRankFormulaVersion())
 	// v2
 	hc.RankFormulaVersion = "v2"
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.NoError(err)
 	re.Equal("v2", hc.GetRankFormulaVersion())
 	// illegal
 	hc.RankFormulaVersion = "v0"
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.Error(err)
 
 	// forbid-rw-type
@@ -2553,27 +2553,27 @@ func TestConfigValidation(t *testing.T) {
 	re.False(hc.IsForbidRWType(utils.Write))
 	// read
 	hc.ForbidRWType = "read"
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.NoError(err)
 	re.True(hc.IsForbidRWType(utils.Read))
 	re.False(hc.IsForbidRWType(utils.Write))
 	// write
 	hc.ForbidRWType = "write"
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.NoError(err)
 	re.False(hc.IsForbidRWType(utils.Read))
 	re.True(hc.IsForbidRWType(utils.Write))
 	// illegal
 	hc.ForbidRWType = "test"
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.Error(err)
 
 	hc.SplitThresholds = 0
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.Error(err)
 
 	hc.SplitThresholds = 1.1
-	err = hc.valid()
+	err = hc.validateLocked()
 	re.Error(err)
 }
 

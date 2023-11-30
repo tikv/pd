@@ -813,17 +813,6 @@ func (c *client) backupClientConn() (*grpc.ClientConn, string) {
 	return nil, ""
 }
 
-func (c *client) getClient() pdpb.PDClient {
-	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
-		backupClientConn, addr := c.backupClientConn()
-		if backupClientConn != nil {
-			log.Debug("[pd] use follower client", zap.String("addr", addr))
-			return pdpb.NewPDClient(backupClientConn)
-		}
-	}
-	return c.leaderClient()
-}
-
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
 	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
 		backupClientConn, addr := c.backupClientConn()
@@ -892,16 +881,18 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	default:
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
 	}
-
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	// Call GetMinTS API to get the minimal TS from the API leader.
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
+		cancel()
 		return 0, 0, errs.ErrClientGetProtoClient
 	}
 
 	resp, err := protoClient.GetMinTS(ctx, &pdpb.GetMinTSRequest{
 		Header: c.requestHeader(),
 	})
+	cancel()
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
 			// If the method is not supported, we fallback to GetTS.
