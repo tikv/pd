@@ -100,7 +100,7 @@ func decodeBytes(b []byte) ([]byte, error) {
 	return buf, nil
 }
 
-// keyToKeyHexStr converts a raw key to a hex string after encoding.
+// rawKeyToKeyHexStr converts a raw key to a hex string after encoding.
 func rawKeyToKeyHexStr(key []byte) string {
 	if len(key) == 0 {
 		return ""

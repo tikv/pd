@@ -358,6 +358,7 @@ func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*Regi
 }
 
 // GetRegionsReplicatedStateByKeyRange gets the regions replicated state info by key range.
+// The keys in the key range should be encoded in the hex bytes format (without encoding to the UTF-8 bytes).
 func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRange *KeyRange) (string, error) {
 	var state string
 	err := c.requestWithRetry(ctx,
@@ -411,6 +412,7 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
+// If the `onlyCount` flag is true, the result will only include the count of regions.
 // The keys in the key range should be encoded in the UTF-8 bytes format.
 func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange, onlyCount bool) (*RegionStats, error) {
 	var regionStats RegionStats
