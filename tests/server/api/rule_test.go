@@ -21,6 +21,8 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -30,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -1084,6 +1087,104 @@ func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
 			return true
 		})
 	}
+}
+
+func (suite *ruleTestSuite) TestConcurrency() {
+	opts := []tests.ConfigOption{
+		func(conf *config.Config, serverName string) {
+			conf.PDServerCfg.KeyType = "raw"
+			conf.Replication.EnablePlacementRules = true
+		},
+	}
+	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+	// FIXME: enable this test in api mode
+	env.RunTestInPDMode(suite.checkConcurrency)
+}
+
+func (suite *ruleTestSuite) checkConcurrency(cluster *tests.TestCluster) {
+	// test concurrency of set rule group with different group id
+	suite.checkConcurrencyWith(cluster,
+		func(i int) []placement.GroupBundle {
+			return []placement.GroupBundle{
+				{
+					ID:    strconv.Itoa(i),
+					Index: i,
+					Rules: []*placement.Rule{
+						{
+							ID: "foo", Index: i, Role: placement.Voter, Count: 1, GroupID: strconv.Itoa(i),
+						},
+					},
+				},
+			}
+		},
+		func(resp []placement.GroupBundle, i int) bool {
+			return len(resp) == 1 && resp[0].ID == strconv.Itoa(i)
+		},
+	)
+	// test concurrency of set rule with different id
+	// TODO: this part cannot run in api mode
+	suite.checkConcurrencyWith(cluster,
+		func(i int) []placement.GroupBundle {
+			return []placement.GroupBundle{
+				{
+					ID:    "pd",
+					Index: 1,
+					Rules: []*placement.Rule{
+						{
+							ID: strconv.Itoa(i), Index: i, Role: placement.Voter, Count: 1, GroupID: "pd",
+						},
+					},
+				},
+			}
+		},
+		func(resp []placement.GroupBundle, i int) bool {
+			return len(resp) == 1 && resp[0].ID == "pd" && resp[0].Rules[0].ID == strconv.Itoa(i)
+		},
+	)
+}
+
+func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
+	genBundle func(int) []placement.GroupBundle,
+	checkBundle func([]placement.GroupBundle, int) bool) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+	expectResult := struct {
+		syncutil.RWMutex
+		val int
+	}{}
+	wg := sync.WaitGroup{}
+
+	for i := 1; i <= 10; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			bundle := genBundle(i)
+			data, err := json.Marshal(bundle)
+			suite.NoError(err)
+			for j := 0; j < 10; j++ {
+				expectResult.Lock()
+				err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
+				suite.NoError(err)
+				expectResult.val = i
+				expectResult.Unlock()
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	expectResult.RLock()
+	defer expectResult.RUnlock()
+	suite.NotZero(expectResult.val)
+	tu.Eventually(re, func() bool {
+		respBundle := make([]placement.GroupBundle, 0)
+		err := tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
+			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
+		suite.NoError(err)
+		suite.Len(respBundle, 1)
+		return checkBundle(respBundle, expectResult.val)
+	})
 }
 
 func (suite *ruleTestSuite) assertBundleEqual(b1, b2 placement.GroupBundle) {
