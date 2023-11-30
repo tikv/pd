@@ -120,6 +120,14 @@ func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {
 	})
 }
 
+func (conf *grantHotRegionSchedulerConfig) getStoreIDs() []uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	storeIDs := make([]uint64, len(conf.StoreIDs))
+	copy(storeIDs, conf.StoreIDs)
+	return storeIDs
+}
+
 // grantLeaderScheduler transfers all hot peers to peers  and transfer leader to the fixed store
 type grantHotRegionScheduler struct {
 	*baseHotScheduler
@@ -313,7 +321,8 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 	}
 
-	destStoreIDs := make([]uint64, 0, len(s.conf.StoreIDs))
+	storeIDs := s.conf.getStoreIDs()
+	destStoreIDs := make([]uint64, 0, len(storeIDs))
 	var candidate []uint64
 	if isLeader {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.High})
@@ -321,7 +330,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
-		candidate = s.conf.StoreIDs
+		candidate = storeIDs
 	}
 	for _, storeID := range candidate {
 		store := cluster.GetStore(storeID)
