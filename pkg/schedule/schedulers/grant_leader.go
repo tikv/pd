@@ -237,8 +237,6 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 
 func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
-	s.conf.RLock()
-	defer s.conf.RUnlock()
 	storeIDWithRanges := s.conf.getStoreIDWithRanges()
 	ops := make([]*operator.Operator, 0, len(storeIDWithRanges))
 	pendingFilter := filter.NewRegionPendingFilter()
