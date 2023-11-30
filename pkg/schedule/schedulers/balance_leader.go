@@ -349,8 +349,6 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	l.conf.RLock()
-	defer l.conf.RUnlock()
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {
