@@ -892,16 +892,18 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	default:
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
 	}
-
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	// Call GetMinTS API to get the minimal TS from the API leader.
-	protoClient := c.getClient()
+	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
+		cancel()
 		return 0, 0, errs.ErrClientGetProtoClient
 	}
 
 	resp, err := protoClient.GetMinTS(ctx, &pdpb.GetMinTSRequest{
 		Header: c.requestHeader(),
 	})
+	cancel()
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
 			// If the method is not supported, we fallback to GetTS.
