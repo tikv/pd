@@ -55,8 +55,16 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re.NoError(err)
 	leader := suite.cluster.WaitLeader()
 	re.NotEmpty(leader)
-	err = suite.cluster.GetLeaderServer().BootstrapCluster()
+	leaderServer := suite.cluster.GetLeaderServer()
+	err = leaderServer.BootstrapCluster()
 	re.NoError(err)
+	for _, region := range []*core.RegionInfo{
+		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
+		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+	} {
+		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
 	var (
 		testServers = suite.cluster.GetServers()
 		endpoints   = make([]string, 0, len(testServers))
@@ -71,6 +79,61 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 	suite.cancelFunc()
 	suite.client.Close()
 	suite.cluster.Destroy()
+}
+
+func (suite *httpClientTestSuite) TestMeta() {
+	re := suite.Require()
+	region, err := suite.client.GetRegionByID(suite.ctx, 10)
+	re.NoError(err)
+	re.Equal(int64(10), region.ID)
+	re.Equal(core.HexRegionKeyStr([]byte("a1")), region.StartKey)
+	re.Equal(core.HexRegionKeyStr([]byte("a2")), region.EndKey)
+	region, err = suite.client.GetRegionByKey(suite.ctx, []byte("a2"))
+	re.NoError(err)
+	re.Equal(int64(11), region.ID)
+	re.Equal(core.HexRegionKeyStr([]byte("a2")), region.StartKey)
+	re.Equal(core.HexRegionKeyStr([]byte("a3")), region.EndKey)
+	regions, err := suite.client.GetRegions(suite.ctx)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regions, err = suite.client.GetRegionsByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), -1)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regions, err = suite.client.GetRegionsByStoreID(suite.ctx, 1)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	state, err := suite.client.GetRegionsReplicatedStateByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
+	re.NoError(err)
+	re.Equal("INPROGRESS", state)
+	regionStats, err := suite.client.GetRegionStatusByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), false)
+	re.NoError(err)
+	re.Greater(regionStats.Count, 0)
+	re.NotEmpty(regionStats.StoreLeaderCount)
+	regionStats, err = suite.client.GetRegionStatusByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), true)
+	re.NoError(err)
+	re.Greater(regionStats.Count, 0)
+	re.Empty(regionStats.StoreLeaderCount)
+	hotReadRegions, err := suite.client.GetHotReadRegions(suite.ctx)
+	re.NoError(err)
+	re.Len(hotReadRegions.AsPeer, 1)
+	re.Len(hotReadRegions.AsLeader, 1)
+	hotWriteRegions, err := suite.client.GetHotWriteRegions(suite.ctx)
+	re.NoError(err)
+	re.Len(hotWriteRegions.AsPeer, 1)
+	re.Len(hotWriteRegions.AsLeader, 1)
+	historyHorRegions, err := suite.client.GetHistoryHotRegions(suite.ctx, &pd.HistoryHotRegionsRequest{
+		StartTime: 0,
+		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
+	})
+	re.NoError(err)
+	re.Len(historyHorRegions.HistoryHotRegion, 0)
+	store, err := suite.client.GetStores(suite.ctx)
+	re.NoError(err)
+	re.Equal(1, store.Count)
+	re.Len(store.Stores, 1)
 }
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
@@ -115,18 +178,22 @@ func (suite *httpClientTestSuite) TestRule() {
 	re.Equal(bundles[0], bundle)
 	// Check if we have the default rule.
 	suite.checkRule(re, &pd.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      placement.DefaultRuleID,
-		Role:    pd.Voter,
-		Count:   3,
+		GroupID:  placement.DefaultGroupID,
+		ID:       placement.DefaultRuleID,
+		Role:     pd.Voter,
+		Count:    3,
+		StartKey: []byte{},
+		EndKey:   []byte{},
 	}, 1, true)
 	// Should be the same as the rules in the bundle.
 	suite.checkRule(re, bundle.Rules[0], 1, true)
 	testRule := &pd.Rule{
-		GroupID: placement.DefaultGroupID,
-		ID:      "test",
-		Role:    pd.Voter,
-		Count:   3,
+		GroupID:  placement.DefaultGroupID,
+		ID:       "test",
+		Role:     pd.Voter,
+		Count:    3,
+		StartKey: []byte{},
+		EndKey:   []byte{},
 	}
 	err = suite.client.SetPlacementRule(suite.ctx, testRule)
 	re.NoError(err)
@@ -178,6 +245,18 @@ func (suite *httpClientTestSuite) TestRule() {
 	ruleGroup, err = suite.client.GetPlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
 	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
 	re.Empty(ruleGroup)
+	// Test the start key and end key.
+	testRule = &pd.Rule{
+		GroupID:  placement.DefaultGroupID,
+		ID:       "test",
+		Role:     pd.Voter,
+		Count:    5,
+		StartKey: []byte("a1"),
+		EndKey:   []byte(""),
+	}
+	err = suite.client.SetPlacementRule(suite.ctx, testRule)
+	re.NoError(err)
+	suite.checkRule(re, testRule, 1, true)
 }
 
 func (suite *httpClientTestSuite) checkRule(
@@ -207,6 +286,8 @@ func checkRuleFunc(
 		re.Equal(rule.ID, r.ID)
 		re.Equal(rule.Role, r.Role)
 		re.Equal(rule.Count, r.Count)
+		re.Equal(rule.StartKey, r.StartKey)
+		re.Equal(rule.EndKey, r.EndKey)
 		return
 	}
 	if exist {
@@ -271,13 +352,6 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re := suite.Require()
 	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
-	for _, region := range []*core.RegionInfo{
-		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
-		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
-	} {
-		err := raftCluster.HandleRegionHeartbeat(region)
-		re.NoError(err)
-	}
 	suspectRegions := raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 0)
 	err := suite.client.AccelerateSchedule(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a2")))
@@ -294,4 +368,19 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re.NoError(err)
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 2)
+}
+
+func (suite *httpClientTestSuite) TestScheduleConfig() {
+	re := suite.Require()
+	config, err := suite.client.GetScheduleConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(float64(4), config["leader-schedule-limit"])
+	re.Equal(float64(2048), config["region-schedule-limit"])
+	config["leader-schedule-limit"] = float64(8)
+	err = suite.client.SetScheduleConfig(suite.ctx, config)
+	re.NoError(err)
+	config, err = suite.client.GetScheduleConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(float64(8), config["leader-schedule-limit"])
+	re.Equal(float64(2048), config["region-schedule-limit"])
 }
