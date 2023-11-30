@@ -47,10 +47,11 @@ type Client interface {
 	GetRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsByKeyRange(context.Context, *KeyRange, int) (*RegionsInfo, error)
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
+	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
-	GetRegionStatusByKeyRange(context.Context, *KeyRange) (*RegionStats, error)
+	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	/* Config-related interfaces */
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
@@ -356,6 +357,19 @@ func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*Regi
 	return &regions, nil
 }
 
+// GetRegionsReplicatedStateByKeyRange gets the regions replicated state info by key range.
+// The keys in the key range should be encoded in the hex bytes format (without encoding to the UTF-8 bytes).
+func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRange *KeyRange) (string, error) {
+	var state string
+	err := c.requestWithRetry(ctx,
+		"GetRegionsReplicatedStateByKeyRange", RegionsReplicatedByKeyRange(keyRange),
+		http.MethodGet, http.NoBody, &state)
+	if err != nil {
+		return "", err
+	}
+	return state, nil
+}
+
 // GetHotReadRegions gets the hot read region statistics info.
 func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotReadRegions StoreHotPeersInfos
@@ -398,11 +412,12 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
+// If the `onlyCount` flag is true, the result will only include the count of regions.
 // The keys in the key range should be encoded in the UTF-8 bytes format.
-func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange) (*RegionStats, error) {
+func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange, onlyCount bool) (*RegionStats, error) {
 	var regionStats RegionStats
 	err := c.requestWithRetry(ctx,
-		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(keyRange),
+		"GetRegionStatusByKeyRange", RegionStatsByKeyRange(keyRange, onlyCount),
 		http.MethodGet, http.NoBody, &regionStats,
 	)
 	if err != nil {

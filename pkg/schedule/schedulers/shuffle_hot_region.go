@@ -77,6 +77,12 @@ func (conf *shuffleHotRegionSchedulerConfig) persistLocked() error {
 	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
+func (conf *shuffleHotRegionSchedulerConfig) getLimit() uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.Limit
+}
+
 // ShuffleHotRegionScheduler mainly used to test.
 // It will randomly pick a hot peer, and move the peer
 // to a random store, and then transfer the leader to
@@ -134,7 +140,7 @@ func (s *shuffleHotRegionScheduler) ReloadConfig() error {
 }
 
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
-	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
+	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.getLimit()
 	conf := cluster.GetSchedulerConfig()
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
