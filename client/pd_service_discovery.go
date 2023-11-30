@@ -63,8 +63,6 @@ type ServiceDiscovery interface {
 	GetKeyspaceID() uint32
 	// GetKeyspaceGroupID returns the ID of the keyspace group
 	GetKeyspaceGroupID() uint32
-	// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
-	DiscoverMicroservice(svcType serviceType) ([]string, error)
 	// GetServiceURLs returns the URLs of the servers providing the service
 	GetServiceURLs() []string
 	// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
@@ -324,7 +322,7 @@ func (c *pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
 }
 
 // DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
-func (c *pdServiceDiscovery) DiscoverMicroservice(svcType serviceType) (urls []string, err error) {
+func (c *pdServiceDiscovery) discoverMicroservice(svcType serviceType) (urls []string, err error) {
 	switch svcType {
 	case apiService:
 		urls = c.GetServiceURLs()
@@ -616,7 +614,6 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) error {
 
 	if _, err := c.GetOrCreateGRPCConn(addr); err != nil {
 		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
-		return err
 	}
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
