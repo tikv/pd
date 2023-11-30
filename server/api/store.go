@@ -172,14 +172,14 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 	}
 }
 
-// @Tags     store
+// @Tags        store
 // @Summary  Get a store's information.
 // @Param    id  path  integer  true  "Store Id"
-// @Produce  json
+// @Produce     json
 // @Success  200  {object}  StoreInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  404  {string}  string  "The store does not exist."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Failure     500  {string}  string  "PD server failed to proceed the request."
 // @Router   /store/{id} [get]
 func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
@@ -735,13 +735,13 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 }
 
 // @Tags     store
-// @Summary  Get all stores in the cluster.
-// @Param    state  query  array  true  "Specify accepted store states."
+// @Summary     Get all stores in the cluster.
+// @Param       state  query  array  true  "Specify accepted store states."
 // @Produce  json
-// @Success  200  {object}  StoresInfo
+// @Success     200  {object}  StoresInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores [get]
-// @Deprecated Better to use /stores/check instead.
+// @Router      /stores [get]
+// @Deprecated  Better to use /stores/check instead.
 func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	stores := rc.GetMetaStores()
