@@ -14,7 +14,9 @@
 
 package ratelimit
 
-import "github.com/tikv/pd/pkg/utils/syncutil"
+import (
+	"github.com/tikv/pd/pkg/utils/syncutil"
+)
 
 type concurrencyLimiter struct {
 	mu      syncutil.RWMutex
@@ -30,7 +32,7 @@ func (l *concurrencyLimiter) allow() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.current+1 <= l.limit {
+	if l.current < l.limit {
 		l.current++
 		return true
 	}
@@ -53,10 +55,19 @@ func (l *concurrencyLimiter) getLimit() uint64 {
 	return l.limit
 }
 
+func (l *concurrencyLimiter) tryToSetLimit(limit uint64) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if limit < l.limit {
+		l.limit = limit
+		return true
+	}
+	return false
+}
+
 func (l *concurrencyLimiter) setLimit(limit uint64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
 	l.limit = limit
 }
 

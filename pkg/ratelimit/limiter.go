@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,14 @@
 package ratelimit
 
 import (
-	"sync"
-
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"golang.org/x/time/rate"
 )
+
+// DoneFunc is done function.
+type DoneFunc func()
 
 // DimensionConfig is the limit dimension config of one label
 type DimensionConfig struct {
@@ -27,94 +31,217 @@ type DimensionConfig struct {
 	QPSBurst int
 	// concurrency config
 	ConcurrencyLimit uint64
+	// BBR config
+	EnableBBR bool
 }
 
-// Limiter is a controller for the request rate.
-type Limiter struct {
-	qpsLimiter         sync.Map
-	concurrencyLimiter sync.Map
-	// the label which is in labelAllowList won't be limited
-	labelAllowList map[string]struct{}
+type limiter struct {
+	cfg         *DimensionConfig
+	mu          syncutil.RWMutex
+	concurrency *concurrencyLimiter
+	rate        *RateLimiter
+	bbr         *bbr
+
+	rateCounter        prometheus.Counter
+	concurrencyCounter prometheus.Counter
 }
 
-// NewLimiter returns a global limiter which can be updated in the later.
-func NewLimiter() *Limiter {
-	return &Limiter{
-		labelAllowList: make(map[string]struct{}),
+func newLimiter(typ, api string, counter *prometheus.CounterVec) *limiter {
+	lim := &limiter{
+		cfg: &DimensionConfig{},
 	}
+	if counter != nil {
+		lim.rateCounter = counter.WithLabelValues(typ, api, "rate")
+		lim.concurrencyCounter = counter.WithLabelValues(typ, api, "concurrency")
+	}
+	return lim
 }
 
-// Allow is used to check whether it has enough token.
-func (l *Limiter) Allow(label string) bool {
-	var cl *concurrencyLimiter
-	var ok bool
-	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
-		if cl, ok = limiter.(*concurrencyLimiter); ok && !cl.allow() {
-			return false
+func (l *limiter) getConcurrencyLimiter() *concurrencyLimiter {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.concurrency
+}
+
+func (l *limiter) getRateLimiter() *RateLimiter {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.rate
+}
+
+func (l *limiter) getBBR() *bbr {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.bbr
+}
+
+func (l *limiter) deleteRateLimiter() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	l.cfg.QPS = 0
+	l.cfg.QPSBurst = 0
+	l.rate = nil
+	return l.isEmpty()
+}
+
+func (l *limiter) deleteConcurrency() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	l.concurrency = nil
+	l.cfg.ConcurrencyLimit = 0
+	return l.isEmpty()
+}
+
+func (l *limiter) deleteBBR() bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	l.bbr = nil
+	l.cfg.EnableBBR = false
+	if l.cfg.ConcurrencyLimit > 0 {
+		if l.concurrency != nil {
+			l.concurrency.setLimit(l.cfg.ConcurrencyLimit)
+		}
+	} else {
+		l.concurrency = nil
+	}
+	return l.isEmpty()
+}
+
+func (l *limiter) isEmpty() bool {
+	return l.concurrency == nil && l.rate == nil
+}
+
+func (l *limiter) getQPSLimiterStatus() (limit rate.Limit, burst int) {
+	baseLimiter := l.getRateLimiter()
+	if baseLimiter != nil {
+		return baseLimiter.Limit(), baseLimiter.Burst()
+	}
+	return 0, 0
+}
+
+func (l *limiter) getConcurrencyLimiterStatus() (limit uint64, current uint64) {
+	baseLimiter := l.getConcurrencyLimiter()
+	if baseLimiter != nil {
+		return baseLimiter.getLimit(), baseLimiter.getCurrent()
+	}
+	return 0, 0
+}
+
+func (l *limiter) getBBRStatus() (enable bool, limit int64) {
+	baseLimiter := l.getBBR()
+	if baseLimiter != nil {
+		return true, baseLimiter.bbrStatus.getMaxInFlight()
+	}
+	return false, 0
+}
+
+func (l *limiter) updateBBRConfig(enable bool, o ...bbrOption) UpdateStatus {
+	oldEnableBBR, _ := l.getBBRStatus()
+	if oldEnableBBR == enable {
+		return BBRNoChange
+	}
+	if !enable {
+		l.deleteBBR()
+		return BBRDeleted
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg.EnableBBR = enable
+	if l.concurrency == nil {
+		l.concurrency = newConcurrencyLimiter(uint64(inf))
+	}
+	fb := func(s *bbrStatus) {
+		if s.getMinRT() == infRT {
+			current := l.concurrency.getCurrent()
+			l.concurrency.tryToSetLimit(current)
+		} else {
+			l.concurrency.tryToSetLimit(uint64(s.getMaxInFlight()))
 		}
 	}
+	l.bbr = newBBR(newConfig(o...), fb)
+	return BBRChanged
+}
 
-	if limiter, exist := l.qpsLimiter.Load(label); exist {
-		if ql, ok := limiter.(*RateLimiter); ok && !ql.Allow() {
-			if cl != nil {
-				cl.release()
+func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
+	oldConcurrencyLimit, _ := l.getConcurrencyLimiterStatus()
+	if oldConcurrencyLimit == limit {
+		return ConcurrencyNoChange
+	}
+	if limit < 1 {
+		l.deleteConcurrency()
+		return ConcurrencyDeleted
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg.ConcurrencyLimit = limit
+	if l.concurrency != nil {
+		if bbr := l.bbr; bbr != nil && bbr.bbrStatus.getMaxInFlight() != inf {
+			if l.concurrency.tryToSetLimit(limit) {
+				return ConcurrencyChanged
 			}
-			return false
+			return ConcurrencyNoChange
 		}
+		l.concurrency.setLimit(limit)
+		return ConcurrencyChanged
 	}
-
-	return true
+	l.concurrency = newConcurrencyLimiter(limit)
+	return ConcurrencyChanged
 }
 
-// Release is used to refill token. It may be not uesful for some limiters because they will refill automatically
-func (l *Limiter) Release(label string) {
-	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
-		if cl, ok := limiter.(*concurrencyLimiter); ok {
-			cl.release()
-		}
+func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
+	oldQPSLimit, oldBurst := l.getQPSLimiterStatus()
+
+	if (float64(oldQPSLimit)-limit < eps && float64(oldQPSLimit)-limit > -eps) && oldBurst == burst {
+		return QPSNoChange
 	}
+	if limit <= eps || burst < 1 {
+		l.deleteRateLimiter()
+		return QPSDeleted
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg.QPS = limit
+	l.cfg.QPSBurst = burst
+	if l.rate != nil {
+		l.rate.SetLimit(rate.Limit(limit))
+		l.rate.SetBurst(burst)
+	} else {
+		l.rate = NewRateLimiter(limit, burst)
+	}
+	return QPSChanged
 }
 
-// Update is used to update Ratelimiter with Options
-func (l *Limiter) Update(label string, opts ...Option) UpdateStatus {
-	var status UpdateStatus
-	for _, opt := range opts {
-		status |= opt(label, l)
-	}
+func (l *limiter) updateDimensionConfig(cfg *DimensionConfig, op ...bbrOption) UpdateStatus {
+	status := l.updateQPSConfig(cfg.QPS, cfg.QPSBurst)
+	status |= l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
+	status |= l.updateBBRConfig(cfg.EnableBBR, op...)
 	return status
 }
 
-// GetQPSLimiterStatus returns the status of a given label's QPS limiter.
-func (l *Limiter) GetQPSLimiterStatus(label string) (limit rate.Limit, burst int) {
-	if limiter, exist := l.qpsLimiter.Load(label); exist {
-		return limiter.(*RateLimiter).Limit(), limiter.(*RateLimiter).Burst()
+func (l *limiter) allow() (DoneFunc, error) {
+	concurrency := l.getConcurrencyLimiter()
+	if concurrency != nil && !concurrency.allow() {
+		if l.concurrencyCounter != nil {
+			l.concurrencyCounter.Add(1)
+		}
+		return nil, errs.ErrRateLimitExceeded
 	}
-
-	return 0, 0
-}
-
-// QPSUnlimit deletes QPS limiter of the given label
-func (l *Limiter) QPSUnlimit(label string) {
-	l.qpsLimiter.Delete(label)
-}
-
-// GetConcurrencyLimiterStatus returns the status of a given label's concurrency limiter.
-func (l *Limiter) GetConcurrencyLimiterStatus(label string) (limit uint64, current uint64) {
-	if limiter, exist := l.concurrencyLimiter.Load(label); exist {
-		return limiter.(*concurrencyLimiter).getLimit(), limiter.(*concurrencyLimiter).getCurrent()
+	rate := l.getRateLimiter()
+	if rate != nil && !rate.Allow() {
+		if concurrency != nil {
+			concurrency.release()
+		}
+		if l.rateCounter != nil {
+			l.rateCounter.Add(1)
+		}
+		return nil, errs.ErrRateLimitExceeded
 	}
-
-	return 0, 0
-}
-
-// ConcurrencyUnlimit deletes concurrency limiter of the given label
-func (l *Limiter) ConcurrencyUnlimit(label string) {
-	l.concurrencyLimiter.Delete(label)
-}
-
-// IsInAllowList returns whether this label is in allow list.
-// If returns true, the given label won't be limited
-func (l *Limiter) IsInAllowList(label string) bool {
-	_, allow := l.labelAllowList[label]
-	return allow
+	done := l.getBBR().process()
+	return func() {
+		done()
+		if concurrency != nil {
+			concurrency.release()
+		}
+	}, nil
 }
