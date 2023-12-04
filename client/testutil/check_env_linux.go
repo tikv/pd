@@ -19,12 +19,13 @@ package testutil
 import (
 	"github.com/cakturk/go-netstat/netstat"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 func environmentCheck(addr string) bool {
 	valid, err := checkAddr(addr[len("http://"):])
 	if err != nil {
-		log.Error("check port status failed", err)
+		log.Error("check port status failed", zap.Error(err))
 		return false
 	}
 	return valid
