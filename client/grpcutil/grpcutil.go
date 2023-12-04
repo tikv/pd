@@ -77,30 +77,11 @@ func BuildForwardContext(ctx context.Context, addr string) context.Context {
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
-// GetForwardedHostInClientSide returns the forwarded host in metadata.
+// GetForwardedHost returns the forwarded host in metadata.
 // Only used for test.
-func GetForwardedHostInClientSide(ctx context.Context) string {
-	md, ok := metadata.FromOutgoingContext(ctx)
-	if !ok {
-		return ""
-	}
-	if t, ok := md[ForwardMetadataKey]; ok {
-		return t[0]
-	}
-	return ""
-}
-
-// GetForwardedHostInServerSide returns the forwarded host in metadata.
-// Only used for test.
-func GetForwardedHostInServerSide(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ""
-	}
-	if t, ok := md[ForwardMetadataKey]; ok {
-		return t[0]
-	}
-	return ""
+func GetForwardedHost(ctx context.Context, f func(context.Context) (metadata.MD, bool)) string {
+	v, _ := getValueFromMetadata(ctx, ForwardMetadataKey, f)
+	return v
 }
 
 // BuildFollowerHandleContext creates a context with follower handle metadata information.
@@ -110,26 +91,23 @@ func BuildFollowerHandleContext(ctx context.Context) context.Context {
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
-// GetFollowerHandleEnableInClientSide returns the enable follower handle in metadata.
+// GetFollowerHandleEnable returns the forwarded host in metadata.
 // Only used for test.
-func GetFollowerHandleEnableInClientSide(ctx context.Context) bool {
-	md, ok := metadata.FromOutgoingContext(ctx)
-	if !ok {
-		return false
-	}
-	_, ok = md[FollowerHandleMetadataKey]
+func GetFollowerHandleEnable(ctx context.Context, f func(context.Context) (metadata.MD, bool)) bool {
+	_, ok := getValueFromMetadata(ctx, FollowerHandleMetadataKey, f)
 	return ok
 }
 
-// GetFollowerHandleEnableInServerSide returns the enable follower handle in metadata.
-// Only used for test.
-func GetFollowerHandleEnableInServerSide(ctx context.Context) bool {
-	md, ok := metadata.FromIncomingContext(ctx)
+func getValueFromMetadata(ctx context.Context, key string, f func(context.Context) (metadata.MD, bool)) (string, bool) {
+	md, ok := f(ctx)
 	if !ok {
-		return false
+		return "", false
 	}
-	_, ok = md[FollowerHandleMetadataKey]
-	return ok
+	vs, ok := md[key]
+	if !ok {
+		return "", false
+	}
+	return vs[0], true
 }
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.
