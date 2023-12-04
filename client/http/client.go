@@ -32,6 +32,7 @@ import (
 )
 
 const (
+	defaultCallerID    = "pd-http-client"
 	httpScheme         = "http"
 	httpsScheme        = "https"
 	networkErrorStatus = "network error"
@@ -145,7 +146,7 @@ func NewClient(
 	pdAddrs []string,
 	opts ...ClientOption,
 ) Client {
-	c := &client{inner: &clientInner{}}
+	c := &client{inner: &clientInner{}, callerID: defaultCallerID}
 	// Apply the options first.
 	for _, opt := range opts {
 		opt(c)
@@ -219,8 +220,8 @@ func (c *client) execDuration(name string, duration time.Duration) {
 
 // Header key definition constants.
 const (
-	PDAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
-	ComponentSignatureKey    = "component"
+	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
+	componentSignatureKey    = "component"
 )
 
 // HeaderOption configures the HTTP header.
@@ -229,7 +230,7 @@ type HeaderOption func(header http.Header)
 // WithAllowFollowerHandle sets the header field to allow a PD follower to handle this request.
 func WithAllowFollowerHandle() HeaderOption {
 	return func(header http.Header) {
-		header.Set("PD-Allow-Follower-Handle", "true")
+		header.Set(pdAllowFollowerHandleKey, "true")
 	}
 }
 
@@ -278,7 +279,7 @@ func (c *client) request(
 	for _, opt := range headerOpts {
 		opt(req.Header)
 	}
-	req.Header.Set(ComponentSignatureKey, c.callerID)
+	req.Header.Set(componentSignatureKey, c.callerID)
 
 	start := time.Now()
 	resp, err := c.inner.cli.Do(req)
