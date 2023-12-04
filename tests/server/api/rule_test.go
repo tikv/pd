@@ -1097,8 +1097,7 @@ func (suite *ruleTestSuite) TestConcurrency() {
 		},
 	}
 	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	// FIXME: enable this test in api mode
-	env.RunTestInPDMode(suite.checkConcurrency)
+	env.RunTestInTwoModes(suite.checkConcurrency)
 }
 
 func (suite *ruleTestSuite) checkConcurrency(cluster *tests.TestCluster) {
@@ -1122,7 +1121,6 @@ func (suite *ruleTestSuite) checkConcurrency(cluster *tests.TestCluster) {
 		},
 	)
 	// test concurrency of set rule with different id
-	// TODO: this part cannot run in api mode
 	suite.checkConcurrencyWith(cluster,
 		func(i int) []placement.GroupBundle {
 			return []placement.GroupBundle{
