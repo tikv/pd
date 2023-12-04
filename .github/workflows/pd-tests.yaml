@@ -23,9 +23,9 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     outputs:
-      job-total: 14
+      job-total: 13
     steps:
       - uses: actions/setup-go@v3
         with:
@@ -44,8 +44,8 @@ jobs:
       - name: Make Test
         env:
           WORKER_ID: ${{ matrix.worker_id }}
-          WORKER_COUNT: 14
-          JOB_COUNT: 10 # 11, 12 13 14 are for other integrations jobs
+          WORKER_COUNT: 13
+          JOB_COUNT: 10 # 11, 12, 13 are for other integrations jobs
         run: |
           make ci-test-job JOB_COUNT=$(($JOB_COUNT)) JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID
