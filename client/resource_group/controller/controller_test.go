@@ -97,7 +97,11 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 	kvCalculator := gc.getKVCalculator()
 	for idx, testCase := range testCases {
 		caseNum := fmt.Sprintf("case %d", idx)
+<<<<<<< HEAD
 		consumption, _, err := gc.onRequestWait(context.TODO(), testCase.req)
+=======
+		consumption, _, _, priority, err := gc.onRequestWait(context.TODO(), testCase.req)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488))
 		re.NoError(err, caseNum)
 		expectedConsumption := &rmpb.Consumption{}
 		if testCase.req.IsWrite() {
