@@ -36,6 +36,8 @@ const (
 	dialTimeout = 3 * time.Second
 	// ForwardMetadataKey is used to record the forwarded host of PD.
 	ForwardMetadataKey = "pd-forwarded-host"
+	// FollowerHandleMetadataKey is used to mark the permit of follower handle.
+	FollowerHandleMetadataKey = "pd-allow-follower-handle"
 )
 
 // GetClientConn returns a gRPC client connection.
@@ -73,6 +75,61 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 func BuildForwardContext(ctx context.Context, addr string) context.Context {
 	md := metadata.Pairs(ForwardMetadataKey, addr)
 	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// GetForwardedHostInClientSide returns the forwarded host in metadata.
+// Only used for test.
+func GetForwardedHostInClientSide(ctx context.Context) string {
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		return ""
+	}
+	if t, ok := md[ForwardMetadataKey]; ok {
+		return t[0]
+	}
+	return ""
+}
+
+// GetForwardedHostInServerSide returns the forwarded host in metadata.
+// Only used for test.
+func GetForwardedHostInServerSide(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	if t, ok := md[ForwardMetadataKey]; ok {
+		return t[0]
+	}
+	return ""
+}
+
+// BuildFollowerHandleContext creates a context with follower handle metadata information.
+// It is used in client side.
+func BuildFollowerHandleContext(ctx context.Context) context.Context {
+	md := metadata.Pairs(FollowerHandleMetadataKey, "")
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// GetFollowerHandleEnableInClientSide returns the enable follower handle in metadata.
+// Only used for test.
+func GetFollowerHandleEnableInClientSide(ctx context.Context) bool {
+	md, ok := metadata.FromOutgoingContext(ctx)
+	if !ok {
+		return false
+	}
+	_, ok = md[FollowerHandleMetadataKey]
+	return ok
+}
+
+// GetFollowerHandleEnableInServerSide returns the enable follower handle in metadata.
+// Only used for test.
+func GetFollowerHandleEnableInServerSide(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return false
+	}
+	_, ok = md[FollowerHandleMetadataKey]
+	return ok
 }
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.

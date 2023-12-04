@@ -33,6 +33,9 @@ import (
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -74,8 +77,8 @@ type ServiceDiscovery interface {
 	// GetServingAddr returns the serving endpoint which is the leader in a quorum-based cluster
 	// or the primary in a primary/secondary configured cluster.
 	GetServingAddr() string
-	// GetBackupAddrs gets the addresses of the current reachable and healthy backup service
-	// endpoints randomly. Backup service endpoints are followers in a quorum-based cluster or
+	// GetBackupAddrs gets the addresses of the current reachable backup service
+	// endpoints. Backup service endpoints are followers in a quorum-based cluster or
 	// secondaries in a primary/secondary configured cluster.
 	GetBackupAddrs() []string
 	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
@@ -95,6 +98,246 @@ type ServiceDiscovery interface {
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
 	AddServiceAddrsSwitchedCallback(callbacks ...func())
+}
+
+// ServiceClient is an interface that defines a set of operations for a raw PD gRPC client to specific PD server.
+type ServiceClient interface {
+	// GetAddress returns the address information of the PD server.
+	GetAddress() string
+	// GetClientConn returns the gRPC connection of the service client
+	GetClientConn() *grpc.ClientConn
+	// BuildGRPCContext builds a context object with a gRPC context.
+	// ctx: the original context object.
+	// mustLeader: whether must send to leader.
+	BuildGRPCContext(ctx context.Context, mustLeader bool) context.Context
+	// IsLeader returns whether the target PD server is leader.
+	IsLeader() bool
+	// Available returns if the network or other availability for the current service client is available.
+	Available() bool
+	// CheckAvailable checks the status about network connection or other availability of the current service client
+	CheckAvailable()
+	// CheckNetworkAvailable checks if the network connection for the current service client is available
+	CheckNetworkAvailable(context.Context)
+	// RespToErr checks if client need to retry based on the PD server error response.
+	RespToErr(*pdpb.Error, error) bool
+}
+
+var _ ServiceClient = (*pdServiceClient)(nil)
+var _ ServiceClient = (*pdServiceAPIClient)(nil)
+
+type pdServiceClient struct {
+	addr       string
+	conn       *grpc.ClientConn
+	isLeader   bool
+	leaderAddr string
+
+	networkFailure atomic.Bool
+}
+
+func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
+	return &pdServiceClient{
+		addr:       addr,
+		conn:       conn,
+		isLeader:   isLeader,
+		leaderAddr: leaderAddr,
+	}
+}
+
+// GetAddress implements ServiceClient.
+func (c *pdServiceClient) GetAddress() string {
+	if c == nil {
+		return ""
+	}
+	return c.addr
+}
+
+// BuildGRPCContext implements ServiceClient.
+func (c *pdServiceClient) BuildGRPCContext(ctx context.Context, toLeader bool) context.Context {
+	if c == nil {
+		return ctx
+	}
+	if c.IsLeader() {
+		return ctx
+	}
+	if toLeader {
+		return grpcutil.BuildForwardContext(ctx, c.leaderAddr)
+	}
+	return grpcutil.BuildFollowerHandleContext(ctx)
+}
+
+// IsLeader implements ServiceClient.
+func (c *pdServiceClient) IsLeader() bool {
+	if c == nil {
+		return false
+	}
+	return c.isLeader
+}
+
+// NetworkAvailable implements ServiceClient.
+func (c *pdServiceClient) Available() bool {
+	if c == nil {
+		return false
+	}
+	return !c.networkFailure.Load()
+}
+
+// CheckAvailable implements ServiceClient.
+func (c *pdServiceClient) CheckAvailable() {}
+
+// CheckNetworkAvailable implements ServiceClient.
+func (c *pdServiceClient) CheckNetworkAvailable(ctx context.Context) {
+	if c == nil || c.conn == nil {
+		return
+	}
+	healthCli := healthpb.NewHealthClient(c.conn)
+	resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
+	failpoint.Inject("unreachableNetwork1", func() {
+		resp = nil
+		err = status.New(codes.Unavailable, "unavailable").Err()
+	})
+	rpcErr, ok := status.FromError(err)
+	if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		c.networkFailure.Store(true)
+	} else {
+		c.networkFailure.Store(false)
+	}
+}
+
+func isNetworkError(code codes.Code) bool {
+	return code == codes.Unavailable || code == codes.DeadlineExceeded
+}
+
+// GetClientConn implements ServiceClient.
+func (c *pdServiceClient) GetClientConn() *grpc.ClientConn {
+	if c == nil {
+		return nil
+	}
+	return c.conn
+}
+
+// RespToErr implements ServiceClient.
+func (c *pdServiceClient) RespToErr(pdErr *pdpb.Error, err error) bool {
+	if c.isLeader {
+		return false
+	}
+	// NOTE: maybe we can mark network unavailable here.
+	return false
+}
+
+type errFn func(pdErr *pdpb.Error) bool
+
+func regionAPIErrorFn(pdErr *pdpb.Error) bool {
+	return pdErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND
+}
+
+// pdServiceAPIClient is a specific API client for PD service.
+// It extends the pdServiceClient and adds additional fields for managing availability
+type pdServiceAPIClient struct {
+	ServiceClient
+	fn errFn
+
+	unavailable      atomic.Bool
+	unavailableUntil atomic.Value
+}
+
+func newPDServiceAPIClient(client ServiceClient, f errFn) ServiceClient {
+	return &pdServiceAPIClient{
+		ServiceClient: client,
+		fn:            f,
+	}
+}
+
+// Available implements ServiceClient.
+func (c *pdServiceAPIClient) Available() bool {
+	return c.ServiceClient.Available() && !c.unavailable.Load()
+}
+
+// CheckkAvailable implements ServiceClient.
+func (c *pdServiceAPIClient) CheckAvailable() {
+	if !c.unavailable.Load() {
+		return
+	}
+	until := c.unavailableUntil.Load().(time.Time)
+	if time.Now().After(until) {
+		c.unavailable.Store(false)
+	}
+}
+
+// RespToErr implements ServiceClient.
+func (c *pdServiceAPIClient) RespToErr(pdErr *pdpb.Error, err error) bool {
+	if c.IsLeader() {
+		return false
+	}
+	if err == nil && pdErr == nil {
+		return false
+	}
+	if c.fn(pdErr) && c.unavailable.CompareAndSwap(false, true) {
+		c.unavailableUntil.Store(time.Now().Add(time.Second * 10))
+		failpoint.Inject("fastCheckAvailable", func() {
+			c.unavailableUntil.Store(time.Now().Add(time.Millisecond * 100))
+		})
+	}
+	return true
+}
+
+// pdServiceBalancerNode is a balancer node for PD service.
+// It extends the pdServiceClient and adds additional fields for the next polling client in the chain.
+type pdServiceBalancerNode struct {
+	ServiceClient
+	next *pdServiceBalancerNode
+}
+
+// pdServiceBalancer is a load balancer for PD service clients.
+// It is used to balance the request to all servers and manage the connections to multiple PD service nodes.
+type pdServiceBalancer struct {
+	mu        sync.Mutex
+	now       *pdServiceBalancerNode
+	totalNode int
+}
+
+func (c *pdServiceBalancer) set(clients []ServiceClient) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(clients) == 0 {
+		return
+	}
+	c.totalNode = len(clients)
+	head := &pdServiceBalancerNode{
+		ServiceClient: clients[0],
+	}
+	head.next = head
+	last := head
+	for i := 1; i < c.totalNode; i++ {
+		next := &pdServiceBalancerNode{
+			ServiceClient: clients[i],
+			next:          head,
+		}
+		head = next
+		last.next = head
+	}
+	c.now = head
+}
+
+func (c *pdServiceBalancer) next() {
+	c.now = c.now.next
+}
+
+func (c *pdServiceBalancer) get() (ret ServiceClient) {
+	c.mu.Lock()
+	i := 0
+	defer c.mu.Unlock()
+	if c.now == nil {
+		return nil
+	}
+	for ; i < c.totalNode; i++ {
+		if c.now.Available() {
+			ret = c.now
+			c.next()
+			return
+		}
+		c.next()
+	}
+	return
 }
 
 type updateKeyspaceIDFunc func() error
