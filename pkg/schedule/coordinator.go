@@ -513,6 +513,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
+	log.Info("scheduler config is updated", zap.Reflect("scheduler-config", scheduleCfg.Schedulers))
 
 	c.markSchedulersInitialized()
 }
