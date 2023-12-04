@@ -2,10 +2,7 @@
 
 # ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX>
 
-if [[ $2 -gt 13 ]]; then 
-    dirs=($(find ./client -iname "Makefile" -exec dirname {} \; | sort -u))
-    printf "%s " "${dirs[@]}"  
-elif [[ $2 -gt 10 ]]; then
+if [[ $2 -gt 10 ]]; then
     # Get integration test list.
     makefile_dirs=($(find . -iname "Makefile" -exec dirname {} \; | sort -u))
     submod_dirs=($(find . -iname "go.mod" -exec dirname {} \; | sort -u))
@@ -13,7 +10,9 @@ elif [[ $2 -gt 10 ]]; then
     # Currently, we only have 3 integration tests, so we can hardcode the task index.
     for t in ${integration_tasks[@]}; do
         if [[ "$t" = "./tests/integrations/client" && "$2" = 11 ]]; then
-            printf "%s " "$t"
+            res=("./client")
+            res+=($t)
+            printf "%s " "${res[@]}"
             break
         elif [[ "$t" = "./tests/integrations/tso" && "$2" = 12 ]]; then
             printf "%s " "$t"
