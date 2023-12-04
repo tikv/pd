@@ -2,7 +2,11 @@
 
 # ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX>
 
-if [[ $2 -gt 10 ]]; then
+if [[ $2 -gt 13 ]]; then 
+    cd "./client"
+    dirs=($(find . -iname "*_test.go" -exec dirname {} \; | sort -u | sed -e "s/^\./github.com\/tikv\/pd\/client/"))
+    printf "%s " "${dirs[@]}"  
+elif [[ $2 -gt 10 ]]; then
     # Get integration test list.
     makefile_dirs=($(find . -iname "Makefile" -exec dirname {} \; | sort -u))
     submod_dirs=($(find . -iname "go.mod" -exec dirname {} \; | sort -u))
