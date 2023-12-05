@@ -118,8 +118,8 @@ type serviceClientTestSuite struct {
 	leaderServer   *testServer
 	followerServer *testServer
 
-	leaderClient   ServiceClient
-	followerClient ServiceClient
+	leaderClient   *pdServiceClient
+	followerClient *pdServiceClient
 }
 
 func TestServiceClientClientTestSuite(t *testing.T) {
@@ -172,14 +172,14 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(leader.IsLeader())
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
-	follower.CheckNetworkAvailable(suite.ctx)
-	leader.CheckNetworkAvailable(suite.ctx)
+	follower.checkNetworkAvailable(suite.ctx)
+	leader.checkNetworkAvailable(suite.ctx)
 	re.False(follower.Available())
 	re.False(leader.Available())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 
-	follower.CheckNetworkAvailable(suite.ctx)
-	leader.CheckNetworkAvailable(suite.ctx)
+	follower.checkNetworkAvailable(suite.ctx)
+	leader.checkNetworkAvailable(suite.ctx)
 	re.True(follower.Available())
 	re.True(leader.Available())
 
@@ -238,11 +238,11 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
 	re.False(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
-	followerAPIClient.CheckAvailable()
-	leaderAPIClient.CheckAvailable()
+	followerAPIClient.markAsAvailable()
+	leaderAPIClient.markAsAvailable()
 	re.False(followerAPIClient.Available())
 	time.Sleep(time.Millisecond * 100)
-	followerAPIClient.CheckAvailable()
+	followerAPIClient.markAsAvailable()
 	re.True(followerAPIClient.Available())
 
 	re.True(followerAPIClient.NeedRetry(nil, err))
