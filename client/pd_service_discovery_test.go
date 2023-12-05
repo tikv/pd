@@ -194,8 +194,8 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.NoError(err)
 	re.Equal(resp.GetMessage(), "Hello pd")
 
-	re.False(follower.RespToErr(nil, nil))
-	re.False(leader.RespToErr(nil, nil))
+	re.False(follower.NeedRetry(nil, nil))
+	re.False(leader.NeedRetry(nil, nil))
 
 	ctx1 := context.WithoutCancel(suite.ctx)
 	ctx1 = follower.BuildGRPCContext(ctx1, false)
@@ -229,13 +229,13 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 		Type: pdpb.ErrorType_REGION_NOT_FOUND,
 	}
 	err = errors.New("error")
-	re.True(followerAPIClient.RespToErr(pdErr1, nil))
-	re.False(leaderAPIClient.RespToErr(pdErr1, nil))
+	re.True(followerAPIClient.NeedRetry(pdErr1, nil))
+	re.False(leaderAPIClient.NeedRetry(pdErr1, nil))
 	re.True(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
 
-	re.True(followerAPIClient.RespToErr(pdErr2, nil))
-	re.False(leaderAPIClient.RespToErr(pdErr2, nil))
+	re.True(followerAPIClient.NeedRetry(pdErr2, nil))
+	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
 	re.False(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
 	followerAPIClient.CheckAvailable()
@@ -245,8 +245,8 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	followerAPIClient.CheckAvailable()
 	re.True(followerAPIClient.Available())
 
-	re.True(followerAPIClient.RespToErr(nil, err))
-	re.False(leaderAPIClient.RespToErr(nil, err))
+	re.True(followerAPIClient.NeedRetry(nil, err))
+	re.False(leaderAPIClient.NeedRetry(nil, err))
 	re.True(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
 

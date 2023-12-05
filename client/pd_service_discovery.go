@@ -118,8 +118,9 @@ type ServiceClient interface {
 	CheckAvailable()
 	// CheckNetworkAvailable checks if the network connection for the current service client is available
 	CheckNetworkAvailable(context.Context)
-	// RespToErr checks if client need to retry based on the PD server error response.
-	RespToErr(*pdpb.Error, error) bool
+	// NeedRetry checks if client need to retry based on the PD server error response.
+	// And It will mark the client as unavailable if the pd error shows the follower can't handle request.
+	NeedRetry(*pdpb.Error, error) bool
 }
 
 var _ ServiceClient = (*pdServiceClient)(nil)
@@ -215,13 +216,9 @@ func (c *pdServiceClient) GetClientConn() *grpc.ClientConn {
 	return c.conn
 }
 
-// RespToErr implements ServiceClient.
-func (c *pdServiceClient) RespToErr(pdErr *pdpb.Error, err error) bool {
-	if c.isLeader {
-		return false
-	}
-	// NOTE: maybe we can mark network unavailable here.
-	return false
+// NeedRetry implements ServiceClient.
+func (c *pdServiceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
+	return !c.IsLeader()
 }
 
 type errFn func(pdErr *pdpb.Error) bool
@@ -263,8 +260,8 @@ func (c *pdServiceAPIClient) CheckAvailable() {
 	}
 }
 
-// RespToErr implements ServiceClient.
-func (c *pdServiceAPIClient) RespToErr(pdErr *pdpb.Error, err error) bool {
+// NeedRetry implements ServiceClient.
+func (c *pdServiceAPIClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	if c.IsLeader() {
 		return false
 	}
