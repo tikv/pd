@@ -373,6 +373,11 @@ func (c *tsoServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGl
 	c.globalAllocPrimariesUpdatedCb = callback
 }
 
+// GetServiceClient implements ServiceDiscovery
+func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
+	return c.apiSvcDiscovery.GetServiceClient()
+}
+
 // getPrimaryAddr returns the primary address.
 func (c *tsoServiceDiscovery) getPrimaryAddr() string {
 	c.keyspaceGroupSD.RLock()

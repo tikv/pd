@@ -262,8 +262,10 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re := suite.Require()
 	follower := suite.followerClient
 	leader := suite.leaderClient
+	followerAPIClient := newPDServiceAPIClient(follower, emptyErrorFn)
+	leaderAPIClient := newPDServiceAPIClient(leader, emptyErrorFn)
 	b := &pdServiceBalancer{}
-	b.set([]ServiceClient{leader, follower})
+	b.set([]ServiceClient{leaderAPIClient, followerAPIClient})
 	re.Equal(b.totalNode, 2)
 
 	for i := 0; i < 10; i++ {

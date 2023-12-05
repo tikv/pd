@@ -522,7 +522,7 @@ func TestGetRegionByFollowerForwarding(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	pd.MemberHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -548,7 +548,7 @@ func TestGetTsoByFollowerForwarding1(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	pd.MemberHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -579,7 +579,7 @@ func TestGetTsoByFollowerForwarding2(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	pd.MemberHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -614,7 +614,7 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	pd.MemberHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -702,6 +702,126 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestGetRegionFromFollower(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pd.MemberHealthCheckInterval = 100 * time.Millisecond
+	cluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(re, ctx, endpoints)
+	cli.UpdateOption(pd.EnableFollowerHandle, true)
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	testutil.Eventually(re, func() bool {
+		ret := true
+		for _, s := range cluster.GetServers() {
+			if s.IsLeader() {
+				continue
+			}
+			if !s.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning() {
+				ret = false
+			}
+		}
+		return ret
+	})
+	// follower have no region
+	cnt := 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, uint64(2))
+	}
+	re.Equal(cnt, 100)
+
+	// send heartbeat, so follower will have region.
+	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	testutil.Eventually(re, func() bool {
+		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(ctx)
+		re.NoError(err)
+		regionID := regionIDAllocator.alloc()
+		region := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			Peers: peers,
+		}
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(leader.GetServer()),
+			Region: region,
+			Leader: peers[0],
+		}
+		err = regionHeartbeat.Send(req)
+		re.NoError(err)
+		_, err = regionHeartbeat.Recv()
+		return err == nil
+	})
+
+	// because we can't check whether this request is processed by followers from response,
+	// we can disable forward and make network problem for leader.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	time.Sleep(150 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, uint64(4))
+	}
+	re.Equal(cnt, 100)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	time.Sleep(100 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, uint64(4))
+	}
+	re.Equal(cnt, 100)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+
+	// follower client failed will retry by leader service client.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/followerHandleError", "return(true)"))
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, uint64(4))
+	}
+	re.Equal(cnt, 100)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/followerHandleError"))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastCheckAvailable", "return(true)"))
+	time.Sleep(100 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, uint64(4))
+	}
+	re.Equal(cnt, 100)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
 }
 
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {

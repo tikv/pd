@@ -384,16 +384,16 @@ func (s *GrpcServer) getForwardedHost(ctx, streamCtx context.Context, serviceNam
 	return forwardedHost, nil
 }
 
-func (s *GrpcServer) isLocalRequest(forwardedHost string) bool {
+func (s *GrpcServer) isLocalRequest(host string) bool {
 	failpoint.Inject("useForwardRequest", func() {
 		failpoint.Return(false)
 	})
-	if forwardedHost == "" {
+	if host == "" {
 		return true
 	}
 	memberAddrs := s.GetMember().Member().GetClientUrls()
 	for _, addr := range memberAddrs {
-		if addr == forwardedHost {
+		if addr == host {
 			return true
 		}
 	}
