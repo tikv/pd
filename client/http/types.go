@@ -341,6 +341,86 @@ func (r *Rule) Clone() *Rule {
 	return &clone
 }
 
+var (
+	_ json.Marshaler   = (*Rule)(nil)
+	_ json.Unmarshaler = (*Rule)(nil)
+)
+
+// This is a helper struct used to customizing the JSON marshal/unmarshal methods of `Rule`.
+type rule struct {
+	GroupID          string            `json:"group_id"`
+	ID               string            `json:"id"`
+	Index            int               `json:"index,omitempty"`
+	Override         bool              `json:"override,omitempty"`
+	StartKeyHex      string            `json:"start_key"`
+	EndKeyHex        string            `json:"end_key"`
+	Role             PeerRoleType      `json:"role"`
+	IsWitness        bool              `json:"is_witness"`
+	Count            int               `json:"count"`
+	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`
+	LocationLabels   []string          `json:"location_labels,omitempty"`
+	IsolationLevel   string            `json:"isolation_level,omitempty"`
+}
+
+// MarshalJSON implements `json.Marshaler` interface to make sure we could set the correct start/end key.
+func (r *Rule) MarshalJSON() ([]byte, error) {
+	tempRule := &rule{
+		GroupID:          r.GroupID,
+		ID:               r.ID,
+		Index:            r.Index,
+		Override:         r.Override,
+		StartKeyHex:      r.StartKeyHex,
+		EndKeyHex:        r.EndKeyHex,
+		Role:             r.Role,
+		IsWitness:        r.IsWitness,
+		Count:            r.Count,
+		LabelConstraints: r.LabelConstraints,
+		LocationLabels:   r.LocationLabels,
+		IsolationLevel:   r.IsolationLevel,
+	}
+	// Converts the start/end key to hex format if the corresponding hex field is empty.
+	if len(r.StartKey) > 0 && len(r.StartKeyHex) == 0 {
+		tempRule.StartKeyHex = rawKeyToKeyHexStr(r.StartKey)
+	}
+	if len(r.EndKey) > 0 && len(r.EndKeyHex) == 0 {
+		tempRule.EndKeyHex = rawKeyToKeyHexStr(r.EndKey)
+	}
+	return json.Marshal(tempRule)
+}
+
+// UnmarshalJSON implements `json.Unmarshaler` interface to make sure we could get the correct start/end key.
+func (r *Rule) UnmarshalJSON(bytes []byte) error {
+	var tempRule rule
+	err := json.Unmarshal(bytes, &tempRule)
+	if err != nil {
+		return err
+	}
+	newRule := Rule{
+		GroupID:          tempRule.GroupID,
+		ID:               tempRule.ID,
+		Index:            tempRule.Index,
+		Override:         tempRule.Override,
+		StartKeyHex:      tempRule.StartKeyHex,
+		EndKeyHex:        tempRule.EndKeyHex,
+		Role:             tempRule.Role,
+		IsWitness:        tempRule.IsWitness,
+		Count:            tempRule.Count,
+		LabelConstraints: tempRule.LabelConstraints,
+		LocationLabels:   tempRule.LocationLabels,
+		IsolationLevel:   tempRule.IsolationLevel,
+	}
+	newRule.StartKey, err = keyHexStrToRawKey(newRule.StartKeyHex)
+	if err != nil {
+		return err
+	}
+	newRule.EndKey, err = keyHexStrToRawKey(newRule.EndKeyHex)
+	if err != nil {
+		return err
+	}
+	*r = newRule
+	return nil
+}
+
 // RuleOpType indicates the operation type
 type RuleOpType string
 
@@ -362,6 +442,94 @@ type RuleOp struct {
 func (r RuleOp) String() string {
 	b, _ := json.Marshal(r)
 	return string(b)
+}
+
+var (
+	_ json.Marshaler   = (*RuleOp)(nil)
+	_ json.Unmarshaler = (*RuleOp)(nil)
+)
+
+// This is a helper struct used to customizing the JSON marshal/unmarshal methods of `RuleOp`.
+type ruleOp struct {
+	GroupID          string            `json:"group_id"`
+	ID               string            `json:"id"`
+	Index            int               `json:"index,omitempty"`
+	Override         bool              `json:"override,omitempty"`
+	StartKeyHex      string            `json:"start_key"`
+	EndKeyHex        string            `json:"end_key"`
+	Role             PeerRoleType      `json:"role"`
+	IsWitness        bool              `json:"is_witness"`
+	Count            int               `json:"count"`
+	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`
+	LocationLabels   []string          `json:"location_labels,omitempty"`
+	IsolationLevel   string            `json:"isolation_level,omitempty"`
+	Action           RuleOpType        `json:"action"`
+	DeleteByIDPrefix bool              `json:"delete_by_id_prefix"`
+}
+
+// MarshalJSON implements `json.Marshaler` interface to make sure we could set the correct start/end key.
+func (r *RuleOp) MarshalJSON() ([]byte, error) {
+	tempRuleOp := &ruleOp{
+		GroupID:          r.GroupID,
+		ID:               r.ID,
+		Index:            r.Index,
+		Override:         r.Override,
+		StartKeyHex:      r.StartKeyHex,
+		EndKeyHex:        r.EndKeyHex,
+		Role:             r.Role,
+		IsWitness:        r.IsWitness,
+		Count:            r.Count,
+		LabelConstraints: r.LabelConstraints,
+		LocationLabels:   r.LocationLabels,
+		IsolationLevel:   r.IsolationLevel,
+		Action:           r.Action,
+		DeleteByIDPrefix: r.DeleteByIDPrefix,
+	}
+	// Converts the start/end key to hex format if the corresponding hex field is empty.
+	if len(r.StartKey) > 0 && len(r.StartKeyHex) == 0 {
+		tempRuleOp.StartKeyHex = rawKeyToKeyHexStr(r.StartKey)
+	}
+	if len(r.EndKey) > 0 && len(r.EndKeyHex) == 0 {
+		tempRuleOp.EndKeyHex = rawKeyToKeyHexStr(r.EndKey)
+	}
+	return json.Marshal(tempRuleOp)
+}
+
+// UnmarshalJSON implements `json.Unmarshaler` interface to make sure we could get the correct start/end key.
+func (r *RuleOp) UnmarshalJSON(bytes []byte) error {
+	var tempRuleOp ruleOp
+	err := json.Unmarshal(bytes, &tempRuleOp)
+	if err != nil {
+		return err
+	}
+	newRuleOp := RuleOp{
+		Rule: &Rule{
+			GroupID:          tempRuleOp.GroupID,
+			ID:               tempRuleOp.ID,
+			Index:            tempRuleOp.Index,
+			Override:         tempRuleOp.Override,
+			StartKeyHex:      tempRuleOp.StartKeyHex,
+			EndKeyHex:        tempRuleOp.EndKeyHex,
+			Role:             tempRuleOp.Role,
+			IsWitness:        tempRuleOp.IsWitness,
+			Count:            tempRuleOp.Count,
+			LabelConstraints: tempRuleOp.LabelConstraints,
+			LocationLabels:   tempRuleOp.LocationLabels,
+			IsolationLevel:   tempRuleOp.IsolationLevel,
+		},
+		Action:           tempRuleOp.Action,
+		DeleteByIDPrefix: tempRuleOp.DeleteByIDPrefix,
+	}
+	newRuleOp.StartKey, err = keyHexStrToRawKey(newRuleOp.StartKeyHex)
+	if err != nil {
+		return err
+	}
+	newRuleOp.EndKey, err = keyHexStrToRawKey(newRuleOp.EndKeyHex)
+	if err != nil {
+		return err
+	}
+	*r = newRuleOp
+	return nil
 }
 
 // RuleGroup defines properties of a rule group.

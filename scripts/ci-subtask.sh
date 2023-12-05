@@ -10,7 +10,9 @@ if [[ $2 -gt 10 ]]; then
     # Currently, we only have 3 integration tests, so we can hardcode the task index.
     for t in ${integration_tasks[@]}; do
         if [[ "$t" = "./tests/integrations/client" && "$2" = 11 ]]; then
-            printf "%s " "$t"
+            res=("./client")
+            res+=($t)
+            printf "%s " "${res[@]}"
             break
         elif [[ "$t" = "./tests/integrations/tso" && "$2" = 12 ]]; then
             printf "%s " "$t"

@@ -402,7 +402,9 @@ func (suite *configTestSuite) checkConfigPDServer(cluster *tests.TestCluster) {
 	suite.Equal("table", sc.KeyType)
 	suite.Equal(typeutil.StringSlice([]string{}), sc.RuntimeServices)
 	suite.Equal("", sc.MetricStorage)
-	suite.Equal("auto", sc.DashboardAddress)
+	if sc.DashboardAddress != "auto" { // dashboard has been assigned
+		re.Equal(leaderServer.GetAddr(), sc.DashboardAddress)
+	}
 	suite.Equal(int(3), sc.FlowRoundByDigit)
 	suite.Equal(typeutil.NewDuration(time.Second), sc.MinResolvedTSPersistenceInterval)
 	suite.Equal(24*time.Hour, sc.MaxResetTSGap.Duration)

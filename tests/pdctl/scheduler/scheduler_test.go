@@ -545,7 +545,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	mustUsage([]string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler", "60"})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
-	checkSchedulerWithStatusCommand("paused", nil)
+	checkSchedulerWithStatusCommand("paused", []string{})
 
 	// set label scheduler to disabled manually.
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "label-scheduler"}, nil)
@@ -560,7 +560,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	cfg.Schedulers = origin
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
-	checkSchedulerWithStatusCommand("disabled", nil)
+	checkSchedulerWithStatusCommand("disabled", []string{})
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
