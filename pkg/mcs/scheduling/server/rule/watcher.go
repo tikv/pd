@@ -94,6 +94,7 @@ func NewWatcher(
 		ctx:                   ctx,
 		cancel:                cancel,
 		rulesPathPrefix:       endpoint.RulesPathPrefix(clusterID),
+		ruleCommonPathPrefix:  endpoint.RuleCommonPathPrefix(clusterID),
 		ruleGroupPathPrefix:   endpoint.RuleGroupPathPrefix(clusterID),
 		regionLabelPathPrefix: endpoint.RegionLabelPathPrefix(clusterID),
 		etcdClient:            etcdClient,
