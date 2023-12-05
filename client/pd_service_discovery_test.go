@@ -149,6 +149,11 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 }
 
 func (suite *serviceClientTestSuite) TearDownTest() {
+	suite.leaderServer.server.resetCount()
+	suite.followerServer.server.resetCount()
+}
+
+func (suite *serviceClientTestSuite) TearDownSuite() {
 	suite.leaderServer.grpcServer.GracefulStop()
 	suite.followerServer.grpcServer.GracefulStop()
 	suite.clean()

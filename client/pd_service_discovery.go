@@ -210,7 +210,10 @@ func (c *pdServiceClient) GetClientConn() *grpc.ClientConn {
 
 // NeedRetry implements ServiceClient.
 func (c *pdServiceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
-	return !c.IsLeader()
+	if c.IsLeader() {
+		return false
+	}
+	return !(err == nil && pdErr == nil)
 }
 
 type errFn func(pdErr *pdpb.Error) bool
