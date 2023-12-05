@@ -114,12 +114,9 @@ type ServiceClient interface {
 	IsLeader() bool
 	// Available returns if the network or other availability for the current service client is available.
 	Available() bool
-	// CheckAvailable checks the status about network connection or other availability of the current service client
-	CheckAvailable()
-	// CheckNetworkAvailable checks if the network connection for the current service client is available
-	CheckNetworkAvailable(context.Context)
-	// RespToErr checks if client need to retry based on the PD server error response.
-	RespToErr(*pdpb.Error, error) bool
+	// NeedRetry checks if client need to retry based on the PD server error response.
+	// And It will mark the client as unavailable if the pd error shows the follower can't handle request.
+	NeedRetry(*pdpb.Error, error) bool
 }
 
 var _ ServiceClient = (*pdServiceClient)(nil)
@@ -134,7 +131,7 @@ type pdServiceClient struct {
 	networkFailure atomic.Bool
 }
 
-func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
+func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) *pdServiceClient {
 	return &pdServiceClient{
 		addr:       addr,
 		conn:       conn,
@@ -181,11 +178,7 @@ func (c *pdServiceClient) Available() bool {
 	return !c.networkFailure.Load()
 }
 
-// CheckAvailable implements ServiceClient.
-func (c *pdServiceClient) CheckAvailable() {}
-
-// CheckNetworkAvailable implements ServiceClient.
-func (c *pdServiceClient) CheckNetworkAvailable(ctx context.Context) {
+func (c *pdServiceClient) checkNetworkAvailable(ctx context.Context) {
 	if c == nil || c.conn == nil {
 		return
 	}
@@ -215,13 +208,9 @@ func (c *pdServiceClient) GetClientConn() *grpc.ClientConn {
 	return c.conn
 }
 
-// RespToErr implements ServiceClient.
-func (c *pdServiceClient) RespToErr(pdErr *pdpb.Error, err error) bool {
-	if c.isLeader {
-		return false
-	}
-	// NOTE: maybe we can mark network unavailable here.
-	return false
+// NeedRetry implements ServiceClient.
+func (c *pdServiceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
+	return !c.IsLeader()
 }
 
 type errFn func(pdErr *pdpb.Error) bool
@@ -240,7 +229,7 @@ type pdServiceAPIClient struct {
 	unavailableUntil atomic.Value
 }
 
-func newPDServiceAPIClient(client ServiceClient, f errFn) ServiceClient {
+func newPDServiceAPIClient(client ServiceClient, f errFn) *pdServiceAPIClient {
 	return &pdServiceAPIClient{
 		ServiceClient: client,
 		fn:            f,
@@ -252,8 +241,7 @@ func (c *pdServiceAPIClient) Available() bool {
 	return c.ServiceClient.Available() && !c.unavailable.Load()
 }
 
-// CheckkAvailable implements ServiceClient.
-func (c *pdServiceAPIClient) CheckAvailable() {
+func (c *pdServiceAPIClient) markAsAvailable() {
 	if !c.unavailable.Load() {
 		return
 	}
@@ -263,8 +251,8 @@ func (c *pdServiceAPIClient) CheckAvailable() {
 	}
 }
 
-// RespToErr implements ServiceClient.
-func (c *pdServiceAPIClient) RespToErr(pdErr *pdpb.Error, err error) bool {
+// NeedRetry implements ServiceClient.
+func (c *pdServiceAPIClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	if c.IsLeader() {
 		return false
 	}

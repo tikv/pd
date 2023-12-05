@@ -118,8 +118,8 @@ type serviceClientTestSuite struct {
 	leaderServer   *testServer
 	followerServer *testServer
 
-	leaderClient   ServiceClient
-	followerClient ServiceClient
+	leaderClient   *pdServiceClient
+	followerClient *pdServiceClient
 }
 
 func TestServiceClientClientTestSuite(t *testing.T) {
@@ -172,14 +172,14 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(leader.IsLeader())
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
-	follower.CheckNetworkAvailable(suite.ctx)
-	leader.CheckNetworkAvailable(suite.ctx)
+	follower.checkNetworkAvailable(suite.ctx)
+	leader.checkNetworkAvailable(suite.ctx)
 	re.False(follower.Available())
 	re.False(leader.Available())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 
-	follower.CheckNetworkAvailable(suite.ctx)
-	leader.CheckNetworkAvailable(suite.ctx)
+	follower.checkNetworkAvailable(suite.ctx)
+	leader.checkNetworkAvailable(suite.ctx)
 	re.True(follower.Available())
 	re.True(leader.Available())
 
@@ -194,8 +194,8 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.NoError(err)
 	re.Equal(resp.GetMessage(), "Hello pd")
 
-	re.False(follower.RespToErr(nil, nil))
-	re.False(leader.RespToErr(nil, nil))
+	re.False(follower.NeedRetry(nil, nil))
+	re.False(leader.NeedRetry(nil, nil))
 
 	ctx1 := context.WithoutCancel(suite.ctx)
 	ctx1 = follower.BuildGRPCContext(ctx1, false)
@@ -229,24 +229,24 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 		Type: pdpb.ErrorType_REGION_NOT_FOUND,
 	}
 	err = errors.New("error")
-	re.True(followerAPIClient.RespToErr(pdErr1, nil))
-	re.False(leaderAPIClient.RespToErr(pdErr1, nil))
+	re.True(followerAPIClient.NeedRetry(pdErr1, nil))
+	re.False(leaderAPIClient.NeedRetry(pdErr1, nil))
 	re.True(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
 
-	re.True(followerAPIClient.RespToErr(pdErr2, nil))
-	re.False(leaderAPIClient.RespToErr(pdErr2, nil))
+	re.True(followerAPIClient.NeedRetry(pdErr2, nil))
+	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
 	re.False(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
-	followerAPIClient.CheckAvailable()
-	leaderAPIClient.CheckAvailable()
+	followerAPIClient.markAsAvailable()
+	leaderAPIClient.markAsAvailable()
 	re.False(followerAPIClient.Available())
 	time.Sleep(time.Millisecond * 100)
-	followerAPIClient.CheckAvailable()
+	followerAPIClient.markAsAvailable()
 	re.True(followerAPIClient.Available())
 
-	re.True(followerAPIClient.RespToErr(nil, err))
-	re.False(leaderAPIClient.RespToErr(nil, err))
+	re.True(followerAPIClient.NeedRetry(nil, err))
+	re.False(leaderAPIClient.NeedRetry(nil, err))
 	re.True(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
 
