@@ -71,9 +71,10 @@ func NewWatcher(
 func (w *Watcher) initializeStoreWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		store := &metapb.Store{}
+		key := string(kv.Key)
 		if err := proto.Unmarshal(kv.Value, store); err != nil {
 			log.Warn("failed to unmarshal store entry",
-				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
+				zap.String("event-kv-key", key), zap.Error(err))
 			return err
 		}
 		origin := w.basicCluster.GetStore(store.GetId())

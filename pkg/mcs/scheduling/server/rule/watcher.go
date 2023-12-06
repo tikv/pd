@@ -123,8 +123,9 @@ func NewWatcher(
 func (rw *Watcher) initializeRuleWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		err := func() error {
-			if strings.HasPrefix(string(kv.Key), rw.rulesPathPrefix) {
-				log.Info("update placement rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+			key := string(kv.Key)
+			if strings.HasPrefix(key, rw.rulesPathPrefix) {
+				log.Info("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
 				rule, err := placement.NewRuleFromJSON(kv.Value)
 				if err != nil {
 					return err
@@ -135,8 +136,8 @@ func (rw *Watcher) initializeRuleWatcher() error {
 					rw.checkerController.AddSuspectKeyRange(oldRule.StartKey, oldRule.EndKey)
 				}
 				return rw.ruleManager.SetRule(rule)
-			} else if strings.HasPrefix(string(kv.Key), rw.ruleGroupPathPrefix) {
-				log.Info("update placement rule group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+			} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
+				log.Info("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
 				ruleGroup, err := placement.NewRuleGroupFromJSON(kv.Value)
 				if err != nil {
 					return err
@@ -147,7 +148,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				}
 				return rw.ruleManager.SetRuleGroup(ruleGroup)
 			} else {
-				log.Warn("unknown key when update placement rule", zap.String("key", string(kv.Key)))
+				log.Warn("unknown key when update placement rule", zap.String("key", key))
 				return nil
 			}
 		}()
@@ -159,7 +160,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		groupID, ruleID, err := func() (string, string, error) {
-			if strings.HasPrefix(string(kv.Key), rw.rulesPathPrefix) {
+			if strings.HasPrefix(key, rw.rulesPathPrefix) {
 				log.Info("delete placement rule", zap.String("key", key))
 				ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix+"/"))
 				if err != nil {
@@ -171,7 +172,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				}
 				rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
 				return rule.GroupID, rule.ID, rw.ruleManager.DeleteRule(rule.GroupID, rule.ID)
-			} else if strings.HasPrefix(string(kv.Key), rw.ruleGroupPathPrefix) {
+			} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
 				log.Info("delete placement rule group", zap.String("key", key))
 				trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix+"/")
 				for _, rule := range rw.ruleManager.GetRulesByGroup(trimmedKey) {
@@ -179,7 +180,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				}
 				return trimmedKey, "", rw.ruleManager.DeleteRuleGroup(trimmedKey)
 			} else {
-				log.Warn("unknown key when delete placement rule", zap.String("key", string(kv.Key)))
+				log.Warn("unknown key when delete placement rule", zap.String("key", key))
 				return "", "", nil
 			}
 		}()
@@ -205,7 +206,8 @@ func (rw *Watcher) initializeRuleWatcher() error {
 func (rw *Watcher) initializeRegionLabelWatcher() error {
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		key := string(kv.Key)
+		log.Info("update region label rule", zap.String("key", key), zap.String("value", string(kv.Value)))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			return err
