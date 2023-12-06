@@ -341,8 +341,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 		cluster.GetLeaderServer().ResetPDLeader()
 		cluster.WaitLeader()
 	}
-	// leader should be changed when campaign leader frequently
-	cluster.WaitLeader()
+	// PD leader should be different from before because etcd leader changed.
 	re.NotEmpty(cluster.GetLeader())
 	re.NotEqual(leader, cluster.GetLeader())
 }
