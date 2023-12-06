@@ -82,7 +82,7 @@ func TestError(t *testing.T) {
 	re.Contains(lg.Message(), rfc)
 	err := errors.New("test error")
 	log.Error("test", ZapError(ErrEtcdLeaderNotFound, err))
-	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]test error`
+	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]etcd leader not found: test error`
 	re.Contains(lg.Message(), rfc)
 }
 
