@@ -219,9 +219,10 @@ func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grp
 	if !ok {
 		panic(fmt.Sprintf("the allocator leader in %s should exist", dcLocation))
 	}
+	// todo: if we support local tso forward, we should get or create client conns.
 	cc, ok := c.clientConns.Load(url)
 	if !ok {
-		panic(fmt.Sprintf("the client connection of %s in %s should exist", url, dcLocation))
+		return nil, url.(string)
 	}
 	return cc.(*grpc.ClientConn), url.(string)
 }
@@ -346,7 +347,6 @@ func (c *baseClient) switchLeader(addrs []string) error {
 
 	if _, err := c.getOrCreateGRPCConn(addr); err != nil {
 		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
-		return err
 	}
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
@@ -419,6 +419,12 @@ func (c *baseClient) getOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) 
 	dCtx, cancel := context.WithTimeout(c.ctx, dialTimeout)
 	defer cancel()
 	cc, err := grpcutil.GetClientConn(dCtx, addr, tlsCfg, c.option.gRPCDialOptions...)
+	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
+		if val, ok := val.(string); ok && val == addr {
+			cc = nil
+			err = errors.Errorf("unreachable network")
+		}
+	})
 	if err != nil {
 		return nil, err
 	}

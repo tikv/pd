@@ -493,7 +493,7 @@ func (s *clientTestSuite) TestCustomTimeout(c *C) {
 	c.Assert(time.Since(start), Less, 2*time.Second)
 }
 
-func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
+func (s *clientTestSuite) TestGetRegionByFollowerForwarding(c *C) {
 	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
@@ -516,7 +516,7 @@ func (s *clientTestSuite) TestGetRegionFromFollowerClient(c *C) {
 }
 
 // case 1: unreachable -> normal
-func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
+func (s *clientTestSuite) TestGetTsoByFollowerForwarding1(c *C) {
 	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
@@ -544,7 +544,7 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient1(c *C) {
 }
 
 // case 2: unreachable -> leader transfer -> normal
-func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
+func (s *clientTestSuite) TestGetTsoByFollowerForwarding2(c *C) {
 	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(s.ctx, 3)
 	c.Assert(err, IsNil)
@@ -573,6 +573,98 @@ func (s *clientTestSuite) TestGetTsoFromFollowerClient2(c *C) {
 	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"), IsNil)
 	time.Sleep(5 * time.Second)
 	checkTS(c, cli, lastTS)
+}
+
+// case 3: network partition between client and follower A -> transfer leader to follower A -> normal
+func (s *clientTestSuite) TestGetTsoAndRegionByFollowerForwarding(c *C) {
+	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
+	cluster, err := tests.NewTestCluster(s.ctx, 3)
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	endpoints := s.runServer(c, cluster)
+	cluster.WaitLeader()
+	leader := cluster.GetServer(cluster.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(c, leader.GetAddr())
+	testutil.WaitUntil(c, func() bool {
+		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(s.ctx)
+		c.Assert(err, IsNil)
+		regionID := regionIDAllocator.alloc()
+		region := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			Peers: peers,
+		}
+		req := &pdpb.RegionHeartbeatRequest{
+			Header: newHeader(leader.GetServer()),
+			Region: region,
+			Leader: peers[0],
+		}
+		err = regionHeartbeat.Send(req)
+		c.Assert(err, IsNil)
+		_, err = regionHeartbeat.Recv()
+		return err == nil
+	})
+	follower := cluster.GetServer(cluster.GetFollower())
+	c.Assert(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())), IsNil)
+
+	cli := setupCli(c, s.ctx, endpoints, pd.WithForwardingOption(true))
+	var lastTS uint64
+	testutil.WaitUntil(c, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		c.Log(err)
+		return false
+	})
+	lastTS = checkTS(c, cli, lastTS)
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
+	c.Assert(err, IsNil)
+	c.Assert(r, NotNil)
+	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(),
+		leader.GetServer().Name(), follower.GetServer().Name())
+	cluster.WaitLeader()
+	testutil.WaitUntil(c, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		c.Log(err)
+		return false
+	})
+	lastTS = checkTS(c, cli, lastTS)
+	testutil.WaitUntil(c, func() bool {
+		r, err = cli.GetRegion(context.Background(), []byte("a"))
+		if err == nil && r != nil {
+			return true
+		}
+		return false
+	})
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork2"), IsNil)
+	testutil.WaitUntil(c, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		c.Log(err)
+		return false
+	})
+	lastTS = checkTS(c, cli, lastTS)
+	testutil.WaitUntil(c, func() bool {
+		r, err = cli.GetRegion(context.Background(), []byte("a"))
+		if err == nil && r != nil {
+			return true
+		}
+		return false
+	})
 }
 
 func checkTS(c *C, cli pd.Client, lastTS uint64) uint64 {

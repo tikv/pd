@@ -631,27 +631,32 @@ func (c *client) checkAllocator(
 		requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(0)
 	}()
 	cc, u := c.getAllocatorClientConnByDCLocation(dc)
-	healthCli := healthpb.NewHealthClient(cc)
+	var healthCli healthpb.HealthClient
 	for {
 		// the pd/allocator leader change, we need to re-establish the stream
 		if u != url {
 			log.Info("[pd] the leader of the allocator leader is changed", zap.String("dc", dc), zap.String("origin", url), zap.String("new", u))
 			return
 		}
-		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
-		resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-		failpoint.Inject("unreachableNetwork", func() {
-			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
-		})
-		healthCancel()
-		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			// create a stream of the original allocator
-			cctx, cancel := context.WithCancel(dispatcherCtx)
-			stream, err := c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
-			if err == nil && stream != nil {
-				log.Info("[pd] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
-				updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
-				return
+		if healthCli == nil && cc != nil {
+			healthCli = healthpb.NewHealthClient(cc)
+		}
+		if healthCli != nil {
+			healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
+			resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
+			failpoint.Inject("unreachableNetwork", func() {
+				resp.Status = healthpb.HealthCheckResponse_UNKNOWN
+			})
+			healthCancel()
+			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
+				// create a stream of the original allocator
+				cctx, cancel := context.WithCancel(dispatcherCtx)
+				stream, err := c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
+				if err == nil && stream != nil {
+					log.Info("[pd] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
+					updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
+					return
+				}
 			}
 		}
 		select {
@@ -660,7 +665,7 @@ func (c *client) checkAllocator(
 		case <-time.After(time.Second):
 			// To ensure we can get the latest allocator leader
 			// and once the leader is changed, we can exit this function.
-			_, u = c.getAllocatorClientConnByDCLocation(dc)
+			cc, u = c.getAllocatorClientConnByDCLocation(dc)
 		}
 	}
 }
@@ -947,29 +952,33 @@ func (c *client) tryConnect(
 	for i := 0; i < maxRetryTimes; i++ {
 		c.ScheduleCheckLeader()
 		cc, url = c.getAllocatorClientConnByDCLocation(dc)
-		cctx, cancel := context.WithCancel(dispatcherCtx)
-		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
-		failpoint.Inject("unreachableNetwork", func() {
-			stream = nil
-			err = status.New(codes.Unavailable, "unavailable").Err()
-		})
-		if stream != nil && err == nil {
-			updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
-			return nil
-		}
-
-		if err != nil && c.option.enableForwarding {
-			// The reason we need to judge if the error code is equal to "Canceled" here is that
-			// when we create a stream we use a goroutine to manually control the timeout of the connection.
-			// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
-			// But it conflicts with the retry mechanism since we use the error code to decide if it is caused by network error.
-			// And actually the `Canceled` error can be regarded as a kind of network error in some way.
-			if rpcErr, ok := status.FromError(err); ok && (isNetworkError(rpcErr.Code()) || rpcErr.Code() == codes.Canceled) {
-				networkErrNum++
+		if cc != nil {
+			cctx, cancel := context.WithCancel(dispatcherCtx)
+			stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
+			failpoint.Inject("unreachableNetwork", func() {
+				stream = nil
+				err = status.New(codes.Unavailable, "unavailable").Err()
+			})
+			if stream != nil && err == nil {
+				updateAndClear(url, &connectionContext{url, stream, cctx, cancel})
+				return nil
 			}
-		}
 
-		cancel()
+			if err != nil && c.option.enableForwarding {
+				// The reason we need to judge if the error code is equal to "Canceled" here is that
+				// when we create a stream we use a goroutine to manually control the timeout of the connection.
+				// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
+				// But it conflicts with the retry mechanism since we use the error code to decide if it is caused by network error.
+				// And actually the `Canceled` error can be regarded as a kind of network error in some way.
+				if rpcErr, ok := status.FromError(err); ok && (isNetworkError(rpcErr.Code()) || rpcErr.Code() == codes.Canceled) {
+					networkErrNum++
+				}
+			}
+
+			cancel()
+		} else {
+			networkErrNum++
+		}
 		select {
 		case <-dispatcherCtx.Done():
 			return err
