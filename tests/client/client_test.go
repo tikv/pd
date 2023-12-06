@@ -635,7 +635,7 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 
 	endpoints := runServer(re, cluster)
 	re.NotEmpty(cluster.WaitLeader())
-	leader := cluster.GetLeaderServer()
+	leader := cluster.GetServer(cluster.GetLeader())
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	testutil.Eventually(re, func() bool {
 		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(ctx)

@@ -225,9 +225,10 @@ func (c *baseClient) getAllocatorClientConnByDCLocation(dcLocation string) (*grp
 	if !ok {
 		panic(fmt.Sprintf("the allocator leader in %s should exist", dcLocation))
 	}
+	// todo: if we support local tso forward, we should get or create client conns.
 	cc, ok := c.clientConns.Load(url)
 	if !ok {
-		panic(fmt.Sprintf("the client connection of %s in %s should exist", url, dcLocation))
+		return nil, url.(string)
 	}
 	return cc.(*grpc.ClientConn), url.(string)
 }
