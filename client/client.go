@@ -658,7 +658,9 @@ func (c *client) checkAllocator(
 			healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
 			resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 			failpoint.Inject("unreachableNetwork", func() {
-				resp.Status = healthpb.HealthCheckResponse_UNKNOWN
+				if err == nil {
+					resp.Status = healthpb.HealthCheckResponse_UNKNOWN
+				}
 			})
 			healthCancel()
 			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
