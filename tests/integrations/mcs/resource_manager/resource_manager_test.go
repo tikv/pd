@@ -208,10 +208,16 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 	defer controller.Stop()
 	controller.OnRequestWait(suite.ctx, "test0", tcs.makeReadRequest())
 	meta := controller.GetActiveResourceGroup("test0")
+	metaShadow, err := controller.GetResourceGroup("test0")
+	re.NoError(err)
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
+	re.Equal(metaShadow.RUSettings.RU, group.RUSettings.RU)
 	controller.OnRequestWait(suite.ctx, "test1", tcs.makeReadRequest())
 	meta = controller.GetActiveResourceGroup("test1")
+	metaShadow, err = controller.GetResourceGroup("test1")
+	re.NoError(err)
 	re.Equal(meta.RUSettings.RU, group.RUSettings.RU)
+	re.Equal(metaShadow.RUSettings.RU, group.RUSettings.RU)
 	suite.NoError(err)
 	// Mock add resource groups
 	for i := 3; i < 9; i++ {
@@ -731,7 +737,11 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			},
 		},
 		{"test2", rmpb.GroupMode_RUMode, false, true,
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0}`,
+=======
+			`{"name":"test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":2,"watch":{"lasting_duration_ms":100000,"type":1}}}`,
+>>>>>>> 026ddf08a (resource_manager/client: update kvproto and add `GetResourceGroup` functon (#6515)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 			func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
@@ -741,6 +751,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 						},
 					},
 				}
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 			},
 		},
 		{"default", rmpb.GroupMode_RUMode, false, true,
@@ -752,6 +763,16 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 							FillRate:   10000,
 							BurstLimit: -1,
 						},
+=======
+				gs.RunawaySettings = &rmpb.RunawaySettings{
+					Rule: &rmpb.RunawayRule{
+						ExecElapsedTimeMs: 1000,
+					},
+					Action: rmpb.RunawayAction_Kill,
+					Watch: &rmpb.RunawayWatch{
+						Type:              rmpb.RunawayWatchType_Similar,
+						LastingDurationMs: 100000,
+>>>>>>> 026ddf08a (resource_manager/client: update kvproto and add `GetResourceGroup` functon (#6515)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 					},
 				}
 			},
