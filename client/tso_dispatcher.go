@@ -229,13 +229,7 @@ func (c *tsoClient) checkAllocator(
 		requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(0)
 	}()
 	cc, u := c.GetTSOAllocatorClientConnByDCLocation(dc)
-<<<<<<< HEAD
-	healthCli := healthpb.NewHealthClient(cc)
-=======
 	var healthCli healthpb.HealthClient
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
->>>>>>> 54bf70e45 (client: update the leader even if the connection creation fails (#7443))
 	for {
 		// the pd/allocator leader change, we need to re-establish the stream
 		if u != url {
