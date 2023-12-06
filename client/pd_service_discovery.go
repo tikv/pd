@@ -146,12 +146,16 @@ type pdServiceClient struct {
 }
 
 func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) *pdServiceClient {
-	return &pdServiceClient{
+	cli := &pdServiceClient{
 		addr:       addr,
 		conn:       conn,
 		isLeader:   isLeader,
 		leaderAddr: leaderAddr,
 	}
+	if conn == nil {
+		cli.networkFailure.Store(true)
+	}
+	return cli
 }
 
 // GetAddress implements ServiceClient.
@@ -963,9 +967,6 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) (bool, error) {
 		leaderClient := newPDServiceClient(addr, addr, newConn, true)
 		c.leader.Store(leaderClient)
 	}
-	if err != nil {
-		return true, err
-	}
 	// Run callbacks
 	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
 		if err := c.tsoGlobalAllocLeaderUpdatedCb(addr); err != nil {
@@ -976,7 +977,7 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) (bool, error) {
 		cb()
 	}
 	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader.GetAddress()))
-	return true, nil
+	return true, err
 }
 
 func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leader *pdpb.Member) (changed bool) {

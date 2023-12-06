@@ -914,7 +914,6 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 		NeedBuckets: options.needBuckets,
 	}
 	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
-	fmt.Println(serviceClient.GetAddress(), serviceClient.IsLeader())
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
