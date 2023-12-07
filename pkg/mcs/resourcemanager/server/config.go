@@ -102,6 +102,9 @@ type ControllerConfig struct {
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
+
+	// EnableControllerTraceLog is to control whether resource control client enable trace.
+	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
