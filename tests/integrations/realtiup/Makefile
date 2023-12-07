@@ -63,6 +63,8 @@ kill_tiup:
 	if [ ! -z "$$pid" ]; then \
 		echo $$pid; \
 		kill $$pid; \
+		echo "waiting for tiup to exit..."; \
+		sleep 10; \
 	fi
 
 test:
