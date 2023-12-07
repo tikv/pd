@@ -98,7 +98,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	suite.keyspaceIDs = make([]uint32, 0)
 
 	if suite.legacy {
-		client, err := pd.NewClientWithContext(suite.ctx, strings.Split(suite.backendEndpoints, ","), pd.SecurityOption{})
+		client, err := pd.NewClientWithContext(suite.ctx, strings.Split(suite.backendEndpoints, ","), pd.SecurityOption{}, pd.WithForwardingOption(true))
 		re.NoError(err)
 		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 		re.True(ok)
@@ -263,7 +263,9 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 // TestGetMinTS tests the correctness of GetMinTS.
 func (suite *tsoClientTestSuite) TestGetMinTS() {
 	re := suite.Require()
-	suite.waitForAllKeyspaceGroupsInServing(re)
+	if !suite.legacy {
+		suite.waitForAllKeyspaceGroupsInServing(re)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
@@ -293,6 +295,15 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 		}
 	}
 	wg.Wait()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		var err error
+		_, _, err = suite.clients[0].GetMinTS(suite.ctx)
+		return err == nil
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 }
 
 // More details can be found in this issue: https://github.com/tikv/pd/issues/4884

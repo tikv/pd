@@ -87,6 +87,18 @@ func (conf *splitBucketSchedulerConfig) persistLocked() error {
 	return conf.storage.SaveSchedulerConfig(SplitBucketName, data)
 }
 
+func (conf *splitBucketSchedulerConfig) getDegree() int {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.Degree
+}
+
+func (conf *splitBucketSchedulerConfig) getSplitLimit() uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.SplitLimit
+}
+
 type splitBucketScheduler struct {
 	*BaseScheduler
 	conf    *splitBucketSchedulerConfig
@@ -202,7 +214,7 @@ func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 		splitBucketDisableCounter.Inc()
 		return false
 	}
-	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.SplitLimit
+	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.getSplitLimit()
 	if !allowed {
 		splitBuckerSplitLimitCounter.Inc()
 		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpSplit.String()).Inc()
@@ -224,7 +236,7 @@ func (s *splitBucketScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bo
 	plan := &splitBucketPlan{
 		conf:               conf,
 		cluster:            cluster,
-		hotBuckets:         cluster.BucketsStats(conf.Degree),
+		hotBuckets:         cluster.BucketsStats(conf.getDegree()),
 		hotRegionSplitSize: cluster.GetSchedulerConfig().GetMaxMovableHotPeerSize(),
 	}
 	return s.splitBucket(plan), nil
