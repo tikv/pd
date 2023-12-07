@@ -399,6 +399,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
 	controller.Start(suite.ctx)
+	defer controller.Stop()
 
 	testCases := []struct {
 		resourceGroupName string
@@ -461,7 +462,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	re.Error(err)
 	time.Sleep(time.Millisecond * 200)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate"))
-	controller.Stop()
 }
 
 // TestSwitchBurst is used to test https://github.com/tikv/pd/issues/6209
@@ -505,6 +505,7 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	}
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
 	controller.Start(suite.ctx)
+	defer controller.Stop()
 	resourceGroupName := suite.initGroups[1].Name
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 2, times: 100, waitDuration: 0}
 	for j := 0; j < tcs.times; j++ {
@@ -593,7 +594,6 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	re.Less(duration, 100*time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend"))
-	controller.Stop()
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
@@ -630,6 +630,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	}
 	c, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
 	c.Start(suite.ctx)
+	defer c.Stop()
 
 	resourceGroupName := groupNames[0]
 	// init
@@ -1077,6 +1078,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceManagerClientDegradedMo
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/degradedModeRU", "return(true)"))
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
 	controller.Start(suite.ctx)
+	defer controller.Stop()
 	tc := tokenConsumptionPerSecond{
 		rruTokensAtATime: 0,
 		wruTokensAtATime: 10000,
@@ -1160,6 +1162,7 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/fastCleanup", `return(true)`))
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
 	controller.Start(suite.ctx)
+	defer controller.Stop()
 
 	testConfig := struct {
 		tcs   tokenConsumptionPerSecond
@@ -1183,7 +1186,6 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	re.Nil(controller.GetActiveResourceGroup(group.Name))
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
-	controller.Stop()
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigChanged() {
@@ -1294,4 +1296,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	c1, err = controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
 	re.NoError(err)
 	re.EqualValues(expectRUCfg, c1.GetConfig())
+	c1.Stop()
+	c2.Stop()
 }
