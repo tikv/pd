@@ -818,18 +818,20 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				case clientv3.EventTypePut:
 					if err := lw.putFn(event.Kv); err != nil {
 						log.Error("put failed in watch loop", zap.Error(err),
-							zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+							zap.Int64("revision", revision), zap.String("name", lw.name),
+							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
-						log.Debug("put in watch loop", zap.String("name", lw.name),
+						log.Debug("put successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
 							zap.ByteString("value", event.Kv.Value))
 					}
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
 						log.Error("delete failed in watch loop", zap.Error(err),
-							zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+							zap.Int64("revision", revision), zap.String("name", lw.name),
+							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
-						log.Debug("delete in watch loop", zap.String("name", lw.name),
+						log.Debug("delete successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key))
 					}
 				}
