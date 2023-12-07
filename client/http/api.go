@@ -72,6 +72,10 @@ const (
 	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
+
+	Store          = "/pd/api/v1/store"
+	CheckLeader    = "/pd/api/v1/leader"
+	TransferLeader = "/pd/api/v1/leader/transfer"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -172,4 +176,14 @@ func PProfProfileAPIWithInterval(interval time.Duration) string {
 // PProfGoroutineWithDebugLevel returns the pprof goroutine API with debug level parameter.
 func PProfGoroutineWithDebugLevel(level int) string {
 	return fmt.Sprintf("%s?debug=%d", PProfGoroutine, level)
+}
+
+// LabelByStore returns the path of PD HTTP API to set store label.
+func LabelByStore(storeID int64) string {
+	return fmt.Sprintf("%s/%d/label", Store, storeID)
+}
+
+// TransferLeaderID returns the path of PD HTTP API to transfer leader by ID.
+func TransferLeaderID(leaderID string) string {
+	return fmt.Sprintf("%s/%s", TransferLeader, leaderID)
 }

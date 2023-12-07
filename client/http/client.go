@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -87,6 +88,14 @@ type Client interface {
 	// Additionally, it is important for the caller to handle the content of the response body properly
 	// in order to ensure that it can be read and marshaled correctly into `res`.
 	WithRespHandler(func(resp *http.Response, res interface{}) error) Client
+	SetStoreLabel(context.Context, int64, map[string]string) error
+
+	GetLeader(context.Context) (*pdpb.Member, error)
+	TransferLeader(context.Context, string) error
+
+	GetSchedulers(context.Context) ([]string, error)
+	AddScheduler(context.Context, string, map[string]interface{}) error
+
 	Close()
 }
 
@@ -728,4 +737,59 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		return 0, nil, errors.Trace(errors.New("min resolved ts is not enabled"))
 	}
 	return resp.MinResolvedTS, resp.StoresMinResolvedTS, nil
+}
+
+// SetStoreLabel sets the label of a store.
+func (c *client) SetStoreLabel(ctx context.Context, storeID int64, storeLabel map[string]string) error {
+	jsonBody, err := json.Marshal(storeLabel)
+	if err != nil {
+		return err
+	}
+
+	return c.requestWithRetry(ctx, "SetStoreLabel", LabelByStore(storeID),
+		http.MethodPost, bytes.NewBuffer(jsonBody), nil)
+}
+
+// GetLeader gets the leader of PD cluster.
+func (c *client) GetLeader(context.Context) (*pdpb.Member, error) {
+	var leader pdpb.Member
+	err := c.requestWithRetry(context.Background(), "GetLeader", CheckLeader,
+		http.MethodGet, http.NoBody, &leader)
+	if err != nil {
+		return nil, err
+	}
+	return &leader, nil
+}
+
+// TransferLeader transfers the PD leader.
+func (c *client) TransferLeader(ctx context.Context, newLeader string) error {
+	return c.requestWithRetry(ctx, "TransferLeader", TransferLeaderID(newLeader),
+		http.MethodPost, http.NoBody, nil)
+}
+
+// GetSchedulers gets the schedulers from PD cluster.
+func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
+	var schedulers []string
+	err := c.requestWithRetry(ctx, "GetSchedulers", Schedulers,
+		http.MethodGet, http.NoBody, &schedulers)
+	if err != nil {
+		return nil, err
+	}
+	return schedulers, nil
+}
+
+// AddScheduler adds a scheduler to PD cluster.
+func (c *client) AddScheduler(ctx context.Context, name string, args map[string]interface{}) error {
+	request := map[string]interface{}{
+		"name": name,
+	}
+	for arg, val := range args {
+		request[arg] = val
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	return c.requestWithRetry(ctx, "AddScheduler", Schedulers,
+		http.MethodPost, bytes.NewBuffer(data), nil)
 }
