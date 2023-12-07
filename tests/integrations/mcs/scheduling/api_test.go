@@ -388,6 +388,7 @@ func (suite *apiTestSuite) TestConfig() {
 		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-hot-region-scheduler")
 		suite.Contains(cfg.Schedule.SchedulersPayload, "balance-witness-scheduler")
 		suite.Contains(cfg.Schedule.SchedulersPayload, "transfer-witness-leader-scheduler")
+		suite.Contains(cfg.Schedule.SchedulersPayload, "evict-slow-store-scheduler")
 	}
 	env := tests.NewSchedulingTestEnvironment(suite.T())
 	env.RunTestInAPIMode(checkConfig)
