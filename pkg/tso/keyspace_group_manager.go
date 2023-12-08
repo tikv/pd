@@ -542,7 +542,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
-			return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
+			return errs.ErrJSONUnmarshal.Wrap(err)
 		}
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == mcsutils.DefaultKeyspaceGroupID {

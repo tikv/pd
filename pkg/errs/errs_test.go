@@ -94,24 +94,24 @@ func TestErrorEqual(t *testing.T) {
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err := errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err)
+	err2 = ErrSchedulerNotFound.Wrap(err)
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err1 = ErrSchedulerNotFound.FastGenByArgs()
-	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	err2 = ErrSchedulerNotFound.Wrap(err)
 	re.False(errors.ErrorEqual(err1, err2))
 
 	err3 := errors.New("test")
 	err4 := errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err3)
+	err2 = ErrSchedulerNotFound.Wrap(err4)
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err3 = errors.New("test1")
 	err4 = errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err3)
+	err2 = ErrSchedulerNotFound.Wrap(err4)
 	re.False(errors.ErrorEqual(err1, err2))
 }
 
