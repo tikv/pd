@@ -16,6 +16,7 @@ package client_test
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"net/http"
 	"sort"
@@ -79,6 +80,14 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 	suite.cancelFunc()
 	suite.client.Close()
 	suite.cluster.Destroy()
+}
+
+func (suite *httpClientTestSuite) TestHealth() {
+	re := suite.Require()
+	info, err := suite.client.GetHealth(context.Background())
+	re.NoError(err)
+	re.Equal("pd1", info.Healths[0].Name)
+	re.True(info.Healths[0].Health)
 }
 
 func (suite *httpClientTestSuite) TestMeta() {
@@ -372,14 +381,31 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 
 func (suite *httpClientTestSuite) TestScheduleConfig() {
 	re := suite.Require()
-	config, err := suite.client.GetScheduleConfig(suite.ctx)
+	configVal, err := suite.client.GetScheduleConfig(suite.ctx)
 	re.NoError(err)
+
+	// configVal to byte[]
+	configValBytes, err := json.Marshal(configVal)
+	re.NoError(err)
+	config := map[string]interface{}{}
+	err = json.Unmarshal(configValBytes, &config)
+	re.NoError(err)
+
 	re.Equal(float64(4), config["leader-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])
 	config["leader-schedule-limit"] = float64(8)
-	err = suite.client.SetScheduleConfig(suite.ctx, config)
+	// byte[] to configVal
+	configValBytes, err = json.Marshal(config)
 	re.NoError(err)
-	config, err = suite.client.GetScheduleConfig(suite.ctx)
+	err = json.Unmarshal(configValBytes, &configVal)
+	re.NoError(err)
+
+	err = suite.client.SetScheduleConfig(suite.ctx, configVal)
+	re.NoError(err)
+	configVal, err = suite.client.GetScheduleConfig(suite.ctx)
+	re.NoError(err)
+	config = map[string]interface{}{}
+	err = json.Unmarshal(configValBytes, &config)
 	re.NoError(err)
 	re.Equal(float64(8), config["leader-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])

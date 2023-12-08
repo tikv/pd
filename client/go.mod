@@ -5,6 +5,8 @@ go 1.21
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/cloudfoundry/gosigar v1.3.6
+	github.com/coreos/go-semver v0.3.1
+	github.com/docker/go-units v0.5.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
