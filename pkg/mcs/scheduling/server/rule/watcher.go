@@ -187,7 +187,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		if err != nil && strings.Contains(err.Error(), "no rule left") && groupID != "" {
 			rw.addPendingDeletion(key, groupID, ruleID)
 		}
-		return nil
+		return err
 	}
 	postEventFn := func() error {
 		return nil
@@ -254,7 +254,7 @@ func (rw *Watcher) addPendingDeletion(path, groupID, ruleID string) {
 func (rw *Watcher) tryFinishPendingDeletion() {
 	rw.pendingDeletion.Lock()
 	defer rw.pendingDeletion.Unlock()
-	originLen := len(rw.pendingDeletion.kvs)
+	previousLen := len(rw.pendingDeletion.kvs)
 	for k, v := range rw.pendingDeletion.kvs {
 		groupID, ruleID := v[0], v[1]
 		var err error
@@ -267,10 +267,8 @@ func (rw *Watcher) tryFinishPendingDeletion() {
 			delete(rw.pendingDeletion.kvs, k)
 		}
 	}
-	// If the length of the map is changed, it means that some rules or rule groups have been deleted.
-	// We need to force load the rules and rule groups to make sure sync with etcd.
-	if len(rw.pendingDeletion.kvs) != originLen {
-		rw.ruleWatcher.ForceLoad()
-		log.Info("force load rules", zap.Int("pending deletion", len(rw.pendingDeletion.kvs)), zap.Int("origin", originLen))
-	}
+	// TODO: If the length of the map is changed, it means that some rules or rule groups have been deleted.
+	// We need to compare the rules and rule groups to make sure sync with etcd,
+	// rather than just force load all the rules and rule groups.
+	log.Info("clean pending deletion", zap.Int("current", len(rw.pendingDeletion.kvs)), zap.Int("previous", previousLen))
 }
