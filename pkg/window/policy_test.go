@@ -81,10 +81,10 @@ func TestRollingPolicy_Add(t *testing.T) {
 				if asExpected {
 					re.Less(math.Abs(point-policy.window.buckets[offset].Points[0]), 1e-6,
 						fmt.Sprintf("error, time since last append: %vms, last offset: %v", totalTS, lastOffset))
-					lastOffset = offset
 				}
 				re.Less(math.Abs(points[i]-policy.window.buckets[offset].Points[0]), 1e-6,
 					fmt.Sprintf("error, time since last append: %vms, last offset: %v", totalTS, lastOffset))
+				lastOffset = offset
 			}
 		})
 	}
