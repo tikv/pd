@@ -86,15 +86,22 @@ func TestRateLimitConfigReload(t *testing.T) {
 
 type configTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestConfigTestSuite(t *testing.T) {
 	suite.Run(t, new(configTestSuite))
 }
 
+func (suite *configTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *configTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
 func (suite *configTestSuite) TestConfigAll() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfigAll)
+	suite.env.RunTestInTwoModes(suite.checkConfigAll)
 }
 
 func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
@@ -212,8 +219,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestConfigSchedule() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfigSchedule)
+	suite.env.RunTestInTwoModes(suite.checkConfigSchedule)
 }
 
 func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
@@ -231,14 +237,15 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	suite.NoError(err)
 
-	scheduleConfig1 := &sc.ScheduleConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, scheduleConfig1))
-	suite.Equal(*scheduleConfig1, *scheduleConfig)
+	tu.Eventually(re, func() bool {
+		scheduleConfig1 := &sc.ScheduleConfig{}
+		suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, scheduleConfig1))
+		return reflect.DeepEqual(*scheduleConfig1, *scheduleConfig)
+	})
 }
 
 func (suite *configTestSuite) TestConfigReplication() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfigReplication)
+	suite.env.RunTestInTwoModes(suite.checkConfigReplication)
 }
 
 func (suite *configTestSuite) checkConfigReplication(cluster *tests.TestCluster) {
@@ -281,8 +288,7 @@ func (suite *configTestSuite) checkConfigReplication(cluster *tests.TestCluster)
 }
 
 func (suite *configTestSuite) TestConfigLabelProperty() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfigLabelProperty)
+	suite.env.RunTestInTwoModes(suite.checkConfigLabelProperty)
 }
 
 func (suite *configTestSuite) checkConfigLabelProperty(cluster *tests.TestCluster) {
@@ -334,8 +340,7 @@ func (suite *configTestSuite) checkConfigLabelProperty(cluster *tests.TestCluste
 }
 
 func (suite *configTestSuite) TestConfigDefault() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfigDefault)
+	suite.env.RunTestInTwoModes(suite.checkConfigDefault)
 }
 
 func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
@@ -379,8 +384,7 @@ func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestConfigPDServer() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfigPDServer)
+	suite.env.RunTestInTwoModes(suite.checkConfigPDServer)
 }
 
 func (suite *configTestSuite) checkConfigPDServer(cluster *tests.TestCluster) {
@@ -507,8 +511,7 @@ func createTTLUrl(url string, ttl int) string {
 }
 
 func (suite *configTestSuite) TestConfigTTL() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfigTTL)
+	suite.env.RunTestInTwoModes(suite.checkConfigTTL)
 }
 
 func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
@@ -569,8 +572,7 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestTTLConflict() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkTTLConflict)
+	suite.env.RunTestInTwoModes(suite.checkTTLConflict)
 }
 
 func (suite *configTestSuite) checkTTLConflict(cluster *tests.TestCluster) {

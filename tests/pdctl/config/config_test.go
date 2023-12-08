@@ -17,8 +17,10 @@ package config_test
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +40,13 @@ import (
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 )
 
+// testDialClient used to dial http request. only used for test.
+var testDialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
+
 type testCase struct {
 	name  string
 	value interface{}
@@ -54,16 +63,43 @@ func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.Schedule
 
 type configTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestConfigTestSuite(t *testing.T) {
 	suite.Run(t, new(configTestSuite))
 }
 
+func (suite *configTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *configTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *configTestSuite) TearDownTest() {
+	cleanFunc := func(cluster *tests.TestCluster) {
+		def := placement.GroupBundle{
+			ID: "pd",
+			Rules: []*placement.Rule{
+				{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+			},
+		}
+		data, err := json.Marshal([]placement.GroupBundle{def})
+		suite.NoError(err)
+		leader := cluster.GetLeaderServer()
+		suite.NotNil(leader)
+		urlPrefix := leader.GetAddr()
+		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(suite.Require()))
+		suite.NoError(err)
+	}
+	suite.env.RunFuncInTwoModes(cleanFunc)
+}
+
 func (suite *configTestSuite) TestConfig() {
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkConfig)
+	suite.env.RunTestInTwoModes(suite.checkConfig)
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
 }
 
@@ -79,7 +115,6 @@ func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
 	}
 	svr := leaderServer.GetServer()
 	tests.MustPutStore(re, cluster, store)
-	defer cluster.Destroy()
 
 	// config show
 	args := []string{"-u", pdAddr, "config", "show"}
@@ -111,6 +146,7 @@ func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
 	re.NoError(err)
 	re.False(svr.GetPDServerConfig().TraceRegionFlow)
 
+	origin := svr.GetPDServerConfig().FlowRoundByDigit
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
@@ -119,6 +155,17 @@ func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "-10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.Error(err)
+
+	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", strconv.Itoa(origin)}
+	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
+		output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "server")
+		re.NoError(err)
+		var conf config.PDServerConfig
+		re.NoError(json.Unmarshal(output, &conf))
+		return conf.FlowRoundByDigit == origin
+	})
 
 	// config show schedule
 	args = []string{"-u", pdAddr, "config", "show", "schedule"}
@@ -295,8 +342,7 @@ func (suite *configTestSuite) checkConfig(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRules)
+	suite.env.RunTestInTwoModes(suite.checkPlacementRules)
 }
 
 func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
@@ -311,7 +357,6 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 		LastHeartbeat: time.Now().UnixNano(),
 	}
 	tests.MustPutStore(re, cluster, store)
-	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
 	re.NoError(err)
@@ -363,8 +408,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+	suite.env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
 }
 
 func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluster) {
@@ -379,8 +423,6 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluste
 		LastHeartbeat: time.Now().UnixNano(),
 	}
 	tests.MustPutStore(re, cluster, store)
-	defer cluster.Destroy()
-
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
@@ -443,8 +485,7 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *tests.TestCluste
 }
 
 func (suite *configTestSuite) TestPlacementRuleBundle() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+	suite.env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
 }
 
 func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluster) {
@@ -459,7 +500,6 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 		LastHeartbeat: time.Now().UnixNano(),
 	}
 	tests.MustPutStore(re, cluster, store)
-	defer cluster.Destroy()
 
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
 	re.NoError(err)
@@ -549,6 +589,25 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
 		{ID: "pf", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pf", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
+
+	// set default rule only
+	bundles = []placement.GroupBundle{{
+		ID: "pd",
+		Rules: []*placement.Rule{
+			{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+		},
+	}}
+	b, err = json.Marshal(bundles)
+	re.NoError(err)
+	re.NoError(os.WriteFile(fname, b, 0600))
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "save", "--in="+fname)
+	re.NoError(err)
+	_, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "delete", "--regexp", ".*f")
+	re.NoError(err)
+
+	suite.checkLoadRuleBundle(pdAddr, fname, []placement.GroupBundle{
+		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+	})
 }
 
 func (suite *configTestSuite) checkLoadRuleBundle(pdAddr string, fname string, expectValues []placement.GroupBundle) {
@@ -627,7 +686,6 @@ func TestReplicationMode(t *testing.T) {
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(re, cluster, store)
-	defer cluster.Destroy()
 
 	conf := config.ReplicationModeConfig{
 		ReplicationMode: "majority",
@@ -667,8 +725,7 @@ func TestReplicationMode(t *testing.T) {
 }
 
 func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
+	suite.env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
 }
 
 func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.TestCluster) {
@@ -682,8 +739,6 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 		State: metapb.StoreState_Up,
 	}
 	tests.MustPutStore(re, cluster, store)
-	defer cluster.Destroy()
-
 	checkMaxReplicas := func(expect uint64) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
@@ -819,8 +874,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *tests.Tes
 }
 
 func (suite *configTestSuite) TestPDServerConfig() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPDServerConfig)
+	suite.env.RunTestInTwoModes(suite.checkPDServerConfig)
 }
 
 func (suite *configTestSuite) checkPDServerConfig(cluster *tests.TestCluster) {
