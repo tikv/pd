@@ -38,6 +38,8 @@ const (
 	store                     = "/pd/api/v1/store"
 	Stores                    = "/pd/api/v1/stores"
 	StatsRegion               = "/pd/api/v1/stats/region"
+	LeaderPrefix              = "/pd/api/v1/leader"
+	TransferLeader            = "/pd/api/v1/leader/transfer"
 	// Config
 	Config          = "/pd/api/v1/config"
 	ClusterVersion  = "/pd/api/v1/config/cluster-version"
@@ -72,10 +74,6 @@ const (
 	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
-
-	Store          = "/pd/api/v1/store"
-	CheckLeader    = "/pd/api/v1/leader"
-	TransferLeader = "/pd/api/v1/leader/transfer"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -180,7 +178,7 @@ func PProfGoroutineWithDebugLevel(level int) string {
 
 // LabelByStore returns the path of PD HTTP API to set store label.
 func LabelByStore(storeID int64) string {
-	return fmt.Sprintf("%s/%d/label", Store, storeID)
+	return fmt.Sprintf("%s/%d/label", store, storeID)
 }
 
 // TransferLeaderID returns the path of PD HTTP API to transfer leader by ID.

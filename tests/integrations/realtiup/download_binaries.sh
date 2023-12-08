@@ -14,17 +14,6 @@ set -o pipefail
 # exclusively accessible when obtaining binaries from
 # http://fileserver.pingcap.net.
 branch=${THIRD_PARTY_TARGET_BRANCH:-master}
-# Specify whether to download the community version of binaries, the following
-# four arguments are applicable only when utilizing the community version of
-# binaries.
-community=${2:-false}
-# Specify which version of the community binaries that will be utilized.
-ver=${3:-v6.5.2}
-# Specify which os that will be used to pack the binaries.
-os=${4:-linux}
-# Specify which architecture that will be used to pack the binaries.
-arch=${5:-amd64}
-
 set -o nounset
 
 # See https://misc.flogisoft.com/bash/tip_colors_and_formatting.
@@ -74,30 +63,6 @@ function download_binaries() {
 	chmod a+x bin/*
 }
 
-# download_community_version will try to download required binaries from the
-# public accessible community version
-function download_community_binaries() {
-	local dist="${ver}-${os}-${arch}"
-	local tidb_file_name="tidb-community-server-$dist"
-	local tidb_tar_name="${tidb_file_name}.tar.gz"
-	local tidb_url="https://download.pingcap.org/$tidb_tar_name"
-
-	color-green "Download community binaries..."
-	download "$tidb_url" "$tidb_tar_name" "tmp/$tidb_tar_name"
-	# extract the tidb community version binaries
-	tar -xz -C tmp -f tmp/$tidb_tar_name
-	# extract the tikv server
-	tar -xz -C third_bin -f tmp/$tidb_file_name/tikv-${dist}.tar.gz
-	# extract the tidb server
-	tar -xz -C third_bin -f tmp/$tidb_file_name/tidb-${dist}.tar.gz
-	# extract the tiflash
-	tar -xz -C third_bin -f tmp/$tidb_file_name/tiflash-${dist}.tar.gz
-	mv third_bin/tiflash third_bin/_tiflash
-	mv third_bin/_tiflash/* bin && rm -rf third_bin/_tiflash
-
-	chmod a+x bin/*
-}
-
 function make_pd() {
 	echo 'download pd-server'
 	CUR_PATH=$(pwd)
@@ -119,7 +84,7 @@ mkdir -p third_bin
 
 # build pd-server
 make_pd
-[ $community == true ] && download_community_binaries || download_binaries
+download_binaries
 
 # Copy it to the bin directory in the root directory.
 rm -rf tmp

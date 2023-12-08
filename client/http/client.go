@@ -467,6 +467,34 @@ func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRan
 	return &regionStats, nil
 }
 
+// SetStoreLabel sets the label of a store.
+func (c *client) SetStoreLabel(ctx context.Context, storeID int64, storeLabel map[string]string) error {
+	jsonBody, err := json.Marshal(storeLabel)
+	if err != nil {
+		return err
+	}
+
+	return c.requestWithRetry(ctx, "SetStoreLabel", LabelByStore(storeID),
+		http.MethodPost, bytes.NewBuffer(jsonBody), nil)
+}
+
+// GetLeader gets the leader of PD cluster.
+func (c *client) GetLeader(context.Context) (*pdpb.Member, error) {
+	var leader pdpb.Member
+	err := c.requestWithRetry(context.Background(), "GetLeader", LeaderPrefix,
+		http.MethodGet, http.NoBody, &leader)
+	if err != nil {
+		return nil, err
+	}
+	return &leader, nil
+}
+
+// TransferLeader transfers the PD leader.
+func (c *client) TransferLeader(ctx context.Context, newLeader string) error {
+	return c.requestWithRetry(ctx, "TransferLeader", TransferLeaderID(newLeader),
+		http.MethodPost, http.NoBody, nil)
+}
+
 // GetScheduleConfig gets the schedule configurations.
 func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{}, error) {
 	var config map[string]interface{}
@@ -671,6 +699,33 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 		http.MethodPatch, bytes.NewBuffer(labelRulePatchJSON), nil)
 }
 
+// GetSchedulers gets the schedulers from PD cluster.
+func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
+	var schedulers []string
+	err := c.requestWithRetry(ctx, "GetSchedulers", Schedulers,
+		http.MethodGet, http.NoBody, &schedulers)
+	if err != nil {
+		return nil, err
+	}
+	return schedulers, nil
+}
+
+// AddScheduler adds a scheduler to PD cluster.
+func (c *client) AddScheduler(ctx context.Context, name string, args map[string]interface{}) error {
+	request := map[string]interface{}{
+		"name": name,
+	}
+	for arg, val := range args {
+		request[arg] = val
+	}
+	data, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	return c.requestWithRetry(ctx, "AddScheduler", Schedulers,
+		http.MethodPost, bytes.NewBuffer(data), nil)
+}
+
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.
 // The keys in the key range should be encoded in the hex bytes format (without encoding to the UTF-8 bytes).
 func (c *client) AccelerateSchedule(ctx context.Context, keyRange *KeyRange) error {
@@ -737,59 +792,4 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		return 0, nil, errors.Trace(errors.New("min resolved ts is not enabled"))
 	}
 	return resp.MinResolvedTS, resp.StoresMinResolvedTS, nil
-}
-
-// SetStoreLabel sets the label of a store.
-func (c *client) SetStoreLabel(ctx context.Context, storeID int64, storeLabel map[string]string) error {
-	jsonBody, err := json.Marshal(storeLabel)
-	if err != nil {
-		return err
-	}
-
-	return c.requestWithRetry(ctx, "SetStoreLabel", LabelByStore(storeID),
-		http.MethodPost, bytes.NewBuffer(jsonBody), nil)
-}
-
-// GetLeader gets the leader of PD cluster.
-func (c *client) GetLeader(context.Context) (*pdpb.Member, error) {
-	var leader pdpb.Member
-	err := c.requestWithRetry(context.Background(), "GetLeader", CheckLeader,
-		http.MethodGet, http.NoBody, &leader)
-	if err != nil {
-		return nil, err
-	}
-	return &leader, nil
-}
-
-// TransferLeader transfers the PD leader.
-func (c *client) TransferLeader(ctx context.Context, newLeader string) error {
-	return c.requestWithRetry(ctx, "TransferLeader", TransferLeaderID(newLeader),
-		http.MethodPost, http.NoBody, nil)
-}
-
-// GetSchedulers gets the schedulers from PD cluster.
-func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
-	var schedulers []string
-	err := c.requestWithRetry(ctx, "GetSchedulers", Schedulers,
-		http.MethodGet, http.NoBody, &schedulers)
-	if err != nil {
-		return nil, err
-	}
-	return schedulers, nil
-}
-
-// AddScheduler adds a scheduler to PD cluster.
-func (c *client) AddScheduler(ctx context.Context, name string, args map[string]interface{}) error {
-	request := map[string]interface{}{
-		"name": name,
-	}
-	for arg, val := range args {
-		request[arg] = val
-	}
-	data, err := json.Marshal(request)
-	if err != nil {
-		return err
-	}
-	return c.requestWithRetry(ctx, "AddScheduler", Schedulers,
-		http.MethodPost, bytes.NewBuffer(data), nil)
 }
