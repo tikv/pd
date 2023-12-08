@@ -67,6 +67,7 @@ func TestRollingPolicy_Add(t *testing.T) {
 			beginTime := time.Now()
 			policy := getRollingPolicy()
 			points := make([]float64, defaultSize)
+			asExpected := true
 			for i, n := range timeSleep {
 				totalTS += n
 				time.Sleep(time.Duration(n) * time.Millisecond)
@@ -74,7 +75,10 @@ func TestRollingPolicy_Add(t *testing.T) {
 				offset := int(time.Since(beginTime)/defaultBucketDuration) % defaultSize
 				points[i] += point
 				policy.Add(point)
-				if offset == test.offset[i] {
+				if offset != test.offset[i] {
+					asExpected = false
+				}
+				if asExpected {
 					re.Less(math.Abs(point-policy.window.buckets[offset].Points[0]), 1e-6,
 						fmt.Sprintf("error, time since last append: %vms, last offset: %v", totalTS, lastOffset))
 					lastOffset = offset
