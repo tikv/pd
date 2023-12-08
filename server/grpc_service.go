@@ -77,6 +77,17 @@ var (
 	ErrEtcdNotStarted                   = status.Errorf(codes.Unavailable, "server is started, but etcd not started")
 )
 
+var (
+	errRegionHeartbeatSend   = forwardFailCounter.WithLabelValues("region_heartbeat", "send")
+	errRegionHeartbeatClient = forwardFailCounter.WithLabelValues("region_heartbeat", "client")
+	errRegionHeartbeatStream = forwardFailCounter.WithLabelValues("region_heartbeat", "stream")
+	errRegionHeartbeatRecv   = forwardFailCounter.WithLabelValues("region_heartbeat", "recv")
+	errScatterRegionSend     = forwardFailCounter.WithLabelValues("scatter_region", "send")
+	errSplitRegionsSend      = forwardFailCounter.WithLabelValues("split_regions", "send")
+	errStoreHeartbeatSend    = forwardFailCounter.WithLabelValues("store_heartbeat", "send")
+	errGetOperatorSend       = forwardFailCounter.WithLabelValues("get_operator", "send")
+)
+
 // GrpcServer wraps Server to provide grpc service.
 type GrpcServer struct {
 	*Server
@@ -867,6 +878,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 					Stats: request.GetStats(),
 				}
 				if _, err := cli.StoreHeartbeat(ctx, req); err != nil {
+					errStoreHeartbeatSend.Inc()
 					log.Debug("forward store heartbeat failed", zap.Error(err))
 					// reset to let it be updated in the next request
 					s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
@@ -1216,12 +1228,14 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				}
 				client, err := s.getDelegateClient(s.ctx, forwardedSchedulingHost)
 				if err != nil {
+					errRegionHeartbeatClient.Inc()
 					log.Error("failed to get client", zap.Error(err))
 					continue
 				}
 				log.Info("create scheduling forwarding stream", zap.String("forwarded-host", forwardedSchedulingHost))
 				forwardSchedulingStream, _, cancel, err = s.createRegionHeartbeatSchedulingStream(stream.Context(), client)
 				if err != nil {
+					errRegionHeartbeatStream.Inc()
 					log.Error("failed to create stream", zap.Error(err))
 					continue
 				}
@@ -1250,6 +1264,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			}
 			if err := forwardSchedulingStream.Send(schedulingpbReq); err != nil {
 				forwardSchedulingStream = nil
+				errRegionHeartbeatSend.Inc()
 				log.Error("failed to send request to scheduling service", zap.Error(err))
 			}
 
@@ -1257,6 +1272,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			case err, ok := <-forwardErrCh:
 				if ok {
 					forwardSchedulingStream = nil
+					errRegionHeartbeatRecv.Inc()
 					log.Error("failed to send response", zap.Error(err))
 				}
 			default:
@@ -1692,6 +1708,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			}
 			resp, err := cli.ScatterRegions(ctx, req)
 			if err != nil {
+				errScatterRegionSend.Inc()
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
 				return s.convertScatterResponse(resp), err
@@ -1900,6 +1917,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 			}
 			resp, err := cli.GetOperator(ctx, req)
 			if err != nil {
+				errGetOperatorSend.Inc()
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
 				return s.convertOperatorResponse(resp), err
@@ -2174,6 +2192,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 			}
 			resp, err := cli.SplitRegions(ctx, req)
 			if err != nil {
+				errSplitRegionsSend.Inc()
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
 				return s.convertSplitResponse(resp), err

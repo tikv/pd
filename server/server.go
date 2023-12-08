@@ -489,13 +489,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
-	if !s.IsServiceIndependent(mcs.SchedulingServiceName) {
-		s.hotRegionStorage, err = storage.NewHotRegionsStorage(
-			ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
-		if err != nil {
-			return err
-		}
+
+	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
+	if err != nil {
+		return err
 	}
+
 	// Run callbacks
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.startCallbacks {

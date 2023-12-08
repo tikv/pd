@@ -57,7 +57,7 @@ const (
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
 	// OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
-	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, *rmpb.Consumption, uint32, error)
+	OnRequestWait(ctx context.Context, resourceGroupName string, info RequestInfo) (*rmpb.Consumption, *rmpb.Consumption, time.Duration, uint32, error)
 	// OnResponse is used to consume tokens after receiving response.
 	OnResponse(resourceGroupName string, req RequestInfo, resp ResponseInfo) (*rmpb.Consumption, error)
 	// IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
@@ -526,10 +526,10 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 // OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
-) (*rmpb.Consumption, *rmpb.Consumption, uint32, error) {
+) (*rmpb.Consumption, *rmpb.Consumption, time.Duration, uint32, error) {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, time.Duration(0), 0, err
 	}
 	return gc.onRequestWait(ctx, info)
 }
@@ -1176,7 +1176,7 @@ func (gc *groupCostController) calcRequest(counter *tokenCounter) float64 {
 
 func (gc *groupCostController) onRequestWait(
 	ctx context.Context, info RequestInfo,
-) (*rmpb.Consumption, *rmpb.Consumption, uint32, error) {
+) (*rmpb.Consumption, *rmpb.Consumption, time.Duration, uint32, error) {
 	delta := &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
@@ -1185,6 +1185,7 @@ func (gc *groupCostController) onRequestWait(
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
+	var waitDuration time.Duration
 
 	if !gc.burstable.Load() {
 		var err error
@@ -1217,6 +1218,7 @@ func (gc *groupCostController) onRequestWait(
 			}
 			gc.requestRetryCounter.Inc()
 			time.Sleep(retryInterval)
+			waitDuration += retryInterval
 		}
 		if err != nil {
 			gc.failedRequestCounter.Inc()
@@ -1226,9 +1228,10 @@ func (gc *groupCostController) onRequestWait(
 			failpoint.Inject("triggerUpdate", func() {
 				gc.lowRUNotifyChan <- struct{}{}
 			})
-			return nil, nil, 0, err
+			return nil, nil, waitDuration, 0, err
 		}
 		gc.successfulRequestDuration.Observe(d.Seconds())
+		waitDuration += d
 	}
 
 	gc.mu.Lock()
@@ -1245,7 +1248,7 @@ func (gc *groupCostController) onRequestWait(
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
 
-	return delta, penalty, gc.meta.Priority, nil
+	return delta, penalty, waitDuration, gc.meta.Priority, nil
 }
 
 func (gc *groupCostController) onResponse(
