@@ -94,7 +94,7 @@ func (prom *PrometheusQuerier) queryMetricsFromPrometheus(query string, timestam
 	resp, warnings, err := prom.api.Query(ctx, query, timestamp)
 
 	if err != nil {
-		return nil, errs.ErrPrometheusQuery.Wrap(err).FastGenWithCause()
+		return nil, errs.ErrPrometheusQuery.Wrap(err)
 	}
 
 	if len(warnings) > 0 {
