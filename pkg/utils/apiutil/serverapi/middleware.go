@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
@@ -122,16 +123,24 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	// It will be helpful when matching the redirect rules "schedulers" or "schedulers/{name}"
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
 	for _, rule := range h.microserviceRedirectRules {
+		// Now we only support checking the scheduling service whether it is independent
+		if rule.targetServiceName == mcsutils.SchedulingServiceName {
+			if !h.s.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+				continue
+			}
+		}
 		if strings.HasPrefix(r.URL.Path, rule.matchPath) &&
 			slice.Contains(rule.matchMethods, r.Method) {
 			if rule.filter != nil && !rule.filter(r) {
 				continue
 			}
-			// we check the service primary addr here, so no need to check independently again.
+			// we check the service primary addr here,
+			// if the service is not available, we will return ErrRedirect by returning an empty addr.
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !ok || addr == "" {
 				log.Warn("failed to get the service primary addr when trying to match redirect rules",
 					zap.String("path", r.URL.Path))
+				return true, ""
 			}
 			// If the URL contains escaped characters, use RawPath instead of Path
 			origin := r.URL.Path
