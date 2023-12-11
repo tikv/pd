@@ -113,7 +113,7 @@ func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 }
 
 func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsAPIServiceMode() {
+	if !h.s.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		return false, ""
 	}
 	if len(h.microserviceRedirectRules) == 0 {

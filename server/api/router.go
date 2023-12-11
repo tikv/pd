@@ -295,6 +295,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/leader/resign", leaderHandler.ResignLeader, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/leader/transfer/{next_leader}", leaderHandler.TransferLeader, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
+	msHandler := newMicroServiceHandlerHandler(svr, rd)
+	registerFunc(apiRouter, "/ms/members/{service}", msHandler.GetMembers, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/ms/leader/{service}", msHandler.GetLeader, setMethods(http.MethodGet), setAuditBackend(prometheus))
+
 	statsHandler := newStatsHandler(svr, rd)
 	registerFunc(clusterRouter, "/stats/region", statsHandler.GetRegionStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 

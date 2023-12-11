@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -78,6 +79,9 @@ type Client interface {
 	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+	/* Micro Service interfaces */
+	GetMicroServiceMembers(context.Context, string) ([]string, error)
+	GetMicroServiceLeader(context.Context, string) (*pdpb.Member, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -728,4 +732,28 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		return 0, nil, errors.Trace(errors.New("min resolved ts is not enabled"))
 	}
 	return resp.MinResolvedTS, resp.StoresMinResolvedTS, nil
+}
+
+// GetMicroServiceMembers gets the members of the microservice.
+func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]string, error) {
+	var members []string
+	err := c.requestWithRetry(ctx,
+		"GetMicroServiceMembers", MicroServiceMembers(service),
+		http.MethodGet, http.NoBody, &members)
+	if err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+// GetMicroServiceLeader gets the leader of the microservice.
+func (c *client) GetMicroServiceLeader(ctx context.Context, service string) (*pdpb.Member, error) {
+	var leader *pdpb.Member
+	err := c.requestWithRetry(ctx,
+		"GetMicroServiceLeader", MicroServiceLeader(service),
+		http.MethodGet, http.NoBody, &leader)
+	if err != nil {
+		return nil, err
+	}
+	return leader, nil
 }

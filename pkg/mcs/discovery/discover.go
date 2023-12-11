@@ -15,6 +15,16 @@
 package discovery
 
 import (
+	"path"
+	"strconv"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -34,4 +44,78 @@ func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, er
 		values = append(values, string(item.Value))
 	}
 	return values, nil
+}
+
+func isValid(id uint32) bool {
+	return id >= utils.DefaultKeyspaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
+}
+
+func getMCSPrimaryPath(name, keyspaceGroupID string, client *clientv3.Client) (string, error) {
+	switch name {
+	case utils.TSOServiceName:
+		id := utils.DefaultKeyspaceGroupID
+		if len(keyspaceGroupID) > 0 {
+			keyspaceGroupID, err := strconv.ParseUint(keyspaceGroupID, 10, 64)
+			if err != nil || !isValid(uint32(keyspaceGroupID)) {
+				return "", errors.Errorf("invalid keyspace group id %d", keyspaceGroupID)
+			}
+			id = uint32(keyspaceGroupID)
+		}
+
+		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+		if err != nil {
+			return "", err
+		}
+		rootPath := endpoint.TSOSvcRootPath(clusterID)
+		primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, id)
+		return primaryPath, nil
+	case utils.SchedulingServiceName:
+		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+		if err != nil {
+			return "", err
+		}
+		return path.Join(endpoint.SchedulingSvcRootPath(clusterID), utils.PrimaryKey), nil
+	case utils.ResourceManagerServiceName:
+		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+		if err != nil {
+			return "", err
+		}
+		return path.Join(endpoint.ResourceManagerSvcRootPath(clusterID), utils.PrimaryKey), nil
+	default:
+	}
+	return "", errors.Errorf("unknown service name %s", name)
+}
+
+// GetMCSPrimary returns the primary member of the specified service name.
+func GetMCSPrimary(name, keyspaceGroupID string, client *clientv3.Client) (*pdpb.Member, int64, error) {
+	primaryPath, err := getMCSPrimaryPath(name, keyspaceGroupID, client)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return election.GetLeader(client, primaryPath)
+}
+
+// GetMembers returns all the members of the specified service name.
+func GetMembers(name string, client *clientv3.Client) (*clientv3.TxnResponse, error) {
+	switch name {
+	case utils.TSOServiceName, utils.SchedulingServiceName, utils.ResourceManagerServiceName:
+		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+		if err != nil {
+			return nil, err
+		}
+		servicePath := ServicePath(strconv.FormatUint(clusterID, 10), name)
+		resps, err := kv.NewSlowLogTxn(client).Then(clientv3.OpGet(servicePath, clientv3.WithPrefix())).Commit()
+		if err != nil {
+			return nil, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
+		}
+		if !resps.Succeeded {
+			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+		if len(resps.Responses) == 0 {
+			return nil, errors.Errorf("no member found for service %s", name)
+		}
+		return resps, nil
+	}
+	return nil, errors.Errorf("unknown service name %s", name)
 }
