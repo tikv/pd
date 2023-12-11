@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 // KeyRange defines a range of keys in bytes.
@@ -573,4 +574,13 @@ type LabelRule struct {
 type LabelRulePatch struct {
 	SetRules    []*LabelRule `json:"sets"`
 	DeleteRules []string     `json:"deletes"`
+}
+
+// MembersInfo is PD members info returned from PD RESTful interface
+// type Members map[string][]*pdpb.Member
+type MembersInfo struct {
+	Header     *pdpb.ResponseHeader `json:"header,omitempty"`
+	Members    []*pdpb.Member       `json:"members,omitempty"`
+	Leader     *pdpb.Member         `json:"leader,omitempty"`
+	EtcdLeader *pdpb.Member         `json:"etcd_leader,omitempty"`
 }
