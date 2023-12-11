@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
