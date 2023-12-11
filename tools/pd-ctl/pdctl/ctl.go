@@ -65,6 +65,12 @@ func GetRootCmd() *cobra.Command {
 		command.NewMinResolvedTSCommand(),
 		command.NewCompletionCommand(),
 		command.NewUnsafeCommand(),
+<<<<<<< HEAD
+=======
+		command.NewKeyspaceGroupCommand(),
+		command.NewKeyspaceCommand(),
+		command.NewResourceManagerCommand(),
+>>>>>>> ab68192a5 (resource_control: improve trace logs, ctl and metrics (#7510))
 	)
 
 	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
