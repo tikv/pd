@@ -1218,8 +1218,6 @@ func (gc *groupCostController) onRequestWait(
 				}
 				if d, err = WaitReservations(ctx, now, res); err == nil {
 					break retryLoop
-				} else if d.Seconds() > 0 {
-					gc.failedLimitReserveDuration.Observe(d.Seconds())
 				}
 			case rmpb.GroupMode_RUMode:
 				res := make([]*Reservation, 0, len(requestUnitLimitTypeList))
@@ -1230,8 +1228,6 @@ func (gc *groupCostController) onRequestWait(
 				}
 				if d, err = WaitReservations(ctx, now, res); err == nil {
 					break retryLoop
-				} else if d.Seconds() > 0 {
-					gc.failedLimitReserveDuration.Observe(d.Seconds())
 				}
 			}
 			gc.requestRetryCounter.Inc()
@@ -1240,6 +1236,9 @@ func (gc *groupCostController) onRequestWait(
 		}
 		if err != nil {
 			gc.failedRequestCounter.Inc()
+			if d.Seconds() > 0 {
+				gc.failedLimitReserveDuration.Observe(d.Seconds())
+			}
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
 			gc.mu.Unlock()
