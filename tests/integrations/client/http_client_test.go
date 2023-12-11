@@ -401,6 +401,7 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 func (suite *httpClientTestSuite) TestSetStoreLabels() {
 	re := suite.Require()
 	resp, err := suite.client.GetStores(suite.ctx)
+	re.NoError(err)
 	setStore := resp.Stores[0]
 	re.Empty(setStore.Store.Labels, nil)
 	storeLabels := map[string]string{
