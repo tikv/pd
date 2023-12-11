@@ -14,7 +14,7 @@ replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
 require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
 	github.com/pingcap/kvproto v0.0.0-20230407040905-68d0eebd564a
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.3
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/tests/integrations/mcs v0.0.0-00010101000000-000000000000
@@ -111,6 +111,7 @@ require (
 	github.com/minio/sio v0.3.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/nxadm/tail v1.4.11 // indirect
 	github.com/oleiade/reflections v1.0.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.8 // indirect

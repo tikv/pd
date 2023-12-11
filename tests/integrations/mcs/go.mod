@@ -14,12 +14,8 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
 	github.com/pingcap/kvproto v0.0.0-20230407040905-68d0eebd564a
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
-<<<<<<< HEAD
 	github.com/pkg/errors v0.9.1
-	github.com/stretchr/testify v1.8.2
-=======
 	github.com/stretchr/testify v1.8.3
->>>>>>> 82ace6ff9 (go.mod: upgrade gin version from v1.8.1 to v1.9.1 (#7451))
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
@@ -57,11 +53,7 @@ require (
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5 // indirect
 	github.com/cenkalti/backoff/v4 v4.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-<<<<<<< HEAD
-=======
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
-	github.com/cloudfoundry/gosigar v1.3.6 // indirect
->>>>>>> 82ace6ff9 (go.mod: upgrade gin version from v1.8.1 to v1.9.1 (#7451))
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f // indirect
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
@@ -71,6 +63,7 @@ require (
 	github.com/elastic/gosigar v0.14.2 // indirect
 	github.com/elliotchance/pie/v2 v2.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
+	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/gin-contrib/cors v1.4.0 // indirect
 	github.com/gin-contrib/gzip v0.0.1 // indirect
@@ -123,6 +116,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/oleiade/reflections v1.0.1 // indirect
+	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.0.8 // indirect
 	github.com/petermattis/goid v0.0.0-20211229010228-4d14c490ee36 // indirect
@@ -170,11 +164,8 @@ require (
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-<<<<<<< HEAD
 	go.uber.org/zap v1.24.0 // indirect
-=======
 	golang.org/x/arch v0.3.0 // indirect
->>>>>>> 82ace6ff9 (go.mod: upgrade gin version from v1.8.1 to v1.9.1 (#7451))
 	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
 	golang.org/x/image v0.5.0 // indirect

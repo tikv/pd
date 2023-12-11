@@ -16,13 +16,8 @@ require (
 	github.com/docker/go-units v0.4.0
 	github.com/elliotchance/pie/v2 v2.1.0
 	github.com/gin-contrib/cors v1.4.0
-<<<<<<< HEAD
-	github.com/gin-gonic/gin v1.8.1
-=======
 	github.com/gin-contrib/gzip v0.0.1
-	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.9.1
->>>>>>> 82ace6ff9 (go.mod: upgrade gin version from v1.8.1 to v1.9.1 (#7451))
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/btree v1.1.2
@@ -100,7 +95,6 @@ require (
 	github.com/fsnotify/fsnotify v1.4.9 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
-	github.com/gin-contrib/gzip v0.0.1
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
