@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
@@ -39,15 +40,61 @@ import (
 
 type schedulerTestSuite struct {
 	suite.Suite
+	env               *tests.SchedulingTestEnvironment
+	defaultSchedulers []string
 }
 
 func TestSchedulerTestSuite(t *testing.T) {
 	suite.Run(t, new(schedulerTestSuite))
 }
 
+func (suite *schedulerTestSuite) SetupSuite() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.defaultSchedulers = []string{
+		"balance-leader-scheduler",
+		"balance-region-scheduler",
+		"balance-hot-region-scheduler",
+		"balance-witness-scheduler",
+		"transfer-witness-leader-scheduler",
+	}
+}
+
+func (suite *schedulerTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+}
+
+func (suite *schedulerTestSuite) TearDownTest() {
+	cleanFunc := func(cluster *tests.TestCluster) {
+		re := suite.Require()
+		pdAddr := cluster.GetConfig().GetClientURL()
+		cmd := pdctlCmd.GetRootCmd()
+
+		var currentSchedulers []string
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &currentSchedulers)
+		for _, scheduler := range suite.defaultSchedulers {
+			if slice.NoneOf(currentSchedulers, func(i int) bool {
+				return currentSchedulers[i] == scheduler
+			}) {
+				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", scheduler}, nil)
+				re.Contains(echo, "Success!")
+			}
+		}
+		for _, scheduler := range currentSchedulers {
+			if slice.NoneOf(suite.defaultSchedulers, func(i int) bool {
+				return suite.defaultSchedulers[i] == scheduler
+			}) {
+				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", scheduler}, nil)
+				re.Contains(echo, "Success!")
+			}
+		}
+	}
+	suite.env.RunFuncInTwoModes(cleanFunc)
+}
+
 func (suite *schedulerTestSuite) TestScheduler() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkScheduler)
+	suite.env.RunTestInTwoModes(suite.checkScheduler)
 }
 
 func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
@@ -436,6 +483,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	for _, store := range stores {
 		version := versioninfo.HotScheduleWithQuery
 		store.Version = versioninfo.MinSupportedVersion(version).String()
+		store.LastHeartbeat = time.Now().UnixNano()
 		tests.MustPutStore(re, cluster, store)
 	}
 	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
@@ -564,8 +612,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
+	suite.env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestCluster) {

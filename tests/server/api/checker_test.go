@@ -27,14 +27,23 @@ import (
 
 type checkerTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestCheckerTestSuite(t *testing.T) {
 	suite.Run(t, new(checkerTestSuite))
 }
+
+func (suite *checkerTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *checkerTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
 func (suite *checkerTestSuite) TestAPI() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkAPI)
+	suite.env.RunTestInTwoModes(suite.checkAPI)
 }
 
 func (suite *checkerTestSuite) checkAPI(cluster *tests.TestCluster) {
