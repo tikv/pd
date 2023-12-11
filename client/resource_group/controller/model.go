@@ -64,13 +64,13 @@ type ResourceCalculator interface {
 
 // KVCalculator is used to calculate the KV-side consumption.
 type KVCalculator struct {
-	*Config
+	*RUConfig
 }
 
 var _ ResourceCalculator = (*KVCalculator)(nil)
 
-func newKVCalculator(cfg *Config) *KVCalculator {
-	return &KVCalculator{Config: cfg}
+func newKVCalculator(cfg *RUConfig) *KVCalculator {
+	return &KVCalculator{RUConfig: cfg}
 }
 
 // Trickle ...
@@ -140,13 +140,13 @@ func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req Requ
 
 // SQLCalculator is used to calculate the SQL-side consumption.
 type SQLCalculator struct {
-	*Config
+	*RUConfig
 }
 
 var _ ResourceCalculator = (*SQLCalculator)(nil)
 
-func newSQLCalculator(cfg *Config) *SQLCalculator {
-	return &SQLCalculator{Config: cfg}
+func newSQLCalculator(cfg *RUConfig) *SQLCalculator {
+	return &SQLCalculator{RUConfig: cfg}
 }
 
 // Trickle update sql layer CPU consumption.
