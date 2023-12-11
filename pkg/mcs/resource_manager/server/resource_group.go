@@ -75,6 +75,12 @@ func (rg *ResourceGroup) Copy() *ResourceGroup {
 	return &newRG
 }
 
+func (rg *ResourceGroup) getRUToken() float64 {
+	rg.Lock()
+	defer rg.Unlock()
+	return rg.RUSettings.RU.Tokens
+}
+
 // PatchSettings patches the resource group settings.
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.
