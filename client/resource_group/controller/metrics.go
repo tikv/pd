@@ -94,6 +94,7 @@ func init() {
 	prometheus.MustRegister(resourceGroupStatusGauge)
 	prometheus.MustRegister(successfulRequestDuration)
 	prometheus.MustRegister(failedRequestCounter)
+	prometheus.MustRegister(failedLimitReserveDuration)
 	prometheus.MustRegister(requestRetryCounter)
 	prometheus.MustRegister(tokenRequestDuration)
 	prometheus.MustRegister(resourceGroupTokenRequestCounter)
