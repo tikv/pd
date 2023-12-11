@@ -25,7 +25,9 @@ RUN GO111MODULE=on go mod download
 
 COPY . .
 
-RUN make
+# Workaround sqlite3 and alpine 3.19 incompatibility
+# https://github.com/mattn/go-sqlite3/issues/1164
+RUN CGO_CFLAGS="-D_LARGEFILE64_SOURCE" make
 
 FROM alpine:3.17
 
