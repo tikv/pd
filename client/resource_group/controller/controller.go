@@ -31,6 +31,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
+	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -51,6 +52,14 @@ const (
 	periodicReport selectType = 0
 	lowToken       selectType = 1
 )
+
+var enableControllerTraceLog = atomicutil.NewBool(false)
+
+func logControllerTrace(msg string, fields ...zap.Field) {
+	if enableControllerTraceLog.Load() {
+		log.Info(msg, fields...)
+	}
+}
 
 // ResourceGroupKVInterceptor is used as quota limit controller for resource group using kv store.
 type ResourceGroupKVInterceptor interface {
@@ -364,6 +373,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 					copyCfg := *c.ruConfig
 					c.safeRuConfig.Store(&copyCfg)
+					if enableControllerTraceLog.Load() != config.EnableControllerTraceLog {
+						enableControllerTraceLog.Store(config.EnableControllerTraceLog)
+					}
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
 
@@ -500,7 +512,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		c.responseDeadlineCh = c.run.responseDeadline.C
 	}
 	go func() {
-		log.Debug("[resource group controller] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
+		logControllerTrace("[resource group controller] send token bucket request", zap.Time("now", now), zap.Any("req", req.Requests), zap.String("source", source))
 		resp, err := c.provider.AcquireTokenBuckets(ctx, req)
 		latency := time.Since(now)
 		if err != nil {
@@ -513,7 +525,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		} else {
 			successfulTokenRequestDuration.Observe(latency.Seconds())
 		}
-		log.Debug("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
+		logControllerTrace("[resource group controller] token bucket response", zap.Time("now", time.Now()), zap.Any("resp", resp), zap.String("source", source), zap.Duration("latency", latency))
 		c.tokenResponseChan <- resp
 	}()
 }
@@ -564,10 +576,11 @@ type groupCostController struct {
 	calculators    []ResourceCalculator
 	handleRespFunc func(*rmpb.TokenBucketResponse)
 
-	successfulRequestDuration prometheus.Observer
-	requestRetryCounter       prometheus.Counter
-	failedRequestCounter      prometheus.Counter
-	tokenRequestCounter       prometheus.Counter
+	successfulRequestDuration  prometheus.Observer
+	failedLimitReserveDuration prometheus.Observer
+	requestRetryCounter        prometheus.Counter
+	failedRequestCounter       prometheus.Counter
+	tokenRequestCounter        prometheus.Counter
 
 	mu struct {
 		sync.Mutex
@@ -657,14 +670,15 @@ func newGroupCostController(
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
 	gc := &groupCostController{
-		meta:                      group,
-		name:                      group.Name,
-		mainCfg:                   mainCfg,
-		mode:                      group.GetMode(),
-		successfulRequestDuration: successfulRequestDuration.WithLabelValues(group.Name),
-		failedRequestCounter:      failedRequestCounter.WithLabelValues(group.Name),
-		requestRetryCounter:       requestRetryCounter.WithLabelValues(group.Name),
-		tokenRequestCounter:       resourceGroupTokenRequestCounter.WithLabelValues(group.Name),
+		meta:                       group,
+		name:                       group.Name,
+		mainCfg:                    mainCfg,
+		mode:                       group.GetMode(),
+		successfulRequestDuration:  successfulRequestDuration.WithLabelValues(group.Name),
+		failedLimitReserveDuration: failedLimitReserveDuration.WithLabelValues(group.Name),
+		failedRequestCounter:       failedRequestCounter.WithLabelValues(group.Name),
+		requestRetryCounter:        requestRetryCounter.WithLabelValues(group.Name),
+		tokenRequestCounter:        resourceGroupTokenRequestCounter.WithLabelValues(group.Name),
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
@@ -766,7 +780,7 @@ func (gc *groupCostController) updateRunState() {
 	}
 	*gc.run.consumption = *gc.mu.consumption
 	gc.mu.Unlock()
-	log.Debug("[resource group controller] update run state", zap.Any("request-unit-consumption", gc.run.consumption))
+	logControllerTrace("[resource group controller] update run state", zap.Any("request-unit-consumption", gc.run.consumption))
 	gc.run.now = newTime
 }
 
@@ -847,7 +861,7 @@ func (gc *groupCostController) updateAvgRaWResourcePerSec() {
 		if !gc.calcAvg(counter, getRawResourceValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
-		log.Debug("[resource group controller] update avg raw resource per sec", zap.String("name", gc.name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec))
+		logControllerTrace("[resource group controller] update avg raw resource per sec", zap.String("name", gc.name), zap.String("type", rmpb.RawResourceType_name[int32(typ)]), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec))
 	}
 	gc.burstable.Store(isBurstable)
 }
@@ -861,7 +875,7 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 		if !gc.calcAvg(counter, getRUValueFromConsumption(gc.run.consumption, typ)) {
 			continue
 		}
-		log.Debug("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec))
+		logControllerTrace("[resource group controller] update avg ru per sec", zap.String("name", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]), zap.Float64("avg-ru-per-sec", counter.avgRUPerSec))
 	}
 	gc.burstable.Store(isBurstable)
 }
@@ -1181,6 +1195,9 @@ func (gc *groupCostController) onRequestWait(
 		}
 		if err != nil {
 			gc.failedRequestCounter.Inc()
+			if d.Seconds() > 0 {
+				gc.failedLimitReserveDuration.Observe(d.Seconds())
+			}
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
 			gc.mu.Unlock()
