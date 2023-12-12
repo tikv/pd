@@ -134,6 +134,13 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.NoError(err)
 	re.Equal(1, store.Count)
 	re.Len(store.Stores, 1)
+	storeID := uint64(store.Stores[0].Store.ID) // TODO: why type is different?
+	store2, err := suite.client.GetStore(suite.ctx, storeID)
+	re.NoError(err)
+	re.EqualValues(storeID, store2.Store.ID)
+	version, err := suite.client.GetClusterVersion(suite.ctx)
+	re.NoError(err)
+	re.Equal("0.0.0", version)
 }
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
