@@ -468,18 +468,18 @@ func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRan
 
 // SetStoreLabels sets the labels of a store.
 func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels map[string]string) error {
-	jsonBody, err := json.Marshal(storeLabels)
+	jsonInput, err := json.Marshal(storeLabels)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.requestWithRetry(ctx, "SetStoreLabel", LabelByStoreID(storeID),
-		http.MethodPost, bytes.NewBuffer(jsonBody), nil)
+		http.MethodPost, bytes.NewBuffer(jsonInput), nil)
 }
 
 func (c *client) GetMembers(ctx context.Context) (*MembersInfo, error) {
-	members := MembersInfo{}
+	var members MembersInfo
 	err := c.requestWithRetry(ctx,
-		"GetMembers", MembersPrefix,
+		"GetMembers", membersPrefix,
 		http.MethodGet, http.NoBody, &members)
 	if err != nil {
 		return nil, err
@@ -488,9 +488,9 @@ func (c *client) GetMembers(ctx context.Context) (*MembersInfo, error) {
 }
 
 // GetLeader gets the leader of PD cluster.
-func (c *client) GetLeader(context.Context) (*pdpb.Member, error) {
+func (c *client) GetLeader(ctx context.Context) (*pdpb.Member, error) {
 	var leader pdpb.Member
-	err := c.requestWithRetry(context.Background(), "GetLeader", LeaderPrefix,
+	err := c.requestWithRetry(ctx, "GetLeader", leaderPrefix,
 		http.MethodGet, http.NoBody, &leader)
 	if err != nil {
 		return nil, err
@@ -719,9 +719,9 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 	return schedulers, nil
 }
 
-// CreateScheduler adds a scheduler to PD cluster.
+// CreateScheduler creates a scheduler to PD cluster.
 func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
-	data, err := json.Marshal(map[string]interface{}{
+	inputJSON, err := json.Marshal(map[string]interface{}{
 		"name":     name,
 		"store_id": storeID,
 	})
@@ -730,7 +730,7 @@ func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint6
 	}
 	return c.requestWithRetry(ctx,
 		"CreateScheduler", Schedulers,
-		http.MethodPost, bytes.NewBuffer(data), nil)
+		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
 }
 
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.

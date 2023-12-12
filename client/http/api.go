@@ -38,9 +38,9 @@ const (
 	store                     = "/pd/api/v1/store"
 	Stores                    = "/pd/api/v1/stores"
 	StatsRegion               = "/pd/api/v1/stats/region"
-	MembersPrefix             = "/pd/api/v1/members"
-	LeaderPrefix              = "/pd/api/v1/leader"
-	TransferLeader            = "/pd/api/v1/leader/transfer"
+	membersPrefix             = "/pd/api/v1/members"
+	leaderPrefix              = "/pd/api/v1/leader"
+	transferLeader            = "/pd/api/v1/leader/transfer"
 	// Config
 	Config          = "/pd/api/v1/config"
 	ClusterVersion  = "/pd/api/v1/config/cluster-version"
@@ -134,7 +134,7 @@ func LabelByStoreID(storeID int64) string {
 
 // TransferLeaderByID returns the path of PD HTTP API to transfer leader by ID.
 func TransferLeaderByID(leaderID string) string {
-	return fmt.Sprintf("%s/%s", TransferLeader, leaderID)
+	return fmt.Sprintf("%s/%s", transferLeader, leaderID)
 }
 
 // ConfigWithTTLSeconds returns the config API with the TTL seconds parameter.
