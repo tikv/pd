@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -54,9 +56,24 @@ type Client interface {
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
+	GetHealth(context.Context) (*HealthInfo, error)
+	GetCluster(context.Context) (*metapb.Cluster, error)
+	GetStore(context.Context, uint64) (*StoreInfo, error)
+	SetStoreLabels(context.Context, uint64, map[string]string) (bool, error)
+	DeleteStore(context.Context, uint64) error
+	SetStoreState(context.Context, uint64, string) error
+	GetStoresByState(context.Context, metapb.StoreState) (*StoresInfo, error)
+	GetPDLeader(context.Context) (*pdpb.Member, error)
+	TransferPDLeader(context.Context, string) error
+	GetMembers(context.Context) (*MembersInfo, error)
+	DeleteMemberByID(context.Context, uint64) error
+	DeleteMember(context.Context, string) error
+
 	/* Config-related interfaces */
-	GetScheduleConfig(context.Context) (map[string]interface{}, error)
-	SetScheduleConfig(context.Context, map[string]interface{}) error
+	GetConfig(context.Context) (*ServerConfig, error)
+	GetScheduleConfig(context.Context) (*ScheduleConfig, error)
+	SetScheduleConfig(context.Context, *ScheduleConfig) error
+	UpdateReplicationConfig(context.Context, ReplicationConfig) error
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -76,8 +93,14 @@ type Client interface {
 	/* Scheduling-related interfaces */
 	AccelerateSchedule(context.Context, *KeyRange) error
 	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
+	CreateScheduler(context.Context, string, uint64) error
+	GetSchedulers(context.Context) ([]string, error)
+	DeleteScheduler(context.Context, string, uint64) error
+	GetEvictLeaderSchedulerConfig(context.Context) (*EvictLeaderSchedulerConfig, error)
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+	GetAutoscalingPlans(context.Context, Strategy) ([]Plan, error)
+	GetRecoveringMark(context.Context) (bool, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -220,7 +243,8 @@ func (c *client) execDuration(name string, duration time.Duration) {
 
 // Header key definition constants.
 const (
-	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
+	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle" // #nosec G101
+	contentTypeKey           = "Content-Type"
 	componentSignatureKey    = "component"
 )
 
@@ -231,6 +255,13 @@ type HeaderOption func(header http.Header)
 func WithAllowFollowerHandle() HeaderOption {
 	return func(header http.Header) {
 		header.Set(pdAllowFollowerHandleKey, "true")
+	}
+}
+
+// WithHeaderContentTypeJSON sets the header field to indicate the content type is JSON.
+func WithHeaderContentTypeJSON() HeaderOption {
+	return func(header http.Header) {
+		header.Set(contentTypeKey, "application/json")
 	}
 }
 
@@ -338,6 +369,161 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*RegionInf
 		return nil, err
 	}
 	return &region, nil
+}
+
+func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
+	data, err := json.Marshal(map[string]interface{}{
+		"name":     name,
+		"store_id": storeID,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"CreateScheduler", Schedulers,
+		http.MethodPost, bytes.NewBuffer(data), nil)
+}
+
+func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
+	var schedulers []string
+	err := c.requestWithRetry(ctx,
+		"GetSchedulers", Schedulers,
+		http.MethodGet, http.NoBody, &schedulers)
+	if err != nil {
+		return nil, err
+	}
+	return schedulers, nil
+}
+
+func (c *client) DeleteScheduler(ctx context.Context, name string, storeID uint64) error {
+	return c.requestWithRetry(ctx,
+		"DeleteScheduler", DeleteSchedulerByNameWithStoreID(name, storeID),
+		http.MethodDelete, http.NoBody, nil)
+}
+
+func (c *client) GetConfig(ctx context.Context) (*ServerConfig, error) {
+	var config ServerConfig
+	err := c.requestWithRetry(ctx,
+		"GetConfig", Config,
+		http.MethodGet, http.NoBody, &config)
+	if err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
+func (c *client) GetHealth(ctx context.Context) (*HealthInfo, error) {
+	var healths []MemberHealth
+	err := c.requestWithRetry(ctx,
+		"GetHealth", Health,
+		http.MethodGet, http.NoBody, &healths)
+	if err != nil {
+		return nil, err
+	}
+	return &HealthInfo{Healths: healths}, nil
+}
+
+func (c *client) GetMembers(ctx context.Context) (*MembersInfo, error) {
+	members := &MembersInfo{}
+	err := c.requestWithRetry(ctx,
+		"GetMembers", Members,
+		http.MethodGet, http.NoBody, &members)
+	if err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+func (c *client) DeleteMember(ctx context.Context, name string) error {
+	return c.requestWithRetry(ctx,
+		"DeleteMember", MembersByName(name),
+		http.MethodDelete, http.NoBody, nil)
+}
+
+func (c *client) DeleteMemberByID(ctx context.Context, id uint64) error {
+	return c.requestWithRetry(ctx,
+		"DeleteMember", MembersByID(id),
+		http.MethodDelete, http.NoBody, nil)
+}
+
+func (c *client) GetCluster(ctx context.Context) (*metapb.Cluster, error) {
+	cluster := &metapb.Cluster{}
+	err := c.requestWithRetry(ctx,
+		"GetCluster", Cluster,
+		http.MethodGet, http.NoBody, &cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	return cluster, nil
+}
+
+func (c *client) GetPDLeader(ctx context.Context) (*pdpb.Member, error) {
+	leader := &pdpb.Member{}
+	err := c.requestWithRetry(ctx,
+		"GetPDLeader", LeaderPrefix,
+		http.MethodGet, http.NoBody, &leader)
+	if err != nil {
+		return nil, err
+	}
+	return leader, nil
+}
+
+func (c *client) TransferPDLeader(ctx context.Context, memberName string) error {
+	return c.requestWithRetry(ctx,
+		"TransferPDLeader", TransferLeader(memberName),
+		http.MethodPost, http.NoBody, nil)
+}
+
+func (c *client) GetRecoveringMark(ctx context.Context) (bool, error) {
+	type resStruct struct {
+		Marked bool `json:"marked"`
+	}
+	recoveringMark := &resStruct{}
+	err := c.requestWithRetry(ctx,
+		"GetRecoveringMark", SnapshotRecoveringMark,
+		http.MethodGet, http.NoBody, recoveringMark)
+
+	if err != nil {
+		return false, err
+	}
+	return recoveringMark.Marked, nil
+}
+
+func (c *client) UpdateReplicationConfig(ctx context.Context, data ReplicationConfig) error {
+	reqData, err := json.Marshal(data)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"UpdateReplicationConfig", ReplicateConfig,
+		http.MethodPost, bytes.NewBuffer(reqData), nil, WithHeaderContentTypeJSON())
+}
+
+func (c *client) GetEvictLeaderSchedulerConfig(ctx context.Context) (*EvictLeaderSchedulerConfig, error) {
+	var config EvictLeaderSchedulerConfig
+	err := c.requestWithRetry(ctx,
+		"GetEvictLeaderSchedulerConfig", evictLeaderSchedulerConfigPrefix,
+		http.MethodGet, http.NoBody, &config)
+	if err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
+func (c *client) GetAutoscalingPlans(ctx context.Context, strategy Strategy) ([]Plan, error) {
+	data, err := json.Marshal(strategy)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	var plans []Plan
+	err = c.requestWithRetry(ctx,
+		"GetAutoscalingPlans", autoscalingPrefix,
+		http.MethodPost, bytes.NewBuffer(data), plans)
+	if err != nil {
+		return nil, err
+	}
+	return plans, nil
 }
 
 // GetRegionByKey gets the region info by key.
@@ -459,25 +645,25 @@ func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRan
 }
 
 // GetScheduleConfig gets the schedule configurations.
-func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{}, error) {
-	var config map[string]interface{}
+func (c *client) GetScheduleConfig(ctx context.Context) (*ScheduleConfig, error) {
+	var config ScheduleConfig
 	err := c.requestWithRetry(ctx,
-		"GetScheduleConfig", ScheduleConfig,
+		"GetScheduleConfig", ScheduleConfigPrefix,
 		http.MethodGet, http.NoBody, &config)
 	if err != nil {
 		return nil, err
 	}
-	return config, nil
+	return &config, nil
 }
 
 // SetScheduleConfig sets the schedule configurations.
-func (c *client) SetScheduleConfig(ctx context.Context, config map[string]interface{}) error {
+func (c *client) SetScheduleConfig(ctx context.Context, config *ScheduleConfig) error {
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.requestWithRetry(ctx,
-		"SetScheduleConfig", ScheduleConfig,
+		"SetScheduleConfig", ScheduleConfigPrefix,
 		http.MethodPost, bytes.NewBuffer(configJSON), nil)
 }
 
@@ -491,6 +677,56 @@ func (c *client) GetStores(ctx context.Context) (*StoresInfo, error) {
 		return nil, err
 	}
 	return &stores, nil
+}
+
+// GetStoresByState gets the stores info by state.
+func (c *client) GetStoresByState(ctx context.Context, state metapb.StoreState) (*StoresInfo, error) {
+	var stores StoresInfo
+	err := c.requestWithRetry(ctx,
+		"GetStoresByState", StoresByState(state),
+		http.MethodGet, http.NoBody, &stores)
+	if err != nil {
+		return nil, err
+	}
+	return &stores, nil
+}
+
+func (c *client) GetStore(ctx context.Context, storeID uint64) (*StoreInfo, error) {
+	storeInfo := &StoreInfo{}
+	err := c.requestWithRetry(ctx,
+		"GetStore", StoreByID(storeID),
+		http.MethodGet, http.NoBody, storeInfo)
+	if err != nil {
+		return nil, err
+	}
+	return storeInfo, nil
+}
+
+func (c *client) SetStoreLabels(ctx context.Context, storeID uint64, labels map[string]string) (bool, error) {
+	data, err := json.Marshal(labels)
+	if err != nil {
+		return false, errors.Trace(err)
+	}
+	err = c.requestWithRetry(ctx,
+		"SetStoreLabels", StoreLabelByID(storeID),
+		http.MethodPost, bytes.NewBuffer(data), nil)
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (c *client) DeleteStore(ctx context.Context, storeID uint64) error {
+	return c.requestWithRetry(ctx,
+		"DeleteStore", StoreByID(storeID),
+		http.MethodDelete, http.NoBody, nil)
+}
+
+// SetStoreState sets store to specified state.
+func (c *client) SetStoreState(ctx context.Context, storeID uint64, state string) error {
+	return c.requestWithRetry(ctx,
+		"SetStoreState", StoreStateByID(storeID, state),
+		http.MethodPost, http.NoBody, nil)
 }
 
 // GetAllPlacementRuleBundles gets all placement rules bundles.

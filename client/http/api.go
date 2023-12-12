@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 // The following constants are the paths of PD HTTP APIs.
@@ -38,11 +40,17 @@ const (
 	store                     = "/pd/api/v1/store"
 	Stores                    = "/pd/api/v1/stores"
 	StatsRegion               = "/pd/api/v1/stats/region"
+	LeaderPrefix              = "/pd/api/v1/leader"
+	leaderTransferPrefix      = "/pd/api/v1/leader/transfer"
+	Cluster                   = "/pd/api/v1/cluster"
+	Health                    = "/pd/api/v1/health"
+	Members                   = "/pd/api/v1/members"
 	// Config
-	Config          = "/pd/api/v1/config"
-	ClusterVersion  = "/pd/api/v1/config/cluster-version"
-	ScheduleConfig  = "/pd/api/v1/config/schedule"
-	ReplicateConfig = "/pd/api/v1/config/replicate"
+	Config                           = "/pd/api/v1/config"
+	ClusterVersion                   = "/pd/api/v1/config/cluster-version"
+	ScheduleConfigPrefix             = "/pd/api/v1/config/schedule"
+	ReplicateConfig                  = "/pd/api/v1/config/replicate"
+	evictLeaderSchedulerConfigPrefix = "/pd/api/v1/scheduler-config/evict-leader-scheduler/list"
 	// Rule
 	PlacementRule         = "/pd/api/v1/config/rule"
 	PlacementRules        = "/pd/api/v1/config/rules"
@@ -72,7 +80,23 @@ const (
 	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
+	autoscalingPrefix   = "autoscaling"
 )
+
+// TransferLeader transfers leader from a source store to a target store.
+func TransferLeader(memberName string) string {
+	return fmt.Sprintf("%s/%s", leaderTransferPrefix, memberName)
+}
+
+// MembersByName returns the path of PD HTTP API to get member by name.
+func MembersByName(name string) string {
+	return fmt.Sprintf("%s/name/%s", Members, name)
+}
+
+// MembersByID returns the path of PD HTTP API to get member by ID.
+func MembersByID(id uint64) string {
+	return fmt.Sprintf("%s/id/%d", Members, id)
+}
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
 func RegionByID(regionID uint64) string {
@@ -114,6 +138,11 @@ func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 		StatsRegion, startKeyStr, endKeyStr)
 }
 
+// StoresByState returns the store API with store ID parameter.
+func StoresByState(state metapb.StoreState) string {
+	return fmt.Sprintf("%s/?state=%d", store, state)
+}
+
 // StoreByID returns the store API with store ID parameter.
 func StoreByID(id uint64) string {
 	return fmt.Sprintf("%s/%d", store, id)
@@ -122,6 +151,11 @@ func StoreByID(id uint64) string {
 // StoreLabelByID returns the store label API with store ID parameter.
 func StoreLabelByID(id uint64) string {
 	return fmt.Sprintf("%s/%d/label", store, id)
+}
+
+// StoreStateByID returns the store API with store ID parameter.
+func StoreStateByID(id uint64, state string) string {
+	return fmt.Sprintf("%s/%d/state?state=%s", store, id, state)
 }
 
 // ConfigWithTTLSeconds returns the config API with the TTL seconds parameter.
@@ -157,6 +191,11 @@ func PlacementRuleGroupByID(id string) string {
 // SchedulerByName returns the scheduler API with the given scheduler name.
 func SchedulerByName(name string) string {
 	return fmt.Sprintf("%s/%s", Schedulers, name)
+}
+
+// DeleteSchedulerByNameWithStoreID returns the scheduler API with the given scheduler name.
+func DeleteSchedulerByNameWithStoreID(name string, storeID uint64) string {
+	return fmt.Sprintf("%s/%s-%d", Schedulers, name, storeID)
 }
 
 // ScatterRangeSchedulerWithName returns the scatter range scheduler API with name parameter.

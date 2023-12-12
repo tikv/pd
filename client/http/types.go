@@ -17,10 +17,14 @@ package http
 import (
 	"encoding/hex"
 	"encoding/json"
+	"go.uber.org/zap"
 	"net/url"
 	"time"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 )
 
 // KeyRange defines a range of keys in bytes.
@@ -573,4 +577,593 @@ type LabelRule struct {
 type LabelRulePatch struct {
 	SetRules    []*LabelRule `json:"sets"`
 	DeleteRules []string     `json:"deletes"`
+}
+
+// following struct definitions are copied from github.com/pingcap/pd/server/api/store
+// these are not exported by that package
+
+// HealthInfo define PD's healthy info
+type HealthInfo struct {
+	Healths []MemberHealth
+}
+
+// MemberHealth define a pd member's healthy info
+type MemberHealth struct {
+	Name       string   `json:"name"`
+	MemberID   uint64   `json:"member_id"`
+	ClientUrls []string `json:"client_urls"`
+	Health     bool     `json:"health"`
+}
+
+// MembersInfo is PD members info returned from PD RESTful interface
+// type Members map[string][]*pdpb.Member
+type MembersInfo struct {
+	Header     *pdpb.ResponseHeader `json:"header,omitempty"`
+	Members    []*pdpb.Member       `json:"members,omitempty"`
+	Leader     *pdpb.Member         `json:"leader,omitempty"`
+	EtcdLeader *pdpb.Member         `json:"etcd_leader,omitempty"`
+}
+
+// EvictLeaderSchedulerConfig holds configuration for evict leader
+// https://github.com/pingcap/pd/blob/b21855a3aeb787c71b0819743059e432be217dcd/server/schedulers/evict_leader.go#L81-L86
+// note that we use `interface{}` as the type of value because we don't care
+// about the value for now
+type EvictLeaderSchedulerConfig struct {
+	StoreIDWithRanges map[uint64]interface{} `json:"store-id-ranges"`
+}
+
+// Strategy within an HTTP request provides rules and resources to help make decision for auto scaling.
+type Strategy struct {
+	Rules     []*StrategyRule `json:"rules"`
+	Resources []*Resource     `json:"resources"`
+}
+
+// StrategyRule is a set of constraints for a kind of component.
+type StrategyRule struct {
+	Component   string       `json:"component"`
+	CPURule     *CPURule     `json:"cpu_rule,omitempty"`
+	StorageRule *StorageRule `json:"storage_rule,omitempty"`
+}
+
+// CPURule is the constraints about CPU.
+type CPURule struct {
+	MaxThreshold  float64  `json:"max_threshold"`
+	MinThreshold  float64  `json:"min_threshold"`
+	ResourceTypes []string `json:"resource_types"`
+}
+
+// StorageRule is the constraints about storage.
+type StorageRule struct {
+	MinThreshold  float64  `json:"min_threshold"`
+	ResourceTypes []string `json:"resource_types"`
+}
+
+// Resource represents a kind of resource set including CPU, memory, storage.
+type Resource struct {
+	ResourceType string `json:"resource_type"`
+	// The basic unit of CPU is milli-core.
+	CPU uint64 `json:"cpu"`
+	// The basic unit of memory is byte.
+	Memory uint64 `json:"memory"`
+	// The basic unit of storage is byte.
+	Storage uint64 `json:"storage"`
+	// If count is not set, it indicates no limit.
+	Count *uint64 `json:"count,omitempty"`
+}
+
+// Plan is the final result of auto-scaling, which indicates how to scale in or scale out.
+type Plan struct {
+	Component    string            `json:"component"`
+	Count        uint64            `json:"count"`
+	ResourceType string            `json:"resource_type"`
+	Labels       map[string]string `json:"labels"`
+}
+
+// ReplicationConfig is the replication configuration.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type ReplicationConfig struct {
+	// MaxReplicas is the number of replicas for each region.
+	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
+
+	// The label keys specified the location of a store.
+	// The placement priorities is implied by the order of label keys.
+	// For example, ["zone", "rack"] means that we should place replicas to
+	// different zones first, then to different racks if we don't have enough zones.
+	LocationLabels StringSlice `toml:"location-labels" json:"location-labels"`
+	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
+	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
+
+	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
+	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+
+	// EnablePlacementRuleCache controls whether use cache during rule checker
+	EnablePlacementRulesCache bool `toml:"enable-placement-rules-cache" json:"enable-placement-rules-cache,string"`
+
+	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
+	// Its value must be empty or one of LocationLabels.
+	// Example:
+	// location-labels = ["zone", "rack", "host"]
+	// isolation-level = "zone"
+	// With configuration like above, PD ensure that all replicas be placed in different zones.
+	// Even if a zone is down, PD will not try to make up replicas in other zone
+	// because other zones already have replicas on it.
+	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
+}
+
+// StringSlice is more friendly to json encode/decode
+type StringSlice []string
+
+// ServerConfig is the pd server configuration.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type ServerConfig struct {
+	// Config is the pd server configuration.
+	// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+	ClientUrls          string `toml:"client-urls" json:"client-urls"`
+	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
+	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
+	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
+
+	Name              string `toml:"name" json:"name"`
+	DataDir           string `toml:"data-dir" json:"data-dir"`
+	ForceNewCluster   bool   `json:"force-new-cluster"`
+	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
+
+	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
+	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
+	InitialClusterToken string `toml:"initial-cluster-token" json:"initial-cluster-token"`
+
+	// Join to an existing pd cluster, a string of endpoints.
+	Join string `toml:"join" json:"join"`
+
+	// LeaderLease time, if leader doesn't update its TTL
+	// in etcd after lease time, etcd will expire the leader key
+	// and other servers can campaign the leader again.
+	// Etcd only supports seconds TTL, so here is second too.
+	LeaderLease int64 `toml:"lease" json:"lease"`
+
+	// Log related config.
+	Log log.Config `toml:"log" json:"log"`
+
+	// Backward compatibility.
+	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
+	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
+
+	// MaxConcurrentTSOProxyStreamings is the maximum number of concurrent TSO proxy streaming process routines allowed.
+	// Exceeding this limit will result in an error being returned to the client when a new client starts a TSO streaming.
+	// Set this to 0 will disable TSO Proxy.
+	// Set this to the negative value to disable the limit.
+	MaxConcurrentTSOProxyStreamings int `toml:"max-concurrent-tso-proxy-streamings" json:"max-concurrent-tso-proxy-streamings"`
+	// TSOProxyRecvFromClientTimeout is the timeout for the TSO proxy to receive a tso request from a client via grpc TSO stream.
+	// After the timeout, the TSO proxy will close the grpc TSO stream.
+	TSOProxyRecvFromClientTimeout Duration `toml:"tso-proxy-recv-from-client-timeout" json:"tso-proxy-recv-from-client-timeout"`
+
+	// TSOSaveInterval is the interval to save timestamp.
+	TSOSaveInterval Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+
+	// The interval to update physical part of timestamp. Usually, this config should not be set.
+	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
+	// more TSOs provided, and at the same time consuming more CPU time.
+	// This config is only valid in 1ms to 10s. If it's configured too long or too short, it will
+	// be automatically clamped to the range.
+	TSOUpdatePhysicalInterval Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
+
+	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
+	// which allows the PD server to generate Local TSO for certain DC-level transactions.
+	// To make this feature meaningful, user has to set the "zone" label for the PD server
+	// to indicate which DC this PD belongs to.
+	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
+
+	Metric MetricConfig `toml:"metric" json:"metric"`
+
+	Schedule ScheduleConfig `toml:"schedule" json:"schedule"`
+
+	Replication ReplicationConfig `toml:"replication" json:"replication"`
+
+	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
+
+	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
+
+	// Labels indicates the labels set for **this** PD server. The labels describe some specific properties
+	// like `zone`/`rack`/`host`. Currently, labels won't affect the PD server except for some special
+	// label keys. Now we have following special keys:
+	// 1. 'zone' is a special key that indicates the DC location of this PD server. If it is set, the value for this
+	// will be used to determine which DC's Local TSO service this PD will provide with if EnableLocalTSO is true.
+	Labels map[string]string `toml:"labels" json:"labels"`
+
+	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
+	// the default size is 2GB, the maximum is 8GB.
+	QuotaBackendBytes ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
+	// AutoCompactionMode is either 'periodic' or 'revision'. The default value is 'periodic'.
+	AutoCompactionMode string `toml:"auto-compaction-mode" json:"auto-compaction-mode"`
+	// AutoCompactionRetention is either duration string with time unit
+	// (e.g. '5m' for 5-minute), or revision unit (e.g. '5000').
+	// If no time unit is provided and compaction mode is 'periodic',
+	// the unit defaults to hour. For example, '5' translates into 5-hour.
+	// The default retention is 1 hour.
+	// Before etcd v3.3.x, the type of retention is int. We add 'v2' suffix to make it backward compatible.
+	AutoCompactionRetention string `toml:"auto-compaction-retention" json:"auto-compaction-retention-v2"`
+
+	// TickInterval is the interval for etcd Raft tick.
+	TickInterval Duration `toml:"tick-interval"`
+	// ElectionInterval is the interval for etcd Raft election.
+	ElectionInterval Duration `toml:"election-interval"`
+	// Prevote is true to enable Raft Pre-Vote.
+	// If enabled, Raft runs an additional election phase
+	// to check whether it would get enough votes to win
+	// an election, thus minimizing disruptions.
+	PreVote bool `toml:"enable-prevote"`
+
+	MaxRequestBytes uint `toml:"max-request-bytes" json:"max-request-bytes"`
+
+	Security SecurityConfig `toml:"security" json:"security"`
+
+	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
+
+	// For all warnings during parsing.
+	WarningMsgs []string
+
+	DisableStrictReconfigCheck bool
+
+	HeartbeatStreamBindInterval Duration
+	LeaderPriorityCheckInterval Duration
+
+	Logger   *zap.Logger        `json:"-"`
+	LogProps *log.ZapProperties `json:"-"`
+
+	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
+
+	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
+
+	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
+
+	Controller ControllerConfig `toml:"controller" json:"controller"`
+}
+
+// PDServerConfig is the configuration for pd server.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type PDServerConfig struct {
+	// UseRegionStorage enables the independent region storage.
+	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
+	// MaxResetTSGap is the max gap to reset the TSO.
+	MaxResetTSGap Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
+	// KeyType is option to specify the type of keys.
+	// There are some types supported: ["table", "raw", "txn"], default: "table"
+	KeyType string `toml:"key-type" json:"key-type"`
+	// RuntimeServices is the running extension services.
+	RuntimeServices StringSlice `toml:"runtime-services" json:"runtime-services"`
+	// MetricStorage is the cluster metric storage.
+	// Currently, we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
+	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
+	// There are some values supported: "auto", "none", or a specific address, default: "auto"
+	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
+	// TraceRegionFlow the option to update flow information of regions.
+	// WARN: TraceRegionFlow is deprecated.
+	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
+	// FlowRoundByDigit used to discretization processing flow information.
+	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
+	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
+	MinResolvedTSPersistenceInterval Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
+	// ServerMemoryLimit indicates the memory limit of current process.
+	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
+	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
+	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
+	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC.
+	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
+	// GCTunerThreshold is the threshold of GC tuner.
+	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+	// BlockSafePointV1 is used to control gc safe point v1 and service safe point v1 can not be updated.
+	BlockSafePointV1 bool `toml:"block-safe-point-v1" json:"block-safe-point-v1,string"`
+}
+
+// ScheduleConfig is the schedule configuration.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type ScheduleConfig struct {
+	// If the snapshot count of one store is greater than this value,
+	// it will never be used as a source or target store.
+	MaxSnapshotCount    uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
+	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count" json:"max-pending-peer-count"`
+	// If both the size of region is smaller than MaxMergeRegionSize
+	// and the number of rows in region is smaller than MaxMergeRegionKeys,
+	// it will try to merge with adjacent regions.
+	MaxMergeRegionSize uint64 `toml:"max-merge-region-size" json:"max-merge-region-size"`
+	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
+	// SplitMergeInterval is the minimum interval time to permit merge after split.
+	SplitMergeInterval Duration `toml:"split-merge-interval" json:"split-merge-interval"`
+	// SwitchWitnessInterval is the minimum interval that allows a peer to become a witness again after it is promoted to non-witness.
+	SwitchWitnessInterval Duration `toml:"switch-witness-interval" json:"switch-witness-interval"`
+	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
+	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
+	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
+	// This option only works when key type is "table".
+	EnableCrossTableMerge bool `toml:"enable-cross-table-merge" json:"enable-cross-table-merge,string"`
+	// PatrolRegionInterval is the interval for scanning region during patrol.
+	PatrolRegionInterval Duration `toml:"patrol-region-interval" json:"patrol-region-interval"`
+	// MaxStoreDownTime is the max duration after which
+	// a store will be considered to be down if it hasn't reported heartbeats.
+	MaxStoreDownTime Duration `toml:"max-store-down-time" json:"max-store-down-time"`
+	// MaxStorePreparingTime is the max duration after which
+	// a store will be considered to be preparing.
+	MaxStorePreparingTime Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
+	// LeaderScheduleLimit is the max coexist leader schedules.
+	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
+	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
+	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
+	// RegionScheduleLimit is the max coexist region schedules.
+	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
+	// WitnessScheduleLimit is the max coexist witness schedules.
+	WitnessScheduleLimit uint64 `toml:"witness-schedule-limit" json:"witness-schedule-limit"`
+	// ReplicaScheduleLimit is the max coexist replica schedules.
+	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
+	// MergeScheduleLimit is the max coexist merge schedules.
+	MergeScheduleLimit uint64 `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
+	// HotRegionScheduleLimit is the max coexist hot region schedules.
+	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
+	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
+	// If the number of times a region hits the hot cache is greater than this
+	// threshold, it is considered a hot region.
+	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
+	// StoreBalanceRate is the maximum of balance rate for each store.
+	// WARN: StoreBalanceRate is deprecated.
+	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
+	// StoreLimit is the limit of scheduling for stores.
+	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
+	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
+	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
+	//
+	//      high space stage         transition stage           low space stage
+	//   |--------------------|-----------------------------|-------------------------|
+	//   ^                    ^                             ^                         ^
+	//   0       HighSpaceRatio * capacity       LowSpaceRatio * capacity          capacity
+	//
+	// LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
+	// When in low space, store region score increases to very large and varies inversely with available size.
+	LowSpaceRatio float64 `toml:"low-space-ratio" json:"low-space-ratio"`
+	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
+	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
+	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
+	// RegionScoreFormulaVersion is used to control the formula used to calculate region score.
+	RegionScoreFormulaVersion string `toml:"region-score-formula-version" json:"region-score-formula-version"`
+	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
+	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
+	// WARN: DisableLearner is deprecated.
+	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
+	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
+	// DisableRemoveDownReplica is the option to prevent replica checker from
+	// removing down replicas.
+	// WARN: DisableRemoveDownReplica is deprecated.
+	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string,omitempty"`
+	// DisableReplaceOfflineReplica is the option to prevent replica checker from
+	// replacing offline replicas.
+	// WARN: DisableReplaceOfflineReplica is deprecated.
+	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string,omitempty"`
+	// DisableMakeUpReplica is the option to prevent replica checker from making up
+	// replicas when replica count is less than expected.
+	// WARN: DisableMakeUpReplica is deprecated.
+	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string,omitempty"`
+	// DisableRemoveExtraReplica is the option to prevent replica checker from
+	// removing extra replicas.
+	// WARN: DisableRemoveExtraReplica is deprecated.
+	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string,omitempty"`
+	// DisableLocationReplacement is the option to prevent replica checker from
+	// moving replica to a better location.
+	// WARN: DisableLocationReplacement is deprecated.
+	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
+
+	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
+	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
+	// EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.
+	EnableReplaceOfflineReplica bool `toml:"enable-replace-offline-replica" json:"enable-replace-offline-replica,string"`
+	// EnableMakeUpReplica is the option to enable replica checker to make up replica.
+	EnableMakeUpReplica bool `toml:"enable-make-up-replica" json:"enable-make-up-replica,string"`
+	// EnableRemoveExtraReplica is the option to enable replica checker to remove extra replica.
+	EnableRemoveExtraReplica bool `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
+	// EnableLocationReplacement is the option to enable replica checker to move replica to a better location.
+	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
+	// EnableDebugMetrics is the option to enable debug metrics.
+	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
+	// EnableJointConsensus is the option to enable using joint consensus as an operator step.
+	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
+	// EnableTiKVSplitRegion is the option to enable tikv split region.
+	// on ebs-based BR we need to disable it with TTL
+	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
+
+	// Schedulers support for loading customized schedulers
+	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
+
+	// Only used to display
+	SchedulersPayload map[string]interface{} `toml:"schedulers-payload" json:"schedulers-payload"`
+
+	// Controls the time interval between write hot regions info into leveldb.
+	HotRegionsWriteInterval Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
+
+	// The day of hot regions data to be reserved. 0 means close.
+	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+
+	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
+	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
+	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
+
+	// EnableDiagnostic is the option to enable using diagnostic
+	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
+
+	// EnableWitness is the option to enable using witness
+	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
+
+	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
+	// A store's slowness must affect more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
+	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
+
+	// StoreLimitVersion is the version of store limit.
+	// v1: which is based on the region count by rate limit.
+	// v2: which is based on region size by window size.
+	StoreLimitVersion string `toml:"store-limit-version" json:"store-limit-version,omitempty"`
+
+	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
+	// and any other scheduling configs will be ignored.
+	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
+}
+
+// SchedulerConfigs is a slice of customized scheduler configuration.
+type SchedulerConfigs []SchedulerConfig
+
+// SchedulerConfig is customized scheduler configuration
+type SchedulerConfig struct {
+	Type        string   `toml:"type" json:"type"`
+	Args        []string `toml:"args" json:"args"`
+	Disable     bool     `toml:"disable" json:"disable"`
+	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
+}
+
+// StoreLimitConfig is a config about scheduling rate limit of different types for a store.
+type StoreLimitConfig struct {
+	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
+	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
+}
+
+// SecurityConfig indicates the security configuration
+type SecurityConfig struct {
+	TLSConfig
+	// RedactInfoLog indicates that whether enabling redact log
+	RedactInfoLog bool             `toml:"redact-info-log" json:"redact-info-log"`
+	Encryption    encryptionConfig `toml:"encryption" json:"encryption"`
+}
+
+// TLSConfig is the configuration for supporting tls.
+type TLSConfig struct {
+	// CAPath is the path of file that contains list of trusted SSL CAs. if set, following four settings shouldn't be empty
+	CAPath string `toml:"cacert-path" json:"cacert-path"`
+	// CertPath is the path of file that contains X509 certificate in PEM format.
+	CertPath string `toml:"cert-path" json:"cert-path"`
+	// KeyPath is the path of file that contains X509 key in PEM format.
+	KeyPath string `toml:"key-path" json:"key-path"`
+	// CertAllowedCN is a CN which must be provided by a client
+	CertAllowedCN []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
+
+	SSLCABytes   []byte
+	SSLCertBytes []byte
+	SSLKEYBytes  []byte
+}
+
+// Config define the encryption config structure.
+type encryptionConfig struct {
+	// Encryption method to use for PD data.
+	DataEncryptionMethod string `toml:"data-encryption-method" json:"data-encryption-method"`
+	// Specifies how often PD rotates data encryption key.
+	DataKeyRotationPeriod Duration `toml:"data-key-rotation-period" json:"data-key-rotation-period"`
+	// Specifies master key if encryption is enabled.
+	MasterKey MasterKeyConfig `toml:"master-key" json:"master-key"`
+}
+
+// MasterKeyConfig defines master key config structure.
+type MasterKeyConfig struct {
+	// Master key type, one of "plaintext", "kms" or "file".
+	Type string `toml:"type" json:"type"`
+
+	MasterKeyKMSConfig
+	MasterKeyFileConfig
+}
+
+// MasterKeyKMSConfig defines a KMS master key config structure.
+type MasterKeyKMSConfig struct {
+	// KMS CMK key id.
+	KmsKeyID string `toml:"key-id" json:"key-id"`
+	// KMS region of the CMK.
+	KmsRegion string `toml:"region" json:"region"`
+	// Custom endpoint to access KMS.
+	KmsEndpoint string `toml:"endpoint" json:"endpoint"`
+}
+
+// MasterKeyFileConfig defines a file-based master key config structure.
+type MasterKeyFileConfig struct {
+	// Master key file path.
+	FilePath string `toml:"path" json:"path"`
+}
+
+// MetricConfig is the metric configuration.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type MetricConfig struct {
+	PushJob      string   `toml:"job" json:"job"`
+	PushAddress  string   `toml:"address" json:"address"`
+	PushInterval Duration `toml:"interval" json:"interval"`
+}
+
+// LabelPropertyConfig is the config section to set properties to store labels.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type LabelPropertyConfig map[string][]StoreLabel
+
+// DashboardConfig is the configuration for tidb-dashboard.
+type DashboardConfig struct {
+	TiDBCAPath         string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath       string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath        string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix   string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
+}
+
+// ReplicationModeConfig is the configuration for the replication policy.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type ReplicationModeConfig struct {
+	ReplicationMode string                      `toml:"replication-mode" json:"replication-mode"` // can be 'dr-auto-sync' or 'majority', default value is 'majority'
+	DRAutoSync      DRAutoSyncReplicationConfig `toml:"dr-auto-sync" json:"dr-auto-sync"`         // used when ReplicationMode is 'dr-auto-sync'
+}
+
+// DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
+type DRAutoSyncReplicationConfig struct {
+	LabelKey           string   `toml:"label-key" json:"label-key"`
+	Primary            string   `toml:"primary" json:"primary"`
+	DR                 string   `toml:"dr" json:"dr"`
+	PrimaryReplicas    int      `toml:"primary-replicas" json:"primary-replicas"`
+	DRReplicas         int      `toml:"dr-replicas" json:"dr-replicas"`
+	WaitStoreTimeout   Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	WaitRecoverTimeout Duration `toml:"wait-recover-timeout" json:"wait-recover-timeout"`
+	PauseRegionSplit   bool     `toml:"pause-region-split" json:"pause-region-split,string"`
+}
+
+// KeyspaceConfig is the configuration for keyspace management.
+type KeyspaceConfig struct {
+	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
+	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
+	// WaitRegionSplit indicates whether to wait for the region split to complete
+	WaitRegionSplit bool `toml:"wait-region-split" json:"wait-region-split"`
+	// WaitRegionSplitTimeout indicates the max duration to wait region split.
+	WaitRegionSplitTimeout Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
+	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
+	CheckRegionSplitInterval Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+}
+
+// ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.
+type ControllerConfig struct {
+	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
+	DegradedModeWaitDuration Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
+
+	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
+	LTBMaxWaitDuration Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
+
+	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
+	// This configuration should be modified carefully.
+	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
+}
+
+// RequestUnitConfig is the configuration of the request units, which determines the coefficients of
+// the RRU and WRU cost. This configuration should be modified carefully.
+type RequestUnitConfig struct {
+	// ReadBaseCost is the base cost for a read request. No matter how many bytes read/written or
+	// the CPU times taken for a request, this cost is inevitable.
+	ReadBaseCost float64 `toml:"read-base-cost" json:"read-base-cost"`
+	// ReadPerBatchBaseCost is the base cost for a read request with batch.
+	ReadPerBatchBaseCost float64 `toml:"read-per-batch-base-cost" json:"read-per-batch-base-cost"`
+	// ReadCostPerByte is the cost for each byte read. It's 1 RU = 64 KiB by default.
+	ReadCostPerByte float64 `toml:"read-cost-per-byte" json:"read-cost-per-byte"`
+	// WriteBaseCost is the base cost for a write request. No matter how many bytes read/written or
+	// the CPU times taken for a request, this cost is inevitable.
+	WriteBaseCost float64 `toml:"write-base-cost" json:"write-base-cost"`
+	// WritePerBatchBaseCost is the base cost for a write request with batch.
+	WritePerBatchBaseCost float64 `toml:"write-per-batch-base-cost" json:"write-per-batch-base-cost"`
+	// WriteCostPerByte is the cost for each byte written. It's 1 RU = 1 KiB by default.
+	WriteCostPerByte float64 `toml:"write-cost-per-byte" json:"write-cost-per-byte"`
+	// CPUMsCost is the cost for each millisecond of CPU time taken.
+	// It's 1 RU = 3 millisecond by default.
+	CPUMsCost float64 `toml:"read-cpu-ms-cost" json:"read-cpu-ms-cost"`
 }
