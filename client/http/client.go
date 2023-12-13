@@ -229,7 +229,7 @@ func (c *client) execDuration(name string, duration time.Duration) {
 // Header key definition constants.
 const (
 	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
-	componentSignatureKey    = "component"
+	xCallerIDKey             = "X-Caller-ID"
 )
 
 // HeaderOption configures the HTTP header.
@@ -287,7 +287,7 @@ func (c *client) request(
 	for _, opt := range headerOpts {
 		opt(req.Header)
 	}
-	req.Header.Set(componentSignatureKey, c.callerID)
+	req.Header.Set(xCallerIDKey, c.callerID)
 
 	start := time.Now()
 	resp, err := c.inner.cli.Do(req)
