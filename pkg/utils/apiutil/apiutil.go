@@ -39,15 +39,14 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	// componentSignatureKey is used for http request header key
-	// to identify component signature
-	componentSignatureKey = "component"
-	// componentAnonymousValue identifies anonymous request source
-	componentAnonymousValue = "anonymous"
-)
-
 const (
+	// componentSignatureKey is used for http request header key to identify component signature.
+	// Deprecated: please use `XCallerIDHeader` below to obtain a more granular source identification.
+	// This is kept for backward compatibility.
+	componentSignatureKey = "component"
+	// anonymousValue identifies anonymous request source
+	anonymousValue = "anonymous"
+
 	// PDRedirectorHeader is used to mark which PD redirected this request.
 	PDRedirectorHeader = "PD-Redirector"
 	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
@@ -57,7 +56,9 @@ const (
 	// XForwardedPortHeader is used to mark the client port.
 	XForwardedPortHeader = "X-Forwarded-Port"
 	// XRealIPHeader is used to mark the real client IP.
-	XRealIPHeader = "X-Real-Ip"
+	XRealIPHeader = "X-Real-IP"
+	// XCallerIDHeader is used to mark the caller ID.
+	XCallerIDHeader = "X-Caller-ID"
 	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
 	ForwardToMicroServiceHeader = "Forward-To-Micro-Service"
 
@@ -136,13 +137,23 @@ func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
 	return splitIP, splitPort
 }
 
-// GetComponentNameOnHTTP returns component name from Request Header
-func GetComponentNameOnHTTP(r *http.Request) string {
+// getComponentNameOnHTTP returns component name from Request Header
+func getComponentNameOnHTTP(r *http.Request) string {
 	componentName := r.Header.Get(componentSignatureKey)
 	if len(componentName) == 0 {
-		componentName = componentAnonymousValue
+		componentName = anonymousValue
 	}
 	return componentName
+}
+
+// GetCallerIDOnHTTP returns caller ID from Request Header
+func GetCallerIDOnHTTP(r *http.Request) string {
+	callerID := r.Header.Get(XCallerIDHeader)
+	if len(callerID) == 0 {
+		// Fall back to get the component name to keep backward compatibility.
+		callerID = getComponentNameOnHTTP(r)
+	}
+	return callerID
 }
 
 // ComponentSignatureRoundTripper is used to add component signature in HTTP header

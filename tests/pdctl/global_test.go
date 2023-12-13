@@ -35,13 +35,13 @@ func TestSendAndGetComponent(t *testing.T) {
 	handler := func(ctx context.Context, s *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-			component := apiutil.GetComponentNameOnHTTP(r)
+			callerID := apiutil.GetCallerIDOnHTTP(r)
 			for k := range r.Header {
 				log.Info("header", zap.String("key", k))
 			}
-			log.Info("component", zap.String("component", component))
-			re.Equal("pdctl", component)
-			fmt.Fprint(w, component)
+			log.Info("caller id", zap.String("caller-id", callerID))
+			re.Equal("pdctl", callerID)
+			fmt.Fprint(w, callerID)
 		})
 		info := apiutil.APIServiceGroup{
 			IsCore: true,

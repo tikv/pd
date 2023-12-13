@@ -59,7 +59,7 @@ func TestCallerID(t *testing.T) {
 	re := require.New(t)
 	expectedVal := defaultCallerID
 	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
-		val := req.Header.Get(componentSignatureKey)
+		val := req.Header.Get(xCallerIDKey)
 		if val != expectedVal {
 			re.Failf("Caller ID header check failed",
 				"should be %s, but got %s", expectedVal, val)
