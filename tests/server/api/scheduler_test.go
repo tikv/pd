@@ -17,7 +17,10 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +28,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
@@ -34,20 +39,25 @@ const apiPrefix = "/pd"
 
 type scheduleTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestScheduleTestSuite(t *testing.T) {
 	suite.Run(t, new(scheduleTestSuite))
 }
 
-func (suite *scheduleTestSuite) TestScheduler() {
-	// Fixme: use RunTestInTwoModes when sync deleted scheduler is supported.
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInPDMode(suite.checkOriginAPI)
-	env = tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInPDMode(suite.checkAPI)
-	env = tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInPDMode(suite.checkDisable)
+func (suite *scheduleTestSuite) SetupSuite() {
+	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *scheduleTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+}
+
+func (suite *scheduleTestSuite) TestOriginAPI() {
+	suite.env.RunTestInTwoModes(suite.checkOriginAPI)
 }
 
 func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
@@ -71,7 +81,7 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	re := suite.Require()
 	suite.NoError(tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re)))
 
-	suite.Len(suite.getSchedulers(urlPrefix), 1)
+	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp := make(map[string]interface{})
 	listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
@@ -83,20 +93,20 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	suite.NoError(err)
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
 	suite.NoError(tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusNotOK(re)))
-	suite.Len(suite.getSchedulers(urlPrefix), 1)
+	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp = make(map[string]interface{})
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
 	suite.Len(resp["store-id-ranges"], 1)
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
 	suite.NoError(tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re)))
-	suite.Len(suite.getSchedulers(urlPrefix), 1)
+	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp = make(map[string]interface{})
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
 	suite.Len(resp["store-id-ranges"], 2)
 	deleteURL := fmt.Sprintf("%s/%s", urlPrefix, "evict-leader-scheduler-1")
 	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.Len(suite.getSchedulers(urlPrefix), 1)
+	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp1 := make(map[string]interface{})
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp1))
 	suite.Len(resp1["store-id-ranges"], 1)
@@ -104,14 +114,18 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistFail", "return(true)"))
 	err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusInternalServerError))
 	suite.NoError(err)
-	suite.Len(suite.getSchedulers(urlPrefix), 1)
+	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistFail"))
 	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 	suite.NoError(err)
-	suite.Empty(suite.getSchedulers(urlPrefix))
+	suite.assertNoScheduler(urlPrefix, "evict-leader-scheduler")
 	suite.NoError(tu.CheckGetJSON(testDialClient, listURL, nil, tu.Status(re, http.StatusNotFound)))
 	err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
 	suite.NoError(err)
+}
+
+func (suite *scheduleTestSuite) TestAPI() {
+	suite.env.RunTestInTwoModes(suite.checkAPI)
 }
 
 func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
@@ -152,9 +166,12 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				body, err := json.Marshal(dataMap)
 				suite.NoError(err)
 				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
-				resp = make(map[string]interface{})
-				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				suite.Equal(3.0, resp["batch"])
+				tu.Eventually(re, func() bool { // wait for scheduling server to be synced.
+					resp = make(map[string]interface{})
+					suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					return resp["batch"] == 3.0
+				})
+
 				// update again
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.StatusOK(re),
@@ -230,9 +247,11 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]interface{})
 				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+
 				for key := range expectMap {
 					suite.Equal(expectMap[key], resp[key], "key %s", key)
 				}
+
 				// update again
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
 					tu.StatusOK(re),
@@ -438,18 +457,22 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				suite.NoError(err)
 				suite.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]interface{})
-				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				exceptMap["4"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
-				suite.Equal(exceptMap, resp["store-id-ranges"])
+				tu.Eventually(re, func() bool {
+					suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					exceptMap["4"] = []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}
+					return reflect.DeepEqual(exceptMap, resp["store-id-ranges"])
+				})
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to delete exist store from evict-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name, "4")
 				err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 				suite.NoError(err)
 				resp = make(map[string]interface{})
-				suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-				delete(exceptMap, "4")
-				suite.Equal(exceptMap, resp["store-id-ranges"])
+				tu.Eventually(re, func() bool {
+					suite.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					delete(exceptMap, "4")
+					return reflect.DeepEqual(exceptMap, resp["store-id-ranges"])
+				})
 				err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
 				suite.NoError(err)
 			},
@@ -468,6 +491,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			testCase.extraTestFunc(testCase.createdName)
 		}
 		suite.deleteScheduler(urlPrefix, testCase.createdName)
+		suite.assertNoScheduler(urlPrefix, testCase.createdName)
 	}
 
 	// test pause and resume all schedulers.
@@ -482,6 +506,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		body, err := json.Marshal(input)
 		suite.NoError(err)
 		suite.addScheduler(urlPrefix, body)
+		suite.assertSchedulerExists(urlPrefix, testCase.createdName) // wait for scheduler to be synced.
 		if testCase.extraTestFunc != nil {
 			testCase.extraTestFunc(testCase.createdName)
 		}
@@ -545,7 +570,12 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			createdName = testCase.name
 		}
 		suite.deleteScheduler(urlPrefix, createdName)
+		suite.assertNoScheduler(urlPrefix, createdName)
 	}
+}
+
+func (suite *scheduleTestSuite) TestDisable() {
+	suite.env.RunTestInTwoModes(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
@@ -581,16 +611,8 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	err = tu.CheckPostJSON(testDialClient, u, body, tu.StatusOK(re))
 	suite.NoError(err)
 
-	var schedulers []string
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers)
-	suite.NoError(err)
-	suite.Len(schedulers, 1)
-	suite.Equal(name, schedulers[0])
-
-	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s?status=disabled", urlPrefix), &schedulers)
-	suite.NoError(err)
-	suite.Len(schedulers, 1)
-	suite.Equal(name, schedulers[0])
+	suite.assertNoScheduler(urlPrefix, name)
+	suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
 
 	// reset schedule config
 	scheduleConfig.Schedulers = originSchedulers
@@ -600,6 +622,7 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	suite.NoError(err)
 
 	suite.deleteScheduler(urlPrefix, name)
+	suite.assertNoScheduler(urlPrefix, name)
 }
 
 func (suite *scheduleTestSuite) addScheduler(urlPrefix string, body []byte) {
@@ -614,12 +637,17 @@ func (suite *scheduleTestSuite) deleteScheduler(urlPrefix string, createdName st
 }
 
 func (suite *scheduleTestSuite) testPauseOrResume(urlPrefix string, name, createdName string, body []byte) {
+	re := suite.Require()
 	if createdName == "" {
 		createdName = name
 	}
-	re := suite.Require()
-	err := tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re))
-	suite.NoError(err)
+	var schedulers []string
+	tu.ReadGetJSON(suite.Require(), testDialClient, urlPrefix, &schedulers)
+	if !slice.Contains(schedulers, createdName) {
+		err := tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re))
+		re.NoError(err)
+	}
+	suite.assertSchedulerExists(urlPrefix, createdName) // wait for scheduler to be synced.
 
 	// test pause.
 	input := make(map[string]interface{})
@@ -655,14 +683,76 @@ func (suite *scheduleTestSuite) testPauseOrResume(urlPrefix string, name, create
 	suite.False(isPaused)
 }
 
-func (suite *scheduleTestSuite) getSchedulers(urlPrefix string) (resp []string) {
-	tu.ReadGetJSON(suite.Require(), testDialClient, urlPrefix, &resp)
-	return
+func (suite *scheduleTestSuite) TestEmptySchedulers() {
+	suite.env.RunTestInTwoModes(suite.checkEmptySchedulers)
+}
+
+func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/schedulers", leaderAddr)
+	for i := 1; i <= 4; i++ {
+		store := &metapb.Store{
+			Id:            uint64(i),
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		}
+		tests.MustPutStore(suite.Require(), cluster, store)
+	}
+	for _, query := range []string{"", "?status=paused", "?status=disabled"} {
+		schedulers := make([]string, 0)
+		suite.NoError(tu.ReadGetJSON(re, testDialClient, urlPrefix+query, &schedulers))
+		for _, scheduler := range schedulers {
+			if strings.Contains(query, "disable") {
+				input := make(map[string]interface{})
+				input["name"] = scheduler
+				body, err := json.Marshal(input)
+				suite.NoError(err)
+				suite.addScheduler(urlPrefix, body)
+			} else {
+				suite.deleteScheduler(urlPrefix, scheduler)
+			}
+		}
+		tu.Eventually(re, func() bool {
+			resp, err := apiutil.GetJSON(testDialClient, urlPrefix+query, nil)
+			suite.NoError(err)
+			defer resp.Body.Close()
+			suite.Equal(http.StatusOK, resp.StatusCode)
+			b, err := io.ReadAll(resp.Body)
+			suite.NoError(err)
+			return strings.Contains(string(b), "[]") && !strings.Contains(string(b), "null")
+		})
+	}
+}
+
+func (suite *scheduleTestSuite) assertSchedulerExists(urlPrefix string, scheduler string) {
+	var schedulers []string
+	re := suite.Require()
+	tu.Eventually(re, func() bool {
+		err := tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers,
+			tu.StatusOK(re))
+		suite.NoError(err)
+		return slice.Contains(schedulers, scheduler)
+	})
+}
+
+func (suite *scheduleTestSuite) assertNoScheduler(urlPrefix string, scheduler string) {
+	var schedulers []string
+	re := suite.Require()
+	tu.Eventually(re, func() bool {
+		err := tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers,
+			tu.StatusOK(re))
+		suite.NoError(err)
+		return !slice.Contains(schedulers, scheduler)
+	})
 }
 
 func (suite *scheduleTestSuite) isSchedulerPaused(urlPrefix, name string) bool {
 	var schedulers []string
-	err := tu.ReadGetJSON(suite.Require(), testDialClient, fmt.Sprintf("%s?status=paused", urlPrefix), &schedulers)
+	re := suite.Require()
+	err := tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s?status=paused", urlPrefix), &schedulers,
+		tu.StatusOK(re))
 	suite.NoError(err)
 	for _, scheduler := range schedulers {
 		if scheduler == name {

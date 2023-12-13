@@ -16,6 +16,11 @@ error = '''
 redirect failed
 '''
 
+["PD:apiutil:ErrRedirectToNotLeader"]
+error = '''
+redirect to not leader
+'''
+
 ["PD:autoscaling:ErrEmptyMetricsResponse"]
 error = '''
 metrics response from Prometheus is empty
@@ -496,6 +501,16 @@ error = '''
 init file log error, %s
 '''
 
+["PD:mcs:ErrNotFoundSchedulingAddr"]
+error = '''
+cannot find scheduling address
+'''
+
+["PD:mcs:ErrSchedulingServer"]
+error = '''
+scheduling server meets %v
+'''
+
 ["PD:member:ErrCheckCampaign"]
 error = '''
 check campaign failed
@@ -541,6 +556,11 @@ error = '''
 build rule list failed, %s
 '''
 
+["PD:placement:ErrKeyFormat"]
+error = '''
+key should be in hex format, %s
+'''
+
 ["PD:placement:ErrLoadRule"]
 error = '''
 load rule failed
@@ -551,9 +571,19 @@ error = '''
 load rule group failed
 '''
 
+["PD:placement:ErrPlacementDisabled"]
+error = '''
+placement rules feature is disabled
+'''
+
 ["PD:placement:ErrRuleContent"]
 error = '''
 invalid rule content, %s
+'''
+
+["PD:placement:ErrRuleNotFound"]
+error = '''
+rule not found
 '''
 
 ["PD:plugin:ErrLoadPlugin"]
@@ -604,6 +634,11 @@ failed to unmarshal proto
 ["PD:region:ErrRegionAbnormalPeer"]
 error = '''
 region %v has abnormal peer
+'''
+
+["PD:region:ErrRegionInvalidID"]
+error = '''
+invalid region id
 '''
 
 ["PD:region:ErrRegionNotAdjacent"]

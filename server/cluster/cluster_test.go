@@ -68,7 +68,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	_, opt, err := newTestScheduleConfig()
 	opt.GetScheduleConfig().StoreLimitVersion = "v2"
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 
 	n, np := uint64(3), uint64(3)
 	stores := newTestStores(n, "2.0.0")
@@ -201,7 +201,7 @@ func TestFilterUnhealthyStore(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 
 	stores := newTestStores(3, "2.0.0")
 	req := &pdpb.StoreHeartbeatRequest{}
@@ -239,7 +239,7 @@ func TestSetOfflineStore(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
@@ -305,7 +305,7 @@ func TestSetOfflineWithReplica(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	// Put 4 stores.
@@ -344,7 +344,7 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	opt.SetMaxReplicas(1)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	// Put 3 stores.
@@ -371,7 +371,7 @@ func TestForceBuryStore(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	// Put 2 stores.
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -390,7 +390,7 @@ func TestReuseAddress(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	// Put 4 stores.
 	for _, store := range newTestStores(4, "2.0.0") {
@@ -436,7 +436,7 @@ func TestUpStore(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
@@ -481,7 +481,7 @@ func TestRemovingProcess(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.SetPrepared()
 
@@ -539,7 +539,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
@@ -574,7 +574,7 @@ func TestStoreClusterVersion(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	stores := newTestStores(3, "5.0.0")
 	s1, s2, s3 := stores[0].GetMeta(), stores[1].GetMeta(), stores[2].GetMeta()
 	s1.Version = "5.0.1"
@@ -599,7 +599,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	newTestStores(4, "2.0.0")
 	peers := []*metapb.Peer{
@@ -661,7 +661,7 @@ func TestBucketHeartbeat(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	// case1: region is not exist
@@ -718,7 +718,7 @@ func TestRegionHeartbeat(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	n, np := uint64(3), uint64(3)
 	cluster.wg.Add(1)
@@ -963,7 +963,7 @@ func TestRegionFlowChanged(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 	processRegions := func(regions []*core.RegionInfo) {
@@ -988,7 +988,7 @@ func TestRegionSizeChanged(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.regionStats = statistics.NewRegionStatistics(
 		cluster.GetBasicCluster(),
@@ -1034,7 +1034,7 @@ func TestConcurrentReportBucket(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
@@ -1064,7 +1064,7 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
@@ -1105,7 +1105,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	cfg.LocationLabels = []string{"zone"}
 	opt.SetReplicationConfig(cfg)
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 
 	for i := uint64(1); i <= 4; i++ {
 		var labels []*metapb.StoreLabel
@@ -1144,7 +1144,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	re.NoError(cluster.putRegion(r))
 
 	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r})
-	counter := cluster.labelLevelStats.GetLabelCounter()
+	counter := cluster.labelStats.GetLabelCounter()
 	re.Equal(0, counter["none"])
 	re.Equal(1, counter["zone"])
 }
@@ -1184,7 +1184,7 @@ func TestHeartbeatSplit(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	// 1: [nil, nil)
@@ -1228,7 +1228,7 @@ func TestRegionSplitAndMerge(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
@@ -1266,7 +1266,7 @@ func TestOfflineAndMerge(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
@@ -1634,7 +1634,7 @@ func TestCalculateStoreSize1(t *testing.T) {
 	cfg := opt.GetReplicationConfig()
 	cfg.EnablePlacementRules = true
 	opt.SetReplicationConfig(cfg)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.regionStats = statistics.NewRegionStatistics(
 		cluster.GetBasicCluster(),
@@ -1669,7 +1669,7 @@ func TestCalculateStoreSize1(t *testing.T) {
 	}
 
 	cluster.ruleManager.SetRule(
-		&placement.Rule{GroupID: "pd", ID: "zone1", StartKey: []byte(""), EndKey: []byte(""), Role: "voter", Count: 2,
+		&placement.Rule{GroupID: placement.DefaultGroupID, ID: "zone1", StartKey: []byte(""), EndKey: []byte(""), Role: placement.Voter, Count: 2,
 			LabelConstraints: []placement.LabelConstraint{
 				{Key: "zone", Op: "in", Values: []string{"zone1"}},
 			},
@@ -1677,7 +1677,7 @@ func TestCalculateStoreSize1(t *testing.T) {
 	)
 
 	cluster.ruleManager.SetRule(
-		&placement.Rule{GroupID: "pd", ID: "zone2", StartKey: []byte(""), EndKey: []byte(""), Role: "voter", Count: 2,
+		&placement.Rule{GroupID: placement.DefaultGroupID, ID: "zone2", StartKey: []byte(""), EndKey: []byte(""), Role: placement.Voter, Count: 2,
 			LabelConstraints: []placement.LabelConstraint{
 				{Key: "zone", Op: "in", Values: []string{"zone2"}},
 			},
@@ -1685,13 +1685,13 @@ func TestCalculateStoreSize1(t *testing.T) {
 	)
 
 	cluster.ruleManager.SetRule(
-		&placement.Rule{GroupID: "pd", ID: "zone3", StartKey: []byte(""), EndKey: []byte(""), Role: "follower", Count: 1,
+		&placement.Rule{GroupID: placement.DefaultGroupID, ID: "zone3", StartKey: []byte(""), EndKey: []byte(""), Role: placement.Follower, Count: 1,
 			LabelConstraints: []placement.LabelConstraint{
 				{Key: "zone", Op: "in", Values: []string{"zone3"}},
 			},
 			LocationLabels: []string{"rack", "host"}},
 	)
-	cluster.ruleManager.DeleteRule("pd", "default")
+	cluster.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 
 	regions := newTestRegions(100, 10, 5)
 	for _, region := range regions {
@@ -1720,7 +1720,7 @@ func TestCalculateStoreSize2(t *testing.T) {
 	cfg.EnablePlacementRules = true
 	opt.SetReplicationConfig(cfg)
 	opt.SetMaxReplicas(3)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.regionStats = statistics.NewRegionStatistics(
 		cluster.GetBasicCluster(),
@@ -1753,7 +1753,7 @@ func TestCalculateStoreSize2(t *testing.T) {
 	}
 
 	cluster.ruleManager.SetRule(
-		&placement.Rule{GroupID: "pd", ID: "dc1", StartKey: []byte(""), EndKey: []byte(""), Role: "voter", Count: 2,
+		&placement.Rule{GroupID: placement.DefaultGroupID, ID: "dc1", StartKey: []byte(""), EndKey: []byte(""), Role: placement.Voter, Count: 2,
 			LabelConstraints: []placement.LabelConstraint{
 				{Key: "dc", Op: "in", Values: []string{"dc1"}},
 			},
@@ -1761,7 +1761,7 @@ func TestCalculateStoreSize2(t *testing.T) {
 	)
 
 	cluster.ruleManager.SetRule(
-		&placement.Rule{GroupID: "pd", ID: "logic3", StartKey: []byte(""), EndKey: []byte(""), Role: "voter", Count: 1,
+		&placement.Rule{GroupID: placement.DefaultGroupID, ID: "logic3", StartKey: []byte(""), EndKey: []byte(""), Role: placement.Voter, Count: 1,
 			LabelConstraints: []placement.LabelConstraint{
 				{Key: "logic", Op: "in", Values: []string{"logic3"}},
 			},
@@ -1769,13 +1769,13 @@ func TestCalculateStoreSize2(t *testing.T) {
 	)
 
 	cluster.ruleManager.SetRule(
-		&placement.Rule{GroupID: "pd", ID: "logic4", StartKey: []byte(""), EndKey: []byte(""), Role: "learner", Count: 1,
+		&placement.Rule{GroupID: placement.DefaultGroupID, ID: "logic4", StartKey: []byte(""), EndKey: []byte(""), Role: placement.Learner, Count: 1,
 			LabelConstraints: []placement.LabelConstraint{
 				{Key: "logic", Op: "in", Values: []string{"logic4"}},
 			},
 			LocationLabels: []string{"dc", "logic", "rack", "host"}},
 	)
-	cluster.ruleManager.DeleteRule("pd", "default")
+	cluster.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 
 	regions := newTestRegions(100, 10, 5)
 	for _, region := range regions {
@@ -1829,7 +1829,7 @@ func Test(t *testing.T) {
 	regions := newTestRegions(n, n, np)
 	_, opts, err := newTestScheduleConfig()
 	re.NoError(err)
-	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opts, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opts, storage.NewStorageWithMemoryBackend())
 	cache := tc.core
 
 	for i := uint64(0); i < n; i++ {
@@ -1943,7 +1943,7 @@ func TestAwakenStore(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	n := uint64(3)
 	stores := newTestStores(n, "6.5.0")
 	re.True(stores[0].NeedAwakenStore())
@@ -1997,7 +1997,7 @@ func TestUpdateAndDeleteLabel(t *testing.T) {
 
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	stores := newTestStores(1, "6.5.1")
 	for _, store := range stores {
 		re.NoError(cluster.PutStore(store.GetMeta()))
@@ -2115,7 +2115,7 @@ func newTestScheduleConfig() (*sc.ScheduleConfig, *config.PersistOptions, error)
 }
 
 func newTestCluster(ctx context.Context, opt *config.PersistOptions) *testCluster {
-	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+	rc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	storage := storage.NewStorageWithMemoryBackend()
 	rc.regionLabeler, _ = labeler.NewRegionLabeler(ctx, storage, time.Second*5)
 
@@ -2127,10 +2127,9 @@ func newTestRaftCluster(
 	id id.Allocator,
 	opt *config.PersistOptions,
 	s storage.Storage,
-	basicCluster *core.BasicCluster,
 ) *RaftCluster {
-	rc := &RaftCluster{serverCtx: ctx}
-	rc.InitCluster(id, opt, s, basicCluster, nil)
+	rc := &RaftCluster{serverCtx: ctx, core: core.NewBasicCluster(), storage: s}
+	rc.InitCluster(id, opt, nil, nil)
 	rc.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
@@ -2138,6 +2137,7 @@ func newTestRaftCluster(
 			panic(err)
 		}
 	}
+	rc.schedulingController = newSchedulingController(rc.ctx, rc.core, rc.opt, rc.ruleManager)
 	return rc
 }
 
@@ -2383,7 +2383,7 @@ func (c *testCluster) LoadRegion(regionID uint64, followerStoreIDs ...uint64) er
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	return c.putRegion(core.NewRegionInfo(region, nil))
+	return c.putRegion(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
 }
 
 func TestBasic(t *testing.T) {
@@ -2468,7 +2468,7 @@ func TestDispatch(t *testing.T) {
 
 func dispatchHeartbeat(co *schedule.Coordinator, region *core.RegionInfo, stream hbstream.HeartbeatStream) error {
 	co.GetHeartbeatStreams().BindStream(region.GetLeader().GetStoreId(), stream)
-	if err := co.GetCluster().(*RaftCluster).putRegion(region.Clone()); err != nil {
+	if err := co.GetCluster().(*RaftCluster).putRegion(region.Clone(core.SetSource(core.Heartbeat))); err != nil {
 		return err
 	}
 	co.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, nil)
@@ -2485,7 +2485,10 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 			nil)
 	}, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
-
+	rc := co.GetCluster().(*RaftCluster)
+	rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
+	rc.schedulingController.coordinator = co
+	controller := co.GetSchedulersController()
 	// Make sure there are no problem when concurrent write and read
 	var wg sync.WaitGroup
 	count := 10
@@ -2498,15 +2501,14 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 			}
 		}(i)
 	}
-	controller := co.GetSchedulersController()
 	for i := 0; i < 1000; i++ {
 		co.CollectHotSpotMetrics()
 		controller.CollectSchedulerMetrics()
-		co.GetCluster().(*RaftCluster).collectClusterMetrics()
+		rc.collectSchedulingMetrics()
 	}
-	co.ResetHotSpotMetrics()
-	controller.ResetSchedulerMetrics()
-	co.GetCluster().(*RaftCluster).resetClusterMetrics()
+	schedule.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
+	rc.resetSchedulingMetrics()
 	wg.Wait()
 }
 
@@ -2520,6 +2522,11 @@ func TestCollectMetrics(t *testing.T) {
 			nil)
 	}, func(co *schedule.Coordinator) { co.Run() }, re)
 	defer cleanup()
+
+	rc := co.GetCluster().(*RaftCluster)
+	rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
+	rc.schedulingController.coordinator = co
+	controller := co.GetSchedulersController()
 	count := 10
 	for i := 0; i <= count; i++ {
 		for k := 0; k < 200; k++ {
@@ -2533,11 +2540,11 @@ func TestCollectMetrics(t *testing.T) {
 			tc.hotStat.HotCache.Update(item, utils.Write)
 		}
 	}
-	controller := co.GetSchedulersController()
+
 	for i := 0; i < 1000; i++ {
 		co.CollectHotSpotMetrics()
 		controller.CollectSchedulerMetrics()
-		co.GetCluster().(*RaftCluster).collectClusterMetrics()
+		rc.collectSchedulingMetrics()
 	}
 	stores := co.GetCluster().GetStores()
 	regionStats := co.GetCluster().RegionWriteStats()
@@ -2550,9 +2557,9 @@ func TestCollectMetrics(t *testing.T) {
 		s.Stats = nil
 	}
 	re.Equal(status1, status2)
-	co.ResetHotSpotMetrics()
-	controller.ResetSchedulerMetrics()
-	co.GetCluster().(*RaftCluster).resetClusterMetrics()
+	schedule.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
+	rc.resetSchedulingMetrics()
 }
 
 func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func(*schedule.Coordinator), re *require.Assertions) (*testCluster, *schedule.Coordinator, func()) {
@@ -2792,11 +2799,11 @@ func TestReplica(t *testing.T) {
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	waitNoResponse(re, stream)
 
-	// Remove peer from store 4.
+	// Remove peer from store 3.
 	re.NoError(tc.addLeaderRegion(2, 1, 2, 3, 4))
 	region = tc.GetRegion(2)
 	re.NoError(dispatchHeartbeat(co, region, stream))
-	region = waitRemovePeer(re, stream, region, 4)
+	region = waitRemovePeer(re, stream, region, 3) // store3 is down, we should remove it firstly.
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	waitNoResponse(re, stream)
 
@@ -2942,14 +2949,14 @@ func TestShouldRun(t *testing.T) {
 
 	for _, testCase := range testCases {
 		r := tc.GetRegion(testCase.regionID)
-		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
+		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
 		re.NoError(tc.processRegionHeartbeat(nr))
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
-	newRegion := core.NewRegionInfo(nr, nil)
+	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(newRegion))
-	re.Equal(7, co.GetPrepareChecker().GetSum())
+	re.Equal(7, tc.core.GetClusterNotFromStorageRegionsCnt())
 }
 
 func TestShouldRunWithNonLeaderRegions(t *testing.T) {
@@ -2985,14 +2992,14 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 
 	for _, testCase := range testCases {
 		r := tc.GetRegion(testCase.regionID)
-		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
+		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
 		re.NoError(tc.processRegionHeartbeat(nr))
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
-	newRegion := core.NewRegionInfo(nr, nil)
+	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(newRegion))
-	re.Equal(9, co.GetPrepareChecker().GetSum())
+	re.Equal(9, tc.core.GetClusterNotFromStorageRegionsCnt())
 
 	// Now, after server is prepared, there exist some regions with no leader.
 	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())
@@ -3133,7 +3140,7 @@ func TestPersistScheduler(t *testing.T) {
 	// option have 6 items because the default scheduler do not remove.
 	re.Len(newOpt.GetSchedulers(), defaultCount+3)
 	re.NoError(newOpt.Persist(storage))
-	tc.RaftCluster.opt = newOpt
+	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
@@ -3146,7 +3153,7 @@ func TestPersistScheduler(t *testing.T) {
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(storage))
-	tc.RaftCluster.opt = newOpt
+	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	controller = co.GetSchedulersController()
@@ -3173,7 +3180,7 @@ func TestPersistScheduler(t *testing.T) {
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(co.GetCluster().GetStorage()))
-	tc.RaftCluster.opt = newOpt
+	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	co.Run()
@@ -3232,7 +3239,7 @@ func TestRemoveScheduler(t *testing.T) {
 	_, newOpt, err := newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(tc.storage))
-	tc.RaftCluster.opt = newOpt
+	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	re.Empty(controller.GetSchedulerNames())
@@ -3262,7 +3269,6 @@ func TestRestart(t *testing.T) {
 	re.NoError(tc.addRegionStore(3, 3))
 	re.NoError(tc.addLeaderRegion(1, 1))
 	region := tc.GetRegion(1)
-	co.GetPrepareChecker().Collect(region)
 
 	// Add 1 replica on store 2.
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3276,7 +3282,6 @@ func TestRestart(t *testing.T) {
 
 	// Recreate coordinator then add another replica on store 3.
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
-	co.GetPrepareChecker().Collect(region)
 	co.Run()
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	region = waitAddLearner(re, stream, region, 3)

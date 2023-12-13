@@ -1,4 +1,5 @@
 // Copyright 2016 TiKV Project Authors.
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
@@ -80,6 +81,13 @@ func (t *regionTree) length() int {
 		return 0
 	}
 	return t.tree.Len()
+}
+
+func (t *regionTree) notFromStorageRegionsCount() int {
+	if t == nil {
+		return 0
+	}
+	return t.notFromStorageRegionsCnt
 }
 
 // GetOverlaps returns the range items that has some intersections with the given items.

@@ -1,3 +1,4 @@
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -255,10 +256,10 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendPrepare() {
 	suite.True(ok)
 	suite.Zero(es2.conf.evictedStore())
 	// prepare with no evict store.
-	suite.es.Prepare(suite.tc)
+	suite.es.PrepareConfig(suite.tc)
 
 	es2.conf.setStoreAndPersist(1)
 	suite.Equal(uint64(1), es2.conf.evictedStore())
 	// prepare with evict store.
-	suite.es.Prepare(suite.tc)
+	suite.es.PrepareConfig(suite.tc)
 }

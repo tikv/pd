@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/pdctl"
@@ -33,27 +34,30 @@ import (
 
 type operatorTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
-func (suite *operatorTestSuite) TestOperator() {
-	var start time.Time
-	start = start.Add(time.Hour)
-	opts := []tests.ConfigOption{
-		// TODO: enable placementrules
+func (suite *operatorTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
+			// TODO: enable placement rules
 			conf.Replication.MaxReplicas = 2
 			conf.Replication.EnablePlacementRules = false
+			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
 		},
-		func(conf *config.Config, serverName string) {
-			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkOperator)
+	)
+}
+
+func (suite *operatorTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *operatorTestSuite) TestOperator() {
+	suite.env.RunTestInTwoModes(suite.checkOperator)
 }
 
 func (suite *operatorTestSuite) checkOperator(cluster *tests.TestCluster) {
@@ -221,6 +225,13 @@ func (suite *operatorTestSuite) checkOperator(cluster *tests.TestCluster) {
 
 	_, err = pdctl.ExecuteCommand(cmd, "config", "set", "enable-placement-rules", "true")
 	re.NoError(err)
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		// wait for the scheduler server to update the config
+		testutil.Eventually(re, func() bool {
+			return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled()
+		})
+	}
+
 	output, err = pdctl.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "3")
 	re.NoError(err)
 	re.Contains(string(output), "not supported")

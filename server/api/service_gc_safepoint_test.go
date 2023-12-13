@@ -58,7 +58,7 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	sspURL := suite.urlPrefix + "/gc/safepoint"
 
 	storage := suite.svr.GetStorage()
-	list := &listServiceGCSafepoint{
+	list := &ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
 				ServiceID: "a",
@@ -87,7 +87,7 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	res, err := testDialClient.Get(sspURL)
 	suite.NoError(err)
 	defer res.Body.Close()
-	listResp := &listServiceGCSafepoint{}
+	listResp := &ListServiceGCSafepoint{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	suite.NoError(err)
 	suite.Equal(list, listResp)

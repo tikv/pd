@@ -99,8 +99,8 @@ func TestRegionRuleFitCache(t *testing.T) {
 			region: mockRegion(3, 0),
 			rules: []*Rule{
 				{
-					GroupID:        "pd",
-					ID:             "default",
+					GroupID:        DefaultGroupID,
+					ID:             DefaultRuleID,
 					Role:           Voter,
 					Count:          4,
 					Version:        1,
@@ -114,8 +114,8 @@ func TestRegionRuleFitCache(t *testing.T) {
 			region: mockRegion(3, 0),
 			rules: []*Rule{
 				{
-					GroupID:         "pd",
-					ID:              "default",
+					GroupID:         DefaultGroupID,
+					ID:              DefaultRuleID,
 					Role:            Voter,
 					Count:           3,
 					CreateTimestamp: 1,
@@ -141,7 +141,7 @@ func TestRegionRuleFitCache(t *testing.T) {
 			region: mockRegion(3, 0),
 			rules: []*Rule{
 				{
-					GroupID:        "pd",
+					GroupID:        DefaultGroupID,
 					ID:             "default-2",
 					Role:           Voter,
 					Count:          3,
@@ -155,7 +155,7 @@ func TestRegionRuleFitCache(t *testing.T) {
 			region: nil,
 			rules: []*Rule{
 				{
-					GroupID:        "pd",
+					GroupID:        DefaultGroupID,
 					ID:             "default-2",
 					Role:           Voter,
 					Count:          3,

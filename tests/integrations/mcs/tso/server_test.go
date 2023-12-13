@@ -89,7 +89,7 @@ func (suite *tsoServerTestSuite) TearDownSuite() {
 func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("Recovered from an unexpected panic", r)
+			suite.T().Log("Recovered from an unexpected panic", r)
 			suite.T().Errorf("Expected no panic, but something bad occurred with")
 		}
 	}()
@@ -391,6 +391,11 @@ func (suite *APIServerForwardTestSuite) TestResignAPIPrimaryForward() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 
 	for j := 0; j < 10; j++ {
 		suite.pdLeader.ResignLeader()

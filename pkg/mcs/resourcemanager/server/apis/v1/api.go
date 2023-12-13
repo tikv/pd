@@ -81,10 +81,10 @@ func NewService(srv *rmserver.Service) *Service {
 		c.Set(multiservicesapi.ServiceContextKey, manager.GetBasicServer())
 		c.Next()
 	})
-	apiHandlerEngine.Use(multiservicesapi.ServiceRedirector())
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	pprof.Register(apiHandlerEngine)
 	endpoint := apiHandlerEngine.Group(APIPathPrefix)
+	endpoint.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		manager:          manager,
 		apiHandlerEngine: apiHandlerEngine,

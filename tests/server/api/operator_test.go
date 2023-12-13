@@ -15,6 +15,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,7 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	pdoperator "github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -44,35 +45,31 @@ var (
 
 type operatorTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
-func (suite *operatorTestSuite) TestOperator() {
-	opts := []tests.ConfigOption{
+func (suite *operatorTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 1
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkAddRemovePeer)
+		})
+}
 
-	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkMergeRegionOperator)
+func (suite *operatorTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
 
-	opts = []tests.ConfigOption{
-		func(conf *config.Config, serverName string) {
-			conf.Replication.MaxReplicas = 3
-		},
-	}
-	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+func (suite *operatorTestSuite) TestAddRemovePeer() {
+	suite.env.RunTestInTwoModes(suite.checkAddRemovePeer)
 }
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
+	suite.pauseRuleChecker(cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -106,6 +103,8 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 			ConfVer: 1,
 			Version: 1,
 		},
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
 	}
 	regionInfo := core.NewRegionInfo(region, peer1)
 	tests.MustPutRegionInfo(re, cluster, regionInfo)
@@ -174,8 +173,38 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	suite.NoError(err)
 }
 
+func (suite *operatorTestSuite) TestMergeRegionOperator() {
+	suite.env.RunTestInTwoModes(suite.checkMergeRegionOperator)
+}
+
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	suite.pauseRuleChecker(cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
@@ -199,8 +228,19 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 	suite.NoError(err)
 }
 
+func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
+	// use a new environment to avoid affecting other tests
+	env := tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 3
+		})
+	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+	env.Cleanup()
+}
+
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
+	suite.pauseRuleChecker(cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -239,6 +279,8 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			ConfVer: 1,
 			Version: 1,
 		},
+		StartKey: []byte("a"),
+		EndKey:   []byte("b"),
 	}
 	tests.MustPutRegionInfo(re, cluster, core.NewRegionInfo(region, peer1))
 
@@ -268,10 +310,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3]}`),
 			expectedError:       nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 1}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 1}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 1}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 		{
@@ -280,11 +322,11 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError:       nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 2}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
-				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 2}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 2}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 2}.String(),
+				operator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
 			}),
 		},
 		{
@@ -299,11 +341,11 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			placementRuleEnable: true,
 			input:               []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 3}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
-				pdoperator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 3}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 3}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.TransferLeader{FromStore: 2, ToStore: 3}.String(),
 			}),
 		},
 		{
@@ -360,10 +402,10 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["follower", "leader"]}`),
 			expectedError: nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 5}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 5}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 5}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 3}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 		{
@@ -400,21 +442,32 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			input:         []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [2, 3], "peer_roles":["leader", "follower"]}`),
 			expectedError: nil,
 			expectSteps: convertStepsToStr([]string{
-				pdoperator.AddLearner{ToStore: 3, PeerID: 6}.String(),
-				pdoperator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
-				pdoperator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
-				pdoperator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
+				operator.AddLearner{ToStore: 3, PeerID: 6}.String(),
+				operator.PromoteLearner{ToStore: 3, PeerID: 6}.String(),
+				operator.TransferLeader{FromStore: 1, ToStore: 2}.String(),
+				operator.RemovePeer{FromStore: 1, PeerID: 1}.String(),
 			}),
 		},
 	}
 	svr := cluster.GetLeaderServer()
+	url := fmt.Sprintf("%s/pd/api/v1/config", svr.GetAddr())
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
-		// TODO: remove this after we can sync this config to all servers.
-		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			sche.GetCluster().GetSchedulerConfig().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+		data := make(map[string]interface{})
+		if testCase.placementRuleEnable {
+			data["enable-placement-rules"] = "true"
 		} else {
-			svr.GetRaftCluster().GetOpts().SetPlacementRuleEnabled(testCase.placementRuleEnable)
+			data["enable-placement-rules"] = "false"
+		}
+		reqData, e := json.Marshal(data)
+		re.NoError(e)
+		err := tu.CheckPostJSON(testDialClient, url, reqData, tu.StatusOK(re))
+		re.NoError(err)
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			// wait for the scheduler server to update the config
+			tu.Eventually(re, func() bool {
+				return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled() == testCase.placementRuleEnable
+			})
 		}
 		manager := svr.GetRaftCluster().GetRuleManager()
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
@@ -433,10 +486,9 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			// add customized rule first and then remove default rule
 			err := manager.SetRules(testCase.rules)
 			suite.NoError(err)
-			err = manager.DeleteRule("pd", "default")
+			err = manager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 			suite.NoError(err)
 		}
-		var err error
 		if testCase.expectedError == nil {
 			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input, tu.StatusOK(re))
 		} else {
@@ -450,10 +502,22 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			suite.NoError(err)
 			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 		} else {
-			// FIXME: we should check the delete result, which should be failed,
-			// but the delete operator may be success because the cluster create a new operator to remove ophan peer.
-			err = tu.CheckDelete(testDialClient, regionURL)
+			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusNotOK(re))
 		}
 		suite.NoError(err)
 	}
+}
+
+// pauseRuleChecker will pause rule checker to avoid unexpected operator.
+func (suite *operatorTestSuite) pauseRuleChecker(cluster *tests.TestCluster) {
+	re := suite.Require()
+	checkerName := "rule"
+	addr := cluster.GetLeaderServer().GetAddr()
+	resp := make(map[string]interface{})
+	url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
+	err := tu.CheckPostJSON(testDialClient, url, []byte(`{"delay":1000}`), tu.StatusOK(re))
+	re.NoError(err)
+	err = tu.ReadGetJSON(re, testDialClient, url, &resp)
+	re.NoError(err)
+	re.True(resp["paused"].(bool))
 }
