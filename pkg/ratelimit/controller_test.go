@@ -15,6 +15,7 @@
 package ratelimit
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -79,7 +80,8 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 func TestControllerWithConcurrencyLimiter(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	limiter := NewController()
+	limiter := NewController(context.Background(), "grpc", nil)
+	defer limiter.Close()
 	testCase := []labelCase{
 		{
 			label: "test1",
@@ -192,7 +194,8 @@ func TestBlockList(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	opts := []Option{AddLabelAllowList()}
-	limiter := NewController()
+	limiter := NewController(context.Background(), "grpc", nil)
+	defer limiter.Close()
 	label := "test"
 
 	re.False(limiter.IsInAllowList(label))
@@ -212,7 +215,8 @@ func TestBlockList(t *testing.T) {
 func TestControllerWithQPSLimiter(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	limiter := NewController()
+	limiter := NewController(context.Background(), "grpc", nil)
+	defer limiter.Close()
 	testCase := []labelCase{
 		{
 			label: "test1",
@@ -321,7 +325,8 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 func TestControllerWithTwoLimiters(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	limiter := NewController()
+	limiter := NewController(context.Background(), "grpc", nil)
+	defer limiter.Close()
 	testCase := []labelCase{
 		{
 			label: "test1",

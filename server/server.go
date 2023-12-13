@@ -273,8 +273,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
-	s.serviceRateLimiter = ratelimit.NewController()
-	s.grpcServiceRateLimiter = ratelimit.NewController()
+	s.serviceRateLimiter = ratelimit.NewController(s.ctx, "http", apiConcurrencyGauge)
+	s.grpcServiceRateLimiter = ratelimit.NewController(s.ctx, "grpc", apiConcurrencyGauge)
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.grpcServiceLabels = make(map[string]struct{})
@@ -382,9 +382,11 @@ func (s *Server) startEtcd(ctx context.Context) error {
 }
 
 func (s *Server) initGRPCServiceLabels() {
-	for _, serviceInfo := range s.grpcServer.GetServiceInfo() {
-		for _, methodInfo := range serviceInfo.Methods {
-			s.grpcServiceLabels[methodInfo.Name] = struct{}{}
+	for name, serviceInfo := range s.grpcServer.GetServiceInfo() {
+		if name == gRPCServiceName {
+			for _, methodInfo := range serviceInfo.Methods {
+				s.grpcServiceLabels[methodInfo.Name] = struct{}{}
+			}
 		}
 	}
 }
@@ -502,6 +504,14 @@ func (s *Server) startServer(ctx context.Context) error {
 		cb()
 	}
 
+	// to init all rate limiter and metrics
+	for service := range s.serviceLabels {
+		s.serviceRateLimiter.Update(service, ratelimit.InitLimiter())
+	}
+	for service := range s.grpcServiceLabels {
+		s.grpcServiceRateLimiter.Update(service, ratelimit.InitLimiter())
+	}
+
 	// Server has started.
 	atomic.StoreInt64(&s.isRunning, 1)
 	serverMaxProcs.Set(float64(runtime.GOMAXPROCS(0)))
@@ -559,6 +569,8 @@ func (s *Server) Close() {
 		}
 	}
 
+	s.grpcServiceRateLimiter.Close()
+	s.serviceRateLimiter.Close()
 	// Run callbacks
 	log.Info("triggering the close callback functions")
 	for _, cb := range s.closeCallbacks {

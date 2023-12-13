@@ -26,11 +26,13 @@ func newConcurrencyLimiter(limit uint64) *concurrencyLimiter {
 	return &concurrencyLimiter{limit: limit}
 }
 
+const unlimit = uint64(0)
+
 func (l *concurrencyLimiter) allow() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.current+1 <= l.limit {
+	if l.limit == unlimit || l.current+1 <= l.limit {
 		l.current++
 		return true
 	}

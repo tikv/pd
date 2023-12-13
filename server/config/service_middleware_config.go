@@ -18,8 +18,8 @@ import "github.com/tikv/pd/pkg/ratelimit"
 
 const (
 	defaultEnableAuditMiddleware         = true
-	defaultEnableRateLimitMiddleware     = false
-	defaultEnableGRPCRateLimitMiddleware = false
+	defaultEnableRateLimitMiddleware     = true
+	defaultEnableGRPCRateLimitMiddleware = true
 )
 
 // ServiceMiddlewareConfig is the configuration for PD Service middleware.

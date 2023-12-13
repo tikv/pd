@@ -159,6 +159,13 @@ var (
 			Name:      "maxprocs",
 			Help:      "The value of GOMAXPROCS.",
 		})
+	apiConcurrencyGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "api_concurrency",
+			Help:      "Concurrency number of the api.",
+		}, []string{"kind", "api"})
 )
 
 func init() {
@@ -179,4 +186,5 @@ func init() {
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
 	prometheus.MustRegister(serverMaxProcs)
+	prometheus.MustRegister(apiConcurrencyGauge)
 }
