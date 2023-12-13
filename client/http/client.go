@@ -735,6 +735,17 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 		http.MethodPatch, labelRulePatchJSON, nil)
 }
 
+// GetSchedulers gets the schedulers from PD cluster.
+func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
+	var schedulers []string
+	err := c.requestWithRetry(ctx, "GetSchedulers", Schedulers,
+		http.MethodGet, nil, &schedulers)
+	if err != nil {
+		return nil, err
+	}
+	return schedulers, nil
+}
+
 // CreateScheduler creates a scheduler to PD cluster.
 func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
 	inputJSON, err := json.Marshal(map[string]interface{}{
@@ -783,18 +794,6 @@ func (c *client) AccelerateScheduleInBatch(ctx context.Context, keyRanges []*Key
 	return c.requestWithRetry(ctx,
 		"AccelerateScheduleInBatch", AccelerateScheduleInBatch,
 		http.MethodPost, inputJSON, nil)
-}
-
-// GetSchedulers gets all scheduler names.
-func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
-	var schedulers []string
-	err := c.requestWithRetry(ctx,
-		"GetSchedulers", Schedulers,
-		http.MethodGet, nil, &schedulers)
-	if err != nil {
-		return nil, err
-	}
-	return schedulers, nil
 }
 
 // PostSchedulerDelay changes the delay of given scheduler.
