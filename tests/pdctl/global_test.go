@@ -30,6 +30,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const pdControlCallerID = "pd-ctl"
+
 func TestSendAndGetComponent(t *testing.T) {
 	re := require.New(t)
 	handler := func(ctx context.Context, s *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
@@ -40,7 +42,7 @@ func TestSendAndGetComponent(t *testing.T) {
 				log.Info("header", zap.String("key", k))
 			}
 			log.Info("caller id", zap.String("caller-id", callerID))
-			re.Equal("pdctl", callerID)
+			re.Equal(pdControlCallerID, callerID)
 			fmt.Fprint(w, callerID)
 		})
 		info := apiutil.APIServiceGroup{
@@ -65,5 +67,5 @@ func TestSendAndGetComponent(t *testing.T) {
 	args := []string{"-u", pdAddr, "health"}
 	output, err := ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Equal("pdctl\n", string(output))
+	re.Equal(fmt.Sprintf("%s\n", pdControlCallerID), string(output))
 }

@@ -137,7 +137,7 @@ func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
 	return splitIP, splitPort
 }
 
-// getComponentNameOnHTTP returns component name from Request Header
+// getComponentNameOnHTTP returns component name from the request header.
 func getComponentNameOnHTTP(r *http.Request) string {
 	componentName := r.Header.Get(componentSignatureKey)
 	if len(componentName) == 0 {
@@ -146,7 +146,7 @@ func getComponentNameOnHTTP(r *http.Request) string {
 	return componentName
 }
 
-// GetCallerIDOnHTTP returns caller ID from Request Header
+// GetCallerIDOnHTTP returns caller ID from the request header.
 func GetCallerIDOnHTTP(r *http.Request) string {
 	callerID := r.Header.Get(XCallerIDHeader)
 	if len(callerID) == 0 {
@@ -156,23 +156,23 @@ func GetCallerIDOnHTTP(r *http.Request) string {
 	return callerID
 }
 
-// ComponentSignatureRoundTripper is used to add component signature in HTTP header
-type ComponentSignatureRoundTripper struct {
-	proxied   http.RoundTripper
-	component string
+// CallerIDRoundTripper is used to add caller ID in the HTTP header.
+type CallerIDRoundTripper struct {
+	proxied  http.RoundTripper
+	callerID string
 }
 
-// NewComponentSignatureRoundTripper returns a new ComponentSignatureRoundTripper.
-func NewComponentSignatureRoundTripper(roundTripper http.RoundTripper, componentName string) *ComponentSignatureRoundTripper {
-	return &ComponentSignatureRoundTripper{
-		proxied:   roundTripper,
-		component: componentName,
+// NewCallerIDRoundTripper returns a new `CallerIDRoundTripper`.
+func NewCallerIDRoundTripper(roundTripper http.RoundTripper, callerID string) *CallerIDRoundTripper {
+	return &CallerIDRoundTripper{
+		proxied:  roundTripper,
+		callerID: callerID,
 	}
 }
 
 // RoundTrip is used to implement RoundTripper
-func (rt *ComponentSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	req.Header.Add(componentSignatureKey, rt.component)
+func (rt *CallerIDRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	req.Header.Add(XCallerIDHeader, rt.callerID)
 	// Send the request, get the response and the error
 	resp, err = rt.proxied.RoundTrip(req)
 	return
