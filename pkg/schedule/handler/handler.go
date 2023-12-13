@@ -808,7 +808,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{},
 	switch status {
 	case "paused":
 		pausedSchedulers := make([]string, 0, len(schedulers))
-		var pausedPeriods []schedulerPausedPeriod
+		pausedPeriods := []schedulerPausedPeriod{}
 		for _, scheduler := range schedulers {
 			paused, err := sc.IsSchedulerPaused(scheduler)
 			if err != nil {
