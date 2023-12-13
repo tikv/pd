@@ -56,7 +56,7 @@ const (
 	// XForwardedPortHeader is used to mark the client port.
 	XForwardedPortHeader = "X-Forwarded-Port"
 	// XRealIPHeader is used to mark the real client IP.
-	XRealIPHeader = "X-Real-IP"
+	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
 	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
@@ -113,7 +113,7 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 
 // GetIPPortFromHTTPRequest returns http client host IP and port from context.
 // Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
-// so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
+// so `X-Forwarded-For` has the higher priority than `X-Real-Ip`.
 // And both of them have the higher priority than `RemoteAddr`
 func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
 	forwardedIPs := strings.Split(r.Header.Get(XForwardedForHeader), ",")

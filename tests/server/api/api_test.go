@@ -164,7 +164,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	suite.Equal("{\"force\":[\"true\"]}", resp.Header.Get("url-param"))
 	suite.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
 	suite.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
-	suite.Equal("anonymous", resp.Header.Get("component"))
+	suite.Equal("anonymous", resp.Header.Get("caller-id"))
 	suite.Equal("127.0.0.1", resp.Header.Get("ip"))
 
 	input = map[string]interface{}{
@@ -543,7 +543,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 
 func doTestRequestWithLogAudit(srv *tests.TestServer) {
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/pd/api/v1/admin/cache/regions", srv.GetAddr()), http.NoBody)
-	req.Header.Set("component", "test")
+	req.Header.Set(apiutil.XCallerIDHeader, "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 }
@@ -551,7 +551,7 @@ func doTestRequestWithLogAudit(srv *tests.TestServer) {
 func doTestRequestWithPrometheus(srv *tests.TestServer) {
 	timeUnix := time.Now().Unix() - 20
 	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), http.NoBody)
-	req.Header.Set("component", "test")
+	req.Header.Set(apiutil.XCallerIDHeader, "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 }
