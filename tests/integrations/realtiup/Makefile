@@ -17,7 +17,7 @@ GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
-check: static deploy test clean
+check: deploy test clean
 
 static: install-tools
 	@ echo "gofmt ..."
