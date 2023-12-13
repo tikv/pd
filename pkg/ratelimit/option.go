@@ -82,7 +82,7 @@ func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 	}
 }
 
-// UpdateDimensionConfig creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
+// InitLimiter creates empty concurrency limiter for a given label by config if it doesn't exist.
 func InitLimiter() Option {
 	return func(label string, l *Controller) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
