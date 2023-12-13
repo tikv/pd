@@ -182,14 +182,6 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	// Prevent more than one redirection.
-	if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
-		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
-		return
-	}
-
-	r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	forwardedIP, forwardedPort := apiutil.GetIPPortFromHTTPRequest(r)
 	if len(forwardedIP) > 0 {
 		r.Header.Add(apiutil.XForwardedForHeader, forwardedIP)
@@ -208,9 +200,9 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		clientUrls = append(clientUrls, targetAddr)
+		// Add a header to the response, this is not a failure injection
+		// it is used for testing, to check whether the request is forwarded to the micro service
 		failpoint.Inject("checkHeader", func() {
-			// add a header to the response, this is not a failure injection
-			// it is used for testing, to check whether the request is forwarded to the micro service
 			w.Header().Set(apiutil.ForwardToMicroServiceHeader, "true")
 		})
 	} else {
@@ -220,7 +212,15 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		clientUrls = leader.GetClientUrls()
+		// Prevent more than one redirection among PD/API servers.
+		if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
+			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
+			http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
+			return
+		}
+		r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	}
+
 	urls := make([]url.URL, 0, len(clientUrls))
 	for _, item := range clientUrls {
 		u, err := url.Parse(item)
