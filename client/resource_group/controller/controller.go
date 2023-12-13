@@ -1245,11 +1245,7 @@ func (gc *groupCostController) onRequestWait(
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
 
-<<<<<<< HEAD
-	return delta, penalty, gc.meta.Priority, nil
-=======
-	return delta, penalty, waitDuration, gc.getMeta().GetPriority(), nil
->>>>>>> fcdeec42a (resource_control: fix data race in controller (#7520))
+	return delta, penalty, gc.getMeta().GetPriority(), nil
 }
 
 func (gc *groupCostController) onResponse(
