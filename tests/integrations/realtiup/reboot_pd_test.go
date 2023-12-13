@@ -25,7 +25,7 @@ import (
 
 func restartTiUP() {
 	log.Info("start to restart TiUP")
-	cmd := exec.Command("make", "redeploy")
+	cmd := exec.Command("make", "deploy")
 	err := cmd.Run()
 	if err != nil {
 		panic(err)

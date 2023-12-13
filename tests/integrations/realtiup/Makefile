@@ -17,8 +17,6 @@ GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
-check: deploy test clean
-
 static: install-tools
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
@@ -32,9 +30,9 @@ tidy:
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
-deploy: clean
-	@ echo "downloading binaries..."
-	./download_binaries.sh
+check: deploy test kill_tiup
+
+deploy: kill_tiup
 	@ echo "deploying..."
 	./deploy.sh
 	@ echo "wait tiup cluster ready..."
@@ -42,20 +40,6 @@ deploy: clean
 	@ echo "check cluster status..."
 	@ pid=$$(ps -ef | grep 'tiup' | grep -v grep | awk '{print $$2}' | head -n 1); \
 	echo $$pid;
-
-redeploy: kill_tiup
-	@ echo "deploying..."
-	./deploy.sh
-	@ echo "wait tiup cluster ready..."
-	./wait_tiup.sh 15 20
-	@ echo "check cluster status..."
-	@ pid=$$(ps -ef | grep 'tiup' | grep -v grep | awk '{print $$2}' | head -n 1); \
-	echo $$pid;
-
-clean: kill_tiup
-	@ echo "cleaning..."
-	@ rm -rf playground.log
-	@ rm -rf bin
 
 kill_tiup:
 	@ echo "kill tiup..."
