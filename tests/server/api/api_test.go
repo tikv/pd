@@ -164,7 +164,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	suite.Equal("{\"force\":[\"true\"]}", resp.Header.Get("url-param"))
 	suite.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
 	suite.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
-	suite.Equal("anonymous", resp.Header.Get("component"))
+	suite.Equal("anonymous", resp.Header.Get("caller-id"))
 	suite.Equal("127.0.0.1", resp.Header.Get("ip"))
 
 	input = map[string]interface{}{
@@ -374,7 +374,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 func (suite *middlewareTestSuite) TestSwaggerUrl() {
 	leader := suite.cluster.GetLeaderServer()
 	suite.NotNil(leader)
-	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", nil)
+	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", http.NoBody)
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
 	suite.True(resp.StatusCode == http.StatusNotFound)
@@ -395,20 +395,20 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	resp.Body.Close()
 	suite.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 	timeUnix := time.Now().Unix() - 20
-	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
+	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	suite.NoError(err)
 
-	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", nil)
+	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", http.NoBody)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	defer resp.Body.Close()
 	content, _ := io.ReadAll(resp.Body)
 	output := string(content)
-	suite.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 1")
+	suite.Contains(output, "pd_service_audit_handling_seconds_count{caller_id=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 1")
 
 	// resign to test persist config
 	oldLeaderName := leader.GetServer().Name()
@@ -421,20 +421,20 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	leader = suite.cluster.GetLeaderServer()
 
 	timeUnix = time.Now().Unix() - 20
-	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), nil)
+	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	suite.NoError(err)
 
-	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", nil)
+	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", http.NoBody)
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	defer resp.Body.Close()
 	content, _ = io.ReadAll(resp.Body)
 	output = string(content)
-	suite.Contains(output, "pd_service_audit_handling_seconds_count{component=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 2")
+	suite.Contains(output, "pd_service_audit_handling_seconds_count{caller_id=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 2")
 
 	input = map[string]interface{}{
 		"enable-audit": "false",
@@ -542,16 +542,16 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 }
 
 func doTestRequestWithLogAudit(srv *tests.TestServer) {
-	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/pd/api/v1/admin/cache/regions", srv.GetAddr()), nil)
-	req.Header.Set("component", "test")
+	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/pd/api/v1/admin/cache/regions", srv.GetAddr()), http.NoBody)
+	req.Header.Set(apiutil.XCallerIDHeader, "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 }
 
 func doTestRequestWithPrometheus(srv *tests.TestServer) {
 	timeUnix := time.Now().Unix() - 20
-	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), nil)
-	req.Header.Set("component", "test")
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), http.NoBody)
+	req.Header.Set(apiutil.XCallerIDHeader, "test")
 	resp, _ := dialClient.Do(req)
 	resp.Body.Close()
 }
@@ -611,7 +611,7 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	}
 
 	addr := follower.GetAddr() + "/pd/api/v1/version"
-	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	suite.NoError(err)
 	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := dialClient.Do(request)
@@ -636,7 +636,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 
 	addr := follower.GetAddr() + "/pd/api/v1/version"
 	// Request to follower without redirectorHeader is OK.
-	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	suite.NoError(err)
 	resp, err := dialClient.Do(request)
 	suite.NoError(err)
@@ -664,7 +664,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 
 	follower := suite.cluster.GetServer(suite.cluster.GetFollower())
 	addr := follower.GetAddr() + "/pd/api/v1/regions"
-	request, err := http.NewRequest(http.MethodGet, addr, nil)
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	suite.NoError(err)
 	resp, err := dialClient.Do(request)
 	suite.NoError(err)
@@ -914,7 +914,7 @@ func TestPreparingProgress(t *testing.T) {
 		tests.MustPutStore(re, cluster, store)
 	}
 	for i := 0; i < 100; i++ {
-		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("p%d", i)), []byte(fmt.Sprintf("%d", i+1)), core.SetApproximateSize(10))
+		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
 	}
 	// no store preparing
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
@@ -941,8 +941,8 @@ func TestPreparingProgress(t *testing.T) {
 	re.Equal(math.MaxFloat64, p.LeftSeconds)
 
 	// update size
-	tests.MustPutRegion(re, cluster, 1000, 4, []byte(fmt.Sprintf("%d", 1000)), []byte(fmt.Sprintf("%d", 1001)), core.SetApproximateSize(10))
-	tests.MustPutRegion(re, cluster, 1001, 5, []byte(fmt.Sprintf("%d", 1001)), []byte(fmt.Sprintf("%d", 1002)), core.SetApproximateSize(40))
+	tests.MustPutRegion(re, cluster, 1000, 4, []byte(fmt.Sprintf("%20d", 1000)), []byte(fmt.Sprintf("%20d", 1001)), core.SetApproximateSize(10))
+	tests.MustPutRegion(re, cluster, 1001, 5, []byte(fmt.Sprintf("%20d", 1001)), []byte(fmt.Sprintf("%20d", 1002)), core.SetApproximateSize(40))
 	time.Sleep(2 * time.Second)
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
@@ -970,7 +970,7 @@ func TestPreparingProgress(t *testing.T) {
 }
 
 func sendRequest(re *require.Assertions, url string, method string, statusCode int) []byte {
-	req, _ := http.NewRequest(method, url, nil)
+	req, _ := http.NewRequest(method, url, http.NoBody)
 	resp, err := dialClient.Do(req)
 	re.NoError(err)
 	re.Equal(statusCode, resp.StatusCode)

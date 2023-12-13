@@ -151,7 +151,7 @@ var (
 			Name:      "audit_handling_seconds",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component", "ip"})
+		}, []string{"service", "method", "caller_id", "ip"})
 	serverMaxProcs = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -166,6 +166,13 @@ var (
 			Name:      "api_concurrency",
 			Help:      "Concurrency number of the api.",
 		}, []string{"kind", "api"})
+	forwardFailCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_fail_total",
+			Help:      "Counter of forward fail.",
+		}, []string{"request", "type"})
 )
 
 func init() {
@@ -187,4 +194,5 @@ func init() {
 	prometheus.MustRegister(bucketReportInterval)
 	prometheus.MustRegister(serverMaxProcs)
 	prometheus.MustRegister(apiConcurrencyGauge)
+	prometheus.MustRegister(forwardFailCounter)
 }

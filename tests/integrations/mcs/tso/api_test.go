@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
@@ -124,7 +125,7 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 }
 
 func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+tsoKeyspaceGroupsPrefix+"/members", nil)
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+tsoKeyspaceGroupsPrefix+"/members", http.NoBody)
 	re.NoError(err)
 	httpResp, err := dialClient.Do(httpReq)
 	re.NoError(err)
@@ -184,7 +185,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	defer httpResp.Body.Close()
 	re.Equal(http.StatusOK, httpResp.StatusCode)
 
-	httpReq, err = http.NewRequest(http.MethodGet, addr+"/pd/api/v2/tso/keyspace-groups/0", nil)
+	httpReq, err = http.NewRequest(http.MethodGet, addr+"/pd/api/v2/tso/keyspace-groups/0", http.NoBody)
 	re.NoError(err)
 	httpResp, err = dialClient.Do(httpReq)
 	re.NoError(err)
@@ -199,4 +200,47 @@ func TestTSOServerStartFirst(t *testing.T) {
 	re.Len(group.Members, 2)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+}
+
+func TestForwardOnlyTSONoScheduling(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/apiutil/serverapi/checkHeader"))
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestAPICluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	pdAddr := tc.GetConfig().GetClientURL()
+	ttc, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", pdAddr)
+
+	// Test /operators, it should not forward when there is no scheduling server.
+	var slice []string
+	err = testutil.ReadGetJSON(re, dialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
+	re.NoError(err)
+	re.Len(slice, 0)
+
+	// Test admin/reset-ts, it should forward to tso server.
+	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
+	err = testutil.CheckPostJSON(dialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
+	re.NoError(err)
+
+	// If close tso server, it should try forward to tso server, but return error in api mode.
+	ttc.Destroy()
+	err = testutil.CheckPostJSON(dialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
+		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))
+	re.NoError(err)
 }

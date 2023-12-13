@@ -65,7 +65,7 @@ type Service struct {
 	*Server
 }
 
-// NewService creates a new TSO service.
+// NewService creates a new scheduling service.
 func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 	server, ok := svr.(*Server)
 	if !ok {
@@ -118,7 +118,7 @@ func (s *heartbeatServer) Recv() (*schedulingpb.RegionHeartbeatRequest, error) {
 	return req, nil
 }
 
-// RegionHeartbeat implements gRPC PDServer.
+// RegionHeartbeat implements gRPC SchedulingServer.
 func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeatServer) error {
 	var (
 		server   = &heartbeatServer{stream: stream}
@@ -168,7 +168,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 	}
 }
 
-// StoreHeartbeat implements gRPC PDServer.
+// StoreHeartbeat implements gRPC SchedulingServer.
 func (s *Service) StoreHeartbeat(ctx context.Context, request *schedulingpb.StoreHeartbeatRequest) (*schedulingpb.StoreHeartbeatResponse, error) {
 	c := s.GetCluster()
 	if c == nil {
@@ -202,7 +202,7 @@ func (s *Service) SplitRegions(ctx context.Context, request *schedulingpb.SplitR
 	}, nil
 }
 
-// ScatterRegions implements gRPC PDServer.
+// ScatterRegions implements gRPC SchedulingServer.
 func (s *Service) ScatterRegions(ctx context.Context, request *schedulingpb.ScatterRegionsRequest) (*schedulingpb.ScatterRegionsResponse, error) {
 	c := s.GetCluster()
 	if c == nil {
@@ -211,7 +211,11 @@ func (s *Service) ScatterRegions(ctx context.Context, request *schedulingpb.Scat
 
 	opsCount, failures, err := c.GetRegionScatterer().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()), request.GetSkipStoreLimit())
 	if err != nil {
-		return nil, err
+		header := s.errorHeader(&schedulingpb.Error{
+			Type:    schedulingpb.ErrorType_UNKNOWN,
+			Message: err.Error(),
+		})
+		return &schedulingpb.ScatterRegionsResponse{Header: header}, nil
 	}
 	percentage := 100
 	if len(failures) > 0 {
@@ -243,7 +247,7 @@ func (s *Service) GetOperator(ctx context.Context, request *schedulingpb.GetOper
 	if r == nil {
 		header := s.errorHeader(&schedulingpb.Error{
 			Type:    schedulingpb.ErrorType_UNKNOWN,
-			Message: "Not Found",
+			Message: "region not found",
 		})
 		return &schedulingpb.GetOperatorResponse{Header: header}, nil
 	}
@@ -257,7 +261,7 @@ func (s *Service) GetOperator(ctx context.Context, request *schedulingpb.GetOper
 	}, nil
 }
 
-// AskBatchSplit implements gRPC PDServer.
+// AskBatchSplit implements gRPC SchedulingServer.
 func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBatchSplitRequest) (*schedulingpb.AskBatchSplitResponse, error) {
 	c := s.GetCluster()
 	if c == nil {

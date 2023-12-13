@@ -16,6 +16,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -59,7 +61,11 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	rc.DropCacheRegion(regionID)
-	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache.")
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+		err = h.DeleteRegionCacheInSchedulingServer(regionID)
+	}
+	msg := "The region is removed from server cache."
+	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
 }
 
 // @Tags     admin
@@ -95,8 +101,11 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	}
 	// Remove region from cache.
 	rc.DropCacheRegion(regionID)
-
-	h.rd.JSON(w, http.StatusOK, "The region is removed from server cache and region meta storage.")
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+		err = h.DeleteRegionCacheInSchedulingServer(regionID)
+	}
+	msg := "The region is removed from server cache and region meta storage."
+	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
 }
 
 // @Tags     admin
@@ -105,9 +114,14 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 // @Success  200  {string}  string  "All regions are removed from server cache."
 // @Router   /admin/cache/regions [delete]
 func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
+	var err error
 	rc := getCluster(r)
 	rc.DropCacheAllRegion()
-	h.rd.JSON(w, http.StatusOK, "All regions are removed from server cache.")
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+		err = h.DeleteRegionCacheInSchedulingServer()
+	}
+	msg := "All regions are removed from server cache."
+	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in
@@ -199,4 +213,36 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = h.rd.Text(w, http.StatusOK, "")
+}
+
+func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
+	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), utils.SchedulingServiceName)
+	if !ok {
+		return errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
+	}
+	var idStr string
+	if len(id) > 0 {
+		idStr = strconv.FormatUint(id[0], 10)
+	}
+	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
+	if err != nil {
+		return err
+	}
+	resp, err := h.svr.GetHTTPClient().Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
+	}
+	return nil
+}
+
+func (h *adminHandler) buildMsg(msg string, err error) string {
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) && err != nil {
+		return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
+	}
+	return msg
 }

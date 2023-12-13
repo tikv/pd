@@ -59,9 +59,9 @@ func TestServerTestSuite(t *testing.T) {
 func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
-
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 3)
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -76,6 +76,7 @@ func (suite *serverTestSuite) SetupSuite() {
 func (suite *serverTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	suite.cancel()
+	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
@@ -95,6 +96,10 @@ func (suite *serverTestSuite) TestAllocID() {
 func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	pd2, err := suite.cluster.Join(suite.ctx)
+	re.NoError(err)
+	err = pd2.Run()
+	re.NoError(err)
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
@@ -116,6 +121,8 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	// Update the pdLeader in test suite.
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	suite.TearDownSuite()
+	suite.SetupSuite()
 }
 
 func (suite *serverTestSuite) TestPrimaryChange() {
@@ -126,21 +133,21 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	tc.WaitForPrimaryServing(re)
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
-	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
-		return ok && oldPrimaryAddr == watchedAddr
+		return ok && oldPrimaryAddr == watchedAddr &&
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
 	})
-	// transfer leader
+	// change primary
 	primary.Close()
 	tc.WaitForPrimaryServing(re)
 	primary = tc.GetPrimaryServer()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
-	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
-		return ok && newPrimaryAddr == watchedAddr
+		return ok && newPrimaryAddr == watchedAddr &&
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
 	})
 }
 
@@ -166,24 +173,24 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	re.NoError(err)
 	re.Empty(resp.GetHeader().GetError())
 
-	resp1, err := s.StoreHeartbeat(
-		context.Background(), &pdpb.StoreHeartbeatRequest{
-			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
-			Stats: &pdpb.StoreStats{
-				StoreId:      1,
-				Capacity:     1798985089024,
-				Available:    1709868695552,
-				UsedSize:     85150956358,
-				KeysWritten:  20000,
-				BytesWritten: 199,
-				KeysRead:     10000,
-				BytesRead:    99,
-			},
-		},
-	)
-	re.NoError(err)
-	re.Empty(resp1.GetHeader().GetError())
 	testutil.Eventually(re, func() bool {
+		resp1, err := s.StoreHeartbeat(
+			context.Background(), &pdpb.StoreHeartbeatRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Stats: &pdpb.StoreStats{
+					StoreId:      1,
+					Capacity:     1798985089024,
+					Available:    1709868695552,
+					UsedSize:     85150956358,
+					KeysWritten:  20000,
+					BytesWritten: 199,
+					KeysRead:     10000,
+					BytesRead:    99,
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp1.GetHeader().GetError())
 		store := tc.GetPrimaryServer().GetCluster().GetStore(1)
 		return store.GetStoreStats().GetCapacity() == uint64(1798985089024) &&
 			store.GetStoreStats().GetAvailable() == uint64(1709868695552) &&
@@ -192,6 +199,44 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 			store.GetStoreStats().GetBytesWritten() == uint64(199) &&
 			store.GetStoreStats().GetKeysRead() == uint64(10000) &&
 			store.GetStoreStats().GetBytesRead() == uint64(99)
+	})
+}
+
+func (suite *serverTestSuite) TestDynamicSwitch() {
+	re := suite.Require()
+	// API server will execute scheduling jobs since there is no scheduler server.
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	// After scheduling server is started, API server will not execute scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	// Scheduling server is responsible for executing scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+	})
+	tc.GetPrimaryServer().Close()
+	// Stop scheduling server. API server will execute scheduling jobs again.
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	tc1, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc1.Destroy()
+	tc1.WaitForPrimaryServing(re)
+	// After scheduling server is started, API server will not execute scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	// Scheduling server is responsible for executing scheduling jobs again.
+	testutil.Eventually(re, func() bool {
+		return tc1.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
 	})
 }
 
@@ -509,6 +554,6 @@ func checkOperatorFail(re *require.Assertions, oc *operator.Controller, op *oper
 
 func waitSyncFinish(re *require.Assertions, tc *tests.TestSchedulingCluster, typ storelimit.Type, expectedLimit float64) {
 	testutil.Eventually(re, func() bool {
-		return tc.GetPrimaryServer().GetPersistConfig().GetStoreLimitByType(2, typ) == expectedLimit
+		return tc.GetPrimaryServer().GetCluster().GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
 	})
 }
