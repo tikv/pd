@@ -383,7 +383,12 @@ tsoBatchLoop:
 					zap.String("dc-location", dc))
 			} else {
 				log.Error("[tso] fetch pending tso requests error",
+<<<<<<< HEAD
 					zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSO, err))
+=======
+					zap.String("dc-location", dc),
+					errs.ZapError(errs.ErrClientGetTSO, err))
+>>>>>>> f51f91345 (errs: remove redundant `FastGenWithCause` in `ZapError` (#7497))
 			}
 			return
 		}
@@ -457,7 +462,14 @@ tsoBatchLoop:
 			default:
 			}
 			c.svcDiscovery.ScheduleCheckMemberChanged()
+<<<<<<< HEAD
 			log.Error("[tso] getTS error", zap.String("dc-location", dc), zap.String("stream-addr", streamAddr), errs.ZapError(errs.ErrClientGetTSO, err))
+=======
+			log.Error("[tso] getTS error after processing requests",
+				zap.String("dc-location", dc),
+				zap.String("stream-addr", streamAddr),
+				errs.ZapError(errs.ErrClientGetTSO, err))
+>>>>>>> f51f91345 (errs: remove redundant `FastGenWithCause` in `ZapError` (#7497))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
