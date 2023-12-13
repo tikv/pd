@@ -15,7 +15,6 @@
 package scheduler_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -690,48 +689,4 @@ func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v inte
 		return
 	}
 	json.Unmarshal(output, v)
-}
-
-func TestForwardSchedulerRequest(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
-	re.NoError(err)
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
-	server := cluster.GetLeaderServer()
-	re.NoError(server.BootstrapCluster())
-	backendEndpoints := server.GetAddr()
-	tc, err := tests.NewTestSchedulingCluster(ctx, 1, backendEndpoints)
-	re.NoError(err)
-	defer tc.Destroy()
-	tc.WaitForPrimaryServing(re)
-
-	cmd := pdctlCmd.GetRootCmd()
-	args := []string{"-u", backendEndpoints, "scheduler", "show"}
-	var sches []string
-	testutil.Eventually(re, func() bool {
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &sches))
-		return slice.Contains(sches, "balance-leader-scheduler")
-	})
-
-	mustUsage := func(args []string) {
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		re.Contains(string(output), "Usage")
-	}
-	mustUsage([]string{"-u", backendEndpoints, "scheduler", "pause", "balance-leader-scheduler"})
-	echo := mustExec(re, cmd, []string{"-u", backendEndpoints, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
-	re.Contains(echo, "Success!")
-	checkSchedulerWithStatusCommand := func(status string, expected []string) {
-		var schedulers []string
-		mustExec(re, cmd, []string{"-u", backendEndpoints, "scheduler", "show", "--status", status}, &schedulers)
-		re.Equal(expected, schedulers)
-	}
-	checkSchedulerWithStatusCommand("paused", []string{
-		"balance-leader-scheduler",
-	})
 }

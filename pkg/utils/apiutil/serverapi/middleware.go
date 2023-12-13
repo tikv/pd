@@ -182,14 +182,16 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	// Prevent more than one redirection.
-	if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
-		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
-		return
+	// Prevent more than one redirection among PD/API servers.
+	if !redirectToMicroService {
+			if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
+				log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
+				http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
+				return
+			}
+			r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	}
 
-	r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	forwardedIP, forwardedPort := apiutil.GetIPPortFromHTTPRequest(r)
 	if len(forwardedIP) > 0 {
 		r.Header.Add(apiutil.XForwardedForHeader, forwardedIP)
