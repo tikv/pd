@@ -500,12 +500,11 @@ func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestClust
 }
 
 func (suite *apiTestSuite) TestFollowerForward() {
-	suite.env.RunTestInAPIMode(suite.checkFollowerForward)
+	suite.env.RunTestInTwoModes(suite.checkFollowerForward)
 }
 
 func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	re := suite.Require()
-	leaderName := cluster.GetLeaderServer().GetServer().Name()
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -515,24 +514,33 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	re.NotEmpty(cluster.WaitLeader())
 
 	followerAddr := follower.GetAddr()
-	followerName := follower.GetServer().Name()
 	if cluster.GetLeaderServer().GetAddr() != leaderAddr {
-		followerAddr, followerName = leaderAddr, leaderName
+		followerAddr = leaderAddr
 	}
 
-	// follower will forward to scheduling server directly
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", followerAddr)
-	results := map[string]interface{}{}
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &results,
-		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"),
-		testutil.WithoutHeader(re, apiutil.PDRedirectorHeader),
-	)
-	re.NoError(err)
+	rules := []*placement.Rule{}
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		// follower will forward to scheduling server directly
+		re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
+		err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
+			testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"),
+		)
+		re.NoError(err)
+	} else {
+		// follower will forward to leader server
+		re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
+		err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
+			testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader),
+		)
+		re.NoError(err)
+	}
 
 	// follower will forward to leader server
+	re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
+	results := make(map[string]interface{})
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config"), &results,
-		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"),
-		testutil.WithHeader(re, apiutil.PDRedirectorHeader, followerName),
+		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader),
 	)
 	re.NoError(err)
 }
