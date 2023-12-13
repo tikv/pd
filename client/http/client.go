@@ -44,7 +44,6 @@ const (
 // Client is a PD (Placement Driver) HTTP client.
 type Client interface {
 	/* Meta-related interfaces */
-	GetClusterVersion(context.Context) (string, error)
 	GetRegionByID(context.Context, uint64) (*RegionInfo, error)
 	GetRegionByKey(context.Context, []byte) (*RegionInfo, error)
 	GetRegions(context.Context) (*RegionsInfo, error)
@@ -64,10 +63,11 @@ type Client interface {
 	/* Config-related interfaces */
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
 	SetScheduleConfig(context.Context, map[string]interface{}) error
+	GetClusterVersion(context.Context) (string, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
-	PostSchedulerDelay(context.Context, string, int64) error
+	SetSchedulerDelay(context.Context, string, int64) error
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -796,8 +796,8 @@ func (c *client) AccelerateScheduleInBatch(ctx context.Context, keyRanges []*Key
 		http.MethodPost, inputJSON, nil)
 }
 
-// PostSchedulerDelay changes the delay of given scheduler.
-func (c *client) PostSchedulerDelay(ctx context.Context, scheduler string, delaySec int64) error {
+// SetSchedulerDelay sets the delay of given scheduler.
+func (c *client) SetSchedulerDelay(ctx context.Context, scheduler string, delaySec int64) error {
 	m := map[string]int64{
 		"delay": delaySec,
 	}
@@ -806,7 +806,7 @@ func (c *client) PostSchedulerDelay(ctx context.Context, scheduler string, delay
 		return errors.Trace(err)
 	}
 	return c.requestWithRetry(ctx,
-		"PostSchedulerDelay", SchedulerByName(scheduler),
+		"SetSchedulerDelay", SchedulerByName(scheduler),
 		http.MethodPost, inputJSON, nil)
 }
 

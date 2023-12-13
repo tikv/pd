@@ -403,9 +403,9 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	schedulers, err = suite.client.GetSchedulers(suite.ctx)
 	re.NoError(err)
 	re.Len(schedulers, 1)
-	err = suite.client.PostSchedulerDelay(suite.ctx, "evict-leader-scheduler", 100)
+	err = suite.client.SetSchedulerDelay(suite.ctx, "evict-leader-scheduler", 100)
 	re.NoError(err)
-	err = suite.client.PostSchedulerDelay(suite.ctx, "not-exist", 100)
+	err = suite.client.SetSchedulerDelay(suite.ctx, "not-exist", 100)
 	re.ErrorContains(err, "500 Internal Server Error") // TODO: should return friendly error message
 }
 
