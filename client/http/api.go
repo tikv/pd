@@ -38,8 +38,9 @@ const (
 	store                     = "/pd/api/v1/store"
 	Stores                    = "/pd/api/v1/stores"
 	StatsRegion               = "/pd/api/v1/stats/region"
-	LeaderPrefix              = "/pd/api/v1/leader"
-	TransferLeader            = "/pd/api/v1/leader/transfer"
+	membersPrefix             = "/pd/api/v1/members"
+	leaderPrefix              = "/pd/api/v1/leader"
+	transferLeader            = "/pd/api/v1/leader/transfer"
 	// Config
 	Config          = "/pd/api/v1/config"
 	ClusterVersion  = "/pd/api/v1/config/cluster-version"
@@ -126,6 +127,16 @@ func StoreLabelByID(id uint64) string {
 	return fmt.Sprintf("%s/%d/label", store, id)
 }
 
+// LabelByStoreID returns the path of PD HTTP API to set store label.
+func LabelByStoreID(storeID int64) string {
+	return fmt.Sprintf("%s/%d/label", store, storeID)
+}
+
+// TransferLeaderByID returns the path of PD HTTP API to transfer leader by ID.
+func TransferLeaderByID(leaderID string) string {
+	return fmt.Sprintf("%s/%s", transferLeader, leaderID)
+}
+
 // ConfigWithTTLSeconds returns the config API with the TTL seconds parameter.
 func ConfigWithTTLSeconds(ttlSeconds float64) string {
 	return fmt.Sprintf("%s?ttlSecond=%.0f", Config, ttlSeconds)
@@ -174,14 +185,4 @@ func PProfProfileAPIWithInterval(interval time.Duration) string {
 // PProfGoroutineWithDebugLevel returns the pprof goroutine API with debug level parameter.
 func PProfGoroutineWithDebugLevel(level int) string {
 	return fmt.Sprintf("%s?debug=%d", PProfGoroutine, level)
-}
-
-// LabelByStore returns the path of PD HTTP API to set store label.
-func LabelByStore(storeID int64) string {
-	return fmt.Sprintf("%s/%d/label", store, storeID)
-}
-
-// TransferLeaderID returns the path of PD HTTP API to transfer leader by ID.
-func TransferLeaderID(leaderID string) string {
-	return fmt.Sprintf("%s/%s", TransferLeader, leaderID)
 }

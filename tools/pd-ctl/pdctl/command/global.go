@@ -29,13 +29,14 @@ import (
 	"go.etcd.io/etcd/pkg/transport"
 )
 
-var (
-	pdControllerComponentName = "pdctl"
-	dialClient                = &http.Client{
-		Transport: apiutil.NewComponentSignatureRoundTripper(http.DefaultTransport, pdControllerComponentName),
-	}
-	pingPrefix = "pd/api/v1/ping"
+const (
+	pdControlCallerID = "pd-ctl"
+	pingPrefix        = "pd/api/v1/ping"
 )
+
+var dialClient = &http.Client{
+	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, pdControlCallerID),
+}
 
 // InitHTTPSClient creates https client with ca file
 func InitHTTPSClient(caPath, certPath, keyPath string) error {
@@ -50,8 +51,8 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	}
 
 	dialClient = &http.Client{
-		Transport: apiutil.NewComponentSignatureRoundTripper(
-			&http.Transport{TLSClientConfig: tlsConfig}, pdControllerComponentName),
+		Transport: apiutil.NewCallerIDRoundTripper(
+			&http.Transport{TLSClientConfig: tlsConfig}, pdControlCallerID),
 	}
 
 	return nil

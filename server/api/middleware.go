@@ -69,7 +69,7 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		w.Header().Add("body-param", requestInfo.BodyParam)
 		w.Header().Add("url-param", requestInfo.URLParam)
 		w.Header().Add("method", requestInfo.Method)
-		w.Header().Add("component", requestInfo.Component)
+		w.Header().Add("caller-id", requestInfo.CallerID)
 		w.Header().Add("ip", requestInfo.IP)
 	})
 

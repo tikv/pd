@@ -55,9 +55,16 @@ type Client interface {
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
+	SetStoreLabels(context.Context, int64, map[string]string) error
+	GetMembers(context.Context) (*MembersInfo, error)
+	GetLeader(context.Context) (*pdpb.Member, error)
+	TransferLeader(context.Context, string) error
 	/* Config-related interfaces */
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
 	SetScheduleConfig(context.Context, map[string]interface{}) error
+	/* Scheduler-related interfaces */
+	GetSchedulers(context.Context) ([]string, error)
+	CreateScheduler(ctx context.Context, name string, storeID uint64) error
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -88,14 +95,6 @@ type Client interface {
 	// Additionally, it is important for the caller to handle the content of the response body properly
 	// in order to ensure that it can be read and marshaled correctly into `res`.
 	WithRespHandler(func(resp *http.Response, res interface{}) error) Client
-	SetStoreLabel(context.Context, int64, map[string]string) error
-
-	GetLeader(context.Context) (*pdpb.Member, error)
-	TransferLeader(context.Context, string) error
-
-	GetSchedulers(context.Context) ([]string, error)
-	AddScheduler(context.Context, string, map[string]interface{}) error
-
 	Close()
 }
 
@@ -230,7 +229,7 @@ func (c *client) execDuration(name string, duration time.Duration) {
 // Header key definition constants.
 const (
 	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
-	componentSignatureKey    = "component"
+	xCallerIDKey             = "X-Caller-ID"
 )
 
 // HeaderOption configures the HTTP header.
@@ -288,7 +287,7 @@ func (c *client) request(
 	for _, opt := range headerOpts {
 		opt(req.Header)
 	}
-	req.Header.Set(componentSignatureKey, c.callerID)
+	req.Header.Set(xCallerIDKey, c.callerID)
 
 	start := time.Now()
 	resp, err := c.inner.cli.Do(req)
@@ -467,21 +466,31 @@ func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRan
 	return &regionStats, nil
 }
 
-// SetStoreLabel sets the label of a store.
-func (c *client) SetStoreLabel(ctx context.Context, storeID int64, storeLabel map[string]string) error {
-	jsonBody, err := json.Marshal(storeLabel)
+// SetStoreLabels sets the labels of a store.
+func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels map[string]string) error {
+	jsonInput, err := json.Marshal(storeLabels)
 	if err != nil {
-		return err
+		return errors.Trace(err)
 	}
+	return c.requestWithRetry(ctx, "SetStoreLabel", LabelByStoreID(storeID),
+		http.MethodPost, bytes.NewBuffer(jsonInput), nil)
+}
 
-	return c.requestWithRetry(ctx, "SetStoreLabel", LabelByStore(storeID),
-		http.MethodPost, bytes.NewBuffer(jsonBody), nil)
+func (c *client) GetMembers(ctx context.Context) (*MembersInfo, error) {
+	var members MembersInfo
+	err := c.requestWithRetry(ctx,
+		"GetMembers", membersPrefix,
+		http.MethodGet, http.NoBody, &members)
+	if err != nil {
+		return nil, err
+	}
+	return &members, nil
 }
 
 // GetLeader gets the leader of PD cluster.
-func (c *client) GetLeader(context.Context) (*pdpb.Member, error) {
+func (c *client) GetLeader(ctx context.Context) (*pdpb.Member, error) {
 	var leader pdpb.Member
-	err := c.requestWithRetry(context.Background(), "GetLeader", LeaderPrefix,
+	err := c.requestWithRetry(ctx, "GetLeader", leaderPrefix,
 		http.MethodGet, http.NoBody, &leader)
 	if err != nil {
 		return nil, err
@@ -491,7 +500,7 @@ func (c *client) GetLeader(context.Context) (*pdpb.Member, error) {
 
 // TransferLeader transfers the PD leader.
 func (c *client) TransferLeader(ctx context.Context, newLeader string) error {
-	return c.requestWithRetry(ctx, "TransferLeader", TransferLeaderID(newLeader),
+	return c.requestWithRetry(ctx, "TransferLeader", TransferLeaderByID(newLeader),
 		http.MethodPost, http.NoBody, nil)
 }
 
@@ -710,20 +719,18 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 	return schedulers, nil
 }
 
-// AddScheduler adds a scheduler to PD cluster.
-func (c *client) AddScheduler(ctx context.Context, name string, args map[string]interface{}) error {
-	request := map[string]interface{}{
-		"name": name,
-	}
-	for arg, val := range args {
-		request[arg] = val
-	}
-	data, err := json.Marshal(request)
+// CreateScheduler creates a scheduler to PD cluster.
+func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
+	inputJSON, err := json.Marshal(map[string]interface{}{
+		"name":     name,
+		"store_id": storeID,
+	})
 	if err != nil {
-		return err
+		return errors.Trace(err)
 	}
-	return c.requestWithRetry(ctx, "AddScheduler", Schedulers,
-		http.MethodPost, bytes.NewBuffer(data), nil)
+	return c.requestWithRetry(ctx,
+		"CreateScheduler", Schedulers,
+		http.MethodPost, bytes.NewBuffer(inputJSON), nil)
 }
 
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.

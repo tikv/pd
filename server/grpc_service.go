@@ -328,11 +328,11 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 
 	// Get the minimal timestamp from the TSO servers/pods
 	var mutex syncutil.Mutex
-	resps := make([]*tsopb.GetMinTSResponse, len(addrs))
+	resps := make([]*tsopb.GetMinTSResponse, 0)
 	wg := sync.WaitGroup{}
 	wg.Add(len(addrs))
-	for idx, addr := range addrs {
-		go func(idx int, addr string) {
+	for _, addr := range addrs {
+		go func(addr string) {
 			defer wg.Done()
 			resp, err := s.getMinTSFromSingleServer(s.ctx, dcLocation, addr)
 			if err != nil || resp == nil {
@@ -342,8 +342,8 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 			}
 			mutex.Lock()
 			defer mutex.Unlock()
-			resps[idx] = resp
-		}(idx, addr)
+			resps = append(resps, resp)
+		}(addr)
 	}
 	wg.Wait()
 

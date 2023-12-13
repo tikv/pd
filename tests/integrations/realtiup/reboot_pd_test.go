@@ -30,7 +30,7 @@ func TestReloadLabel(t *testing.T) {
 	storeLabel := map[string]string{
 		"zone": "zone1",
 	}
-	err := pdHTTPCli.SetStoreLabel(ctx, setStore.Store.ID, storeLabel)
+	err := pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel)
 	re.NoError(err)
 
 	resp, err = pdHTTPCli.GetStores(ctx)

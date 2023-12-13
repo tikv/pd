@@ -28,9 +28,7 @@ func TestTransferLeader(t *testing.T) {
 	}
 
 	// record scheduler
-	err = pdHTTPCli.AddScheduler(ctx, "evict-leader-scheduler", map[string]interface{}{
-		"store_id": 1,
-	})
+	err = pdHTTPCli.CreateScheduler(ctx, "evict-leader-scheduler", 1)
 	re.NoError(err)
 	res, err := pdHTTPCli.GetSchedulers(ctx)
 	re.NoError(err)
