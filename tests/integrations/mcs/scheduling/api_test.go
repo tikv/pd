@@ -299,7 +299,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	rulesArgs, err := json.Marshal(rules)
 	suite.NoError(err)
 
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "/config/rules"), &rules,
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), rulesArgs,
@@ -517,20 +517,20 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	followerAddr := follower.GetAddr()
 	followerName := follower.GetServer().Name()
 	if cluster.GetLeaderServer().GetAddr() != leaderAddr {
-		leaderAddr, followerAddr = followerAddr, leaderAddr
-		followerName = leaderName
+		followerAddr, followerName = leaderAddr, leaderName
 	}
 
-	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leaderAddr)
-	rules := []*placement.Rule{}
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "/config/rules"), &rules,
+	// follower will forward to scheduling server directly
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", followerAddr)
+	results := map[string]interface{}{}
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &results,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"),
 		testutil.WithoutHeader(re, apiutil.PDRedirectorHeader),
 	)
 	re.NoError(err)
 
-	urlPrefix = fmt.Sprintf("%s/pd/api/v1", followerAddr)
-	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "/config/rules"), &rules,
+	// follower will forward to leader server
+	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config"), &results,
 		testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"),
 		testutil.WithHeader(re, apiutil.PDRedirectorHeader, followerName),
 	)
