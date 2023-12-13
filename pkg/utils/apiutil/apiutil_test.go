@@ -101,7 +101,7 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 			ip:   "127.0.0.1",
 			port: "5299",
 		},
-		// IPv4 "X-Real-IP" with port
+		// IPv4 "X-Real-Ip" with port
 		{
 			r: &http.Request{
 				Header: map[string][]string{
@@ -111,7 +111,7 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 			ip:   "127.0.0.1",
 			port: "5299",
 		},
-		// IPv4 "X-Real-IP" without port
+		// IPv4 "X-Real-Ip" without port
 		{
 			r: &http.Request{
 				Header: map[string][]string{
@@ -158,7 +158,7 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 			ip:   "::1",
 			port: "",
 		},
-		// IPv6 "X-Real-IP" with port
+		// IPv6 "X-Real-Ip" with port
 		{
 			r: &http.Request{
 				Header: map[string][]string{
@@ -168,7 +168,7 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 			ip:   "::1",
 			port: "5299",
 		},
-		// IPv6 "X-Real-IP" without port
+		// IPv6 "X-Real-Ip" without port
 		{
 			r: &http.Request{
 				Header: map[string][]string{
