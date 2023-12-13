@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -43,6 +44,7 @@ const (
 // Client is a PD (Placement Driver) HTTP client.
 type Client interface {
 	/* Meta-related interfaces */
+	GetClusterVersion(context.Context) (string, error)
 	GetRegionByID(context.Context, uint64) (*RegionInfo, error)
 	GetRegionByKey(context.Context, []byte) (*RegionInfo, error)
 	GetRegions(context.Context) (*RegionsInfo, error)
@@ -55,10 +57,17 @@ type Client interface {
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
-	GetClusterVersion(context.Context) (string, error)
+	SetStoreLabels(context.Context, int64, map[string]string) error
+	GetMembers(context.Context) (*MembersInfo, error)
+	GetLeader(context.Context) (*pdpb.Member, error)
+	TransferLeader(context.Context, string) error
 	/* Config-related interfaces */
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
 	SetScheduleConfig(context.Context, map[string]interface{}) error
+	/* Scheduler-related interfaces */
+	GetSchedulers(context.Context) ([]string, error)
+	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	PostSchedulerDelay(context.Context, string, int64) error
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -78,8 +87,6 @@ type Client interface {
 	/* Scheduling-related interfaces */
 	AccelerateSchedule(context.Context, *KeyRange) error
 	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
-	GetSchedulers(ctx context.Context) ([]string, error)
-	PostSchedulerDelay(context.Context, string, int64) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 
@@ -225,7 +232,7 @@ func (c *client) execDuration(name string, duration time.Duration) {
 // Header key definition constants.
 const (
 	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
-	componentSignatureKey    = "component"
+	xCallerIDKey             = "X-Caller-ID"
 )
 
 // HeaderOption configures the HTTP header.
@@ -283,7 +290,7 @@ func (c *client) request(
 	for _, opt := range headerOpts {
 		opt(req.Header)
 	}
-	req.Header.Set(componentSignatureKey, c.callerID)
+	req.Header.Set(xCallerIDKey, c.callerID)
 
 	start := time.Now()
 	resp, err := c.inner.cli.Do(req)
@@ -460,6 +467,44 @@ func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRan
 		return nil, err
 	}
 	return &regionStats, nil
+}
+
+// SetStoreLabels sets the labels of a store.
+func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels map[string]string) error {
+	jsonInput, err := json.Marshal(storeLabels)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx, "SetStoreLabel", LabelByStoreID(storeID),
+		http.MethodPost, jsonInput, nil)
+}
+
+func (c *client) GetMembers(ctx context.Context) (*MembersInfo, error) {
+	var members MembersInfo
+	err := c.requestWithRetry(ctx,
+		"GetMembers", membersPrefix,
+		http.MethodGet, nil, &members)
+	if err != nil {
+		return nil, err
+	}
+	return &members, nil
+}
+
+// GetLeader gets the leader of PD cluster.
+func (c *client) GetLeader(ctx context.Context) (*pdpb.Member, error) {
+	var leader pdpb.Member
+	err := c.requestWithRetry(ctx, "GetLeader", leaderPrefix,
+		http.MethodGet, nil, &leader)
+	if err != nil {
+		return nil, err
+	}
+	return &leader, nil
+}
+
+// TransferLeader transfers the PD leader.
+func (c *client) TransferLeader(ctx context.Context, newLeader string) error {
+	return c.requestWithRetry(ctx, "TransferLeader", TransferLeaderByID(newLeader),
+		http.MethodPost, nil, nil)
 }
 
 // GetScheduleConfig gets the schedule configurations.
@@ -688,6 +733,20 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 	return c.requestWithRetry(ctx,
 		"PatchRegionLabelRules", RegionLabelRules,
 		http.MethodPatch, labelRulePatchJSON, nil)
+}
+
+// CreateScheduler creates a scheduler to PD cluster.
+func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
+	inputJSON, err := json.Marshal(map[string]interface{}{
+		"name":     name,
+		"store_id": storeID,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.requestWithRetry(ctx,
+		"CreateScheduler", Schedulers,
+		http.MethodPost, inputJSON, nil)
 }
 
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.
