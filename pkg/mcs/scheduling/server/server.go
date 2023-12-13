@@ -192,6 +192,10 @@ func (s *Server) updateAPIServerMemberLoop() {
 			continue
 		}
 		for _, ep := range members.Members {
+			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
+				log.Info("member is not started yet", zap.String("member-id", fmt.Sprintf("%x", ep.GetID())), errs.ZapError(err))
+				continue
+			}
 			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
 			if err != nil {
 				log.Info("failed to get status of member", zap.String("member-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
