@@ -15,9 +15,6 @@
 package realtiup
 
 import (
-	"gorm.io/driver/mysql"
-	"gorm.io/gorm"
-	"moul.io/zapgorm2"
 	"testing"
 	"time"
 
@@ -25,6 +22,9 @@ import (
 	mysqldriver "github.com/go-sql-driver/mysql"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"moul.io/zapgorm2"
 )
 
 // TestDB is a test database
