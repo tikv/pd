@@ -853,7 +853,7 @@ func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]
 	var members []string
 	err := c.requestWithRetry(ctx,
 		"GetMicroServiceMembers", MicroServiceMembers(service),
-		http.MethodGet, http.NoBody, &members)
+		http.MethodGet, nil, &members)
 	if err != nil {
 		return nil, err
 	}
@@ -865,7 +865,7 @@ func (c *client) GetMicroServiceLeader(ctx context.Context, service string) (*pd
 	var leader *pdpb.Member
 	err := c.requestWithRetry(ctx,
 		"GetMicroServiceLeader", MicroServiceLeader(service),
-		http.MethodGet, http.NoBody, &leader)
+		http.MethodGet, nil, &leader)
 	if err != nil {
 		return nil, err
 	}
