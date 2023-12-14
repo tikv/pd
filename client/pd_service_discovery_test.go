@@ -48,7 +48,7 @@ type testGRPCServer struct {
 // SayHello implements helloworld.GreeterServer
 func (s *testGRPCServer) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
 	if !s.isLeader {
-		if !grpcutil.GetFollowerHandleEnable(ctx, metadata.FromIncomingContext) {
+		if !grpcutil.IsFollowerHandleEnabled(ctx, metadata.FromIncomingContext) {
 			if addr := grpcutil.GetForwardedHost(ctx, metadata.FromIncomingContext); addr == s.leaderAddr {
 				s.forwardCount.Add(1)
 				return pb.NewGreeterClient(s.leaderConn).SayHello(ctx, in)
@@ -204,20 +204,20 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 
 	ctx1 := context.WithoutCancel(suite.ctx)
 	ctx1 = follower.BuildGRPCContext(ctx1, false)
-	re.True(grpcutil.GetFollowerHandleEnable(ctx1, metadata.FromOutgoingContext))
+	re.True(grpcutil.IsFollowerHandleEnabled(ctx1, metadata.FromOutgoingContext))
 	re.Len(grpcutil.GetForwardedHost(ctx1, metadata.FromOutgoingContext), 0)
 	ctx2 := context.WithoutCancel(suite.ctx)
 	ctx2 = follower.BuildGRPCContext(ctx2, true)
-	re.False(grpcutil.GetFollowerHandleEnable(ctx2, metadata.FromOutgoingContext))
+	re.False(grpcutil.IsFollowerHandleEnabled(ctx2, metadata.FromOutgoingContext))
 	re.Equal(grpcutil.GetForwardedHost(ctx2, metadata.FromOutgoingContext), leaderAddress)
 
 	ctx3 := context.WithoutCancel(suite.ctx)
 	ctx3 = leader.BuildGRPCContext(ctx3, false)
-	re.False(grpcutil.GetFollowerHandleEnable(ctx3, metadata.FromOutgoingContext))
+	re.False(grpcutil.IsFollowerHandleEnabled(ctx3, metadata.FromOutgoingContext))
 	re.Len(grpcutil.GetForwardedHost(ctx3, metadata.FromOutgoingContext), 0)
 	ctx4 := context.WithoutCancel(suite.ctx)
 	ctx4 = leader.BuildGRPCContext(ctx4, true)
-	re.False(grpcutil.GetFollowerHandleEnable(ctx4, metadata.FromOutgoingContext))
+	re.False(grpcutil.IsFollowerHandleEnabled(ctx4, metadata.FromOutgoingContext))
 	re.Len(grpcutil.GetForwardedHost(ctx4, metadata.FromOutgoingContext), 0)
 
 	followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)

@@ -150,10 +150,7 @@ func (c *pdServiceClient) GetAddress() string {
 
 // BuildGRPCContext implements ServiceClient.
 func (c *pdServiceClient) BuildGRPCContext(ctx context.Context, toLeader bool) context.Context {
-	if c == nil {
-		return ctx
-	}
-	if c.IsLeader() {
+	if c == nil || c.isLeader {
 		return ctx
 	}
 	if toLeader {
@@ -315,8 +312,8 @@ func (c *pdServiceBalancer) next() {
 
 func (c *pdServiceBalancer) get() (ret ServiceClient) {
 	c.mu.Lock()
-	i := 0
 	defer c.mu.Unlock()
+	i := 0
 	if c.now == nil {
 		return nil
 	}
