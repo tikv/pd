@@ -321,13 +321,15 @@ func (s *Server) startServer() (err error) {
 	s.serverLoopWg.Add(1)
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	<-serverReadyChan
-	s.startServerLoop()
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.GetStartCallbacks() {
 		cb()
 	}
+	// The start callback function will initialize storage, which will be used in service ready callback.
+	// We should make sure the calling sequence is right.
+	s.startServerLoop()
 
 	// Server has started.
 	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
