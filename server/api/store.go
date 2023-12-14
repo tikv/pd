@@ -334,7 +334,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 // @Param    id    path  integer  true  "Store Id"
 // @Param    body  body  object   true  "Labels in json format"
 // @Produce  json
-// @Success  200  {string}  string  "The store's label is updated."
+// @Success  200  {string}  string  "The label is deleted for store."
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /store/{id}/label [delete]
@@ -369,7 +369,7 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 // @Param    id    path  integer  true  "Store Id"
 // @Param    body  body  object   true  "json params"
 // @Produce  json
-// @Success  200  {string}  string  "The store's label is updated."
+// @Success  200  {string}  string  "The store's weight is updated."
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /store/{id}/weight [post]
@@ -413,7 +413,7 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
+	h.rd.JSON(w, http.StatusOK, "The store's weight is updated.")
 }
 
 // FIXME: details of input json body params
@@ -423,7 +423,7 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 // @Param    id         path   integer  true   "Store Id"
 // @Param    body       body   object   true   "json params"
 // @Produce  json
-// @Success  200  {string}  string  "The store's label is updated."
+// @Success  200  {string}  string  "The store's limit is updated."
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /store/{id}/limit [post]
@@ -486,7 +486,7 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
+	h.rd.JSON(w, http.StatusOK, "The store's limit is updated.")
 }
 
 type storesHandler struct {
