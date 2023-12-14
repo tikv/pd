@@ -49,7 +49,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re := suite.Require()
 	var err error
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -134,6 +134,13 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.NoError(err)
 	re.Equal(1, store.Count)
 	re.Len(store.Stores, 1)
+	storeID := uint64(store.Stores[0].Store.ID) // TODO: why type is different?
+	store2, err := suite.client.GetStore(suite.ctx, storeID)
+	re.NoError(err)
+	re.EqualValues(storeID, store2.Store.ID)
+	version, err := suite.client.GetClusterVersion(suite.ctx)
+	re.NoError(err)
+	re.Equal("0.0.0", version)
 }
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
@@ -383,4 +390,68 @@ func (suite *httpClientTestSuite) TestScheduleConfig() {
 	re.NoError(err)
 	re.Equal(float64(8), config["leader-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])
+}
+
+func (suite *httpClientTestSuite) TestSchedulers() {
+	re := suite.Require()
+	schedulers, err := suite.client.GetSchedulers(suite.ctx)
+	re.NoError(err)
+	re.Len(schedulers, 0)
+
+	err = suite.client.CreateScheduler(suite.ctx, "evict-leader-scheduler", 1)
+	re.NoError(err)
+	schedulers, err = suite.client.GetSchedulers(suite.ctx)
+	re.NoError(err)
+	re.Len(schedulers, 1)
+	err = suite.client.SetSchedulerDelay(suite.ctx, "evict-leader-scheduler", 100)
+	re.NoError(err)
+	err = suite.client.SetSchedulerDelay(suite.ctx, "not-exist", 100)
+	re.ErrorContains(err, "500 Internal Server Error") // TODO: should return friendly error message
+}
+
+func (suite *httpClientTestSuite) TestSetStoreLabels() {
+	re := suite.Require()
+	resp, err := suite.client.GetStores(suite.ctx)
+	re.NoError(err)
+	setStore := resp.Stores[0]
+	re.Empty(setStore.Store.Labels, nil)
+	storeLabels := map[string]string{
+		"zone": "zone1",
+	}
+	err = suite.client.SetStoreLabels(suite.ctx, 1, storeLabels)
+	re.NoError(err)
+
+	resp, err = suite.client.GetStores(suite.ctx)
+	re.NoError(err)
+	for _, store := range resp.Stores {
+		if store.Store.ID == setStore.Store.ID {
+			for _, label := range store.Store.Labels {
+				re.Equal(label.Value, storeLabels[label.Key])
+			}
+		}
+	}
+}
+
+func (suite *httpClientTestSuite) TestTransferLeader() {
+	re := suite.Require()
+	members, err := suite.client.GetMembers(suite.ctx)
+	re.NoError(err)
+	re.Len(members.Members, 2)
+
+	oldLeader, err := suite.client.GetLeader(suite.ctx)
+	re.NoError(err)
+
+	// Transfer leader to another pd
+	for _, member := range members.Members {
+		if member.Name != oldLeader.Name {
+			err = suite.client.TransferLeader(suite.ctx, member.Name)
+			re.NoError(err)
+			break
+		}
+	}
+
+	newLeader := suite.cluster.WaitLeader()
+	re.NotEmpty(newLeader)
+	re.NoError(err)
+	re.NotEqual(oldLeader.Name, newLeader)
 }
