@@ -24,11 +24,13 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
+	"go.uber.org/zap"
 )
 
 type regionTestSuite struct {
@@ -248,8 +250,7 @@ func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
-	// Fixme: after delete+set rule, the key range will be empty, so the test will fail in api mode.
-	suite.env.RunTestInPDMode(suite.checkRegionsReplicated)
+	suite.env.RunTestInTwoModes(suite.checkRegionsReplicated)
 }
 
 func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster) {
@@ -305,6 +306,14 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	suite.NoError(err)
 
 	tu.Eventually(re, func() bool {
+		respBundle := make([]placement.GroupBundle, 0)
+		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
+			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
+		suite.NoError(err)
+		return len(respBundle) == 1 && respBundle[0].ID == "5"
+	})
+
+	tu.Eventually(re, func() bool {
 		err = tu.ReadGetJSON(re, testDialClient, url, &status)
 		suite.NoError(err)
 		return status == "REPLICATED"
@@ -328,9 +337,20 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("REPLICATED", status)
+	tu.Eventually(re, func() bool {
+		respBundle := make([]placement.GroupBundle, 0)
+		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
+			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
+		suite.NoError(err)
+		log.Info("respBundle", zap.Any("respBundle", respBundle))
+		return len(respBundle) == 1 && len(respBundle[0].Rules) == 2
+	})
+
+	tu.Eventually(re, func() bool {
+		err = tu.ReadGetJSON(re, testDialClient, url, &status)
+		suite.NoError(err)
+		return status == "REPLICATED"
+	})
 
 	// test multiple bundles
 	bundle = append(bundle, placement.GroupBundle{
@@ -347,17 +367,34 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
 	suite.NoError(err)
 
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("INPROGRESS", status)
+	tu.Eventually(re, func() bool {
+		respBundle := make([]placement.GroupBundle, 0)
+		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
+			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
+		suite.NoError(err)
+		if len(respBundle) != 2 {
+			return false
+		}
+		s1 := respBundle[0].ID == "5" && respBundle[1].ID == "6"
+		s2 := respBundle[0].ID == "6" && respBundle[1].ID == "5"
+		return s1 || s2
+	})
+
+	tu.Eventually(re, func() bool {
+		err = tu.ReadGetJSON(re, testDialClient, url, &status)
+		suite.NoError(err)
+		return status == "INPROGRESS"
+	})
 
 	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1}, &metapb.Peer{Id: 6, StoreId: 1}, &metapb.Peer{Id: 7, StoreId: 1})
 	tests.MustPutRegionInfo(re, cluster, r1)
 
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("REPLICATED", status)
+	tu.Eventually(re, func() bool {
+		err = tu.ReadGetJSON(re, testDialClient, url, &status)
+		suite.NoError(err)
+		return status == "REPLICATED"
+	})
 }
 
 func (suite *regionTestSuite) checkRegionCount(cluster *tests.TestCluster, count uint64) {

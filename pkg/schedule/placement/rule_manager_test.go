@@ -15,6 +15,7 @@
 package placement
 
 import (
+	"context"
 	"encoding/hex"
 	"testing"
 
@@ -32,7 +33,7 @@ func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *Ru
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
-	manager := NewRuleManager(store, nil, mockconfig.NewTestOptions())
+	manager := NewRuleManager(context.Background(), store, nil, mockconfig.NewTestOptions())
 	manager.conf.SetEnableWitness(enableWitness)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"}, "")
 	re.NoError(err)
@@ -90,23 +91,23 @@ func TestAdjustRule(t *testing.T) {
 		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: -1},
 		{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3, LabelConstraints: []LabelConstraint{{Op: "foo"}}},
 	}
-	re.NoError(manager.adjustRule(&rules[0], "group"))
+	re.NoError(manager.AdjustRule(&rules[0], "group"))
 
 	re.Equal([]byte{0x12, 0x3a, 0xbc}, rules[0].StartKey)
 	re.Equal([]byte{0x12, 0x3a, 0xbf}, rules[0].EndKey)
-	re.Error(manager.adjustRule(&rules[1], ""))
+	re.Error(manager.AdjustRule(&rules[1], ""))
 
 	for i := 2; i < len(rules); i++ {
-		re.Error(manager.adjustRule(&rules[i], "group"))
+		re.Error(manager.AdjustRule(&rules[i], "group"))
 	}
 
 	manager.SetKeyType(constant.Table.String())
-	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3}, "group"))
+	re.Error(manager.AdjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3}, "group"))
 
 	manager.SetKeyType(constant.Txn.String())
-	re.Error(manager.adjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3}, "group"))
+	re.Error(manager.AdjustRule(&Rule{GroupID: "group", ID: "id", StartKeyHex: "123abc", EndKeyHex: "123abf", Role: Voter, Count: 3}, "group"))
 
-	re.Error(manager.adjustRule(&Rule{
+	re.Error(manager.AdjustRule(&Rule{
 		GroupID:     "group",
 		ID:          "id",
 		StartKeyHex: hex.EncodeToString(codec.EncodeBytes([]byte{0})),
@@ -115,7 +116,7 @@ func TestAdjustRule(t *testing.T) {
 		Count:       3,
 	}, "group"))
 
-	re.Error(manager.adjustRule(&Rule{
+	re.Error(manager.AdjustRule(&Rule{
 		GroupID:          "tiflash",
 		ID:               "id",
 		StartKeyHex:      hex.EncodeToString(codec.EncodeBytes([]byte{0})),
@@ -156,7 +157,7 @@ func TestSaveLoad(t *testing.T) {
 		re.NoError(manager.SetRule(r.Clone()))
 	}
 
-	m2 := NewRuleManager(store, nil, nil)
+	m2 := NewRuleManager(context.Background(), store, nil, nil)
 	err := m2.Initialize(3, []string{"no", "labels"}, "")
 	re.NoError(err)
 	re.Len(m2.GetAllRules(), 3)
@@ -174,7 +175,7 @@ func TestSetAfterGet(t *testing.T) {
 	rule.Count = 1
 	manager.SetRule(rule)
 
-	m2 := NewRuleManager(store, nil, nil)
+	m2 := NewRuleManager(context.Background(), store, nil, nil)
 	err := m2.Initialize(100, []string{}, "")
 	re.NoError(err)
 	rule = m2.GetRule(DefaultGroupID, DefaultRuleID)

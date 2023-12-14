@@ -139,18 +139,19 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster sche.SchedulerCluste
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
+	ranges := s.conf.GetRanges()
 	for _, source := range candidates.Stores {
 		var region *core.RegionInfo
 		if s.conf.IsRoleAllow(roleFollower) {
-			region = filter.SelectOneRegion(cluster.RandFollowerRegions(source.GetID(), s.conf.Ranges), nil,
+			region = filter.SelectOneRegion(cluster.RandFollowerRegions(source.GetID(), ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLeader) {
-			region = filter.SelectOneRegion(cluster.RandLeaderRegions(source.GetID(), s.conf.Ranges), nil,
+			region = filter.SelectOneRegion(cluster.RandLeaderRegions(source.GetID(), ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}
 		if region == nil && s.conf.IsRoleAllow(roleLearner) {
-			region = filter.SelectOneRegion(cluster.RandLearnerRegions(source.GetID(), s.conf.Ranges), nil,
+			region = filter.SelectOneRegion(cluster.RandLearnerRegions(source.GetID(), ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}
 		if region != nil {

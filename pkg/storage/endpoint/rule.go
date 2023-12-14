@@ -15,43 +15,44 @@
 package endpoint
 
 import (
+	"context"
+	"encoding/json"
 	"strings"
 
+	"github.com/tikv/pd/pkg/storage/kv"
 	"go.etcd.io/etcd/clientv3"
 )
 
 // RuleStorage defines the storage operations on the rule.
 type RuleStorage interface {
+	// TODO: shall we support other interfaces about txn?
 	LoadRule(ruleKey string) (string, error)
 	LoadRules(f func(k, v string)) error
-	SaveRule(ruleKey string, rule interface{}) error
-	SaveRuleJSON(ruleKey, rule string) error
-	DeleteRule(ruleKey string) error
+	SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error
+	DeleteRule(txn kv.Txn, ruleKey string) error
 	LoadRuleGroups(f func(k, v string)) error
-	SaveRuleGroup(groupID string, group interface{}) error
-	SaveRuleGroupJSON(groupID, group string) error
-	DeleteRuleGroup(groupID string) error
+	SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error
+	DeleteRuleGroup(txn kv.Txn, groupID string) error
 	LoadRegionRules(f func(k, v string)) error
 	SaveRegionRule(ruleKey string, rule interface{}) error
-	SaveRegionRuleJSON(ruleKey, rule string) error
 	DeleteRegionRule(ruleKey string) error
+	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
 var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
-func (se *StorageEndpoint) SaveRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(ruleKeyPath(ruleKey), rule)
-}
-
-// SaveRuleJSON stores a rule cfg JSON to the rulesPath.
-func (se *StorageEndpoint) SaveRuleJSON(ruleKey, rule string) error {
-	return se.Save(ruleKeyPath(ruleKey), rule)
+func (se *StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error {
+	value, err := json.Marshal(rule)
+	if err != nil {
+		return err
+	}
+	return txn.Save(ruleKeyPath(ruleKey), string(value))
 }
 
 // DeleteRule removes a rule from storage.
-func (se *StorageEndpoint) DeleteRule(ruleKey string) error {
-	return se.Remove(ruleKeyPath(ruleKey))
+func (se *StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
+	return txn.Remove(ruleKeyPath(ruleKey))
 }
 
 // LoadRuleGroups loads all rule groups from storage.
@@ -60,18 +61,17 @@ func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
 }
 
 // SaveRuleGroup stores a rule group config to storage.
-func (se *StorageEndpoint) SaveRuleGroup(groupID string, group interface{}) error {
-	return se.saveJSON(ruleGroupIDPath(groupID), group)
-}
-
-// SaveRuleGroupJSON stores a rule group config JSON to storage.
-func (se *StorageEndpoint) SaveRuleGroupJSON(groupID, group string) error {
-	return se.Save(ruleGroupIDPath(groupID), group)
+func (se *StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error {
+	value, err := json.Marshal(group)
+	if err != nil {
+		return err
+	}
+	return txn.Save(ruleGroupIDPath(groupID), string(value))
 }
 
 // DeleteRuleGroup removes a rule group from storage.
-func (se *StorageEndpoint) DeleteRuleGroup(groupID string) error {
-	return se.Remove(ruleGroupIDPath(groupID))
+func (se *StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
+	return txn.Remove(ruleGroupIDPath(groupID))
 }
 
 // LoadRegionRules loads region rules from storage.
@@ -82,11 +82,6 @@ func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
 // SaveRegionRule saves a region rule to the storage.
 func (se *StorageEndpoint) SaveRegionRule(ruleKey string, rule interface{}) error {
 	return se.saveJSON(regionLabelKeyPath(ruleKey), rule)
-}
-
-// SaveRegionRuleJSON saves a region rule JSON to the storage.
-func (se *StorageEndpoint) SaveRegionRuleJSON(ruleKey, rule string) error {
-	return se.Save(regionLabelKeyPath(ruleKey), rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
