@@ -16,7 +16,7 @@ package members_test
 
 import (
 	"context"
-	testing2 "testing"
+	"testing"
 
 	"github.com/stretchr/testify/suite"
 	pdClient "github.com/tikv/pd/client/http"
@@ -37,7 +37,7 @@ type memberTestSuite struct {
 	dialClient       pdClient.Client
 }
 
-func TestMemberTestSuite(t *testing2.T) {
+func TestMemberTestSuite(t *testing.T) {
 	suite.Run(t, new(memberTestSuite))
 }
 

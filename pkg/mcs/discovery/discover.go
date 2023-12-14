@@ -46,49 +46,22 @@ func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, er
 	return values, nil
 }
 
-func isValid(id uint32) bool {
-	return id >= utils.DefaultKeyspaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
-}
-
-func getMCSPrimaryPath(name, keyspaceGroupID string, client *clientv3.Client) (string, error) {
-	switch name {
-	case utils.TSOServiceName:
-		id := utils.DefaultKeyspaceGroupID
-		if len(keyspaceGroupID) > 0 {
-			keyspaceGroupID, err := strconv.ParseUint(keyspaceGroupID, 10, 64)
-			if err != nil || !isValid(uint32(keyspaceGroupID)) {
-				return "", errors.Errorf("invalid keyspace group id %d", keyspaceGroupID)
-			}
-			id = uint32(keyspaceGroupID)
-		}
-
-		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
-		if err != nil {
-			return "", err
-		}
-		rootPath := endpoint.TSOSvcRootPath(clusterID)
-		primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, id)
-		return primaryPath, nil
-	case utils.SchedulingServiceName:
-		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
-		if err != nil {
-			return "", err
-		}
-		return path.Join(endpoint.SchedulingSvcRootPath(clusterID), utils.PrimaryKey), nil
-	case utils.ResourceManagerServiceName:
-		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
-		if err != nil {
-			return "", err
-		}
-		return path.Join(endpoint.ResourceManagerSvcRootPath(clusterID), utils.PrimaryKey), nil
-	default:
-	}
-	return "", errors.Errorf("unknown service name %s", name)
-}
-
 // GetMCSPrimary returns the primary member of the specified service name.
-func GetMCSPrimary(name, keyspaceGroupID string, client *clientv3.Client) (*pdpb.Member, int64, error) {
-	primaryPath, err := getMCSPrimaryPath(name, keyspaceGroupID, client)
+func GetMCSPrimary(name string, client *clientv3.Client, keyspaceGroupID string) (*pdpb.Member, int64, error) {
+	keyspaceGroupIDKey := utils.DefaultKeyspaceGroupID
+	if keyspaceGroupID != "" {
+		isValid := func(id uint32) bool {
+			return id >= utils.DefaultKeyspaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
+		}
+
+		keyspaceGroupID, err := strconv.ParseUint(keyspaceGroupID, 10, 64)
+		if err != nil || !isValid(uint32(keyspaceGroupID)) {
+			return nil, 0, errors.Errorf("invalid keyspace group id %d", keyspaceGroupID)
+		}
+		keyspaceGroupIDKey = uint32(keyspaceGroupID)
+	}
+
+	primaryPath, err := getMCSPrimaryPath(name, client, keyspaceGroupIDKey)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -118,4 +91,31 @@ func GetMembers(name string, client *clientv3.Client) (*clientv3.TxnResponse, er
 		return resps, nil
 	}
 	return nil, errors.Errorf("unknown service name %s", name)
+}
+
+func getMCSPrimaryPath(name string, client *clientv3.Client, id uint32) (string, error) {
+	switch name {
+	case utils.TSOServiceName:
+		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+		if err != nil {
+			return "", err
+		}
+		rootPath := endpoint.TSOSvcRootPath(clusterID)
+		primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, id)
+		return primaryPath, nil
+	case utils.SchedulingServiceName:
+		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+		if err != nil {
+			return "", err
+		}
+		return path.Join(endpoint.SchedulingSvcRootPath(clusterID), utils.PrimaryKey), nil
+	case utils.ResourceManagerServiceName:
+		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+		if err != nil {
+			return "", err
+		}
+		return path.Join(endpoint.ResourceManagerSvcRootPath(clusterID), utils.PrimaryKey), nil
+	default:
+	}
+	return "", errors.Errorf("unknown service name %s", name)
 }

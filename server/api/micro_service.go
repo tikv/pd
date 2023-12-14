@@ -2,14 +2,13 @@ package api
 
 import (
 	"fmt"
-	"net/http"
-
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
+	"net/http"
 )
 
 type microServiceHandler struct {
@@ -74,7 +73,7 @@ func (h *microServiceHandler) GetLeader(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if service := mux.Vars(r)["service"]; len(service) > 0 {
-		leader, _, err := discovery.GetMCSPrimary(service, r.URL.Query().Get("keyspace_id"), h.svr.GetClient())
+		leader, _, err := discovery.GetMCSPrimary(service, h.svr.GetClient(), r.URL.Query().Get("keyspace_id"))
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
