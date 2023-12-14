@@ -71,7 +71,7 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 	}
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
-		if !conf.validate() {
+		if !conf.validateLocked() {
 			json.Unmarshal(oldc, conf)
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
@@ -90,7 +90,7 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 	return http.StatusBadRequest, "Config item is not found."
 }
 
-func (conf *balanceWitnessSchedulerConfig) validate() bool {
+func (conf *balanceWitnessSchedulerConfig) validateLocked() bool {
 	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
@@ -111,6 +111,20 @@ func (conf *balanceWitnessSchedulerConfig) persistLocked() error {
 		return err
 	}
 	return conf.storage.SaveSchedulerConfig(BalanceWitnessName, data)
+}
+
+func (conf *balanceWitnessSchedulerConfig) getBatch() int {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.Batch
+}
+
+func (conf *balanceWitnessSchedulerConfig) getRanges() []core.KeyRange {
+	conf.RLock()
+	defer conf.RUnlock()
+	ranges := make([]core.KeyRange, len(conf.Ranges))
+	copy(ranges, conf.Ranges)
+	return ranges
 }
 
 type balanceWitnessHandler struct {
@@ -238,14 +252,12 @@ func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 }
 
 func (b *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	b.conf.RLock()
-	defer b.conf.RUnlock()
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
 	}
-	batch := b.conf.Batch
+	batch := b.conf.getBatch()
 	schedulerCounter.WithLabelValues(b.GetName(), "schedule").Inc()
 
 	opInfluence := b.OpController.GetOpInfluence(cluster.GetBasicCluster())
@@ -305,7 +317,7 @@ func createTransferWitnessOperator(cs *candidateStores, b *balanceWitnessSchedul
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the witness.
 func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandWitnessRegions(solver.SourceStoreID(), b.conf.Ranges),
+	solver.Region = filter.SelectOneRegion(solver.RandWitnessRegions(solver.SourceStoreID(), b.conf.getRanges()),
 		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.Region == nil {
 		log.Debug("store has no witness", zap.String("scheduler", b.GetName()), zap.Uint64("store-id", solver.SourceStoreID()))

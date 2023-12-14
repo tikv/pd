@@ -467,6 +467,10 @@ func (c *RaftCluster) startGCTuner() {
 func (c *RaftCluster) runStoreConfigSync() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
+	// TODO: After we fix the atomic problem of config, we can remove this failpoint.
+	failpoint.Inject("skipStoreConfigSync", func() {
+		failpoint.Return()
+	})
 
 	var (
 		synced, switchRaftV2Config, needPersist bool
@@ -491,6 +495,7 @@ func (c *RaftCluster) runStoreConfigSync() {
 			if err := c.opt.Persist(c.storage); err != nil {
 				log.Warn("store config persisted failed", zap.Error(err))
 			}
+			log.Info("store config is updated")
 		}
 		select {
 		case <-c.ctx.Done():

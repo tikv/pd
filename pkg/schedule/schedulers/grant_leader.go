@@ -63,7 +63,7 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
+		return errs.ErrStrconvParseUint.Wrap(err)
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
@@ -141,6 +141,16 @@ func (conf *grantLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRa
 		return ranges
 	}
 	return nil
+}
+
+func (conf *grantLeaderSchedulerConfig) getStoreIDWithRanges() map[uint64][]core.KeyRange {
+	conf.RLock()
+	defer conf.RUnlock()
+	storeIDWithRanges := make(map[uint64][]core.KeyRange)
+	for id, ranges := range conf.StoreIDWithRanges {
+		storeIDWithRanges[id] = ranges
+	}
+	return storeIDWithRanges
 }
 
 // grantLeaderScheduler transfers all leaders to peers in the store.
@@ -227,12 +237,11 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 
 func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
-	s.conf.RLock()
-	defer s.conf.RUnlock()
-	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWithRanges))
+	storeIDWithRanges := s.conf.getStoreIDWithRanges()
+	ops := make([]*operator.Operator, 0, len(storeIDWithRanges))
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
-	for id, ranges := range s.conf.StoreIDWithRanges {
+	for id, ranges := range storeIDWithRanges {
 		region := filter.SelectOneRegion(cluster.RandFollowerRegions(id, ranges), nil, pendingFilter, downFilter)
 		if region == nil {
 			grantLeaderNoFollowerCounter.Inc()

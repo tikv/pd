@@ -244,6 +244,7 @@ ci-test-job: install-tools dashboard-ui
 	else \
 	for mod in $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)); do cd $$mod && $(MAKE) ci-test-job && cd $(ROOT_PATH) > /dev/null && cat $$mod/covprofile >> covprofile; done; \
 	fi
+	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 
