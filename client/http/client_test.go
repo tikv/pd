@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 )
 
 // requestChecker is used to check the HTTP request sent by the client.
@@ -40,8 +41,11 @@ func newHTTPClientWithRequestChecker(checker func(req *http.Request) error) *htt
 
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re := require.New(t)
-	var expectedVal string
 	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
+		var expectedVal string
+		if req.URL.Path == HotHistory {
+			expectedVal = "true"
+		}
 		val := req.Header.Get(pdAllowFollowerHandleKey)
 		if val != expectedVal {
 			re.Failf("PD allow follower handler header check failed",
@@ -51,16 +55,17 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	})
 	c := NewClient([]string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
-	expectedVal = "true"
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
+	c.Close()
 }
 
 func TestCallerID(t *testing.T) {
 	re := require.New(t)
-	expectedVal := defaultCallerID
+	expectedVal := atomic.NewString(defaultCallerID)
 	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
 		val := req.Header.Get(xCallerIDKey)
-		if val != expectedVal {
+		// Exclude the request sent by the inner client.
+		if val != defaultInnerCallerID && val != expectedVal.Load() {
 			re.Failf("Caller ID header check failed",
 				"should be %s, but got %s", expectedVal, val)
 		}
@@ -68,6 +73,7 @@ func TestCallerID(t *testing.T) {
 	})
 	c := NewClient([]string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
-	expectedVal = "test"
-	c.WithCallerID(expectedVal).GetRegions(context.Background())
+	expectedVal.Store("test")
+	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())
+	c.Close()
 }
