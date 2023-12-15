@@ -111,7 +111,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 
 	preFn := func(events []*clientv3.Event) error {
 		suspectKeyRanges = &core.KeyRanges{}
-		if len(events) != 0 {
+		if len(events) > 0 {
 			rw.ruleManager.Lock()
 			rw.patch = rw.ruleManager.BeginPatch()
 		}
@@ -220,7 +220,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		}
 	}
 	postFn := func(events []*clientv3.Event) error {
-		if len(events) > 0 {
+		if len(events) > 0 && rw.patch != nil {
 			if err := rw.ruleManager.TryCommitPatch(rw.patch); err != nil {
 				return err
 			}

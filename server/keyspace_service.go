@@ -89,7 +89,6 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		return nil
 	}
-	// TODO: does it need to check the num of events?
 	postEventFn := func([]*clientv3.Event) error {
 		defer func() {
 			keyspaces = keyspaces[:0]

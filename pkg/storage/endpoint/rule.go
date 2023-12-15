@@ -16,23 +16,21 @@ package endpoint
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 
 	"github.com/tikv/pd/pkg/storage/kv"
-	"go.etcd.io/etcd/clientv3"
 )
 
 // RuleStorage defines the storage operations on the rule.
 type RuleStorage interface {
-	// TODO: shall we support other interfaces about txn?
-	LoadRule(ruleKey string) (string, error)
-	LoadRules(f func(k, v string)) error
+	LoadRules(txn kv.Txn, f func(k, v string)) error
 	SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error
 	DeleteRule(txn kv.Txn, ruleKey string) error
-	LoadRuleGroups(f func(k, v string)) error
+	LoadRuleGroups(txn kv.Txn, f func(k, v string)) error
 	SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error
 	DeleteRuleGroup(txn kv.Txn, groupID string) error
+	// LoadRule is used only in rule watcher.
+	LoadRule(ruleKey string) (string, error)
+
 	LoadRegionRules(f func(k, v string)) error
 	SaveRegionRule(ruleKey string, rule interface{}) error
 	DeleteRegionRule(ruleKey string) error
@@ -43,11 +41,7 @@ var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
 func (se *StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error {
-	value, err := json.Marshal(rule)
-	if err != nil {
-		return err
-	}
-	return txn.Save(ruleKeyPath(ruleKey), string(value))
+	return saveJSONInTxn(txn, ruleKeyPath(ruleKey), rule)
 }
 
 // DeleteRule removes a rule from storage.
@@ -56,17 +50,13 @@ func (se *StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
 }
 
 // LoadRuleGroups loads all rule groups from storage.
-func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
-	return se.loadRangeByPrefix(ruleGroupPath+"/", f)
+func (se *StorageEndpoint) LoadRuleGroups(txn kv.Txn, f func(k, v string)) error {
+	return loadRangeByPrefixInTxn(txn, ruleGroupPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
 func (se *StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error {
-	value, err := json.Marshal(group)
-	if err != nil {
-		return err
-	}
-	return txn.Save(ruleGroupIDPath(groupID), string(value))
+	return saveJSONInTxn(txn, ruleGroupIDPath(groupID), group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
@@ -95,25 +85,6 @@ func (se *StorageEndpoint) LoadRule(ruleKey string) (string, error) {
 }
 
 // LoadRules loads placement rules from storage.
-func (se *StorageEndpoint) LoadRules(f func(k, v string)) error {
-	return se.loadRangeByPrefix(rulesPath+"/", f)
-}
-
-// loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
-func (se *StorageEndpoint) loadRangeByPrefix(prefix string, f func(k, v string)) error {
-	nextKey := prefix
-	endKey := clientv3.GetPrefixRangeEnd(prefix)
-	for {
-		keys, values, err := se.LoadRange(nextKey, endKey, MinKVRangeLimit)
-		if err != nil {
-			return err
-		}
-		for i := range keys {
-			f(strings.TrimPrefix(keys[i], prefix), values[i])
-		}
-		if len(keys) < MinKVRangeLimit {
-			return nil
-		}
-		nextKey = keys[len(keys)-1] + "\x00"
-	}
+func (se *StorageEndpoint) LoadRules(txn kv.Txn, f func(k, v string)) error {
+	return loadRangeByPrefixInTxn(txn, rulesPath+"/", f)
 }

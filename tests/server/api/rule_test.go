@@ -26,7 +26,6 @@ import (
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -36,7 +35,6 @@ import (
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/zap"
 )
 
 type ruleTestSuite struct {
@@ -1022,7 +1020,6 @@ func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
 			if len(respBundle) != len(bundle) {
 				return false
 			}
-			log.Info("respBundle", zap.Any("respBundle", respBundle), zap.Any("bundle", bundle))
 			sort.Slice(respBundle, func(i, j int) bool { return respBundle[i].ID < respBundle[j].ID })
 			sort.Slice(bundle, func(i, j int) bool { return bundle[i].ID < bundle[j].ID })
 			for i := range respBundle {

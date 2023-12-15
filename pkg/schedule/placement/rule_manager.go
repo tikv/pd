@@ -157,36 +157,37 @@ func (m *RuleManager) loadRules() error {
 		toSave   []*Rule
 		toDelete []string
 	)
-	err := m.storage.LoadRules(func(k, v string) {
-		r, err := NewRuleFromJSON([]byte(v))
-		if err != nil {
-			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
-			toDelete = append(toDelete, k)
-			return
-		}
-		err = m.AdjustRule(r, "")
-		if err != nil {
-			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
-			toDelete = append(toDelete, k)
-			return
-		}
-		_, ok := m.ruleConfig.rules[r.Key()]
-		if ok {
-			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
-			toDelete = append(toDelete, k)
-			return
-		}
-		if k != r.StoreKey() {
-			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
-			toDelete = append(toDelete, k)
-			toSave = append(toSave, r)
-		}
-		m.ruleConfig.rules[r.Key()] = r
-	})
-	if err != nil {
-		return err
-	}
 	return m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+		err = m.storage.LoadRules(txn, func(k, v string) {
+			r, err := NewRuleFromJSON([]byte(v))
+			if err != nil {
+				log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+				toDelete = append(toDelete, k)
+				return
+			}
+			err = m.AdjustRule(r, "")
+			if err != nil {
+				log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
+				toDelete = append(toDelete, k)
+				return
+			}
+			_, ok := m.ruleConfig.rules[r.Key()]
+			if ok {
+				log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+				toDelete = append(toDelete, k)
+				return
+			}
+			if k != r.StoreKey() {
+				log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+				toDelete = append(toDelete, k)
+				toSave = append(toSave, r)
+			}
+			m.ruleConfig.rules[r.Key()] = r
+		})
+		if err != nil {
+			return err
+		}
+
 		for _, s := range toSave {
 			if err = m.storage.SaveRule(txn, s.StoreKey(), s); err != nil {
 				return err
@@ -202,13 +203,15 @@ func (m *RuleManager) loadRules() error {
 }
 
 func (m *RuleManager) loadGroups() error {
-	return m.storage.LoadRuleGroups(func(k, v string) {
-		g, err := NewRuleGroupFromJSON([]byte(v))
-		if err != nil {
-			log.Error("failed to unmarshal rule group", zap.String("group-id", k), errs.ZapError(errs.ErrLoadRuleGroup, err))
-			return
-		}
-		m.ruleConfig.groups[g.ID] = g
+	return m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+		return m.storage.LoadRuleGroups(txn, func(k, v string) {
+			g, err := NewRuleGroupFromJSON([]byte(v))
+			if err != nil {
+				log.Error("failed to unmarshal rule group", zap.String("group-id", k), errs.ZapError(errs.ErrLoadRuleGroup, err))
+				return
+			}
+			m.ruleConfig.groups[g.ID] = g
+		})
 	})
 }
 
