@@ -131,14 +131,13 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
 		return rw.ruleManager.DeleteRule(rule.GroupID, rule.ID)
 	}
-	postEventFn := func() error {
-		return nil
-	}
 	rw.ruleWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
 		"scheduling-rule-watcher", rw.rulesPathPrefix,
-		putFn, deleteFn, postEventFn,
+		func([]*clientv3.Event) error { return nil },
+		putFn, deleteFn,
+		func([]*clientv3.Event) error { return nil },
 		clientv3.WithPrefix(),
 	)
 	rw.ruleWatcher.StartWatchLoop()
@@ -168,14 +167,13 @@ func (rw *Watcher) initializeGroupWatcher() error {
 		}
 		return rw.ruleManager.DeleteRuleGroup(trimmedKey)
 	}
-	postEventFn := func() error {
-		return nil
-	}
 	rw.groupWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
 		"scheduling-rule-group-watcher", rw.ruleGroupPathPrefix,
-		putFn, deleteFn, postEventFn,
+		func([]*clientv3.Event) error { return nil },
+		putFn, deleteFn,
+		func([]*clientv3.Event) error { return nil },
 		clientv3.WithPrefix(),
 	)
 	rw.groupWatcher.StartWatchLoop()
@@ -197,14 +195,13 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		log.Info("delete region label rule", zap.String("key", key))
 		return rw.regionLabeler.DeleteLabelRule(strings.TrimPrefix(key, prefixToTrim))
 	}
-	postEventFn := func() error {
-		return nil
-	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
 		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
-		putFn, deleteFn, postEventFn,
+		func([]*clientv3.Event) error { return nil },
+		putFn, deleteFn,
+		func([]*clientv3.Event) error { return nil },
 		clientv3.WithPrefix(),
 	)
 	rw.labelWatcher.StartWatchLoop()

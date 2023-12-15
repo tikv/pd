@@ -16,6 +16,7 @@ package placement
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -49,6 +50,7 @@ const (
 // RuleManager is responsible for the lifecycle of all placement Rules.
 // It is thread safe.
 type RuleManager struct {
+	ctx     context.Context
 	storage endpoint.RuleStorage
 	syncutil.RWMutex
 	initialized bool
@@ -63,8 +65,9 @@ type RuleManager struct {
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider) *RuleManager {
+func NewRuleManager(ctx context.Context, storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider) *RuleManager {
 	return &RuleManager{
+		ctx:              ctx,
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
 		conf:             conf,
