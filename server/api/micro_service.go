@@ -2,13 +2,14 @@ package api
 
 import (
 	"fmt"
+	"net/http"
+
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
-	"net/http"
 )
 
 type microServiceHandler struct {
@@ -45,21 +46,21 @@ func (h *microServiceHandler) GetMembers(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		var apis []string
+		var addrs []string
 		for _, resp := range resps.Responses {
 			for _, keyValue := range resp.GetResponseRange().GetKvs() {
 				var entry discovery.ServiceRegistryEntry
 				if err = entry.Deserialize(keyValue.Value); err != nil {
 					log.Info("deserialize failed", zap.String("key", string(keyValue.Key)), zap.Error(err))
 				}
-				apis = append(apis, entry.ServiceAddr)
+				addrs = append(addrs, entry.ServiceAddr)
 			}
 		}
-		h.rd.JSON(w, http.StatusOK, apis)
+		h.rd.JSON(w, http.StatusOK, addrs)
 		return
 	}
 
-	h.rd.JSON(w, http.StatusInternalServerError, "not support service")
+	h.rd.JSON(w, http.StatusInternalServerError, "please specify service")
 }
 
 // @Tags     leader
@@ -86,5 +87,5 @@ func (h *microServiceHandler) GetLeader(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.rd.JSON(w, http.StatusInternalServerError, "not support service")
+	h.rd.JSON(w, http.StatusInternalServerError, "please specify service")
 }
