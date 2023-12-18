@@ -241,7 +241,7 @@ func TestSetOfflineStore(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -438,7 +438,7 @@ func TestUpStore(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -541,7 +541,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -1268,7 +1268,7 @@ func TestOfflineAndMerge(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -2130,7 +2130,7 @@ func newTestRaftCluster(
 ) *RaftCluster {
 	rc := &RaftCluster{serverCtx: ctx, core: core.NewBasicCluster(), storage: s}
 	rc.InitCluster(id, opt, nil, nil)
-	rc.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), rc, opt)
+	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {

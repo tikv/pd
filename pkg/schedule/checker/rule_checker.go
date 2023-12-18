@@ -199,7 +199,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 		if c.isDownPeer(region, peer) {
 			if c.isStoreDownTimeHitMaxDownTime(peer.GetStoreId()) {
 				ruleCheckerReplaceDownCounter.Inc()
-				return c.replaceUnexpectRulePeer(region, rf, fit, peer, downStatus)
+				return c.replaceUnexpectedRulePeer(region, rf, fit, peer, downStatus)
 			}
 			// When witness placement rule is enabled, promotes the witness to voter when region has down voter.
 			if c.isWitnessEnabled() && core.IsVoter(peer) {
@@ -211,7 +211,7 @@ func (c *RuleChecker) fixRulePeer(region *core.RegionInfo, fit *placement.Region
 		}
 		if c.isOfflinePeer(peer) {
 			ruleCheckerReplaceOfflineCounter.Inc()
-			return c.replaceUnexpectRulePeer(region, rf, fit, peer, offlineStatus)
+			return c.replaceUnexpectedRulePeer(region, rf, fit, peer, offlineStatus)
 		}
 	}
 	// fix loose matched peers.
@@ -246,7 +246,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 					continue
 				}
 				ruleCheckerNoStoreThenTryReplace.Inc()
-				op, err := c.replaceUnexpectRulePeer(region, oldPeerRuleFit, fit, p, "swap-fit")
+				op, err := c.replaceUnexpectedRulePeer(region, oldPeerRuleFit, fit, p, "swap-fit")
 				if err != nil {
 					return nil, err
 				}
@@ -267,7 +267,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 }
 
 // The peer's store may in Offline or Down, need to be replace.
-func (c *RuleChecker) replaceUnexpectRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
+func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *placement.RuleFit, fit *placement.RegionFit, peer *metapb.Peer, status string) (*operator.Operator, error) {
 	var fastFailover bool
 	// If the store to which the original peer belongs is TiFlash, the new peer cannot be set to witness, nor can it perform fast failover
 	if c.isWitnessEnabled() && !c.cluster.GetStore(peer.StoreId).IsTiFlash() {

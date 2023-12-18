@@ -58,7 +58,9 @@ func (conf *shuffleRegionSchedulerConfig) GetRoles() []string {
 func (conf *shuffleRegionSchedulerConfig) GetRanges() []core.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	return conf.Ranges
+	ranges := make([]core.KeyRange, len(conf.Ranges))
+	copy(ranges, conf.Ranges)
+	return ranges
 }
 
 func (conf *shuffleRegionSchedulerConfig) IsRoleAllow(role string) bool {
