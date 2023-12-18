@@ -75,6 +75,8 @@ const (
 	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
+	// Micro Service
+	microServicePrefix = "/pd/api/v2/ms"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -185,4 +187,9 @@ func PProfProfileAPIWithInterval(interval time.Duration) string {
 // PProfGoroutineWithDebugLevel returns the pprof goroutine API with debug level parameter.
 func PProfGoroutineWithDebugLevel(level int) string {
 	return fmt.Sprintf("%s?debug=%d", PProfGoroutine, level)
+}
+
+// MicroServiceMembers returns the path of PD HTTP API to get the members of microservice.
+func MicroServiceMembers(service string) string {
+	return fmt.Sprintf("%s/members/%s", microServicePrefix, service)
 }
