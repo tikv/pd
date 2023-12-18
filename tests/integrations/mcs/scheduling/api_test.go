@@ -413,7 +413,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 		re.Equal(cfg["replication"].(map[string]interface{})["max-replicas"],
 			float64(opts.GetReplicationConfig().MaxReplicas))
 		schedulers := cfg["schedule"].(map[string]interface{})["schedulers-payload"].(map[string]interface{})
-		return len(schedulers) == 5
+		return len(schedulers) == 6
 	})
 
 	// Test to change config in api server
