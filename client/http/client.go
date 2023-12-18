@@ -33,7 +33,10 @@ import (
 )
 
 const (
-	defaultCallerID      = "pd-http-client"
+	// defaultCallerID marks the default caller ID of the PD HTTP client.
+	defaultCallerID = "pd-http-client"
+	// defaultInnerCallerID marks the default caller ID of the inner PD HTTP client.
+	// It's used to distinguish the requests sent by the inner client via some internal logic.
 	defaultInnerCallerID = "pd-http-client-inner"
 	httpScheme           = "http"
 	httpsScheme          = "https"
@@ -43,6 +46,7 @@ const (
 	defaultTimeout                   = 30 * time.Second
 )
 
+// respHandleFunc is the function to handle the HTTP response.
 type respHandleFunc func(resp *http.Response, res interface{}) error
 
 // clientInner is the inner implementation of the PD HTTP client, which contains some fundamental fields.
@@ -79,6 +83,7 @@ func (ci *clientInner) close() {
 	}
 }
 
+// getPDAddrs returns the current PD addresses and the index of the leader address.
 func (ci *clientInner) getPDAddrs() ([]string, int) {
 	ci.RLock()
 	defer ci.RUnlock()
@@ -113,26 +118,21 @@ func (ci *clientInner) execDuration(name string, duration time.Duration) {
 
 // requestWithRetry will first try to send the request to the PD leader, if it fails, it will try to send
 // the request to the other PD followers to gain a better availability.
-// TODO: support custom retry logic.
+// TODO: support custom retry logic, e.g. retry with customizable backoffer.
 func (ci *clientInner) requestWithRetry(
 	ctx context.Context,
-	callerID, name, uri, method string,
-	body []byte, res interface{},
-	respHandler respHandleFunc, headerOpts ...HeaderOption,
+	reqInfo *requestInfo,
+	headerOpts ...HeaderOption,
 ) error {
 	var (
 		err                    error
 		addr                   string
 		pdAddrs, leaderAddrIdx = ci.getPDAddrs()
 	)
+	// Try to send the request to the PD leader first.
 	if leaderAddrIdx != -1 {
 		addr = pdAddrs[leaderAddrIdx]
-		// Try to send the request to the PD leader first.
-		err = ci.doRequest(ctx,
-			callerID, name,
-			fmt.Sprintf("%s%s", addr, uri), method,
-			body, res, respHandler,
-			headerOpts...)
+		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 		if err == nil {
 			return nil
 		}
@@ -142,11 +142,7 @@ func (ci *clientInner) requestWithRetry(
 	// Try to send the request to the other PD followers.
 	for idx := 0; idx < len(pdAddrs) && idx != leaderAddrIdx; idx++ {
 		addr = ci.pdAddrs[idx]
-		err = ci.doRequest(ctx,
-			callerID, name,
-			fmt.Sprintf("%s%s", addr, uri), method,
-			body, res, respHandler,
-			headerOpts...)
+		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 		if err == nil {
 			break
 		}
@@ -158,18 +154,18 @@ func (ci *clientInner) requestWithRetry(
 
 func (ci *clientInner) doRequest(
 	ctx context.Context,
-	callerID, name, url, method string,
-	body []byte, res interface{},
-	respHandler respHandleFunc, headerOpts ...HeaderOption,
+	addr string, reqInfo *requestInfo,
+	headerOpts ...HeaderOption,
 ) error {
+	url := reqInfo.getURL(addr)
 	logFields := []zap.Field{
-		zap.String("name", name),
+		zap.String("name", reqInfo.name),
 		zap.String("url", url),
-		zap.String("method", method),
-		zap.String("caller-id", callerID),
+		zap.String("method", reqInfo.method),
+		zap.String("caller-id", reqInfo.callerID),
 	}
 	log.Debug("[pd] request the http url", logFields...)
-	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, reqInfo.method, url, bytes.NewBuffer(reqInfo.body))
 	if err != nil {
 		log.Error("[pd] create http request failed", append(logFields, zap.Error(err))...)
 		return errors.Trace(err)
@@ -177,21 +173,21 @@ func (ci *clientInner) doRequest(
 	for _, opt := range headerOpts {
 		opt(req.Header)
 	}
-	req.Header.Set(xCallerIDKey, callerID)
+	req.Header.Set(xCallerIDKey, reqInfo.callerID)
 
 	start := time.Now()
 	resp, err := ci.cli.Do(req)
 	if err != nil {
-		ci.reqCounter(name, networkErrorStatus)
+		ci.reqCounter(reqInfo.name, networkErrorStatus)
 		log.Error("[pd] do http request failed", append(logFields, zap.Error(err))...)
 		return errors.Trace(err)
 	}
-	ci.execDuration(name, time.Since(start))
-	ci.reqCounter(name, resp.Status)
+	ci.execDuration(reqInfo.name, time.Since(start))
+	ci.reqCounter(reqInfo.name, resp.Status)
 
 	// Give away the response handling to the caller if the handler is set.
-	if respHandler != nil {
-		return respHandler(resp, res)
+	if reqInfo.respHandler != nil {
+		return reqInfo.respHandler(resp, reqInfo.res)
 	}
 
 	defer func() {
@@ -215,11 +211,11 @@ func (ci *clientInner) doRequest(
 		return errors.Errorf("request pd http api failed with status: '%s'", resp.Status)
 	}
 
-	if res == nil {
+	if reqInfo.res == nil {
 		return nil
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(res)
+	err = json.NewDecoder(resp.Body).Decode(reqInfo.res)
 	if err != nil {
 		return errors.Trace(err)
 	}
@@ -244,9 +240,12 @@ func (ci *clientInner) membersInfoUpdater(ctx context.Context) {
 
 func (ci *clientInner) updateMembersInfo(ctx context.Context) {
 	var membersInfo MembersInfo
-	err := ci.requestWithRetry(ctx,
-		defaultInnerCallerID, "GetMembers",
-		membersPrefix, http.MethodGet, nil, &membersInfo, nil)
+	err := ci.requestWithRetry(ctx, newRequestInfo().
+		WithCallerID(defaultInnerCallerID).
+		WithName(getMembersName).
+		WithURI(membersPrefix).
+		WithMethod(http.MethodGet).
+		WithResp(&membersInfo))
 	if err != nil {
 		log.Error("[pd] http client get members info failed", zap.Error(err))
 		return
@@ -386,15 +385,11 @@ func WithAllowFollowerHandle() HeaderOption {
 	}
 }
 
-func (c *client) request(
-	ctx context.Context,
-	name, uri, method string,
-	body []byte, res interface{}, headerOpts ...HeaderOption,
-) error {
-	return c.inner.requestWithRetry(ctx,
-		c.callerID, name,
-		uri, method, body, res,
-		c.respHandler, headerOpts...)
+func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts ...HeaderOption) error {
+	return c.inner.requestWithRetry(ctx, reqInfo.
+		WithCallerID(c.callerID).
+		WithRespHandler(c.respHandler),
+		headerOpts...)
 }
 
 // UpdateMembersInfo updates the members info of the PD cluster in the inner client.
