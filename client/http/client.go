@@ -157,15 +157,23 @@ func (ci *clientInner) doRequest(
 	addr string, reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
 ) error {
-	url := reqInfo.getURL(addr)
+	var (
+		callerID    = reqInfo.callerID
+		name        = reqInfo.name
+		url         = reqInfo.getURL(addr)
+		method      = reqInfo.method
+		body        = reqInfo.body
+		res         = reqInfo.res
+		respHandler = reqInfo.respHandler
+	)
 	logFields := []zap.Field{
-		zap.String("name", reqInfo.name),
+		zap.String("name", name),
 		zap.String("url", url),
-		zap.String("method", reqInfo.method),
-		zap.String("caller-id", reqInfo.callerID),
+		zap.String("method", method),
+		zap.String("caller-id", callerID),
 	}
 	log.Debug("[pd] request the http url", logFields...)
-	req, err := http.NewRequestWithContext(ctx, reqInfo.method, url, bytes.NewBuffer(reqInfo.body))
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(body))
 	if err != nil {
 		log.Error("[pd] create http request failed", append(logFields, zap.Error(err))...)
 		return errors.Trace(err)
@@ -173,21 +181,21 @@ func (ci *clientInner) doRequest(
 	for _, opt := range headerOpts {
 		opt(req.Header)
 	}
-	req.Header.Set(xCallerIDKey, reqInfo.callerID)
+	req.Header.Set(xCallerIDKey, callerID)
 
 	start := time.Now()
 	resp, err := ci.cli.Do(req)
 	if err != nil {
-		ci.reqCounter(reqInfo.name, networkErrorStatus)
+		ci.reqCounter(name, networkErrorStatus)
 		log.Error("[pd] do http request failed", append(logFields, zap.Error(err))...)
 		return errors.Trace(err)
 	}
-	ci.execDuration(reqInfo.name, time.Since(start))
-	ci.reqCounter(reqInfo.name, resp.Status)
+	ci.execDuration(name, time.Since(start))
+	ci.reqCounter(name, resp.Status)
 
 	// Give away the response handling to the caller if the handler is set.
-	if reqInfo.respHandler != nil {
-		return reqInfo.respHandler(resp, reqInfo.res)
+	if respHandler != nil {
+		return respHandler(resp, res)
 	}
 
 	defer func() {
@@ -211,11 +219,11 @@ func (ci *clientInner) doRequest(
 		return errors.Errorf("request pd http api failed with status: '%s'", resp.Status)
 	}
 
-	if reqInfo.res == nil {
+	if res == nil {
 		return nil
 	}
 
-	err = json.NewDecoder(resp.Body).Decode(reqInfo.res)
+	err = json.NewDecoder(resp.Body).Decode(res)
 	if err != nil {
 		return errors.Trace(err)
 	}

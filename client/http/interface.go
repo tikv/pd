@@ -109,7 +109,7 @@ func (c *client) GetMembers(ctx context.Context) (*MembersInfo, error) {
 func (c *client) GetLeader(ctx context.Context) (*pdpb.Member, error) {
 	var leader pdpb.Member
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetLeader").
+		WithName(getLeaderName).
 		WithURI(leaderPrefix).
 		WithMethod(http.MethodGet).
 		WithResp(&leader))
@@ -122,7 +122,7 @@ func (c *client) GetLeader(ctx context.Context) (*pdpb.Member, error) {
 // TransferLeader transfers the PD leader.
 func (c *client) TransferLeader(ctx context.Context, newLeader string) error {
 	return c.request(ctx, newRequestInfo().
-		WithName("TransferLeader").
+		WithName(transferLeaderName).
 		WithURI(TransferLeaderByID(newLeader)).
 		WithMethod(http.MethodPost))
 }
@@ -131,7 +131,7 @@ func (c *client) TransferLeader(ctx context.Context, newLeader string) error {
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*RegionInfo, error) {
 	var region RegionInfo
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetRegionByID").
+		WithName(getRegionByIDName).
 		WithURI(RegionByID(regionID)).
 		WithMethod(http.MethodGet).
 		WithResp(&region))
@@ -145,7 +145,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64) (*RegionInf
 func (c *client) GetRegionByKey(ctx context.Context, key []byte) (*RegionInfo, error) {
 	var region RegionInfo
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetRegionByKey").
+		WithName(getRegionByKeyName).
 		WithURI(RegionByKey(key)).
 		WithMethod(http.MethodGet).
 		WithResp(&region))
@@ -159,7 +159,7 @@ func (c *client) GetRegionByKey(ctx context.Context, key []byte) (*RegionInfo, e
 func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 	var regions RegionsInfo
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetRegions").
+		WithName(getRegionsName).
 		WithURI(Regions).
 		WithMethod(http.MethodGet).
 		WithResp(&regions))
@@ -174,7 +174,7 @@ func (c *client) GetRegions(ctx context.Context) (*RegionsInfo, error) {
 func (c *client) GetRegionsByKeyRange(ctx context.Context, keyRange *KeyRange, limit int) (*RegionsInfo, error) {
 	var regions RegionsInfo
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetRegionsByKeyRange").
+		WithName(getRegionsByKeyRangeName).
 		WithURI(RegionsByKeyRange(keyRange, limit)).
 		WithMethod(http.MethodGet).
 		WithResp(&regions))
@@ -188,7 +188,7 @@ func (c *client) GetRegionsByKeyRange(ctx context.Context, keyRange *KeyRange, l
 func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*RegionsInfo, error) {
 	var regions RegionsInfo
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetRegionsByStoreID").
+		WithName(getRegionsByStoreIDName).
 		WithURI(RegionsByStoreID(storeID)).
 		WithMethod(http.MethodGet).
 		WithResp(&regions))
@@ -203,7 +203,7 @@ func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*Regi
 func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRange *KeyRange) (string, error) {
 	var state string
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetRegionsReplicatedStateByKeyRange").
+		WithName(getRegionsReplicatedStateByKeyRangeName).
 		WithURI(RegionsReplicatedByKeyRange(keyRange)).
 		WithMethod(http.MethodGet).
 		WithResp(&state))
@@ -217,7 +217,7 @@ func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRan
 func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotReadRegions StoreHotPeersInfos
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetHotReadRegions").
+		WithName(getHotReadRegionsName).
 		WithURI(HotRead).
 		WithMethod(http.MethodGet).
 		WithResp(&hotReadRegions))
@@ -231,7 +231,7 @@ func (c *client) GetHotReadRegions(ctx context.Context) (*StoreHotPeersInfos, er
 func (c *client) GetHotWriteRegions(ctx context.Context) (*StoreHotPeersInfos, error) {
 	var hotWriteRegions StoreHotPeersInfos
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetHotWriteRegions").
+		WithName(getHotWriteRegionsName).
 		WithURI(HotWrite).
 		WithMethod(http.MethodGet).
 		WithResp(&hotWriteRegions))
@@ -249,7 +249,7 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 	}
 	var historyHotRegions HistoryHotRegions
 	err = c.request(ctx, newRequestInfo().
-		WithName("GetHistoryHotRegions").
+		WithName(getHistoryHotRegionsName).
 		WithURI(HotHistory).
 		WithMethod(http.MethodGet).
 		WithBody(reqJSON).
@@ -267,7 +267,7 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 func (c *client) GetRegionStatusByKeyRange(ctx context.Context, keyRange *KeyRange, onlyCount bool) (*RegionStats, error) {
 	var regionStats RegionStats
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetRegionStatusByKeyRange").
+		WithName(getRegionStatusByKeyRangeName).
 		WithURI(RegionStatsByKeyRange(keyRange, onlyCount)).
 		WithMethod(http.MethodGet).
 		WithResp(&regionStats))
@@ -284,7 +284,7 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("SetStoreLabels").
+		WithName(setStoreLabelsName).
 		WithURI(LabelByStoreID(storeID)).
 		WithMethod(http.MethodPost).
 		WithBody(jsonInput))
@@ -294,7 +294,7 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{}, error) {
 	var config map[string]interface{}
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetScheduleConfig").
+		WithName(getScheduleConfigName).
 		WithURI(ScheduleConfig).
 		WithMethod(http.MethodGet).
 		WithResp(&config))
@@ -311,7 +311,7 @@ func (c *client) SetScheduleConfig(ctx context.Context, config map[string]interf
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("SetScheduleConfig").
+		WithName(setScheduleConfigName).
 		WithURI(ScheduleConfig).
 		WithMethod(http.MethodPost).
 		WithBody(configJSON))
@@ -321,7 +321,7 @@ func (c *client) SetScheduleConfig(ctx context.Context, config map[string]interf
 func (c *client) GetStores(ctx context.Context) (*StoresInfo, error) {
 	var stores StoresInfo
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetStores").
+		WithName(getStoresName).
 		WithURI(Stores).
 		WithMethod(http.MethodGet).
 		WithResp(&stores))
@@ -335,7 +335,7 @@ func (c *client) GetStores(ctx context.Context) (*StoresInfo, error) {
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*StoreInfo, error) {
 	var store StoreInfo
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetStore").
+		WithName(getStoreName).
 		WithURI(StoreByID(storeID)).
 		WithMethod(http.MethodGet).
 		WithResp(&store))
@@ -349,7 +349,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*StoreInfo, erro
 func (c *client) GetClusterVersion(ctx context.Context) (string, error) {
 	var version string
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetClusterVersion").
+		WithName(getClusterVersionName).
 		WithURI(ClusterVersion).
 		WithMethod(http.MethodGet).
 		WithResp(&version))
@@ -363,7 +363,7 @@ func (c *client) GetClusterVersion(ctx context.Context) (string, error) {
 func (c *client) GetAllPlacementRuleBundles(ctx context.Context) ([]*GroupBundle, error) {
 	var bundles []*GroupBundle
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetAllPlacementRuleBundles").
+		WithName(getAllPlacementRuleBundlesName).
 		WithURI(PlacementRuleBundle).
 		WithMethod(http.MethodGet).
 		WithResp(&bundles))
@@ -377,7 +377,7 @@ func (c *client) GetAllPlacementRuleBundles(ctx context.Context) ([]*GroupBundle
 func (c *client) GetPlacementRuleBundleByGroup(ctx context.Context, group string) (*GroupBundle, error) {
 	var bundle GroupBundle
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetPlacementRuleBundleByGroup").
+		WithName(getPlacementRuleBundleByGroupName).
 		WithURI(PlacementRuleBundleByGroup(group)).
 		WithMethod(http.MethodGet).
 		WithResp(&bundle))
@@ -391,7 +391,7 @@ func (c *client) GetPlacementRuleBundleByGroup(ctx context.Context, group string
 func (c *client) GetPlacementRulesByGroup(ctx context.Context, group string) ([]*Rule, error) {
 	var rules []*Rule
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetPlacementRulesByGroup").
+		WithName(getPlacementRulesByGroupName).
 		WithURI(PlacementRulesByGroup(group)).
 		WithMethod(http.MethodGet).
 		WithResp(&rules))
@@ -408,7 +408,7 @@ func (c *client) SetPlacementRule(ctx context.Context, rule *Rule) error {
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("SetPlacementRule").
+		WithName(setPlacementRuleName).
 		WithURI(PlacementRule).
 		WithMethod(http.MethodPost).
 		WithBody(ruleJSON))
@@ -421,7 +421,7 @@ func (c *client) SetPlacementRuleInBatch(ctx context.Context, ruleOps []*RuleOp)
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("SetPlacementRuleInBatch").
+		WithName(setPlacementRuleInBatchName).
 		WithURI(PlacementRulesInBatch).
 		WithMethod(http.MethodPost).
 		WithBody(ruleOpsJSON))
@@ -435,7 +435,7 @@ func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBu
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("SetPlacementRuleBundles").
+		WithName(setPlacementRuleBundlesName).
 		WithURI(PlacementRuleBundleWithPartialParameter(partial)).
 		WithMethod(http.MethodPost).
 		WithBody(bundlesJSON))
@@ -444,7 +444,7 @@ func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBu
 // DeletePlacementRule deletes the placement rule.
 func (c *client) DeletePlacementRule(ctx context.Context, group, id string) error {
 	return c.request(ctx, newRequestInfo().
-		WithName("DeletePlacementRule").
+		WithName(deletePlacementRuleName).
 		WithURI(PlacementRuleByGroupAndID(group, id)).
 		WithMethod(http.MethodDelete))
 }
@@ -453,7 +453,7 @@ func (c *client) DeletePlacementRule(ctx context.Context, group, id string) erro
 func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, error) {
 	var ruleGroups []*RuleGroup
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetAllPlacementRuleGroups").
+		WithName(getAllPlacementRuleGroupsName).
 		WithURI(placementRuleGroups).
 		WithMethod(http.MethodGet).
 		WithResp(&ruleGroups))
@@ -467,7 +467,7 @@ func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, e
 func (c *client) GetPlacementRuleGroupByID(ctx context.Context, id string) (*RuleGroup, error) {
 	var ruleGroup RuleGroup
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetPlacementRuleGroupByID").
+		WithName(getPlacementRuleGroupByIDName).
 		WithURI(PlacementRuleGroupByID(id)).
 		WithMethod(http.MethodGet).
 		WithResp(&ruleGroup))
@@ -484,7 +484,7 @@ func (c *client) SetPlacementRuleGroup(ctx context.Context, ruleGroup *RuleGroup
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("SetPlacementRuleGroup").
+		WithName(setPlacementRuleGroupName).
 		WithURI(placementRuleGroup).
 		WithMethod(http.MethodPost).
 		WithBody(ruleGroupJSON))
@@ -493,7 +493,7 @@ func (c *client) SetPlacementRuleGroup(ctx context.Context, ruleGroup *RuleGroup
 // DeletePlacementRuleGroupByID deletes the placement rule group by ID.
 func (c *client) DeletePlacementRuleGroupByID(ctx context.Context, id string) error {
 	return c.request(ctx, newRequestInfo().
-		WithName("DeletePlacementRuleGroupByID").
+		WithName(deletePlacementRuleGroupByIDName).
 		WithURI(PlacementRuleGroupByID(id)).
 		WithMethod(http.MethodDelete))
 }
@@ -502,7 +502,7 @@ func (c *client) DeletePlacementRuleGroupByID(ctx context.Context, id string) er
 func (c *client) GetAllRegionLabelRules(ctx context.Context) ([]*LabelRule, error) {
 	var labelRules []*LabelRule
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetAllRegionLabelRules").
+		WithName(getAllRegionLabelRulesName).
 		WithURI(RegionLabelRules).
 		WithMethod(http.MethodGet).
 		WithResp(&labelRules))
@@ -520,7 +520,7 @@ func (c *client) GetRegionLabelRulesByIDs(ctx context.Context, ruleIDs []string)
 	}
 	var labelRules []*LabelRule
 	err = c.request(ctx, newRequestInfo().
-		WithName("GetRegionLabelRulesByIDs").
+		WithName(getRegionLabelRulesByIDsName).
 		WithURI(RegionLabelRules).
 		WithMethod(http.MethodGet).
 		WithBody(idsJSON).
@@ -538,7 +538,7 @@ func (c *client) SetRegionLabelRule(ctx context.Context, labelRule *LabelRule) e
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("SetRegionLabelRule").
+		WithName(setRegionLabelRuleName).
 		WithURI(RegionLabelRule).
 		WithMethod(http.MethodPost).
 		WithBody(labelRuleJSON))
@@ -551,7 +551,7 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("PatchRegionLabelRules").
+		WithName(patchRegionLabelRulesName).
 		WithURI(RegionLabelRules).
 		WithMethod(http.MethodPatch).
 		WithBody(labelRulePatchJSON))
@@ -561,7 +561,7 @@ func (c *client) PatchRegionLabelRules(ctx context.Context, labelRulePatch *Labe
 func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 	var schedulers []string
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetSchedulers").
+		WithName(getSchedulersName).
 		WithURI(Schedulers).
 		WithMethod(http.MethodGet).
 		WithResp(&schedulers))
@@ -581,7 +581,7 @@ func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint6
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("CreateScheduler").
+		WithName(createSchedulerName).
 		WithURI(Schedulers).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
@@ -599,7 +599,7 @@ func (c *client) AccelerateSchedule(ctx context.Context, keyRange *KeyRange) err
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("AccelerateSchedule").
+		WithName(accelerateScheduleName).
 		WithURI(AccelerateSchedule).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
@@ -621,7 +621,7 @@ func (c *client) AccelerateScheduleInBatch(ctx context.Context, keyRanges []*Key
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("AccelerateScheduleInBatch").
+		WithName(accelerateScheduleInBatchName).
 		WithURI(AccelerateScheduleInBatch).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
@@ -637,7 +637,7 @@ func (c *client) SetSchedulerDelay(ctx context.Context, scheduler string, delayS
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName("SetSchedulerDelay").
+		WithName(setSchedulerDelayName).
 		WithURI(SchedulerByName(scheduler)).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
@@ -667,7 +667,7 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 	}{}
 	err := c.request(ctx, newRequestInfo().
-		WithName("GetMinResolvedTSByStoresIDs").
+		WithName(getMinResolvedTSByStoresIDsName).
 		WithURI(uri).
 		WithMethod(http.MethodGet).
 		WithResp(&resp))
