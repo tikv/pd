@@ -45,8 +45,8 @@ import (
 const (
 	// maxRetryTimes is the max retry times for initializing the cluster ID.
 	maxRetryTimes = 5
-	// clusterIDPath is the path to store cluster id
-	clusterIDPath = "/pd/cluster_id"
+	// ClusterIDPath is the path to store cluster id
+	ClusterIDPath = "/pd/cluster_id"
 	// retryInterval is the interval to retry.
 	retryInterval = time.Second
 )
@@ -56,7 +56,7 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
-		if clusterID, err := etcdutil.GetClusterID(client, clusterIDPath); err == nil && clusterID != 0 {
+		if clusterID, err := etcdutil.GetClusterID(client, ClusterIDPath); err == nil && clusterID != 0 {
 			return clusterID, nil
 		}
 		select {

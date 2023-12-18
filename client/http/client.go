@@ -89,6 +89,8 @@ type Client interface {
 	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+	/* Micro Service interfaces */
+	GetMicroServiceMembers(context.Context, string) ([]string, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -843,4 +845,16 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		return 0, nil, errors.Trace(errors.New("min resolved ts is not enabled"))
 	}
 	return resp.MinResolvedTS, resp.StoresMinResolvedTS, nil
+}
+
+// GetMicroServiceMembers gets the members of the microservice.
+func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]string, error) {
+	var members []string
+	err := c.requestWithRetry(ctx,
+		"GetMicroServiceMembers", MicroServiceMembers(service),
+		http.MethodGet, nil, &members)
+	if err != nil {
+		return nil, err
+	}
+	return members, nil
 }
