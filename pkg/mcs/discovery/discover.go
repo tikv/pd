@@ -66,7 +66,7 @@ func GetMSMembers(name string, client *clientv3.Client) ([]string, error) {
 			for _, keyValue := range resp.GetResponseRange().GetKvs() {
 				var entry ServiceRegistryEntry
 				if err = entry.Deserialize(keyValue.Value); err != nil {
-					log.Error("deserialize failed", zap.String("key", string(keyValue.Key)), zap.Error(err))
+					log.Error("try to deserialize service registry entry failed", zap.String("key", string(keyValue.Key)), zap.Error(err))
 					continue
 				}
 				addrs = append(addrs, entry.ServiceAddr)
