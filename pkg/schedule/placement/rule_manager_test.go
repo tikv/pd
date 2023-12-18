@@ -15,6 +15,7 @@
 package placement
 
 import (
+	"context"
 	"encoding/hex"
 	"testing"
 
@@ -32,7 +33,7 @@ func newTestManager(t *testing.T, enableWitness bool) (endpoint.RuleStorage, *Ru
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	var err error
-	manager := NewRuleManager(store, nil, mockconfig.NewTestOptions())
+	manager := NewRuleManager(context.Background(), store, nil, mockconfig.NewTestOptions())
 	manager.conf.SetEnableWitness(enableWitness)
 	err = manager.Initialize(3, []string{"zone", "rack", "host"}, "")
 	re.NoError(err)
@@ -156,7 +157,7 @@ func TestSaveLoad(t *testing.T) {
 		re.NoError(manager.SetRule(r.Clone()))
 	}
 
-	m2 := NewRuleManager(store, nil, nil)
+	m2 := NewRuleManager(context.Background(), store, nil, nil)
 	err := m2.Initialize(3, []string{"no", "labels"}, "")
 	re.NoError(err)
 	re.Len(m2.GetAllRules(), 3)
@@ -174,7 +175,7 @@ func TestSetAfterGet(t *testing.T) {
 	rule.Count = 1
 	manager.SetRule(rule)
 
-	m2 := NewRuleManager(store, nil, nil)
+	m2 := NewRuleManager(context.Background(), store, nil, nil)
 	err := m2.Initialize(100, []string{}, "")
 	re.NoError(err)
 	rule = m2.GetRule(DefaultGroupID, DefaultRuleID)

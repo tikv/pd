@@ -89,7 +89,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		return nil
 	}
-	postEventFn := func() error {
+	postEventFn := func([]*clientv3.Event) error {
 		defer func() {
 			keyspaces = keyspaces[:0]
 		}()
@@ -109,6 +109,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		s.client,
 		"keyspace-server-watcher",
 		startKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
 		postEventFn,
