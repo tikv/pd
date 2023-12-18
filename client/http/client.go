@@ -282,7 +282,7 @@ func (ci *clientInner) updateMembersInfo(ctx context.Context) {
 	}
 	var (
 		newPDAddrs       []string
-		newLeaderAddrIdx int
+		newLeaderAddrIdx int = -1
 	)
 	for _, member := range membersInfo.Members {
 		if membersInfo.Leader != nil && member.GetMemberId() == membersInfo.Leader.GetMemberId() {
@@ -297,10 +297,21 @@ func (ci *clientInner) updateMembersInfo(ctx context.Context) {
 	}
 	oldPDAddrs, oldLeaderAddrIdx := ci.getPDAddrs()
 	ci.setPDAddrs(newPDAddrs, newLeaderAddrIdx)
-	if len(oldPDAddrs) != len(newPDAddrs) || oldLeaderAddrIdx != newLeaderAddrIdx {
+	// Log the member info change if it happens.
+	var oldPDLeaderAddr, newPDLeaderAddr string
+	if oldLeaderAddrIdx != -1 {
+		oldPDLeaderAddr = oldPDAddrs[oldLeaderAddrIdx]
+	}
+	if newLeaderAddrIdx != -1 {
+		newPDLeaderAddr = newPDAddrs[newLeaderAddrIdx]
+	}
+	oldMemberNum, newMemberNum := len(oldPDAddrs), len(newPDAddrs)
+	if oldPDLeaderAddr != newPDLeaderAddr || oldMemberNum != newMemberNum {
 		log.Info("[pd] http client members info changed",
-			zap.Strings("old-addrs", oldPDAddrs), zap.Int("old-leader-addr-idx", oldLeaderAddrIdx),
-			zap.Strings("new-addrs", newPDAddrs), zap.Int("new-leader-addr-idx", newLeaderAddrIdx))
+			zap.Int("old-member-num", oldMemberNum), zap.Int("new-member-num", newMemberNum),
+			zap.Strings("old-addrs", oldPDAddrs), zap.Strings("new-addrs", newPDAddrs),
+			zap.Int("old-leader-addr-idx", oldLeaderAddrIdx), zap.Int("new-leader-addr-idx", newLeaderAddrIdx),
+			zap.String("old-leader-addr", oldPDLeaderAddr), zap.String("new-leader-addr", newPDLeaderAddr))
 	}
 }
 
