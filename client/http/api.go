@@ -76,7 +76,7 @@ const (
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
 	// Micro Service
-	microServicePrefix = "/pd/api/v1/ms"
+	microServicePrefix = "/pd/api/v2/ms"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.

@@ -93,6 +93,7 @@ func (suite *memberTestSuite) TestPrimary() {
 	leader, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
 	re.NotNil(leader)
 	re.NoError(err)
+
 	leader, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, "scheduling")
 	re.NotNil(leader)
 	re.NoError(err)
@@ -100,7 +101,6 @@ func (suite *memberTestSuite) TestPrimary() {
 
 func (suite *memberTestSuite) TestMembers() {
 	re := suite.Require()
-
 	members, err := suite.dialClient.GetMicroServiceMembers(suite.ctx, "tso")
 	re.NoError(err)
 	re.Len(members, utils.DefaultKeyspaceGroupReplicaCount)
