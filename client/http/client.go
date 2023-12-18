@@ -91,7 +91,7 @@ type Client interface {
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]string, error)
-	GetMicroServiceLeader(context.Context, string) (*pdpb.Member, error)
+	GetMicroServicePrimary(context.Context, string) (*pdpb.Member, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -860,11 +860,11 @@ func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]
 	return members, nil
 }
 
-// GetMicroServiceLeader gets the leader of the microservice.
-func (c *client) GetMicroServiceLeader(ctx context.Context, service string) (*pdpb.Member, error) {
+// GetMicroServicePrimary gets the primary of the microservice.
+func (c *client) GetMicroServicePrimary(ctx context.Context, service string) (*pdpb.Member, error) {
 	var leader *pdpb.Member
 	err := c.requestWithRetry(ctx,
-		"GetMicroServiceLeader", MicroServiceLeader(service),
+		"GetMicroServicePrimary", MicroServicePrimary(service),
 		http.MethodGet, nil, &leader)
 	if err != nil {
 		return nil, err

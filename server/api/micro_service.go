@@ -63,27 +63,27 @@ func (h *microServiceHandler) GetMembers(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusInternalServerError, "please specify service")
 }
 
-// @Tags     leader
-// @Summary  Get the leader of the cluster for the specified service.
+// @Tags     Primary
+// @Summary  Get the primary of the cluster for the specified service.
 // @Produce  json
 // @Success  200  {object}  pdpb.Member
-// @Router   /ms/leader/{service} [get]
-func (h *microServiceHandler) GetLeader(w http.ResponseWriter, r *http.Request) {
+// @Router   /ms/primary/{service} [get]
+func (h *microServiceHandler) GetPrimary(w http.ResponseWriter, r *http.Request) {
 	if !h.svr.IsAPIServiceMode() {
 		h.rd.JSON(w, http.StatusServiceUnavailable, "not support micro service")
 		return
 	}
 	if service := mux.Vars(r)["service"]; len(service) > 0 {
-		leader, _, err := discovery.GetMCSPrimary(service, h.svr.GetClient(), r.URL.Query().Get("keyspace_id"))
+		primary, _, err := discovery.GetMCSPrimary(service, h.svr.GetClient(), r.URL.Query().Get("keyspace_id"))
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if leader == nil {
-			h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("no leader for %s", service))
+		if primary == nil {
+			h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("no primary for %s", service))
 			return
 		}
-		h.rd.JSON(w, http.StatusOK, leader)
+		h.rd.JSON(w, http.StatusOK, primary)
 		return
 	}
 

@@ -189,9 +189,9 @@ func PProfGoroutineWithDebugLevel(level int) string {
 	return fmt.Sprintf("%s?debug=%d", PProfGoroutine, level)
 }
 
-// MicroServiceLeader returns the path of PD HTTP API to get the leader of microservice.
-func MicroServiceLeader(service string) string {
-	return fmt.Sprintf("%s/leader/%s", microServicePrefix, service)
+// MicroServicePrimary returns the path of PD HTTP API to get the primary of microservice.
+func MicroServicePrimary(service string) string {
+	return fmt.Sprintf("%s/primary/%s", microServicePrefix, service)
 }
 
 // MicroServiceMembers returns the path of PD HTTP API to get the members of microservice.
