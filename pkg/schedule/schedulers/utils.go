@@ -218,11 +218,11 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	for len(args) > 1 {
 		startKey, err := url.QueryUnescape(args[0])
 		if err != nil {
-			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
+			return nil, errs.ErrQueryUnescape.Wrap(err)
 		}
 		endKey, err := url.QueryUnescape(args[1])
 		if err != nil {
-			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
+			return nil, errs.ErrQueryUnescape.Wrap(err)
 		}
 		args = args[2:]
 		ranges = append(ranges, core.NewKeyRange(startKey, endKey))

@@ -81,9 +81,19 @@ func TestError(t *testing.T) {
 	log.Error("test", zap.Error(ErrEtcdLeaderNotFound.FastGenByArgs()))
 	re.Contains(lg.Message(), rfc)
 	err := errors.New("test error")
-	log.Error("test", ZapError(ErrEtcdLeaderNotFound, err))
-	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]test error`
-	re.Contains(lg.Message(), rfc)
+	// use Info() because of no stack for comparing.
+	log.Info("test", ZapError(ErrEtcdLeaderNotFound, err))
+	rfc = `[error="[PD:member:ErrEtcdLeaderNotFound]etcd leader not found: test error`
+	m1 := lg.Message()
+	re.Contains(m1, rfc)
+	log.Info("test", zap.Error(ErrEtcdLeaderNotFound.Wrap(err)))
+	m2 := lg.Message()
+	idx1 := strings.Index(m1, "[error")
+	idx2 := strings.Index(m2, "[error")
+	re.Equal(m1[idx1:], m2[idx2:])
+	log.Info("test", zap.Error(ErrEtcdLeaderNotFound.Wrap(err).FastGenWithCause()))
+	m3 := lg.Message()
+	re.NotContains(m3, rfc)
 }
 
 func TestErrorEqual(t *testing.T) {
@@ -94,24 +104,24 @@ func TestErrorEqual(t *testing.T) {
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err := errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err)
+	err2 = ErrSchedulerNotFound.Wrap(err)
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err1 = ErrSchedulerNotFound.FastGenByArgs()
-	err2 = ErrSchedulerNotFound.Wrap(err).FastGenWithCause()
+	err2 = ErrSchedulerNotFound.Wrap(err)
 	re.False(errors.ErrorEqual(err1, err2))
 
 	err3 := errors.New("test")
 	err4 := errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err3)
+	err2 = ErrSchedulerNotFound.Wrap(err4)
 	re.True(errors.ErrorEqual(err1, err2))
 
 	err3 = errors.New("test1")
 	err4 = errors.New("test")
-	err1 = ErrSchedulerNotFound.Wrap(err3).FastGenWithCause()
-	err2 = ErrSchedulerNotFound.Wrap(err4).FastGenWithCause()
+	err1 = ErrSchedulerNotFound.Wrap(err3)
+	err2 = ErrSchedulerNotFound.Wrap(err4)
 	re.False(errors.ErrorEqual(err1, err2))
 }
 
@@ -135,11 +145,16 @@ func TestErrorWithStack(t *testing.T) {
 	m1 := lg.Message()
 	log.Error("test", zap.Error(errors.WithStack(err)))
 	m2 := lg.Message()
+	log.Error("test", ZapError(ErrStrconvParseInt.GenWithStackByCause(), err))
+	m3 := lg.Message()
 	// This test is based on line number and the first log is in line 141, the second is in line 142.
 	// So they have the same length stack. Move this test to another place need to change the corresponding length.
 	idx1 := strings.Index(m1, "[stack=")
 	re.GreaterOrEqual(idx1, -1)
 	idx2 := strings.Index(m2, "[stack=")
 	re.GreaterOrEqual(idx2, -1)
+	idx3 := strings.Index(m3, "[stack=")
+	re.GreaterOrEqual(idx3, -1)
 	re.Len(m2[idx2:], len(m1[idx1:]))
+	re.Len(m3[idx3:], len(m1[idx1:]))
 }
