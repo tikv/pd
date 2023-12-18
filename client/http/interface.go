@@ -683,9 +683,11 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 // GetMicroServiceMembers gets the members of the microservice.
 func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]string, error) {
 	var members []string
-	err := c.request(ctx,
-		"GetMicroServiceMembers", MicroServiceMembers(service),
-		http.MethodGet, nil, &members)
+	err := c.request(ctx, newRequestInfo().
+		WithName(getMicroServiceMembersName).
+		WithURI(MicroServiceMembers(service)).
+		WithMethod(http.MethodGet).
+		WithResp(&members))
 	if err != nil {
 		return nil, err
 	}
