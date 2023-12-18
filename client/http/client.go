@@ -72,7 +72,17 @@ func newClientInner() *clientInner {
 	return &clientInner{ctx: ctx, cancel: cancel, leaderAddrIdx: -1}
 }
 
-func (ci *clientInner) start() {
+func (ci *clientInner) init() {
+	// Init the HTTP client if it's not configured.
+	if ci.cli == nil {
+		ci.cli = &http.Client{Timeout: defaultTimeout}
+		if ci.tlsConf != nil {
+			transport := http.DefaultTransport.(*http.Transport).Clone()
+			transport.TLSClientConfig = ci.tlsConf
+			ci.cli.Transport = transport
+		}
+	}
+	// Start the members info updater daemon.
 	go ci.membersInfoUpdater(ci.ctx)
 }
 
@@ -93,6 +103,19 @@ func (ci *clientInner) getPDAddrs() ([]string, int) {
 func (ci *clientInner) setPDAddrs(pdAddrs []string, leaderAddrIdx int) {
 	ci.Lock()
 	defer ci.Unlock()
+	// Normalize the addresses with correct scheme prefix.
+	var scheme string
+	if ci.tlsConf == nil {
+		scheme = httpScheme
+	} else {
+		scheme = httpsScheme
+	}
+	for i, addr := range pdAddrs {
+		if strings.HasPrefix(addr, httpScheme) {
+			continue
+		}
+		pdAddrs[i] = fmt.Sprintf("%s://%s", scheme, addr)
+	}
 	ci.pdAddrs = pdAddrs
 	ci.leaderAddrIdx = leaderAddrIdx
 }
@@ -327,29 +350,8 @@ func NewClient(
 	for _, opt := range opts {
 		opt(c)
 	}
-	// Normalize the addresses with correct scheme prefix.
-	for i, addr := range pdAddrs {
-		if !strings.HasPrefix(addr, httpScheme) {
-			var scheme string
-			if c.inner.tlsConf != nil {
-				scheme = httpsScheme
-			} else {
-				scheme = httpScheme
-			}
-			pdAddrs[i] = fmt.Sprintf("%s://%s", scheme, addr)
-		}
-	}
 	c.inner.setPDAddrs(pdAddrs, -1)
-	// Init the HTTP client if it's not configured.
-	if c.inner.cli == nil {
-		c.inner.cli = &http.Client{Timeout: defaultTimeout}
-		if c.inner.tlsConf != nil {
-			transport := http.DefaultTransport.(*http.Transport).Clone()
-			transport.TLSClientConfig = c.inner.tlsConf
-			c.inner.cli.Transport = transport
-		}
-	}
-	c.inner.start()
+	c.inner.init()
 	return c
 }
 
