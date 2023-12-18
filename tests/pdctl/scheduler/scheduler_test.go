@@ -56,7 +56,7 @@ func (suite *schedulerTestSuite) SetupSuite() {
 		"balance-hot-region-scheduler",
 		"balance-witness-scheduler",
 		"transfer-witness-leader-scheduler",
-		"evict-leader-scheduler",
+		"evict-slow-store-scheduler",
 	}
 }
 
@@ -562,6 +562,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			return !strings.Contains(echo, schedulerName)
 		})
 	}
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-store-scheduler"}, nil)
+	re.Contains(echo, "Success!")
 
 	// test shuffle hot region scheduler
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "shuffle-hot-region-scheduler"}, nil)
