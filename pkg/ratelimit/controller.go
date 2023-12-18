@@ -70,7 +70,7 @@ func (l *Controller) collectMetrics() {
 				label := key.(string)
 				// Due to not in hot path, no need to save sub Gauge.
 				if con := limiter.getConcurrencyLimiter(); con != nil {
-					l.concurrencyGauge.WithLabelValues(l.apiType, label).Set(float64(con.getCurrent()))
+					l.concurrencyGauge.WithLabelValues(l.apiType, label).Set(float64(con.getMaxConcurrency()))
 				}
 				return true
 			})
