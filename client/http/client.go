@@ -90,15 +90,10 @@ func (ci *clientInner) getPDAddrs() ([]string, int) {
 	return ci.pdAddrs, ci.leaderAddrIdx
 }
 
-func (ci *clientInner) setPDAddrs(pdAddrs []string) {
+func (ci *clientInner) setPDAddrs(pdAddrs []string, leaderAddrIdx int) {
 	ci.Lock()
 	defer ci.Unlock()
 	ci.pdAddrs = pdAddrs
-}
-
-func (ci *clientInner) setLeaderAddrIdx(leaderAddrIdx int) {
-	ci.Lock()
-	defer ci.Unlock()
 	ci.leaderAddrIdx = leaderAddrIdx
 }
 
@@ -277,10 +272,13 @@ func (ci *clientInner) updateMembersInfo(ctx context.Context) {
 		log.Error("[pd] http client get empty member addresses")
 		return
 	}
-	ci.setPDAddrs(newPDAddrs)
-	ci.setLeaderAddrIdx(newLeaderAddrIdx)
-	log.Info("[pd] http client update members info",
-		zap.Strings("new-addrs", newPDAddrs), zap.Int("new-leader-addr-idx", newLeaderAddrIdx))
+	oldPDAddrs, oldLeaderAddrIdx := ci.getPDAddrs()
+	ci.setPDAddrs(newPDAddrs, newLeaderAddrIdx)
+	if len(oldPDAddrs) != len(newPDAddrs) || oldLeaderAddrIdx != newLeaderAddrIdx {
+		log.Info("[pd] http client members info changed",
+			zap.Strings("old-addrs", oldPDAddrs), zap.Int("old-leader-addr-idx", oldLeaderAddrIdx),
+			zap.Strings("new-addrs", newPDAddrs), zap.Int("new-leader-addr-idx", newLeaderAddrIdx))
+	}
 }
 
 type client struct {
@@ -341,7 +339,7 @@ func NewClient(
 			pdAddrs[i] = fmt.Sprintf("%s://%s", scheme, addr)
 		}
 	}
-	c.inner.setPDAddrs(pdAddrs)
+	c.inner.setPDAddrs(pdAddrs, -1)
 	// Init the HTTP client if it's not configured.
 	if c.inner.cli == nil {
 		c.inner.cli = &http.Client{Timeout: defaultTimeout}
