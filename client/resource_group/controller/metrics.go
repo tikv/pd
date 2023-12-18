@@ -42,6 +42,15 @@ var (
 			Help:      "Bucketed histogram of wait duration of successful request.",
 		}, []string{resourceGroupNameLabel})
 
+	failedLimitReserveDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: requestSubsystem,
+			Name:      "limit_reserve_time_failed",
+			Buckets:   []float64{.005, .01, .05, .1, .5, 1, 5, 10, 20, 25, 30}, // 0.005 ~ 30
+			Help:      "Bucketed histogram of wait duration of failed request.",
+		}, []string{resourceGroupNameLabel})
+
 	failedRequestCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -85,6 +94,7 @@ func init() {
 	prometheus.MustRegister(resourceGroupStatusGauge)
 	prometheus.MustRegister(successfulRequestDuration)
 	prometheus.MustRegister(failedRequestCounter)
+	prometheus.MustRegister(failedLimitReserveDuration)
 	prometheus.MustRegister(requestRetryCounter)
 	prometheus.MustRegister(tokenRequestDuration)
 	prometheus.MustRegister(resourceGroupTokenRequestCounter)

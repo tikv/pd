@@ -45,20 +45,26 @@ var (
 
 type operatorTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
-func (suite *operatorTestSuite) TestAddRemovePeer() {
-	opts := []tests.ConfigOption{
+func (suite *operatorTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 1
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkAddRemovePeer)
+		})
+}
+
+func (suite *operatorTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *operatorTestSuite) TestAddRemovePeer() {
+	suite.env.RunTestInTwoModes(suite.checkAddRemovePeer)
 }
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
@@ -168,17 +174,36 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 }
 
 func (suite *operatorTestSuite) TestMergeRegionOperator() {
-	opts := []tests.ConfigOption{
-		func(conf *config.Config, serverName string) {
-			conf.Replication.MaxReplicas = 1
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkMergeRegionOperator)
+	suite.env.RunTestInTwoModes(suite.checkMergeRegionOperator)
 }
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
 	suite.pauseRuleChecker(cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
@@ -204,13 +229,13 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 }
 
 func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
-	opts := []tests.ConfigOption{
+	// use a new environment to avoid affecting other tests
+	env := tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 3
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+		})
 	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+	env.Cleanup()
 }
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
