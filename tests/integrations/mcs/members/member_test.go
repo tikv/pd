@@ -88,17 +88,6 @@ func (suite *memberTestSuite) TearDownTest() {
 	suite.cluster.Destroy()
 }
 
-func (suite *memberTestSuite) TestPrimary() {
-	re := suite.Require()
-	leader, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
-	re.NotNil(leader)
-	re.NoError(err)
-
-	leader, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, "scheduling")
-	re.NotNil(leader)
-	re.NoError(err)
-}
-
 func (suite *memberTestSuite) TestMembers() {
 	re := suite.Require()
 	members, err := suite.dialClient.GetMicroServiceMembers(suite.ctx, "tso")
