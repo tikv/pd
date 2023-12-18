@@ -31,7 +31,7 @@ import (
 )
 
 // DefaultCacheSize is the default length of waiting list.
-const DefaultCacheSize = 1000
+const DefaultCacheSize = 10000
 
 var denyCheckersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("checkers", "deny")
 
