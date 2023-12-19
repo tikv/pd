@@ -24,10 +24,10 @@ import (
 	pdHttp "github.com/tikv/pd/client/http"
 )
 
-// Debug is the flag to print the output of api response for debug.
-var Debug bool
-
 var (
+	// Debug is the flag to print the output of api response for debug.
+	Debug bool
+
 	totalRegion int
 	totalStore  int
 	storesID    []uint64
