@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -156,4 +158,18 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	}
 
 	return nil
+}
+
+func isPathInDirectory(path, directory string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+
+	absDir, err := filepath.Abs(directory)
+	if err != nil {
+		return false
+	}
+
+	return strings.HasPrefix(absPath, absDir)
 }

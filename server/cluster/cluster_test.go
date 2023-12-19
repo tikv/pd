@@ -16,9 +16,12 @@ package cluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -224,7 +227,7 @@ func TestSetOfflineStore(t *testing.T) {
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -421,7 +424,7 @@ func TestUpStore(t *testing.T) {
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -524,7 +527,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -834,6 +837,16 @@ func TestRegionHeartbeat(t *testing.T) {
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(region))
 		checkRegions(re, cluster.core, regions[:i+1])
+
+		// Flashback
+		region = region.Clone(core.WithFlashback(true, 1))
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core, regions[:i+1])
+		region = region.Clone(core.WithFlashback(false, 0))
+		regions[i] = region
+		re.NoError(cluster.processRegionHeartbeat(region))
+		checkRegions(re, cluster.core, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
@@ -965,7 +978,7 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.WithLeader(region.GetPeers()[2]),
 		core.SetApproximateSize(curMaxMergeSize-1),
 		core.SetApproximateKeys(curMaxMergeKeys-1),
-		core.SetFromHeartbeat(true),
+		core.SetSource(core.Heartbeat),
 	)
 	cluster.processRegionHeartbeat(region)
 	regionID := region.GetID()
@@ -975,7 +988,7 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.WithLeader(region.GetPeers()[2]),
 		core.SetApproximateSize(curMaxMergeSize+1),
 		core.SetApproximateKeys(curMaxMergeKeys+1),
-		core.SetFromHeartbeat(true),
+		core.SetSource(core.Heartbeat),
 	)
 	cluster.processRegionHeartbeat(region)
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
@@ -1233,7 +1246,7 @@ func TestOfflineAndMerge(t *testing.T) {
 	cluster.coordinator = newCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}
@@ -1319,9 +1332,45 @@ func TestSyncConfig(t *testing.T) {
 	for _, v := range testdata {
 		tc.storeConfigManager = config.NewTestStoreConfigManager(v.whiteList)
 		re.Equal(uint64(144), tc.GetStoreConfig().GetRegionMaxSize())
-		re.Equal(v.updated, syncConfig(tc.storeConfigManager, tc.GetStores()))
+		re.Equal(v.updated, syncConfig(tc.ctx, tc.storeConfigManager, tc.GetStores()))
 		re.Equal(v.maxRegionSize, tc.GetStoreConfig().GetRegionMaxSize())
 	}
+}
+
+func TestSyncConfigContext(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	tc := newTestCluster(ctx, opt)
+	tc.storeConfigManager = config.NewStoreConfigManager(http.DefaultClient)
+	tc.httpClient = &http.Client{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+		time.Sleep(time.Second * 100)
+		cfg := &config.StoreConfig{}
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			res.WriteHeader(http.StatusInternalServerError)
+			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			return
+		}
+
+		res.WriteHeader(http.StatusOK)
+		res.Write(b)
+	}))
+	stores := newTestStores(1, "2.0.0")
+	for _, s := range stores {
+		re.NoError(tc.putStoreLocked(s))
+	}
+	// trip schema header
+	now := time.Now()
+	stores[0].GetMeta().StatusAddress = server.URL[7:]
+	synced := syncConfig(tc.ctx, tc.storeConfigManager, stores)
+	re.False(synced)
+	re.Less(time.Since(now), clientTimeout*2)
 }
 
 func TestUpdateStorePendingPeerCount(t *testing.T) {
@@ -1943,7 +1992,7 @@ func newTestRaftCluster(
 	rc.InitCluster(id, opt, s, basicCluster)
 	rc.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
-		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels())
+		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
 			panic(err)
 		}

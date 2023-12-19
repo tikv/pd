@@ -937,7 +937,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			lastBind = time.Now()
 		}
 
-		region := core.RegionFromHeartbeat(request, flowRoundOption, core.SetFromHeartbeat(true))
+		region := core.RegionFromHeartbeat(request, flowRoundOption)
 		if region.GetLeader() == nil {
 			log.Error("invalid request, the leader is nil", zap.Reflect("request", request), errs.ZapError(errs.ErrLeaderNil))
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "invalid-leader").Inc()
@@ -1232,7 +1232,6 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 	if rc == nil {
 		return &pdpb.ReportBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
-
 	_, err := rc.HandleBatchReportSplit(request)
 	if err != nil {
 		return &pdpb.ReportBatchSplitResponse{
@@ -1695,6 +1694,9 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		return rsp.(*pdpb.SplitAndScatterRegionsResponse), err
 	}
 	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SplitAndScatterRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()))
 	if err != nil {

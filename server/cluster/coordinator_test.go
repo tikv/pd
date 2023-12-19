@@ -508,11 +508,11 @@ func TestReplica(t *testing.T) {
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	waitNoResponse(re, stream)
 
-	// Remove peer from store 4.
+	// Remove peer from store 3.
 	re.NoError(tc.addLeaderRegion(2, 1, 2, 3, 4))
 	region = tc.GetRegion(2)
 	re.NoError(dispatchHeartbeat(co, region, stream))
-	region = waitRemovePeer(re, stream, region, 4)
+	region = waitRemovePeer(re, stream, region, 3) // store3 is down, we should remove it firstly.
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	waitNoResponse(re, stream)
 
@@ -826,8 +826,9 @@ func TestPersistScheduler(t *testing.T) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	re.NoError(err)
-	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
+	shuffle, err := schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
+	re.NoError(co.addScheduler(shuffle))
 	// suppose we add a new default enable scheduler
 	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "shuffle-region"})
 	defer func() {

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -130,18 +131,23 @@ func (c *baseClient) memberLoop() {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 
+	ticker := time.NewTicker(memberUpdateInterval)
+	defer ticker.Stop()
+
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
 	for {
 		select {
 		case <-c.checkLeaderCh:
-		case <-time.After(memberUpdateInterval):
+		case <-ticker.C:
 		case <-ctx.Done():
+			log.Info("[pd] exit member loop due to context canceled")
 			return
 		}
 		failpoint.Inject("skipUpdateMember", func() {
 			failpoint.Continue()
 		})
-		if err := c.updateMember(); err != nil {
-			log.Error("[pd] failed updateMember", errs.ZapError(err))
+		if err := bo.Exec(ctx, c.updateMember); err != nil {
+			log.Error("[pd] failed update member with retry", errs.ZapError(err))
 		}
 	}
 }
