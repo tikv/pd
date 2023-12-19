@@ -96,6 +96,9 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 	}
 
 	tlsInfo, err := s.ToTLSInfo()
+	if tlsInfo == nil {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
 	}
