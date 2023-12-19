@@ -865,6 +865,16 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	if limit != 0 {
 		limit++
 	}
+	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
+		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
+			zap.String("key", lw.key), zap.Error(err))
+	}
+	defer func() {
+		if err := lw.postEventsFn([]*clientv3.Event{}); err != nil {
+			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
+				zap.String("key", lw.key), zap.Error(err))
+		}
+	}()
 	for {
 		// Sort by key to get the next key and we don't need to worry about the performance,
 		// Because the default sort is just SortByKey and SortAscend
@@ -874,10 +884,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(err))
 			return 0, err
-		}
-		if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
-			log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
-				zap.String("key", lw.key), zap.Error(err))
 		}
 		for i, item := range resp.Kvs {
 			if resp.More && i == len(resp.Kvs)-1 {
@@ -893,10 +899,6 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
-			if err := lw.postEventsFn([]*clientv3.Event{}); err != nil {
-				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
-					zap.String("key", lw.key), zap.Error(err))
-			}
 			return resp.Header.Revision + 1, err
 		}
 	}

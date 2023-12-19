@@ -110,9 +110,10 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	var suspectKeyRanges *core.KeyRanges
 
 	preFn := func(events []*clientv3.Event) error {
-		suspectKeyRanges = &core.KeyRanges{}
+		// It will be locked until the postFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
+		suspectKeyRanges = &core.KeyRanges{}
 		return nil
 	}
 
@@ -149,7 +150,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			}
 			return nil
 		} else {
-			log.Warn("unknown key when update placement rule", zap.String("key", key))
+			log.Warn("unknown key when updating placement rule", zap.String("key", key))
 			return nil
 		}
 	}
@@ -181,7 +182,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			}
 			return nil
 		} else {
-			log.Warn("unknown key when delete placement rule", zap.String("key", key))
+			log.Warn("unknown key when deleting placement rule", zap.String("key", key))
 			return nil
 		}
 	}
@@ -212,8 +213,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 func (rw *Watcher) initializeRegionLabelWatcher() error {
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
-		key := string(kv.Key)
-		log.Info("update region label rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+		log.Info("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			return err
