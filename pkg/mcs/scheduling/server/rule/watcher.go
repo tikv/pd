@@ -109,7 +109,7 @@ func NewWatcher(
 func (rw *Watcher) initializeRuleWatcher() error {
 	var suspectKeyRanges *core.KeyRanges
 
-	preFn := func(events []*clientv3.Event) error {
+	preEventsFn := func(events []*clientv3.Event) error {
 		// It will be locked until the postFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
@@ -186,7 +186,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			return nil
 		}
 	}
-	postFn := func(events []*clientv3.Event) error {
+	postEventsFn := func(events []*clientv3.Event) error {
 		defer rw.ruleManager.Unlock()
 		if err := rw.ruleManager.TryCommitPatch(rw.patch); err != nil {
 			log.Error("failed to commit patch", zap.Error(err))
@@ -201,9 +201,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
 		"scheduling-rule-watcher", rw.ruleCommonPathPrefix,
-		preFn,
+		preEventsFn,
 		putFn, deleteFn,
-		postFn,
+		postEventsFn,
 		clientv3.WithPrefix(),
 	)
 	rw.ruleWatcher.StartWatchLoop()

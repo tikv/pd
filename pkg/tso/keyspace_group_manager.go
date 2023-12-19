@@ -559,7 +559,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
 	}
-	postEventFn := func([]*clientv3.Event) error {
+	postEventsFn := func([]*clientv3.Event) error {
 		// Retry the groups that are not initialized successfully before.
 		for id, group := range kgm.groupUpdateRetryList {
 			delete(kgm.groupUpdateRetryList, id)
@@ -576,7 +576,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		postEventFn,
+		postEventsFn,
 		clientv3.WithRange(endKey),
 	)
 	if kgm.loadKeyspaceGroupsTimeout > 0 {
