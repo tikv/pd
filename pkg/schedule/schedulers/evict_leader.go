@@ -80,7 +80,7 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
+		return errs.ErrStrconvParseUint.Wrap(err)
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {

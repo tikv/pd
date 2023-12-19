@@ -14,12 +14,6 @@
 
 package endpoint
 
-import (
-	"strings"
-
-	"go.etcd.io/etcd/clientv3"
-)
-
 // RuleStorage defines the storage operations on the rule.
 type RuleStorage interface {
 	LoadRule(ruleKey string) (string, error)
@@ -102,23 +96,4 @@ func (se *StorageEndpoint) LoadRule(ruleKey string) (string, error) {
 // LoadRules loads placement rules from storage.
 func (se *StorageEndpoint) LoadRules(f func(k, v string)) error {
 	return se.loadRangeByPrefix(rulesPath+"/", f)
-}
-
-// loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
-func (se *StorageEndpoint) loadRangeByPrefix(prefix string, f func(k, v string)) error {
-	nextKey := prefix
-	endKey := clientv3.GetPrefixRangeEnd(prefix)
-	for {
-		keys, values, err := se.LoadRange(nextKey, endKey, MinKVRangeLimit)
-		if err != nil {
-			return err
-		}
-		for i := range keys {
-			f(strings.TrimPrefix(keys[i], prefix), values[i])
-		}
-		if len(keys) < MinKVRangeLimit {
-			return nil
-		}
-		nextKey = keys[len(keys)-1] + "\x00"
-	}
 }

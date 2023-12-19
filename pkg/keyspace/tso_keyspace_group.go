@@ -245,9 +245,10 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client, clusterID ui
 		client,
 		"tso-nodes-watcher",
 		tsoServiceKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		func() error { return nil },
+		func([]*clientv3.Event) error { return nil },
 		clientv3.WithRange(tsoServiceEndKey),
 	)
 }

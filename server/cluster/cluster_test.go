@@ -241,7 +241,7 @@ func TestSetOfflineStore(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -438,7 +438,7 @@ func TestUpStore(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -541,7 +541,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -1268,7 +1268,7 @@ func TestOfflineAndMerge(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	cluster.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
 		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -2130,7 +2130,7 @@ func newTestRaftCluster(
 ) *RaftCluster {
 	rc := &RaftCluster{serverCtx: ctx, core: core.NewBasicCluster(), storage: s}
 	rc.InitCluster(id, opt, nil, nil)
-	rc.ruleManager = placement.NewRuleManager(storage.NewStorageWithMemoryBackend(), rc, opt)
+	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
 		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
 		if err != nil {
@@ -3017,6 +3017,7 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
 	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3107,13 +3108,15 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	re.Len(sches, defaultCount+2)
 
-	// remove 5 schedulers
+	// remove all default schedulers
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
 	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
-	re.Len(controller.GetSchedulerNames(), defaultCount-3)
+	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
+	// only remains 2 items with independent config.
+	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
 	co.Stop()
 	co.GetSchedulersController().Wait()
@@ -3137,7 +3140,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	re.Len(sches, 3)
 
-	// option have 6 items because the default scheduler do not remove.
+	// option have 9 items because the default scheduler do not remove.
 	re.Len(newOpt.GetSchedulers(), defaultCount+3)
 	re.NoError(newOpt.Persist(storage))
 	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
@@ -3164,9 +3167,9 @@ func TestPersistScheduler(t *testing.T) {
 	brs, err := schedulers.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(brs))
-	re.Len(controller.GetSchedulerNames(), defaultCount)
+	re.Len(controller.GetSchedulerNames(), 5)
 
-	// the scheduler option should contain 6 items
+	// the scheduler option should contain 9 items
 	// the `hot scheduler` are disabled
 	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount+3)
 	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
@@ -3185,9 +3188,9 @@ func TestPersistScheduler(t *testing.T) {
 
 	co.Run()
 	controller = co.GetSchedulersController()
-	re.Len(controller.GetSchedulerNames(), defaultCount-1)
+	re.Len(controller.GetSchedulerNames(), 4)
 	re.NoError(controller.RemoveScheduler(schedulers.EvictLeaderName))
-	re.Len(controller.GetSchedulerNames(), defaultCount-2)
+	re.Len(controller.GetSchedulerNames(), 3)
 }
 
 func TestRemoveScheduler(t *testing.T) {
@@ -3225,6 +3228,7 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
 	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
+	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)

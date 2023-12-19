@@ -470,7 +470,7 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 	// make sure path is in data dir
 	filePath, err := filepath.Abs(pluginPath)
 	if err != nil || !isPathInDirectory(filePath, h.s.GetConfig().DataDir) {
-		return errs.ErrFilePathAbs.Wrap(err).FastGenWithCause()
+		return errs.ErrFilePathAbs.Wrap(err)
 	}
 
 	c.LoadPlugin(pluginPath, ch)

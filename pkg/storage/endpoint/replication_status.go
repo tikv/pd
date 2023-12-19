@@ -43,9 +43,5 @@ func (se *StorageEndpoint) LoadReplicationStatus(mode string, status interface{}
 
 // SaveReplicationStatus stores replication status by mode.
 func (se *StorageEndpoint) SaveReplicationStatus(mode string, status interface{}) error {
-	value, err := json.Marshal(status)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return se.Save(replicationModePath(mode), string(value))
+	return se.saveJSON(replicationModePath(mode), status)
 }
