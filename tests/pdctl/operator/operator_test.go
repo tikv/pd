@@ -107,7 +107,7 @@ func (suite *operatorTestSuite) checkOperator(cluster *tests.TestCluster) {
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &slice))
-	re.Len(slice, 0)
+	re.Empty(slice)
 	args = []string{"-u", pdAddr, "operator", "check", "2"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)

@@ -426,6 +426,7 @@ func (suite *ruleCheckerTestSuite) TestFixRoleLeaderIssue3130() {
 }
 
 func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {
+	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"rule": "follower"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"rule": "follower"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"rule": "leader"})
@@ -456,12 +457,12 @@ func (suite *ruleCheckerTestSuite) TestFixLeaderRoleWithUnhealthyRegion() {
 			},
 		},
 	})
-	suite.NoError(err)
+	re.NoError(err)
 	// no Leader
 	suite.cluster.AddNoLeaderRegion(1, 1, 2, 3)
 	r := suite.cluster.GetRegion(1)
 	op := suite.rc.Check(r)
-	suite.Nil(op)
+	re.Nil(op)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixRuleWitness() {
@@ -532,6 +533,7 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness3() {
 }
 
 func (suite *ruleCheckerTestSuite) TestFixRuleWitness4() {
+	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"A": "leader"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"B": "voter"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"C": "learner"})
@@ -565,12 +567,12 @@ func (suite *ruleCheckerTestSuite) TestFixRuleWitness4() {
 			},
 		},
 	})
-	suite.NoError(err)
+	re.NoError(err)
 
 	op := suite.rc.Check(r)
-	suite.NotNil(op)
-	suite.Equal("fix-non-witness-peer", op.Desc())
-	suite.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
+	re.NotNil(op)
+	re.Equal("fix-non-witness-peer", op.Desc())
+	re.Equal(uint64(3), op.Step(0).(operator.BecomeNonWitness).StoreID)
 }
 
 func (suite *ruleCheckerTestSuite) TestFixRuleWitness5() {

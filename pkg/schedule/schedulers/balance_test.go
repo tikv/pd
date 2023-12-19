@@ -237,9 +237,10 @@ func TestBalanceLeaderSchedulerTestSuite(t *testing.T) {
 }
 
 func (suite *balanceLeaderSchedulerTestSuite) SetupTest() {
+	re := suite.Require()
 	suite.cancel, suite.conf, suite.tc, suite.oc = prepareSchedulersTest()
 	lb, err := CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
-	suite.NoError(err)
+	re.NoError(err)
 	suite.lb = lb
 }
 
@@ -560,6 +561,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TearDownTest() {
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
+	re := suite.Require()
 	// Stores:     1       2       3       4
 	// Leaders:    10      10      10      10
 	// Weight:     0.5     0.9     1       2
@@ -573,36 +575,36 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	suite.tc.UpdateStoreLeaderWeight(4, 2)
 	suite.tc.AddLeaderRegionWithRange(1, "a", "g", 1, 2, 3, 4)
 	lb, err := CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
-	suite.NoError(err)
+	re.NoError(err)
 	ops, _ := lb.Schedule(suite.tc, false)
-	suite.NotEmpty(ops)
-	suite.Len(ops, 1)
-	suite.Len(ops[0].Counters, 1)
-	suite.Len(ops[0].FinishedCounters, 1)
+	re.NotEmpty(ops)
+	re.Len(ops, 1)
+	re.Len(ops[0].Counters, 1)
+	re.Len(ops[0].FinishedCounters, 1)
 	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"h", "n"}))
-	suite.NoError(err)
+	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
-	suite.Empty(ops)
+	re.Empty(ops)
 	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"b", "f"}))
-	suite.NoError(err)
+	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
-	suite.Empty(ops)
+	re.Empty(ops)
 	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", "a"}))
-	suite.NoError(err)
+	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
-	suite.Empty(ops)
+	re.Empty(ops)
 	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"g", ""}))
-	suite.NoError(err)
+	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
-	suite.Empty(ops)
+	re.Empty(ops)
 	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", "f"}))
-	suite.NoError(err)
+	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
-	suite.Empty(ops)
+	re.Empty(ops)
 	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"b", ""}))
-	suite.NoError(err)
+	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
-	suite.Empty(ops)
+	re.Empty(ops)
 }
 
 func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
