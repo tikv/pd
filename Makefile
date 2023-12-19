@@ -265,7 +265,13 @@ test-tso-consistency: install-tools
 	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency
+REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realtiup
+
+test-real-cluster:
+	# testing with the real cluster...
+	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
+
+.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency test-real-cluster
 
 #### Daily CI coverage analyze  ####
 
@@ -297,6 +303,7 @@ clean-test:
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
+	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
 
 clean-build:
