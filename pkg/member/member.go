@@ -191,8 +191,7 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
 			return err
 		}
-		return errors.Errorf("campaign times is too frequent, resign and campaign again, "+
-			"leader-name: %s, leader-key: %s", m.Name(), m.GetLeaderPath())
+		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
 
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())

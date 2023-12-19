@@ -786,6 +786,11 @@ error = '''
 service with path [%s] already registered
 '''
 
+["PD:server:ErrLeaderFrequentlyChange"]
+error = '''
+leader %s frequently changed, leader-key is [%s]
+'''
+
 ["PD:strconv:ErrStrconvParseBool"]
 error = '''
 parse bool error

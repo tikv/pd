@@ -158,7 +158,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	}
 	ls.setLease(newLease)
 
-	failpoint.Inject("skipGrant", func(val failpoint.Value) {
+	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
 		var member pdpb.Member
 		member.Unmarshal([]byte(leaderData))
 		name, ok := val.(string)

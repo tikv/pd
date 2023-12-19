@@ -359,7 +359,7 @@ func TestGrantLeaseFailed(t *testing.T) {
 	cluster.WaitLeader()
 	leader := cluster.GetLeader()
 	re.NotEmpty(cluster.GetLeader())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrant", fmt.Sprintf("return(\"%s\")", leader)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", leader)))
 
 	for i := 0; i < 3; i++ {
 		cluster.GetLeaderServer().ResetPDLeader()
@@ -368,7 +368,7 @@ func TestGrantLeaseFailed(t *testing.T) {
 	// PD leader should be different from before because etcd leader changed.
 	re.NotEmpty(cluster.GetLeader())
 	re.NotEqual(leader, cluster.GetLeader())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrant"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 }
 
 func TestGetLeader(t *testing.T) {
