@@ -929,6 +929,103 @@ func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
 	}
 }
 
+func (suite *ruleTestSuite) TestLeaderAndVoter() {
+	suite.env.RunTestInTwoModes(suite.checkLeaderAndVoter)
+}
+
+func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+
+	stores := []*metapb.Store{
+		{
+			Id:        1,
+			Address:   "tikv1",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "7.5.0",
+			Labels:    []*metapb.StoreLabel{{Key: "zone", Value: "z1"}},
+		},
+		{
+			Id:        2,
+			Address:   "tikv2",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "7.5.0",
+			Labels:    []*metapb.StoreLabel{{Key: "zone", Value: "z2"}},
+		},
+	}
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	bundles := [][]placement.GroupBundle{
+		{
+			{
+				ID:    "1",
+				Index: 1,
+				Rules: []*placement.Rule{
+					{
+						ID: "rule_1", Index: 1, Role: placement.Voter, Count: 1, GroupID: "1",
+						LabelConstraints: []placement.LabelConstraint{
+							{Key: "zone", Op: "in", Values: []string{"z1"}},
+						},
+					},
+					{
+						ID: "rule_2", Index: 2, Role: placement.Leader, Count: 1, GroupID: "1",
+						LabelConstraints: []placement.LabelConstraint{
+							{Key: "zone", Op: "in", Values: []string{"z2"}},
+						},
+					},
+				},
+			},
+		},
+		{
+			{
+				ID:    "1",
+				Index: 1,
+				Rules: []*placement.Rule{
+					{
+						ID: "rule_1", Index: 1, Role: placement.Leader, Count: 1, GroupID: "1",
+						LabelConstraints: []placement.LabelConstraint{
+							{Key: "zone", Op: "in", Values: []string{"z2"}},
+						},
+					},
+					{
+						ID: "rule_2", Index: 2, Role: placement.Voter, Count: 1, GroupID: "1",
+						LabelConstraints: []placement.LabelConstraint{
+							{Key: "zone", Op: "in", Values: []string{"z1"}},
+						},
+					},
+				},
+			},
+		}}
+	for _, bundle := range bundles {
+		data, err := json.Marshal(bundle)
+		suite.NoError(err)
+		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
+		suite.NoError(err)
+
+		tu.Eventually(re, func() bool {
+			respBundle := make([]placement.GroupBundle, 0)
+			err := tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
+				tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
+			suite.NoError(err)
+			suite.Len(respBundle, 1)
+			if bundle[0].Rules[0].Role == placement.Leader {
+				return respBundle[0].Rules[0].Role == placement.Leader
+			}
+			if bundle[0].Rules[0].Role == placement.Voter {
+				return respBundle[0].Rules[0].Role == placement.Voter
+			}
+			return false
+		})
+	}
+}
+
 func (suite *ruleTestSuite) TestDeleteAndUpdate() {
 	suite.env.RunTestInTwoModes(suite.checkDeleteAndUpdate)
 }
