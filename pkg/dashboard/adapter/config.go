@@ -38,6 +38,9 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	if dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig(); err != nil {
 		return nil, err
 	}
+	if dashboardCfg.ClusterTLSInfo, err = cfg.Security.ToTLSInfo(); err != nil {
+		return nil, err
+	}
 	if dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig(); err != nil {
 		return nil, err
 	}
