@@ -52,7 +52,7 @@ func (suite *memberTestSuite) SetupTest() {
 	suite.server = cluster.GetLeaderServer()
 	suite.NoError(suite.server.BootstrapCluster())
 	suite.backendEndpoints = suite.server.GetAddr()
-	suite.dialClient = pdClient.NewClient([]string{suite.server.GetAddr()})
+	suite.dialClient = pdClient.NewClient("mcs-member-test", []string{suite.server.GetAddr()})
 
 	// TSO
 	nodes := make(map[string]bs.Server)

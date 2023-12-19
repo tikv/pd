@@ -24,7 +24,7 @@ const physicalShiftBits = 18
 
 var (
 	pdAddrs   = []string{"127.0.0.1:2379"}
-	pdHTTPCli = http.NewClient(pdAddrs)
+	pdHTTPCli = http.NewClient("pd-realtiup-test", pdAddrs)
 )
 
 // GetTimeFromTS extracts time.Time from a timestamp.
