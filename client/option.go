@@ -41,8 +41,8 @@ const (
 	// EnableTSOFollowerProxy is the TSO Follower Proxy option.
 	// It is stored as bool.
 	EnableTSOFollowerProxy
-	// EnableFollowerHandle is the follower handle option.
-	EnableFollowerHandle
+	// EnableFollowerHandleRegionRequest is the follower handle option for region request .
+	EnableFollowerHandleRegionRequest
 
 	dynamicOptionCount
 )
@@ -75,7 +75,7 @@ func newOption() *option {
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
 	co.dynamicOptions[EnableTSOFollowerProxy].Store(defaultEnableTSOFollowerProxy)
-	co.dynamicOptions[EnableFollowerHandle].Store(defaultEnableFollowerHandle)
+	co.dynamicOptions[EnableFollowerHandleRegionRequest].Store(defaultEnableFollowerHandle)
 	return co
 }
 
@@ -92,17 +92,17 @@ func (o *option) setMaxTSOBatchWaitInterval(interval time.Duration) error {
 	return nil
 }
 
-// setEnableFollowerHandle set the Follower Handle option.
-func (o *option) setEnableFollowerHandle(enable bool) {
-	old := o.getEnableFollowerHandle()
+// setEnableFollowerHandleRegionRequest set the Follower Handle option.
+func (o *option) setEnableFollowerHandleRegionRequest(enable bool) {
+	old := o.isEnableFollowerHandleRegionRequest()
 	if enable != old {
-		o.dynamicOptions[EnableFollowerHandle].Store(enable)
+		o.dynamicOptions[EnableFollowerHandleRegionRequest].Store(enable)
 	}
 }
 
-// getMaxTSOBatchWaitInterval gets the Follower Handle enable option.
-func (o *option) getEnableFollowerHandle() bool {
-	return o.dynamicOptions[EnableFollowerHandle].Load().(bool)
+// isEnableFollowerHandleRegionRequest gets the Follower Handle enable option.
+func (o *option) isEnableFollowerHandleRegionRequest() bool {
+	return o.dynamicOptions[EnableFollowerHandleRegionRequest].Load().(bool)
 }
 
 // getMaxTSOBatchWaitInterval gets the max TSO batch wait interval option.

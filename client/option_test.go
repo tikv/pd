@@ -28,7 +28,7 @@ func TestDynamicOptionChange(t *testing.T) {
 	// Check the default value setting.
 	re.Equal(defaultMaxTSOBatchWaitInterval, o.getMaxTSOBatchWaitInterval())
 	re.Equal(defaultEnableTSOFollowerProxy, o.getEnableTSOFollowerProxy())
-	re.Equal(defaultEnableFollowerHandle, o.getEnableFollowerHandle())
+	re.Equal(defaultEnableFollowerHandle, o.isEnableFollowerHandleRegionRequest())
 
 	// Check the invalid value setting.
 	re.NotNil(o.setMaxTSOBatchWaitInterval(time.Second))
@@ -58,9 +58,9 @@ func TestDynamicOptionChange(t *testing.T) {
 	o.setEnableTSOFollowerProxy(expectBool)
 
 	expectBool = true
-	o.setEnableFollowerHandle(expectBool)
-	re.Equal(expectBool, o.getEnableFollowerHandle())
+	o.setEnableFollowerHandleRegionRequest(expectBool)
+	re.Equal(expectBool, o.isEnableFollowerHandleRegionRequest())
 	expectBool = false
-	o.setEnableFollowerHandle(expectBool)
-	re.Equal(expectBool, o.getEnableFollowerHandle())
+	o.setEnableFollowerHandleRegionRequest(expectBool)
+	re.Equal(expectBool, o.isEnableFollowerHandleRegionRequest())
 }

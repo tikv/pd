@@ -707,12 +707,12 @@ func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
 		}
 		c.option.setEnableTSOFollowerProxy(enable)
-	case EnableFollowerHandle:
+	case EnableFollowerHandleRegionRequest:
 		enable, ok := value.(bool)
 		if !ok {
-			return errors.New("[pd] invalid value type for EnableFollowerHandle option, it should be bool")
+			return errors.New("[pd] invalid value type for EnableFollowerHandleRegionRequest option, it should be bool")
 		}
-		c.option.setEnableFollowerHandle(enable)
+		c.option.setEnableFollowerHandleRegionRequest(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
