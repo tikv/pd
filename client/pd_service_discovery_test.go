@@ -118,8 +118,8 @@ type serviceClientTestSuite struct {
 	leaderServer   *testServer
 	followerServer *testServer
 
-	leaderClient   *pdServiceClient
-	followerClient *pdServiceClient
+	leaderClient   ServiceClient
+	followerClient ServiceClient
 }
 
 func TestServiceClientClientTestSuite(t *testing.T) {
@@ -177,14 +177,14 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(leader.IsLeader())
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
-	follower.checkNetworkAvailable(suite.ctx)
-	leader.checkNetworkAvailable(suite.ctx)
+	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
+	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	re.False(follower.Available())
 	re.False(leader.Available())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 
-	follower.checkNetworkAvailable(suite.ctx)
-	leader.checkNetworkAvailable(suite.ctx)
+	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
+	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	re.True(follower.Available())
 	re.True(leader.Available())
 
@@ -203,20 +203,20 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(leader.NeedRetry(nil, nil))
 
 	ctx1 := context.WithoutCancel(suite.ctx)
-	ctx1 = follower.BuildGRPCContext(ctx1, false)
+	ctx1 = follower.BuildGRPCTargetContext(ctx1, false)
 	re.True(grpcutil.IsFollowerHandleEnabled(ctx1, metadata.FromOutgoingContext))
 	re.Len(grpcutil.GetForwardedHost(ctx1, metadata.FromOutgoingContext), 0)
 	ctx2 := context.WithoutCancel(suite.ctx)
-	ctx2 = follower.BuildGRPCContext(ctx2, true)
+	ctx2 = follower.BuildGRPCTargetContext(ctx2, true)
 	re.False(grpcutil.IsFollowerHandleEnabled(ctx2, metadata.FromOutgoingContext))
 	re.Equal(grpcutil.GetForwardedHost(ctx2, metadata.FromOutgoingContext), leaderAddress)
 
 	ctx3 := context.WithoutCancel(suite.ctx)
-	ctx3 = leader.BuildGRPCContext(ctx3, false)
+	ctx3 = leader.BuildGRPCTargetContext(ctx3, false)
 	re.False(grpcutil.IsFollowerHandleEnabled(ctx3, metadata.FromOutgoingContext))
 	re.Len(grpcutil.GetForwardedHost(ctx3, metadata.FromOutgoingContext), 0)
 	ctx4 := context.WithoutCancel(suite.ctx)
-	ctx4 = leader.BuildGRPCContext(ctx4, true)
+	ctx4 = leader.BuildGRPCTargetContext(ctx4, true)
 	re.False(grpcutil.IsFollowerHandleEnabled(ctx4, metadata.FromOutgoingContext))
 	re.Len(grpcutil.GetForwardedHost(ctx4, metadata.FromOutgoingContext), 0)
 
@@ -243,11 +243,11 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
 	re.False(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
-	followerAPIClient.markAsAvailable()
-	leaderAPIClient.markAsAvailable()
+	followerAPIClient.(*pdServiceAPIClient).markAsAvailable()
+	leaderAPIClient.(*pdServiceAPIClient).markAsAvailable()
 	re.False(followerAPIClient.Available())
 	time.Sleep(time.Millisecond * 100)
-	followerAPIClient.markAsAvailable()
+	followerAPIClient.(*pdServiceAPIClient).markAsAvailable()
 	re.True(followerAPIClient.Available())
 
 	re.True(followerAPIClient.NeedRetry(nil, err))
@@ -268,7 +268,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 
 	for i := 0; i < 10; i++ {
 		client := b.get()
-		ctx := client.BuildGRPCContext(suite.ctx, false)
+		ctx := client.BuildGRPCTargetContext(suite.ctx, false)
 		conn := client.GetClientConn()
 		re.NotNil(conn)
 		resp, err := pb.NewGreeterClient(conn).SayHello(ctx, &pb.HelloRequest{Name: "pd"})
@@ -282,7 +282,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 
 	for i := 0; i < 10; i++ {
 		client := b.get()
-		ctx := client.BuildGRPCContext(suite.ctx, true)
+		ctx := client.BuildGRPCTargetContext(suite.ctx, true)
 		conn := client.GetClientConn()
 		re.NotNil(conn)
 		resp, err := pb.NewGreeterClient(conn).SayHello(ctx, &pb.HelloRequest{Name: "pd"})

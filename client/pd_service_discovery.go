@@ -106,10 +106,10 @@ type ServiceClient interface {
 	GetAddress() string
 	// GetClientConn returns the gRPC connection of the service client
 	GetClientConn() *grpc.ClientConn
-	// BuildGRPCContext builds a context object with a gRPC context.
+	// BuildGRPCTargetContext builds a context object with a gRPC context.
 	// ctx: the original context object.
 	// mustLeader: whether must send to leader.
-	BuildGRPCContext(ctx context.Context, mustLeader bool) context.Context
+	BuildGRPCTargetContext(ctx context.Context, mustLeader bool) context.Context
 	// IsLeader returns whether the target PD server is leader.
 	IsLeader() bool
 	// Available returns if the network or other availability for the current service client is available.
@@ -119,8 +119,10 @@ type ServiceClient interface {
 	NeedRetry(*pdpb.Error, error) bool
 }
 
-var _ ServiceClient = (*pdServiceClient)(nil)
-var _ ServiceClient = (*pdServiceAPIClient)(nil)
+var (
+	_ ServiceClient = (*pdServiceClient)(nil)
+	_ ServiceClient = (*pdServiceAPIClient)(nil)
+)
 
 type pdServiceClient struct {
 	addr       string
@@ -131,7 +133,7 @@ type pdServiceClient struct {
 	networkFailure atomic.Bool
 }
 
-func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) *pdServiceClient {
+func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
 	return &pdServiceClient{
 		addr:       addr,
 		conn:       conn,
@@ -149,7 +151,7 @@ func (c *pdServiceClient) GetAddress() string {
 }
 
 // BuildGRPCContext implements ServiceClient.
-func (c *pdServiceClient) BuildGRPCContext(ctx context.Context, toLeader bool) context.Context {
+func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader bool) context.Context {
 	if c == nil || c.isLeader {
 		return ctx
 	}
@@ -229,7 +231,7 @@ type pdServiceAPIClient struct {
 	unavailableUntil atomic.Value
 }
 
-func newPDServiceAPIClient(client ServiceClient, f errFn) *pdServiceAPIClient {
+func newPDServiceAPIClient(client ServiceClient, f errFn) ServiceClient {
 	return &pdServiceAPIClient{
 		ServiceClient: client,
 		fn:            f,
