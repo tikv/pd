@@ -27,7 +27,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/kvproto v0.0.0-20230727073445-53e1f8730c30 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20231218095437-aa621ed4de2c // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/prometheus/client_golang v1.11.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
