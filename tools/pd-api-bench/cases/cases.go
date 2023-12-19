@@ -19,21 +19,13 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"net/http"
-	"net/url"
 
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
+	pdHttp "github.com/tikv/pd/client/http"
 )
 
-var (
-	// PDAddress is the address of PD server.
-	PDAddress string
-	// Debug is the flag to print the output of api response for debug.
-	Debug bool
-)
+// Debug is the flag to print the output of api response for debug.
+var Debug bool
 
 var (
 	totalRegion int
@@ -42,19 +34,11 @@ var (
 )
 
 // InitCluster initializes the cluster.
-func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
-		PDAddress+"/pd/api/v1/stats/region?start_key=&end_key=&count", http.NoBody)
-	resp, err := httpClit.Do(req)
+func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) error {
+	statsResp, err := httpCli.GetRegionStatusByKeyRange(ctx, pdHttp.NewKeyRange([]byte(""), []byte("")), false)
 	if err != nil {
 		return err
 	}
-	statsResp := &statistics.RegionStats{}
-	err = apiutil.ReadJSON(resp.Body, statsResp)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
 	totalRegion = statsResp.Count
 
 	stores, err := cli.GetAllStores(ctx)
@@ -122,8 +106,7 @@ var GRPCCaseMap = map[string]GRPCCase{
 // HTTPCase is the interface for all HTTP cases.
 type HTTPCase interface {
 	Case
-	Do(context.Context, *http.Client) error
-	Params(string)
+	Do(context.Context, pdHttp.Client) error
 }
 
 // HTTPCaseMap is the map for all HTTP cases.
@@ -134,8 +117,6 @@ var HTTPCaseMap = map[string]HTTPCase{
 
 type minResolvedTS struct {
 	*baseCase
-	path   string
-	params string
 }
 
 func newMinResolvedTS() *minResolvedTS {
@@ -145,45 +126,23 @@ func newMinResolvedTS() *minResolvedTS {
 			qps:   1000,
 			burst: 1,
 		},
-		path: "/pd/api/v1/min-resolved-ts",
 	}
 }
 
-type minResolvedTSStruct struct {
-	IsRealTime          bool              `json:"is_real_time,omitempty"`
-	MinResolvedTS       uint64            `json:"min_resolved_ts"`
-	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
-	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
-}
-
-func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
-	url := fmt.Sprintf("%s%s", PDAddress, c.path)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-	res, err := cli.Do(req)
-	if err != nil {
-		return err
-	}
-	listResp := &minResolvedTSStruct{}
-	err = apiutil.ReadJSON(res.Body, listResp)
+func (c *minResolvedTS) Do(ctx context.Context, cli pdHttp.Client) error {
+	minResolvedTS, storesMinResolvedTS, err := cli.GetMinResolvedTSByStoresIDs(ctx, storesID)
 	if Debug {
-		log.Printf("Do %s: url: %s resp: %v err: %v", c.name, url, listResp, err)
+		log.Printf("Do %s: minResolvedTS: %d storesMinResolvedTS: %v err: %v", c.name, minResolvedTS, storesMinResolvedTS, err)
 	}
 	if err != nil {
 		return err
 	}
-	res.Body.Close()
 	return nil
-}
-
-func (c *minResolvedTS) Params(param string) {
-	c.params = param
-	c.path = fmt.Sprintf("%s?%s", c.path, c.params)
 }
 
 type regionsStats struct {
 	*baseCase
 	regionSample int
-	path         string
 }
 
 func newRegionStats() *regionsStats {
@@ -194,11 +153,10 @@ func newRegionStats() *regionsStats {
 			burst: 1,
 		},
 		regionSample: 1000,
-		path:         "/pd/api/v1/stats/region",
 	}
 }
 
-func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
+func (c *regionsStats) Do(ctx context.Context, cli pdHttp.Client) error {
 	upperBound := totalRegion / c.regionSample
 	if upperBound < 1 {
 		upperBound = 1
@@ -206,30 +164,16 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
-	url := fmt.Sprintf("%s%s?start_key=%s&end_key=%s&%s",
-		PDAddress,
-		c.path,
-		url.QueryEscape(string(generateKeyForSimulator(startID, 56))),
-		url.QueryEscape(string(generateKeyForSimulator(endID, 56))),
-		"")
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-	res, err := cli.Do(req)
-	if err != nil {
-		return err
-	}
-	statsResp := &statistics.RegionStats{}
-	err = apiutil.ReadJSON(res.Body, statsResp)
+	regionStats, err := cli.GetRegionStatusByKeyRange(ctx,
+		pdHttp.NewKeyRange(generateKeyForSimulator(startID, 56), generateKeyForSimulator(endID, 56)), false)
 	if Debug {
-		log.Printf("Do %s: url: %s resp: %v err: %v", c.name, url, statsResp, err)
+		log.Printf("Do %s: regionStats: %v err: %v", c.name, regionStats, err)
 	}
 	if err != nil {
 		return err
 	}
-	res.Body.Close()
 	return nil
 }
-
-func (c *regionsStats) Params(_ string) {}
 
 type getRegion struct {
 	*baseCase
