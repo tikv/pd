@@ -56,6 +56,24 @@ type TLSConfig struct {
 	SSLKEYBytes  []byte
 }
 
+// ToTLSInfo converts TLSConfig to transport.TLSInfo.
+func (s TLSConfig) ToTLSInfo() (*transport.TLSInfo, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+	allowedCN, err := s.GetOneAllowedCN()
+	if err != nil {
+		return nil, err
+	}
+
+	return &transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+		AllowedCN:     allowedCN,
+	}, nil
+}
+
 // ToTLSConfig generates tls config.
 func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 	if len(s.SSLCABytes) != 0 || len(s.SSLCertBytes) != 0 || len(s.SSLKEYBytes) != 0 {
@@ -77,19 +95,12 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 		}, nil
 	}
 
-	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+	tlsInfo, err := s.ToTLSInfo()
+	if tlsInfo == nil {
 		return nil, nil
 	}
-	allowedCN, err := s.GetOneAllowedCN()
 	if err != nil {
-		return nil, err
-	}
-
-	tlsInfo := transport.TLSInfo{
-		CertFile:      s.CertPath,
-		KeyFile:       s.KeyPath,
-		TrustedCAFile: s.CAPath,
-		AllowedCN:     allowedCN,
+		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 
 	tlsConfig, err := tlsInfo.ClientConfig()
