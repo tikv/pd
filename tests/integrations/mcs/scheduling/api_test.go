@@ -382,13 +382,14 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 	suite.Equal(cfg.DataDir, s.GetConfig().DataDir)
 	testutil.Eventually(re, func() bool {
 		// wait for all schedulers to be loaded in scheduling server.
-		return len(cfg.Schedule.SchedulersPayload) == 5
+		return len(cfg.Schedule.SchedulersPayload) == 6
 	})
 	suite.Contains(cfg.Schedule.SchedulersPayload, "balance-leader-scheduler")
 	suite.Contains(cfg.Schedule.SchedulersPayload, "balance-region-scheduler")
 	suite.Contains(cfg.Schedule.SchedulersPayload, "balance-hot-region-scheduler")
 	suite.Contains(cfg.Schedule.SchedulersPayload, "balance-witness-scheduler")
 	suite.Contains(cfg.Schedule.SchedulersPayload, "transfer-witness-leader-scheduler")
+	suite.Contains(cfg.Schedule.SchedulersPayload, "evict-slow-store-scheduler")
 }
 
 func (suite *apiTestSuite) TestConfigForward() {
@@ -412,7 +413,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 		re.Equal(cfg["replication"].(map[string]interface{})["max-replicas"],
 			float64(opts.GetReplicationConfig().MaxReplicas))
 		schedulers := cfg["schedule"].(map[string]interface{})["schedulers-payload"].(map[string]interface{})
-		return len(schedulers) == 5
+		return len(schedulers) == 6
 	})
 
 	// Test to change config in api server

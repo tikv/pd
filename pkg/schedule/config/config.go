@@ -556,6 +556,7 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-witness"},
 	{Type: "hot-region"},
 	{Type: "transfer-witness-leader"},
+	{Type: "evict-slow-store"},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.
