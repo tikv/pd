@@ -24,13 +24,11 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/zap"
 )
 
 type regionTestSuite struct {
@@ -342,7 +340,6 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
 			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
 		suite.NoError(err)
-		log.Info("respBundle", zap.Any("respBundle", respBundle))
 		return len(respBundle) == 1 && len(respBundle[0].Rules) == 2
 	})
 
