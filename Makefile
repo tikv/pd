@@ -55,7 +55,12 @@ ifeq ($(ENABLE_FIPS), 1)
 	BUILD_TOOL_CGO_ENABLED := 1
 endif
 
-LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty --always)"
+RELEASE_VERSION ?= $(shell git describe --tags --dirty --always)
+ifeq ($(RUN_CI), 1)
+	RELEASE_VERSION := None
+endif
+
+LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(RELEASE_VERSION)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
@@ -160,7 +165,7 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.51.2
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.55.2
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
@@ -260,7 +265,13 @@ test-tso-consistency: install-tools
 	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency
+REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realtiup
+
+test-real-cluster:
+	# testing with the real cluster...
+	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
+
+.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency test-real-cluster
 
 #### Daily CI coverage analyze  ####
 
@@ -292,6 +303,7 @@ clean-test:
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
+	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
 
 clean-build:

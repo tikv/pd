@@ -97,11 +97,6 @@ func (se *StorageEndpoint) LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32
 	return true, uint32(id64), nil
 }
 
-// RunInTxn runs the given function in a transaction.
-func (se *StorageEndpoint) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
-	return se.Base.RunInTxn(ctx, f)
-}
-
 // LoadRangeKeyspace loads keyspaces starting at startID.
 // limit specifies the limit of loaded keyspaces.
 func (se *StorageEndpoint) LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {

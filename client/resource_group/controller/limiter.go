@@ -122,10 +122,11 @@ func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensN
 // A Reservation holds information about events that are permitted by a Limiter to happen after a delay.
 // A Reservation may be canceled, which may enable the Limiter to permit additional events.
 type Reservation struct {
-	ok        bool
-	lim       *Limiter
-	tokens    float64
-	timeToAct time.Time
+	ok              bool
+	lim             *Limiter
+	tokens          float64
+	timeToAct       time.Time
+	needWaitDurtion time.Duration
 	// This is the Limit at reservation time, it can change later.
 	limit Limit
 }
@@ -301,7 +302,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 ) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	log.Debug("[resource group controller] before reconfigure", zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", args.NotifyThreshold), zap.Int64("old-burst", lim.burst))
+	logControllerTrace("[resource group controller] before reconfigure", zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", args.NotifyThreshold), zap.Int64("old-burst", lim.burst))
 	if args.NewBurst < 0 {
 		lim.last = now
 		lim.tokens = args.NewTokens
@@ -317,7 +318,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		opt(lim)
 	}
 	lim.maybeNotify()
-	log.Debug("[resource group controller] after reconfigure", zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.limit)), zap.Float64("notify-threshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
+	logControllerTrace("[resource group controller] after reconfigure", zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.limit)), zap.Float64("notify-threshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -358,9 +359,10 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 
 	// Prepare reservation
 	r := Reservation{
-		ok:    ok,
-		lim:   lim,
-		limit: lim.limit,
+		ok:              ok,
+		lim:             lim,
+		limit:           lim.limit,
+		needWaitDurtion: waitDuration,
 	}
 	if ok {
 		r.tokens = n
@@ -372,7 +374,14 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
-		log.Debug("[resource group controller]", zap.Float64("current-tokens", lim.tokens), zap.Float64("current-rate", float64(lim.limit)), zap.Float64("request-tokens", n), zap.Int64("burst", lim.burst), zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
+		log.Warn("[resource group controller] cannot reserve enough tokens",
+			zap.Duration("need-wait-duration", waitDuration),
+			zap.Duration("max-wait-duration", maxFutureReserve),
+			zap.Float64("current-ltb-tokens", lim.tokens),
+			zap.Float64("current-ltb-rate", float64(lim.limit)),
+			zap.Float64("request-tokens", n),
+			zap.Int64("burst", lim.burst),
+			zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
 		lim.last = last
 		if lim.limit == 0 {
 			lim.notify()
@@ -452,7 +461,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
-			return 0, errs.ErrClientResourceGroupThrottled
+			return res.needWaitDurtion, errs.ErrClientResourceGroupThrottled
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {

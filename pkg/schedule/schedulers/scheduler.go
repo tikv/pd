@@ -52,7 +52,7 @@ type Scheduler interface {
 func EncodeConfig(v interface{}) ([]byte, error) {
 	marshaled, err := json.Marshal(v)
 	if err != nil {
-		return nil, errs.ErrJSONMarshal.Wrap(err).FastGenWithCause()
+		return nil, errs.ErrJSONMarshal.Wrap(err)
 	}
 	return marshaled, nil
 }
@@ -61,7 +61,7 @@ func EncodeConfig(v interface{}) ([]byte, error) {
 func DecodeConfig(data []byte, v interface{}) error {
 	err := json.Unmarshal(data, v)
 	if err != nil {
-		return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
+		return errs.ErrJSONUnmarshal.Wrap(err)
 	}
 	return nil
 }

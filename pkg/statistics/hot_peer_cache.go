@@ -544,6 +544,18 @@ func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	}
 }
 
+// removeAllItem removes all items of the cache.
+// It is used for test.
+func (f *hotPeerCache) removeAllItem() {
+	for _, peers := range f.peersOfStore {
+		for _, peer := range peers.GetAll() {
+			item := peer.(*HotPeerStat)
+			item.actionType = utils.Remove
+			f.updateStat(item)
+		}
+	}
+}
+
 func (f *hotPeerCache) coldItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1

@@ -612,7 +612,7 @@ func (o *PersistConfig) IsLocationReplacementEnabled() bool {
 	return o.getTTLBoolOr(sc.EnableLocationReplacement, o.GetScheduleConfig().EnableLocationReplacement)
 }
 
-// IsTikvRegionSplitEnabled returns whether tikv split region is disabled.
+// IsTikvRegionSplitEnabled returns whether tikv split region is enabled.
 func (o *PersistConfig) IsTikvRegionSplitEnabled() bool {
 	return o.getTTLBoolOr(sc.EnableTiKVSplitRegion, o.GetScheduleConfig().EnableTiKVSplitRegion)
 }

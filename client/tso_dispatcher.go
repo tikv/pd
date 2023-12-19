@@ -412,7 +412,7 @@ tsoBatchLoop:
 			} else {
 				log.Error("[tso] fetch pending tso requests error",
 					zap.String("dc-location", dc),
-					errs.ZapError(errs.ErrClientGetTSO.FastGenByArgs("when fetch pending tso requests"), err))
+					errs.ZapError(errs.ErrClientGetTSO, err))
 			}
 			return
 		}
@@ -495,10 +495,10 @@ tsoBatchLoop:
 			default:
 			}
 			c.svcDiscovery.ScheduleCheckMemberChanged()
-			log.Error("[tso] getTS error",
+			log.Error("[tso] getTS error after processing requests",
 				zap.String("dc-location", dc),
 				zap.String("stream-addr", streamAddr),
-				errs.ZapError(errs.ErrClientGetTSO.FastGenByArgs("after processing requests"), err))
+				errs.ZapError(errs.ErrClientGetTSO, err))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
