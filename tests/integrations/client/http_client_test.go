@@ -72,7 +72,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
-	suite.client = pd.NewClient(endpoints)
+	suite.client = pd.NewClient("pd-http-client-it", endpoints)
 }
 
 func (suite *httpClientTestSuite) TearDownSuite() {
