@@ -1456,8 +1456,6 @@ func (suite *ruleCheckerTestSuite) TestPendingList() {
 	_, exist = suite.rc.pendingList.Get(1)
 	suite.False(exist)
 }
-<<<<<<< HEAD:server/schedule/checker/rule_checker_test.go
-=======
 
 func (suite *ruleCheckerTestSuite) TestLocationLabels() {
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -1549,4 +1547,3 @@ func (suite *ruleCheckerTestSuite) TestTiFlashLocationLabels() {
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.Nil(op)
 }
->>>>>>> f4d774ae4 (checker: fix the conflict between tiflash learner and location labels (#6660)):pkg/schedule/checker/rule_checker_test.go
