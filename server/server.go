@@ -952,6 +952,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.Keyspace = *s.persistOptions.GetKeyspaceConfig().Clone()
+	cfg.MicroService = *s.persistOptions.GetMicroServiceConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
 	if s.storage == nil {
@@ -987,6 +988,27 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 	}
 	s.keyspaceManager.UpdateConfig(&cfg)
 	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetMicroServiceConfig gets the micro service config information.
+func (s *Server) GetMicroServiceConfig() *config.MicroServiceConfig {
+	return s.persistOptions.GetMicroServiceConfig().Clone()
+}
+
+// SetMicroServiceConfig sets the micro service config information.
+func (s *Server) SetMicroServiceConfig(cfg config.MicroServiceConfig) error {
+	old := s.persistOptions.GetMicroServiceConfig()
+	s.persistOptions.SetMicroServiceConfig(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetMicroServiceConfig(old)
+		log.Error("failed to update micro service config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("micro service config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 

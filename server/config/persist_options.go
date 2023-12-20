@@ -52,6 +52,7 @@ type PersistOptions struct {
 	replicationMode atomic.Value
 	labelProperty   atomic.Value
 	keyspace        atomic.Value
+	microService    atomic.Value
 	storeConfig     atomic.Value
 	clusterVersion  unsafe.Pointer
 }
@@ -65,6 +66,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.keyspace.Store(&cfg.Keyspace)
+	o.microService.Store(&cfg.MicroService)
 	// storeConfig will be fetched from TiKV later,
 	// set it to an empty config here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
@@ -131,6 +133,16 @@ func (o *PersistOptions) GetKeyspaceConfig() *KeyspaceConfig {
 // SetKeyspaceConfig sets the keyspace configuration.
 func (o *PersistOptions) SetKeyspaceConfig(cfg *KeyspaceConfig) {
 	o.keyspace.Store(cfg)
+}
+
+// GetMicroServiceConfig returns the micro service configuration.
+func (o *PersistOptions) GetMicroServiceConfig() *MicroServiceConfig {
+	return o.microService.Load().(*MicroServiceConfig)
+}
+
+// SetMicroServiceConfig sets the micro service configuration.
+func (o *PersistOptions) SetMicroServiceConfig(cfg *MicroServiceConfig) {
+	o.microService.Store(cfg)
 }
 
 // GetStoreConfig returns the store config.
@@ -768,6 +780,7 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 			ReplicationMode: *o.GetReplicationModeConfig(),
 			LabelProperty:   o.GetLabelPropertyConfig(),
 			Keyspace:        *o.GetKeyspaceConfig(),
+			MicroService:    *o.GetMicroServiceConfig(),
 			ClusterVersion:  *o.GetClusterVersion(),
 		},
 		StoreConfig: *o.GetStoreConfig(),
@@ -799,6 +812,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.replicationMode.Store(&cfg.ReplicationMode)
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.keyspace.Store(&cfg.Keyspace)
+		o.microService.Store(&cfg.MicroService)
 		o.storeConfig.Store(&cfg.StoreConfig)
 		o.SetClusterVersion(&cfg.ClusterVersion)
 	}

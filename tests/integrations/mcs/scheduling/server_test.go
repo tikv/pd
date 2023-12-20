@@ -205,6 +205,11 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 
 func (suite *serverTestSuite) TestDynamicSwitch() {
 	re := suite.Require()
+	leaderServer := suite.pdLeader.GetServer()
+	conf := leaderServer.GetMicroServiceConfig().Clone()
+	// Change back to the default value.
+	conf.EnableDynamicSwitch = true
+	leaderServer.SetMicroServiceConfig(*conf)
 	// API server will execute scheduling jobs since there is no scheduler server.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
@@ -238,6 +243,50 @@ func (suite *serverTestSuite) TestDynamicSwitch() {
 	// Scheduling server is responsible for executing scheduling jobs again.
 	testutil.Eventually(re, func() bool {
 		return tc1.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+	})
+}
+
+func (suite *serverTestSuite) TestDisableDynamicSwitch() {
+	re := suite.Require()
+
+	// API server will execute scheduling jobs since there is no scheduler server.
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	leaderServer := suite.pdLeader.GetServer()
+	// After Disabling dynamic switch, the API server will stop scheduling.
+	conf := leaderServer.GetMicroServiceConfig().Clone()
+	conf.EnableDynamicSwitch = false
+	leaderServer.SetMicroServiceConfig(*conf)
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	// Enable dynamic switch again, the API server will restart scheduling.
+	conf.EnableDynamicSwitch = true
+	leaderServer.SetMicroServiceConfig(*conf)
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	// After scheduling server is started, API server will not execute scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	// Scheduling server is responsible for executing scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+	})
+	// Disable dynamic switch and stop scheduling server. API server won't execute scheduling jobs again.
+	conf.EnableDynamicSwitch = false
+	leaderServer.SetMicroServiceConfig(*conf)
+	tc.GetPrimaryServer().Close()
+	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 }
 

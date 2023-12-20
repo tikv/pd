@@ -165,6 +165,8 @@ type Config struct {
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 
+	MicroService MicroServiceConfig `toml:"micro-service" json:"micro-service"`
+
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
 }
 
@@ -249,6 +251,8 @@ const (
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
+
+	defaultEnableDynamicSwitch = true
 )
 
 // Special keys for Labels
@@ -460,6 +464,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
 	c.Keyspace.adjust(configMetaData.Child("keyspace"))
+
+	c.MicroService.adjust(configMetaData.Child("micro-service"))
 
 	c.Security.Encryption.Adjust()
 
@@ -845,6 +851,28 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}
+}
+
+// MicroServiceConfig is the configuration for micro service.
+type MicroServiceConfig struct {
+	EnableDynamicSwitch bool `toml:"enable-dynamic-switch" json:"enable-dynamic-switch,string"`
+}
+
+func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
+	if !meta.IsDefined("enable-dynamic-switch") {
+		c.EnableDynamicSwitch = defaultEnableDynamicSwitch
+	}
+}
+
+// Clone returns a copy of micro service config.
+func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
+	cfg := *c
+	return &cfg
+}
+
+// IsDynamicSwitchEnabled returns whether to enable dynamic switch.
+func (c *MicroServiceConfig) IsDynamicSwitchEnabled() bool {
+	return c.EnableDynamicSwitch
 }
 
 // KeyspaceConfig is the configuration for keyspace management.
