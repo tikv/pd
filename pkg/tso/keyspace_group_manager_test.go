@@ -988,7 +988,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 		re.Equal(len(keyspaces), len(newGroup.Keyspaces))
 		for i := 0; i < len(newGroup.Keyspaces); i++ {
 			if i > 0 {
-				re.True(newGroup.Keyspaces[i-1] < newGroup.Keyspaces[i])
+				re.Less(newGroup.Keyspaces[i-1], newGroup.Keyspaces[i])
 			}
 		}
 	}

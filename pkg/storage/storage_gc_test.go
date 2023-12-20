@@ -93,7 +93,7 @@ func TestLoadMinServiceSafePoint(t *testing.T) {
 	// gc_worker service safepoint will not be removed.
 	ssp, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime.Add(5000*time.Second))
 	re.NoError(err)
-	re.Equal(ssp.ServiceID, endpoint.GCWorkerServiceSafePointID)
+	re.Equal(endpoint.GCWorkerServiceSafePointID, ssp.ServiceID)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys"))
 }
 

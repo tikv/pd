@@ -260,7 +260,7 @@ func (suite *ruleTestSuite) checkGetAll(cluster *tests.TestCluster) {
 	var resp2 []*placement.Rule
 	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rules", &resp2)
 	suite.NoError(err)
-	suite.GreaterOrEqual(len(resp2), 1)
+	suite.NotEmpty(resp2)
 }
 
 func (suite *ruleTestSuite) TestSetAll() {
@@ -1338,40 +1338,40 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	u := fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 1)
 	err := tu.ReadGetJSON(re, testDialClient, u, fit)
 	suite.NoError(err)
-	suite.Equal(len(fit.RuleFits), 1)
-	suite.Equal(len(fit.OrphanPeers), 1)
+	suite.Len(fit.RuleFits, 1)
+	suite.Len(fit.OrphanPeers, 1)
 	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 2)
 	fit = &placement.RegionFit{}
 	err = tu.ReadGetJSON(re, testDialClient, u, fit)
 	suite.NoError(err)
-	suite.Equal(len(fit.RuleFits), 2)
-	suite.Equal(len(fit.OrphanPeers), 0)
+	suite.Len(fit.RuleFits, 2)
+	suite.Empty(fit.OrphanPeers)
 	u = fmt.Sprintf("%s/config/rules/region/%d/detail", urlPrefix, 3)
 	fit = &placement.RegionFit{}
 	err = tu.ReadGetJSON(re, testDialClient, u, fit)
 	suite.NoError(err)
-	suite.Equal(len(fit.RuleFits), 0)
-	suite.Equal(len(fit.OrphanPeers), 2)
+	suite.Empty(fit.RuleFits)
+	suite.Len(fit.OrphanPeers, 2)
 
 	var label labeler.LabelRule
 	escapedID := url.PathEscape("keyspaces/0")
 	u = fmt.Sprintf("%s/config/region-label/rule/%s", urlPrefix, escapedID)
 	err = tu.ReadGetJSON(re, testDialClient, u, &label)
 	suite.NoError(err)
-	suite.Equal(label.ID, "keyspaces/0")
+	suite.Equal("keyspaces/0", label.ID)
 
 	var labels []labeler.LabelRule
 	u = fmt.Sprintf("%s/config/region-label/rules", urlPrefix)
 	err = tu.ReadGetJSON(re, testDialClient, u, &labels)
 	suite.NoError(err)
 	suite.Len(labels, 1)
-	suite.Equal(labels[0].ID, "keyspaces/0")
+	suite.Equal("keyspaces/0", labels[0].ID)
 
 	u = fmt.Sprintf("%s/config/region-label/rules/ids", urlPrefix)
 	err = tu.CheckGetJSON(testDialClient, u, []byte(`["rule1", "rule3"]`), func(resp []byte, statusCode int, _ http.Header) {
 		err := json.Unmarshal(resp, &labels)
 		suite.NoError(err)
-		suite.Len(labels, 0)
+		suite.Empty(labels)
 	})
 	suite.NoError(err)
 
@@ -1379,7 +1379,7 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		err := json.Unmarshal(resp, &labels)
 		suite.NoError(err)
 		suite.Len(labels, 1)
-		suite.Equal(labels[0].ID, "keyspaces/0")
+		suite.Equal("keyspaces/0", labels[0].ID)
 	})
 	suite.NoError(err)
 
