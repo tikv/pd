@@ -110,8 +110,8 @@ type ServiceClient interface {
 	// ctx: the original context object.
 	// mustLeader: whether must send to leader.
 	BuildGRPCTargetContext(ctx context.Context, mustLeader bool) context.Context
-	// IsLeader returns whether the target PD server is leader.
-	IsLeader() bool
+	// IsConnectedToLeader returns whether the connected PD server is leader.
+	IsConnectedToLeader() bool
 	// Available returns if the network or other availability for the current service client is available.
 	Available() bool
 	// NeedRetry checks if client need to retry based on the PD server error response.
@@ -161,8 +161,8 @@ func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader b
 	return grpcutil.BuildFollowerHandleContext(ctx)
 }
 
-// IsLeader implements ServiceClient.
-func (c *pdServiceClient) IsLeader() bool {
+// IsConnectedToLeader implements ServiceClient.
+func (c *pdServiceClient) IsConnectedToLeader() bool {
 	if c == nil {
 		return false
 	}
@@ -209,7 +209,7 @@ func (c *pdServiceClient) GetClientConn() *grpc.ClientConn {
 
 // NeedRetry implements ServiceClient.
 func (c *pdServiceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
-	if c.IsLeader() {
+	if c.IsConnectedToLeader() {
 		return false
 	}
 	return !(err == nil && pdErr == nil)
@@ -255,7 +255,7 @@ func (c *pdServiceAPIClient) markAsAvailable() {
 
 // NeedRetry implements ServiceClient.
 func (c *pdServiceAPIClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
-	if c.IsLeader() {
+	if c.IsConnectedToLeader() {
 		return false
 	}
 	if err == nil && pdErr == nil {
