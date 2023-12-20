@@ -465,7 +465,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		err := tu.CheckPostJSON(testDialClient, url, reqData, tu.StatusOK(re))
 		re.NoError(err)
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			// wait for the scheduler server to update the config
+			// wait for the scheduling server to update the config
 			tu.Eventually(re, func() bool {
 				return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled() == testCase.placementRuleEnable
 			})

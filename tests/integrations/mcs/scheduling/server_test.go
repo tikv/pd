@@ -210,7 +210,7 @@ func (suite *serverTestSuite) TestDynamicSwitch() {
 	// Change back to the default value.
 	conf.EnableDynamicSwitch = true
 	leaderServer.SetMicroServiceConfig(*conf)
-	// API server will execute scheduling jobs since there is no scheduler server.
+	// API server will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -249,7 +249,7 @@ func (suite *serverTestSuite) TestDynamicSwitch() {
 func (suite *serverTestSuite) TestDisableDynamicSwitch() {
 	re := suite.Require()
 
-	// API server will execute scheduling jobs since there is no scheduler server.
+	// API server will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
