@@ -77,24 +77,20 @@ func initEvictSlowTrendSchedulerConfig(storage endpoint.ConfigStorage) *evictSlo
 	}
 }
 
+func (conf *evictSlowTrendSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
+}
+
+func (conf *evictSlowTrendSchedulerConfig) getSchedulerName() string {
+	return EvictSlowTrendName
+}
+
 func (conf *evictSlowTrendSchedulerConfig) Clone() *evictSlowTrendSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &evictSlowTrendSchedulerConfig{
 		RecoveryDurationGap: conf.RecoveryDurationGap,
 	}
-}
-
-func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
-	name := EvictSlowTrendName
-	data, err := EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
@@ -203,7 +199,7 @@ func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
-	return conf.persistLocked()
+	return saveSchedulerConfig(conf)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.SchedulerCluster) (oldID uint64, err error) {
@@ -220,7 +216,7 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
-	return oldID, conf.persistLocked()
+	return oldID, saveSchedulerConfig(conf)
 }
 
 type evictSlowTrendHandler struct {
@@ -254,7 +250,7 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.persistLocked(); err != nil {
+	if err := saveSchedulerConfig(handler.config); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return

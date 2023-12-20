@@ -87,15 +87,8 @@ func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 	}
 }
 
-func (conf *grantLeaderSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
-	conf.RLock()
-	defer conf.RUnlock()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+func (conf *grantLeaderSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
 }
 
 func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
@@ -297,7 +290,9 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	}
 
 	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
+	handler.config.RLock()
+	defer handler.config.RUnlock()
+	err := saveSchedulerConfig(handler.config)
 	if err != nil {
 		handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -323,7 +318,9 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {
-		err = handler.config.Persist()
+		handler.config.RLock()
+		defer handler.config.RUnlock()
+		err = saveSchedulerConfig(handler.config)
 		if err != nil {
 			handler.config.resetStore(id, keyRanges)
 			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())

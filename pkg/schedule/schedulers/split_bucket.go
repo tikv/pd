@@ -79,12 +79,12 @@ func (conf *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
 	}
 }
 
-func (conf *splitBucketSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(SplitBucketName, data)
+func (conf *splitBucketSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
+}
+
+func (conf *splitBucketSchedulerConfig) getSchedulerName() string {
+	return SplitBucketName
 }
 
 func (conf *splitBucketSchedulerConfig) getDegree() int {
@@ -133,7 +133,7 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		h.conf.persistLocked()
+		saveSchedulerConfig(h.conf)
 		rd.Text(w, http.StatusOK, "Config is updated.")
 		return
 	}

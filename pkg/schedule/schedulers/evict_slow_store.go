@@ -74,16 +74,12 @@ func (conf *evictSlowStoreSchedulerConfig) Clone() *evictSlowStoreSchedulerConfi
 	}
 }
 
-func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
-	name := EvictSlowStoreName
-	data, err := EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+func (conf *evictSlowStoreSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
+}
+
+func (conf *evictSlowStoreSchedulerConfig) getSchedulerName() string {
+	return EvictSlowStoreName
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
@@ -122,7 +118,7 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
-	return conf.persistLocked()
+	return saveSchedulerConfig(conf)
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
@@ -132,7 +128,7 @@ func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err 
 	if oldID > 0 {
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
-		err = conf.persistLocked()
+		err = saveSchedulerConfig(conf)
 	}
 	return
 }
@@ -168,7 +164,7 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.persistLocked(); err != nil {
+	if err := saveSchedulerConfig(handler.config); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return

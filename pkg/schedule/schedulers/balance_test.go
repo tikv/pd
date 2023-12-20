@@ -1388,7 +1388,7 @@ func TestConcurrencyUpdateConfig(t *testing.T) {
 			default:
 			}
 			sche.config.BuildWithArgs(args)
-			re.NoError(sche.config.Persist())
+			re.NoError(saveSchedulerConfig(sche.config))
 		}
 	}()
 	for i := 0; i < 1000; i++ {
