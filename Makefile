@@ -261,7 +261,7 @@ test-tso-consistency: install-tools
 	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realtiup
+REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
 
 test-real-cluster:
 	# testing with the real cluster...
