@@ -568,7 +568,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 				ruleCheckerRemoveOrphanPeerCounter.Inc()
 				return operator.CreateRemovePeerOperator("remove-unhealthy-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
-			// The healthy orphan peer should be the last one to be removed only if there are extra peers to keep the high availablility.
+			// The healthy orphan peer can be removed to keep the high availability only if the peer count is greater than the rule requirement.
 			if hasHealthPeer && extra > 0 {
 				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
 				ruleCheckerRemoveOrphanPeerCounter.Inc()

@@ -2049,11 +2049,13 @@ func (suite *ruleCheckerTestSuite) TestRemoveOrphanPeer() {
 	suite.ruleManager.SetRule(rule)
 	suite.ruleManager.DeleteRule("pd", "default")
 
+	// case1: regionA has 3 peers but not extra peer can be removed, so it needs to add peer first
 	suite.cluster.AddLeaderRegionWithRange(1, "200", "300", 1, 2, 3)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	suite.NotNil(op)
 	suite.Equal("add-rule-peer", op.Desc())
 
+	// case2: regionB has 4 peers and one extra peer can be removed, so it needs to remove extra peer first
 	suite.cluster.AddLeaderRegionWithRange(2, "300", "400", 1, 2, 3, 4)
 	op = suite.rc.Check(suite.cluster.GetRegion(2))
 	suite.NotNil(op)
