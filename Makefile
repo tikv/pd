@@ -261,7 +261,7 @@ test-tso-consistency: install-tools
 	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realtiup
+REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
 
 test-real-cluster:
 	# testing with the real cluster...
@@ -305,6 +305,7 @@ clean-test:
 clean-build:
 	# Cleaning building files...
 	rm -rf .dashboard_download_cache/
+	rm -rf .dashboard_build_temp/
 	rm -rf $(BUILD_BIN_PATH)
 	rm -rf $(GO_TOOLS_BIN_PATH)
 
