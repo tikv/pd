@@ -309,3 +309,24 @@ func NewKeyRange(startKey, endKey string) KeyRange {
 		EndKey:   []byte(endKey),
 	}
 }
+
+// KeyRanges is a slice of KeyRange.
+type KeyRanges struct {
+	krs []*KeyRange
+}
+
+// Append appends a KeyRange.
+func (rs *KeyRanges) Append(startKey, endKey []byte) {
+	rs.krs = append(rs.krs, &KeyRange{
+		StartKey: startKey,
+		EndKey:   endKey,
+	})
+}
+
+// Ranges returns the slice of KeyRange.
+func (rs *KeyRanges) Ranges() []*KeyRange {
+	if rs == nil {
+		return nil
+	}
+	return rs.krs
+}
