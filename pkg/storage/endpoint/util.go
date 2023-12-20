@@ -16,9 +16,12 @@ package endpoint
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"go.etcd.io/etcd/clientv3"
 )
 
 func (se *StorageEndpoint) loadProto(key string, msg proto.Message) (bool, error) {
@@ -42,9 +45,36 @@ func (se *StorageEndpoint) saveProto(key string, msg proto.Message) error {
 }
 
 func (se *StorageEndpoint) saveJSON(key string, data interface{}) error {
+	return saveJSONInTxn(se /* use the same interface */, key, data)
+}
+
+func saveJSONInTxn(txn kv.Txn, key string, data interface{}) error {
 	value, err := json.Marshal(data)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return se.Save(key, string(value))
+	return txn.Save(key, string(value))
+}
+
+// loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
+func (se *StorageEndpoint) loadRangeByPrefix(prefix string, f func(k, v string)) error {
+	return loadRangeByPrefixInTxn(se /* use the same interface */, prefix, f)
+}
+
+func loadRangeByPrefixInTxn(txn kv.Txn, prefix string, f func(k, v string)) error {
+	nextKey := prefix
+	endKey := clientv3.GetPrefixRangeEnd(prefix)
+	for {
+		keys, values, err := txn.LoadRange(nextKey, endKey, MinKVRangeLimit)
+		if err != nil {
+			return err
+		}
+		for i := range keys {
+			f(strings.TrimPrefix(keys[i], prefix), values[i])
+		}
+		if len(keys) < MinKVRangeLimit {
+			return nil
+		}
+		nextKey = keys[len(keys)-1] + "\x00"
+	}
 }

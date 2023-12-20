@@ -15,7 +15,6 @@
 package scheduler_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -49,7 +48,8 @@ func TestSchedulerTestSuite(t *testing.T) {
 }
 
 func (suite *schedulerTestSuite) SetupSuite() {
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 	suite.defaultSchedulers = []string{
 		"balance-leader-scheduler",
@@ -57,12 +57,14 @@ func (suite *schedulerTestSuite) SetupSuite() {
 		"balance-hot-region-scheduler",
 		"balance-witness-scheduler",
 		"transfer-witness-leader-scheduler",
+		"evict-slow-store-scheduler",
 	}
 }
 
 func (suite *schedulerTestSuite) TearDownSuite() {
+	re := suite.Require()
 	suite.env.Cleanup()
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
 }
 
 func (suite *schedulerTestSuite) TearDownTest() {
@@ -174,6 +176,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		"balance-hot-region-scheduler":      true,
 		"transfer-witness-leader-scheduler": true,
 		"balance-witness-scheduler":         true,
+		"evict-slow-store-scheduler":        true,
 	}
 	checkSchedulerCommand(nil, expected)
 
@@ -184,6 +187,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		"balance-hot-region-scheduler":      true,
 		"transfer-witness-leader-scheduler": true,
 		"balance-witness-scheduler":         true,
+		"evict-slow-store-scheduler":        true,
 	}
 	checkSchedulerCommand(args, expected)
 
@@ -229,6 +233,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
 			"balance-witness-scheduler":         true,
+			"evict-slow-store-scheduler":        true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -246,6 +251,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
 			"balance-witness-scheduler":         true,
+			"evict-slow-store-scheduler":        true,
 		}
 
 		// check update success
@@ -261,6 +267,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			"balance-hot-region-scheduler":      true,
 			"transfer-witness-leader-scheduler": true,
 			"balance-witness-scheduler":         true,
+			"evict-slow-store-scheduler":        true,
 		}
 		checkSchedulerCommand(args, expected)
 		checkStorePause([]uint64{}, schedulers[idx])
@@ -273,6 +280,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
 			"balance-witness-scheduler":         true,
+			"evict-slow-store-scheduler":        true,
 		}
 		checkSchedulerCommand(args, expected)
 		checkStorePause([]uint64{2}, schedulers[idx])
@@ -285,6 +293,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
 			"balance-witness-scheduler":         true,
+			"evict-slow-store-scheduler":        true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -301,6 +310,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			schedulers[idx]:                     true,
 			"transfer-witness-leader-scheduler": true,
 			"balance-witness-scheduler":         true,
+			"evict-slow-store-scheduler":        true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -316,6 +326,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			"balance-hot-region-scheduler":      true,
 			"transfer-witness-leader-scheduler": true,
 			"balance-witness-scheduler":         true,
+			"evict-slow-store-scheduler":        true,
 		}
 		checkSchedulerCommand(args, expected)
 		checkStorePause([]uint64{}, schedulers[idx])
@@ -328,6 +339,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		"shuffle-region-scheduler":          true,
 		"transfer-witness-leader-scheduler": true,
 		"balance-witness-scheduler":         true,
+		"evict-slow-store-scheduler":        true,
 	})
 	var roles []string
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
@@ -349,6 +361,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		"grant-hot-region-scheduler":        true,
 		"transfer-witness-leader-scheduler": true,
 		"balance-witness-scheduler":         true,
+		"evict-slow-store-scheduler":        true,
 	})
 	var conf3 map[string]interface{}
 	expected3 := map[string]interface{}{
@@ -528,7 +541,11 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	evictSlownessSchedulers := []string{"evict-slow-store-scheduler", "evict-slow-trend-scheduler"}
 	for _, schedulerName := range evictSlownessSchedulers {
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", schedulerName}, nil)
-		re.Contains(echo, "Success!")
+		if strings.Contains(echo, "Success!") {
+			re.Contains(echo, "Success!")
+		} else {
+			re.Contains(echo, "scheduler existed")
+		}
 		testutil.Eventually(re, func() bool {
 			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
 			return strings.Contains(echo, schedulerName)
@@ -547,6 +564,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 			return !strings.Contains(echo, schedulerName)
 		})
 	}
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-store-scheduler"}, nil)
+	re.Contains(echo, "Success!")
 
 	// test shuffle hot region scheduler
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "shuffle-hot-region-scheduler"}, nil)
@@ -690,48 +709,4 @@ func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v inte
 		return
 	}
 	json.Unmarshal(output, v)
-}
-
-func TestForwardSchedulerRequest(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
-	re.NoError(err)
-	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader())
-	server := cluster.GetLeaderServer()
-	re.NoError(server.BootstrapCluster())
-	backendEndpoints := server.GetAddr()
-	tc, err := tests.NewTestSchedulingCluster(ctx, 1, backendEndpoints)
-	re.NoError(err)
-	defer tc.Destroy()
-	tc.WaitForPrimaryServing(re)
-
-	cmd := pdctlCmd.GetRootCmd()
-	args := []string{"-u", backendEndpoints, "scheduler", "show"}
-	var sches []string
-	testutil.Eventually(re, func() bool {
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		re.NoError(json.Unmarshal(output, &sches))
-		return slice.Contains(sches, "balance-leader-scheduler")
-	})
-
-	mustUsage := func(args []string) {
-		output, err := pdctl.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		re.Contains(string(output), "Usage")
-	}
-	mustUsage([]string{"-u", backendEndpoints, "scheduler", "pause", "balance-leader-scheduler"})
-	echo := mustExec(re, cmd, []string{"-u", backendEndpoints, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
-	re.Contains(echo, "Success!")
-	checkSchedulerWithStatusCommand := func(status string, expected []string) {
-		var schedulers []string
-		mustExec(re, cmd, []string{"-u", backendEndpoints, "scheduler", "show", "--status", status}, &schedulers)
-		re.Equal(expected, schedulers)
-	}
-	checkSchedulerWithStatusCommand("paused", []string{
-		"balance-leader-scheduler",
-	})
 }

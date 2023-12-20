@@ -16,7 +16,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c
 	github.com/stretchr/testify v1.8.4
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/client v0.0.0-20231101084237-a1a1eea8dafd
 	github.com/tikv/pd/tests/integrations/mcs v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.54.0
 )
@@ -121,7 +121,7 @@ require (
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20231127105651-ce4097837c5e // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20231218095437-aa621ed4de2c // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect

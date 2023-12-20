@@ -514,9 +514,10 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		kgm.etcdClient,
 		"tso-nodes-watcher",
 		kgm.tsoServiceKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		func() error { return nil },
+		func([]*clientv3.Event) error { return nil },
 		clientv3.WithRange(tsoServiceEndKey),
 	)
 	kgm.tsoNodesWatcher.StartWatchLoop()
@@ -542,7 +543,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		group := &endpoint.KeyspaceGroup{}
 		if err := json.Unmarshal(kv.Value, group); err != nil {
-			return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
+			return errs.ErrJSONUnmarshal.Wrap(err)
 		}
 		kgm.updateKeyspaceGroup(group)
 		if group.ID == mcsutils.DefaultKeyspaceGroupID {
@@ -558,7 +559,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		kgm.deleteKeyspaceGroup(groupID)
 		return nil
 	}
-	postEventFn := func() error {
+	postEventsFn := func([]*clientv3.Event) error {
 		// Retry the groups that are not initialized successfully before.
 		for id, group := range kgm.groupUpdateRetryList {
 			delete(kgm.groupUpdateRetryList, id)
@@ -572,9 +573,10 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		kgm.etcdClient,
 		"keyspace-watcher",
 		startKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		postEventFn,
+		postEventsFn,
 		clientv3.WithRange(endKey),
 	)
 	if kgm.loadKeyspaceGroupsTimeout > 0 {

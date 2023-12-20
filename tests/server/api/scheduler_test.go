@@ -477,6 +477,10 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				suite.NoError(err)
 			},
 		},
+		{
+			name:        "evict-slow-store-scheduler",
+			createdName: "evict-slow-store-scheduler",
+		},
 	}
 	for _, testCase := range testCases {
 		input := make(map[string]interface{})

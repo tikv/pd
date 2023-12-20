@@ -151,7 +151,7 @@ var (
 			Name:      "audit_handling_seconds",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component", "ip"})
+		}, []string{"service", "method", "caller_id", "ip"})
 	serverMaxProcs = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",

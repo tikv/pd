@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/client v0.0.0-20231101084237-a1a1eea8dafd
 	go.uber.org/zap v1.24.0
 	google.golang.org/grpc v1.54.0
 )
