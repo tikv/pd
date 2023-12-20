@@ -186,6 +186,7 @@ func (suite *tsoClientTestSuite) TearDownSuite() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTS() {
+	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -195,9 +196,9 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 				var lastTS uint64
 				for j := 0; j < tsoRequestRound; j++ {
 					physical, logical, err := client.GetTS(suite.ctx)
-					suite.NoError(err)
+					re.NoError(err)
 					ts := tsoutil.ComposeTS(physical, logical)
-					suite.Less(lastTS, ts)
+					re.Less(lastTS, ts)
 					lastTS = ts
 				}
 			}(client)
@@ -207,6 +208,7 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTSAsync() {
+	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -220,9 +222,9 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 				var lastTS uint64 = math.MaxUint64
 				for j := len(tsFutures) - 1; j >= 0; j-- {
 					physical, logical, err := tsFutures[j].Wait()
-					suite.NoError(err)
+					re.NoError(err)
 					ts := tsoutil.ComposeTS(physical, logical)
-					suite.Greater(lastTS, ts)
+					re.Greater(lastTS, ts)
 					lastTS = ts
 				}
 			}(client)
@@ -253,9 +255,9 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	var lastTS uint64
 	for j := 0; j < tsoRequestRound; j++ {
 		physical, logical, err := client.GetTS(ctx)
-		suite.NoError(err)
+		re.NoError(err)
 		ts := tsoutil.ComposeTS(physical, logical)
-		suite.Less(lastTS, ts)
+		re.Less(lastTS, ts)
 		lastTS = ts
 	}
 }

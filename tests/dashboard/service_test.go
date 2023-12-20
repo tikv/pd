@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
 
@@ -69,20 +70,20 @@ func (suite *dashboardTestSuite) TearDownSuite() {
 }
 
 func (suite *dashboardTestSuite) TestDashboardRedirect() {
-	suite.testDashboard(false)
+	suite.testDashboard(suite.Require(), false)
 }
 
 func (suite *dashboardTestSuite) TestDashboardProxy() {
-	suite.testDashboard(true)
+	suite.testDashboard(suite.Require(), true)
 }
 
-func (suite *dashboardTestSuite) checkRespCode(url string, code int) {
+func (suite *dashboardTestSuite) checkRespCode(re *require.Assertions, url string, code int) {
 	resp, err := suite.httpClient.Get(url)
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 	resp.Body.Close()
-	suite.Equal(code, resp.StatusCode)
+	re.Equal(code, resp.StatusCode)
 }
 
 func waitForConfigSync() {
@@ -90,46 +91,46 @@ func waitForConfigSync() {
 	time.Sleep(3 * time.Second)
 }
 
-func (suite *dashboardTestSuite) checkServiceIsStarted(internalProxy bool, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
+func (suite *dashboardTestSuite) checkServiceIsStarted(re *require.Assertions, internalProxy bool, servers map[string]*tests.TestServer, leader *tests.TestServer) string {
 	waitForConfigSync()
 	dashboardAddress := leader.GetServer().GetPersistOptions().GetDashboardAddress()
 	hasServiceNode := false
 	for _, srv := range servers {
-		suite.Equal(dashboardAddress, srv.GetPersistOptions().GetDashboardAddress())
+		re.Equal(dashboardAddress, srv.GetPersistOptions().GetDashboardAddress())
 		addr := srv.GetAddr()
 		if addr == dashboardAddress || internalProxy {
-			suite.checkRespCode(fmt.Sprintf("%s/dashboard/", addr), http.StatusOK)
-			suite.checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusUnauthorized)
+			suite.checkRespCode(re, fmt.Sprintf("%s/dashboard/", addr), http.StatusOK)
+			suite.checkRespCode(re, fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusUnauthorized)
 			if addr == dashboardAddress {
 				hasServiceNode = true
 			}
 		} else {
-			suite.checkRespCode(fmt.Sprintf("%s/dashboard/", addr), http.StatusTemporaryRedirect)
-			suite.checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusTemporaryRedirect)
+			suite.checkRespCode(re, fmt.Sprintf("%s/dashboard/", addr), http.StatusTemporaryRedirect)
+			suite.checkRespCode(re, fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusTemporaryRedirect)
 		}
 	}
-	suite.True(hasServiceNode)
+	re.True(hasServiceNode)
 	return dashboardAddress
 }
 
-func (suite *dashboardTestSuite) checkServiceIsStopped(servers map[string]*tests.TestServer) {
+func (suite *dashboardTestSuite) checkServiceIsStopped(re *require.Assertions, servers map[string]*tests.TestServer) {
 	waitForConfigSync()
 	for _, srv := range servers {
-		suite.Equal("none", srv.GetPersistOptions().GetDashboardAddress())
+		re.Equal("none", srv.GetPersistOptions().GetDashboardAddress())
 		addr := srv.GetAddr()
-		suite.checkRespCode(fmt.Sprintf("%s/dashboard/", addr), http.StatusNotFound)
-		suite.checkRespCode(fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusNotFound)
+		suite.checkRespCode(re, fmt.Sprintf("%s/dashboard/", addr), http.StatusNotFound)
+		suite.checkRespCode(re, fmt.Sprintf("%s/dashboard/api/keyvisual/heatmaps", addr), http.StatusNotFound)
 	}
 }
 
-func (suite *dashboardTestSuite) testDashboard(internalProxy bool) {
+func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalProxy bool) {
 	cluster, err := tests.NewTestCluster(suite.ctx, 3, func(conf *config.Config, serverName string) {
 		conf.Dashboard.InternalProxy = internalProxy
 	})
-	suite.NoError(err)
+	re.NoError(err)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
-	suite.NoError(err)
+	re.NoError(err)
 
 	cmd := pdctlCmd.GetRootCmd()
 
@@ -139,7 +140,7 @@ func (suite *dashboardTestSuite) testDashboard(internalProxy bool) {
 	leaderAddr := leader.GetAddr()
 
 	// auto select node
-	dashboardAddress1 := suite.checkServiceIsStarted(internalProxy, servers, leader)
+	dashboardAddress1 := suite.checkServiceIsStarted(re, internalProxy, servers, leader)
 
 	// pd-ctl set another addr
 	var dashboardAddress2 string
@@ -151,13 +152,13 @@ func (suite *dashboardTestSuite) testDashboard(internalProxy bool) {
 	}
 	args := []string{"-u", leaderAddr, "config", "set", "dashboard-address", dashboardAddress2}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	suite.NoError(err)
-	suite.checkServiceIsStarted(internalProxy, servers, leader)
-	suite.Equal(dashboardAddress2, leader.GetServer().GetPersistOptions().GetDashboardAddress())
+	re.NoError(err)
+	suite.checkServiceIsStarted(re, internalProxy, servers, leader)
+	re.Equal(dashboardAddress2, leader.GetServer().GetPersistOptions().GetDashboardAddress())
 
 	// pd-ctl set stop
 	args = []string{"-u", leaderAddr, "config", "set", "dashboard-address", "none"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
-	suite.NoError(err)
-	suite.checkServiceIsStopped(servers)
+	re.NoError(err)
+	suite.checkServiceIsStopped(re, servers)
 }

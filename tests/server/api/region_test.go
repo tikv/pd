@@ -57,9 +57,9 @@ func (suite *regionTestSuite) TearDownTest() {
 		for _, region := range leader.GetRegions() {
 			url := fmt.Sprintf("%s/pd/api/v1/admin/cache/region/%d", pdAddr, region.GetID())
 			err := tu.CheckDelete(testDialClient, url, tu.StatusOK(re))
-			suite.NoError(err)
+			re.NoError(err)
 		}
-		suite.Empty(leader.GetRegions())
+		re.Empty(leader.GetRegions())
 		// clean rules
 		def := placement.GroupBundle{
 			ID: "pd",
@@ -68,18 +68,18 @@ func (suite *regionTestSuite) TearDownTest() {
 			},
 		}
 		data, err := json.Marshal([]placement.GroupBundle{def})
-		suite.NoError(err)
+		re.NoError(err)
 		urlPrefix := cluster.GetLeaderServer().GetAddr()
-		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(suite.Require()))
-		suite.NoError(err)
+		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(re))
+		re.NoError(err)
 		// clean stores
 		// TODO: cannot sync to scheduling server?
 		for _, store := range leader.GetStores() {
-			suite.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true))
-			suite.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
+			re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true))
+			re.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
 		}
-		suite.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
-		suite.Empty(leader.GetStores())
+		re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
+		re.Empty(leader.GetStores())
 	}
 	suite.env.RunFuncInTwoModes(cleanFunc)
 }
@@ -117,14 +117,14 @@ func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
 			NewRegionsID        []uint64 `json:"regions-id"`
 		}{}
 		err := json.Unmarshal(res, s)
-		suite.NoError(err)
-		suite.Equal(100, s.ProcessedPercentage)
-		suite.Equal([]uint64{newRegionID}, s.NewRegionsID)
+		re.NoError(err)
+		re.Equal(100, s.ProcessedPercentage)
+		re.Equal([]uint64{newRegionID}, s.NewRegionsID)
 	}
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/splitResponses", fmt.Sprintf("return(%v)", newRegionID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/splitResponses", fmt.Sprintf("return(%v)", newRegionID)))
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/split", urlPrefix), []byte(body), checkOpt)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/splitResponses"))
-	suite.NoError(err)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/splitResponses"))
+	re.NoError(err)
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
@@ -154,7 +154,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
 		tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	idList := leader.GetRaftCluster().GetSuspectRegions()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
@@ -190,7 +190,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 		hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", urlPrefix), []byte(body),
 		tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	idList := leader.GetRaftCluster().GetSuspectRegions()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
@@ -230,7 +230,7 @@ func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
 
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", urlPrefix), []byte(body), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	oc := leader.GetRaftCluster().GetOperatorController()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		oc = sche.GetCoordinator().GetOperatorController()
@@ -240,11 +240,11 @@ func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
 	op2 := oc.GetOperator(702)
 	op3 := oc.GetOperator(703)
 	// At least one operator used to scatter region
-	suite.True(op1 != nil || op2 != nil || op3 != nil)
+	re.True(op1 != nil || op2 != nil || op3 != nil)
 
 	body = `{"regions_id": [701, 702, 703]}`
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", urlPrefix), []byte(body), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
@@ -286,42 +286,42 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	// invalid url
 	url := fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix, "_", "t")
 	err := tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest))
-	suite.NoError(err)
+	re.NoError(err)
 
 	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix, hex.EncodeToString(r1.GetStartKey()), "_")
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// correct test
 	url = fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix, hex.EncodeToString(r1.GetStartKey()), hex.EncodeToString(r1.GetEndKey()))
 	err = tu.CheckGetJSON(testDialClient, url, nil, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// test one rule
 	data, err := json.Marshal(bundle)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	tu.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
 		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
 			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
-		suite.NoError(err)
+		re.NoError(err)
 		return len(respBundle) == 1 && respBundle[0].ID == "5"
 	})
 
 	tu.Eventually(re, func() bool {
 		err = tu.ReadGetJSON(re, testDialClient, url, &status)
-		suite.NoError(err)
+		re.NoError(err)
 		return status == "REPLICATED"
 	})
 
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/mockPending", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/handler/mockPending", "return(true)"))
 	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.Equal("PENDING", status)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/mockPending"))
+	re.NoError(err)
+	re.Equal("PENDING", status)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/handler/mockPending"))
 	// test multiple rules
 	r1 = core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 1})
@@ -331,21 +331,21 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		ID: "bar", Index: 1, Role: placement.Voter, Count: 1,
 	})
 	data, err = json.Marshal(bundle)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	tu.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
 		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
 			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
-		suite.NoError(err)
+		re.NoError(err)
 		return len(respBundle) == 1 && len(respBundle[0].Rules) == 2
 	})
 
 	tu.Eventually(re, func() bool {
 		err = tu.ReadGetJSON(re, testDialClient, url, &status)
-		suite.NoError(err)
+		re.NoError(err)
 		return status == "REPLICATED"
 	})
 
@@ -360,15 +360,15 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 		},
 	})
 	data, err = json.Marshal(bundle)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	tu.Eventually(re, func() bool {
 		respBundle := make([]placement.GroupBundle, 0)
 		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
 			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
-		suite.NoError(err)
+		re.NoError(err)
 		if len(respBundle) != 2 {
 			return false
 		}
@@ -379,7 +379,7 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	tu.Eventually(re, func() bool {
 		err = tu.ReadGetJSON(re, testDialClient, url, &status)
-		suite.NoError(err)
+		re.NoError(err)
 		return status == "INPROGRESS"
 	})
 
@@ -389,7 +389,7 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 
 	tu.Eventually(re, func() bool {
 		err = tu.ReadGetJSON(re, testDialClient, url, &status)
-		suite.NoError(err)
+		re.NoError(err)
 		return status == "REPLICATED"
 	})
 }

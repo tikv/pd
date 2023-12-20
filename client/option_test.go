@@ -31,7 +31,7 @@ func TestDynamicOptionChange(t *testing.T) {
 	re.Equal(defaultEnableFollowerHandle, o.getEnableFollowerHandle())
 
 	// Check the invalid value setting.
-	re.NotNil(o.setMaxTSOBatchWaitInterval(time.Second))
+	re.Error(o.setMaxTSOBatchWaitInterval(time.Second))
 	re.Equal(defaultMaxTSOBatchWaitInterval, o.getMaxTSOBatchWaitInterval())
 	expectInterval := time.Millisecond
 	o.setMaxTSOBatchWaitInterval(expectInterval)

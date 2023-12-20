@@ -129,7 +129,7 @@ func (suite *httpClientTestSuite) TestMeta() {
 		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
 	})
 	re.NoError(err)
-	re.Len(historyHorRegions.HistoryHotRegion, 0)
+	re.Empty(historyHorRegions.HistoryHotRegion)
 	store, err := suite.client.GetStores(suite.ctx)
 	re.NoError(err)
 	re.Equal(1, store.Count)
@@ -179,7 +179,7 @@ func (suite *httpClientTestSuite) TestRule() {
 	bundles, err := suite.client.GetAllPlacementRuleBundles(suite.ctx)
 	re.NoError(err)
 	re.Len(bundles, 1)
-	re.Equal(bundles[0].ID, placement.DefaultGroupID)
+	re.Equal(placement.DefaultGroupID, bundles[0].ID)
 	bundle, err := suite.client.GetPlacementRuleBundleByGroup(suite.ctx, placement.DefaultGroupID)
 	re.NoError(err)
 	re.Equal(bundles[0], bundle)
@@ -360,14 +360,14 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re := suite.Require()
 	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
 	suspectRegions := raftCluster.GetSuspectRegions()
-	re.Len(suspectRegions, 0)
+	re.Empty(suspectRegions)
 	err := suite.client.AccelerateSchedule(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a2")))
 	re.NoError(err)
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 1)
 	raftCluster.ClearSuspectRegions()
 	suspectRegions = raftCluster.GetSuspectRegions()
-	re.Len(suspectRegions, 0)
+	re.Empty(suspectRegions)
 	err = suite.client.AccelerateScheduleInBatch(suite.ctx, []*pd.KeyRange{
 		pd.NewKeyRange([]byte("a1"), []byte("a2")),
 		pd.NewKeyRange([]byte("a2"), []byte("a3")),
@@ -396,7 +396,7 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re := suite.Require()
 	schedulers, err := suite.client.GetSchedulers(suite.ctx)
 	re.NoError(err)
-	re.Len(schedulers, 0)
+	re.Empty(schedulers)
 
 	err = suite.client.CreateScheduler(suite.ctx, "evict-leader-scheduler", 1)
 	re.NoError(err)

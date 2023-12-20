@@ -113,35 +113,35 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
 	err := tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
-	suite.NoError(err)
+	re.NoError(err)
 	recordURL := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
 	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "add learner peer 1 on store 3"), tu.StringContain(re, "RUNNING"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "admin-add-peer {add peer: store [3]}"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "remove peer on store 2"), tu.StringContain(re, "RUNNING"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "admin-remove-peer {rm peer: store [2]}"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	tests.MustPutStore(re, cluster, &metapb.Store{
 		Id:            4,
@@ -150,27 +150,27 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 		LastHeartbeat: time.Now().UnixNano(),
 	})
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "add learner peer 2 on store 4"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// Fail to add peer to tombstone store.
 	err = cluster.GetLeaderServer().GetRaftCluster().RemoveStore(3, true)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusNotOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`), tu.StatusNotOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`), tu.StatusNotOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// Fail to get operator if from is latest.
 	time.Sleep(time.Second)
 	url := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
 	err = tu.CheckGetJSON(testDialClient, url, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
-	suite.NoError(err)
+	re.NoError(err)
 }
 
 func (suite *operatorTestSuite) TestMergeRegionOperator() {
@@ -214,18 +214,18 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	tu.CheckDelete(testDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	tu.CheckDelete(testDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`),
 		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
 		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
-	suite.NoError(err)
+	re.NoError(err)
 }
 
 func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
@@ -480,14 +480,14 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 				svr.GetRaftCluster().GetOpts().GetLocationLabels(),
 				svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
 			)
-			suite.NoError(err)
+			re.NoError(err)
 		}
 		if len(testCase.rules) > 0 {
 			// add customized rule first and then remove default rule
 			err := manager.SetRules(testCase.rules)
-			suite.NoError(err)
+			re.NoError(err)
 			err = manager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
-			suite.NoError(err)
+			re.NoError(err)
 		}
 		if testCase.expectedError == nil {
 			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input, tu.StatusOK(re))
@@ -495,16 +495,16 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input,
 				tu.StatusNotOK(re), tu.StringContain(re, testCase.expectedError.Error()))
 		}
-		suite.NoError(err)
+		re.NoError(err)
 		if len(testCase.expectSteps) > 0 {
 			err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 				tu.StatusOK(re), tu.StringContain(re, testCase.expectSteps))
-			suite.NoError(err)
+			re.NoError(err)
 			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 		} else {
 			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusNotOK(re))
 		}
-		suite.NoError(err)
+		re.NoError(err)
 	}
 }
 

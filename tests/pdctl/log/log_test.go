@@ -64,6 +64,7 @@ func (suite *logTestSuite) TearDownSuite() {
 }
 
 func (suite *logTestSuite) TestLog() {
+	re := suite.Require()
 	cmd := pdctlCmd.GetRootCmd()
 	var testCases = []struct {
 		cmd    []string
@@ -94,12 +95,13 @@ func (suite *logTestSuite) TestLog() {
 
 	for _, testCase := range testCases {
 		_, err := pdctl.ExecuteCommand(cmd, testCase.cmd...)
-		suite.NoError(err)
-		suite.Equal(testCase.expect, suite.cluster.GetLeaderServer().GetConfig().Log.Level)
+		re.NoError(err)
+		re.Equal(testCase.expect, suite.cluster.GetLeaderServer().GetConfig().Log.Level)
 	}
 }
 
 func (suite *logTestSuite) TestInstanceLog() {
+	re := suite.Require()
 	cmd := pdctlCmd.GetRootCmd()
 	var testCases = []struct {
 		cmd      []string
@@ -126,11 +128,11 @@ func (suite *logTestSuite) TestInstanceLog() {
 
 	for _, testCase := range testCases {
 		_, err := pdctl.ExecuteCommand(cmd, testCase.cmd...)
-		suite.NoError(err)
+		re.NoError(err)
 		svrs := suite.cluster.GetServers()
 		for _, svr := range svrs {
 			if svr.GetAddr() == testCase.instance {
-				suite.Equal(testCase.expect, svr.GetConfig().Log.Level)
+				re.Equal(testCase.expect, svr.GetConfig().Log.Level)
 			}
 		}
 	}

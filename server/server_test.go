@@ -53,6 +53,7 @@ func TestLeaderServerTestSuite(t *testing.T) {
 }
 
 func (suite *leaderServerTestSuite) SetupSuite() {
+	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.svrs = make(map[string]*Server)
 
@@ -65,9 +66,9 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 		go func() {
 			mockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
 			svr, err := CreateServer(suite.ctx, cfg, nil, mockHandler)
-			suite.NoError(err)
+			re.NoError(err)
 			err = svr.Run()
-			suite.NoError(err)
+			re.NoError(err)
 			ch <- svr
 		}()
 	}
@@ -87,7 +88,11 @@ func (suite *leaderServerTestSuite) TearDownSuite() {
 	}
 }
 
-func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, cfgs []*config.Config) ([]*Server, testutil.CleanupFunc) {
+func (suite *leaderServerTestSuite) newTestServersWithCfgs(
+	ctx context.Context,
+	cfgs []*config.Config,
+	re *require.Assertions,
+) ([]*Server, testutil.CleanupFunc) {
 	svrs := make([]*Server, 0, len(cfgs))
 
 	ch := make(chan *Server)
@@ -104,16 +109,16 @@ func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, 
 					ch <- svr
 				}
 			}()
-			suite.NoError(err)
+			re.NoError(err)
 			err = svr.Run()
-			suite.NoError(err)
+			re.NoError(err)
 			failed = false
 		}(cfg)
 	}
 
 	for i := 0; i < len(cfgs); i++ {
 		svr := <-ch
-		suite.NotNil(svr)
+		re.NotNil(svr)
 		svrs = append(svrs, svr)
 	}
 	MustWaitLeader(suite.Require(), svrs)
@@ -131,6 +136,7 @@ func (suite *leaderServerTestSuite) newTestServersWithCfgs(ctx context.Context, 
 }
 
 func (suite *leaderServerTestSuite) TestCheckClusterID() {
+	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(suite.Require()), 2)
@@ -146,7 +152,7 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 
 	cfgA, cfgB := cfgs[0], cfgs[1]
 	// Start a standalone cluster.
-	svrsA, cleanA := suite.newTestServersWithCfgs(ctx, []*config.Config{cfgA})
+	svrsA, cleanA := suite.newTestServersWithCfgs(ctx, []*config.Config{cfgA}, re)
 	defer cleanA()
 	// Close it.
 	for _, svr := range svrsA {
@@ -154,142 +160,146 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 	}
 
 	// Start another cluster.
-	_, cleanB := suite.newTestServersWithCfgs(ctx, []*config.Config{cfgB})
+	_, cleanB := suite.newTestServersWithCfgs(ctx, []*config.Config{cfgB}, re)
 	defer cleanB()
 
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
 	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
 	svr, err := CreateServer(ctx, cfgA, nil, mockHandler)
-	suite.NoError(err)
+	re.NoError(err)
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)
-	suite.NoError(err)
+	re.NoError(err)
 	urlsMap, err := types.NewURLsMap(svr.cfg.InitialCluster)
-	suite.NoError(err)
+	re.NoError(err)
 	tlsConfig, err := svr.cfg.Security.ToTLSConfig()
-	suite.NoError(err)
+	re.NoError(err)
 	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
-	suite.Error(err)
+	re.Error(err)
 	etcd.Close()
 	testutil.CleanServer(cfgA.DataDir)
 }
 
 func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
+	re := suite.Require()
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.1")
 	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = CreateServer(ctx, cfg, nil, mockHandler, mockHandler)
 	// Repeat register.
-	suite.Error(err)
+	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
 	err = svr.Run()
-	suite.NoError(err)
+	re.NoError(err)
 	resp, err := http.Get(fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()))
-	suite.NoError(err)
-	suite.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 	bodyString := string(bodyBytes)
-	suite.Equal("Hello World\n", bodyString)
+	re.Equal("Hello World\n", bodyString)
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
+	re := suite.Require()
 	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = CreateServer(ctx, cfg, nil, mockHandler, mockHandler)
 	// Repeat register.
-	suite.Error(err)
+	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
 	err = svr.Run()
-	suite.NoError(err)
+	re.NoError(err)
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), http.NoBody)
-	suite.NoError(err)
+	re.NoError(err)
 	req.Header.Add(apiutil.XForwardedForHeader, "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
-	suite.NoError(err)
-	suite.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 	bodyString := string(bodyBytes)
-	suite.Equal("Hello World\n", bodyString)
+	re.Equal("Hello World\n", bodyString)
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
+	re := suite.Require()
 	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = CreateServer(ctx, cfg, nil, mockHandler, mockHandler)
 	// Repeat register.
-	suite.Error(err)
+	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
 	err = svr.Run()
-	suite.NoError(err)
+	re.NoError(err)
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), http.NoBody)
-	suite.NoError(err)
+	re.NoError(err)
 	req.Header.Add(apiutil.XRealIPHeader, "127.0.0.2")
 	resp, err := http.DefaultClient.Do(req)
-	suite.NoError(err)
-	suite.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 	bodyString := string(bodyBytes)
-	suite.Equal("Hello World\n", bodyString)
+	re.Equal("Hello World\n", bodyString)
 }
 
 func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
+	re := suite.Require()
 	mockHandler := CreateMockHandler(suite.Require(), "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(suite.Require()))
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = CreateServer(ctx, cfg, nil, mockHandler, mockHandler)
 	// Repeat register.
-	suite.Error(err)
+	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}()
 	err = svr.Run()
-	suite.NoError(err)
+	re.NoError(err)
 
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), http.NoBody)
-	suite.NoError(err)
+	re.NoError(err)
 	req.Header.Add(apiutil.XForwardedForHeader, "127.0.0.2")
 	req.Header.Add(apiutil.XRealIPHeader, "127.0.0.3")
 	resp, err := http.DefaultClient.Do(req)
-	suite.NoError(err)
-	suite.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
 	bodyBytes, err := io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 	bodyString := string(bodyBytes)
-	suite.Equal("Hello World\n", bodyString)
+	re.Equal("Hello World\n", bodyString)
 }
 
 func TestAPIService(t *testing.T) {
