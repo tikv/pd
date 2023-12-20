@@ -196,7 +196,7 @@ func TestRetrieveCPUMetrics(t *testing.T) {
 			for i := 0; i < len(addresses)-1; i++ {
 				value, ok := result[addresses[i]]
 				re.True(ok)
-				re.True(math.Abs(value-mockResultValue) < 1e-6)
+				re.Less(math.Abs(value-mockResultValue), 1e-6)
 			}
 
 			_, ok := result[addresses[len(addresses)-1]]

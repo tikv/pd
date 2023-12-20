@@ -161,11 +161,11 @@ func TestSaveLoad(t *testing.T) {
 	err := m2.Initialize(3, []string{"no", "labels"}, "")
 	re.NoError(err)
 	re.Len(m2.GetAllRules(), 3)
-	re.Equal(rules[0].String(), m2.GetRule(DefaultGroupID, DefaultRuleID).String())
-	re.Equal(rules[1].String(), m2.GetRule("foo", "baz").String())
-	re.Equal(rules[2].String(), m2.GetRule("foo", "bar").String())
-	re.Equal(manager.GetRulesCount(), 3)
-	re.Equal(manager.GetGroupsCount(), 2)
+	re.Equal(m2.GetRule(DefaultGroupID, DefaultRuleID).String(), rules[0].String())
+	re.Equal(m2.GetRule("foo", "baz").String(), rules[1].String())
+	re.Equal(m2.GetRule("foo", "bar").String(), rules[2].String())
+	re.Equal(3, manager.GetRulesCount())
+	re.Equal(2, manager.GetGroupsCount())
 }
 
 func TestSetAfterGet(t *testing.T) {

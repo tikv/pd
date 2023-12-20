@@ -350,7 +350,7 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 		// prevent store from being disconnected
 		tc.SetStoreLastHeartbeatInterval(i, 40*time.Minute)
 	}
-	re.Equal(tc.GetStore(uint64(6)).IsDisconnected(), true)
+	re.True(tc.GetStore(uint64(6)).IsDisconnected())
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddSuspectRegions)
 	var wg sync.WaitGroup
 	for j := 0; j < 10; j++ {
@@ -466,7 +466,7 @@ func TestScatterForManyRegion(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
 	scatterer.scatterRegions(regions, failures, group, 3, false)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
-	re.Len(failures, 0)
+	re.Empty(failures)
 }
 
 func TestScattersGroup(t *testing.T) {

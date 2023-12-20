@@ -100,7 +100,7 @@ func checkLabelRule(re *require.Assertions, id uint32, regionLabeler *labeler.Re
 
 	rangeRule, ok := loadedLabel.Data.([]*labeler.KeyRangeRule)
 	re.True(ok)
-	re.Equal(2, len(rangeRule))
+	re.Len(rangeRule, 2)
 
 	keyspaceIDBytes := make([]byte, 4)
 	nextKeyspaceIDBytes := make([]byte, 4)
