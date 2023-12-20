@@ -368,11 +368,11 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *tests.TestCluster) {
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &hotRegion))
 		re.NotNil(hotRegion.AsPeer[1])
-		re.Equal(hotRegion.AsPeer[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
+		re.Zero(hotRegion.AsPeer[1].Count)
+		re.Zero(hotRegion.AsPeer[1].TotalBytesRate)
 		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
-		re.Equal(hotRegion.AsLeader[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
+		re.Zero(hotRegion.AsLeader[1].Count)
+		re.Zero(hotRegion.AsLeader[1].TotalBytesRate)
 		re.Equal(load, hotRegion.AsLeader[1].StoreByteRate)
 	}
 	{
@@ -381,12 +381,12 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *tests.TestCluster) {
 		hotRegion := statistics.StoreHotPeersInfos{}
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &hotRegion))
-		re.Equal(0, hotRegion.AsPeer[1].Count)
-		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
+		re.Zero(hotRegion.AsPeer[1].Count)
+		re.Zero(hotRegion.AsPeer[1].TotalBytesRate)
 		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
-		re.Equal(0, hotRegion.AsLeader[1].Count)
-		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
-		re.Equal(0.0, hotRegion.AsLeader[1].StoreByteRate) // write leader sum
+		re.Zero(hotRegion.AsLeader[1].Count)
+		re.Zero(hotRegion.AsLeader[1].TotalBytesRate)
+		re.Zero(hotRegion.AsLeader[1].StoreByteRate) // write leader sum
 	}
 }
 

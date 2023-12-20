@@ -172,7 +172,7 @@ install-tools:
 
 #### Static checks ####
 
-check: install-tools tidy static generate-errdoc check-test
+check: install-tools tidy static generate-errdoc
 
 static: install-tools
 	@ echo "gofmt ..."
@@ -199,11 +199,7 @@ check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
-check-test:
-	@echo "checking test..."
-	./scripts/check-test.sh
-
-.PHONY: check static tidy generate-errdoc check-plugin check-test
+.PHONY: check static tidy generate-errdoc check-plugin
 
 #### Test utils ####
 
