@@ -111,7 +111,7 @@ func TestRollingPolicy_AddWithTimespan(t *testing.T) {
 			t.Logf("%+v", bkt)
 		}
 
-		re.Equal(0, len(policy.window.buckets[0].Points))
+		re.Empty(policy.window.buckets[0].Points)
 		re.Equal(4, int(policy.window.buckets[1].Points[0]))
 		re.Equal(2, int(policy.window.buckets[2].Points[0]))
 	})
@@ -137,8 +137,8 @@ func TestRollingPolicy_AddWithTimespan(t *testing.T) {
 			t.Logf("%+v", bkt)
 		}
 
-		re.Equal(0, len(policy.window.buckets[0].Points))
+		re.Zero(len(policy.window.buckets[0].Points))
 		re.Equal(4, int(policy.window.buckets[1].Points[0]))
-		re.Equal(0, len(policy.window.buckets[2].Points))
+		re.Zero(len(policy.window.buckets[2].Points))
 	})
 }

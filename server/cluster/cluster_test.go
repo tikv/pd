@@ -179,10 +179,10 @@ func TestStoreHeartbeat(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(utils.Read, 0)
 	re.Empty(storeStats[1])
-	re.Nil(cluster.HandleStoreHeartbeat(hotReq, hotResp))
+	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
 	storeStats = cluster.hotStat.RegionStats(utils.Read, 1)
-	re.Len(storeStats[1], 0)
+	re.Empty(storeStats[1])
 	storeStats = cluster.hotStat.RegionStats(utils.Read, 3)
 	re.Empty(storeStats[1])
 	// after 2 hot heartbeats, wo can find region 1 peer again
@@ -2239,7 +2239,7 @@ func checkRegions(re *require.Assertions, cache *core.BasicCluster, regions []*c
 		}
 	}
 
-	re.Equal(len(regions), cache.GetTotalRegionCount())
+	re.Len(regions, cache.GetTotalRegionCount())
 	for id, count := range regionCount {
 		re.Equal(count, cache.GetStoreRegionCount(id))
 	}
@@ -2744,7 +2744,7 @@ func TestMergeRegionCancelOneOperator(t *testing.T) {
 	re.Len(ops, co.GetOperatorController().AddWaitingOperator(ops...))
 	// Cancel source operator.
 	co.GetOperatorController().RemoveOperator(co.GetOperatorController().GetOperator(source.GetID()))
-	re.Len(co.GetOperatorController().GetOperators(), 0)
+	re.Empty(co.GetOperatorController().GetOperators())
 
 	// Cancel target region.
 	ops, err = operator.CreateMergeRegionOperator("merge-region", tc, source, target, operator.OpMerge)
@@ -2752,7 +2752,7 @@ func TestMergeRegionCancelOneOperator(t *testing.T) {
 	re.Len(ops, co.GetOperatorController().AddWaitingOperator(ops...))
 	// Cancel target operator.
 	co.GetOperatorController().RemoveOperator(co.GetOperatorController().GetOperator(target.GetID()))
-	re.Len(co.GetOperatorController().GetOperators(), 0)
+	re.Empty(co.GetOperatorController().GetOperators())
 }
 
 func TestReplica(t *testing.T) {
@@ -3047,8 +3047,8 @@ func TestAddScheduler(t *testing.T) {
 	re.Equal(4, int(batch))
 	gls, err := schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"0"}), controller.RemoveScheduler)
 	re.NoError(err)
-	re.NotNil(controller.AddScheduler(gls))
-	re.NotNil(controller.RemoveScheduler(gls.GetName()))
+	re.Error(controller.AddScheduler(gls))
+	re.Error(controller.RemoveScheduler(gls.GetName()))
 
 	gls, err = schedulers.CreateScheduler(schedulers.GrantLeaderType, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(schedulers.GrantLeaderType, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
@@ -3445,7 +3445,7 @@ func TestStoreOverloaded(t *testing.T) {
 	time.Sleep(time.Second)
 	for i := 0; i < 100; i++ {
 		ops, _ := lb.Schedule(tc, false /* dryRun */)
-		re.Greater(len(ops), 0)
+		re.NotEmpty(ops)
 	}
 }
 
@@ -3480,7 +3480,7 @@ func TestStoreOverloadedWithReplace(t *testing.T) {
 	// sleep 2 seconds to make sure that token is filled up
 	time.Sleep(2 * time.Second)
 	ops, _ = lb.Schedule(tc, false /* dryRun */)
-	re.Greater(len(ops), 0)
+	re.NotEmpty(ops)
 }
 
 func TestDownStoreLimit(t *testing.T) {

@@ -62,21 +62,22 @@ func (suite *operatorBuilderTestSuite) TearDownTest() {
 }
 
 func (suite *operatorBuilderTestSuite) TestNewBuilder() {
+	re := suite.Require()
 	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2, Role: metapb.PeerRole_Learner}}
 	region := core.NewRegionInfo(&metapb.Region{Id: 42, Peers: peers}, peers[0])
 	builder := NewBuilder("test", suite.cluster, region)
-	suite.NoError(builder.err)
-	suite.Len(builder.originPeers, 2)
-	suite.Equal(peers[0], builder.originPeers[1])
-	suite.Equal(peers[1], builder.originPeers[2])
-	suite.Equal(uint64(1), builder.originLeaderStoreID)
-	suite.Len(builder.targetPeers, 2)
-	suite.Equal(peers[0], builder.targetPeers[1])
-	suite.Equal(peers[1], builder.targetPeers[2])
+	re.NoError(builder.err)
+	re.Len(builder.originPeers, 2)
+	re.Equal(peers[0], builder.originPeers[1])
+	re.Equal(peers[1], builder.originPeers[2])
+	re.Equal(uint64(1), builder.originLeaderStoreID)
+	re.Len(builder.targetPeers, 2)
+	re.Equal(peers[0], builder.targetPeers[1])
+	re.Equal(peers[1], builder.targetPeers[2])
 
 	region = region.Clone(core.WithLeader(nil))
 	builder = NewBuilder("test", suite.cluster, region)
-	suite.Error(builder.err)
+	re.Error(builder.err)
 }
 
 func (suite *operatorBuilderTestSuite) newBuilder() *Builder {
@@ -90,18 +91,19 @@ func (suite *operatorBuilderTestSuite) newBuilder() *Builder {
 }
 
 func (suite *operatorBuilderTestSuite) TestRecord() {
-	suite.Error(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 1}).err)
-	suite.NoError(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4}).err)
-	suite.Error(suite.newBuilder().PromoteLearner(1).err)
-	suite.NoError(suite.newBuilder().PromoteLearner(3).err)
-	suite.NoError(suite.newBuilder().SetLeader(1).SetLeader(2).err)
-	suite.Error(suite.newBuilder().SetLeader(3).err)
-	suite.Error(suite.newBuilder().RemovePeer(4).err)
-	suite.NoError(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, Role: metapb.PeerRole_Learner}).RemovePeer(4).err)
-	suite.Error(suite.newBuilder().SetLeader(2).RemovePeer(2).err)
-	suite.Error(suite.newBuilder().PromoteLearner(4).err)
-	suite.Error(suite.newBuilder().SetLeader(4).err)
-	suite.Error(suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{2: {Id: 2}}).err)
+	re := suite.Require()
+	re.Error(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 1}).err)
+	re.NoError(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4}).err)
+	re.Error(suite.newBuilder().PromoteLearner(1).err)
+	re.NoError(suite.newBuilder().PromoteLearner(3).err)
+	re.NoError(suite.newBuilder().SetLeader(1).SetLeader(2).err)
+	re.Error(suite.newBuilder().SetLeader(3).err)
+	re.Error(suite.newBuilder().RemovePeer(4).err)
+	re.NoError(suite.newBuilder().AddPeer(&metapb.Peer{StoreId: 4, Role: metapb.PeerRole_Learner}).RemovePeer(4).err)
+	re.Error(suite.newBuilder().SetLeader(2).RemovePeer(2).err)
+	re.Error(suite.newBuilder().PromoteLearner(4).err)
+	re.Error(suite.newBuilder().SetLeader(4).err)
+	re.Error(suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{2: {Id: 2}}).err)
 
 	m := map[uint64]*metapb.Peer{
 		2: {StoreId: 2},
@@ -109,18 +111,19 @@ func (suite *operatorBuilderTestSuite) TestRecord() {
 		4: {StoreId: 4},
 	}
 	builder := suite.newBuilder().SetPeers(m).SetAddLightPeer()
-	suite.Len(builder.targetPeers, 3)
-	suite.Equal(m[2], builder.targetPeers[2])
-	suite.Equal(m[3], builder.targetPeers[3])
-	suite.Equal(m[4], builder.targetPeers[4])
-	suite.Equal(uint64(0), builder.targetLeaderStoreID)
-	suite.True(builder.addLightPeer)
+	re.Len(builder.targetPeers, 3)
+	re.Equal(m[2], builder.targetPeers[2])
+	re.Equal(m[3], builder.targetPeers[3])
+	re.Equal(m[4], builder.targetPeers[4])
+	re.Equal(uint64(0), builder.targetLeaderStoreID)
+	re.True(builder.addLightPeer)
 }
 
 func (suite *operatorBuilderTestSuite) TestPrepareBuild() {
+	re := suite.Require()
 	// no voter.
 	_, err := suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{4: {StoreId: 4, Role: metapb.PeerRole_Learner}}).prepareBuild()
-	suite.Error(err)
+	re.Error(err)
 
 	// use joint consensus
 	builder := suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{
@@ -130,19 +133,19 @@ func (suite *operatorBuilderTestSuite) TestPrepareBuild() {
 		5: {StoreId: 5, Role: metapb.PeerRole_Learner},
 	})
 	_, err = builder.prepareBuild()
-	suite.NoError(err)
-	suite.Len(builder.toAdd, 2)
-	suite.NotEqual(metapb.PeerRole_Learner, builder.toAdd[4].GetRole())
-	suite.Equal(uint64(14), builder.toAdd[4].GetId())
-	suite.Equal(metapb.PeerRole_Learner, builder.toAdd[5].GetRole())
-	suite.NotEqual(uint64(0), builder.toAdd[5].GetId())
-	suite.Len(builder.toRemove, 1)
-	suite.NotNil(builder.toRemove[2])
-	suite.Len(builder.toPromote, 1)
-	suite.NotNil(builder.toPromote[3])
-	suite.Len(builder.toDemote, 1)
-	suite.NotNil(builder.toDemote[1])
-	suite.Equal(uint64(1), builder.currentLeaderStoreID)
+	re.NoError(err)
+	re.Len(builder.toAdd, 2)
+	re.NotEqual(metapb.PeerRole_Learner, builder.toAdd[4].GetRole())
+	re.Equal(uint64(14), builder.toAdd[4].GetId())
+	re.Equal(metapb.PeerRole_Learner, builder.toAdd[5].GetRole())
+	re.NotEqual(uint64(0), builder.toAdd[5].GetId())
+	re.Len(builder.toRemove, 1)
+	re.NotNil(builder.toRemove[2])
+	re.Len(builder.toPromote, 1)
+	re.NotNil(builder.toPromote[3])
+	re.Len(builder.toDemote, 1)
+	re.NotNil(builder.toDemote[1])
+	re.Equal(uint64(1), builder.currentLeaderStoreID)
 
 	// do not use joint consensus
 	builder = suite.newBuilder().SetPeers(map[uint64]*metapb.Peer{
@@ -154,22 +157,23 @@ func (suite *operatorBuilderTestSuite) TestPrepareBuild() {
 	})
 	builder.useJointConsensus = false
 	_, err = builder.prepareBuild()
-	suite.NoError(err)
-	suite.Len(builder.toAdd, 3)
-	suite.Equal(metapb.PeerRole_Learner, builder.toAdd[1].GetRole())
-	suite.NotEqual(uint64(0), builder.toAdd[1].GetId())
-	suite.NotEqual(metapb.PeerRole_Learner, builder.toAdd[4].GetRole())
-	suite.Equal(uint64(14), builder.toAdd[4].GetId())
-	suite.Equal(metapb.PeerRole_Learner, builder.toAdd[5].GetRole())
-	suite.NotEqual(uint64(0), builder.toAdd[5].GetId())
-	suite.Len(builder.toRemove, 1)
-	suite.NotNil(builder.toRemove[1])
-	suite.Len(builder.toPromote, 1)
-	suite.NotNil(builder.toPromote[3])
-	suite.Equal(uint64(1), builder.currentLeaderStoreID)
+	re.NoError(err)
+	re.Len(builder.toAdd, 3)
+	re.Equal(metapb.PeerRole_Learner, builder.toAdd[1].GetRole())
+	re.NotEqual(uint64(0), builder.toAdd[1].GetId())
+	re.NotEqual(metapb.PeerRole_Learner, builder.toAdd[4].GetRole())
+	re.Equal(uint64(14), builder.toAdd[4].GetId())
+	re.Equal(metapb.PeerRole_Learner, builder.toAdd[5].GetRole())
+	re.NotEqual(uint64(0), builder.toAdd[5].GetId())
+	re.Len(builder.toRemove, 1)
+	re.NotNil(builder.toRemove[1])
+	re.Len(builder.toPromote, 1)
+	re.NotNil(builder.toPromote[3])
+	re.Equal(uint64(1), builder.currentLeaderStoreID)
 }
 
 func (suite *operatorBuilderTestSuite) TestBuild() {
+	re := suite.Require()
 	type testCase struct {
 		name              string
 		useJointConsensus bool
@@ -545,42 +549,42 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 		builder.SetPeers(m).SetLeader(testCase.targetPeers[0].GetStoreId())
 		op, err := builder.Build(0)
 		if len(testCase.steps) == 0 {
-			suite.Error(err)
+			re.Error(err)
 			continue
 		}
-		suite.NoError(err)
-		suite.Equal(testCase.kind, op.Kind())
-		suite.Len(testCase.steps, op.Len())
+		re.NoError(err)
+		re.Equal(testCase.kind, op.Kind())
+		re.Len(testCase.steps, op.Len())
 		for i := 0; i < op.Len(); i++ {
 			switch step := op.Step(i).(type) {
 			case TransferLeader:
-				suite.Equal(testCase.steps[i].(TransferLeader).FromStore, step.FromStore)
-				suite.Equal(testCase.steps[i].(TransferLeader).ToStore, step.ToStore)
+				re.Equal(testCase.steps[i].(TransferLeader).FromStore, step.FromStore)
+				re.Equal(testCase.steps[i].(TransferLeader).ToStore, step.ToStore)
 			case AddPeer:
-				suite.Equal(testCase.steps[i].(AddPeer).ToStore, step.ToStore)
+				re.Equal(testCase.steps[i].(AddPeer).ToStore, step.ToStore)
 			case RemovePeer:
-				suite.Equal(testCase.steps[i].(RemovePeer).FromStore, step.FromStore)
+				re.Equal(testCase.steps[i].(RemovePeer).FromStore, step.FromStore)
 			case AddLearner:
-				suite.Equal(testCase.steps[i].(AddLearner).ToStore, step.ToStore)
+				re.Equal(testCase.steps[i].(AddLearner).ToStore, step.ToStore)
 			case PromoteLearner:
-				suite.Equal(testCase.steps[i].(PromoteLearner).ToStore, step.ToStore)
+				re.Equal(testCase.steps[i].(PromoteLearner).ToStore, step.ToStore)
 			case ChangePeerV2Enter:
-				suite.Len(step.PromoteLearners, len(testCase.steps[i].(ChangePeerV2Enter).PromoteLearners))
-				suite.Len(step.DemoteVoters, len(testCase.steps[i].(ChangePeerV2Enter).DemoteVoters))
+				re.Len(step.PromoteLearners, len(testCase.steps[i].(ChangePeerV2Enter).PromoteLearners))
+				re.Len(step.DemoteVoters, len(testCase.steps[i].(ChangePeerV2Enter).DemoteVoters))
 				for j, p := range testCase.steps[i].(ChangePeerV2Enter).PromoteLearners {
-					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
+					re.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
 				}
 				for j, d := range testCase.steps[i].(ChangePeerV2Enter).DemoteVoters {
-					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
+					re.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
 				}
 			case ChangePeerV2Leave:
-				suite.Len(step.PromoteLearners, len(testCase.steps[i].(ChangePeerV2Leave).PromoteLearners))
-				suite.Len(step.DemoteVoters, len(testCase.steps[i].(ChangePeerV2Leave).DemoteVoters))
+				re.Len(step.PromoteLearners, len(testCase.steps[i].(ChangePeerV2Leave).PromoteLearners))
+				re.Len(step.DemoteVoters, len(testCase.steps[i].(ChangePeerV2Leave).DemoteVoters))
 				for j, p := range testCase.steps[i].(ChangePeerV2Leave).PromoteLearners {
-					suite.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
+					re.Equal(p.ToStore, step.PromoteLearners[j].ToStore)
 				}
 				for j, d := range testCase.steps[i].(ChangePeerV2Leave).DemoteVoters {
-					suite.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
+					re.Equal(d.ToStore, step.DemoteVoters[j].ToStore)
 				}
 			}
 		}
@@ -588,26 +592,27 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 }
 
 func (suite *operatorBuilderTestSuite) TestTargetUnhealthyPeer() {
+	re := suite.Require()
 	p := &metapb.Peer{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}
 	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
 	builder := NewBuilder("test", suite.cluster, region)
 	builder.PromoteLearner(2)
-	suite.Error(builder.err)
+	re.Error(builder.err)
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.PromoteLearner(2)
-	suite.Error(builder.err)
+	re.Error(builder.err)
 	p = &metapb.Peer{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.SetLeader(2)
-	suite.Error(builder.err)
+	re.Error(builder.err)
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
 		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.SetLeader(2)
-	suite.Error(builder.err)
+	re.Error(builder.err)
 }

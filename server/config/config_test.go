@@ -492,7 +492,7 @@ func TestRateLimitClone(t *testing.T) {
 		ConcurrencyLimit: 200,
 	}
 	dc := cfg.LimiterConfig["test"]
-	re.Equal(dc.ConcurrencyLimit, uint64(0))
+	re.Zero(dc.ConcurrencyLimit)
 
 	gCfg := &GRPCRateLimitConfig{
 		EnableRateLimit: defaultEnableGRPCRateLimitMiddleware,
@@ -503,5 +503,5 @@ func TestRateLimitClone(t *testing.T) {
 		ConcurrencyLimit: 300,
 	}
 	gdc := gCfg.LimiterConfig["test"]
-	re.Equal(gdc.ConcurrencyLimit, uint64(0))
+	re.Zero(gdc.ConcurrencyLimit)
 }

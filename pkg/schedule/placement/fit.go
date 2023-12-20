@@ -93,6 +93,15 @@ func (f *RegionFit) IsSatisfied() bool {
 	return len(f.OrphanPeers) == 0
 }
 
+// ExtraCount return the extra count.
+func (f *RegionFit) ExtraCount() int {
+	desired := 0
+	for _, r := range f.RuleFits {
+		desired += r.Rule.Count
+	}
+	return len(f.regionStores) - desired
+}
+
 // GetRuleFit returns the RuleFit that contains the peer.
 func (f *RegionFit) GetRuleFit(peerID uint64) *RuleFit {
 	for _, rf := range f.RuleFits {

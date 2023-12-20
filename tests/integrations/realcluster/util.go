@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package realtiup
+package realcluster
 
 import (
 	"time"
@@ -24,7 +24,7 @@ const physicalShiftBits = 18
 
 var (
 	pdAddrs   = []string{"127.0.0.1:2379"}
-	pdHTTPCli = http.NewClient("pd-realtiup-test", pdAddrs)
+	pdHTTPCli = http.NewClient("pd-real-cluster-test", pdAddrs)
 )
 
 // GetTimeFromTS extracts time.Time from a timestamp.
