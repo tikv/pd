@@ -506,6 +506,7 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 		}
 	}
 
+	extra := fit.ExtraCount()
 	// If hasUnhealthyFit is true, try to remove unhealthy orphan peers only if number of OrphanPeers is >= 2.
 	// Ref https://github.com/tikv/pd/issues/4045
 	if len(fit.OrphanPeers) >= 2 {
@@ -522,7 +523,8 @@ func (c *RuleChecker) fixOrphanPeers(region *core.RegionInfo, fit *placement.Reg
 				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 				return operator.CreateRemovePeerOperator("remove-unhealthy-orphan-peer", c.cluster, 0, region, orphanPeer.StoreId)
 			}
-			if hasHealthPeer {
+			// The healthy orphan peer can be removed to keep the high availability only if the peer count is greater than the rule requirement.
+			if hasHealthPeer && extra > 0 {
 				// there already exists a healthy orphan peer, so we can remove other orphan Peers.
 				checkerCounter.WithLabelValues("rule_checker", "remove-orphan-peer").Inc()
 				// if there exists a disconnected orphan peer, we will pick it to remove firstly.
