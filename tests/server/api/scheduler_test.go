@@ -74,7 +74,7 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
 		}
-		tests.MustPutStore(suite.Require(), cluster, store)
+		tests.MustPutStore(re, cluster, store)
 	}
 
 	input := make(map[string]interface{})
@@ -142,7 +142,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
 		}
-		tests.MustPutStore(suite.Require(), cluster, store)
+		tests.MustPutStore(re, cluster, store)
 	}
 
 	type arg struct {
@@ -596,7 +596,7 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
 		}
-		tests.MustPutStore(suite.Require(), cluster, store)
+		tests.MustPutStore(re, cluster, store)
 	}
 
 	name := "shuffle-leader-scheduler"
@@ -704,7 +704,7 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
 		}
-		tests.MustPutStore(suite.Require(), cluster, store)
+		tests.MustPutStore(re, cluster, store)
 	}
 	for _, query := range []string{"", "?status=paused", "?status=disabled"} {
 		schedulers := make([]string, 0)

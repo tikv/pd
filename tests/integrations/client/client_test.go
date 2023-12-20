@@ -1040,7 +1040,7 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 	}
 	time.Sleep(500 * time.Millisecond)
 	for i := 0; i < 20; i++ {
-		testutil.Eventually(suite.Require(), func() bool {
+		testutil.Eventually(re, func() bool {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			re.NoError(err)
 			if i > 0 && i < regionLen {
@@ -1079,7 +1079,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 	}
 
 	// Wait for region heartbeats.
-	testutil.Eventually(suite.Require(), func() bool {
+	testutil.Eventually(re, func() bool {
 		scanRegions, err := suite.client.ScanRegions(context.Background(), []byte{0}, nil, 10)
 		return err == nil && len(scanRegions) == 10
 	})
@@ -1148,7 +1148,7 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 	err := suite.regionHeartbeat.Send(req)
 	re.NoError(err)
 
-	testutil.Eventually(suite.Require(), func() bool {
+	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegionByID(context.Background(), regionID)
 		re.NoError(err)
 		if r == nil {

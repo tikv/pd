@@ -93,7 +93,7 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	re.NoError(err)
 	re.Equal(list, listResp)
 
-	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(suite.Require()))
+	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
 	left, err := storage.LoadAllServiceGCSafePoints()

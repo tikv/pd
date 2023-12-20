@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -69,7 +70,7 @@ func (suite *operatorTestSuite) TestAddRemovePeer() {
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(cluster)
+	suite.pauseRuleChecker(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -204,7 +205,7 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	suite.pauseRuleChecker(cluster)
+	suite.pauseRuleChecker(re, cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
@@ -240,7 +241,7 @@ func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(cluster)
+	suite.pauseRuleChecker(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -509,8 +510,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 }
 
 // pauseRuleChecker will pause rule checker to avoid unexpected operator.
-func (suite *operatorTestSuite) pauseRuleChecker(cluster *tests.TestCluster) {
-	re := suite.Require()
+func (suite *operatorTestSuite) pauseRuleChecker(re *require.Assertions, cluster *tests.TestCluster) {
 	checkerName := "rule"
 	addr := cluster.GetLeaderServer().GetAddr()
 	resp := make(map[string]interface{})

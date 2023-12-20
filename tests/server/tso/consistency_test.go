@@ -134,7 +134,7 @@ func (suite *tsoConsistencyTestSuite) getTimestampByDC(ctx context.Context, clus
 	re.NoError(tsoClient.Send(req))
 	resp, err := tsoClient.Recv()
 	re.NoError(err)
-	return checkAndReturnTimestampResponse(suite.Require(), req, resp)
+	return checkAndReturnTimestampResponse(re, req, resp)
 }
 
 func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
@@ -216,7 +216,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSO() {
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
 
-	cluster.WaitAllLeaders(suite.Require(), dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 	suite.testTSO(cluster, dcLocationConfig, nil)
 }
 

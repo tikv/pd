@@ -92,7 +92,7 @@ func (suite *configTestSuite) TearDownTest() {
 		leader := cluster.GetLeaderServer()
 		re.NotNil(leader)
 		urlPrefix := leader.GetAddr()
-		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(suite.Require()))
+		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
 		re.NoError(err)
 	}
 	suite.env.RunFuncInTwoModes(cleanFunc)
@@ -615,7 +615,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *tests.TestCluste
 func (suite *configTestSuite) checkLoadRuleBundle(re *require.Assertions, pdAddr string, fname string, expectValues []placement.GroupBundle) {
 	var bundles []placement.GroupBundle
 	cmd := pdctlCmd.GetRootCmd()
-	testutil.Eventually(suite.Require(), func() bool { // wait for the config to be synced to the scheduling server
+	testutil.Eventually(re, func() bool { // wait for the config to be synced to the scheduling server
 		_, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--out="+fname)
 		re.NoError(err)
 		b, _ := os.ReadFile(fname)

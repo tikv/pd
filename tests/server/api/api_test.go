@@ -181,7 +181,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	resp.Body.Close()
 	re.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 
-	header := mustRequestSuccess(suite.Require(), leader.GetServer())
+	header := mustRequestSuccess(re, leader.GetServer())
 	re.Equal("", header.Get("service-label"))
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/addRequestInfoMiddleware"))
@@ -299,7 +299,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(suite.Require(), servers)
+	server.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	cfg, ok := leader.GetServer().GetRateLimitConfig().LimiterConfig["SetLogLevel"]
@@ -423,7 +423,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(suite.Require(), servers)
+	server.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 
 	timeUnix = time.Now().Unix() - 20

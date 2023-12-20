@@ -303,13 +303,13 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	// the default keyspace group is exist.
 	var kg *endpoint.KeyspaceGroup
 	var code int
-	testutil.Eventually(suite.Require(), func() bool {
+	testutil.Eventually(re, func() bool {
 		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
 		return code == http.StatusOK && kg != nil
 	}, testutil.WithWaitFor(time.Second*1))
 	re.Equal(utils.DefaultKeyspaceGroupID, kg.ID)
 	// the allocNodesToAllKeyspaceGroups loop will run every 100ms.
-	testutil.Eventually(suite.Require(), func() bool {
+	testutil.Eventually(re, func() bool {
 		return len(kg.Members) == utils.DefaultKeyspaceGroupReplicaCount
 	})
 	for _, member := range kg.Members {

@@ -222,7 +222,7 @@ func (suite *storeTestSuite) TestStoreGet() {
 	available, _ := units.RAMInBytes("1.555TiB")
 	re.Equal(capacity, int64(info.Status.Capacity))
 	re.Equal(available, int64(info.Status.Available))
-	checkStoresInfo(suite.Require(), []*StoreInfo{info}, suite.stores[:1])
+	checkStoresInfo(re, []*StoreInfo{info}, suite.stores[:1])
 }
 
 func (suite *storeTestSuite) TestStoreLabel() {

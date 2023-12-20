@@ -472,7 +472,7 @@ func (suite *configTestSuite) assertTTLConfig(
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		// wait for the scheduling primary server to be synced
 		options := cluster.GetSchedulingPrimaryServer().GetPersistConfig()
-		tu.Eventually(suite.Require(), func() bool {
+		tu.Eventually(re, func() bool {
 			if expectedEqual {
 				return uint64(999) == options.GetMaxSnapshotCount()
 			}
