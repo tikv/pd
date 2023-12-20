@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -192,7 +193,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		defer rw.unlockRuleManager()
 		if err := rw.ruleManager.TryCommitPatch(rw.patch); err != nil {
 			log.Error("failed to commit patch", zap.Error(err))
-			if err != nil {
+			// If the rule list is invalid, we need to clean the rule manager and force load the rules.
+			// It means that the rules are not watched in a batch.
+			if err == errs.ErrBuildRuleList {
 				rw.ruleManager.CleanLocked()
 				rw.ruleWatcher.ForceLoad()
 			}
