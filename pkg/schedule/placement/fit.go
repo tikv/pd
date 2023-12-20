@@ -93,7 +93,7 @@ func (f *RegionFit) IsSatisfied() bool {
 	return len(f.OrphanPeers) == 0
 }
 
-// retrun true if the count of the rule is satisfied.
+// ExtraCount return the extra count.
 func (f *RegionFit) ExtraCount() int {
 	desired := 0
 	for _, r := range f.RuleFits {
