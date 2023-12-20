@@ -1,4 +1,4 @@
-module github.com/tikv/pd/tests/integrations/realtiup
+module github.com/tikv/pd/tests/integrations/realcluster
 
 go 1.21
 
