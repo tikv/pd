@@ -202,7 +202,7 @@ func (m *RuleManager) loadRules() error {
 			return m.storage.DeleteRule(txn, localKey)
 		})
 	}
-	return m.runBatchInTxn(batch)
+	return m.runBatchOpInTxn(batch)
 }
 
 func (m *RuleManager) loadGroups() error {
@@ -521,7 +521,7 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 			})
 		}
 	}
-	return m.runBatchInTxn(batch)
+	return m.runBatchOpInTxn(batch)
 }
 
 // SetRules inserts or updates lots of Rules at once.
@@ -814,7 +814,7 @@ func (m *RuleManager) IsInitialized() bool {
 	return m.initialized
 }
 
-func (m *RuleManager) runBatchInTxn(batch []func(kv.Txn) error) error {
+func (m *RuleManager) runBatchOpInTxn(batch []func(kv.Txn) error) error {
 	// execute batch in transaction with limited operations per transaction
 	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
 		end := start + etcdutil.MaxEtcdTxnOps

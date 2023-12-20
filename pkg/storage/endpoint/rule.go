@@ -22,15 +22,17 @@ import (
 
 // RuleStorage defines the storage operations on the rule.
 type RuleStorage interface {
-	SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error
-	DeleteRule(txn kv.Txn, ruleKey string) error
-	SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error
-	DeleteRuleGroup(txn kv.Txn, groupID string) error
 	// Load in txn is unnecessary and may cause txn too large.
 	// because scheduling server will load rules from etcd rather than watching.
 	LoadRule(ruleKey string) (string, error)
 	LoadRules(f func(k, v string)) error
 	LoadRuleGroups(f func(k, v string)) error
+	// We need to use txn to avoid concurrent modification.
+	// And it is helpful for the scheduling server to watch the rule.
+	SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error
+	DeleteRule(txn kv.Txn, ruleKey string) error
+	SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error
+	DeleteRuleGroup(txn kv.Txn, groupID string) error
 
 	LoadRegionRules(f func(k, v string)) error
 	SaveRegionRule(ruleKey string, rule interface{}) error

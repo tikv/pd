@@ -781,7 +781,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			revision, err = lw.load(ctx)
 			if err != nil {
 				log.Warn("force load key failed in watch loop",
-					zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), zap.Error(err))
+			} else {
+				log.Info("force load key successfully in watch loop",
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision))
 			}
 			continue
 		case <-ticker.C:
