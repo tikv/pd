@@ -138,6 +138,7 @@ function compile_asset {
 
   echo '+ Build UI'
   cd "${BUILD_DIR}"
+  git init
   make ui
 
   echo '+ Generating UI assets'
