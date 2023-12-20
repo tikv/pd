@@ -766,6 +766,11 @@ error = '''
 cannot set invalid configuration
 '''
 
+["PD:server:ErrLeaderFrequentlyChange"]
+error = '''
+leader %s frequently changed, leader-key is [%s]
+'''
+
 ["PD:server:ErrLeaderNil"]
 error = '''
 leader is nil
