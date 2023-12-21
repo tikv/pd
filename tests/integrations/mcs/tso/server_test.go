@@ -585,7 +585,7 @@ func (suite *CommonTestSuite) TestMetrics() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 	respBytes, err := io.ReadAll(resp.Body)
 	re.NoError(err)
-	re.Contains(string(respBytes), "tso_server_info")
+	re.Contains(string(respBytes), "pd_server_info")
 }
 
 func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {

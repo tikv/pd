@@ -17,6 +17,7 @@ package scheduling
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
@@ -38,6 +39,13 @@ import (
 	"github.com/tikv/pd/tests/server/api"
 	"go.uber.org/goleak"
 )
+
+// dialClient used to dial http request.
+var dialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
@@ -92,6 +100,23 @@ func (suite *serverTestSuite) TestAllocID() {
 	re.NoError(err)
 	re.NotEqual(uint64(0), id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+}
+
+func (suite *serverTestSuite) TestMetrics() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	time.Sleep(200 * time.Millisecond)
+	addr := tc.GetPrimaryServer().GetAddr()
+	req, _ := http.NewRequest(http.MethodGet, addr+"/metrics", http.NoBody)
+	resp, err := dialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	content, _ := io.ReadAll(resp.Body)
+	output := string(content)
+	re.Contains(output, "pd_server_info")
 }
 
 func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {

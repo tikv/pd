@@ -100,6 +100,6 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respBytes, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		re.Contains(string(respBytes), "resource_manager_server_info")
+		re.Contains(string(respBytes), "pd_server_info")
 	}
 }
