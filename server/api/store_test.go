@@ -50,15 +50,15 @@ func TestStoreTestSuite(t *testing.T) {
 	suite.Run(t, new(storeTestSuite))
 }
 
-func (suite *storeTestSuite) requestStatusBody(client *http.Client, method string, url string) int {
+func (suite *storeTestSuite) requestStatusBody(re *require.Assertions, client *http.Client, method string, url string) int {
 	req, err := http.NewRequest(method, url, http.NoBody)
-	suite.NoError(err)
+	re.NoError(err)
 	resp, err := client.Do(req)
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 	err = resp.Body.Close()
-	suite.NoError(err)
+	re.NoError(err)
 	return resp.StatusCode
 }
 
@@ -138,31 +138,31 @@ func (suite *storeTestSuite) TestStoresList() {
 	info := new(StoresInfo)
 	re := suite.Require()
 	err := tu.ReadGetJSON(re, testDialClient, url, info)
-	suite.NoError(err)
+	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[:3])
 
 	url = fmt.Sprintf("%s/stores/check?state=up", suite.urlPrefix)
 	info = new(StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
-	suite.NoError(err)
+	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[:2])
 
 	url = fmt.Sprintf("%s/stores/check?state=offline", suite.urlPrefix)
 	info = new(StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
-	suite.NoError(err)
+	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[2:3])
 
 	url = fmt.Sprintf("%s/stores/check?state=tombstone", suite.urlPrefix)
 	info = new(StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
-	suite.NoError(err)
+	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[3:])
 
 	url = fmt.Sprintf("%s/stores/check?state=tombstone&state=offline", suite.urlPrefix)
 	info = new(StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
-	suite.NoError(err)
+	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[2:])
 
 	// down store
@@ -183,7 +183,7 @@ func (suite *storeTestSuite) TestStoresList() {
 	url = fmt.Sprintf("%s/stores/check?state=down", suite.urlPrefix)
 	info = new(StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
-	suite.NoError(err)
+	re.NoError(err)
 	checkStoresInfo(re, info.Stores, []*metapb.Store{store})
 
 	// disconnect store
@@ -197,11 +197,12 @@ func (suite *storeTestSuite) TestStoresList() {
 	url = fmt.Sprintf("%s/stores/check?state=disconnected", suite.urlPrefix)
 	info = new(StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
-	suite.NoError(err)
+	re.NoError(err)
 	checkStoresInfo(re, info.Stores, []*metapb.Store{store})
 }
 
 func (suite *storeTestSuite) TestStoreGet() {
+	re := suite.Require()
 	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
 	suite.grpcSvr.StoreHeartbeat(
 		context.Background(), &pdpb.StoreHeartbeatRequest{
@@ -215,13 +216,13 @@ func (suite *storeTestSuite) TestStoreGet() {
 		},
 	)
 	info := new(StoreInfo)
-	err := tu.ReadGetJSON(suite.Require(), testDialClient, url, info)
-	suite.NoError(err)
+	err := tu.ReadGetJSON(re, testDialClient, url, info)
+	re.NoError(err)
 	capacity, _ := units.RAMInBytes("1.636TiB")
 	available, _ := units.RAMInBytes("1.555TiB")
-	suite.Equal(capacity, int64(info.Status.Capacity))
-	suite.Equal(available, int64(info.Status.Available))
-	checkStoresInfo(suite.Require(), []*StoreInfo{info}, suite.stores[:1])
+	re.Equal(capacity, int64(info.Status.Capacity))
+	re.Equal(available, int64(info.Status.Available))
+	checkStoresInfo(re, []*StoreInfo{info}, suite.stores[:1])
 }
 
 func (suite *storeTestSuite) TestStoreLabel() {
@@ -229,36 +230,36 @@ func (suite *storeTestSuite) TestStoreLabel() {
 	re := suite.Require()
 	var info StoreInfo
 	err := tu.ReadGetJSON(re, testDialClient, url, &info)
-	suite.NoError(err)
-	suite.Empty(info.Store.Labels)
+	re.NoError(err)
+	re.Empty(info.Store.Labels)
 
 	// Test merge.
 	// enable label match check.
 	labelCheck := map[string]string{"strictly-match-label": "true"}
 	lc, _ := json.Marshal(labelCheck)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", lc, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	// Test set.
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
-	suite.NoError(err)
+	re.NoError(err)
 	// TODO: supports strictly match check in placement rules
 	err = tu.CheckPostJSON(testDialClient, url+"/label", b,
 		tu.StatusNotOK(re),
 		tu.StringContain(re, "key matching the label was not found"))
-	suite.NoError(err)
+	re.NoError(err)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
 	ll, _ := json.Marshal(locationLabels)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", ll, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
-	suite.NoError(err)
-	suite.Len(info.Store.Labels, len(labels))
+	re.NoError(err)
+	re.Len(info.Store.Labels, len(labels))
 	for _, l := range info.Store.Labels {
-		suite.Equal(l.Value, labels[l.Key])
+		re.Equal(l.Value, labels[l.Key])
 	}
 
 	// Test merge.
@@ -266,33 +267,33 @@ func (suite *storeTestSuite) TestStoreLabel() {
 	labelCheck = map[string]string{"strictly-match-label": "false"}
 	lc, _ = json.Marshal(labelCheck)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/config", lc, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
-	suite.NoError(err)
-	suite.Len(info.Store.Labels, len(expectLabel))
+	re.NoError(err)
+	re.Len(info.Store.Labels, len(expectLabel))
 	for _, l := range info.Store.Labels {
-		suite.Equal(expectLabel[l.Key], l.Value)
+		re.Equal(expectLabel[l.Key], l.Value)
 	}
 
 	// delete label
 	b, err = json.Marshal(map[string]string{"host": ""})
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
-	suite.NoError(err)
+	re.NoError(err)
 	delete(expectLabel, "host")
-	suite.Len(info.Store.Labels, len(expectLabel))
+	re.Len(info.Store.Labels, len(expectLabel))
 	for _, l := range info.Store.Labels {
-		suite.Equal(expectLabel[l.Key], l.Value)
+		re.Equal(expectLabel[l.Key], l.Value)
 	}
 
 	suite.stores[0].Labels = info.Store.Labels
@@ -319,40 +320,40 @@ func (suite *storeTestSuite) TestStoreDelete() {
 	}
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/store/%d", suite.urlPrefix, testCase.id)
-		status := suite.requestStatusBody(testDialClient, http.MethodDelete, url)
-		suite.Equal(testCase.status, status)
+		status := suite.requestStatusBody(re, testDialClient, http.MethodDelete, url)
+		re.Equal(testCase.status, status)
 	}
 	// store 6 origin status:offline
 	url := fmt.Sprintf("%s/store/6", suite.urlPrefix)
 	store := new(StoreInfo)
 	err := tu.ReadGetJSON(re, testDialClient, url, store)
-	suite.NoError(err)
-	suite.False(store.Store.PhysicallyDestroyed)
-	suite.Equal(metapb.StoreState_Offline, store.Store.State)
+	re.NoError(err)
+	re.False(store.Store.PhysicallyDestroyed)
+	re.Equal(metapb.StoreState_Offline, store.Store.State)
 
 	// up store success because it is offline but not physically destroyed
-	status := suite.requestStatusBody(testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
-	suite.Equal(http.StatusOK, status)
+	status := suite.requestStatusBody(re, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	re.Equal(http.StatusOK, status)
 
-	status = suite.requestStatusBody(testDialClient, http.MethodGet, url)
-	suite.Equal(http.StatusOK, status)
+	status = suite.requestStatusBody(re, testDialClient, http.MethodGet, url)
+	re.Equal(http.StatusOK, status)
 	store = new(StoreInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, store)
-	suite.NoError(err)
-	suite.Equal(metapb.StoreState_Up, store.Store.State)
-	suite.False(store.Store.PhysicallyDestroyed)
+	re.NoError(err)
+	re.Equal(metapb.StoreState_Up, store.Store.State)
+	re.False(store.Store.PhysicallyDestroyed)
 
 	// offline store with physically destroyed
-	status = suite.requestStatusBody(testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
-	suite.Equal(http.StatusOK, status)
+	status = suite.requestStatusBody(re, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
+	re.Equal(http.StatusOK, status)
 	err = tu.ReadGetJSON(re, testDialClient, url, store)
-	suite.NoError(err)
-	suite.Equal(metapb.StoreState_Offline, store.Store.State)
-	suite.True(store.Store.PhysicallyDestroyed)
+	re.NoError(err)
+	re.Equal(metapb.StoreState_Offline, store.Store.State)
+	re.True(store.Store.PhysicallyDestroyed)
 
 	// try to up store again failed because it is physically destroyed
-	status = suite.requestStatusBody(testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
-	suite.Equal(http.StatusBadRequest, status)
+	status = suite.requestStatusBody(re, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	re.Equal(http.StatusBadRequest, status)
 	// reset store 6
 	suite.cleanup()
 	suite.SetupSuite()
@@ -367,45 +368,46 @@ func (suite *storeTestSuite) TestStoreSetState() {
 	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
 	info := StoreInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, &info)
-	suite.NoError(err)
-	suite.Equal(metapb.StoreState_Up, info.Store.State)
+	re.NoError(err)
+	re.Equal(metapb.StoreState_Up, info.Store.State)
 
 	// Set to Offline.
 	info = StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Offline", nil, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
-	suite.NoError(err)
-	suite.Equal(metapb.StoreState_Offline, info.Store.State)
+	re.NoError(err)
+	re.Equal(metapb.StoreState_Offline, info.Store.State)
 
 	// store not found
 	info = StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/store/10086/state?state=Offline", nil, tu.StatusNotOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// Invalid state.
 	invalidStates := []string{"Foo", "Tombstone"}
 	for _, state := range invalidStates {
 		info = StoreInfo{}
 		err = tu.CheckPostJSON(testDialClient, url+"/state?state="+state, nil, tu.StatusNotOK(re))
-		suite.NoError(err)
+		re.NoError(err)
 		err := tu.ReadGetJSON(re, testDialClient, url, &info)
-		suite.NoError(err)
-		suite.Equal(metapb.StoreState_Offline, info.Store.State)
+		re.NoError(err)
+		re.Equal(metapb.StoreState_Offline, info.Store.State)
 	}
 
 	// Set back to Up.
 	info = StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Up", nil, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
-	suite.NoError(err)
-	suite.Equal(metapb.StoreState_Up, info.Store.State)
+	re.NoError(err)
+	re.Equal(metapb.StoreState_Up, info.Store.State)
 	suite.cleanup()
 	suite.SetupSuite()
 }
 
 func (suite *storeTestSuite) TestUrlStoreFilter() {
+	re := suite.Require()
 	testCases := []struct {
 		u    string
 		want []*metapb.Store
@@ -430,24 +432,25 @@ func (suite *storeTestSuite) TestUrlStoreFilter() {
 
 	for _, testCase := range testCases {
 		uu, err := url.Parse(testCase.u)
-		suite.NoError(err)
+		re.NoError(err)
 		f, err := newStoreStateFilter(uu)
-		suite.NoError(err)
-		suite.Equal(testCase.want, f.filter(suite.stores))
+		re.NoError(err)
+		re.Equal(testCase.want, f.filter(suite.stores))
 	}
 
 	u, err := url.Parse("http://localhost:2379/pd/api/v1/stores?state=foo")
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = newStoreStateFilter(u)
-	suite.Error(err)
+	re.Error(err)
 
 	u, err = url.Parse("http://localhost:2379/pd/api/v1/stores?state=999999")
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = newStoreStateFilter(u)
-	suite.Error(err)
+	re.Error(err)
 }
 
 func (suite *storeTestSuite) TestDownState() {
+	re := suite.Require()
 	store := core.NewStoreInfo(
 		&metapb.Store{
 			State: metapb.StoreState_Up,
@@ -456,15 +459,15 @@ func (suite *storeTestSuite) TestDownState() {
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 	storeInfo := newStoreInfo(suite.svr.GetScheduleConfig(), store)
-	suite.Equal(metapb.StoreState_Up.String(), storeInfo.Store.StateName)
+	re.Equal(metapb.StoreState_Up.String(), storeInfo.Store.StateName)
 
 	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)))
 	storeInfo = newStoreInfo(suite.svr.GetScheduleConfig(), newStore)
-	suite.Equal(disconnectedName, storeInfo.Store.StateName)
+	re.Equal(disconnectedName, storeInfo.Store.StateName)
 
 	newStore = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)))
 	storeInfo = newStoreInfo(suite.svr.GetScheduleConfig(), newStore)
-	suite.Equal(downStateName, storeInfo.Store.StateName)
+	re.Equal(downStateName, storeInfo.Store.StateName)
 }
 
 func (suite *storeTestSuite) TestGetAllLimit() {
@@ -508,16 +511,17 @@ func (suite *storeTestSuite) TestGetAllLimit() {
 		suite.T().Logf(testCase.name)
 		info := make(map[uint64]interface{}, 4)
 		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
-		suite.NoError(err)
-		suite.Len(info, len(testCase.expectedStores))
+		re.NoError(err)
+		re.Len(info, len(testCase.expectedStores))
 		for id := range testCase.expectedStores {
 			_, ok := info[id]
-			suite.True(ok)
+			re.True(ok)
 		}
 	}
 }
 
 func (suite *storeTestSuite) TestStoreLimitTTL() {
+	re := suite.Require()
 	// add peer
 	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", suite.urlPrefix, 5)
 	data := map[string]interface{}{
@@ -525,19 +529,18 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 		"rate": 999,
 	}
 	postData, err := json.Marshal(data)
-	suite.NoError(err)
-	re := suite.Require()
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	// remove peer
 	data = map[string]interface{}{
 		"type": "remove-peer",
 		"rate": 998,
 	}
 	postData, err = json.Marshal(data)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	// all store limit add peer
 	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", suite.urlPrefix, 3)
 	data = map[string]interface{}{
@@ -545,26 +548,26 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 		"rate": 997,
 	}
 	postData, err = json.Marshal(data)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	// all store limit remove peer
 	data = map[string]interface{}{
 		"type": "remove-peer",
 		"rate": 996,
 	}
 	postData, err = json.Marshal(data)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
-	suite.Equal(float64(999), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
-	suite.Equal(float64(998), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
-	suite.Equal(float64(997), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
-	suite.Equal(float64(996), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
+	re.Equal(float64(999), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
+	re.Equal(float64(998), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
+	re.Equal(float64(997), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
+	re.Equal(float64(996), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
 	time.Sleep(5 * time.Second)
-	suite.NotEqual(float64(999), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
-	suite.NotEqual(float64(998), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
-	suite.NotEqual(float64(997), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
-	suite.NotEqual(float64(996), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
+	re.NotEqual(float64(999), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
+	re.NotEqual(float64(998), suite.svr.GetPersistOptions().GetStoreLimit(uint64(1)).RemovePeer)
+	re.NotEqual(float64(997), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).AddPeer)
+	re.NotEqual(float64(996), suite.svr.GetPersistOptions().GetStoreLimit(uint64(2)).RemovePeer)
 }

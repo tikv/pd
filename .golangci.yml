@@ -11,8 +11,7 @@ linters:
     - makezero
     - gosec
     - bodyclose
-    # TODO: enable when all existing errors are fixed
-    # - testifylint
+    - testifylint
   disable:
     - errcheck
 linters-settings:

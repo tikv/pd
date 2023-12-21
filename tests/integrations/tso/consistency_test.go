@@ -148,6 +148,7 @@ func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
 }
 
 func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
+	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
@@ -164,7 +165,7 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 			for j := 0; j < tsoRequestRound; j++ {
 				ts = suite.request(ctx, tsoCount)
 				// Check whether the TSO fallbacks
-				suite.Equal(1, tsoutil.CompareTimestamp(ts, last))
+				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
 				last = ts
 				time.Sleep(10 * time.Millisecond)
 			}
