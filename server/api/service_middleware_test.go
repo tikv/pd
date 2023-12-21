@@ -60,26 +60,15 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	re := suite.Require()
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
 	suite.True(sc.EnableAudit)
-
-	ms := map[string]interface{}{
-		"enable-audit":           "true",
-		"enable-rate-limit":      "true",
-		"enable-grpc-rate-limit": "true",
-	}
-	postData, err := json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
-	sc = &config.ServiceMiddlewareConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.True(sc.EnableAudit)
 	suite.True(sc.RateLimitConfig.EnableRateLimit)
 	suite.True(sc.GRPCRateLimitConfig.EnableRateLimit)
-	ms = map[string]interface{}{
+
+	ms := map[string]interface{}{
 		"audit.enable-audit":     "false",
 		"enable-rate-limit":      "false",
 		"enable-grpc-rate-limit": "false",
 	}
-	postData, err = json.Marshal(ms)
+	postData, err := json.Marshal(ms)
 	suite.NoError(err)
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
@@ -87,6 +76,19 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	suite.False(sc.EnableAudit)
 	suite.False(sc.RateLimitConfig.EnableRateLimit)
 	suite.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	ms = map[string]interface{}{
+		"enable-audit":           "true",
+		"enable-rate-limit":      "true",
+		"enable-grpc-rate-limit": "true",
+	}
+	postData, err = json.Marshal(ms)
+	suite.NoError(err)
+	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
+	sc = &config.ServiceMiddlewareConfig{}
+	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	suite.True(sc.EnableAudit)
+	suite.True(sc.RateLimitConfig.EnableRateLimit)
+	suite.True(sc.GRPCRateLimitConfig.EnableRateLimit)
 
 	// test empty
 	ms = map[string]interface{}{}
@@ -101,7 +103,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item audit not found")))
 	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
 	ms = map[string]interface{}{
-		"audit.enable-audit": "true",
+		"audit.enable-audit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	suite.NoError(err)

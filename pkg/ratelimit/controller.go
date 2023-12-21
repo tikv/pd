@@ -23,6 +23,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const limiterMetricsInterval = time.Second * 15
+
 var emptyFunc = func() {}
 
 // Controller is a controller which holds multiple limiters to manage the request rate of different objects.
@@ -53,12 +55,13 @@ func NewController(ctx context.Context, typ string, concurrencyGauge *prometheus
 	return l
 }
 
+// Close closes the Controller.
 func (l *Controller) Close() {
 	l.cancel()
 }
 
 func (l *Controller) collectMetrics() {
-	tricker := time.NewTicker(time.Second * 5)
+	tricker := time.NewTicker(limiterMetricsInterval)
 	defer tricker.Stop()
 	for {
 		select {
