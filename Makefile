@@ -249,6 +249,12 @@ ci-test-job: install-tools dashboard-ui
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
 
+test-tso: install-tools
+	# testing TSO function & consistency...
+	@$(FAILPOINT_ENABLE)
+	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_full_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
+
 test-tso-function: install-tools
 	# testing TSO function...
 	@$(FAILPOINT_ENABLE)
@@ -267,7 +273,7 @@ test-real-cluster:
 	# testing with the real cluster...
 	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
 
-.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency test-real-cluster
+.PHONY: test basic-test test-with-cover test-tso test-tso-function test-tso-consistency test-real-cluster
 
 #### Daily CI coverage analyze  ####
 
