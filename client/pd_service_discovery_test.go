@@ -173,8 +173,8 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(follower.Available())
 	re.True(leader.Available())
 
-	re.False(follower.IsLeader())
-	re.True(leader.IsLeader())
+	re.False(follower.IsConnectedToLeader())
+	re.True(leader.IsConnectedToLeader())
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
 	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
