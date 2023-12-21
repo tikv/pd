@@ -46,6 +46,6 @@ func TestDurationTOML(t *testing.T) {
 	example := &example{}
 
 	text := []byte(`interval = "1h1m1s"`)
-	re.Nil(toml.Unmarshal(text, example))
+	re.NoError(toml.Unmarshal(text, example))
 	re.Equal(float64(60*60+60+1), example.Interval.Seconds())
 }

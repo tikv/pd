@@ -57,7 +57,7 @@ func TestTransferLeader(t *testing.T) {
 
 	res, err = pdHTTPCli.GetSchedulers(ctx)
 	re.NoError(err)
-	re.Equal(oldSchedulersLen, len(res))
+	re.Len(res, oldSchedulersLen)
 
 	// transfer leader to old leader
 	re.NoError(pdHTTPCli.TransferLeader(ctx, oldLeader))
@@ -69,5 +69,5 @@ func TestTransferLeader(t *testing.T) {
 
 	res, err = pdHTTPCli.GetSchedulers(ctx)
 	re.NoError(err)
-	re.Equal(oldSchedulersLen, len(res))
+	re.Len(res, oldSchedulersLen)
 }
