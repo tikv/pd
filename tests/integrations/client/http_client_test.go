@@ -276,8 +276,9 @@ func (suite *httpClientTestSuite) checkRule(
 	if exist {
 		got, err := suite.client.GetPlacementRule(suite.ctx, rule.GroupID, rule.ID)
 		re.NoError(err)
-		// skip comparison of the generated field StartKeyHex
+		// skip comparison of the generated field
 		got.StartKeyHex = rule.StartKeyHex
+		got.EndKeyHex = rule.EndKeyHex
 		re.Equal(rule, got)
 	} else {
 		_, err := suite.client.GetPlacementRule(suite.ctx, rule.GroupID, rule.ID)
