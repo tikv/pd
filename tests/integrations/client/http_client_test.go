@@ -85,7 +85,7 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re := suite.Require()
 	replicateConfig, err := suite.client.GetReplicateConfig(suite.ctx)
 	re.NoError(err)
-	re.Equal(float64(3), replicateConfig["max-replicas"])
+	re.Equal(3.0, replicateConfig["max-replicas"])
 	region, err := suite.client.GetRegionByID(suite.ctx, 10)
 	re.NoError(err)
 	re.Equal(int64(10), region.ID)
