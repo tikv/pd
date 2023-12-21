@@ -24,6 +24,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+// ClusterStatus saves some cluster state information.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type ClusterStatus struct {
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	IsInitialized     bool      `json:"is_initialized"`
+	ReplicationStatus string    `json:"replication_status"`
+}
+
 // KeyRange defines a range of keys in bytes.
 type KeyRange struct {
 	startKey []byte

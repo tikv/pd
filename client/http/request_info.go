@@ -37,6 +37,8 @@ const (
 	getScheduleConfigName                   = "GetScheduleConfig"
 	setScheduleConfigName                   = "SetScheduleConfig"
 	getClusterVersionName                   = "GetClusterVersion"
+	getClusterName                          = "GetCluster"
+	getClusterStatusName                    = "GetClusterStatus"
 	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"

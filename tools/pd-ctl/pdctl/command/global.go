@@ -264,3 +264,13 @@ func checkURL(endpoint string) (string, error) {
 
 	return u.String(), nil
 }
+
+func jsonPrint(cmd *cobra.Command, val any) {
+	jsonBytes, err := json.MarshalIndent(val, "", "  ")
+	if err != nil {
+		cmd.Printf("Failed to marshal the data to json: %s\n", err)
+		return
+	}
+
+	cmd.Println(string(jsonBytes))
+}
