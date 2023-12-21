@@ -39,11 +39,12 @@ func TestLogTestSuite(t *testing.T) {
 }
 
 func (suite *logTestSuite) SetupSuite() {
+	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	var err error
 	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3)
-	suite.NoError(err)
-	suite.NoError(suite.cluster.RunInitialServers())
+	re.NoError(err)
+	re.NoError(suite.cluster.RunInitialServers())
 	suite.cluster.WaitLeader()
 	suite.pdAddrs = suite.cluster.GetConfig().GetClientURLs()
 
@@ -53,7 +54,7 @@ func (suite *logTestSuite) SetupSuite() {
 		LastHeartbeat: time.Now().UnixNano(),
 	}
 	leaderServer := suite.cluster.GetLeaderServer()
-	suite.NoError(leaderServer.BootstrapCluster())
+	re.NoError(leaderServer.BootstrapCluster())
 	tests.MustPutStore(suite.Require(), suite.cluster, store)
 }
 

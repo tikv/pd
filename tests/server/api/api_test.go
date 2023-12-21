@@ -218,7 +218,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
 	resp.Body.Close()
-	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), true)
+	suite.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 
 	// returns StatusOK when no rate-limit config
 	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
@@ -227,7 +227,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	suite.NoError(err)
-	suite.Equal(resp.StatusCode, http.StatusOK)
+	suite.Equal(http.StatusOK, resp.StatusCode)
 	input = make(map[string]interface{})
 	input["type"] = "label"
 	input["label"] = "SetLogLevel"
@@ -241,7 +241,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	suite.NoError(err)
-	suite.Equal(resp.StatusCode, http.StatusOK)
+	suite.Equal(http.StatusOK, resp.StatusCode)
 
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
@@ -251,10 +251,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		resp.Body.Close()
 		suite.NoError(err)
 		if i > 0 {
-			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+			suite.Equal(http.StatusTooManyRequests, resp.StatusCode)
 			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 		} else {
-			suite.Equal(resp.StatusCode, http.StatusOK)
+			suite.Equal(http.StatusOK, resp.StatusCode)
 		}
 	}
 
@@ -268,10 +268,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		resp.Body.Close()
 		suite.NoError(err)
 		if i > 0 {
-			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+			suite.Equal(http.StatusTooManyRequests, resp.StatusCode)
 			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 		} else {
-			suite.Equal(resp.StatusCode, http.StatusOK)
+			suite.Equal(http.StatusOK, resp.StatusCode)
 		}
 	}
 
@@ -284,7 +284,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		suite.NoError(err)
-		suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+		suite.Equal(http.StatusTooManyRequests, resp.StatusCode)
 		suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 	}
 
@@ -297,12 +297,12 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	}
 	server.MustWaitLeader(suite.Require(), servers)
 	leader = suite.cluster.GetLeaderServer()
-	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), true)
+	suite.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	cfg, ok := leader.GetServer().GetRateLimitConfig().LimiterConfig["SetLogLevel"]
-	suite.Equal(ok, true)
-	suite.Equal(cfg.ConcurrencyLimit, uint64(1))
-	suite.Equal(cfg.QPS, 0.5)
-	suite.Equal(cfg.QPSBurst, 1)
+	suite.True(ok)
+	suite.Equal(uint64(1), cfg.ConcurrencyLimit)
+	suite.Equal(0.5, cfg.QPS)
+	suite.Equal(1, cfg.QPSBurst)
 
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
@@ -312,10 +312,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		resp.Body.Close()
 		suite.NoError(err)
 		if i > 0 {
-			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+			suite.Equal(http.StatusTooManyRequests, resp.StatusCode)
 			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 		} else {
-			suite.Equal(resp.StatusCode, http.StatusOK)
+			suite.Equal(http.StatusOK, resp.StatusCode)
 		}
 	}
 
@@ -329,10 +329,10 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		resp.Body.Close()
 		suite.NoError(err)
 		if i > 0 {
-			suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+			suite.Equal(http.StatusTooManyRequests, resp.StatusCode)
 			suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 		} else {
-			suite.Equal(resp.StatusCode, http.StatusOK)
+			suite.Equal(http.StatusOK, resp.StatusCode)
 		}
 	}
 
@@ -345,7 +345,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		suite.NoError(err)
-		suite.Equal(resp.StatusCode, http.StatusTooManyRequests)
+		suite.Equal(http.StatusTooManyRequests, resp.StatusCode)
 		suite.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 	}
 
@@ -358,7 +358,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	resp, err = dialClient.Do(req)
 	suite.NoError(err)
 	resp.Body.Close()
-	suite.Equal(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled(), false)
+	suite.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
@@ -367,7 +367,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		_, err = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		suite.NoError(err)
-		suite.Equal(resp.StatusCode, http.StatusOK)
+		suite.Equal(http.StatusOK, resp.StatusCode)
 	}
 }
 
@@ -377,7 +377,7 @@ func (suite *middlewareTestSuite) TestSwaggerUrl() {
 	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", http.NoBody)
 	resp, err := dialClient.Do(req)
 	suite.NoError(err)
-	suite.True(resp.StatusCode == http.StatusNotFound)
+	suite.Equal(http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
 }
 

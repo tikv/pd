@@ -38,19 +38,19 @@ func TestAdjustInvalidDataEncryptionMethod(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	config := &Config{DataEncryptionMethod: "unknown"}
-	re.NotNil(config.Adjust())
+	re.Error(config.Adjust())
 }
 
 func TestAdjustNegativeRotationDuration(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	config := &Config{DataKeyRotationPeriod: typeutil.NewDuration(time.Duration(int64(-1)))}
-	re.NotNil(config.Adjust())
+	re.Error(config.Adjust())
 }
 
 func TestAdjustInvalidMasterKeyType(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	config := &Config{MasterKey: MasterKeyConfig{Type: "unknown"}}
-	re.NotNil(config.Adjust())
+	re.Error(config.Adjust())
 }

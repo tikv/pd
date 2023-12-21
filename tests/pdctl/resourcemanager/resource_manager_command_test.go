@@ -41,9 +41,10 @@ type testResourceManagerSuite struct {
 }
 
 func (s *testResourceManagerSuite) SetupSuite() {
+	re := s.Require()
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	cluster, err := tests.NewTestCluster(s.ctx, 1)
-	s.Nil(err)
+	re.NoError(err)
 	s.cluster = cluster
 	s.cluster.RunInitialServers()
 	cluster.WaitLeader()
@@ -56,18 +57,19 @@ func (s *testResourceManagerSuite) TearDownSuite() {
 }
 
 func (s *testResourceManagerSuite) TestConfigController() {
+	re := s.Require()
 	expectCfg := server.ControllerConfig{}
 	expectCfg.Adjust(nil)
 	// Show controller config
 	checkShow := func() {
 		args := []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "show"}
 		output, err := pdctl.ExecuteCommand(pdctlCmd.GetRootCmd(), args...)
-		s.Nil(err)
+		re.NoError(err)
 
 		actualCfg := server.ControllerConfig{}
 		err = json.Unmarshal(output, &actualCfg)
-		s.Nil(err)
-		s.Equal(expectCfg, actualCfg)
+		re.NoError(err)
+		re.Equal(expectCfg, actualCfg)
 	}
 
 	// Check default config
@@ -76,22 +78,22 @@ func (s *testResourceManagerSuite) TestConfigController() {
 	// Set controller config
 	args := []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "set", "ltb-max-wait-duration", "1h"}
 	output, err := pdctl.ExecuteCommand(pdctlCmd.GetRootCmd(), args...)
-	s.Nil(err)
-	s.Contains(string(output), "Success!")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 	expectCfg.LTBMaxWaitDuration = typeutil.Duration{Duration: 1 * time.Hour}
 	checkShow()
 
 	args = []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "set", "enable-controller-trace-log", "true"}
 	output, err = pdctl.ExecuteCommand(pdctlCmd.GetRootCmd(), args...)
-	s.Nil(err)
-	s.Contains(string(output), "Success!")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 	expectCfg.EnableControllerTraceLog = true
 	checkShow()
 
 	args = []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "set", "write-base-cost", "2"}
 	output, err = pdctl.ExecuteCommand(pdctlCmd.GetRootCmd(), args...)
-	s.Nil(err)
-	s.Contains(string(output), "Success!")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 	expectCfg.RequestUnit.WriteBaseCost = 2
 	checkShow()
 }

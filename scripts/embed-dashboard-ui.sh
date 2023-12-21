@@ -138,6 +138,8 @@ function compile_asset {
 
   echo '+ Build UI'
   cd "${BUILD_DIR}"
+  # ref https://github.com/tikv/pd/issues/7593
+  git init
   make ui
 
   echo '+ Generating UI assets'

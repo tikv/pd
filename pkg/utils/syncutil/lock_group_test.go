@@ -60,14 +60,14 @@ func TestLockGroupWithRemoveEntryOnUnlock(t *testing.T) {
 	for i := 0; i < maxID; i++ {
 		group.Lock(uint32(i))
 	}
-	re.Equal(len(group.entries), maxID)
+	re.Len(group.entries, maxID)
 	for i := 0; i < maxID; i++ {
 		group.Unlock(uint32(i))
 	}
 
 	wg.Wait()
 	// Check that size of the lock group is limited.
-	re.Equal(len(group.entries), 0)
+	re.Empty(group.entries)
 }
 
 // mustSequentialUpdateSingle checks that for any given update, update is sequential.
