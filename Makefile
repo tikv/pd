@@ -273,7 +273,7 @@ test-real-cluster:
 	# testing with the real cluster...
 	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
 
-.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency test-real-cluster
+.PHONY: test basic-test test-with-cover test-tso test-tso-function test-tso-consistency test-real-cluster
 
 #### Daily CI coverage analyze  ####
 
