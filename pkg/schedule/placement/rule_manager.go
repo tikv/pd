@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -157,61 +158,59 @@ func (m *RuleManager) loadRules() error {
 		toSave   []*Rule
 		toDelete []string
 	)
-	return m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
-		err = m.storage.LoadRules(txn, func(k, v string) {
-			r, err := NewRuleFromJSON([]byte(v))
-			if err != nil {
-				log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
-				toDelete = append(toDelete, k)
-				return
-			}
-			err = m.AdjustRule(r, "")
-			if err != nil {
-				log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
-				toDelete = append(toDelete, k)
-				return
-			}
-			_, ok := m.ruleConfig.rules[r.Key()]
-			if ok {
-				log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
-				toDelete = append(toDelete, k)
-				return
-			}
-			if k != r.StoreKey() {
-				log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
-				toDelete = append(toDelete, k)
-				toSave = append(toSave, r)
-			}
-			m.ruleConfig.rules[r.Key()] = r
-		})
+	// load rules from storage
+	err := m.storage.LoadRules(func(k, v string) {
+		r, err := NewRuleFromJSON([]byte(v))
 		if err != nil {
-			return err
+			log.Error("failed to unmarshal rule value", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			toDelete = append(toDelete, k)
+			return
 		}
-
-		for _, s := range toSave {
-			if err = m.storage.SaveRule(txn, s.StoreKey(), s); err != nil {
-				return err
-			}
+		err = m.AdjustRule(r, "")
+		if err != nil {
+			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
+			toDelete = append(toDelete, k)
+			return
 		}
-		for _, d := range toDelete {
-			if err = m.storage.DeleteRule(txn, d); err != nil {
-				return err
-			}
+		_, ok := m.ruleConfig.rules[r.Key()]
+		if ok {
+			log.Error("duplicated rule key", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			toDelete = append(toDelete, k)
+			return
 		}
-		return nil
+		if k != r.StoreKey() {
+			log.Error("mismatch data key, need to restore", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule))
+			toDelete = append(toDelete, k)
+			toSave = append(toSave, r)
+		}
+		m.ruleConfig.rules[r.Key()] = r
 	})
+	if err != nil {
+		return err
+	}
+	// save the rules with mismatch data key or bad format
+	var batch []func(kv.Txn) error
+	for _, s := range toSave {
+		batch = append(batch, func(txn kv.Txn) error {
+			return m.storage.SaveRule(txn, s.StoreKey(), s)
+		})
+	}
+	for _, d := range toDelete {
+		batch = append(batch, func(txn kv.Txn) error {
+			return m.storage.DeleteRule(txn, d)
+		})
+	}
+	return m.runBatchInTxn(batch)
 }
 
 func (m *RuleManager) loadGroups() error {
-	return m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
-		return m.storage.LoadRuleGroups(txn, func(k, v string) {
-			g, err := NewRuleGroupFromJSON([]byte(v))
-			if err != nil {
-				log.Error("failed to unmarshal rule group", zap.String("group-id", k), errs.ZapError(errs.ErrLoadRuleGroup, err))
-				return
-			}
-			m.ruleConfig.groups[g.ID] = g
-		})
+	return m.storage.LoadRuleGroups(func(k, v string) {
+		g, err := NewRuleGroupFromJSON([]byte(v))
+		if err != nil {
+			log.Error("failed to unmarshal rule group", zap.String("group-id", k), errs.ZapError(errs.ErrLoadRuleGroup, err))
+			return
+		}
+		m.ruleConfig.groups[g.ID] = g
 	})
 }
 
@@ -492,30 +491,36 @@ func (m *RuleManager) TryCommitPatch(patch *RuleConfigPatch) error {
 }
 
 func (m *RuleManager) savePatch(p *ruleConfig) error {
-	return m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
-		for key, r := range p.rules {
-			if r == nil {
-				r = &Rule{GroupID: key[0], ID: key[1]}
-				err = m.storage.DeleteRule(txn, r.StoreKey())
-			} else {
-				err = m.storage.SaveRule(txn, r.StoreKey(), r)
-			}
-			if err != nil {
-				return err
-			}
+	var batch []func(kv.Txn) error
+	// add rules to batch
+	for key, r := range p.rules {
+		if r == nil {
+			rule := &Rule{GroupID: key[0], ID: key[1]}
+			batch = append(batch, func(txn kv.Txn) error {
+				return m.storage.DeleteRule(txn, rule.StoreKey())
+			})
+		} else {
+			rule := r.Clone()
+			batch = append(batch, func(txn kv.Txn) error {
+				return m.storage.SaveRule(txn, rule.StoreKey(), rule)
+			})
 		}
-		for id, g := range p.groups {
-			if g.isDefault() {
-				err = m.storage.DeleteRuleGroup(txn, id)
-			} else {
-				err = m.storage.SaveRuleGroup(txn, id, g)
-			}
-			if err != nil {
-				return err
-			}
+	}
+	// add groups to batch
+	for id, g := range p.groups {
+		if g.isDefault() {
+			batch = append(batch, func(txn kv.Txn) error {
+				return m.storage.DeleteRuleGroup(txn, id)
+			})
+		} else {
+			group := g.Clone()
+			batch = append(batch, func(txn kv.Txn) error {
+				return m.storage.SaveRuleGroup(txn, id, group)
+			})
 		}
-		return nil
-	})
+	}
+	err := m.runBatchInTxn(batch)
+	return err
 }
 
 // SetRules inserts or updates lots of Rules at once.
@@ -806,6 +811,28 @@ func (m *RuleManager) IsInitialized() bool {
 	m.RLock()
 	defer m.RUnlock()
 	return m.initialized
+}
+
+func (m *RuleManager) runBatchInTxn(batch []func(kv.Txn) error) error {
+	// execute batch in transaction with limited operations per transaction
+	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
+		end := start + etcdutil.MaxEtcdTxnOps
+		if end > len(batch) {
+			end = len(batch)
+		}
+		err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+			for _, op := range batch[start:end] {
+				if err = op(txn); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // checkRule check the rule whether will have RuleFit after FitRegion

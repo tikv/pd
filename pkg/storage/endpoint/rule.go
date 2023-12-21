@@ -22,14 +22,15 @@ import (
 
 // RuleStorage defines the storage operations on the rule.
 type RuleStorage interface {
-	LoadRules(txn kv.Txn, f func(k, v string)) error
 	SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error
 	DeleteRule(txn kv.Txn, ruleKey string) error
-	LoadRuleGroups(txn kv.Txn, f func(k, v string)) error
 	SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error
 	DeleteRuleGroup(txn kv.Txn, groupID string) error
-	// LoadRule is used only in rule watcher.
+	// Load in txn is unnecessary and may cause txn too large.
+	// because scheduling server will load rules from etcd rather than watching.
 	LoadRule(ruleKey string) (string, error)
+	LoadRules(f func(k, v string)) error
+	LoadRuleGroups(f func(k, v string)) error
 
 	LoadRegionRules(f func(k, v string)) error
 	SaveRegionRule(ruleKey string, rule interface{}) error
@@ -50,8 +51,8 @@ func (se *StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
 }
 
 // LoadRuleGroups loads all rule groups from storage.
-func (se *StorageEndpoint) LoadRuleGroups(txn kv.Txn, f func(k, v string)) error {
-	return loadRangeByPrefixInTxn(txn, ruleGroupPath+"/", f)
+func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
+	return se.loadRangeByPrefix(ruleGroupPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
@@ -85,6 +86,6 @@ func (se *StorageEndpoint) LoadRule(ruleKey string) (string, error) {
 }
 
 // LoadRules loads placement rules from storage.
-func (se *StorageEndpoint) LoadRules(txn kv.Txn, f func(k, v string)) error {
-	return loadRangeByPrefixInTxn(txn, rulesPath+"/", f)
+func (se *StorageEndpoint) LoadRules(f func(k, v string)) error {
+	return se.loadRangeByPrefix(rulesPath+"/", f)
 }
