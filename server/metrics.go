@@ -152,13 +152,6 @@ var (
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"service", "method", "caller_id", "ip"})
-	serverMaxProcs = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "service",
-			Name:      "maxprocs",
-			Help:      "The value of GOMAXPROCS.",
-		})
 
 	forwardFailCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -186,6 +179,5 @@ func init() {
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
-	prometheus.MustRegister(serverMaxProcs)
 	prometheus.MustRegister(forwardFailCounter)
 }
