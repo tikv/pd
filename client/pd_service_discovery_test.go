@@ -275,8 +275,8 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 		re.NoError(err)
 		re.Equal("Hello pd", resp.GetMessage())
 	}
-	re.Equal(suite.leaderServer.server.getHandleCount(), int32(5))
-	re.Equal(suite.followerServer.server.getHandleCount(), int32(5))
+	re.Equal(int32(5), suite.leaderServer.server.getHandleCount())
+	re.Equal(int32(5), suite.followerServer.server.getHandleCount())
 	suite.followerServer.server.resetCount()
 	suite.leaderServer.server.resetCount()
 
@@ -289,7 +289,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 		re.NoError(err)
 		re.Equal("Hello pd", resp.GetMessage())
 	}
-	re.Equal(suite.leaderServer.server.getHandleCount(), int32(10))
-	re.Equal(suite.followerServer.server.getHandleCount(), int32(0))
-	re.Equal(suite.followerServer.server.getForwardCount(), int32(5))
+	re.Equal(int32(10), suite.leaderServer.server.getHandleCount())
+	re.Equal(int32(0), suite.followerServer.server.getHandleCount())
+	re.Equal(int32(5), suite.followerServer.server.getForwardCount())
 }
