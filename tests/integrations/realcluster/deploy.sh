@@ -16,7 +16,8 @@ $TIUP_BIN_DIR update playground
 
 cd ../../..
 if [ ! -d "bin" ] || [ ! -e "bin/tikv-server" ] && [ ! -e "bin/tidb-server" ] && [ ! -e "bin/pd-server" ] && [ ! -e "bin/tiflash" ]; then
-	color-green "check binaries..."
+	color-green "downloading binaries..."
+	color-green "this may take a few minutes, you can also download them manually and put them in the bin directory."
 	$TIUP_BIN_DIR playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 --without-monitor --tag pd_test \
 		> $CUR_PATH/playground.log 2>&1 &
 else
