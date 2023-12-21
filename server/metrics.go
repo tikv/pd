@@ -136,14 +136,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
-	serverInfo = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "info",
-			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
-		}, []string{"version", "hash"})
-
 	serviceAuditHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -174,7 +166,6 @@ func init() {
 	prometheus.MustRegister(tsoHandleDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
-	prometheus.MustRegister(serverInfo)
 	prometheus.MustRegister(bucketReportCounter)
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
