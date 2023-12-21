@@ -426,7 +426,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 	re.NoError(err) // although no key, watcher returns no error
 	cache.RLock()
 	defer cache.RUnlock()
-	suite.Empty(cache.data)
+	re.Empty(cache.data)
 }
 
 func (suite *loopWatcherTestSuite) TestCallBack() {
@@ -544,7 +544,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 		data string
 	}{}
 	checkCache := func(expect string) {
-		testutil.Eventually(suite.Require(), func() bool {
+		testutil.Eventually(re, func() bool {
 			cache.RLock()
 			defer cache.RUnlock()
 			return cache.data == expect
@@ -631,6 +631,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
+	re := suite.Require()
 	checkWatcherRequestProgress := func(injectWatchChanBlock bool) {
 		fname := testutil.InitTempFileLogger("debug")
 		defer os.RemoveAll(fname)
@@ -655,14 +656,14 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 
 		if injectWatchChanBlock {
 			failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock", "return(true)")
-			testutil.Eventually(suite.Require(), func() bool {
+			testutil.Eventually(re, func() bool {
 				b, _ := os.ReadFile(fname)
 				l := string(b)
 				return strings.Contains(l, "watch channel is blocked for a long time")
 			})
 			failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/watchChanBlock")
 		} else {
-			testutil.Eventually(suite.Require(), func() bool {
+			testutil.Eventually(re, func() bool {
 				b, _ := os.ReadFile(fname)
 				l := string(b)
 				return strings.Contains(l, "watcher receives progress notify in watch loop")

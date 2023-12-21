@@ -49,6 +49,7 @@ type Client interface {
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
 	SetScheduleConfig(context.Context, map[string]interface{}) error
 	GetClusterVersion(context.Context) (string, error)
+	GetReplicateConfig(context.Context) (map[string]interface{}, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
@@ -57,6 +58,7 @@ type Client interface {
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
 	GetPlacementRulesByGroup(context.Context, string) ([]*Rule, error)
+	GetPlacementRule(context.Context, string, string) (*Rule, error)
 	SetPlacementRule(context.Context, *Rule) error
 	SetPlacementRuleInBatch(context.Context, []*RuleOp) error
 	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
@@ -359,6 +361,20 @@ func (c *client) GetClusterVersion(ctx context.Context) (string, error) {
 	return version, nil
 }
 
+// GetReplicateConfig gets the replication configurations.
+func (c *client) GetReplicateConfig(ctx context.Context) (map[string]interface{}, error) {
+	var config map[string]interface{}
+	err := c.request(ctx, newRequestInfo().
+		WithName(getReplicateConfigName).
+		WithURI(ReplicateConfig).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
 // GetAllPlacementRuleBundles gets all placement rules bundles.
 func (c *client) GetAllPlacementRuleBundles(ctx context.Context) ([]*GroupBundle, error) {
 	var bundles []*GroupBundle
@@ -399,6 +415,20 @@ func (c *client) GetPlacementRulesByGroup(ctx context.Context, group string) ([]
 		return nil, err
 	}
 	return rules, nil
+}
+
+// GetPlacementRule gets the placement rule by group and ID.
+func (c *client) GetPlacementRule(ctx context.Context, group, id string) (*Rule, error) {
+	var rule Rule
+	err := c.request(ctx, newRequestInfo().
+		WithName(getPlacementRuleName).
+		WithURI(PlacementRuleByGroupAndID(group, id)).
+		WithMethod(http.MethodGet).
+		WithResp(&rule))
+	if err != nil {
+		return nil, err
+	}
+	return &rule, nil
 }
 
 // SetPlacementRule sets the placement rule.
