@@ -104,14 +104,13 @@ func (w *Watcher) initializeStoreWatcher() error {
 		}
 		return nil
 	}
-	postEventFn := func() error {
-		return nil
-	}
 	w.storeWatcher = etcdutil.NewLoopWatcher(
 		w.ctx, &w.wg,
 		w.etcdClient,
 		"scheduling-store-watcher", w.storePathPrefix,
-		putFn, deleteFn, postEventFn,
+		func([]*clientv3.Event) error { return nil },
+		putFn, deleteFn,
+		func([]*clientv3.Event) error { return nil },
 		clientv3.WithPrefix(),
 	)
 	w.storeWatcher.StartWatchLoop()

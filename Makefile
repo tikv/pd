@@ -172,7 +172,7 @@ install-tools:
 
 #### Static checks ####
 
-check: install-tools tidy static generate-errdoc check-test
+check: install-tools tidy static generate-errdoc
 
 static: install-tools
 	@ echo "gofmt ..."
@@ -199,11 +199,7 @@ check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
-check-test:
-	@echo "checking test..."
-	./scripts/check-test.sh
-
-.PHONY: check static tidy generate-errdoc check-plugin check-test
+.PHONY: check static tidy generate-errdoc check-plugin
 
 #### Test utils ####
 
@@ -265,7 +261,13 @@ test-tso-consistency: install-tools
 	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency
+REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
+
+test-real-cluster:
+	# testing with the real cluster...
+	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
+
+.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency test-real-cluster
 
 #### Daily CI coverage analyze  ####
 
@@ -297,11 +299,13 @@ clean-test:
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
+	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
 
 clean-build:
 	# Cleaning building files...
 	rm -rf .dashboard_download_cache/
+	rm -rf .dashboard_build_temp/
 	rm -rf $(BUILD_BIN_PATH)
 	rm -rf $(GO_TOOLS_BIN_PATH)
 

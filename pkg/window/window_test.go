@@ -20,7 +20,6 @@ package window
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +32,7 @@ func TestWindowResetWindow(t *testing.T) {
 	}
 	window.ResetWindow()
 	for i := 0; i < opts.Size; i++ {
-		re.Equal(len(window.Bucket(i).Points), 0)
+		re.Empty(window.Bucket(i).Points)
 	}
 }
 
@@ -45,9 +44,9 @@ func TestWindowResetBucket(t *testing.T) {
 		window.Append(i, 1.0)
 	}
 	window.ResetBucket(1)
-	re.Equal(len(window.Bucket(1).Points), 0)
-	re.Equal(window.Bucket(0).Points[0], float64(1.0))
-	re.Equal(window.Bucket(2).Points[0], float64(1.0))
+	re.Empty(window.Bucket(1).Points)
+	re.Equal(float64(1.0), window.Bucket(0).Points[0])
+	re.Equal(float64(1.0), window.Bucket(2).Points[0])
 }
 
 func TestWindowResetBuckets(t *testing.T) {
@@ -59,7 +58,7 @@ func TestWindowResetBuckets(t *testing.T) {
 	}
 	window.ResetBuckets(0, 3)
 	for i := 0; i < opts.Size; i++ {
-		re.Equal(len(window.Bucket(i).Points), 0)
+		re.Empty(window.Bucket(i).Points)
 	}
 }
 
@@ -74,28 +73,30 @@ func TestWindowAppend(t *testing.T) {
 		window.Append(i, 2.0)
 	}
 	for i := 0; i < opts.Size; i++ {
-		re.Equal(window.Bucket(i).Points[0], float64(1.0))
+		re.Equal(float64(1.0), window.Bucket(i).Points[0])
 	}
 	for i := 1; i < opts.Size; i++ {
-		re.Equal(window.Bucket(i).Points[1], float64(2.0))
+		re.Equal(float64(2.0), window.Bucket(i).Points[1])
 	}
 }
 
 func TestWindowAdd(t *testing.T) {
+	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
 	window.Append(0, 1.0)
 	window.Add(0, 1.0)
-	assert.Equal(t, window.Bucket(0).Points[0], float64(2.0))
+	re.Equal(float64(2.0), window.Bucket(0).Points[0])
 
 	window = NewWindow(opts)
 	window.Add(0, 1.0)
 	window.Add(0, 1.0)
-	assert.Equal(t, window.Bucket(0).Points[0], float64(2.0))
+	re.Equal(float64(2.0), window.Bucket(0).Points[0])
 }
 
 func TestWindowSize(t *testing.T) {
+	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	assert.Equal(t, window.Size(), 3)
+	re.Equal(3, window.Size())
 }

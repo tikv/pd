@@ -34,7 +34,7 @@ func TestString(t *testing.T) {
 	for _, data := range testcases {
 		re.Equal(data.expected, filterType(data.filterType).String())
 	}
-	re.Equal(int(filtersLen), len(filters))
+	re.Len(filters, int(filtersLen))
 }
 
 func TestCounter(t *testing.T) {
@@ -42,9 +42,9 @@ func TestCounter(t *testing.T) {
 	counter := NewCounter(BalanceLeader.String())
 	counter.inc(source, storeStateTombstone, 1, 2)
 	counter.inc(target, storeStateTombstone, 1, 2)
-	re.Equal(counter.counter[source][storeStateTombstone][1][2], 1)
-	re.Equal(counter.counter[target][storeStateTombstone][1][2], 1)
+	re.Equal(1, counter.counter[source][storeStateTombstone][1][2])
+	re.Equal(1, counter.counter[target][storeStateTombstone][1][2])
 	counter.Flush()
-	re.Equal(counter.counter[source][storeStateTombstone][1][2], 0)
-	re.Equal(counter.counter[target][storeStateTombstone][1][2], 0)
+	re.Zero(counter.counter[source][storeStateTombstone][1][2])
+	re.Zero(counter.counter[target][storeStateTombstone][1][2])
 }
