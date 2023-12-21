@@ -191,13 +191,15 @@ func (m *RuleManager) loadRules() error {
 	// save the rules with mismatch data key or bad format
 	var batch []func(kv.Txn) error
 	for _, s := range toSave {
+		localRule := s
 		batch = append(batch, func(txn kv.Txn) error {
-			return m.storage.SaveRule(txn, s.StoreKey(), s)
+			return m.storage.SaveRule(txn, localRule.StoreKey(), localRule)
 		})
 	}
 	for _, d := range toDelete {
+		localKey := d
 		batch = append(batch, func(txn kv.Txn) error {
-			return m.storage.DeleteRule(txn, d)
+			return m.storage.DeleteRule(txn, localKey)
 		})
 	}
 	return m.runBatchInTxn(batch)
@@ -494,33 +496,32 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 	var batch []func(kv.Txn) error
 	// add rules to batch
 	for key, r := range p.rules {
+		localKey, localRule := key, r
 		if r == nil {
-			rule := &Rule{GroupID: key[0], ID: key[1]}
+			rule := &Rule{GroupID: localKey[0], ID: localKey[1]}
 			batch = append(batch, func(txn kv.Txn) error {
 				return m.storage.DeleteRule(txn, rule.StoreKey())
 			})
 		} else {
-			rule := r.Clone()
 			batch = append(batch, func(txn kv.Txn) error {
-				return m.storage.SaveRule(txn, rule.StoreKey(), rule)
+				return m.storage.SaveRule(txn, localRule.StoreKey(), localRule)
 			})
 		}
 	}
 	// add groups to batch
 	for id, g := range p.groups {
+		localID, localGroup := id, g
 		if g.isDefault() {
 			batch = append(batch, func(txn kv.Txn) error {
-				return m.storage.DeleteRuleGroup(txn, id)
+				return m.storage.DeleteRuleGroup(txn, localID)
 			})
 		} else {
-			group := g.Clone()
 			batch = append(batch, func(txn kv.Txn) error {
-				return m.storage.SaveRuleGroup(txn, id, group)
+				return m.storage.SaveRuleGroup(txn, localID, localGroup)
 			})
 		}
 	}
-	err := m.runBatchInTxn(batch)
-	return err
+	return m.runBatchInTxn(batch)
 }
 
 // SetRules inserts or updates lots of Rules at once.
