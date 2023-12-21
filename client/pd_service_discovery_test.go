@@ -197,7 +197,7 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.ErrorContains(err, "not leader")
 	resp, err := pb.NewGreeterClient(leaderConn).SayHello(suite.ctx, &pb.HelloRequest{Name: "pd"})
 	re.NoError(err)
-	re.Equal(resp.GetMessage(), "Hello pd")
+	re.Equal("Hello pd", resp.GetMessage())
 
 	re.False(follower.NeedRetry(nil, nil))
 	re.False(leader.NeedRetry(nil, nil))
@@ -205,7 +205,7 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	ctx1 := context.WithoutCancel(suite.ctx)
 	ctx1 = follower.BuildGRPCTargetContext(ctx1, false)
 	re.True(grpcutil.IsFollowerHandleEnabled(ctx1, metadata.FromOutgoingContext))
-	re.Len(grpcutil.GetForwardedHost(ctx1, metadata.FromOutgoingContext), 0)
+	re.Empty(grpcutil.GetForwardedHost(ctx1, metadata.FromOutgoingContext))
 	ctx2 := context.WithoutCancel(suite.ctx)
 	ctx2 = follower.BuildGRPCTargetContext(ctx2, true)
 	re.False(grpcutil.IsFollowerHandleEnabled(ctx2, metadata.FromOutgoingContext))
@@ -214,11 +214,11 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	ctx3 := context.WithoutCancel(suite.ctx)
 	ctx3 = leader.BuildGRPCTargetContext(ctx3, false)
 	re.False(grpcutil.IsFollowerHandleEnabled(ctx3, metadata.FromOutgoingContext))
-	re.Len(grpcutil.GetForwardedHost(ctx3, metadata.FromOutgoingContext), 0)
+	re.Empty(grpcutil.GetForwardedHost(ctx3, metadata.FromOutgoingContext))
 	ctx4 := context.WithoutCancel(suite.ctx)
 	ctx4 = leader.BuildGRPCTargetContext(ctx4, true)
 	re.False(grpcutil.IsFollowerHandleEnabled(ctx4, metadata.FromOutgoingContext))
-	re.Len(grpcutil.GetForwardedHost(ctx4, metadata.FromOutgoingContext), 0)
+	re.Empty(grpcutil.GetForwardedHost(ctx4, metadata.FromOutgoingContext))
 
 	followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)
 	leaderAPIClient := newPDServiceAPIClient(leader, regionAPIErrorFn)
@@ -264,7 +264,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	leader := suite.leaderClient
 	b := &pdServiceBalancer{}
 	b.set([]ServiceClient{leader, follower})
-	re.Equal(b.totalNode, 2)
+	re.Equal(2, b.totalNode)
 
 	for i := 0; i < 10; i++ {
 		client := b.get()
@@ -273,7 +273,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 		re.NotNil(conn)
 		resp, err := pb.NewGreeterClient(conn).SayHello(ctx, &pb.HelloRequest{Name: "pd"})
 		re.NoError(err)
-		re.Equal(resp.GetMessage(), "Hello pd")
+		re.Equal("Hello pd", resp.GetMessage())
 	}
 	re.Equal(suite.leaderServer.server.getHandleCount(), int32(5))
 	re.Equal(suite.followerServer.server.getHandleCount(), int32(5))
@@ -287,7 +287,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 		re.NotNil(conn)
 		resp, err := pb.NewGreeterClient(conn).SayHello(ctx, &pb.HelloRequest{Name: "pd"})
 		re.NoError(err)
-		re.Equal(resp.GetMessage(), "Hello pd")
+		re.Equal("Hello pd", resp.GetMessage())
 	}
 	re.Equal(suite.leaderServer.server.getHandleCount(), int32(10))
 	re.Equal(suite.followerServer.server.getHandleCount(), int32(0))
