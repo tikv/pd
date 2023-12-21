@@ -125,7 +125,7 @@ func (suite *balanceWitnessSchedulerTestSuite) TestTransferWitnessOut() {
 			}
 		}
 	}
-	suite.Equal(3, len(regions))
+	suite.Len(regions, 3)
 	for _, count := range targets {
 		suite.Zero(count)
 	}

@@ -78,14 +78,14 @@ func TestKeyspaceGroup(t *testing.T) {
 	err = json.Unmarshal(output, &keyspaceGroup)
 	re.NoError(err)
 	re.Equal(uint32(1), keyspaceGroup.ID)
-	re.Equal(keyspaceGroup.Keyspaces, []uint32{111})
+	re.Equal([]uint32{111}, keyspaceGroup.Keyspaces)
 	output, err = pdctl.ExecuteCommand(cmd, append(args, "2")...)
 	re.NoError(err)
 	keyspaceGroup = endpoint.KeyspaceGroup{}
 	err = json.Unmarshal(output, &keyspaceGroup)
 	re.NoError(err)
 	re.Equal(uint32(2), keyspaceGroup.ID)
-	re.Equal(keyspaceGroup.Keyspaces, []uint32{222, 333})
+	re.Equal([]uint32{222, 333}, keyspaceGroup.Keyspaces)
 }
 
 func TestSplitKeyspaceGroup(t *testing.T) {
@@ -133,8 +133,8 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	err = json.Unmarshal(output, &keyspaceGroups)
 	re.NoError(err)
 	re.Len(keyspaceGroups, 2)
-	re.Equal(keyspaceGroups[0].ID, uint32(0))
-	re.Equal(keyspaceGroups[1].ID, uint32(1))
+	re.Zero(keyspaceGroups[0].ID)
+	re.Equal(uint32(1), keyspaceGroups[1].ID)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
@@ -448,7 +448,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 	var keyspaceGroups []*endpoint.KeyspaceGroup
 	err = json.Unmarshal(output, &keyspaceGroups)
 	re.NoError(err)
-	re.Len(keyspaceGroups, 0)
+	re.Empty(keyspaceGroups)
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "2", "3"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
@@ -462,8 +462,8 @@ func TestKeyspaceGroupState(t *testing.T) {
 	err = json.Unmarshal(output, &keyspaceGroups)
 	re.NoError(err)
 	re.Len(keyspaceGroups, 2)
-	re.Equal(keyspaceGroups[0].ID, uint32(0))
-	re.Equal(keyspaceGroups[1].ID, uint32(2))
+	re.Equal(uint32(0), keyspaceGroups[0].ID)
+	re.Equal(uint32(2), keyspaceGroups[1].ID)
 
 	args = []string{"-u", pdAddr, "keyspace-group", "finish-split", "2"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
@@ -486,7 +486,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 	err = json.Unmarshal(output, &keyspaceGroups)
 	re.NoError(err)
 	re.Len(keyspaceGroups, 1)
-	re.Equal(keyspaceGroups[0].ID, uint32(0))
+	re.Equal(uint32(0), keyspaceGroups[0].ID)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))

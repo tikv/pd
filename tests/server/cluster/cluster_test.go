@@ -1485,7 +1485,7 @@ func TestMinResolvedTS(t *testing.T) {
 	}
 
 	// default run job
-	re.NotEqual(rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration, 0)
+	re.NotZero(rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
 	re.Equal(time.Duration(0), rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration)
 

@@ -1330,5 +1330,5 @@ func checkRegionsReplicated(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	c.String(http.StatusOK, state)
+	c.IndentedJSON(http.StatusOK, state)
 }

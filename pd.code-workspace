@@ -22,7 +22,7 @@
 		},
 		{
 			"name": "real-cluster-tests",
-			"path": "tests/integrations/realtiup"
+			"path": "tests/integrations/realcluster"
 		},
 		{
 			"name": "pd-tso-bench",

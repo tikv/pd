@@ -224,7 +224,7 @@ func (suite *regionTestSuite) TestRegionCheck() {
 func (suite *regionTestSuite) TestRegions() {
 	r := NewAPIRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}, nil))
 	suite.Nil(r.Leader.Peer)
-	suite.Len(r.Leader.RoleName, 0)
+	suite.Empty(r.Leader.RoleName)
 
 	rs := []*core.RegionInfo{
 		core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"), core.SetApproximateKeys(10), core.SetApproximateSize(10)),
