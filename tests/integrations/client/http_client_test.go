@@ -83,6 +83,9 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 
 func (suite *httpClientTestSuite) TestMeta() {
 	re := suite.Require()
+	replicateConfig, err := suite.client.GetReplicateConfig(suite.ctx)
+	re.NoError(err)
+	require.Equal(suite.T(), float64(3), replicateConfig["max-replicas"])
 	region, err := suite.client.GetRegionByID(suite.ctx, 10)
 	re.NoError(err)
 	re.Equal(int64(10), region.ID)
@@ -270,6 +273,16 @@ func (suite *httpClientTestSuite) checkRule(
 	re *require.Assertions,
 	rule *pd.Rule, totalRuleCount int, exist bool,
 ) {
+	if exist {
+		got, err := suite.client.GetPlacementRule(suite.ctx, rule.GroupID, rule.ID)
+		re.NoError(err)
+		// skip comparison of the generated field StartKeyHex
+		got.StartKeyHex = rule.StartKeyHex
+		re.Equal(rule, got)
+	} else {
+		_, err := suite.client.GetPlacementRule(suite.ctx, rule.GroupID, rule.ID)
+		re.ErrorContains(err, http.StatusText(http.StatusNotFound))
+	}
 	// Check through the `GetPlacementRulesByGroup` API.
 	rules, err := suite.client.GetPlacementRulesByGroup(suite.ctx, rule.GroupID)
 	re.NoError(err)
