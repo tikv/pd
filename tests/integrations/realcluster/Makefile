@@ -30,24 +30,24 @@ tidy:
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
-check: deploy test kill_tiup
+check: deploy test kill_cluster
 
-deploy: kill_tiup
+deploy: kill_cluster
 	@ echo "deploying..."
 	./deploy.sh
-	@ echo "wait tiup cluster ready..."
+	@ echo "wait cluster ready..."
 	./wait_tiup.sh 15 20
 	@ echo "check cluster status..."
-	@ pid=$$(ps -ef | grep 'tiup' | grep -v grep | awk '{print $$2}' | head -n 1); \
+	@ pid=$$(ps -ef | grep 'playground' | grep -v grep | awk '{print $$2}' | head -n 1); \
 	echo $$pid;
 
-kill_tiup:
-	@ echo "kill tiup..."
-	@ pid=$$(ps -ef | grep 'tiup' | grep -v grep | awk '{print $$2}' | head -n 1); \
+kill_cluster:
+	@ echo "kill cluster..."
+	@ pid=$$(ps -ef | grep 'playground' | grep -v grep | awk '{print $$2}' | head -n 1); \
 	if [ ! -z "$$pid" ]; then \
 		echo $$pid; \
 		kill $$pid; \
-		echo "waiting for tiup to exit..."; \
+		echo "waiting for cluster to exit..."; \
 		sleep 10; \
 	fi
 

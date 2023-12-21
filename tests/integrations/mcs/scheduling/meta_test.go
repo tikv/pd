@@ -60,7 +60,8 @@ func (suite *metaTestSuite) SetupSuite() {
 }
 
 func (suite *metaTestSuite) TearDownSuite() {
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	suite.cancel()
 	suite.cluster.Destroy()
 }

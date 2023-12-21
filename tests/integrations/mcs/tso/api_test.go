@@ -115,7 +115,7 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
 	err := testutil.CheckPostJSON(dialClient, url, input,
 		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.ForwardToMicroServiceHeader, "true"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// Test reset ts with invalid tso
 	input = []byte(`{}`)
@@ -230,7 +230,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	err = testutil.ReadGetJSON(re, dialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
 		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader))
 	re.NoError(err)
-	re.Len(slice, 0)
+	re.Empty(slice)
 
 	// Test admin/reset-ts, it should forward to tso server.
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)

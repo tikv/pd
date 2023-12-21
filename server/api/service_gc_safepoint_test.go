@@ -55,6 +55,7 @@ func (suite *serviceGCSafepointTestSuite) TearDownSuite() {
 }
 
 func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
+	re := suite.Require()
 	sspURL := suite.urlPrefix + "/gc/safepoint"
 
 	storage := suite.svr.GetStorage()
@@ -80,22 +81,22 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	}
 	for _, ssp := range list.ServiceGCSafepoints {
 		err := storage.SaveServiceGCSafePoint(ssp)
-		suite.NoError(err)
+		re.NoError(err)
 	}
 	storage.SaveGCSafePoint(1)
 
 	res, err := testDialClient.Get(sspURL)
-	suite.NoError(err)
+	re.NoError(err)
 	defer res.Body.Close()
 	listResp := &ListServiceGCSafepoint{}
 	err = apiutil.ReadJSON(res.Body, listResp)
-	suite.NoError(err)
-	suite.Equal(list, listResp)
+	re.NoError(err)
+	re.Equal(list, listResp)
 
-	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(suite.Require()))
-	suite.NoError(err)
+	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(re))
+	re.NoError(err)
 
 	left, err := storage.LoadAllServiceGCSafePoints()
-	suite.NoError(err)
-	suite.Equal(list.ServiceGCSafepoints[1:], left)
+	re.NoError(err)
+	re.Equal(list.ServiceGCSafepoints[1:], left)
 }

@@ -83,6 +83,9 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 
 func (suite *httpClientTestSuite) TestMeta() {
 	re := suite.Require()
+	replicateConfig, err := suite.client.GetReplicateConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(3.0, replicateConfig["max-replicas"])
 	region, err := suite.client.GetRegionByID(suite.ctx, 10)
 	re.NoError(err)
 	re.Equal(int64(10), region.ID)
@@ -129,7 +132,7 @@ func (suite *httpClientTestSuite) TestMeta() {
 		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
 	})
 	re.NoError(err)
-	re.Len(historyHorRegions.HistoryHotRegion, 0)
+	re.Empty(historyHorRegions.HistoryHotRegion)
 	store, err := suite.client.GetStores(suite.ctx)
 	re.NoError(err)
 	re.Equal(1, store.Count)
@@ -179,7 +182,7 @@ func (suite *httpClientTestSuite) TestRule() {
 	bundles, err := suite.client.GetAllPlacementRuleBundles(suite.ctx)
 	re.NoError(err)
 	re.Len(bundles, 1)
-	re.Equal(bundles[0].ID, placement.DefaultGroupID)
+	re.Equal(placement.DefaultGroupID, bundles[0].ID)
 	bundle, err := suite.client.GetPlacementRuleBundleByGroup(suite.ctx, placement.DefaultGroupID)
 	re.NoError(err)
 	re.Equal(bundles[0], bundle)
@@ -270,6 +273,17 @@ func (suite *httpClientTestSuite) checkRule(
 	re *require.Assertions,
 	rule *pd.Rule, totalRuleCount int, exist bool,
 ) {
+	if exist {
+		got, err := suite.client.GetPlacementRule(suite.ctx, rule.GroupID, rule.ID)
+		re.NoError(err)
+		// skip comparison of the generated field
+		got.StartKeyHex = rule.StartKeyHex
+		got.EndKeyHex = rule.EndKeyHex
+		re.Equal(rule, got)
+	} else {
+		_, err := suite.client.GetPlacementRule(suite.ctx, rule.GroupID, rule.ID)
+		re.ErrorContains(err, http.StatusText(http.StatusNotFound))
+	}
 	// Check through the `GetPlacementRulesByGroup` API.
 	rules, err := suite.client.GetPlacementRulesByGroup(suite.ctx, rule.GroupID)
 	re.NoError(err)
@@ -360,14 +374,14 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re := suite.Require()
 	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
 	suspectRegions := raftCluster.GetSuspectRegions()
-	re.Len(suspectRegions, 0)
+	re.Empty(suspectRegions)
 	err := suite.client.AccelerateSchedule(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a2")))
 	re.NoError(err)
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 1)
 	raftCluster.ClearSuspectRegions()
 	suspectRegions = raftCluster.GetSuspectRegions()
-	re.Len(suspectRegions, 0)
+	re.Empty(suspectRegions)
 	err = suite.client.AccelerateScheduleInBatch(suite.ctx, []*pd.KeyRange{
 		pd.NewKeyRange([]byte("a1"), []byte("a2")),
 		pd.NewKeyRange([]byte("a2"), []byte("a3")),
@@ -396,7 +410,7 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re := suite.Require()
 	schedulers, err := suite.client.GetSchedulers(suite.ctx)
 	re.NoError(err)
-	re.Len(schedulers, 0)
+	re.Empty(schedulers)
 
 	err = suite.client.CreateScheduler(suite.ctx, "evict-leader-scheduler", 1)
 	re.NoError(err)
