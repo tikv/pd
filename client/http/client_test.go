@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,14 +27,14 @@ import (
 
 func TestPDAddrNormalization(t *testing.T) {
 	re := require.New(t)
-	c := NewClient([]string{"127.0.0.1"})
+	c := NewClient("test-http-pd-addr", []string{"127.0.0.1"})
 	pdAddrs, leaderAddrIdx := c.(*client).inner.getPDAddrs()
-	re.Equal(1, len(pdAddrs))
+	re.Len(pdAddrs, 1)
 	re.Equal(-1, leaderAddrIdx)
 	re.Contains(pdAddrs[0], httpScheme)
-	c = NewClient([]string{"127.0.0.1"}, WithTLSConfig(&tls.Config{}))
+	c = NewClient("test-https-pd-addr", []string{"127.0.0.1"}, WithTLSConfig(&tls.Config{}))
 	pdAddrs, leaderAddrIdx = c.(*client).inner.getPDAddrs()
-	re.Equal(1, len(pdAddrs))
+	re.Len(pdAddrs, 1)
 	re.Equal(-1, leaderAddrIdx)
 	re.Contains(pdAddrs[0], httpsScheme)
 }
@@ -68,7 +69,7 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 		}
 		return nil
 	})
-	c := NewClient([]string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := NewClient("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
 	c.Close()
@@ -80,13 +81,13 @@ func TestCallerID(t *testing.T) {
 	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
 		val := req.Header.Get(xCallerIDKey)
 		// Exclude the request sent by the inner client.
-		if val != defaultInnerCallerID && val != expectedVal.Load() {
+		if !strings.Contains(val, defaultInnerCallerID) && val != expectedVal.Load() {
 			re.Failf("Caller ID header check failed",
 				"should be %s, but got %s", expectedVal, val)
 		}
 		return nil
 	})
-	c := NewClient([]string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := NewClient("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
 	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())

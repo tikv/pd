@@ -21,6 +21,10 @@
 			"path": "tests/integrations/tso"
 		},
 		{
+			"name": "real-cluster-tests",
+			"path": "tests/integrations/realcluster"
+		},
+		{
 			"name": "pd-tso-bench",
 			"path": "tools/pd-tso-bench"
 		},

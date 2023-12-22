@@ -126,30 +126,30 @@ func (suite *regionTestSuite) TestRegion() {
 	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
 	r1m := make(map[string]interface{})
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r1))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r1))
 	r1.Adjust()
-	suite.Equal(NewAPIRegionInfo(r), r1)
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, &r1m))
-	suite.Equal(float64(r.GetBytesWritten()), r1m["written_bytes"].(float64))
-	suite.Equal(float64(r.GetKeysWritten()), r1m["written_keys"].(float64))
-	suite.Equal(float64(r.GetBytesRead()), r1m["read_bytes"].(float64))
-	suite.Equal(float64(r.GetKeysRead()), r1m["read_keys"].(float64))
+	re.Equal(NewAPIRegionInfo(r), r1)
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &r1m))
+	re.Equal(float64(r.GetBytesWritten()), r1m["written_bytes"].(float64))
+	re.Equal(float64(r.GetKeysWritten()), r1m["written_keys"].(float64))
+	re.Equal(float64(r.GetBytesRead()), r1m["read_bytes"].(float64))
+	re.Equal(float64(r.GetKeysRead()), r1m["read_keys"].(float64))
 	keys := r1m["buckets"].([]interface{})
-	suite.Len(keys, 2)
-	suite.Equal(core.HexRegionKeyStr([]byte("a")), keys[0].(string))
-	suite.Equal(core.HexRegionKeyStr([]byte("b")), keys[1].(string))
+	re.Len(keys, 2)
+	re.Equal(core.HexRegionKeyStr([]byte("a")), keys[0].(string))
+	re.Equal(core.HexRegionKeyStr([]byte("b")), keys[1].(string))
 
 	url = fmt.Sprintf("%s/region/key/%s", suite.urlPrefix, "a")
 	r2 := &RegionInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
 	r2.Adjust()
-	suite.Equal(NewAPIRegionInfo(r), r2)
+	re.Equal(NewAPIRegionInfo(r), r2)
 
 	url = fmt.Sprintf("%s/region/key/%s?format=hex", suite.urlPrefix, hex.EncodeToString([]byte("a")))
 	r2 = &RegionInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
 	r2.Adjust()
-	suite.Equal(NewAPIRegionInfo(r), r2)
+	re.Equal(NewAPIRegionInfo(r), r2)
 }
 
 func (suite *regionTestSuite) TestRegionCheck() {
@@ -165,66 +165,67 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	mustRegionHeartbeat(re, suite.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
 	r1 := &RegionInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r1))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r1))
 	r1.Adjust()
-	suite.Equal(NewAPIRegionInfo(r), r1)
+	re.Equal(NewAPIRegionInfo(r), r1)
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "down-peer")
 	r2 := &RegionsInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
 	r2.Adjust()
-	suite.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r2)
+	re.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r2)
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "pending-peer")
 	r3 := &RegionsInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r3))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r3))
 	r3.Adjust()
-	suite.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r3)
+	re.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r3)
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
 	r4 := &RegionsInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r4))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r4))
 	r4.Adjust()
-	suite.Equal(&RegionsInfo{Count: 0, Regions: []RegionInfo{}}, r4)
+	re.Equal(&RegionsInfo{Count: 0, Regions: []RegionInfo{}}, r4)
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "empty-region")
 	r5 := &RegionsInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r5))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r5))
 	r5.Adjust()
-	suite.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r5)
+	re.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r5)
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-size")
 	r6 := make([]*histItem, 1)
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, &r6))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &r6))
 	histSizes := []*histItem{{Start: 1, End: 1, Count: 1}}
-	suite.Equal(histSizes, r6)
+	re.Equal(histSizes, r6)
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-keys")
 	r7 := make([]*histItem, 1)
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, &r7))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &r7))
 	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
-	suite.Equal(histKeys, r7)
+	re.Equal(histKeys, r7)
 
 	mustPutStore(re, suite.svr, 2, metapb.StoreState_Offline, metapb.NodeState_Removing, []*metapb.StoreLabel{})
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
 	r8 := &RegionsInfo{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r8))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r8))
 	r4.Adjust()
-	suite.Equal(1, r8.Count)
-	suite.Equal(r.GetID(), r8.Regions[0].ID)
+	re.Equal(1, r8.Count)
+	re.Equal(r.GetID(), r8.Regions[0].ID)
 }
 
 func (suite *regionTestSuite) TestRegions() {
+	re := suite.Require()
 	r := NewAPIRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}, nil))
-	suite.Nil(r.Leader.Peer)
-	suite.Len(r.Leader.RoleName, 0)
+	re.Nil(r.Leader.Peer)
+	re.Empty(r.Leader.RoleName)
 
 	rs := []*core.RegionInfo{
 		core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"), core.SetApproximateKeys(10), core.SetApproximateSize(10)),
@@ -232,7 +233,6 @@ func (suite *regionTestSuite) TestRegions() {
 		core.NewTestRegionInfo(4, 2, []byte("c"), []byte("d"), core.SetApproximateKeys(10), core.SetApproximateSize(10)),
 	}
 	regions := make([]RegionInfo, 0, len(rs))
-	re := suite.Require()
 	for _, r := range rs {
 		regions = append(regions, *NewAPIRegionInfo(r))
 		mustRegionHeartbeat(re, suite.svr, r)
@@ -240,15 +240,15 @@ func (suite *regionTestSuite) TestRegions() {
 	url := fmt.Sprintf("%s/regions", suite.urlPrefix)
 	regionsInfo := &RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, regionsInfo)
-	suite.NoError(err)
-	suite.Len(regions, regionsInfo.Count)
+	re.NoError(err)
+	re.Len(regions, regionsInfo.Count)
 	sort.Slice(regionsInfo.Regions, func(i, j int) bool {
 		return regionsInfo.Regions[i].ID < regionsInfo.Regions[j].ID
 	})
 	for i, r := range regionsInfo.Regions {
-		suite.Equal(regions[i].ID, r.ID)
-		suite.Equal(regions[i].ApproximateSize, r.ApproximateSize)
-		suite.Equal(regions[i].ApproximateKeys, r.ApproximateKeys)
+		re.Equal(regions[i].ID, r.ID)
+		re.Equal(regions[i].ApproximateSize, r.ApproximateSize)
+		re.Equal(regions[i].ApproximateKeys, r.ApproximateKeys)
 	}
 }
 
@@ -265,29 +265,29 @@ func (suite *regionTestSuite) TestStoreRegions() {
 	url := fmt.Sprintf("%s/regions/store/%d", suite.urlPrefix, 1)
 	r4 := &RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, r4)
-	suite.NoError(err)
-	suite.Len(regionIDs, r4.Count)
+	re.NoError(err)
+	re.Len(regionIDs, r4.Count)
 	sort.Slice(r4.Regions, func(i, j int) bool { return r4.Regions[i].ID < r4.Regions[j].ID })
 	for i, r := range r4.Regions {
-		suite.Equal(regionIDs[i], r.ID)
+		re.Equal(regionIDs[i], r.ID)
 	}
 
 	regionIDs = []uint64{4}
 	url = fmt.Sprintf("%s/regions/store/%d", suite.urlPrefix, 2)
 	r5 := &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, r5)
-	suite.NoError(err)
-	suite.Len(regionIDs, r5.Count)
+	re.NoError(err)
+	re.Len(regionIDs, r5.Count)
 	for i, r := range r5.Regions {
-		suite.Equal(regionIDs[i], r.ID)
+		re.Equal(regionIDs[i], r.ID)
 	}
 
 	regionIDs = []uint64{}
 	url = fmt.Sprintf("%s/regions/store/%d", suite.urlPrefix, 3)
 	r6 := &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, r6)
-	suite.NoError(err)
-	suite.Len(regionIDs, r6.Count)
+	re.NoError(err)
+	re.Len(regionIDs, r6.Count)
 }
 
 func (suite *regionTestSuite) TestTop() {
@@ -299,13 +299,13 @@ func (suite *regionTestSuite) TestTop() {
 	mustRegionHeartbeat(re, suite.svr, r2)
 	r3 := core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(re, suite.svr, r3)
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/writeflow", suite.urlPrefix), []uint64{2, 1, 3})
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/readflow", suite.urlPrefix), []uint64{1, 3, 2})
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/writeflow?limit=2", suite.urlPrefix), []uint64{2, 1})
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/confver", suite.urlPrefix), []uint64{3, 2, 1})
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/confver?limit=2", suite.urlPrefix), []uint64{3, 2})
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/version", suite.urlPrefix), []uint64{2, 3, 1})
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/version?limit=2", suite.urlPrefix), []uint64{2, 3})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/writeflow", suite.urlPrefix), []uint64{2, 1, 3})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/readflow", suite.urlPrefix), []uint64{1, 3, 2})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/writeflow?limit=2", suite.urlPrefix), []uint64{2, 1})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/confver", suite.urlPrefix), []uint64{3, 2, 1})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/confver?limit=2", suite.urlPrefix), []uint64{3, 2})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/version", suite.urlPrefix), []uint64{2, 3, 1})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/version?limit=2", suite.urlPrefix), []uint64{2, 3})
 	// Top size.
 	baseOpt := []core.RegionCreateOption{core.SetRegionConfVer(3), core.SetRegionVersion(3)}
 	opt := core.SetApproximateSize(1000)
@@ -317,8 +317,8 @@ func (suite *regionTestSuite) TestTop() {
 	opt = core.SetApproximateSize(800)
 	r3 = core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r3)
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/size?limit=2", suite.urlPrefix), []uint64{1, 2})
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/size", suite.urlPrefix), []uint64{1, 2, 3})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/size?limit=2", suite.urlPrefix), []uint64{1, 2})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/size", suite.urlPrefix), []uint64{1, 2, 3})
 	// Top CPU usage.
 	baseOpt = []core.RegionCreateOption{core.SetRegionConfVer(4), core.SetRegionVersion(4)}
 	opt = core.SetCPUUsage(100)
@@ -330,21 +330,22 @@ func (suite *regionTestSuite) TestTop() {
 	opt = core.SetCPUUsage(500)
 	r3 = core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r3)
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu?limit=2", suite.urlPrefix), []uint64{3, 2})
-	suite.checkTopRegions(fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{3, 2, 1})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/cpu?limit=2", suite.urlPrefix), []uint64{3, 2})
+	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{3, 2, 1})
 }
 
-func (suite *regionTestSuite) checkTopRegions(url string, regionIDs []uint64) {
+func (suite *regionTestSuite) checkTopRegions(re *require.Assertions, url string, regionIDs []uint64) {
 	regions := &RegionsInfo{}
-	err := tu.ReadGetJSON(suite.Require(), testDialClient, url, regions)
-	suite.NoError(err)
-	suite.Len(regionIDs, regions.Count)
+	err := tu.ReadGetJSON(re, testDialClient, url, regions)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
 	for i, r := range regions.Regions {
-		suite.Equal(regionIDs[i], r.ID)
+		re.Equal(regionIDs[i], r.ID)
 	}
 }
 
 func (suite *regionTestSuite) TestTopN() {
+	re := suite.Require()
 	writtenBytes := []uint64{10, 10, 9, 5, 3, 2, 2, 1, 0, 0}
 	for n := 0; n <= len(writtenBytes)+1; n++ {
 		regions := make([]*core.RegionInfo, 0, len(writtenBytes))
@@ -355,12 +356,12 @@ func (suite *regionTestSuite) TestTopN() {
 		}
 		topN := TopNRegions(regions, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, n)
 		if n > len(writtenBytes) {
-			suite.Len(topN, len(writtenBytes))
+			re.Len(topN, len(writtenBytes))
 		} else {
-			suite.Len(topN, n)
+			re.Len(topN, n)
 		}
 		for i := range topN {
-			suite.Equal(writtenBytes[i], topN[i].GetBytesWritten())
+			re.Equal(writtenBytes[i], topN[i].GetBytesWritten())
 		}
 	}
 }
@@ -432,8 +433,8 @@ func (suite *getRegionTestSuite) TestRegionKey() {
 	url := fmt.Sprintf("%s/region/key/%s", suite.urlPrefix, url.QueryEscape(string([]byte{0xFF, 0xFF, 0xBB})))
 	RegionInfo := &RegionInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, RegionInfo)
-	suite.NoError(err)
-	suite.Equal(RegionInfo.ID, r.GetID())
+	re.NoError(err)
+	re.Equal(RegionInfo.ID, r.GetID())
 }
 
 func (suite *getRegionTestSuite) TestScanRegionByKeys() {
@@ -453,55 +454,55 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	regionIDs := []uint64{3, 4, 5, 99}
 	regions := &RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, regions)
-	suite.NoError(err)
-	suite.Len(regionIDs, regions.Count)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
-		suite.Equal(regions.Regions[i].ID, v)
+		re.Equal(regions.Regions[i].ID, v)
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s", suite.urlPrefix, "d")
 	regionIDs = []uint64{4, 5, 99}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
-	suite.NoError(err)
-	suite.Len(regionIDs, regions.Count)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
-		suite.Equal(regions.Regions[i].ID, v)
+		re.Equal(regions.Regions[i].ID, v)
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s", suite.urlPrefix, "g")
 	regionIDs = []uint64{5, 99}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
-	suite.NoError(err)
-	suite.Len(regionIDs, regions.Count)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
-		suite.Equal(regions.Regions[i].ID, v)
+		re.Equal(regions.Regions[i].ID, v)
 	}
 	url = fmt.Sprintf("%s/regions/key?end_key=%s", suite.urlPrefix, "e")
 	regionIDs = []uint64{2, 3, 4}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
-	suite.NoError(err)
-	suite.Len(regionIDs, regions.Count)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
-		suite.Equal(regions.Regions[i].ID, v)
+		re.Equal(regions.Regions[i].ID, v)
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", suite.urlPrefix, "b", "g")
 	regionIDs = []uint64{3, 4}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
-	suite.NoError(err)
-	suite.Len(regionIDs, regions.Count)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
-		suite.Equal(regions.Regions[i].ID, v)
+		re.Equal(regions.Regions[i].ID, v)
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", suite.urlPrefix, "b", []byte{0xFF, 0xFF, 0xCC})
 	regionIDs = []uint64{3, 4, 5, 99}
 	regions = &RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
-	suite.NoError(err)
-	suite.Len(regionIDs, regions.Count)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
 	for i, v := range regionIDs {
-		suite.Equal(regions.Regions[i].ID, v)
+		re.Equal(regions.Regions[i].ID, v)
 	}
 }
 
@@ -547,8 +548,8 @@ func (suite *getRegionRangeHolesTestSuite) TestRegionRangeHoles() {
 
 	url := fmt.Sprintf("%s/regions/range-holes", suite.urlPrefix)
 	rangeHoles := new([][]string)
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, rangeHoles))
-	suite.Equal([][]string{
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, rangeHoles))
+	re.Equal([][]string{
 		{"", core.HexRegionKeyStr(r1.GetStartKey())},
 		{core.HexRegionKeyStr(r1.GetEndKey()), core.HexRegionKeyStr(r3.GetStartKey())},
 		{core.HexRegionKeyStr(r4.GetEndKey()), core.HexRegionKeyStr(r6.GetStartKey())},

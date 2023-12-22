@@ -233,7 +233,7 @@ func TestGetTotalCPUUseTime(t *testing.T) {
 	}
 	totalCPUUseTime, _ := getTotalCPUUseTime(querier, TiDB, instances, time.Now(), 0)
 	expected := mockResultValue * float64(len(instances))
-	re.True(math.Abs(expected-totalCPUUseTime) < 1e-6)
+	re.Less(math.Abs(expected-totalCPUUseTime), 1e-6)
 }
 
 func TestGetTotalCPUQuota(t *testing.T) {

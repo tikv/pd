@@ -163,7 +163,7 @@ func BenchmarkPlacementRule(b *testing.B) {
 		ops, plans = sc.Schedule(tc, false)
 	}
 	b.StopTimer()
-	re.Len(plans, 0)
+	re.Empty(plans)
 	re.Len(ops, 1)
 	re.Contains(ops[0].String(), "to [191]")
 }

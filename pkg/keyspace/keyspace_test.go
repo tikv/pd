@@ -75,13 +75,14 @@ func (m *mockConfig) GetCheckRegionSplitInterval() time.Duration {
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
+	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
 	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
-	suite.NoError(kgm.Bootstrap(suite.ctx))
-	suite.NoError(suite.manager.Bootstrap())
+	re.NoError(kgm.Bootstrap(suite.ctx))
+	re.NoError(suite.manager.Bootstrap())
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
@@ -89,11 +90,13 @@ func (suite *keyspaceTestSuite) TearDownTest() {
 }
 
 func (suite *keyspaceTestSuite) SetupSuite() {
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 }
 
 func (suite *keyspaceTestSuite) TearDownSuite() {
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
@@ -205,20 +208,20 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		// Disabling an ENABLED keyspace is allowed. Should update StateChangedAt.
 		updated, err := manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, oldTime)
 		re.NoError(err)
-		re.Equal(updated.State, keyspacepb.KeyspaceState_DISABLED)
-		re.Equal(updated.StateChangedAt, oldTime)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
+		re.Equal(oldTime, updated.StateChangedAt)
 
 		newTime := time.Now().Unix()
 		// Disabling an DISABLED keyspace is allowed. Should NOT update StateChangedAt.
 		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.NoError(err)
-		re.Equal(updated.State, keyspacepb.KeyspaceState_DISABLED)
-		re.Equal(updated.StateChangedAt, oldTime)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
+		re.Equal(oldTime, updated.StateChangedAt)
 		// Archiving a DISABLED keyspace is allowed. Should update StateChangeAt.
 		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, newTime)
 		re.NoError(err)
-		re.Equal(updated.State, keyspacepb.KeyspaceState_ARCHIVED)
-		re.Equal(updated.StateChangedAt, newTime)
+		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, updated.State)
+		re.Equal(newTime, updated.StateChangedAt)
 		// Changing state of an ARCHIVED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
@@ -244,7 +247,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	// Load all keyspaces including the default keyspace.
 	keyspaces, err := manager.LoadRangeKeyspace(0, 0)
 	re.NoError(err)
-	re.Equal(total+1, len(keyspaces))
+	re.Len(keyspaces, total+1)
 	for i := range keyspaces {
 		re.Equal(uint32(i), keyspaces[i].Id)
 		if i != 0 {
@@ -256,7 +259,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	// Result should be keyspaces with id 0 - 49.
 	keyspaces, err = manager.LoadRangeKeyspace(0, 50)
 	re.NoError(err)
-	re.Equal(50, len(keyspaces))
+	re.Len(keyspaces, 50)
 	for i := range keyspaces {
 		re.Equal(uint32(i), keyspaces[i].Id)
 		if i != 0 {
@@ -269,7 +272,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	loadStart := 33
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 20)
 	re.NoError(err)
-	re.Equal(20, len(keyspaces))
+	re.Len(keyspaces, 20)
 	for i := range keyspaces {
 		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
 		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
@@ -280,7 +283,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	loadStart = 90
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 30)
 	re.NoError(err)
-	re.Equal(11, len(keyspaces))
+	re.Len(keyspaces, 11)
 	for i := range keyspaces {
 		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
 		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])

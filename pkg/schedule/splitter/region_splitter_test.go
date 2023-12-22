@@ -81,6 +81,7 @@ func (suite *regionSplitterTestSuite) TearDownTest() {
 }
 
 func (suite *regionSplitterTestSuite) TestRegionSplitter() {
+	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(suite.ctx, opt)
@@ -90,24 +91,25 @@ func (suite *regionSplitterTestSuite) TestRegionSplitter() {
 	newRegions := map[uint64]struct{}{}
 	// assert success
 	failureKeys := splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, newRegions)
-	suite.Empty(failureKeys)
-	suite.Len(newRegions, 2)
+	re.Empty(failureKeys)
+	re.Len(newRegions, 2)
 
 	percentage, newRegionsID := splitter.SplitRegions(suite.ctx, [][]byte{[]byte("fff"), []byte("ggg")}, 1)
-	suite.Equal(100, percentage)
-	suite.Len(newRegionsID, 2)
+	re.Equal(100, percentage)
+	re.Len(newRegionsID, 2)
 	// assert out of range
 	newRegions = map[uint64]struct{}{}
 	failureKeys = splitter.splitRegionsByKeys(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, newRegions)
-	suite.Len(failureKeys, 2)
-	suite.Empty(newRegions)
+	re.Len(failureKeys, 2)
+	re.Empty(newRegions)
 
 	percentage, newRegionsID = splitter.SplitRegions(suite.ctx, [][]byte{[]byte("aaa"), []byte("bbb")}, 1)
-	suite.Equal(0, percentage)
-	suite.Empty(newRegionsID)
+	re.Equal(0, percentage)
+	re.Empty(newRegionsID)
 }
 
 func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
+	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	tc := mockcluster.NewCluster(suite.ctx, opt)
@@ -122,15 +124,15 @@ func (suite *regionSplitterTestSuite) TestGroupKeysByRegion() {
 		[]byte("fff"),
 		[]byte("zzz"),
 	})
-	suite.Len(groupKeys, 2)
+	re.Len(groupKeys, 2)
 	for k, v := range groupKeys {
 		switch k {
 		case uint64(1):
-			suite.Len(v.keys, 1)
-			suite.Equal([]byte("bbb"), v.keys[0])
+			re.Len(v.keys, 1)
+			re.Equal([]byte("bbb"), v.keys[0])
 		case uint64(2):
-			suite.Len(v.keys, 1)
-			suite.Equal([]byte("ddd"), v.keys[0])
+			re.Len(v.keys, 1)
+			re.Equal([]byte("ddd"), v.keys[0])
 		}
 	}
 }

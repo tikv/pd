@@ -60,6 +60,9 @@ type clientInner struct {
 	pdAddrs       []string
 	leaderAddrIdx int
 
+	// source is used to mark the source of the client creation,
+	// it will also be used in the caller ID of the inner client.
+	source  string
 	tlsConf *tls.Config
 	cli     *http.Client
 
@@ -67,9 +70,9 @@ type clientInner struct {
 	executionDuration *prometheus.HistogramVec
 }
 
-func newClientInner() *clientInner {
+func newClientInner(source string) *clientInner {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &clientInner{ctx: ctx, cancel: cancel, leaderAddrIdx: -1}
+	return &clientInner{ctx: ctx, cancel: cancel, leaderAddrIdx: -1, source: source}
 }
 
 func (ci *clientInner) init() {
@@ -155,7 +158,7 @@ func (ci *clientInner) requestWithRetry(
 			return nil
 		}
 		log.Debug("[pd] request leader addr failed",
-			zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
+			zap.String("source", ci.source), zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
 	}
 	// Try to send the request to the other PD followers.
 	for idx := 0; idx < len(pdAddrs) && idx != leaderAddrIdx; idx++ {
@@ -165,7 +168,7 @@ func (ci *clientInner) requestWithRetry(
 			break
 		}
 		log.Debug("[pd] request follower addr failed",
-			zap.Int("idx", idx), zap.String("addr", addr), zap.Error(err))
+			zap.String("source", ci.source), zap.Int("idx", idx), zap.String("addr", addr), zap.Error(err))
 	}
 	return err
 }
@@ -176,6 +179,7 @@ func (ci *clientInner) doRequest(
 	headerOpts ...HeaderOption,
 ) error {
 	var (
+		source      = ci.source
 		callerID    = reqInfo.callerID
 		name        = reqInfo.name
 		url         = reqInfo.getURL(addr)
@@ -185,6 +189,7 @@ func (ci *clientInner) doRequest(
 		respHandler = reqInfo.respHandler
 	)
 	logFields := []zap.Field{
+		zap.String("source", source),
 		zap.String("name", name),
 		zap.String("url", url),
 		zap.String("method", method),
@@ -250,13 +255,13 @@ func (ci *clientInner) doRequest(
 
 func (ci *clientInner) membersInfoUpdater(ctx context.Context) {
 	ci.updateMembersInfo(ctx)
-	log.Info("[pd] http client member info updater started")
+	log.Info("[pd] http client member info updater started", zap.String("source", ci.source))
 	ticker := time.NewTicker(defaultMembersInfoUpdateInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("[pd] http client member info updater stopped")
+			log.Info("[pd] http client member info updater stopped", zap.String("source", ci.source))
 			return
 		case <-ticker.C:
 			ci.updateMembersInfo(ctx)
@@ -267,17 +272,17 @@ func (ci *clientInner) membersInfoUpdater(ctx context.Context) {
 func (ci *clientInner) updateMembersInfo(ctx context.Context) {
 	var membersInfo MembersInfo
 	err := ci.requestWithRetry(ctx, newRequestInfo().
-		WithCallerID(defaultInnerCallerID).
+		WithCallerID(fmt.Sprintf("%s-%s", ci.source, defaultInnerCallerID)).
 		WithName(getMembersName).
 		WithURI(membersPrefix).
 		WithMethod(http.MethodGet).
 		WithResp(&membersInfo))
 	if err != nil {
-		log.Error("[pd] http client get members info failed", zap.Error(err))
+		log.Error("[pd] http client get members info failed", zap.String("source", ci.source), zap.Error(err))
 		return
 	}
 	if len(membersInfo.Members) == 0 {
-		log.Error("[pd] http client get empty members info")
+		log.Error("[pd] http client get empty members info", zap.String("source", ci.source))
 		return
 	}
 	var (
@@ -292,7 +297,7 @@ func (ci *clientInner) updateMembersInfo(ctx context.Context) {
 	}
 	// Prevent setting empty addresses.
 	if len(newPDAddrs) == 0 {
-		log.Error("[pd] http client get empty member addresses")
+		log.Error("[pd] http client get empty member addresses", zap.String("source", ci.source))
 		return
 	}
 	oldPDAddrs, oldLeaderAddrIdx := ci.getPDAddrs()
@@ -307,7 +312,7 @@ func (ci *clientInner) updateMembersInfo(ctx context.Context) {
 	}
 	oldMemberNum, newMemberNum := len(oldPDAddrs), len(newPDAddrs)
 	if oldPDLeaderAddr != newPDLeaderAddr || oldMemberNum != newMemberNum {
-		log.Info("[pd] http client members info changed",
+		log.Info("[pd] http client members info changed", zap.String("source", ci.source),
 			zap.Int("old-member-num", oldMemberNum), zap.Int("new-member-num", newMemberNum),
 			zap.Strings("old-addrs", oldPDAddrs), zap.Strings("new-addrs", newPDAddrs),
 			zap.Int("old-leader-addr-idx", oldLeaderAddrIdx), zap.Int("new-leader-addr-idx", newLeaderAddrIdx),
@@ -353,10 +358,11 @@ func WithMetrics(
 
 // NewClient creates a PD HTTP client with the given PD addresses and TLS config.
 func NewClient(
+	source string,
 	pdAddrs []string,
 	opts ...ClientOption,
 ) Client {
-	c := &client{inner: newClientInner(), callerID: defaultCallerID}
+	c := &client{inner: newClientInner(source), callerID: defaultCallerID}
 	// Apply the options first.
 	for _, opt := range opts {
 		opt(c)
@@ -369,7 +375,7 @@ func NewClient(
 // Close gracefully closes the HTTP client.
 func (c *client) Close() {
 	c.inner.close()
-	log.Info("[pd] http client closed")
+	log.Info("[pd] http client closed", zap.String("source", c.inner.source))
 }
 
 // WithCallerID sets and returns a new client with the given caller ID.

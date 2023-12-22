@@ -185,12 +185,15 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 	failpoint.Inject("skipCampaignLeaderCheck", func() {
 		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
 	})
+
 	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
-		log.Warn("campaign times is too frequent, resign and campaign again",
-			zap.String("leader-name", m.Name()), zap.String("leader-key", m.GetLeaderPath()))
 		m.leadership.ResetCampaignTimes()
-		return m.ResignEtcdLeader(ctx, m.Name(), "")
+		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
+			return err
+		}
+		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
+
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
