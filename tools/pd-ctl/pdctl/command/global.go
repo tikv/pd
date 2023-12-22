@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
+	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.etcd.io/etcd/pkg/transport"
 )
@@ -164,6 +165,10 @@ func getEndpoints(cmd *cobra.Command) []string {
 		os.Exit(1)
 	}
 	return strings.Split(addrs, ",")
+}
+
+func pdClient(cmd *cobra.Command) pd.Client {
+	return pd.NewClient(pdControlCallerID, getEndpoints(cmd))
 }
 
 func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]interface{}) {

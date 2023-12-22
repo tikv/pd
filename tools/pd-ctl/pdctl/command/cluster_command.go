@@ -18,7 +18,6 @@ import (
 	"context"
 
 	"github.com/spf13/cobra"
-	pd "github.com/tikv/pd/client/http"
 )
 
 // NewClusterCommand return a cluster subcommand of rootCmd
@@ -43,7 +42,7 @@ func NewClusterStatusCommand() *cobra.Command {
 }
 
 func showClusterCommandFunc(cmd *cobra.Command, args []string) {
-	cli := pd.NewClient(pdControlCallerID, getEndpoints(cmd))
+	cli := pdClient(cmd)
 	clusterInfo, err := cli.GetCluster(context.Background())
 	if err != nil {
 		cmd.Printf("Failed to get the cluster information: %s\n", err)
@@ -53,7 +52,7 @@ func showClusterCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showClusterStatusCommandFunc(cmd *cobra.Command, args []string) {
-	cli := pd.NewClient(pdControlCallerID, getEndpoints(cmd))
+	cli := pdClient(cmd)
 	r, err := cli.GetClusterStatus(context.Background())
 	if err != nil {
 		cmd.Printf("Failed to get the cluster status: %s\n", err)
