@@ -78,7 +78,7 @@ get min TSO failed, %v
 
 ["PD:client:ErrClientGetTSO"]
 error = '''
-get TSO failed, %v
+get TSO failed
 '''
 
 ["PD:client:ErrClientGetTSOTimeout"]
