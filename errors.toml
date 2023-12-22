@@ -63,7 +63,7 @@ create TSO stream failed, %s
 
 ["PD:client:ErrClientGetLeader"]
 error = '''
-get leader from %v error
+get leader failed, %v
 '''
 
 ["PD:client:ErrClientGetMember"]
@@ -73,7 +73,7 @@ get member failed
 
 ["PD:client:ErrClientGetTSO"]
 error = '''
-get TSO failed, %v
+get TSO failed
 '''
 
 ["PD:client:ErrClientGetTSOTimeout"]
