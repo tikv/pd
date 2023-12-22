@@ -321,39 +321,9 @@ func (kgm *KeyspaceGroupManager) initAssignment(
 		revision             int64
 	)
 
-<<<<<<< HEAD
 	// Load all keyspace groups from etcd and apply the ones assigned to this tso service.
 	for {
 		revision, groups, more, err = kgm.loadKeyspaceGroups(ctx, keyspaceGroupsLoaded, kgm.loadKeyspaceGroupsBatchSize)
-=======
-	return nil
-}
-
-// InitializeGroupWatchLoop initializes the watch loop monitoring the path for storing keyspace group
-// membership/distribution metadata.
-// Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
-// Value: endpoint.KeyspaceGroup
-func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
-	rootPath := kgm.legacySvcRootPath
-	startKey := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(mcsutils.DefaultKeyspaceGroupID)}, "/")
-	endKey := strings.Join(
-		[]string{rootPath, clientv3.GetPrefixRangeEnd(endpoint.KeyspaceGroupIDPrefix())}, "/")
-
-	defaultKGConfigured := false
-	putFn := func(kv *mvccpb.KeyValue) error {
-		group := &endpoint.KeyspaceGroup{}
-		if err := json.Unmarshal(kv.Value, group); err != nil {
-			return errs.ErrJSONUnmarshal.Wrap(err)
-		}
-		kgm.updateKeyspaceGroup(group)
-		if group.ID == mcsutils.DefaultKeyspaceGroupID {
-			defaultKGConfigured = true
-		}
-		return nil
-	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
-		groupID, err := ExtractKeyspaceGroupIDFromPath(kgm.compiledKGMembershipIDRegexp, string(kv.Key))
->>>>>>> f51f91345 (errs: remove redundant `FastGenWithCause` in `ZapError` (#7497))
 		if err != nil {
 			return
 		}

@@ -117,11 +117,7 @@ func (s *HeartbeatStreams) run() {
 			if stream, ok := s.streams[storeID]; ok {
 				if err := stream.Send(msg); err != nil {
 					log.Error("send heartbeat message fail",
-<<<<<<< HEAD
-						zap.Uint64("region-id", msg.RegionId), errs.ZapError(errs.ErrGRPCSend.Wrap(err).GenWithStackByArgs()))
-=======
 						zap.Uint64("region-id", msg.GetRegionId()), errs.ZapError(errs.ErrGRPCSend, err))
->>>>>>> f51f91345 (errs: remove redundant `FastGenWithCause` in `ZapError` (#7497))
 					delete(s.streams, storeID)
 					heartbeatStreamCounter.WithLabelValues(storeAddress, storeLabel, "push", "err").Inc()
 				} else {
