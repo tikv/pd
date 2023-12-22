@@ -965,8 +965,6 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) (bool, error) {
 		leaderClient := newPDServiceClient(addr, addr, newConn, true)
 		c.leader.Store(leaderClient)
 	}
-	// Set PD leader and Global TSO Allocator (which is also the PD leader)
-	c.leader.Store(addr)
 	// Run callbacks
 	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
 		if err := c.tsoGlobalAllocLeaderUpdatedCb(addr); err != nil {
