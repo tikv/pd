@@ -26,11 +26,11 @@ import (
 func TestEncryptionMethodSupported(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	re.NotNil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_PLAINTEXT))
-	re.NotNil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_UNKNOWN))
-	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES128_CTR))
-	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES192_CTR))
-	re.Nil(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES256_CTR))
+	re.Error(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_PLAINTEXT))
+	re.Error(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_UNKNOWN))
+	re.NoError(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES128_CTR))
+	re.NoError(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES192_CTR))
+	re.NoError(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_AES256_CTR))
 }
 
 func TestKeyLength(t *testing.T) {

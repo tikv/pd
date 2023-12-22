@@ -28,10 +28,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func checkKernelVersionNewerThan(t *testing.T, major, minor int) bool {
+func checkKernelVersionNewerThan(re *require.Assertions, t *testing.T, major, minor int) bool {
 	u := syscall.Utsname{}
 	err := syscall.Uname(&u)
-	require.NoError(t, err)
+	re.NoError(err)
 	releaseBs := make([]byte, 0, len(u.Release))
 	for _, v := range u.Release {
 		if v == 0 {
@@ -42,16 +42,16 @@ func checkKernelVersionNewerThan(t *testing.T, major, minor int) bool {
 	releaseStr := string(releaseBs)
 	t.Log("kernel release string:", releaseStr)
 	versionInfoRE := regexp.MustCompile(`[0-9]+\.[0-9]+\.[0-9]+`)
-	kernelVerion := versionInfoRE.FindAllString(releaseStr, 1)
-	require.Equal(t, 1, len(kernelVerion), fmt.Sprintf("release str is %s", releaseStr))
+	kernelVersion := versionInfoRE.FindAllString(releaseStr, 1)
+	re.Len(kernelVersion, 1, fmt.Sprintf("release str is %s", releaseStr))
 	kernelVersionPartRE := regexp.MustCompile(`[0-9]+`)
-	kernelVersionParts := kernelVersionPartRE.FindAllString(kernelVerion[0], -1)
-	require.Equal(t, 3, len(kernelVersionParts), fmt.Sprintf("kernel verion str is %s", kernelVerion[0]))
+	kernelVersionParts := kernelVersionPartRE.FindAllString(kernelVersion[0], -1)
+	re.Len(kernelVersionParts, 3, fmt.Sprintf("kernel verion str is %s", kernelVersion[0]))
 	t.Logf("parsed kernel version parts: major %s, minor %s, patch %s",
 		kernelVersionParts[0], kernelVersionParts[1], kernelVersionParts[2])
 	mustConvInt := func(s string) int {
 		i, err := strconv.Atoi(s)
-		require.NoError(t, err, s)
+		re.NoError(err, s)
 		return i
 	}
 	versionNewerThanFlag := false
@@ -64,6 +64,7 @@ func checkKernelVersionNewerThan(t *testing.T, major, minor int) bool {
 }
 
 func TestGetCgroupCPU(t *testing.T) {
+	re := require.New(t)
 	exit := make(chan struct{})
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -83,15 +84,15 @@ func TestGetCgroupCPU(t *testing.T) {
 	cpu, err := GetCgroupCPU()
 	if err == errNoCPUControllerDetected {
 		// for more information, please refer https://github.com/pingcap/tidb/pull/41347
-		if checkKernelVersionNewerThan(t, 4, 7) {
-			require.NoError(t, err, "linux version > v4.7 and err still happens")
+		if checkKernelVersionNewerThan(re, t, 4, 7) {
+			re.NoError(err, "linux version > v4.7 and err still happens")
 		} else {
 			t.Logf("the error '%s' is ignored because the kernel is too old", err)
 		}
 	} else {
-		require.NoError(t, err)
-		require.NotZero(t, cpu.Period)
-		require.Less(t, int64(1), cpu.Period)
+		re.NoError(err)
+		re.NotZero(cpu.Period)
+		re.Less(int64(1), cpu.Period)
 	}
 	close(exit)
 	wg.Wait()

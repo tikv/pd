@@ -45,7 +45,7 @@ func TestMergeRegionsInfo(t *testing.T) {
 	}
 	regionsInfo := regionsInfo1.Merge(regionsInfo2)
 	re.Equal(int64(2), regionsInfo.Count)
-	re.Equal(2, len(regionsInfo.Regions))
+	re.Len(regionsInfo.Regions, 2)
 	re.Subset(regionsInfo.Regions, append(regionsInfo1.Regions, regionsInfo2.Regions...))
 }
 

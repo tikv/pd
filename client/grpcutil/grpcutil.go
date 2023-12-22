@@ -36,6 +36,8 @@ const (
 	dialTimeout = 3 * time.Second
 	// ForwardMetadataKey is used to record the forwarded host of PD.
 	ForwardMetadataKey = "pd-forwarded-host"
+	// FollowerHandleMetadataKey is used to mark the permit of follower handle.
+	FollowerHandleMetadataKey = "pd-allow-follower-handle"
 )
 
 // GetClientConn returns a gRPC client connection.
@@ -73,6 +75,39 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 func BuildForwardContext(ctx context.Context, addr string) context.Context {
 	md := metadata.Pairs(ForwardMetadataKey, addr)
 	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// GetForwardedHost returns the forwarded host in metadata.
+// Only used for test.
+func GetForwardedHost(ctx context.Context, f func(context.Context) (metadata.MD, bool)) string {
+	v, _ := getValueFromMetadata(ctx, ForwardMetadataKey, f)
+	return v
+}
+
+// BuildFollowerHandleContext creates a context with follower handle metadata information.
+// It is used in client side.
+func BuildFollowerHandleContext(ctx context.Context) context.Context {
+	md := metadata.Pairs(FollowerHandleMetadataKey, "")
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// IsFollowerHandleEnabled returns the forwarded host in metadata.
+// Only used for test.
+func IsFollowerHandleEnabled(ctx context.Context, f func(context.Context) (metadata.MD, bool)) bool {
+	_, ok := getValueFromMetadata(ctx, FollowerHandleMetadataKey, f)
+	return ok
+}
+
+func getValueFromMetadata(ctx context.Context, key string, f func(context.Context) (metadata.MD, bool)) (string, bool) {
+	md, ok := f(ctx)
+	if !ok {
+		return "", false
+	}
+	vs, ok := md[key]
+	if !ok {
+		return "", false
+	}
+	return vs[0], true
 }
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.

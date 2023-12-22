@@ -114,6 +114,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TearDownSuite() {
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult1() {
+	re := suite.Require()
 	plans := make([]Plan, 0)
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[4], Step: 2, Target: suite.stores[0], Status: NewStatus(StatusStoreScoreDisallowed)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[4], Step: 2, Target: suite.stores[1], Status: NewStatus(StatusStoreScoreDisallowed)})
@@ -141,9 +142,9 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult1() {
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[0], Step: 2, Target: suite.stores[3], Status: NewStatus(StatusStoreNotMatchRule)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[0], Step: 2, Target: suite.stores[4], Status: NewStatus(StatusStoreScoreDisallowed)})
 	statuses, isNormal, err := BalancePlanSummary(plans)
-	suite.NoError(err)
-	suite.True(isNormal)
-	suite.True(suite.check(statuses,
+	re.NoError(err)
+	re.True(isNormal)
+	re.True(suite.check(statuses,
 		map[uint64]*Status{
 			1: NewStatus(StatusStoreNotMatchRule),
 			2: NewStatus(StatusStoreNotMatchRule),
@@ -154,6 +155,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult1() {
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult2() {
+	re := suite.Require()
 	plans := make([]Plan, 0)
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[4], Step: 0, Status: NewStatus(StatusStoreDown)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[3], Step: 0, Status: NewStatus(StatusStoreDown)})
@@ -161,9 +163,9 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult2() {
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[1], Step: 0, Status: NewStatus(StatusStoreDown)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[0], Step: 0, Status: NewStatus(StatusStoreDown)})
 	statuses, isNormal, err := BalancePlanSummary(plans)
-	suite.NoError(err)
-	suite.False(isNormal)
-	suite.True(suite.check(statuses,
+	re.NoError(err)
+	re.False(isNormal)
+	re.True(suite.check(statuses,
 		map[uint64]*Status{
 			1: NewStatus(StatusStoreDown),
 			2: NewStatus(StatusStoreDown),
@@ -174,6 +176,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult2() {
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult3() {
+	re := suite.Require()
 	plans := make([]Plan, 0)
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[4], Step: 0, Status: NewStatus(StatusStoreDown)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[3], Region: suite.regions[0], Step: 1, Status: NewStatus(StatusRegionNotMatchRule)})
@@ -181,9 +184,9 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult3() {
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[1], Region: suite.regions[1], Step: 1, Status: NewStatus(StatusRegionNotMatchRule)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[0], Region: suite.regions[1], Step: 1, Status: NewStatus(StatusRegionNotMatchRule)})
 	statuses, isNormal, err := BalancePlanSummary(plans)
-	suite.NoError(err)
-	suite.False(isNormal)
-	suite.True(suite.check(statuses,
+	re.NoError(err)
+	re.False(isNormal)
+	re.True(suite.check(statuses,
 		map[uint64]*Status{
 			1: NewStatus(StatusRegionNotMatchRule),
 			2: NewStatus(StatusRegionNotMatchRule),
@@ -193,6 +196,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult3() {
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
+	re := suite.Require()
 	plans := make([]Plan, 0)
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[4], Step: 0, Status: NewStatus(StatusStoreDown)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[3], Region: suite.regions[0], Step: 1, Status: NewStatus(StatusRegionNotMatchRule)})
@@ -208,9 +212,9 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[0], Target: suite.stores[3], Step: 2, Status: NewStatus(StatusStoreNotMatchRule)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[0], Target: suite.stores[4], Step: 2, Status: NewStatus(StatusStoreDown)})
 	statuses, isNormal, err := BalancePlanSummary(plans)
-	suite.NoError(err)
-	suite.False(isNormal)
-	suite.True(suite.check(statuses,
+	re.NoError(err)
+	re.False(isNormal)
+	re.True(suite.check(statuses,
 		map[uint64]*Status{
 			1: NewStatus(StatusStoreAlreadyHasPeer),
 			2: NewStatus(StatusStoreAlreadyHasPeer),
@@ -221,6 +225,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult4() {
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult5() {
+	re := suite.Require()
 	plans := make([]Plan, 0)
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[4], Step: 0, Status: NewStatus(StatusStoreRemoveLimitThrottled)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[3], Region: suite.regions[0], Step: 1, Status: NewStatus(StatusRegionNotMatchRule)})
@@ -234,9 +239,9 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult5() {
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[0], Target: suite.stores[2], Step: 2, Status: NewStatus(StatusStoreNotMatchRule)})
 	plans = append(plans, &BalanceSchedulerPlan{Source: suite.stores[0], Target: suite.stores[3], Step: 2, Status: NewStatus(StatusStoreNotMatchRule)})
 	statuses, isNormal, err := BalancePlanSummary(plans)
-	suite.NoError(err)
-	suite.False(isNormal)
-	suite.True(suite.check(statuses,
+	re.NoError(err)
+	re.False(isNormal)
+	re.True(suite.check(statuses,
 		map[uint64]*Status{
 			1: NewStatus(StatusStoreAlreadyHasPeer),
 			2: NewStatus(StatusStoreAlreadyHasPeer),
@@ -247,6 +252,7 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult5() {
 }
 
 func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult6() {
+	re := suite.Require()
 	basePlan := NewBalanceSchedulerPlan()
 	collector := NewCollector(basePlan)
 	collector.Collect(SetResourceWithStep(suite.stores[0], 2), SetStatus(NewStatus(StatusStoreDown)))
@@ -258,9 +264,9 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) TestAnalyzerResult6() {
 	basePlan.Step++
 	collector.Collect(SetResource(suite.regions[0]), SetStatus(NewStatus(StatusRegionNoLeader)))
 	statuses, isNormal, err := BalancePlanSummary(collector.GetPlans())
-	suite.NoError(err)
-	suite.False(isNormal)
-	suite.True(suite.check(statuses,
+	re.NoError(err)
+	re.False(isNormal)
+	re.True(suite.check(statuses,
 		map[uint64]*Status{
 			1: NewStatus(StatusStoreDown),
 			2: NewStatus(StatusStoreDown),
