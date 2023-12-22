@@ -102,6 +102,7 @@ func NewService(srv *tsoserver.Service) *Service {
 	}
 	s.RegisterAdminRouter()
 	s.RegisterKeyspaceGroupRouter()
+	s.RegisterHealth()
 	return s
 }
 
@@ -116,6 +117,12 @@ func (s *Service) RegisterAdminRouter() {
 func (s *Service) RegisterKeyspaceGroupRouter() {
 	router := s.root.Group("keyspace-groups")
 	router.GET("/members", GetKeyspaceGroupMembers)
+}
+
+// RegisterHealth registers the router of the health handler.
+func (s *Service) RegisterHealth() {
+	router := s.root.Group("health")
+	router.GET("", GetHealth)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -199,6 +206,22 @@ func ResetTS(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "Reset ts successfully.")
+}
+
+// GetHealth returns the health status of the TSO service.
+func GetHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	am, err := svr.GetKeyspaceGroupManager().GetAllocatorManager(utils.DefaultKeyspaceGroupID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if am.GetMember().IsLeaderElected() {
+		c.IndentedJSON(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no leader elected")
 }
 
 // KeyspaceGroupMember contains the keyspace group and its member information.

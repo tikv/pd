@@ -216,11 +216,11 @@ type Server struct {
 	// related data structures defined in the PD grpc service
 	pdProtoFactory *tsoutil.PDProtoFactory
 
-	serviceRateLimiter *ratelimit.Limiter
+	serviceRateLimiter *ratelimit.Controller
 	serviceLabels      map[string][]apiutil.AccessPath
 	apiServiceLabelMap map[apiutil.AccessPath]string
 
-	grpcServiceRateLimiter *ratelimit.Limiter
+	grpcServiceRateLimiter *ratelimit.Controller
 	grpcServiceLabels      map[string]struct{}
 	grpcServer             *grpc.Server
 
@@ -273,8 +273,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
-	s.serviceRateLimiter = ratelimit.NewLimiter()
-	s.grpcServiceRateLimiter = ratelimit.NewLimiter()
+	s.serviceRateLimiter = ratelimit.NewController()
+	s.grpcServiceRateLimiter = ratelimit.NewController()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.grpcServiceLabels = make(map[string]struct{})
@@ -489,13 +489,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
-	if !s.IsServiceIndependent(mcs.SchedulingServiceName) {
-		s.hotRegionStorage, err = storage.NewHotRegionsStorage(
-			ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
-		if err != nil {
-			return err
-		}
+
+	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
+	if err != nil {
+		return err
 	}
+
 	// Run callbacks
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.startCallbacks {
@@ -1467,7 +1467,7 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 }
 
 // GetServiceRateLimiter is used to get rate limiter
-func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
+func (s *Server) GetServiceRateLimiter() *ratelimit.Controller {
 	return s.serviceRateLimiter
 }
 
@@ -1482,7 +1482,7 @@ func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit
 }
 
 // GetGRPCRateLimiter is used to get rate limiter
-func (s *Server) GetGRPCRateLimiter() *ratelimit.Limiter {
+func (s *Server) GetGRPCRateLimiter() *ratelimit.Controller {
 	return s.grpcServiceRateLimiter
 }
 
@@ -2017,9 +2017,10 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		s.client,
 		name,
 		primaryKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		func() error { return nil },
+		func([]*clientv3.Event) error { return nil },
 	)
 }
 

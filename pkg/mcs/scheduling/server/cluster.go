@@ -65,7 +65,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		cancel()
 		return nil, err
 	}
-	ruleManager := placement.NewRuleManager(storage, basicCluster, persistConfig)
+	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,

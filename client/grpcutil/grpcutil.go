@@ -91,9 +91,9 @@ func BuildFollowerHandleContext(ctx context.Context) context.Context {
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
-// GetFollowerHandleEnable returns the forwarded host in metadata.
+// IsFollowerHandleEnabled returns the forwarded host in metadata.
 // Only used for test.
-func GetFollowerHandleEnable(ctx context.Context, f func(context.Context) (metadata.MD, bool)) bool {
+func IsFollowerHandleEnabled(ctx context.Context, f func(context.Context) (metadata.MD, bool)) bool {
 	_, ok := getValueFromMetadata(ctx, FollowerHandleMetadataKey, f)
 	return ok
 }

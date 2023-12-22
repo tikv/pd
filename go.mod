@@ -36,7 +36,7 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20231127105651-ce4097837c5e
+	github.com/pingcap/tidb-dashboard v0.0.0-20231218095437-aa621ed4de2c
 	github.com/prometheus/client_golang v1.11.1
 	github.com/prometheus/common v0.26.0
 	github.com/sasha-s/go-deadlock v0.2.0
@@ -55,7 +55,7 @@ require (
 	go.uber.org/atomic v1.10.0
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.24.0
-	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a
+	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
 	golang.org/x/text v0.13.0
 	golang.org/x/time v0.1.0
 	golang.org/x/tools v0.6.0
@@ -185,7 +185,7 @@ require (
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/image v0.5.0 // indirect
-	golang.org/x/mod v0.8.0 // indirect
+	golang.org/x/mod v0.11.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/oauth2 v0.4.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect

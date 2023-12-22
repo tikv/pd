@@ -57,7 +57,7 @@ type EmbeddedEtcdMember struct {
 	id       uint64       // etcd server id.
 	member   *pdpb.Member // current PD's info.
 	rootPath string
-	// memberValue is the serialized string of `member`. It will be save in
+	// memberValue is the serialized string of `member`. It will be saved in
 	// etcd leader key when the PD node is successfully elected as the PD leader
 	// of the cluster. Every write will use it to check PD leadership.
 	memberValue string
@@ -185,13 +185,15 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 	failpoint.Inject("skipCampaignLeaderCheck", func() {
 		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
 	})
-	if len(m.leadership.CampaignTimes) >= campaignLeaderFrequencyTimes {
-		log.Warn("campaign times is too frequent, resign and campaign again",
-			zap.String("leader-name", m.Name()), zap.String("leader-key", m.GetLeaderPath()))
-		// remove all campaign times
-		m.leadership.CampaignTimes = nil
-		return m.ResignEtcdLeader(ctx, m.Name(), "")
+
+	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
+		m.leadership.ResetCampaignTimes()
+		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
+			return err
+		}
+		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
+
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
@@ -200,7 +202,7 @@ func (m *EmbeddedEtcdMember) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// PreCheckLeader does some pre-check before checking whether or not it's the leader.
+// PreCheckLeader does some pre-check before checking whether it's the leader.
 func (m *EmbeddedEtcdMember) PreCheckLeader() error {
 	if m.GetEtcdLeader() == 0 {
 		return errs.ErrEtcdLeaderNotFound

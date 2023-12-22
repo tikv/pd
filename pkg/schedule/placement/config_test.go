@@ -30,40 +30,40 @@ func TestTrim(t *testing.T) {
 	rc.setGroup(&RuleGroup{ID: "g2", Index: 2})
 
 	testCases := []struct {
-		ops       func(p *ruleConfigPatch)
+		ops       func(p *RuleConfigPatch)
 		mutRules  map[[2]string]*Rule
 		mutGroups map[string]*RuleGroup
 	}{
 		{
-			func(p *ruleConfigPatch) {
-				p.setRule(&Rule{GroupID: "g1", ID: "id1", Index: 100})
-				p.setRule(&Rule{GroupID: "g1", ID: "id2"})
-				p.setGroup(&RuleGroup{ID: "g1", Index: 100})
-				p.setGroup(&RuleGroup{ID: "g2", Index: 2})
+			func(p *RuleConfigPatch) {
+				p.SetRule(&Rule{GroupID: "g1", ID: "id1", Index: 100})
+				p.SetRule(&Rule{GroupID: "g1", ID: "id2"})
+				p.SetGroup(&RuleGroup{ID: "g1", Index: 100})
+				p.SetGroup(&RuleGroup{ID: "g2", Index: 2})
 			},
 			map[[2]string]*Rule{{"g1", "id1"}: {GroupID: "g1", ID: "id1", Index: 100}},
 			map[string]*RuleGroup{"g1": {ID: "g1", Index: 100}},
 		},
 		{
-			func(p *ruleConfigPatch) {
-				p.deleteRule("g1", "id1")
-				p.deleteGroup("g2")
-				p.deleteRule("g3", "id3")
-				p.deleteGroup("g3")
+			func(p *RuleConfigPatch) {
+				p.DeleteRule("g1", "id1")
+				p.DeleteGroup("g2")
+				p.DeleteRule("g3", "id3")
+				p.DeleteGroup("g3")
 			},
 			map[[2]string]*Rule{{"g1", "id1"}: nil},
 			map[string]*RuleGroup{"g2": {ID: "g2"}},
 		},
 		{
-			func(p *ruleConfigPatch) {
-				p.setRule(&Rule{GroupID: "g1", ID: "id2", Index: 200})
-				p.setRule(&Rule{GroupID: "g1", ID: "id2"})
-				p.setRule(&Rule{GroupID: "g3", ID: "id3"})
-				p.deleteRule("g3", "id3")
-				p.setGroup(&RuleGroup{ID: "g1", Index: 100})
-				p.setGroup(&RuleGroup{ID: "g1", Index: 1})
-				p.setGroup(&RuleGroup{ID: "g3", Index: 3})
-				p.deleteGroup("g3")
+			func(p *RuleConfigPatch) {
+				p.SetRule(&Rule{GroupID: "g1", ID: "id2", Index: 200})
+				p.SetRule(&Rule{GroupID: "g1", ID: "id2"})
+				p.SetRule(&Rule{GroupID: "g3", ID: "id3"})
+				p.DeleteRule("g3", "id3")
+				p.SetGroup(&RuleGroup{ID: "g1", Index: 100})
+				p.SetGroup(&RuleGroup{ID: "g1", Index: 1})
+				p.SetGroup(&RuleGroup{ID: "g3", Index: 3})
+				p.DeleteGroup("g3")
 			},
 			map[[2]string]*Rule{},
 			map[string]*RuleGroup{},

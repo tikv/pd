@@ -70,13 +70,14 @@ func (suite *serverTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
-	suite.NoError(suite.pdLeader.BootstrapCluster())
+	re.NoError(suite.pdLeader.BootstrapCluster())
 }
 
 func (suite *serverTestSuite) TearDownSuite() {
+	re := suite.Require()
 	suite.cluster.Destroy()
 	suite.cancel()
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
@@ -136,7 +137,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 6
 	})
 	// change primary
 	primary.Close()
@@ -147,7 +148,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 5
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 6
 	})
 }
 

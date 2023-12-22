@@ -205,3 +205,10 @@ func (w *HotCache) GetThresholds(kind utils.RWType, storeID uint64) []float64 {
 	}
 	return nil
 }
+
+// CleanCache cleans the cache.
+// This is used for test purpose.
+func (w *HotCache) CleanCache() {
+	w.writeCache.removeAllItem()
+	w.readCache.removeAllItem()
+}

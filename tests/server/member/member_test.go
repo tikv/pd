@@ -341,10 +341,34 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 		cluster.GetLeaderServer().ResetPDLeader()
 		cluster.WaitLeader()
 	}
-	// leader should be changed when campaign leader frequently
-	cluster.WaitLeader()
+	// PD leader should be different from before because etcd leader changed.
 	re.NotEmpty(cluster.GetLeader())
 	re.NotEqual(leader, cluster.GetLeader())
+}
+
+func TestGrantLeaseFailed(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 5)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	leader := cluster.GetLeader()
+	re.NotEmpty(cluster.GetLeader())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", leader)))
+
+	for i := 0; i < 3; i++ {
+		cluster.GetLeaderServer().ResetPDLeader()
+		cluster.WaitLeader()
+	}
+	// PD leader should be different from before because etcd leader changed.
+	re.NotEmpty(cluster.GetLeader())
+	re.NotEqual(leader, cluster.GetLeader())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 }
 
 func TestGetLeader(t *testing.T) {

@@ -120,12 +120,12 @@ type ServiceClient interface {
 	GetAddress() string
 	// GetClientConn returns the gRPC connection of the service client
 	GetClientConn() *grpc.ClientConn
-	// BuildGRPCContext builds a context object with a gRPC context.
+	// BuildGRPCTargetContext builds a context object with a gRPC context.
 	// ctx: the original context object.
 	// mustLeader: whether must send to leader.
-	BuildGRPCContext(ctx context.Context, mustLeader bool) context.Context
-	// IsLeader returns whether the target PD server is leader.
-	IsLeader() bool
+	BuildGRPCTargetContext(ctx context.Context, mustLeader bool) context.Context
+	// IsConnectedToLeader returns whether the connected PD server is leader.
+	IsConnectedToLeader() bool
 	// Available returns if the network or other availability for the current service client is available.
 	Available() bool
 	// NeedRetry checks if client need to retry based on the PD server error response.
@@ -133,8 +133,10 @@ type ServiceClient interface {
 	NeedRetry(*pdpb.Error, error) bool
 }
 
-var _ ServiceClient = (*pdServiceClient)(nil)
-var _ ServiceClient = (*pdServiceAPIClient)(nil)
+var (
+	_ ServiceClient = (*pdServiceClient)(nil)
+	_ ServiceClient = (*pdServiceAPIClient)(nil)
+)
 
 type pdServiceClient struct {
 	addr       string
@@ -145,7 +147,7 @@ type pdServiceClient struct {
 	networkFailure atomic.Bool
 }
 
-func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) *pdServiceClient {
+func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
 	cli := &pdServiceClient{
 		addr:       addr,
 		conn:       conn,
@@ -166,12 +168,12 @@ func (c *pdServiceClient) GetAddress() string {
 	return c.addr
 }
 
-// BuildGRPCContext implements ServiceClient.
-func (c *pdServiceClient) BuildGRPCContext(ctx context.Context, toLeader bool) context.Context {
+// BuildGRPCTargetContext implements ServiceClient.
+func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader bool) context.Context {
 	if c == nil {
 		return ctx
 	}
-	if c.IsLeader() {
+	if c.IsConnectedToLeader() {
 		return ctx
 	}
 	if toLeader {
@@ -180,8 +182,8 @@ func (c *pdServiceClient) BuildGRPCContext(ctx context.Context, toLeader bool) c
 	return grpcutil.BuildFollowerHandleContext(ctx)
 }
 
-// IsLeader implements ServiceClient.
-func (c *pdServiceClient) IsLeader() bool {
+// IsConnectedToLeader implements ServiceClient.
+func (c *pdServiceClient) IsConnectedToLeader() bool {
 	if c == nil {
 		return false
 	}
@@ -230,7 +232,7 @@ func (c *pdServiceClient) GetClientConn() *grpc.ClientConn {
 
 // NeedRetry implements ServiceClient.
 func (c *pdServiceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
-	if c.IsLeader() {
+	if c.IsConnectedToLeader() {
 		return false
 	}
 	return !(err == nil && pdErr == nil)
@@ -256,7 +258,7 @@ type pdServiceAPIClient struct {
 	unavailableUntil atomic.Value
 }
 
-func newPDServiceAPIClient(client ServiceClient, f errFn) *pdServiceAPIClient {
+func newPDServiceAPIClient(client ServiceClient, f errFn) ServiceClient {
 	return &pdServiceAPIClient{
 		ServiceClient: client,
 		fn:            f,
@@ -281,7 +283,7 @@ func (c *pdServiceAPIClient) markAsAvailable() {
 
 // NeedRetry implements ServiceClient.
 func (c *pdServiceAPIClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
-	if c.IsLeader() {
+	if c.IsConnectedToLeader() {
 		return false
 	}
 	if err == nil && pdErr == nil {
@@ -326,13 +328,13 @@ func (c *pdServiceBalancer) set(clients []ServiceClient) {
 	}
 	c.totalNode = len(clients)
 	head := &pdServiceBalancerNode{
-		pdServiceAPIClient: newPDServiceAPIClient(clients[0], c.errFn),
+		pdServiceAPIClient: newPDServiceAPIClient(clients[0], c.errFn).(*pdServiceAPIClient),
 	}
 	head.next = head
 	last := head
 	for i := 1; i < c.totalNode; i++ {
 		next := &pdServiceBalancerNode{
-			pdServiceAPIClient: newPDServiceAPIClient(clients[i], c.errFn),
+			pdServiceAPIClient: newPDServiceAPIClient(clients[i], c.errFn).(*pdServiceAPIClient),
 			next:               head,
 		}
 		head = next
@@ -356,8 +358,8 @@ func (c *pdServiceBalancer) next() {
 
 func (c *pdServiceBalancer) get() (ret ServiceClient) {
 	c.mu.Lock()
-	i := 0
 	defer c.mu.Unlock()
+	i := 0
 	if c.now == nil {
 		return nil
 	}
@@ -1012,7 +1014,6 @@ func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leader *pdp
 					follower := newPDServiceClient(addr, leader.GetClientUrls()[0], conn, false)
 					if err != nil || conn == nil {
 						log.Warn("[pd] failed to connect follower", zap.String("follower", addr), errs.ZapError(err))
-						follower.networkFailure.Store(true)
 					}
 					c.followers.LoadOrStore(addr, follower)
 				}

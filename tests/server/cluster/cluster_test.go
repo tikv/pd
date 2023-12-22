@@ -1310,6 +1310,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 
 	time.Sleep(time.Second)
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
+	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
 	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
 		"store_id": 1,
@@ -1318,8 +1319,9 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 		"store_id": 2,
 	})
 	// Check scheduler updated.
+	schedsNum += 1
 	schedulersController := rc.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), 6)
+	re.Len(schedulersController.GetSchedulerNames(), schedsNum)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
@@ -1339,7 +1341,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Check scheduler updated.
 	schedulersController = rc1.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), 6)
+	re.Len(schedulersController.GetSchedulerNames(), schedsNum)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
@@ -1358,7 +1360,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Check scheduler updated
 	schedulersController = rc.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), 6)
+	re.Len(schedulersController.GetSchedulerNames(), schedsNum)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
@@ -1483,7 +1485,7 @@ func TestMinResolvedTS(t *testing.T) {
 	}
 
 	// default run job
-	re.NotEqual(rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration, 0)
+	re.NotZero(rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration)
 	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
 	re.Equal(time.Duration(0), rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration)
 

@@ -42,30 +42,40 @@ import (
 
 type hotTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestHotTestSuite(t *testing.T) {
 	suite.Run(t, new(hotTestSuite))
 }
 
-func (suite *hotTestSuite) TestHot() {
-	var start time.Time
-	start = start.Add(time.Hour)
-	opts := []tests.ConfigOption{
+func (suite *hotTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
-			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
+			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
+			conf.Schedule.HotRegionCacheHitsThreshold = 0
 		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkHot)
+	)
+}
 
-	opts = append(opts, func(conf *config.Config, serverName string) {
-		conf.Schedule.HotRegionCacheHitsThreshold = 0
-	})
-	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkHotWithoutHotPeer)
-	env = tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkHotWithStoreID)
+func (suite *hotTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *hotTestSuite) TearDownTest() {
+	cleanFunc := func(cluster *tests.TestCluster) {
+		leader := cluster.GetLeaderServer()
+		hotStat := leader.GetRaftCluster().GetHotStat()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			hotStat = sche.GetCluster().GetHotStat()
+		}
+		hotStat.HotCache.CleanCache()
+	}
+	suite.env.RunFuncInTwoModes(cleanFunc)
+}
+
+func (suite *hotTestSuite) TestHot() {
+	suite.env.RunTestInTwoModes(suite.checkHot)
 }
 
 func (suite *hotTestSuite) checkHot(cluster *tests.TestCluster) {
@@ -229,6 +239,10 @@ func (suite *hotTestSuite) checkHot(cluster *tests.TestCluster) {
 	testCommand(reportIntervals, "read")
 }
 
+func (suite *hotTestSuite) TestHotWithStoreID() {
+	suite.env.RunTestInTwoModes(suite.checkHotWithStoreID)
+}
+
 func (suite *hotTestSuite) checkHotWithStoreID(cluster *tests.TestCluster) {
 	re := suite.Require()
 	statistics.Denoising = false
@@ -292,6 +306,10 @@ func (suite *hotTestSuite) checkHotWithStoreID(cluster *tests.TestCluster) {
 	re.Equal(float64(200000000), hotRegion.AsLeader[1].TotalBytesRate)
 }
 
+func (suite *hotTestSuite) TestHotWithoutHotPeer() {
+	suite.env.RunTestInTwoModes(suite.checkHotWithoutHotPeer)
+}
+
 func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *tests.TestCluster) {
 	re := suite.Require()
 	statistics.Denoising = false
@@ -350,11 +368,11 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *tests.TestCluster) {
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &hotRegion))
 		re.NotNil(hotRegion.AsPeer[1])
-		re.Equal(hotRegion.AsPeer[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
+		re.Zero(hotRegion.AsPeer[1].Count)
+		re.Zero(hotRegion.AsPeer[1].TotalBytesRate)
 		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
-		re.Equal(hotRegion.AsLeader[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
+		re.Zero(hotRegion.AsLeader[1].Count)
+		re.Zero(hotRegion.AsLeader[1].TotalBytesRate)
 		re.Equal(load, hotRegion.AsLeader[1].StoreByteRate)
 	}
 	{
@@ -363,12 +381,12 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *tests.TestCluster) {
 		hotRegion := statistics.StoreHotPeersInfos{}
 		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &hotRegion))
-		re.Equal(hotRegion.AsPeer[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsPeer[1].TotalBytesRate)
+		re.Zero(hotRegion.AsPeer[1].Count)
+		re.Zero(hotRegion.AsPeer[1].TotalBytesRate)
 		re.Equal(load, hotRegion.AsPeer[1].StoreByteRate)
-		re.Equal(hotRegion.AsLeader[1].Count, 0)
-		re.Equal(0.0, hotRegion.AsLeader[1].TotalBytesRate)
-		re.Equal(0.0, hotRegion.AsLeader[1].StoreByteRate) // write leader sum
+		re.Zero(hotRegion.AsLeader[1].Count)
+		re.Zero(hotRegion.AsLeader[1].TotalBytesRate)
+		re.Zero(hotRegion.AsLeader[1].StoreByteRate) // write leader sum
 	}
 }
 

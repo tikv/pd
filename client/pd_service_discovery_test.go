@@ -48,7 +48,7 @@ type testGRPCServer struct {
 // SayHello implements helloworld.GreeterServer
 func (s *testGRPCServer) SayHello(ctx context.Context, in *pb.HelloRequest) (*pb.HelloReply, error) {
 	if !s.isLeader {
-		if !grpcutil.GetFollowerHandleEnable(ctx, metadata.FromIncomingContext) {
+		if !grpcutil.IsFollowerHandleEnabled(ctx, metadata.FromIncomingContext) {
 			if addr := grpcutil.GetForwardedHost(ctx, metadata.FromIncomingContext); addr == s.leaderAddr {
 				s.forwardCount.Add(1)
 				return pb.NewGreeterClient(s.leaderConn).SayHello(ctx, in)
@@ -118,8 +118,8 @@ type serviceClientTestSuite struct {
 	leaderServer   *testServer
 	followerServer *testServer
 
-	leaderClient   *pdServiceClient
-	followerClient *pdServiceClient
+	leaderClient   ServiceClient
+	followerClient ServiceClient
 }
 
 func TestServiceClientClientTestSuite(t *testing.T) {
@@ -173,18 +173,18 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(follower.Available())
 	re.True(leader.Available())
 
-	re.False(follower.IsLeader())
-	re.True(leader.IsLeader())
+	re.False(follower.IsConnectedToLeader())
+	re.True(leader.IsConnectedToLeader())
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
-	follower.checkNetworkAvailable(suite.ctx)
-	leader.checkNetworkAvailable(suite.ctx)
+	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
+	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	re.False(follower.Available())
 	re.False(leader.Available())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 
-	follower.checkNetworkAvailable(suite.ctx)
-	leader.checkNetworkAvailable(suite.ctx)
+	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
+	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	re.True(follower.Available())
 	re.True(leader.Available())
 
@@ -197,28 +197,28 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.ErrorContains(err, "not leader")
 	resp, err := pb.NewGreeterClient(leaderConn).SayHello(suite.ctx, &pb.HelloRequest{Name: "pd"})
 	re.NoError(err)
-	re.Equal(resp.GetMessage(), "Hello pd")
+	re.Equal("Hello pd", resp.GetMessage())
 
 	re.False(follower.NeedRetry(nil, nil))
 	re.False(leader.NeedRetry(nil, nil))
 
 	ctx1 := context.WithoutCancel(suite.ctx)
-	ctx1 = follower.BuildGRPCContext(ctx1, false)
-	re.True(grpcutil.GetFollowerHandleEnable(ctx1, metadata.FromOutgoingContext))
-	re.Len(grpcutil.GetForwardedHost(ctx1, metadata.FromOutgoingContext), 0)
+	ctx1 = follower.BuildGRPCTargetContext(ctx1, false)
+	re.True(grpcutil.IsFollowerHandleEnabled(ctx1, metadata.FromOutgoingContext))
+	re.Empty(grpcutil.GetForwardedHost(ctx1, metadata.FromOutgoingContext))
 	ctx2 := context.WithoutCancel(suite.ctx)
-	ctx2 = follower.BuildGRPCContext(ctx2, true)
-	re.False(grpcutil.GetFollowerHandleEnable(ctx2, metadata.FromOutgoingContext))
+	ctx2 = follower.BuildGRPCTargetContext(ctx2, true)
+	re.False(grpcutil.IsFollowerHandleEnabled(ctx2, metadata.FromOutgoingContext))
 	re.Equal(grpcutil.GetForwardedHost(ctx2, metadata.FromOutgoingContext), leaderAddress)
 
 	ctx3 := context.WithoutCancel(suite.ctx)
-	ctx3 = leader.BuildGRPCContext(ctx3, false)
-	re.False(grpcutil.GetFollowerHandleEnable(ctx3, metadata.FromOutgoingContext))
-	re.Len(grpcutil.GetForwardedHost(ctx3, metadata.FromOutgoingContext), 0)
+	ctx3 = leader.BuildGRPCTargetContext(ctx3, false)
+	re.False(grpcutil.IsFollowerHandleEnabled(ctx3, metadata.FromOutgoingContext))
+	re.Empty(grpcutil.GetForwardedHost(ctx3, metadata.FromOutgoingContext))
 	ctx4 := context.WithoutCancel(suite.ctx)
-	ctx4 = leader.BuildGRPCContext(ctx4, true)
-	re.False(grpcutil.GetFollowerHandleEnable(ctx4, metadata.FromOutgoingContext))
-	re.Len(grpcutil.GetForwardedHost(ctx4, metadata.FromOutgoingContext), 0)
+	ctx4 = leader.BuildGRPCTargetContext(ctx4, true)
+	re.False(grpcutil.IsFollowerHandleEnabled(ctx4, metadata.FromOutgoingContext))
+	re.Empty(grpcutil.GetForwardedHost(ctx4, metadata.FromOutgoingContext))
 
 	followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)
 	leaderAPIClient := newPDServiceAPIClient(leader, regionAPIErrorFn)
@@ -243,11 +243,11 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
 	re.False(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
-	followerAPIClient.markAsAvailable()
-	leaderAPIClient.markAsAvailable()
+	followerAPIClient.(*pdServiceAPIClient).markAsAvailable()
+	leaderAPIClient.(*pdServiceAPIClient).markAsAvailable()
 	re.False(followerAPIClient.Available())
 	time.Sleep(time.Millisecond * 100)
-	followerAPIClient.markAsAvailable()
+	followerAPIClient.(*pdServiceAPIClient).markAsAvailable()
 	re.True(followerAPIClient.Available())
 
 	re.True(followerAPIClient.NeedRetry(nil, err))
@@ -262,36 +262,34 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re := suite.Require()
 	follower := suite.followerClient
 	leader := suite.leaderClient
-	followerAPIClient := newPDServiceAPIClient(follower, emptyErrorFn)
-	leaderAPIClient := newPDServiceAPIClient(leader, emptyErrorFn)
 	b := &pdServiceBalancer{}
-	b.set([]ServiceClient{leaderAPIClient, followerAPIClient})
-	re.Equal(b.totalNode, 2)
+	b.set([]ServiceClient{leader, follower})
+	re.Equal(2, b.totalNode)
 
 	for i := 0; i < 10; i++ {
 		client := b.get()
-		ctx := client.BuildGRPCContext(suite.ctx, false)
+		ctx := client.BuildGRPCTargetContext(suite.ctx, false)
 		conn := client.GetClientConn()
 		re.NotNil(conn)
 		resp, err := pb.NewGreeterClient(conn).SayHello(ctx, &pb.HelloRequest{Name: "pd"})
 		re.NoError(err)
-		re.Equal(resp.GetMessage(), "Hello pd")
+		re.Equal("Hello pd", resp.GetMessage())
 	}
-	re.Equal(suite.leaderServer.server.getHandleCount(), int32(5))
-	re.Equal(suite.followerServer.server.getHandleCount(), int32(5))
+	re.Equal(int32(5), suite.leaderServer.server.getHandleCount())
+	re.Equal(int32(5), suite.followerServer.server.getHandleCount())
 	suite.followerServer.server.resetCount()
 	suite.leaderServer.server.resetCount()
 
 	for i := 0; i < 10; i++ {
 		client := b.get()
-		ctx := client.BuildGRPCContext(suite.ctx, true)
+		ctx := client.BuildGRPCTargetContext(suite.ctx, true)
 		conn := client.GetClientConn()
 		re.NotNil(conn)
 		resp, err := pb.NewGreeterClient(conn).SayHello(ctx, &pb.HelloRequest{Name: "pd"})
 		re.NoError(err)
-		re.Equal(resp.GetMessage(), "Hello pd")
+		re.Equal("Hello pd", resp.GetMessage())
 	}
-	re.Equal(suite.leaderServer.server.getHandleCount(), int32(10))
-	re.Equal(suite.followerServer.server.getHandleCount(), int32(0))
-	re.Equal(suite.followerServer.server.getForwardCount(), int32(5))
+	re.Equal(int32(10), suite.leaderServer.server.getHandleCount())
+	re.Equal(int32(0), suite.followerServer.server.getHandleCount())
+	re.Equal(int32(5), suite.followerServer.server.getForwardCount())
 }

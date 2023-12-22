@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -45,25 +46,31 @@ var (
 
 type operatorTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
-func (suite *operatorTestSuite) TestAddRemovePeer() {
-	opts := []tests.ConfigOption{
+func (suite *operatorTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 1
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkAddRemovePeer)
+		})
+}
+
+func (suite *operatorTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *operatorTestSuite) TestAddRemovePeer() {
+	suite.env.RunTestInTwoModes(suite.checkAddRemovePeer)
 }
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(cluster)
+	suite.pauseRuleChecker(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -107,35 +114,35 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
 	err := tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
-	suite.NoError(err)
+	re.NoError(err)
 	recordURL := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
 	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "add learner peer 1 on store 3"), tu.StringContain(re, "RUNNING"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "admin-add-peer {add peer: store [3]}"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"remove-peer", "region_id": 1, "store_id": 2}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "remove peer on store 2"), tu.StringContain(re, "RUNNING"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, recordURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "admin-remove-peer {rm peer: store [2]}"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	tests.MustPutStore(re, cluster, &metapb.Store{
 		Id:            4,
@@ -144,42 +151,61 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 		LastHeartbeat: time.Now().UnixNano(),
 	})
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-learner", "region_id": 1, "store_id": 4}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "add learner peer 2 on store 4"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// Fail to add peer to tombstone store.
 	err = cluster.GetLeaderServer().GetRaftCluster().RemoveStore(3, true)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 1, "store_id": 3}`), tu.StatusNotOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-peer", "region_id": 1, "from_store_id": 1, "to_store_id": 3}`), tu.StatusNotOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"transfer-region", "region_id": 1, "to_store_ids": [1, 2, 3]}`), tu.StatusNotOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// Fail to get operator if from is latest.
 	time.Sleep(time.Second)
 	url := fmt.Sprintf("%s/operators/records?from=%s", urlPrefix, strconv.FormatInt(time.Now().Unix(), 10))
 	err = tu.CheckGetJSON(testDialClient, url, nil,
 		tu.StatusNotOK(re), tu.StringContain(re, "operator not found"))
-	suite.NoError(err)
+	re.NoError(err)
 }
 
 func (suite *operatorTestSuite) TestMergeRegionOperator() {
-	opts := []tests.ConfigOption{
-		func(conf *config.Config, serverName string) {
-			conf.Replication.MaxReplicas = 1
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkMergeRegionOperator)
+	suite.env.RunTestInTwoModes(suite.checkMergeRegionOperator)
 }
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(cluster)
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	suite.pauseRuleChecker(re, cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
@@ -189,33 +215,33 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 
 	tu.CheckDelete(testDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 20, "target_region_id": 10}`), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	tu.CheckDelete(testDialClient, fmt.Sprintf("%s/operators/%d", urlPrefix, 10), tu.StatusOK(re))
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 30}`),
 		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 10}`),
 		tu.StatusNotOK(re), tu.StringContain(re, "not adjacent"))
-	suite.NoError(err)
+	re.NoError(err)
 }
 
 func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
-	opts := []tests.ConfigOption{
+	// use a new environment to avoid affecting other tests
+	env := tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
 			conf.Replication.MaxReplicas = 3
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
+		})
 	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+	env.Cleanup()
 }
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(cluster)
+	suite.pauseRuleChecker(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -455,14 +481,14 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 				svr.GetRaftCluster().GetOpts().GetLocationLabels(),
 				svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
 			)
-			suite.NoError(err)
+			re.NoError(err)
 		}
 		if len(testCase.rules) > 0 {
 			// add customized rule first and then remove default rule
 			err := manager.SetRules(testCase.rules)
-			suite.NoError(err)
+			re.NoError(err)
 			err = manager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
-			suite.NoError(err)
+			re.NoError(err)
 		}
 		if testCase.expectedError == nil {
 			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input, tu.StatusOK(re))
@@ -470,22 +496,21 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 			err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), testCase.input,
 				tu.StatusNotOK(re), tu.StringContain(re, testCase.expectedError.Error()))
 		}
-		suite.NoError(err)
+		re.NoError(err)
 		if len(testCase.expectSteps) > 0 {
 			err = tu.CheckGetJSON(testDialClient, regionURL, nil,
 				tu.StatusOK(re), tu.StringContain(re, testCase.expectSteps))
-			suite.NoError(err)
+			re.NoError(err)
 			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusOK(re))
 		} else {
 			err = tu.CheckDelete(testDialClient, regionURL, tu.StatusNotOK(re))
 		}
-		suite.NoError(err)
+		re.NoError(err)
 	}
 }
 
 // pauseRuleChecker will pause rule checker to avoid unexpected operator.
-func (suite *operatorTestSuite) pauseRuleChecker(cluster *tests.TestCluster) {
-	re := suite.Require()
+func (suite *operatorTestSuite) pauseRuleChecker(re *require.Assertions, cluster *tests.TestCluster) {
 	checkerName := "rule"
 	addr := cluster.GetLeaderServer().GetAddr()
 	resp := make(map[string]interface{})
