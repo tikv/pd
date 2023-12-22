@@ -33,9 +33,11 @@ import (
 	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
@@ -78,6 +80,19 @@ func PromHandler() gin.HandlerFunc {
 	}
 }
 
+// StatusHandler is a handler to get status info.
+func StatusHandler(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(server)
+	version := versioninfo.Status{
+		BuildTS:        versioninfo.PDBuildTS,
+		GitHash:        versioninfo.PDGitHash,
+		Version:        versioninfo.PDReleaseVersion,
+		StartTimestamp: svr.StartTimestamp(),
+	}
+
+	c.IndentedJSON(http.StatusOK, version)
+}
+
 type server interface {
 	GetBackendEndpoints() string
 	Context() context.Context
@@ -97,6 +112,7 @@ type server interface {
 	RegisterGRPCService(*grpc.Server)
 	SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup)
 	diagnosticspb.DiagnosticsServer
+	StartTimestamp() int64
 }
 
 // WaitAPIServiceReady waits for the api service ready.
