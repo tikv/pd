@@ -170,10 +170,7 @@ func (c *pdServiceClient) GetAddress() string {
 
 // BuildGRPCTargetContext implements ServiceClient.
 func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader bool) context.Context {
-	if c == nil {
-		return ctx
-	}
-	if c.IsConnectedToLeader() {
+	if c == nil || c.IsConnectedToLeader() {
 		return ctx
 	}
 	if toLeader {
