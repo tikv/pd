@@ -73,17 +73,17 @@ func (suite *redirectorTestSuite) TestReverseProxy() {
 	// Test normal forwarding
 	req, err := http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
 	re.NoError(err)
-	checkHTTPRequest(suite.Require(), suite.noRedirectHTTPClient, req, http.StatusOK, suite.tempText)
+	checkHTTPRequest(re, suite.noRedirectHTTPClient, req, http.StatusOK, suite.tempText)
 	// Test the requests that are forwarded by others
 	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
 	re.NoError(err)
 	req.Header.Set(proxyHeader, "other")
-	checkHTTPRequest(suite.Require(), suite.noRedirectHTTPClient, req, http.StatusOK, suite.tempText)
+	checkHTTPRequest(re, suite.noRedirectHTTPClient, req, http.StatusOK, suite.tempText)
 	// Test LoopDetected
 	suite.redirector.SetAddress(redirectorServer.URL)
 	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
 	re.NoError(err)
-	checkHTTPRequest(suite.Require(), suite.noRedirectHTTPClient, req, http.StatusLoopDetected, "")
+	checkHTTPRequest(re, suite.noRedirectHTTPClient, req, http.StatusLoopDetected, "")
 }
 
 func (suite *redirectorTestSuite) TestTemporaryRedirect() {
@@ -94,11 +94,11 @@ func (suite *redirectorTestSuite) TestTemporaryRedirect() {
 	// Test TemporaryRedirect
 	req, err := http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
 	re.NoError(err)
-	checkHTTPRequest(suite.Require(), suite.noRedirectHTTPClient, req, http.StatusTemporaryRedirect, "")
+	checkHTTPRequest(re, suite.noRedirectHTTPClient, req, http.StatusTemporaryRedirect, "")
 	// Test Response
 	req, err = http.NewRequest(http.MethodGet, redirectorServer.URL, http.NoBody)
 	re.NoError(err)
-	checkHTTPRequest(suite.Require(), http.DefaultClient, req, http.StatusOK, suite.tempText)
+	checkHTTPRequest(re, http.DefaultClient, req, http.StatusOK, suite.tempText)
 }
 
 func checkHTTPRequest(re *require.Assertions, client *http.Client, req *http.Request, expectedCode int, expectedText string) {

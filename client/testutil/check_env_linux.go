@@ -11,12 +11,32 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//go:build linux
+// +build linux
 
-//go:build boringcrypto
-// +build boringcrypto
-
-package versioninfo
+package testutil
 
 import (
-	_ "crypto/tls/fipsonly"
+	"github.com/cakturk/go-netstat/netstat"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
+
+func environmentCheck(addr string) bool {
+	valid, err := checkAddr(addr[len("http://"):])
+	if err != nil {
+		log.Error("check port status failed", zap.Error(err))
+		return false
+	}
+	return valid
+}
+
+func checkAddr(addr string) (bool, error) {
+	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
+		return s.RemoteAddr.String() == addr || s.LocalAddr.String() == addr
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(tabs) < 1, nil
+}

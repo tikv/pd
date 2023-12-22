@@ -70,13 +70,14 @@ func (suite *serverTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
-	suite.NoError(suite.pdLeader.BootstrapCluster())
+	re.NoError(suite.pdLeader.BootstrapCluster())
 }
 
 func (suite *serverTestSuite) TearDownSuite() {
+	re := suite.Require()
 	suite.cluster.Destroy()
 	suite.cancel()
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
