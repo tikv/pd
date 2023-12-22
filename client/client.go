@@ -730,7 +730,7 @@ func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, contex
 	if serviceClient == nil {
 		return nil, ctx
 	}
-	return pdpb.NewPDClient(serviceClient.GetClientConn()), serviceClient.BuildGRPCContext(ctx, true)
+	return pdpb.NewPDClient(serviceClient.GetClientConn()), serviceClient.BuildGRPCTargetContext(ctx, true)
 }
 
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
@@ -740,14 +740,14 @@ func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower
 	if allowFollower {
 		serviceClient = c.pdSvcDiscovery.getServiceClientByKind(regionAPIKind)
 		if serviceClient != nil {
-			return serviceClient, serviceClient.BuildGRPCContext(ctx, !allowFollower)
+			return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 		}
 	}
 	serviceClient = c.pdSvcDiscovery.GetServiceClient()
 	if serviceClient == nil {
 		return nil, ctx
 	}
-	return serviceClient, serviceClient.BuildGRPCContext(ctx, !allowFollower)
+	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
@@ -1037,7 +1037,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
-	if !serviceClient.IsLeader() && err != nil || resp.Header.GetError() != nil {
+	if !serviceClient.IsConnectedToLeader() && err != nil || resp.Header.GetError() != nil {
 		protoClient, cctx := c.getClientAndContext(scanCtx)
 		if protoClient == nil {
 			return nil, errs.ErrClientGetProtoClient

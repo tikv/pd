@@ -537,7 +537,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 	pd.MemberHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(suite.ctx, 3)
-	suite.NoError(err)
+	re.NoError(err)
 	suite.cluster = cluster
 	suite.endpoints = runServer(re, cluster)
 	cluster.WaitLeader()
@@ -747,7 +747,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		}
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
-	re.Equal(cnt, 100)
+	re.Equal(100, cnt)
 
 	// because we can't check whether this request is processed by followers from response,
 	// we can disable forward and make network problem for leader.
@@ -761,7 +761,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		}
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
-	re.Equal(cnt, 100)
+	re.Equal(100, cnt)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 
 	// make network problem for follower.
@@ -776,7 +776,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		}
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
-	re.Equal(cnt, 100)
+	re.Equal(100, cnt)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 
 	// follower client failed will retry by leader service client.
@@ -789,7 +789,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		}
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
-	re.Equal(cnt, 100)
+	re.Equal(100, cnt)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/followerHandleError"))
 
 	// test after being healthy
@@ -804,7 +804,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		}
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
-	re.Equal(cnt, 100)
+	re.Equal(100, cnt)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
 }
