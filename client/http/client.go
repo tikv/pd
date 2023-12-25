@@ -165,7 +165,7 @@ func (ci *clientInner) requestWithRetry(
 		addr = ci.pdAddrs[idx]
 		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 		if err == nil {
-			break
+			return nil
 		}
 		log.Debug("[pd] request follower addr failed",
 			zap.String("source", ci.source), zap.Int("idx", idx), zap.String("addr", addr), zap.Error(err))
