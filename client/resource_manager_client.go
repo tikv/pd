@@ -67,6 +67,7 @@ type GetResourceGroupOp struct {
 // GetResourceGroupOption configures GetResourceGroupOp.
 type GetResourceGroupOption func(*GetResourceGroupOp)
 
+// WithRUStats specifies to return resource group with ru statistics data.
 func WithRUStats(op *GetResourceGroupOp) {
 	op.withRUStats = true
 }
