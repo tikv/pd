@@ -215,6 +215,7 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 	err := h.AddEvictOrGrant(storeID, name)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
