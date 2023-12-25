@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/gin-contrib/cors"
@@ -184,12 +185,14 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 //
 //	@Tags		ResourceManager
 //	@Summary	Get resource group by name.
-//	@Success	200		{string}	json	format	of	rmserver.ResourceGroup
-//	@Failure	404		{string}	error
-//	@Param		name	path		string	true	"groupName"
+//	@Success	200		    {string}	json	format	of	rmserver.ResourceGroup
+//	@Failure	404		    {string}	error
+//	@Param		name	    path		string	true	"groupName"
+//	@Param		with_stats	query		bool	false	whether to return statistics data.
 //	@Router		/config/group/{name} [GET]
 func (s *Service) getResourceGroup(c *gin.Context) {
-	group := s.manager.GetResourceGroup(c.Param("name"))
+	withStats := strings.EqualFold(c.Query("with_stats"), "true")
+	group := s.manager.GetResourceGroup(c.Param("name"), withStats)
 	if group == nil {
 		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
 	}
@@ -202,9 +205,11 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Summary	get all resource group with a list.
 //	@Success	200	{string}	json	format	of	[]rmserver.ResourceGroup
 //	@Failure	404	{string}	error
+//	@Param		with_stats		query	bool	false	whether to return statistics data.
 //	@Router		/config/groups [GET]
 func (s *Service) getResourceGroupList(c *gin.Context) {
-	groups := s.manager.GetResourceGroupList()
+	withStats := strings.EqualFold(c.Query("with_stats"), "true")
+	groups := s.manager.GetResourceGroupList(withStats)
 	c.IndentedJSON(http.StatusOK, groups)
 }
 

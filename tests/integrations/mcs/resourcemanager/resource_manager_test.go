@@ -1060,6 +1060,86 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re.Equal(groups, newGroups)
 }
 
+func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
+	re := suite.Require()
+	cli := suite.client
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastPersist", `return(true)`))
+	defer re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastPersist"))
+	group := &rmpb.ResourceGroup{
+		Name: "test_ru_consumption",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{
+				FillRate:   10000,
+				BurstLimit: 10000,
+				MaxTokens:  20000.0,
+			}},
+		},
+	}
+	_, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+
+	g, err := cli.GetResourceGroup(suite.ctx, group.Name)
+	re.NoError(err)
+	re.Equal(group, g)
+
+	// Test Resource Group Stats
+	testConsumption := &rmpb.Consumption{
+		RRU:               200.0,
+		WRU:               100.0,
+		ReadBytes:         1024,
+		WriteBytes:        512,
+		TotalCpuTimeMs:    50.0,
+		SqlLayerCpuTimeMs: 40.0,
+		KvReadRpcCount:    5,
+		KvWriteRpcCount:   6,
+	}
+	_, err = cli.AcquireTokenBuckets(suite.ctx, &rmpb.TokenBucketsRequest{
+		Requests: []*rmpb.TokenBucketRequest{
+			{
+				ResourceGroupName:           group.Name,
+				ConsumptionSinceLastRequest: testConsumption,
+			},
+		},
+		TargetRequestPeriodMs: 1000,
+		ClientUniqueId:        1,
+	})
+	re.NoError(err)
+	time.Sleep(10 * time.Millisecond)
+	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	re.NoError(err)
+	re.Equal(g.RUStats, testConsumption)
+
+	// update resoruce group, ru stats not change
+	g.RUSettings.RU.Settings.FillRate = 12345
+	_, err = cli.ModifyResourceGroup(suite.ctx, g)
+	re.NoError(err)
+	g1, err := cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	re.NoError(err)
+	re.Equal(g1, g)
+
+	// test restart cluster
+	time.Sleep(250 * time.Millisecond)
+	servers := suite.cluster.GetServers()
+	re.NoError(suite.cluster.StopAll())
+	cli.Close()
+	serverList := make([]*tests.TestServer, 0, len(servers))
+	for _, s := range servers {
+		serverList = append(serverList, s)
+	}
+	re.NoError(suite.cluster.RunServers(serverList))
+	suite.cluster.WaitLeader()
+	// re-connect client as well
+	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	re.NoError(err)
+	cli = suite.client
+
+	// check ru stats not loss after restart
+	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	re.NoError(err)
+	re.Equal(g.RUStats, testConsumption)
+}
+
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {
 	re := suite.Require()
 	cli := suite.client

@@ -98,7 +98,7 @@ func (s *Service) GetResourceGroup(ctx context.Context, req *rmpb.GetResourceGro
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := s.manager.GetResourceGroup(req.ResourceGroupName)
+	rg := s.manager.GetResourceGroup(req.ResourceGroupName, req.WithRuStats)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
 	}
@@ -112,7 +112,7 @@ func (s *Service) ListResourceGroups(ctx context.Context, req *rmpb.ListResource
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList()
+	groups := s.manager.GetResourceGroupList(req.WithRuStats)
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
@@ -184,49 +184,55 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
+			var err error
 			// Get the resource group from manager to acquire token buckets.
-			rg := s.manager.GetMutableResourceGroup(resourceGroupName)
-			if rg == nil {
-				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
-				continue
-			}
-			// Send the consumption to update the metrics.
-			isBackground := req.GetIsBackground()
-			isTiFlash := req.GetIsTiflash()
-			if isBackground && isTiFlash {
-				return errors.New("background and tiflash cannot be true at the same time")
-			}
-			s.manager.consumptionDispatcher <- struct {
-				resourceGroupName string
-				*rmpb.Consumption
-				isBackground bool
-				isTiFlash    bool
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
-			if isBackground {
-				continue
-			}
-			now := time.Now()
-			resp := &rmpb.TokenBucketResponse{
-				ResourceGroupName: rg.Name,
-			}
-			switch rg.Mode {
-			case rmpb.GroupMode_RUMode:
-				var tokens *rmpb.GrantedRUTokenBucket
-				for _, re := range req.GetRuItems().GetRequestRU() {
-					if re.Type == rmpb.RequestUnitType_RU {
-						tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID)
-					}
-					if tokens == nil {
-						continue
-					}
-					resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
+			s.manager.WithMutableResourceGroup(resourceGroupName, func(rg *ResourceGroup) {
+				if rg == nil {
+					log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
+					return
 				}
-			case rmpb.GroupMode_RawMode:
-				log.Warn("not supports the resource type", zap.String("resource-group", resourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
-				continue
+				// Send the consumption to update the metrics.
+				isBackground := req.GetIsBackground()
+				isTiFlash := req.GetIsTiflash()
+				if isBackground && isTiFlash {
+					err = errors.New("background and tiflash cannot be true at the same time")
+					return
+				}
+				s.manager.consumptionDispatcher <- struct {
+					resourceGroupName string
+					*rmpb.Consumption
+					isBackground bool
+					isTiFlash    bool
+				}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
+				if isBackground {
+					return
+				}
+				now := time.Now()
+				resp := &rmpb.TokenBucketResponse{
+					ResourceGroupName: rg.Name,
+				}
+				switch rg.Mode {
+				case rmpb.GroupMode_RUMode:
+					var tokens *rmpb.GrantedRUTokenBucket
+					for _, re := range req.GetRuItems().GetRequestRU() {
+						if re.Type == rmpb.RequestUnitType_RU {
+							tokens = rg.RequestRU(now, re.Value, targetPeriodMs, clientUniqueID)
+						}
+						if tokens == nil {
+							continue
+						}
+						resp.GrantedRUTokens = append(resp.GrantedRUTokens, tokens)
+					}
+				case rmpb.GroupMode_RawMode:
+					log.Warn("not supports the resource type", zap.String("resource-group", resourceGroupName), zap.String("mode", rmpb.GroupMode_name[int32(rmpb.GroupMode_RawMode)]))
+					return
+				}
+				log.Debug("finish token request from", zap.String("resource-group", resourceGroupName))
+				resps.Responses = append(resps.Responses, resp)
+			})
+			if err != nil {
+				return err
 			}
-			log.Debug("finish token request from", zap.String("resource-group", resourceGroupName))
-			resps.Responses = append(resps.Responses, resp)
 		}
 		stream.Send(resps)
 	}
