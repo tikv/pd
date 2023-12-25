@@ -16,22 +16,27 @@ package server
 
 import "github.com/prometheus/client_golang/prometheus"
 
-const (
-	namespace       = "scheduling"
-	serverSubsystem = "server"
-)
-
 var (
-	// Meta & Server info.
-	serverInfo = prometheus.NewGaugeVec(
+	// ServerMaxProcsGauge record the maxprocs.
+	ServerMaxProcsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: serverSubsystem,
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "maxprocs",
+			Help:      "The value of GOMAXPROCS.",
+		})
+
+	// ServerInfoGauge indicates the pd server info including version and git hash.
+	ServerInfoGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
 			Name:      "info",
-			Help:      "Indicate the scheduling server info, and the value is the start timestamp (s).",
+			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
 		}, []string{"version", "hash"})
 )
 
 func init() {
-	prometheus.MustRegister(serverInfo)
+	prometheus.MustRegister(ServerMaxProcsGauge)
+	prometheus.MustRegister(ServerInfoGauge)
 }
