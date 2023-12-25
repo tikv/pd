@@ -63,17 +63,8 @@ The api bench cases we support are as follows:
 
 You can run shell as follows.
 ```shell
-go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug
+go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug true
 ```
-
-### HTTP params
-
-You can use the following command to set the params of HTTP request:
-```shell
-go run main.go -http-cases GetMinResolvedTS-1+1 -params 'scope=cluster'  -client 1 -debug
-```
-for more params, can use like `-params 'A=1&B=2&C=3'`
-
 
 ### TLS
 
@@ -82,7 +73,7 @@ You can use the following command to generate a certificate for testing TLS:
 ```shell
 mkdir cert
 ./cert_opt.sh generate cert
-go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug -cacert ./cert/ca.pem -cert ./cert/pd-server.pem  -key ./cert/pd-server-key.pem
+go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug true -cacert ./cert/ca.pem -cert ./cert/pd-server.pem  -key ./cert/pd-server-key.pem
 ./cert_opt.sh cleanup cert
 rm -rf cert
 ```

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 )
 
@@ -546,4 +548,46 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 		testutil.WithoutHeader(re, apiutil.ForwardToMicroServiceHeader),
 	)
 	re.NoError(err)
+}
+
+func (suite *apiTestSuite) TestMetrics() {
+	suite.env.RunTestInAPIMode(suite.checkMetrics)
+}
+
+func (suite *apiTestSuite) checkMetrics(cluster *tests.TestCluster) {
+	re := suite.Require()
+	s := cluster.GetSchedulingPrimaryServer()
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	resp, err := http.Get(s.GetConfig().GetAdvertiseListenAddr() + "/metrics")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	respBytes, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Contains(string(respBytes), "scheduling_server_info")
+}
+
+func (suite *apiTestSuite) TestStatus() {
+	suite.env.RunTestInAPIMode(suite.checkStatus)
+}
+
+func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
+	re := suite.Require()
+	s := cluster.GetSchedulingPrimaryServer()
+	testutil.Eventually(re, func() bool {
+		return s.IsServing()
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	resp, err := http.Get(s.GetConfig().GetAdvertiseListenAddr() + "/status")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	respBytes, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	var status versioninfo.Status
+	re.NoError(json.Unmarshal(respBytes, &status))
+	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
+	re.Equal(versioninfo.PDGitHash, status.GitHash)
+	re.Equal(versioninfo.PDReleaseVersion, status.Version)
 }

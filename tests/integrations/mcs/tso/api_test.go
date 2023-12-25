@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -243,4 +244,34 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	err = testutil.CheckPostJSON(dialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))
 	re.NoError(err)
+}
+
+func (suite *tsoAPITestSuite) TestMetrics() {
+	re := suite.Require()
+
+	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	resp, err := http.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/metrics")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	respBytes, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Contains(string(respBytes), "tso_server_info")
+}
+
+func (suite *tsoAPITestSuite) TestStatus() {
+	re := suite.Require()
+
+	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	resp, err := http.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/status")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	respBytes, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	var s versioninfo.Status
+	re.NoError(json.Unmarshal(respBytes, &s))
+	re.Equal(versioninfo.PDBuildTS, s.BuildTS)
+	re.Equal(versioninfo.PDGitHash, s.GitHash)
+	re.Equal(versioninfo.PDReleaseVersion, s.Version)
 }

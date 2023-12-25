@@ -4,6 +4,7 @@ go 1.21
 
 require (
 	github.com/BurntSushi/toml v0.3.1
+	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/cloudfoundry/gosigar v1.3.6
 	github.com/gogo/protobuf v1.3.2
 	github.com/opentracing/opentracing-go v1.2.0
@@ -33,11 +34,12 @@ require (
 	github.com/prometheus/common v0.26.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.17.0 // indirect
-	golang.org/x/sys v0.13.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
-	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
-	google.golang.org/protobuf v1.30.0 // indirect
+	golang.org/x/net v0.18.0 // indirect
+	golang.org/x/sys v0.14.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
+	google.golang.org/grpc/examples v0.0.0-20230419000256-16651f60ddc5
+	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

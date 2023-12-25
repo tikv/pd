@@ -139,6 +139,15 @@ func (g *RuleGroup) String() string {
 	return string(b)
 }
 
+// Clone returns a copy of RuleGroup.
+func (g *RuleGroup) Clone() *RuleGroup {
+	return &RuleGroup{
+		ID:       g.ID,
+		Index:    g.Index,
+		Override: g.Override,
+	}
+}
+
 // Rules are ordered by (GroupID, Index, ID).
 func compareRule(a, b *Rule) int {
 	switch {
