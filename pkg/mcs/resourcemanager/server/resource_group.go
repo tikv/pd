@@ -179,7 +179,8 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 		}
 
 		if rg.RUConsumption != nil {
-			group.RUStats = &*rg.RUConsumption
+			consumption := *rg.RUConsumption
+			group.RUStats = &consumption
 		}
 		return group
 	case rmpb.GroupMode_RawMode: // Raw mode
@@ -214,9 +215,10 @@ func (rg *ResourceGroup) GetGroupStates() *GroupStates {
 
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
+		consumption := *rg.RUConsumption
 		tokens := &GroupStates{
 			RU:            rg.RUSettings.RU.GroupTokenBucketState.Clone(),
-			RUConsumption: &*rg.RUConsumption,
+			RUConsumption: &consumption,
 		}
 		return tokens
 	case rmpb.GroupMode_RawMode: // Raw mode
@@ -245,7 +247,6 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 	rg.Lock()
 	defer rg.Unlock()
-
 	rc := rg.RUConsumption
 	rc.RRU += c.RRU
 	rc.WRU += c.WRU
@@ -255,7 +256,6 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 	rc.SqlLayerCpuTimeMs += c.SqlLayerCpuTimeMs
 	rc.KvReadRpcCount += c.KvReadRpcCount
 	rc.KvWriteRpcCount += c.KvWriteRpcCount
-
 }
 
 // persistStates persists the resource group tokens.

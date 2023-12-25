@@ -287,11 +287,14 @@ func (m *Manager) GetResourceGroup(name string, withStats bool) *ResourceGroup {
 	return nil
 }
 
-// GetMutableResourceGroup apply target function on target resource group.
-func (m *Manager) WithMutableResourceGroup(name string, f func(*ResourceGroup)) {
+// GetMutableResourceGroup returns a mutable resource group.
+func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
-	f(m.groups[name])
+	if group, ok := m.groups[name]; ok {
+		return group
+	}
+	return nil
 }
 
 // GetResourceGroupList returns copies of resource group list.
@@ -411,11 +414,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			m.consumptionRecord[name] = time.Now()
 
 			// TODO: maybe we need to distinguish background ru.
-			m.WithMutableResourceGroup(name, func(rg *ResourceGroup) {
-				if rg != nil {
-					rg.UpdateRUConsumption(consumptionInfo.Consumption)
-				}
-			})
+			if rg := m.GetMutableResourceGroup(name); rg != nil {
+				rg.UpdateRUConsumption(consumptionInfo.Consumption)
+			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
 			for name, lastTime := range m.consumptionRecord {
