@@ -144,8 +144,10 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 
 	case schedulers.GrantLeaderName:
 		h.addEvictOrGrant(w, input, schedulers.GrantLeaderName)
+		return
 	case schedulers.EvictLeaderName:
 		h.addEvictOrGrant(w, input, schedulers.EvictLeaderName)
+		return
 	case schedulers.ShuffleLeaderName:
 		if err := h.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -214,6 +216,7 @@ func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[stri
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 	}
+	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
 // @Tags     scheduler
