@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -343,6 +344,20 @@ func WithTLSConfig(tlsConf *tls.Config) ClientOption {
 	return func(c *client) {
 		c.inner.tlsConf = tlsConf
 	}
+}
+
+func WithLoggerRedirection(logLevel, fileName string) ClientOption {
+	cfg := &log.Config{}
+	cfg.Level = logLevel
+	if fileName != "" {
+		f, _ := os.CreateTemp(".", fileName)
+		fname := f.Name()
+		f.Close()
+		cfg.File.Filename = fname
+	}
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+	return func(c *client) {}
 }
 
 // WithMetrics configures the client with metrics.

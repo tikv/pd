@@ -42,21 +42,19 @@ func NewClusterStatusCommand() *cobra.Command {
 }
 
 func showClusterCommandFunc(cmd *cobra.Command, args []string) {
-	cli := pdClient(cmd)
-	clusterInfo, err := cli.GetCluster(context.Background())
+	info, err := PDCli.GetCluster(context.Background())
 	if err != nil {
 		cmd.Printf("Failed to get the cluster information: %s\n", err)
 		return
 	}
-	jsonPrint(cmd, clusterInfo)
+	jsonPrint(cmd, info)
 }
 
 func showClusterStatusCommandFunc(cmd *cobra.Command, args []string) {
-	cli := pdClient(cmd)
-	r, err := cli.GetClusterStatus(context.Background())
+	status, err := PDCli.GetClusterStatus(context.Background())
 	if err != nil {
 		cmd.Printf("Failed to get the cluster status: %s\n", err)
 		return
 	}
-	jsonPrint(cmd, r)
+	jsonPrint(cmd, status)
 }

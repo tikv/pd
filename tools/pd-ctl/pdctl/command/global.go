@@ -35,12 +35,20 @@ const (
 	pingPrefix        = "pd/api/v1/ping"
 )
 
+var PDCli pd.Client
+
+func SetNewPDClient(addrs []string, opts ...pd.ClientOption) {
+	withOpts := append(opts, pd.WithLoggerRedirection("fatal", ""))
+	PDCli = pd.NewClient(pdControlCallerID, addrs, withOpts...)
+}
+
+// TODO: replace dialClient with PDCli
 var dialClient = &http.Client{
 	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, pdControlCallerID),
 }
 
 // InitHTTPSClient creates https client with ca file
-func InitHTTPSClient(caPath, certPath, keyPath string) error {
+func InitHTTPSClient(pdAddrs, caPath, certPath, keyPath string) error {
 	tlsInfo := transport.TLSInfo{
 		CertFile:      certPath,
 		KeyFile:       keyPath,
@@ -55,6 +63,8 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 		Transport: apiutil.NewCallerIDRoundTripper(
 			&http.Transport{TLSClientConfig: tlsConfig}, pdControlCallerID),
 	}
+
+	SetNewPDClient(strings.Split(pdAddrs, ","), pd.WithTLSConfig(tlsConfig))
 
 	return nil
 }
@@ -165,10 +175,6 @@ func getEndpoints(cmd *cobra.Command) []string {
 		os.Exit(1)
 	}
 	return strings.Split(addrs, ",")
-}
-
-func pdClient(cmd *cobra.Command) pd.Client {
-	return pd.NewClient(pdControlCallerID, getEndpoints(cmd))
 }
 
 func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]interface{}) {

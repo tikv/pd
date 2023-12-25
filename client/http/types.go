@@ -25,7 +25,7 @@ import (
 )
 
 // ClusterStatus saves some cluster state information.
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+// NOTE: This type sync with https://github.com/tikv/pd/blob/5eae459c01a797cbd0c416054c6f0cad16b8740a/server/cluster/cluster.go#L173
 type ClusterStatus struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
