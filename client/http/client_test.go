@@ -32,11 +32,13 @@ func TestPDAddrNormalization(t *testing.T) {
 	re.Len(pdAddrs, 1)
 	re.Equal(-1, leaderAddrIdx)
 	re.Contains(pdAddrs[0], httpScheme)
+	c.Close()
 	c = NewClient("test-https-pd-addr", []string{"127.0.0.1"}, WithTLSConfig(&tls.Config{}))
 	pdAddrs, leaderAddrIdx = c.(*client).inner.getPDAddrs()
 	re.Len(pdAddrs, 1)
 	re.Equal(-1, leaderAddrIdx)
 	re.Contains(pdAddrs[0], httpsScheme)
+	c.Close()
 }
 
 // requestChecker is used to check the HTTP request sent by the client.

@@ -168,6 +168,9 @@ func main() {
 	for _, cli := range pdClis {
 		cli.Close()
 	}
+	for _, cli := range httpClis {
+		cli.Close()
+	}
 	log.Println("Exit")
 	switch sig {
 	case syscall.SIGTERM:

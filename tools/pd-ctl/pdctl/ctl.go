@@ -39,7 +39,6 @@ func GetRootCmd() *cobra.Command {
 		Short: "Placement Driver control",
 	}
 
-	// TODO: remove passing this flag to all subcommands
 	rootCmd.PersistentFlags().StringP("pd", "u", "http://127.0.0.1:2379", "address of pd")
 	rootCmd.PersistentFlags().String("cacert", "", "path of file that contains list of trusted SSL CAs")
 	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")

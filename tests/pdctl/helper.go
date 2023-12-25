@@ -32,6 +32,7 @@ func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err err
 	root.SetOut(buf)
 	root.SetArgs(args)
 	command.SetNewPDClient([]string{args[1]})
+	defer command.PDCli.Close()
 	err = root.Execute()
 	return buf.Bytes(), err
 }

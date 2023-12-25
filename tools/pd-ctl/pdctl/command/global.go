@@ -35,9 +35,14 @@ const (
 	pingPrefix        = "pd/api/v1/ping"
 )
 
+// PDCli is a pd HTTP client
 var PDCli pd.Client
 
+// SetNewPDClient creates a PD HTTP client with the given PD addresses and options.
 func SetNewPDClient(addrs []string, opts ...pd.ClientOption) {
+	if PDCli != nil {
+		PDCli.Close()
+	}
 	withOpts := append(opts, pd.WithLoggerRedirection("fatal", ""))
 	PDCli = pd.NewClient(pdControlCallerID, addrs, withOpts...)
 }

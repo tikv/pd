@@ -346,6 +346,18 @@ func WithTLSConfig(tlsConf *tls.Config) ClientOption {
 	}
 }
 
+// WithMetrics configures the client with metrics.
+func WithMetrics(
+	requestCounter *prometheus.CounterVec,
+	executionDuration *prometheus.HistogramVec,
+) ClientOption {
+	return func(c *client) {
+		c.inner.requestCounter = requestCounter
+		c.inner.executionDuration = executionDuration
+	}
+}
+
+// WithLoggerRedirection configures the client with the given logger redirection.
 func WithLoggerRedirection(logLevel, fileName string) ClientOption {
 	cfg := &log.Config{}
 	cfg.Level = logLevel
@@ -358,17 +370,6 @@ func WithLoggerRedirection(logLevel, fileName string) ClientOption {
 	lg, p, _ := log.InitLogger(cfg)
 	log.ReplaceGlobals(lg, p)
 	return func(c *client) {}
-}
-
-// WithMetrics configures the client with metrics.
-func WithMetrics(
-	requestCounter *prometheus.CounterVec,
-	executionDuration *prometheus.HistogramVec,
-) ClientOption {
-	return func(c *client) {
-		c.inner.requestCounter = requestCounter
-		c.inner.executionDuration = executionDuration
-	}
 }
 
 // NewClient creates a PD HTTP client with the given PD addresses and TLS config.
