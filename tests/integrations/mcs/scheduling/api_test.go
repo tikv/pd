@@ -27,6 +27,12 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
+var testDialClient = &http.Client{
+	Transport: &http.Transport{
+		DisableKeepAlives: true,
+	},
+}
+
 type apiTestSuite struct {
 	suite.Suite
 	env *tests.SchedulingTestEnvironment
