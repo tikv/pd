@@ -187,7 +187,7 @@ func (c *pdServiceClient) IsConnectedToLeader() bool {
 	return c.isLeader
 }
 
-// NetworkAvailable implements ServiceClient.
+// Available implements ServiceClient.
 func (c *pdServiceClient) Available() bool {
 	if c == nil {
 		return false
