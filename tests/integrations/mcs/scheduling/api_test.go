@@ -566,7 +566,7 @@ func (suite *apiTestSuite) checkMetrics(cluster *tests.TestCluster) {
 	re.Equal(http.StatusOK, resp.StatusCode)
 	respBytes, err := io.ReadAll(resp.Body)
 	re.NoError(err)
-	re.Contains(string(respBytes), "scheduling_server_info")
+	re.Contains(string(respBytes), "pd_server_info")
 }
 
 func (suite *apiTestSuite) TestStatus() {

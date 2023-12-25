@@ -136,14 +136,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
-	serverInfo = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "info",
-			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
-		}, []string{"version", "hash"})
-
 	serviceAuditHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -152,13 +144,6 @@ var (
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"service", "method", "caller_id", "ip"})
-	serverMaxProcs = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "service",
-			Name:      "maxprocs",
-			Help:      "The value of GOMAXPROCS.",
-		})
 
 	forwardFailCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -181,11 +166,9 @@ func init() {
 	prometheus.MustRegister(tsoHandleDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
-	prometheus.MustRegister(serverInfo)
 	prometheus.MustRegister(bucketReportCounter)
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
-	prometheus.MustRegister(serverMaxProcs)
 	prometheus.MustRegister(forwardFailCounter)
 }
