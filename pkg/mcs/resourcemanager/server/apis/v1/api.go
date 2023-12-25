@@ -188,7 +188,7 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 //	@Success	200		    {string}	json	format	of	rmserver.ResourceGroup
 //	@Failure	404		    {string}	error
 //	@Param		name	    path		string	true	"groupName"
-//	@Param		with_stats	query		bool	false	whether to return statistics data.
+//	@Param		with_stats	query		bool	false	"whether to return statistics data."
 //	@Router		/config/group/{name} [GET]
 func (s *Service) getResourceGroup(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
@@ -205,7 +205,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Summary	get all resource group with a list.
 //	@Success	200	{string}	json	format	of	[]rmserver.ResourceGroup
 //	@Failure	404	{string}	error
-//	@Param		with_stats		query	bool	false	whether to return statistics data.
+//	@Param		with_stats		query	bool	false	"whether to return statistics data."
 //	@Router		/config/groups [GET]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
