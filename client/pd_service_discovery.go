@@ -52,7 +52,7 @@ var MemberHealthCheckInterval = time.Second
 type apiKind int
 
 const (
-	defaultAPIKind apiKind = iota
+	forwardAPIKind apiKind = iota
 	regionAPIKind
 	apiKindCount
 )
@@ -93,7 +93,8 @@ type ServiceDiscovery interface {
 	// secondaries in a primary/secondary configured cluster.
 	GetBackupAddrs() []string
 	// GetServiceClient tries to get the leader/primary ServiceClient.
-	// If the leader ServiceClient meets network problem, it returns a follower/secondary ServiceClient.
+	// If the leader ServiceClient meets network problem,
+	// it returns a follower/secondary ServiceClient which can forward the request to leader.
 	GetServiceClient() ServiceClient
 	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
 	GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error)
@@ -187,7 +188,7 @@ func (c *pdServiceClient) IsConnectedToLeader() bool {
 	return c.isLeader
 }
 
-// NetworkAvailable implements ServiceClient.
+// Available implements ServiceClient.
 func (c *pdServiceClient) Available() bool {
 	if c == nil {
 		return false
@@ -316,7 +317,6 @@ func newPDServiceBalancer(fn errFn) *pdServiceBalancer {
 		errFn: fn,
 	}
 }
-
 func (c *pdServiceBalancer) set(clients []ServiceClient) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -446,7 +446,7 @@ func newPDServiceDiscovery(
 		ctx:                 ctx,
 		cancel:              cancel,
 		wg:                  wg,
-		apiCandidateNodes:   [2]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn), newPDServiceBalancer(regionAPIErrorFn)},
+		apiCandidateNodes:   [apiKindCount]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn), newPDServiceBalancer(regionAPIErrorFn)},
 		serviceModeUpdateCb: serviceModeUpdateCb,
 		updateKeyspaceIDCb:  updateKeyspaceIDCb,
 		keyspaceID:          keyspaceID,
@@ -721,7 +721,7 @@ func (c *pdServiceDiscovery) getServiceClientByKind(kind apiKind) ServiceClient 
 func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 	leaderClient := c.getLeaderServiceClient()
 	if c.option.enableForwarding && !leaderClient.Available() {
-		if followerClient := c.getServiceClientByKind(defaultAPIKind); followerClient != nil {
+		if followerClient := c.getServiceClientByKind(forwardAPIKind); followerClient != nil {
 			log.Debug("[pd] use follower client", zap.String("addr", followerClient.GetAddress()))
 			return followerClient
 		}
