@@ -58,14 +58,10 @@ func saveJSONInTxn(txn kv.Txn, key string, data interface{}) error {
 
 // loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
 func (se *StorageEndpoint) loadRangeByPrefix(prefix string, f func(k, v string)) error {
-	return loadRangeByPrefixInTxn(se /* use the same interface */, prefix, f)
-}
-
-func loadRangeByPrefixInTxn(txn kv.Txn, prefix string, f func(k, v string)) error {
 	nextKey := prefix
 	endKey := clientv3.GetPrefixRangeEnd(prefix)
 	for {
-		keys, values, err := txn.LoadRange(nextKey, endKey, MinKVRangeLimit)
+		keys, values, err := se.LoadRange(nextKey, endKey, MinKVRangeLimit)
 		if err != nil {
 			return err
 		}

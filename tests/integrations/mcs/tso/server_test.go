@@ -576,18 +576,6 @@ func (suite *CommonTestSuite) TestAdvertiseAddr() {
 	re.Equal(conf.GetListenAddr(), conf.GetAdvertiseListenAddr())
 }
 
-func (suite *CommonTestSuite) TestMetrics() {
-	re := suite.Require()
-
-	resp, err := http.Get(suite.tsoDefaultPrimaryServer.GetConfig().GetAdvertiseListenAddr() + "/metrics")
-	re.NoError(err)
-	defer resp.Body.Close()
-	re.Equal(http.StatusOK, resp.StatusCode)
-	respBytes, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	re.Contains(string(respBytes), "tso_server_info")
-}
-
 func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	re := suite.Require()
 

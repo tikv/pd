@@ -91,6 +91,7 @@ func NewService(srv *tsoserver.Service) *Service {
 		c.Next()
 	})
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
+	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	root.Use(multiservicesapi.ServiceRedirector())
