@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 )
 
@@ -100,6 +101,21 @@ func TestResourceManagerServer(t *testing.T) {
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respBytes, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		re.Contains(string(respBytes), "resource_manager_server_info")
+		re.Contains(string(respBytes), "pd_server_info")
+	}
+
+	// Test status handler
+	{
+		resp, err := http.Get(addr + "/status")
+		re.NoError(err)
+		defer resp.Body.Close()
+		re.Equal(http.StatusOK, resp.StatusCode)
+		respBytes, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		var s versioninfo.Status
+		re.NoError(json.Unmarshal(respBytes, &s))
+		re.Equal(versioninfo.PDBuildTS, s.BuildTS)
+		re.Equal(versioninfo.PDGitHash, s.GitHash)
+		re.Equal(versioninfo.PDReleaseVersion, s.Version)
 	}
 }
