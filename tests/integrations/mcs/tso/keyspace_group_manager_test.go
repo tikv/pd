@@ -30,11 +30,11 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyspace"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -761,7 +761,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 
 	var (
-		keyspaceGroupNum = keyspace.MaxEtcdTxnOps
+		keyspaceGroupNum = etcdutil.MaxEtcdTxnOps
 		keyspaceGroups   = make([]*endpoint.KeyspaceGroup, 0, keyspaceGroupNum)
 		keyspaces        = make([]uint32, 0, keyspaceGroupNum)
 	)
@@ -772,7 +772,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 			Keyspaces: []uint32{uint32(i)},
 		})
 		keyspaces = append(keyspaces, uint32(i))
-		if len(keyspaceGroups) < keyspace.MaxEtcdTxnOps/2 && i != keyspaceGroupNum {
+		if len(keyspaceGroups) < etcdutil.MaxEtcdTxnOps/2 && i != keyspaceGroupNum {
 			continue
 		}
 		handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
