@@ -210,7 +210,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *schedulerHandler) handleAddEvictOrGrantErr(w http.ResponseWriter, err error) {
-	if errors.ErrorEqual(err, errs.ErrMissingStoreId.FastGenByArgs()) {
+	if errors.ErrorEqual(err, errs.ErrMissingStoreID.FastGenByArgs()) {
 		h.r.JSON(w, http.StatusBadRequest, err.Error())
 	} else {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -220,7 +220,7 @@ func (h *schedulerHandler) handleAddEvictOrGrantErr(w http.ResponseWriter, err e
 func (h *schedulerHandler) addEvictOrGrant(input map[string]interface{}, name string) error {
 	storeID, ok := input["store_id"].(float64)
 	if !ok {
-		return errs.ErrMissingStoreId.FastGenByArgs()
+		return errs.ErrMissingStoreID.FastGenByArgs()
 	}
 	return h.AddEvictOrGrant(storeID, name)
 }
