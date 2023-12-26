@@ -132,7 +132,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_capacity\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_capacity\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -218,7 +218,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_size\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_size\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -303,7 +303,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_size\"}) / max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_capacity\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_size\"}) / sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"storage_capacity\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -386,7 +386,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_up_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_up_count\"})",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 2,
@@ -471,7 +471,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"leader_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"leader_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "refId": "A",
@@ -555,7 +555,7 @@
       "tableColumn": "",
       "targets": [
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"region_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"region_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "count",
@@ -631,7 +631,7 @@
       ],
       "targets": [
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_disconnected_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_disconnected_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Disconnect Stores",
@@ -639,7 +639,7 @@
           "step": 20
         },
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_unhealth_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_unhealth_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Unhealth Stores",
@@ -647,7 +647,7 @@
           "step": 20
         },
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_low_space_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_low_space_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "LowSpace Stores",
@@ -655,7 +655,7 @@
           "step": 20
         },
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_down_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_down_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Down Stores",
@@ -663,7 +663,7 @@
           "step": 20
         },
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_offline_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_offline_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Offline Stores",
@@ -671,7 +671,7 @@
           "step": 20
         },
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_tombstone_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_tombstone_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Tombstone Stores",
@@ -679,7 +679,7 @@
           "step": 20
         },
         {
-          "expr": "max(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_slow_count\"})",
+          "expr": "sum(pd_cluster_status{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"store_slow_count\"})",
           "format": "time_series",
           "intervalFactor": 2,
           "legendFormat": "Slow Stores",
