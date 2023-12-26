@@ -1138,6 +1138,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
 	re.NoError(err)
 	re.Equal(g.RUStats, testConsumption)
+
+	_, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
+	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {
