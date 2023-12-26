@@ -171,7 +171,7 @@ func (c *pdServiceClient) GetAddress() string {
 
 // BuildGRPCTargetContext implements ServiceClient.
 func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader bool) context.Context {
-	if c == nil || c.IsConnectedToLeader() {
+	if c == nil || c.isLeader {
 		return ctx
 	}
 	if toLeader {
@@ -959,6 +959,7 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) (bool, error) {
 	if addr == oldLeader.GetAddress() && oldLeader.GetClientConn() != nil {
 		return false, nil
 	}
+
 	newConn, err := c.GetOrCreateGRPCConn(addr)
 	// If gRPC connect is created successfully or leader is new, still saves.
 	if addr != oldLeader.GetAddress() || newConn != nil {

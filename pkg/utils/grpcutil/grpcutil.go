@@ -184,8 +184,8 @@ func GetForwardedHost(ctx context.Context) string {
 	return ""
 }
 
-// GetEnableFollowerHandle returns the follower host in metadata.
-func GetEnableFollowerHandle(ctx context.Context) bool {
+// IsFollowerHandleEnabled returns the follower host in metadata.
+func IsFollowerHandleEnabled(ctx context.Context) bool {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		log.Debug("failed to get gRPC incoming metadata when checking follower handle is enabled")

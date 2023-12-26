@@ -2040,7 +2040,7 @@ func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.Req
 		if allowFollower == nil {
 			return ErrNotLeader
 		}
-		if !grpcutil.GetEnableFollowerHandle(ctx) {
+		if !grpcutil.IsFollowerHandleEnabled(ctx) {
 			// TODO: change the error code
 			return ErrFollowerHandlingNotAllowed
 		}
