@@ -141,13 +141,16 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-
 	case schedulers.GrantLeaderName:
-		h.addEvictOrGrant(w, input, schedulers.GrantLeaderName)
-		return
+		if err := h.addEvictOrGrant(input, schedulers.GrantLeaderName); err != nil {
+			h.handleAddEvictOrGrantErr(w, err)
+			return
+		}
 	case schedulers.EvictLeaderName:
-		h.addEvictOrGrant(w, input, schedulers.EvictLeaderName)
-		return
+		if err := h.addEvictOrGrant(input, schedulers.EvictLeaderName); err != nil {
+			h.handleAddEvictOrGrantErr(w, err)
+			return
+		}
 	case schedulers.ShuffleLeaderName:
 		if err := h.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -206,18 +209,20 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
-func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[string]interface{}, name string) {
+func (h *schedulerHandler) handleAddEvictOrGrantErr(w http.ResponseWriter, err error) {
+	if errors.ErrorEqual(err, errs.ErrMissingStoreId.FastGenByArgs()) {
+		h.r.JSON(w, http.StatusBadRequest, err.Error())
+	} else {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func (h *schedulerHandler) addEvictOrGrant(input map[string]interface{}, name string) error {
 	storeID, ok := input["store_id"].(float64)
 	if !ok {
-		h.r.JSON(w, http.StatusBadRequest, "missing store id")
-		return
+		return errs.ErrMissingStoreId.FastGenByArgs()
 	}
-	err := h.AddEvictOrGrant(storeID, name)
-	if err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
+	return h.AddEvictOrGrant(storeID, name)
 }
 
 // @Tags     scheduler
