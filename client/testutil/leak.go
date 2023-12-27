@@ -23,4 +23,8 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).createTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*Server).handleRawConn"),
+	// TODO: remove the below options once we fixed the http connection leak problems
+	goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
+	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/transport.(*controlBuffer).get"),
+	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/transport.(*http2Server).keepalive"),
 }

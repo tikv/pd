@@ -86,7 +86,7 @@ var (
 var (
 	ErrClientCreateTSOStream = errors.Normalize("create TSO stream failed, %s", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
 	ErrClientGetTSOTimeout   = errors.Normalize("get TSO timeout", errors.RFCCodeText("PD:client:ErrClientGetTSOTimeout"))
-	ErrClientGetTSO          = errors.Normalize("get TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
+	ErrClientGetTSO          = errors.Normalize("get TSO failed", errors.RFCCodeText("PD:client:ErrClientGetTSO"))
 	ErrClientGetLeader       = errors.Normalize("get leader failed, %v", errors.RFCCodeText("PD:client:ErrClientGetLeader"))
 	ErrClientGetMember       = errors.Normalize("get member failed", errors.RFCCodeText("PD:client:ErrClientGetMember"))
 	ErrClientGetMinTSO       = errors.Normalize("get min TSO failed, %v", errors.RFCCodeText("PD:client:ErrClientGetMinTSO"))
@@ -102,6 +102,8 @@ var (
 
 // region errors
 var (
+	// ErrRegionInvalidID is error info for region id invalid.
+	ErrRegionInvalidID = errors.Normalize("invalid region id", errors.RFCCodeText("PD:region:ErrRegionInvalidID"))
 	// ErrRegionNotAdjacent is error info for region not adjacent.
 	ErrRegionNotAdjacent = errors.Normalize("two regions are not adjacent", errors.RFCCodeText("PD:region:ErrRegionNotAdjacent"))
 	// ErrRegionNotFound is error info for region not found.
@@ -153,10 +155,13 @@ var (
 
 // placement errors
 var (
-	ErrRuleContent   = errors.Normalize("invalid rule content, %s", errors.RFCCodeText("PD:placement:ErrRuleContent"))
-	ErrLoadRule      = errors.Normalize("load rule failed", errors.RFCCodeText("PD:placement:ErrLoadRule"))
-	ErrLoadRuleGroup = errors.Normalize("load rule group failed", errors.RFCCodeText("PD:placement:ErrLoadRuleGroup"))
-	ErrBuildRuleList = errors.Normalize("build rule list failed, %s", errors.RFCCodeText("PD:placement:ErrBuildRuleList"))
+	ErrRuleContent       = errors.Normalize("invalid rule content, %s", errors.RFCCodeText("PD:placement:ErrRuleContent"))
+	ErrLoadRule          = errors.Normalize("load rule failed", errors.RFCCodeText("PD:placement:ErrLoadRule"))
+	ErrLoadRuleGroup     = errors.Normalize("load rule group failed", errors.RFCCodeText("PD:placement:ErrLoadRuleGroup"))
+	ErrBuildRuleList     = errors.Normalize("build rule list failed, %s", errors.RFCCodeText("PD:placement:ErrBuildRuleList"))
+	ErrPlacementDisabled = errors.Normalize("placement rules feature is disabled", errors.RFCCodeText("PD:placement:ErrPlacementDisabled"))
+	ErrKeyFormat         = errors.Normalize("key should be in hex format, %s", errors.RFCCodeText("PD:placement:ErrKeyFormat"))
+	ErrRuleNotFound      = errors.Normalize("rule not found", errors.RFCCodeText("PD:placement:ErrRuleNotFound"))
 )
 
 // region label errors
@@ -192,6 +197,8 @@ var (
 var (
 	ErrRedirect       = errors.Normalize("redirect failed", errors.RFCCodeText("PD:apiutil:ErrRedirect"))
 	ErrOptionNotExist = errors.Normalize("the option %s does not exist", errors.RFCCodeText("PD:apiutil:ErrOptionNotExist"))
+	// ErrRedirectToNotLeader is the error message for redirect to not leader.
+	ErrRedirectToNotLeader = errors.Normalize("redirect to not leader", errors.RFCCodeText("PD:apiutil:ErrRedirectToNotLeader"))
 )
 
 // grpcutil errors
@@ -201,14 +208,15 @@ var (
 
 // server errors
 var (
-	ErrServiceRegistered     = errors.Normalize("service with path [%s] already registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
-	ErrAPIInformationInvalid = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
-	ErrClientURLEmpty        = errors.Normalize("client url empty", errors.RFCCodeText("PD:server:ErrClientEmpty"))
-	ErrLeaderNil             = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
-	ErrCancelStartEtcd       = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
-	ErrConfigItem            = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:server:ErrConfiguration"))
-	ErrServerNotStarted      = errors.Normalize("server not started", errors.RFCCodeText("PD:server:ErrServerNotStarted"))
-	ErrRateLimitExceeded     = errors.Normalize("rate limit exceeded", errors.RFCCodeText("PD:server:ErrRateLimitExceeded"))
+	ErrServiceRegistered      = errors.Normalize("service with path [%s] already registered", errors.RFCCodeText("PD:server:ErrServiceRegistered"))
+	ErrAPIInformationInvalid  = errors.Normalize("invalid api information, group %s version %s", errors.RFCCodeText("PD:server:ErrAPIInformationInvalid"))
+	ErrClientURLEmpty         = errors.Normalize("client url empty", errors.RFCCodeText("PD:server:ErrClientEmpty"))
+	ErrLeaderNil              = errors.Normalize("leader is nil", errors.RFCCodeText("PD:server:ErrLeaderNil"))
+	ErrCancelStartEtcd        = errors.Normalize("etcd start canceled", errors.RFCCodeText("PD:server:ErrCancelStartEtcd"))
+	ErrConfigItem             = errors.Normalize("cannot set invalid configuration", errors.RFCCodeText("PD:server:ErrConfiguration"))
+	ErrServerNotStarted       = errors.Normalize("server not started", errors.RFCCodeText("PD:server:ErrServerNotStarted"))
+	ErrRateLimitExceeded      = errors.Normalize("rate limit exceeded", errors.RFCCodeText("PD:server:ErrRateLimitExceeded"))
+	ErrLeaderFrequentlyChange = errors.Normalize("leader %s frequently changed, leader-key is [%s]", errors.RFCCodeText("PD:server:ErrLeaderFrequentlyChange"))
 )
 
 // logutil errors

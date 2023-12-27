@@ -69,7 +69,7 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		w.Header().Add("body-param", requestInfo.BodyParam)
 		w.Header().Add("url-param", requestInfo.URLParam)
 		w.Header().Add("method", requestInfo.Method)
-		w.Header().Add("component", requestInfo.Component)
+		w.Header().Add("caller-id", requestInfo.CallerID)
 		w.Header().Add("ip", requestInfo.IP)
 	})
 
@@ -114,7 +114,7 @@ func newAuditMiddleware(s *server.Server) negroni.Handler {
 	return &auditMiddleware{svr: s}
 }
 
-// ServeHTTP is used to implememt negroni.Handler for auditMiddleware
+// ServeHTTP is used to implement negroni.Handler for auditMiddleware
 func (s *auditMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	if !s.svr.GetServiceMiddlewarePersistOptions().IsAuditEnabled() {
 		next(w, r)
@@ -164,7 +164,7 @@ func newRateLimitMiddleware(s *server.Server) negroni.Handler {
 	return &rateLimitMiddleware{svr: s}
 }
 
-// ServeHTTP is used to implememt negroni.Handler for rateLimitMiddleware
+// ServeHTTP is used to implement negroni.Handler for rateLimitMiddleware
 func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	if !s.svr.GetServiceMiddlewarePersistOptions().IsRateLimitEnabled() {
 		next(w, r)
@@ -177,8 +177,8 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 
 	// There is no need to check whether rateLimiter is nil. CreateServer ensures that it is created
 	rateLimiter := s.svr.GetServiceRateLimiter()
-	if rateLimiter.Allow(requestInfo.ServiceLabel) {
-		defer rateLimiter.Release(requestInfo.ServiceLabel)
+	if done, err := rateLimiter.Allow(requestInfo.ServiceLabel); err == nil {
+		defer done()
 		next(w, r)
 	} else {
 		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)

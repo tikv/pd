@@ -43,6 +43,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -216,11 +217,11 @@ type Server struct {
 	// related data structures defined in the PD grpc service
 	pdProtoFactory *tsoutil.PDProtoFactory
 
-	serviceRateLimiter *ratelimit.Limiter
+	serviceRateLimiter *ratelimit.Controller
 	serviceLabels      map[string][]apiutil.AccessPath
 	apiServiceLabelMap map[apiutil.AccessPath]string
 
-	grpcServiceRateLimiter *ratelimit.Limiter
+	grpcServiceRateLimiter *ratelimit.Controller
 	grpcServiceLabels      map[string]struct{}
 	grpcServer             *grpc.Server
 
@@ -273,8 +274,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
-	s.serviceRateLimiter = ratelimit.NewLimiter()
-	s.grpcServiceRateLimiter = ratelimit.NewLimiter()
+	s.serviceRateLimiter = ratelimit.NewController()
+	s.grpcServiceRateLimiter = ratelimit.NewController()
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.grpcServiceLabels = make(map[string]struct{})
@@ -428,7 +429,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
-	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
 	s.rootPath = endpoint.PDRootPath(s.clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
@@ -473,7 +474,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -489,13 +490,13 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
-	if !s.IsAPIServiceMode() {
-		s.hotRegionStorage, err = storage.NewHotRegionsStorage(
-			ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
-		if err != nil {
-			return err
-		}
+
+	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
+		ctx, filepath.Join(s.cfg.DataDir, "hot-region"), s.encryptionKeyManager, s.handler)
+	if err != nil {
+		return err
 	}
+
 	// Run callbacks
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.startCallbacks {
@@ -504,7 +505,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	// Server has started.
 	atomic.StoreInt64(&s.isRunning, 1)
-	serverMaxProcs.Set(float64(runtime.GOMAXPROCS(0)))
+	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 	return nil
 }
 
@@ -1043,7 +1044,7 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 			return errs.ErrNotBootstrapped.GenWithStackByArgs()
 		}
 		// replication.MaxReplicas won't work when placement rule is enabled and not only have one default rule.
-		defaultRule := rc.GetRuleManager().GetRule("pd", "default")
+		defaultRule := rc.GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 
 		CheckInDefaultRule := func() error {
 			// replication config won't work when placement rule is enabled and exceeds one default rule
@@ -1363,6 +1364,12 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 	return s.cluster
 }
 
+// DirectlyGetRaftCluster returns raft cluster directly.
+// Only used for test.
+func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
+	return s.cluster
+}
+
 // GetCluster gets cluster.
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
@@ -1392,6 +1399,15 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 		return rc.GetRegions()
 	}
 	return nil
+}
+
+// IsServiceIndependent returns if the service is enabled
+func (s *Server) IsServiceIndependent(name string) bool {
+	rc := s.GetRaftCluster()
+	if rc != nil {
+		return rc.IsServiceIndependent(name)
+	}
+	return false
 }
 
 // GetServiceLabels returns ApiAccessPaths by given service label
@@ -1452,7 +1468,7 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 }
 
 // GetServiceRateLimiter is used to get rate limiter
-func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
+func (s *Server) GetServiceRateLimiter() *ratelimit.Controller {
 	return s.serviceRateLimiter
 }
 
@@ -1467,7 +1483,7 @@ func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit
 }
 
 // GetGRPCRateLimiter is used to get rate limiter
-func (s *Server) GetGRPCRateLimiter() *ratelimit.Limiter {
+func (s *Server) GetGRPCRateLimiter() *ratelimit.Controller {
 	return s.grpcServiceRateLimiter
 }
 
@@ -1627,7 +1643,7 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
-	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
+	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
 				zap.String("campaign-leader-name", s.Name()))
@@ -2002,9 +2018,10 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		s.client,
 		name,
 		primaryKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		func() error { return nil },
+		func([]*clientv3.Event) error { return nil },
 	)
 }
 

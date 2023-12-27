@@ -261,13 +261,13 @@ func TestShuffleRegionRole(t *testing.T) {
 	// update rule to 1leader+1follower+1learner
 	tc.SetEnablePlacementRules(true)
 	tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd",
-		ID:      "default",
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
 	tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd",
+		GroupID: placement.DefaultGroupID,
 		ID:      "learner",
 		Role:    placement.Learner,
 		Count:   1,
@@ -428,8 +428,8 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 		{
 			name: "default Rule",
 			rule: &placement.Rule{
-				GroupID:        "pd",
-				ID:             "default",
+				GroupID:        placement.DefaultGroupID,
+				ID:             placement.DefaultRuleID,
 				Index:          1,
 				StartKey:       []byte(""),
 				EndKey:         []byte(""),
@@ -442,8 +442,8 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 		{
 			name: "single store allowed to be placed leader",
 			rule: &placement.Rule{
-				GroupID:  "pd",
-				ID:       "default",
+				GroupID:  placement.DefaultGroupID,
+				ID:       placement.DefaultRuleID,
 				Index:    1,
 				StartKey: []byte(""),
 				EndKey:   []byte(""),
@@ -463,8 +463,8 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 		{
 			name: "2 store allowed to be placed leader",
 			rule: &placement.Rule{
-				GroupID:  "pd",
-				ID:       "default",
+				GroupID:  placement.DefaultGroupID,
+				ID:       placement.DefaultRuleID,
 				Index:    1,
 				StartKey: []byte(""),
 				EndKey:   []byte(""),
@@ -484,7 +484,7 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		re.Nil(tc.SetRule(testCase.rule))
+		re.NoError(tc.SetRule(testCase.rule))
 		ops, _ := lb.Schedule(tc, false)
 		if testCase.schedule {
 			re.Len(ops, 1)

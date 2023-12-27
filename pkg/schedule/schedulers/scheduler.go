@@ -42,8 +42,8 @@ type Scheduler interface {
 	ReloadConfig() error
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
-	Prepare(cluster sche.SchedulerCluster) error
-	Cleanup(cluster sche.SchedulerCluster)
+	PrepareConfig(cluster sche.SchedulerCluster) error
+	CleanConfig(cluster sche.SchedulerCluster)
 	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
 }
@@ -52,7 +52,7 @@ type Scheduler interface {
 func EncodeConfig(v interface{}) ([]byte, error) {
 	marshaled, err := json.Marshal(v)
 	if err != nil {
-		return nil, errs.ErrJSONMarshal.Wrap(err).FastGenWithCause()
+		return nil, errs.ErrJSONMarshal.Wrap(err)
 	}
 	return marshaled, nil
 }
@@ -61,7 +61,7 @@ func EncodeConfig(v interface{}) ([]byte, error) {
 func DecodeConfig(data []byte, v interface{}) error {
 	err := json.Unmarshal(data, v)
 	if err != nil {
-		return errs.ErrJSONUnmarshal.Wrap(err).FastGenWithCause()
+		return errs.ErrJSONUnmarshal.Wrap(err)
 	}
 	return nil
 }

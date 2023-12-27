@@ -105,6 +105,35 @@ func TestKeyspace(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
 
+// Show command should auto retry without refresh_group_id if keyspace group manager not initialized.
+// See issue: #7441
+func TestKeyspaceGroupUninitialized(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	tc, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	re.NoError(tc.RunInitialServers())
+	tc.WaitLeader()
+	re.NoError(tc.GetLeaderServer().BootstrapCluster())
+	pdAddr := tc.GetConfig().GetClientURL()
+
+	keyspaceName := "DEFAULT"
+	keyspaceID := uint32(0)
+	args := []string{"-u", pdAddr, "keyspace", "show", "name", keyspaceName}
+	output, err := pdctl.ExecuteCommand(pdctlCmd.GetRootCmd(), args...)
+	re.NoError(err)
+	var meta api.KeyspaceMeta
+	re.NoError(json.Unmarshal(output, &meta))
+	re.Equal(keyspaceName, meta.GetName())
+	re.Equal(keyspaceID, meta.GetId())
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+}
+
 type keyspaceTestSuite struct {
 	suite.Suite
 	ctx     context.Context
@@ -118,22 +147,24 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
+	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	tc, err := tests.NewTestAPICluster(suite.ctx, 1)
-	suite.NoError(err)
-	suite.NoError(tc.RunInitialServers())
+	re.NoError(err)
+	re.NoError(tc.RunInitialServers())
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	suite.NoError(leaderServer.BootstrapCluster())
+	re.NoError(leaderServer.BootstrapCluster())
 	suite.cluster = tc
 	suite.pdAddr = tc.GetConfig().GetClientURL()
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	suite.cancel()
 }
 

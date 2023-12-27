@@ -185,7 +185,7 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 	}
 	tc.SetEnablePlacementRules(true)
 	re.NoError(tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd", ID: "learner", Role: placement.Learner, Count: 3,
+		GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 3,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}))
 
 	// Region 1 has the same distribution with the Region 2, which is used to test selectPeerToReplace.
@@ -350,7 +350,7 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 		// prevent store from being disconnected
 		tc.SetStoreLastHeartbeatInterval(i, 40*time.Minute)
 	}
-	re.Equal(tc.GetStore(uint64(6)).IsDisconnected(), true)
+	re.True(tc.GetStore(uint64(6)).IsDisconnected())
 	scatterer := NewRegionScatterer(ctx, tc, oc, tc.AddSuspectRegions)
 	var wg sync.WaitGroup
 	for j := 0; j < 10; j++ {
@@ -466,7 +466,7 @@ func TestScatterForManyRegion(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain", `return(true)`))
 	scatterer.scatterRegions(regions, failures, group, 3, false)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/scatter/scatterHbStreamsDrain"))
-	re.Len(failures, 0)
+	re.Empty(failures)
 }
 
 func TestScattersGroup(t *testing.T) {
@@ -575,8 +575,8 @@ func TestRegionHasLearner(t *testing.T) {
 		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z2"})
 	}
 	tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd",
-		ID:      "default",
+		GroupID: placement.DefaultGroupID,
+		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   3,
 		LabelConstraints: []placement.LabelConstraint{
@@ -588,7 +588,7 @@ func TestRegionHasLearner(t *testing.T) {
 		},
 	})
 	tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd",
+		GroupID: placement.DefaultGroupID,
 		ID:      "learner",
 		Role:    placement.Learner,
 		Count:   1,

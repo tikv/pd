@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -30,6 +29,7 @@ import (
 	"time"
 
 	pd "github.com/tikv/pd/client"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tools/pd-api-bench/cases"
 	"go.uber.org/zap"
@@ -50,9 +50,6 @@ var (
 	burst = flag.Int64("burst", 1, "burst")
 
 	wait = flag.Bool("wait", true, "wait for a round")
-
-	// http params
-	httpParams = flag.String("params", "", "http params")
 
 	// tls
 	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
@@ -79,12 +76,6 @@ func main() {
 		cancel()
 	}()
 
-	addr := trimHTTPPrefix(*pdAddr)
-	protocol := "http"
-	if len(*caPath) != 0 {
-		protocol = "https"
-	}
-	cases.PDAddress = fmt.Sprintf("%s://%s", protocol, addr)
 	cases.Debug = *debugFlag
 
 	hcases := make([]cases.HTTPCase, 0)
@@ -202,9 +193,9 @@ func main() {
 	for i := 0; i < *client; i++ {
 		pdClis[i] = newPDClient(ctx)
 	}
-	httpClis := make([]*http.Client, *client)
+	httpClis := make([]pdHttp.Client, *client)
 	for i := 0; i < *client; i++ {
-		httpClis[i] = newHTTPClient()
+		httpClis[i] = pdHttp.NewClient("tools-api-bench", []string{*pdAddr}, pdHttp.WithTLSConfig(loadTLSConfig()))
 	}
 	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {
@@ -239,6 +230,18 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 	burst := gcase.GetBurst()
 	tt := time.Duration(base/qps*burst*int64(*client)) * time.Microsecond
 	log.Printf("begin to run gRPC case %s, with qps = %d and burst = %d, interval is %v", gcase.Name(), qps, burst, tt)
+	doFn := func(cli pd.Client) {
+		err := gcase.Unary(ctx, cli)
+		if err != nil {
+			log.Println(err)
+		}
+		cntMu.Lock()
+		endCnt++
+		if *debugFlag && endCnt%1000 == 0 {
+			log.Printf("case grpc %s has finished query %d", gcase.Name(), endCnt)
+		}
+		cntMu.Unlock()
+	}
 	for _, cli := range clients {
 		go func(cli pd.Client) {
 			var ticker = time.NewTicker(tt)
@@ -249,34 +252,14 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 					for i := int64(0); i < burst; i++ {
 						cntMu.Lock()
 						startCnt++
-						if startCnt%1000 == 0 {
+						if *debugFlag && startCnt%1000 == 0 {
 							log.Printf("case grpc %s has sent query %d", gcase.Name(), startCnt)
 						}
 						cntMu.Unlock()
 						if *wait {
-							err := gcase.Unary(ctx, cli)
-							if err != nil {
-								log.Println(err)
-							}
-							cntMu.Lock()
-							endCnt++
-							if endCnt%1000 == 0 {
-								log.Printf("case grpc %s has finished query %d", gcase.Name(), endCnt)
-							}
-							cntMu.Unlock()
+							doFn(cli)
 						} else {
-							go func() {
-								err := gcase.Unary(ctx, cli)
-								if err != nil {
-									log.Println(err)
-								}
-								cntMu.Lock()
-								endCnt++
-								if endCnt%1000 == 0 {
-									log.Printf("case grpc %s has finished query %d", gcase.Name(), endCnt)
-								}
-								cntMu.Unlock()
-							}()
+							go doFn(cli)
 						}
 					}
 				case <-ctx.Done():
@@ -288,7 +271,7 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 	}
 }
 
-func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.Client) {
+func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp.Client) {
 	startCnt := 0
 	endCnt := 0
 	var cntMu sync.Mutex
@@ -296,11 +279,20 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.
 	burst := hcase.GetBurst()
 	tt := time.Duration(base/qps*burst*int64(*client)) * time.Microsecond
 	log.Printf("begin to run http case %s, with qps = %d and burst = %d, interval is %v", hcase.Name(), qps, burst, tt)
-	if *httpParams != "" {
-		hcase.Params(*httpParams)
+	doFn := func(hCli pdHttp.Client) {
+		err := hcase.Do(ctx, hCli)
+		if err != nil {
+			log.Println(err)
+		}
+		cntMu.Lock()
+		endCnt++
+		if *debugFlag && endCnt%1000 == 0 {
+			log.Printf("case http %s has finished query %d", hcase.Name(), endCnt)
+		}
+		cntMu.Unlock()
 	}
 	for _, hCli := range httpClis {
-		go func(hCli *http.Client) {
+		go func(hCli pdHttp.Client) {
 			var ticker = time.NewTicker(tt)
 			defer ticker.Stop()
 			for {
@@ -309,34 +301,14 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.
 					for i := int64(0); i < burst; i++ {
 						cntMu.Lock()
 						startCnt++
-						if startCnt%1000 == 0 {
+						if *debugFlag && startCnt%1000 == 0 {
 							log.Printf("case http %s has done query %d", hcase.Name(), startCnt)
 						}
 						cntMu.Unlock()
 						if *wait {
-							err := hcase.Do(ctx, hCli)
-							if err != nil {
-								log.Println(err)
-							}
-							cntMu.Lock()
-							endCnt++
-							if endCnt%1000 == 0 {
-								log.Printf("case http %s has finished query %d", hcase.Name(), endCnt)
-							}
-							cntMu.Unlock()
+							doFn(hCli)
 						} else {
-							go func() {
-								err := hcase.Do(ctx, hCli)
-								if err != nil {
-									log.Println(err)
-								}
-								cntMu.Lock()
-								endCnt++
-								if endCnt%1000 == 0 {
-									log.Printf("case http %s has finished query %d", hcase.Name(), endCnt)
-								}
-								cntMu.Unlock()
-							}()
+							go doFn(hCli)
 						}
 					}
 				case <-ctx.Done():
@@ -350,20 +322,6 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []*http.
 
 func exit(code int) {
 	os.Exit(code)
-}
-
-// newHTTPClient returns an HTTP(s) client.
-func newHTTPClient() *http.Client {
-	// defaultTimeout for non-context requests.
-	const defaultTimeout = 30 * time.Second
-	cli := &http.Client{Timeout: defaultTimeout, Transport: http.DefaultTransport.(*http.Transport).Clone()}
-	tlsConf := loadTLSConfig()
-	if tlsConf != nil {
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.TLSClientConfig = tlsConf
-		cli.Transport = transport
-	}
-	return cli
 }
 
 func trimHTTPPrefix(str string) string {

@@ -64,6 +64,11 @@ const (
 	DefaultSlowRequestTime = time.Second
 
 	healthyPath = "health"
+
+	// MaxEtcdTxnOps is the max value of operations in an etcd txn. The default limit of etcd txn op is 128.
+	// We use 120 here to leave some space for other operations.
+	// See: https://github.com/etcd-io/etcd/blob/d3e43d4de6f6d9575b489dd7850a85e37e0f6b6c/server/embed/config.go#L61
+	MaxEtcdTxnOps = 120
 )
 
 // CheckClusterID checks etcd cluster ID, returns an error if mismatch.
@@ -382,13 +387,18 @@ func (checker *healthyChecker) patrol(ctx context.Context) []string {
 }
 
 func (checker *healthyChecker) update(eps []string) {
+	epMap := make(map[string]struct{})
 	for _, ep := range eps {
+		epMap[ep] = struct{}{}
+	}
+
+	for ep := range epMap {
 		// check if client exists, if not, create one, if exists, check if it's offline or disconnected.
 		if client, ok := checker.Load(ep); ok {
 			lastHealthy := client.(*healthyClient).lastHealth
 			if time.Since(lastHealthy) > etcdServerOfflineTimeout {
 				log.Info("some etcd server maybe offline", zap.String("endpoint", ep))
-				checker.Delete(ep)
+				checker.removeClient(ep)
 			}
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
 				// try to reset client endpoint to trigger reconnect
@@ -399,6 +409,16 @@ func (checker *healthyChecker) update(eps []string) {
 		}
 		checker.addClient(ep, time.Now())
 	}
+
+	// check if there are some stale clients, if exists, remove them.
+	checker.Range(func(key, value interface{}) bool {
+		ep := key.(string)
+		if _, ok := epMap[ep]; !ok {
+			log.Info("remove stale etcd client", zap.String("endpoint", ep))
+			checker.removeClient(ep)
+		}
+		return true
+	})
 }
 
 func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
@@ -411,6 +431,15 @@ func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 		Client:     client,
 		lastHealth: lastHealth,
 	})
+}
+
+func (checker *healthyChecker) removeClient(ep string) {
+	if client, ok := checker.LoadAndDelete(ep); ok {
+		err := client.(*healthyClient).Close()
+		if err != nil {
+			log.Error("failed to close etcd healthy client", zap.Error(err))
+		}
+	}
 }
 
 func syncUrls(client *clientv3.Client) []string {
@@ -563,8 +592,10 @@ type LoopWatcher struct {
 	putFn func(*mvccpb.KeyValue) error
 	// deleteFn is used to handle the delete event.
 	deleteFn func(*mvccpb.KeyValue) error
-	// postEventFn is used to call after handling all events.
-	postEventFn func() error
+	// postEventsFn is used to call after handling all events.
+	postEventsFn func([]*clientv3.Event) error
+	// preEventsFn is used to call before handling all events.
+	preEventsFn func([]*clientv3.Event) error
 
 	// forceLoadMu is used to ensure two force loads have minimal interval.
 	forceLoadMu syncutil.RWMutex
@@ -589,7 +620,9 @@ func NewLoopWatcher(
 	ctx context.Context, wg *sync.WaitGroup,
 	client *clientv3.Client,
 	name, key string,
-	putFn, deleteFn func(*mvccpb.KeyValue) error, postEventFn func() error,
+	preEventsFn func([]*clientv3.Event) error,
+	putFn, deleteFn func(*mvccpb.KeyValue) error,
+	postEventsFn func([]*clientv3.Event) error,
 	opts ...clientv3.OpOption,
 ) *LoopWatcher {
 	return &LoopWatcher{
@@ -603,7 +636,8 @@ func NewLoopWatcher(
 		updateClientCh:           make(chan *clientv3.Client, 1),
 		putFn:                    putFn,
 		deleteFn:                 deleteFn,
-		postEventFn:              postEventFn,
+		postEventsFn:             postEventsFn,
+		preEventsFn:              preEventsFn,
 		opts:                     opts,
 		lastTimeForceLoad:        time.Now(),
 		loadTimeout:              defaultLoadDataFromEtcdTimeout,
@@ -707,7 +741,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 	}()
 	ticker := time.NewTicker(RequestProgressInterval)
 	defer ticker.Stop()
-	lastReceivedResponseTime := time.Now()
 
 	for {
 		if watcherCancel != nil {
@@ -736,8 +769,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 				continue
 			}
 		}
+		lastReceivedResponseTime := time.Now()
 		log.Info("watch channel is created in watch loop",
 			zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+
 	watchChanLoop:
 		select {
 		case <-ctx.Done():
@@ -746,7 +781,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			revision, err = lw.load(ctx)
 			if err != nil {
 				log.Warn("force load key failed in watch loop",
-					zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), zap.Error(err))
+			} else {
+				log.Info("force load key successfully in watch loop",
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision))
 			}
 			continue
 		case <-ticker.C:
@@ -788,28 +826,34 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 				goto watchChanLoop
 			}
+			if err := lw.preEventsFn(wresp.Events); err != nil {
+				log.Error("run pre event failed in watch loop", zap.Error(err),
+					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+			}
 			for _, event := range wresp.Events {
 				switch event.Type {
 				case clientv3.EventTypePut:
 					if err := lw.putFn(event.Kv); err != nil {
 						log.Error("put failed in watch loop", zap.Error(err),
-							zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+							zap.Int64("revision", revision), zap.String("name", lw.name),
+							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
-						log.Debug("put in watch loop", zap.String("name", lw.name),
+						log.Debug("put successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key),
 							zap.ByteString("value", event.Kv.Value))
 					}
 				case clientv3.EventTypeDelete:
 					if err := lw.deleteFn(event.Kv); err != nil {
 						log.Error("delete failed in watch loop", zap.Error(err),
-							zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
+							zap.Int64("revision", revision), zap.String("name", lw.name),
+							zap.String("watch-key", lw.key), zap.ByteString("event-kv-key", event.Kv.Key))
 					} else {
-						log.Debug("delete in watch loop", zap.String("name", lw.name),
+						log.Debug("delete successfully in watch loop", zap.String("name", lw.name),
 							zap.ByteString("key", event.Kv.Key))
 					}
 				}
 			}
-			if err := lw.postEventFn(); err != nil {
+			if err := lw.postEventsFn(wresp.Events); err != nil {
 				log.Error("run post event failed in watch loop", zap.Error(err),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
 			}
@@ -829,6 +873,16 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	if limit != 0 {
 		limit++
 	}
+	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
+		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
+			zap.String("key", lw.key), zap.Error(err))
+	}
+	defer func() {
+		if err := lw.postEventsFn([]*clientv3.Event{}); err != nil {
+			log.Error("run post event failed in watch loop", zap.String("name", lw.name),
+				zap.String("key", lw.key), zap.Error(err))
+		}
+	}()
 	for {
 		// Sort by key to get the next key and we don't need to worry about the performance,
 		// Because the default sort is just SortByKey and SortAscend
@@ -848,15 +902,15 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			}
 			err = lw.putFn(item)
 			if err != nil {
-				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+				log.Error("put failed in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
+					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value), zap.Error(err))
+			} else {
+				log.Debug("put successfully in watch loop when loading", zap.String("name", lw.name), zap.String("watch-key", lw.key),
+					zap.ByteString("key", item.Key), zap.ByteString("value", item.Value))
 			}
 		}
 		// Note: if there are no keys in etcd, the resp.More is false. It also means the load is finished.
 		if !resp.More {
-			if err := lw.postEventFn(); err != nil {
-				log.Error("run post event failed in watch loop", zap.String("name", lw.name),
-					zap.String("key", lw.key), zap.Error(err))
-			}
 			return resp.Header.Revision + 1, err
 		}
 	}

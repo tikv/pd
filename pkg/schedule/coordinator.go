@@ -88,8 +88,8 @@ type Coordinator struct {
 }
 
 // NewCoordinator creates a new Coordinator.
-func NewCoordinator(ctx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
-	ctx, cancel := context.WithCancel(ctx)
+func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
+	ctx, cancel := context.WithCancel(parentCtx)
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
 	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
@@ -513,6 +513,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
 		log.Error("cannot persist schedule config", errs.ZapError(err))
 	}
+	log.Info("scheduler config is updated", zap.Reflect("scheduler-config", scheduleCfg.Schedulers))
 
 	c.markSchedulersInitialized()
 }
@@ -714,7 +715,7 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 }
 
 // ResetHotSpotMetrics resets hot spot metrics.
-func (c *Coordinator) ResetHotSpotMetrics() {
+func ResetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
 	schedulers.HotPendingSum.Reset()
 }

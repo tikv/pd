@@ -88,7 +88,7 @@ func ReadGetJSON(re *require.Assertions, client *http.Client, url string, data i
 }
 
 // ReadGetJSONWithBody is used to do get request with input and check whether given data can be extracted successfully.
-func ReadGetJSONWithBody(re *require.Assertions, client *http.Client, url string, input []byte, data interface{}) error {
+func ReadGetJSONWithBody(re *require.Assertions, client *http.Client, url string, input []byte, data interface{}, checkOpts ...func([]byte, int, http.Header)) error {
 	resp, err := apiutil.GetJSON(client, url, input)
 	if err != nil {
 		return err
@@ -112,6 +112,21 @@ func CheckGetJSON(client *http.Client, url string, data []byte, checkOpts ...fun
 		return err
 	}
 	return checkResp(resp, checkOpts...)
+}
+
+// CheckGetUntilStatusCode is used to do get request and do check options.
+func CheckGetUntilStatusCode(re *require.Assertions, client *http.Client, url string, code int) error {
+	var err error
+	Eventually(re, func() bool {
+		resp, err2 := apiutil.GetJSON(client, url, nil)
+		if err2 != nil {
+			err = err2
+			return true
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode == code
+	})
+	return err
 }
 
 // CheckPatchJSON is used to do patch request and do check options.

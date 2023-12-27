@@ -65,7 +65,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		cancel()
 		return nil, err
 	}
-	ruleManager := placement.NewRuleManager(storage, basicCluster, persistConfig)
+	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,
@@ -486,10 +486,6 @@ func (c *Cluster) collectMetrics() {
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
-	c.collectClusterMetrics()
-}
-
-func (c *Cluster) collectClusterMetrics() {
 	if c.regionStats == nil {
 		return
 	}
@@ -501,20 +497,8 @@ func (c *Cluster) collectClusterMetrics() {
 
 func (c *Cluster) resetMetrics() {
 	statistics.Reset()
-
-	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
-	c.coordinator.ResetHotSpotMetrics()
-	c.resetClusterMetrics()
-}
-
-func (c *Cluster) resetClusterMetrics() {
-	if c.regionStats == nil {
-		return
-	}
-	c.regionStats.Reset()
-	c.labelStats.Reset()
-	// reset hot cache metrics
-	c.hotStat.ResetMetrics()
+	schedulers.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.
@@ -536,6 +520,11 @@ func (c *Cluster) StopBackgroundJobs() {
 	c.coordinator.Stop()
 	c.cancel()
 	c.wg.Wait()
+}
+
+// IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.
+func (c *Cluster) IsBackgroundJobsRunning() bool {
+	return c.running.Load()
 }
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.

@@ -34,27 +34,30 @@ import (
 
 type operatorTestSuite struct {
 	suite.Suite
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestOperatorTestSuite(t *testing.T) {
 	suite.Run(t, new(operatorTestSuite))
 }
 
-func (suite *operatorTestSuite) TestOperator() {
-	var start time.Time
-	start = start.Add(time.Hour)
-	opts := []tests.ConfigOption{
-		// TODO: enable placementrules
+func (suite *operatorTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, serverName string) {
+			// TODO: enable placement rules
 			conf.Replication.MaxReplicas = 2
 			conf.Replication.EnablePlacementRules = false
+			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
 		},
-		func(conf *config.Config, serverName string) {
-			conf.Schedule.MaxStoreDownTime.Duration = time.Since(start)
-		},
-	}
-	env := tests.NewSchedulingTestEnvironment(suite.T(), opts...)
-	env.RunTestInTwoModes(suite.checkOperator)
+	)
+}
+
+func (suite *operatorTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *operatorTestSuite) TestOperator() {
+	suite.env.RunTestInTwoModes(suite.checkOperator)
 }
 
 func (suite *operatorTestSuite) checkOperator(cluster *tests.TestCluster) {
@@ -104,7 +107,7 @@ func (suite *operatorTestSuite) checkOperator(cluster *tests.TestCluster) {
 	output, err := pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &slice))
-	re.Len(slice, 0)
+	re.Empty(slice)
 	args = []string{"-u", pdAddr, "operator", "check", "2"}
 	output, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)

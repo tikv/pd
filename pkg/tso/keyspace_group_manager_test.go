@@ -988,7 +988,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 		re.Equal(len(keyspaces), len(newGroup.Keyspaces))
 		for i := 0; i < len(newGroup.Keyspaces); i++ {
 			if i > 0 {
-				re.True(newGroup.Keyspaces[i-1] < newGroup.Keyspaces[i])
+				re.Less(newGroup.Keyspaces[i-1], newGroup.Keyspaces[i])
 			}
 		}
 	}
@@ -1224,14 +1224,12 @@ func waitForPrimariesServing(
 	re *require.Assertions, mgrs []*KeyspaceGroupManager, ids []uint32,
 ) {
 	testutil.Eventually(re, func() bool {
-		for i := 0; i < 100; i++ {
-			for j, id := range ids {
-				if member, err := mgrs[j].GetElectionMember(id, id); err != nil || !member.IsLeader() {
-					return false
-				}
-				if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, GlobalDCLocation, 1); err != nil {
-					return false
-				}
+		for j, id := range ids {
+			if member, err := mgrs[j].GetElectionMember(id, id); err != nil || member == nil || !member.IsLeader() {
+				return false
+			}
+			if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, GlobalDCLocation, 1); err != nil {
+				return false
 			}
 		}
 		return true

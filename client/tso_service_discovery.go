@@ -288,21 +288,6 @@ func (c *tsoServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	return c.keyspaceGroupSD.group.Id
 }
 
-// DiscoverServiceURLs discovers the microservice with the specified type and returns the server urls.
-func (c *tsoServiceDiscovery) DiscoverMicroservice(svcType serviceType) ([]string, error) {
-	var urls []string
-
-	switch svcType {
-	case apiService:
-	case tsoService:
-		return c.apiSvcDiscovery.DiscoverMicroservice(tsoService)
-	default:
-		panic("invalid service type")
-	}
-
-	return urls, nil
-}
-
 // GetServiceURLs returns the URLs of the tso primary/secondary addresses of this keyspace group.
 // For testing use. It should only be called when the client is closed.
 func (c *tsoServiceDiscovery) GetServiceURLs() []string {
@@ -386,6 +371,11 @@ func (c *tsoServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGl
 		callback(addr)
 	}
 	c.globalAllocPrimariesUpdatedCb = callback
+}
+
+// GetServiceClient implements ServiceDiscovery
+func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
+	return c.apiSvcDiscovery.GetServiceClient()
 }
 
 // getPrimaryAddr returns the primary address.
@@ -582,7 +572,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 	)
 	t := c.tsoServerDiscovery
 	if len(t.addrs) == 0 || t.failureCount == len(t.addrs) {
-		addrs, err = sd.DiscoverMicroservice(tsoService)
+		addrs, err = sd.(*pdServiceDiscovery).discoverMicroservice(tsoService)
 		if err != nil {
 			return "", err
 		}

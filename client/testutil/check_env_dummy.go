@@ -11,27 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//go:build !linux
+// +build !linux
 
-package server
+package testutil
 
-import "github.com/prometheus/client_golang/prometheus"
-
-const (
-	namespace       = "scheduling"
-	serverSubsystem = "server"
-)
-
-var (
-	// Meta & Server info.
-	serverInfo = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: serverSubsystem,
-			Name:      "info",
-			Help:      "Indicate the scheduling server info, and the value is the start timestamp (s).",
-		}, []string{"version", "hash"})
-)
-
-func init() {
-	prometheus.MustRegister(serverInfo)
+func environmentCheck(addr string) bool {
+	return true
 }

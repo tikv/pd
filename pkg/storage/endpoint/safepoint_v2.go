@@ -79,12 +79,7 @@ func (se *StorageEndpoint) LoadGCSafePointV2(keyspaceID uint32) (*GCSafePointV2,
 
 // SaveGCSafePointV2 saves gc safe point for the given keyspace.
 func (se *StorageEndpoint) SaveGCSafePointV2(gcSafePoint *GCSafePointV2) error {
-	key := GCSafePointV2Path(gcSafePoint.KeyspaceID)
-	value, err := json.Marshal(gcSafePoint)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
-	}
-	return se.Save(key, string(value))
+	return se.saveJSON(GCSafePointV2Path(gcSafePoint.KeyspaceID), gcSafePoint)
 }
 
 // LoadAllGCSafePoints returns gc safe point for all keyspaces
@@ -203,11 +198,7 @@ func (se *StorageEndpoint) SaveServiceSafePointV2(serviceSafePoint *ServiceSafeP
 	}
 
 	key := ServiceSafePointV2Path(serviceSafePoint.KeyspaceID, serviceSafePoint.ServiceID)
-	value, err := json.Marshal(serviceSafePoint)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
-	}
-	return se.Save(key, string(value))
+	return se.saveJSON(key, serviceSafePoint)
 }
 
 // RemoveServiceSafePointV2 removes a service safe point.

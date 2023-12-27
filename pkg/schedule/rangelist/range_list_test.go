@@ -85,7 +85,7 @@ func TestRangeList2(t *testing.T) {
 	}
 
 	rl := b.Build()
-	re.Equal(len(expectKeys), rl.Len())
+	re.Len(expectKeys, rl.Len())
 	for i := 0; i < rl.Len(); i++ {
 		key, data := rl.Get(i)
 		re.Equal(expectKeys[i], key)

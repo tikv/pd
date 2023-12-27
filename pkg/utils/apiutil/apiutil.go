@@ -39,15 +39,14 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	// componentSignatureKey is used for http request header key
-	// to identify component signature
-	componentSignatureKey = "component"
-	// componentAnonymousValue identifies anonymous request source
-	componentAnonymousValue = "anonymous"
-)
-
 const (
+	// componentSignatureKey is used for http request header key to identify component signature.
+	// Deprecated: please use `XCallerIDHeader` below to obtain a more granular source identification.
+	// This is kept for backward compatibility.
+	componentSignatureKey = "component"
+	// anonymousValue identifies anonymous request source
+	anonymousValue = "anonymous"
+
 	// PDRedirectorHeader is used to mark which PD redirected this request.
 	PDRedirectorHeader = "PD-Redirector"
 	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
@@ -58,13 +57,10 @@ const (
 	XForwardedPortHeader = "X-Forwarded-Port"
 	// XRealIPHeader is used to mark the real client IP.
 	XRealIPHeader = "X-Real-Ip"
+	// XCallerIDHeader is used to mark the caller ID.
+	XCallerIDHeader = "X-Caller-ID"
 	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
 	ForwardToMicroServiceHeader = "Forward-To-Micro-Service"
-
-	// ErrRedirectFailed is the error message for redirect failed.
-	ErrRedirectFailed = "redirect failed"
-	// ErrRedirectToNotLeader is the error message for redirect to not leader.
-	ErrRedirectToNotLeader = "redirect to not leader"
 
 	chunkSize = 4096
 )
@@ -117,7 +113,7 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 
 // GetIPPortFromHTTPRequest returns http client host IP and port from context.
 // Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
-// so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
+// so `X-Forwarded-For` has the higher priority than `X-Real-Ip`.
 // And both of them have the higher priority than `RemoteAddr`
 func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
 	forwardedIPs := strings.Split(r.Header.Get(XForwardedForHeader), ",")
@@ -141,32 +137,42 @@ func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
 	return splitIP, splitPort
 }
 
-// GetComponentNameOnHTTP returns component name from Request Header
-func GetComponentNameOnHTTP(r *http.Request) string {
+// getComponentNameOnHTTP returns component name from the request header.
+func getComponentNameOnHTTP(r *http.Request) string {
 	componentName := r.Header.Get(componentSignatureKey)
 	if len(componentName) == 0 {
-		componentName = componentAnonymousValue
+		componentName = anonymousValue
 	}
 	return componentName
 }
 
-// ComponentSignatureRoundTripper is used to add component signature in HTTP header
-type ComponentSignatureRoundTripper struct {
-	proxied   http.RoundTripper
-	component string
+// GetCallerIDOnHTTP returns caller ID from the request header.
+func GetCallerIDOnHTTP(r *http.Request) string {
+	callerID := r.Header.Get(XCallerIDHeader)
+	if len(callerID) == 0 {
+		// Fall back to get the component name to keep backward compatibility.
+		callerID = getComponentNameOnHTTP(r)
+	}
+	return callerID
 }
 
-// NewComponentSignatureRoundTripper returns a new ComponentSignatureRoundTripper.
-func NewComponentSignatureRoundTripper(roundTripper http.RoundTripper, componentName string) *ComponentSignatureRoundTripper {
-	return &ComponentSignatureRoundTripper{
-		proxied:   roundTripper,
-		component: componentName,
+// CallerIDRoundTripper is used to add caller ID in the HTTP header.
+type CallerIDRoundTripper struct {
+	proxied  http.RoundTripper
+	callerID string
+}
+
+// NewCallerIDRoundTripper returns a new `CallerIDRoundTripper`.
+func NewCallerIDRoundTripper(roundTripper http.RoundTripper, callerID string) *CallerIDRoundTripper {
+	return &CallerIDRoundTripper{
+		proxied:  roundTripper,
+		callerID: callerID,
 	}
 }
 
 // RoundTrip is used to implement RoundTripper
-func (rt *ComponentSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	req.Header.Add(componentSignatureKey, rt.component)
+func (rt *CallerIDRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	req.Header.Add(XCallerIDHeader, rt.callerID)
 	// Send the request, get the response and the error
 	resp, err = rt.proxied.RoundTrip(req)
 	return
@@ -228,7 +234,7 @@ func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
 
 // DoDelete is used to send delete request and return http response code.
 func DoDelete(client *http.Client, url string) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	if err != nil {
 		return nil, err
 	}
@@ -459,7 +465,7 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
-	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
+	http.Error(w, errs.ErrRedirect.FastGenByArgs().Error(), http.StatusInternalServerError)
 }
 
 // copyHeader duplicates the HTTP headers from the source `src` to the destination `dst`.

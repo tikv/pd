@@ -161,7 +161,7 @@ func TestCancel(t *testing.T) {
 	checkTokens(re, lim1, t2, 7)
 	checkTokens(re, lim2, t2, 2)
 	d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
-	re.Equal(d, time.Duration(0))
+	re.Equal(4*time.Second, d)
 	re.Error(err)
 	checkTokens(re, lim1, t3, 13)
 	checkTokens(re, lim2, t3, 3)

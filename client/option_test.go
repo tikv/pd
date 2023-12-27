@@ -28,9 +28,10 @@ func TestDynamicOptionChange(t *testing.T) {
 	// Check the default value setting.
 	re.Equal(defaultMaxTSOBatchWaitInterval, o.getMaxTSOBatchWaitInterval())
 	re.Equal(defaultEnableTSOFollowerProxy, o.getEnableTSOFollowerProxy())
+	re.Equal(defaultEnableFollowerHandle, o.getEnableFollowerHandle())
 
 	// Check the invalid value setting.
-	re.NotNil(o.setMaxTSOBatchWaitInterval(time.Second))
+	re.Error(o.setMaxTSOBatchWaitInterval(time.Second))
 	re.Equal(defaultMaxTSOBatchWaitInterval, o.getMaxTSOBatchWaitInterval())
 	expectInterval := time.Millisecond
 	o.setMaxTSOBatchWaitInterval(expectInterval)
@@ -55,4 +56,11 @@ func TestDynamicOptionChange(t *testing.T) {
 	close(o.enableTSOFollowerProxyCh)
 	// Setting the same value should not notify the channel.
 	o.setEnableTSOFollowerProxy(expectBool)
+
+	expectBool = true
+	o.setEnableFollowerHandle(expectBool)
+	re.Equal(expectBool, o.getEnableFollowerHandle())
+	expectBool = false
+	o.setEnableFollowerHandle(expectBool)
+	re.Equal(expectBool, o.getEnableFollowerHandle())
 }
