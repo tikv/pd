@@ -259,7 +259,13 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := rc.GetRegion(regionID)
-	h.rd.JSON(w, http.StatusOK, NewAPIRegionInfo(regionInfo))
+	b, err := marshalRegionInfoJSON(r.Context(), regionInfo)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.Data(w, http.StatusOK, b)
 }
 
 // @Tags     region
@@ -289,7 +295,13 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := rc.GetRegionByKey([]byte(key))
-	h.rd.JSON(w, http.StatusOK, NewAPIRegionInfo(regionInfo))
+	b, err := marshalRegionInfoJSON(r.Context(), regionInfo)
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.rd.Data(w, http.StatusOK, b)
 }
 
 // @Tags     region
@@ -347,6 +359,37 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 		svr: svr,
 		rd:  rd,
 	}
+}
+
+// marshalRegionInfoJSON marshals region to bytes in `RegionInfo`'s JSON format.
+// It is used to reduce the cost of JSON serialization.
+func marshalRegionInfoJSON(ctx context.Context, r *core.RegionInfo) ([]byte, error) {
+	out := &jwriter.Writer{}
+
+	region := &RegionInfo{}
+	select {
+	case <-ctx.Done():
+		// Return early, avoid the unnecessary computation.
+		// See more details in https://github.com/tikv/pd/issues/6835
+		return nil, ctx.Err()
+	default:
+	}
+
+	InitRegion(r, region)
+	// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
+	// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
+	region.Leader.setDefaultIfNil()
+	for i := range region.Peers {
+		region.Peers[i].setDefaultIfNil()
+	}
+	for i := range region.PendingPeers {
+		region.PendingPeers[i].setDefaultIfNil()
+	}
+	for i := range region.DownPeers {
+		region.DownPeers[i].setDefaultIfNil()
+	}
+	region.MarshalEasyJSON(out)
+	return out.Buffer.BuildBytes(), out.Error
 }
 
 // marshalRegionsInfoJSON marshals regions to bytes in `RegionsInfo`'s JSON format.
