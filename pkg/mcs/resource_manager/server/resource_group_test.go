@@ -2,8 +2,10 @@ package server
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
+	"github.com/brianvoe/gofakeit/v6"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 )
@@ -29,8 +31,48 @@ func TestPatchResourceGroup(t *testing.T) {
 		re.NoError(err)
 		err = rg.PatchSettings(patch)
 		re.NoError(err)
+<<<<<<< HEAD:pkg/mcs/resource_manager/server/resource_group_test.go
 		res, err := json.Marshal(rg.Copy())
+=======
+		res, err := json.Marshal(rg.Clone(false))
+>>>>>>> ed9685a79 (resource_mananger: deep clone resource group (#7623)):pkg/mcs/resourcemanager/server/resource_group_test.go
 		re.NoError(err)
 		re.Equal(ca.expectJSONString, string(res))
+	}
+}
+
+func resetSizeCache(obj interface{}) {
+	resetSizeCacheRecursive(reflect.ValueOf(obj))
+}
+
+func resetSizeCacheRecursive(value reflect.Value) {
+	if value.Kind() == reflect.Ptr {
+		value = value.Elem()
+	}
+
+	if value.Kind() != reflect.Struct {
+		return
+	}
+
+	for i := 0; i < value.NumField(); i++ {
+		fieldValue := value.Field(i)
+		fieldType := value.Type().Field(i)
+
+		if fieldType.Name == "XXX_sizecache" && fieldType.Type.Kind() == reflect.Int32 {
+			fieldValue.SetInt(0)
+		} else {
+			resetSizeCacheRecursive(fieldValue)
+		}
+	}
+}
+
+func TestClone(t *testing.T) {
+	for i := 0; i <= 10; i++ {
+		var rg ResourceGroup
+		gofakeit.Struct(&rg)
+		// hack to reset XXX_sizecache, gofakeit will random set this field but proto clone will not copy this field.
+		resetSizeCache(&rg)
+		rgClone := rg.Clone(true)
+		require.EqualValues(t, &rg, rgClone)
 	}
 }

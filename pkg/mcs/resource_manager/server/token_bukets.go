@@ -49,6 +49,22 @@ type GroupTokenBucket struct {
 	GroupTokenBucketState `json:"state,omitempty"`
 }
 
+// Clone returns the deep copy of GroupTokenBucket
+func (gtb *GroupTokenBucket) Clone() *GroupTokenBucket {
+	if gtb == nil {
+		return nil
+	}
+	var settings *rmpb.TokenLimitSettings
+	if gtb.Settings != nil {
+		settings = proto.Clone(gtb.Settings).(*rmpb.TokenLimitSettings)
+	}
+	stateClone := *gtb.GroupTokenBucketState.Clone()
+	return &GroupTokenBucket{
+		Settings:              settings,
+		GroupTokenBucketState: stateClone,
+	}
+}
+
 func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 	gtb.Tokens = state.Tokens
 	gtb.LastUpdate = state.LastUpdate
@@ -85,10 +101,14 @@ type GroupTokenBucketState struct {
 
 // Clone returns the copy of GroupTokenBucketState
 func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
-	tokenSlots := make(map[uint64]*TokenSlot)
-	for id, tokens := range gts.tokenSlots {
-		tokenSlots[id] = tokens
+	var tokenSlots map[uint64]*TokenSlot
+	if gts.tokenSlots != nil {
+		tokenSlots = make(map[uint64]*TokenSlot)
+		for id, tokens := range gts.tokenSlots {
+			tokenSlots[id] = tokens
+		}
 	}
+
 	var lastUpdate *time.Time
 	if gts.LastUpdate != nil {
 		newLastUpdate := *gts.LastUpdate

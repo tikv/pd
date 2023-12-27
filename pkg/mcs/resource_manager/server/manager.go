@@ -278,7 +278,11 @@ func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
+<<<<<<< HEAD:pkg/mcs/resource_manager/server/manager.go
 		return group.Copy()
+=======
+		return group.Clone(withStats)
+>>>>>>> ed9685a79 (resource_mananger: deep clone resource group (#7623)):pkg/mcs/resourcemanager/server/manager.go
 	}
 	return nil
 }
@@ -298,7 +302,11 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 	m.RLock()
 	res := make([]*ResourceGroup, 0, len(m.groups))
 	for _, group := range m.groups {
+<<<<<<< HEAD:pkg/mcs/resource_manager/server/manager.go
 		res = append(res, group.Copy())
+=======
+		res = append(res, group.Clone(withStats))
+>>>>>>> ed9685a79 (resource_mananger: deep clone resource group (#7623)):pkg/mcs/resourcemanager/server/manager.go
 	}
 	m.RUnlock()
 	sort.Slice(res, func(i, j int) bool {
