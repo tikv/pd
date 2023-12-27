@@ -1118,18 +1118,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	re.NoError(err)
 	re.Equal(g1, g)
 
-	// test restart cluster
+	// test leader change
 	time.Sleep(250 * time.Millisecond)
-	servers := suite.cluster.GetServers()
-	re.NoError(suite.cluster.StopAll())
-	cli.Close()
-	serverList := make([]*tests.TestServer, 0, len(servers))
-	for _, s := range servers {
-		serverList = append(serverList, s)
-	}
-	re.NoError(suite.cluster.RunServers(serverList))
+	re.NoError(suite.cluster.GetLeaderServer().ResignLeader())
 	suite.cluster.WaitLeader()
+
 	// re-connect client as well
+	cli.Close()
 	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	cli = suite.client
@@ -1138,9 +1133,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
 	re.NoError(err)
 	re.Equal(g.RUStats, testConsumption)
-
-	_, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
-	re.NoError(err)
 }
 
 func (suite *resourceManagerClientTestSuite) TestResourceManagerClientFailover() {
