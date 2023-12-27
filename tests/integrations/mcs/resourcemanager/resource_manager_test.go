@@ -1063,8 +1063,6 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	re := suite.Require()
 	cli := suite.client
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastPersist", `return(true)`))
-	defer re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastPersist"))
 	group := &rmpb.ResourceGroup{
 		Name: "test_ru_consumption",
 		Mode: rmpb.GroupMode_RUMode,
