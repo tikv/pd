@@ -1120,13 +1120,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	time.Sleep(250 * time.Millisecond)
 	re.NoError(suite.cluster.GetLeaderServer().ResignLeader())
 	suite.cluster.WaitLeader()
-
-	// re-connect client as well
+	// re-connect client as
 	cli.Close()
 	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	cli = suite.client
-
 	// check ru stats not loss after restart
 	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
 	re.NoError(err)
