@@ -143,7 +143,8 @@ func TestRedirectWithMetrics(t *testing.T) {
 	successCnt.Write(&out)
 	re.Equal(float64(1), out.Counter.GetValue())
 
-	// 3. Test the Leader failure, need to send all followers.
+	// 3. Test when the leader fails, needs to be sent to the follower in order,
+	// and returns directly if one follower succeeds
 	httpClient = newHTTPClientWithRequestChecker(func(req *http.Request) error {
 		// mock leader failure.
 		if strings.Contains(pdAddrs[0], req.Host) {
@@ -159,7 +160,7 @@ func TestRedirectWithMetrics(t *testing.T) {
 	successCnt, err = c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, ""}...)
 	re.NoError(err)
 	successCnt.Write(&out)
-	// one follower success
+	// only one follower success
 	re.Equal(float64(2), out.Counter.GetValue())
 	failureCnt, err = c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, networkErrorStatus}...)
 	re.NoError(err)
