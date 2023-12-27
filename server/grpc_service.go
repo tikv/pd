@@ -744,7 +744,6 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetStoreResponse), err
 	}
-	time.Sleep(120 * time.Millisecond)
 	rc := s.GetRaftCluster()
 	if rc == nil {
 		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
