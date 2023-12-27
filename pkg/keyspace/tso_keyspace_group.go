@@ -915,7 +915,7 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	//   - Load and delete the keyspace groups in the merge list.
 	//   - Load and update the target keyspace group.
 	// So we pre-check the number of operations to avoid exceeding the maximum number of etcd transaction.
-	if (mergeListNum+1)*2 > MaxEtcdTxnOps {
+	if (mergeListNum+1)*2 > etcdutil.MaxEtcdTxnOps {
 		return ErrExceedMaxEtcdTxnOps
 	}
 	if slice.Contains(mergeList, utils.DefaultKeyspaceGroupID) {
@@ -1062,7 +1062,7 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 			continue
 		}
 		var (
-			maxBatchSize  = MaxEtcdTxnOps/2 - 1
+			maxBatchSize  = etcdutil.MaxEtcdTxnOps/2 - 1
 			groupsToMerge = make([]uint32, 0, maxBatchSize)
 		)
 		for idx, group := range groups.GetAll() {
