@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kms v1.20.8
 	github.com/aws/aws-sdk-go-v2/service/sts v1.18.7
 	github.com/axw/gocov v1.0.0
+	github.com/brianvoe/gofakeit/v6 v6.26.3
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
