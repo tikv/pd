@@ -161,7 +161,10 @@ func (ci *clientInner) requestWithRetry(
 			zap.String("source", ci.source), zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
 	}
 	// Try to send the request to the other PD followers.
-	for idx := 0; idx < len(pdAddrs) && idx != leaderAddrIdx; idx++ {
+	for idx := 0; idx < len(pdAddrs); idx++ {
+		if idx == leaderAddrIdx {
+			continue
+		}
 		addr = ci.pdAddrs[idx]
 		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 		if err == nil {
