@@ -16,12 +16,14 @@ package client_test
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client/http"
@@ -49,7 +51,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	re := suite.Require()
 	var err error
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -73,6 +75,32 @@ func (suite *httpClientTestSuite) SetupSuite() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	suite.client = pd.NewClient("pd-http-client-it", endpoints)
+}
+
+func (suite *httpClientTestSuite) TestPDLeaderLostWhileEtcdLeaderIntact() {
+	re := suite.Require()
+	members, err := suite.client.GetMembers(suite.ctx)
+	re.NoError(err)
+	re.Len(members.Members, 3)
+
+	leader := suite.cluster.GetLeader()
+	memberID := suite.cluster.GetServer(leader).GetLeader().GetMemberId()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
+
+	waitToLeaderChange(re, suite.cluster, leader)
+	leader2 := suite.cluster.GetLeader()
+	re.NotEqual(leader, leader2)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
+	// check members success
+	members, err = suite.client.GetMembers(suite.ctx)
+	re.NoError(err)
+	re.Len(members.Members, 3)
 }
 
 func (suite *httpClientTestSuite) TearDownSuite() {
@@ -477,4 +505,16 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
+}
+
+func waitToLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string) string {
+	var leader string
+	testutil.Eventually(re, func() bool {
+		leader = cluster.GetLeader()
+		if leader == old || leader == "" {
+			return false
+		}
+		return true
+	})
+	return leader
 }
