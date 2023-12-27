@@ -51,6 +51,8 @@ var (
 
 	wait = flag.Bool("wait", true, "wait for a round")
 
+	metrics = flag.Bool("metrics", true, "metrics")
+
 	// tls
 	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
 	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
@@ -237,7 +239,7 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 		}
 		cntMu.Lock()
 		endCnt++
-		if *debugFlag && endCnt%1000 == 0 {
+		if *metrics && endCnt%1000 == 0 {
 			log.Printf("case grpc %s has finished query %d", gcase.Name(), endCnt)
 		}
 		cntMu.Unlock()
@@ -252,7 +254,7 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 					for i := int64(0); i < burst; i++ {
 						cntMu.Lock()
 						startCnt++
-						if *debugFlag && startCnt%1000 == 0 {
+						if *metrics && startCnt%1000 == 0 {
 							log.Printf("case grpc %s has sent query %d", gcase.Name(), startCnt)
 						}
 						cntMu.Unlock()
@@ -263,7 +265,7 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 						}
 					}
 				case <-ctx.Done():
-					log.Println("Got signal to exit handleGetRegion")
+					log.Println("Got signal to exit handleGRPCCase")
 					return
 				}
 			}
@@ -286,7 +288,7 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp
 		}
 		cntMu.Lock()
 		endCnt++
-		if *debugFlag && endCnt%1000 == 0 {
+		if *metrics && endCnt%1000 == 0 {
 			log.Printf("case http %s has finished query %d", hcase.Name(), endCnt)
 		}
 		cntMu.Unlock()
@@ -301,7 +303,7 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp
 					for i := int64(0); i < burst; i++ {
 						cntMu.Lock()
 						startCnt++
-						if *debugFlag && startCnt%1000 == 0 {
+						if *metrics && startCnt%1000 == 0 {
 							log.Printf("case http %s has done query %d", hcase.Name(), startCnt)
 						}
 						cntMu.Unlock()
@@ -312,7 +314,7 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp
 						}
 					}
 				case <-ctx.Done():
-					log.Println("Got signal to exit handleScanRegions")
+					log.Println("Got signal to exit handleHTTPCase")
 					return
 				}
 			}
