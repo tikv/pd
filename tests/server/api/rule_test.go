@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -504,8 +505,7 @@ func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAllByKey() {
-	// Fixme: after delete+set rule, the key range will be empty, so the test will fail in api mode.
-	suite.env.RunTestInPDMode(suite.checkGetAllByKey)
+	suite.env.RunTestInTwoModes(suite.checkGetAllByKey)
 }
 
 func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
@@ -1035,7 +1035,6 @@ func (suite *ruleTestSuite) TestDeleteAndUpdate() {
 }
 
 func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
-	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
@@ -1108,28 +1107,7 @@ func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
 	}
 
 	for _, bundle := range bundles {
-		data, err := json.Marshal(bundle)
-		re.NoError(err)
-		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
-		re.NoError(err)
-
-		tu.Eventually(re, func() bool {
-			respBundle := make([]placement.GroupBundle, 0)
-			err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
-				tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
-			re.NoError(err)
-			if len(respBundle) != len(bundle) {
-				return false
-			}
-			sort.Slice(respBundle, func(i, j int) bool { return respBundle[i].ID < respBundle[j].ID })
-			sort.Slice(bundle, func(i, j int) bool { return bundle[i].ID < bundle[j].ID })
-			for i := range respBundle {
-				if !suite.compareBundle(respBundle[i], bundle[i]) {
-					return false
-				}
-			}
-			return true
-		})
+		suite.postAndCheckRuleBundle(urlPrefix, bundle)
 	}
 }
 
@@ -1222,6 +1200,34 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 	})
 }
 
+func (suite *ruleTestSuite) TestLargeRules() {
+	suite.env.RunTestInTwoModes(suite.checkLargeRules)
+}
+
+func (suite *ruleTestSuite) checkLargeRules(cluster *tests.TestCluster) {
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+	genBundlesWithRulesNum := func(num int) []placement.GroupBundle {
+		bundle := []placement.GroupBundle{
+			{
+				ID:    "1",
+				Index: 1,
+				Rules: make([]*placement.Rule, 0),
+			},
+		}
+		for i := 0; i < num; i++ {
+			bundle[0].Rules = append(bundle[0].Rules, &placement.Rule{
+				ID: strconv.Itoa(i), Index: i, Role: placement.Voter, Count: 1, GroupID: "1",
+				StartKey: []byte(strconv.Itoa(i)), EndKey: []byte(strconv.Itoa(i + 1)),
+			})
+		}
+		return bundle
+	}
+	suite.postAndCheckRuleBundle(urlPrefix, genBundlesWithRulesNum(etcdutil.MaxEtcdTxnOps/2))
+	suite.postAndCheckRuleBundle(urlPrefix, genBundlesWithRulesNum(etcdutil.MaxEtcdTxnOps*2))
+}
+
 func (suite *ruleTestSuite) assertBundleEqual(re *require.Assertions, b1, b2 placement.GroupBundle) {
 	tu.Eventually(re, func() bool {
 		return suite.compareBundle(b1, b2)
@@ -1249,6 +1255,32 @@ func (suite *ruleTestSuite) compareRule(r1 *placement.Rule, r2 *placement.Rule) 
 		r2.EndKeyHex == r1.EndKeyHex &&
 		r2.Role == r1.Role &&
 		r2.Count == r1.Count
+}
+
+func (suite *ruleTestSuite) postAndCheckRuleBundle(urlPrefix string, bundle []placement.GroupBundle) {
+	re := suite.Require()
+	data, err := json.Marshal(bundle)
+	re.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
+	re.NoError(err)
+
+	tu.Eventually(re, func() bool {
+		respBundle := make([]placement.GroupBundle, 0)
+		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
+			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
+		re.NoError(err)
+		if len(respBundle) != len(bundle) {
+			return false
+		}
+		sort.Slice(respBundle, func(i, j int) bool { return respBundle[i].ID < respBundle[j].ID })
+		sort.Slice(bundle, func(i, j int) bool { return bundle[i].ID < bundle[j].ID })
+		for i := range respBundle {
+			if !suite.compareBundle(respBundle[i], bundle[i]) {
+				return false
+			}
+		}
+		return true
+	})
 }
 
 type regionRuleTestSuite struct {

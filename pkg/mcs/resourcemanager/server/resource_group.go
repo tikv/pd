@@ -37,6 +37,8 @@ type ResourceGroup struct {
 	Priority   uint32                   `json:"priority"`
 	Runaway    *rmpb.RunawaySettings    `json:"runaway_settings,omitempty"`
 	Background *rmpb.BackgroundSettings `json:"background_settings,omitempty"`
+	// total ru consumption
+	RUConsumption *rmpb.Consumption `json:"ru_consumption,omitempty"`
 }
 
 // RequestUnitSettings is the definition of the RU settings.
@@ -61,7 +63,7 @@ func (rg *ResourceGroup) String() string {
 }
 
 // Copy copies the resource group.
-func (rg *ResourceGroup) Copy() *ResourceGroup {
+func (rg *ResourceGroup) Copy(withStats bool) *ResourceGroup {
 	// TODO: use a better way to copy
 	rg.RLock()
 	defer rg.RUnlock()
@@ -73,6 +75,9 @@ func (rg *ResourceGroup) Copy() *ResourceGroup {
 	err = json.Unmarshal(res, &newRG)
 	if err != nil {
 		panic(err)
+	}
+	if !withStats {
+		newRG.RUConsumption = nil
 	}
 	return &newRG
 }
@@ -116,11 +121,12 @@ func (rg *ResourceGroup) PatchSettings(metaGroup *rmpb.ResourceGroup) error {
 // FromProtoResourceGroup converts a rmpb.ResourceGroup to a ResourceGroup.
 func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 	rg := &ResourceGroup{
-		Name:       group.Name,
-		Mode:       group.Mode,
-		Priority:   group.Priority,
-		Runaway:    group.RunawaySettings,
-		Background: group.BackgroundSettings,
+		Name:          group.Name,
+		Mode:          group.Mode,
+		Priority:      group.Priority,
+		Runaway:       group.RunawaySettings,
+		Background:    group.BackgroundSettings,
+		RUConsumption: &rmpb.Consumption{},
 	}
 	switch group.GetMode() {
 	case rmpb.GroupMode_RUMode:
@@ -128,6 +134,9 @@ func FromProtoResourceGroup(group *rmpb.ResourceGroup) *ResourceGroup {
 			rg.RUSettings = NewRequestUnitSettings(nil)
 		} else {
 			rg.RUSettings = NewRequestUnitSettings(group.GetRUSettings().GetRU())
+		}
+		if group.RUStats != nil {
+			rg.RUConsumption = group.RUStats
 		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
@@ -168,6 +177,11 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 			RunawaySettings:    rg.Runaway,
 			BackgroundSettings: rg.Background,
 		}
+
+		if rg.RUConsumption != nil {
+			consumption := *rg.RUConsumption
+			group.RUStats = &consumption
+		}
 		return group
 	case rmpb.GroupMode_RawMode: // Raw mode
 		panic("no implementation")
@@ -186,6 +200,8 @@ func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) 
 type GroupStates struct {
 	// RU tokens
 	RU *GroupTokenBucketState `json:"r_u,omitempty"`
+	// RU consumption
+	RUConsumption *rmpb.Consumption `json:"ru_consumption,omitempty"`
 	// raw resource tokens
 	CPU     *GroupTokenBucketState `json:"cpu,omitempty"`
 	IORead  *GroupTokenBucketState `json:"io_read,omitempty"`
@@ -199,8 +215,10 @@ func (rg *ResourceGroup) GetGroupStates() *GroupStates {
 
 	switch rg.Mode {
 	case rmpb.GroupMode_RUMode: // RU mode
+		consumption := *rg.RUConsumption
 		tokens := &GroupStates{
-			RU: rg.RUSettings.RU.GroupTokenBucketState.Clone(),
+			RU:            rg.RUSettings.RU.GroupTokenBucketState.Clone(),
+			RUConsumption: &consumption,
 		}
 		return tokens
 	case rmpb.GroupMode_RawMode: // Raw mode
@@ -217,9 +235,27 @@ func (rg *ResourceGroup) SetStatesIntoResourceGroup(states *GroupStates) {
 			rg.RUSettings.RU.setState(state)
 			log.Debug("update group token bucket state", zap.String("name", rg.Name), zap.Any("state", state))
 		}
+		if states.RUConsumption != nil {
+			rg.UpdateRUConsumption(states.RUConsumption)
+		}
 	case rmpb.GroupMode_RawMode:
 		panic("no implementation")
 	}
+}
+
+// UpdateRUConsumption add delta consumption data to group ru statistics.
+func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
+	rg.Lock()
+	defer rg.Unlock()
+	rc := rg.RUConsumption
+	rc.RRU += c.RRU
+	rc.WRU += c.WRU
+	rc.ReadBytes += c.ReadBytes
+	rc.WriteBytes += c.WriteBytes
+	rc.TotalCpuTimeMs += c.TotalCpuTimeMs
+	rc.SqlLayerCpuTimeMs += c.SqlLayerCpuTimeMs
+	rc.KvReadRpcCount += c.KvReadRpcCount
+	rc.KvWriteRpcCount += c.KvWriteRpcCount
 }
 
 // persistStates persists the resource group tokens.

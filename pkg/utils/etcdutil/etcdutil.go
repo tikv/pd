@@ -64,6 +64,11 @@ const (
 	DefaultSlowRequestTime = time.Second
 
 	healthyPath = "health"
+
+	// MaxEtcdTxnOps is the max value of operations in an etcd txn. The default limit of etcd txn op is 128.
+	// We use 120 here to leave some space for other operations.
+	// See: https://github.com/etcd-io/etcd/blob/d3e43d4de6f6d9575b489dd7850a85e37e0f6b6c/server/embed/config.go#L61
+	MaxEtcdTxnOps = 120
 )
 
 // CheckClusterID checks etcd cluster ID, returns an error if mismatch.
@@ -776,7 +781,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			revision, err = lw.load(ctx)
 			if err != nil {
 				log.Warn("force load key failed in watch loop",
-					zap.String("name", lw.name), zap.String("key", lw.key), zap.Error(err))
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision), zap.Error(err))
+			} else {
+				log.Info("force load key successfully in watch loop",
+					zap.String("name", lw.name), zap.String("key", lw.key), zap.Int64("revision", revision))
 			}
 			continue
 		case <-ticker.C:
