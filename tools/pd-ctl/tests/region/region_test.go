@@ -208,3 +208,56 @@ func TestRegion(t *testing.T) {
 		{core.HexRegionKeyStr(r5.GetEndKey()), ""},
 	}, *rangeHoles)
 }
+
+func TestRegionNoLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	url := cluster.GetConfig().GetClientURL()
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	for i := 0; i < len(stores); i++ {
+		tests.MustPutStore(re, cluster, stores[i])
+	}
+
+	metaRegion := &metapb.Region{
+		Id:       100,
+		StartKey: []byte(""),
+		EndKey:   []byte(""),
+		Peers: []*metapb.Peer{
+			{Id: 1, StoreId: 1},
+			{Id: 5, StoreId: 2},
+			{Id: 6, StoreId: 3}},
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	r := core.NewRegionInfo(metaRegion, nil)
+
+	cluster.GetLeaderServer().GetRaftCluster().GetBasicCluster().SetRegion(r)
+
+	cmd := pdctlCmd.GetRootCmd()
+	_, err = pdctl.ExecuteCommand(cmd, "-u", url, "region", "100")
+	re.NoError(err)
+}
