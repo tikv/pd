@@ -9,7 +9,7 @@ require (
 	github.com/prometheus/client_golang v1.11.1
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	go.uber.org/zap v1.24.0
-	google.golang.org/grpc v1.56.3
+	google.golang.org/grpc v1.59.0
 )
 
 require (
@@ -21,7 +21,7 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00 // indirect
-	github.com/pingcap/kvproto v0.0.0-20230727073445-53e1f8730c30 // indirect
+	github.com/pingcap/kvproto v0.0.0-20231222062942-c0c73f41d0b2 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.26.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
@@ -30,7 +30,7 @@ require (
 	golang.org/x/net v0.18.0 // indirect
 	golang.org/x/sys v0.14.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
-	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )
