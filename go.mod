@@ -11,7 +11,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.18.7
 	github.com/axw/gocov v1.0.0
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
 	github.com/docker/go-units v0.4.0
 	github.com/elliotchance/pie/v2 v2.1.0
@@ -27,7 +26,6 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/joho/godotenv v1.4.0
 	github.com/mailru/easyjson v0.7.6
-	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
 	github.com/pingcap/errcode v0.3.0
@@ -49,7 +47,7 @@ require (
 	github.com/swaggo/http-swagger v1.2.6
 	github.com/swaggo/swag v1.8.3
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/tools/pd-ctl v0.0.0-00010101000000-000000000000
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
@@ -57,11 +55,17 @@ require (
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.24.0
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
-	golang.org/x/text v0.14.0
 	golang.org/x/time v0.3.0
 	golang.org/x/tools v0.14.0
 	google.golang.org/grpc v1.59.0
 	gotest.tools/gotestsum v1.7.0
+)
+
+require (
+	github.com/chzyer/readline v1.5.1 // indirect
+	github.com/mattn/go-shellwords v1.0.12 // indirect
+	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000 // indirect
+	golang.org/x/text v0.14.0 // indirect
 )
 
 require (
@@ -211,6 +215,8 @@ require (
 replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
 
 replace github.com/tikv/pd/client => ./client
+
+replace github.com/tikv/pd/tools/pd-ctl => ./tools/pd-ctl
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
