@@ -8904,7 +8904,7 @@
           },
           "yaxes": [
             {
-              "format": "ops",
+              "format": "short",
               "label": null,
               "logBase": 10,
               "max": null,
@@ -9212,7 +9212,7 @@
           },
           "yaxes": [
             {
-              "format": "ops",
+              "format": "short",
               "label": null,
               "logBase": 10,
               "max": null,
