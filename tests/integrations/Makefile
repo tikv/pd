@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ROOT_PATH := ../../..
+ROOT_PATH := ../..
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
@@ -31,11 +31,11 @@ tidy:
 	git diff --quiet go.mod go.sum
 
 test: failpoint-enable
-	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
 ci-test-job:
-	CGO_ENABLED=1 go test ./... -v -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=$(ROOT_PATH)/... github.com/tikv/pd/tests/integrations/mcs
+	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=$(ROOT_PATH)/...
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools

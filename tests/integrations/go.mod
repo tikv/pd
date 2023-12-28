@@ -1,24 +1,33 @@
-module github.com/tikv/pd/tests/integrations/tso
+module github.com/tikv/pd/tests/integrations
 
-go 1.21
+go 1.21.0
 
 replace (
-	github.com/tikv/pd => ../../../
-	github.com/tikv/pd/client => ../../../client
-	github.com/tikv/pd/tests/integrations/mcs => ../mcs
+	github.com/tikv/pd => ../../
+	github.com/tikv/pd/client => ../../client
+	github.com/tikv/pd/tests/integrations/mcs => ./mcs
 )
 
 // reset grpc and protobuf deps in order to import client and server at the same time
 replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
 
 require (
+	github.com/DATA-DOG/go-sqlmock v1.5.0
+	github.com/docker/go-units v0.5.0
+	github.com/go-sql-driver/mysql v1.7.0
 	github.com/pingcap/failpoint v0.0.0-20220801062533-2eaa32854a6c
-	github.com/pingcap/kvproto v0.0.0-20231222062942-c0c73f41d0b2
+	github.com/pingcap/kvproto v0.0.0-20231226064240-4f28b82c7860
+	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/stretchr/testify v1.8.4
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-20231101084237-a1a1eea8dafd
-	github.com/tikv/pd/tests/integrations/mcs v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
+	go.uber.org/goleak v1.3.0
+	go.uber.org/zap v1.24.0
 	google.golang.org/grpc v1.59.0
+	gorm.io/driver/mysql v1.4.5
+	gorm.io/gorm v1.24.3
+	moul.io/zapgorm2 v1.1.0
 )
 
 require (
@@ -52,11 +61,11 @@ require (
 	github.com/cenkalti/backoff/v4 v4.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
+	github.com/cloudfoundry/gosigar v1.3.6 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f // indirect
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/elliotchance/pie/v2 v2.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
@@ -75,7 +84,6 @@ require (
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.14.0 // indirect
 	github.com/go-resty/resty/v2 v2.6.0 // indirect
-	github.com/go-sql-driver/mysql v1.7.0 // indirect
 	github.com/goccy/go-graphviz v0.0.9 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
@@ -85,7 +93,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.1.2 // indirect
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect
-	github.com/google/uuid v1.3.1 // indirect
+	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/mux v1.7.4 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.1-0.20190118093823-f849b5445de4 // indirect
@@ -119,7 +127,6 @@ require (
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
-	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
 	github.com/pingcap/tidb-dashboard v0.0.0-20231218095437-aa621ed4de2c // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
@@ -158,19 +165,16 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
-	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
-	go.uber.org/goleak v1.1.12 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
 	golang.org/x/image v0.10.0 // indirect
 	golang.org/x/net v0.18.0 // indirect
-	golang.org/x/oauth2 v0.11.0 // indirect
+	golang.org/x/oauth2 v0.4.0 // indirect
 	golang.org/x/sync v0.4.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
@@ -185,9 +189,6 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/datatypes v1.1.0 // indirect
-	gorm.io/driver/mysql v1.4.5 // indirect
 	gorm.io/driver/sqlite v1.4.3 // indirect
-	gorm.io/gorm v1.24.3 // indirect
-	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
