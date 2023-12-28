@@ -31,6 +31,10 @@
 		{
 			"name": "pd-api-bench",
 			"path": "tools/pd-api-bench"
+		},
+		{
+			"name": "pd-ctl",
+			"path": "tools/pd-ctl"
 		}
 	],
 	"settings": {}

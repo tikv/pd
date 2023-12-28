@@ -47,7 +47,6 @@ require (
 	github.com/swaggo/http-swagger v1.2.6
 	github.com/swaggo/swag v1.8.3
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
-	github.com/tikv/pd/tools/pd-ctl v0.0.0-00010101000000-000000000000
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
@@ -61,12 +60,7 @@ require (
 	gotest.tools/gotestsum v1.7.0
 )
 
-require (
-	github.com/chzyer/readline v1.5.1 // indirect
-	github.com/mattn/go-shellwords v1.0.12 // indirect
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000 // indirect
-	golang.org/x/text v0.14.0 // indirect
-)
+require golang.org/x/text v0.14.0 // indirect
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
@@ -213,10 +207,6 @@ require (
 )
 
 replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
-
-replace github.com/tikv/pd/client => ./client
-
-replace github.com/tikv/pd/tools/pd-ctl => ./tools/pd-ctl
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
