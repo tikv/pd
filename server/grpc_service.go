@@ -1406,7 +1406,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	var region *core.RegionInfo
 	if *followerHandle {
 		rc = s.cluster
-		if !s.cluster.GetRegionSyncer().IsRunning() {
+		if !rc.GetRegionSyncer().IsRunning() {
 			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
 		}
 		region = rc.GetRegionByKey(request.GetRegionKey())
@@ -1468,7 +1468,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	if *followerHandle {
 		// no need to check running status
 		rc = s.cluster
-		if !s.cluster.GetRegionSyncer().IsRunning() {
+		if !rc.GetRegionSyncer().IsRunning() {
 			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
 		}
 	} else {
@@ -1526,7 +1526,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	var rc *cluster.RaftCluster
 	if *followerHandle {
 		rc = s.cluster
-		if !s.cluster.GetRegionSyncer().IsRunning() {
+		if !rc.GetRegionSyncer().IsRunning() {
 			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
 		}
 	} else {
@@ -1587,7 +1587,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	var rc *cluster.RaftCluster
 	if *followerHandle {
 		rc = s.cluster
-		if !s.cluster.GetRegionSyncer().IsRunning() {
+		if !rc.GetRegionSyncer().IsRunning() {
 			return &pdpb.ScanRegionsResponse{Header: s.regionNotFound()}, nil
 		}
 	} else {
@@ -2253,7 +2253,7 @@ func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 	return s.validateRoleInRequest(context.TODO(), header, nil)
 }
 
-// validateRoleRequest checks if Server is leader when disallow follower-handle and clusterID is matched.
+// validateRoleInRequest checks if Server is leader when disallow follower-handle and clusterID is matched.
 // TODO: Call it in gRPC interceptor.
 func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.RequestHeader, allowFollower *bool) error {
 	if s.IsClosed() {
