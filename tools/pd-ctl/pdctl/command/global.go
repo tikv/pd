@@ -25,7 +25,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/spf13/cobra"
-	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.etcd.io/etcd/pkg/transport"
 )
@@ -35,25 +34,12 @@ const (
 	pingPrefix        = "pd/api/v1/ping"
 )
 
-// PDCli is a pd HTTP client
-var PDCli pd.Client
-
-// SetNewPDClient creates a PD HTTP client with the given PD addresses and options.
-func SetNewPDClient(addrs []string, opts ...pd.ClientOption) {
-	if PDCli != nil {
-		PDCli.Close()
-	}
-	withOpts := append(opts, pd.WithLoggerRedirection("fatal", ""))
-	PDCli = pd.NewClient(pdControlCallerID, addrs, withOpts...)
-}
-
-// TODO: replace dialClient with PDCli
 var dialClient = &http.Client{
 	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, pdControlCallerID),
 }
 
 // InitHTTPSClient creates https client with ca file
-func InitHTTPSClient(pdAddrs, caPath, certPath, keyPath string) error {
+func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	tlsInfo := transport.TLSInfo{
 		CertFile:      certPath,
 		KeyFile:       keyPath,
@@ -68,8 +54,6 @@ func InitHTTPSClient(pdAddrs, caPath, certPath, keyPath string) error {
 		Transport: apiutil.NewCallerIDRoundTripper(
 			&http.Transport{TLSClientConfig: tlsConfig}, pdControlCallerID),
 	}
-
-	SetNewPDClient(strings.Split(pdAddrs, ","), pd.WithTLSConfig(tlsConfig))
 
 	return nil
 }
@@ -279,14 +263,4 @@ func checkURL(endpoint string) (string, error) {
 	}
 
 	return u.String(), nil
-}
-
-func jsonPrint(cmd *cobra.Command, val any) {
-	jsonBytes, err := json.MarshalIndent(val, "", "  ")
-	if err != nil {
-		cmd.Printf("Failed to marshal the data to json: %s\n", err)
-		return
-	}
-
-	cmd.Println(string(jsonBytes))
 }

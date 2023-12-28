@@ -74,12 +74,6 @@ func GetRootCmd() *cobra.Command {
 	rootCmd.SilenceErrors = true
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		addrs, err := cmd.Flags().GetString("pd")
-		if err != nil {
-			return err
-		}
-
-		// TODO: refine code after replace dialClient with PDCli
 		CAPath, err := cmd.Flags().GetString("cacert")
 		if err == nil && len(CAPath) != 0 {
 			certPath, err := cmd.Flags().GetString("cert")
@@ -92,14 +86,11 @@ func GetRootCmd() *cobra.Command {
 				return err
 			}
 
-			if err := command.InitHTTPSClient(addrs, CAPath, certPath, keyPath); err != nil {
+			if err := command.InitHTTPSClient(CAPath, certPath, keyPath); err != nil {
 				rootCmd.Println(err)
 				return err
 			}
-		} else {
-			command.SetNewPDClient(strings.Split(addrs, ","))
 		}
-
 		return nil
 	}
 

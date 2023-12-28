@@ -168,7 +168,7 @@ func (suite *keyspacepdTestsuite) TearDownTest() {
 	suite.cancel()
 }
 
-func (suite *keyspacepdTestsuite) pdTestshowKeyspace() {
+func (suite *keyspacepdTestsuite) TestshowKeyspace() {
 	re := suite.Require()
 	keyspaceName := "DEFAULT"
 	keyspaceID := uint32(0)

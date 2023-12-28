@@ -15,7 +15,6 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.3
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
 	go.uber.org/zap v1.24.0
 	golang.org/x/text v0.14.0

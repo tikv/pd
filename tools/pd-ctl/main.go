@@ -21,7 +21,6 @@ import (
 	"syscall"
 
 	"github.com/tikv/pd/tools/pd-ctl/pdctl"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 func main() {
@@ -45,9 +44,6 @@ func main() {
 			os.Exit(0)
 		default:
 			os.Exit(1)
-		}
-		if command.PDCli != nil {
-			command.PDCli.Close()
 		}
 	}()
 

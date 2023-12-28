@@ -22,7 +22,6 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -50,8 +49,6 @@ type Client interface {
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
 	SetScheduleConfig(context.Context, map[string]interface{}) error
 	GetClusterVersion(context.Context) (string, error)
-	GetCluster(context.Context) (*metapb.Cluster, error)
-	GetClusterStatus(context.Context) (*ClusterStatus, error)
 	GetReplicateConfig(context.Context) (map[string]interface{}, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
@@ -362,34 +359,6 @@ func (c *client) GetClusterVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return version, nil
-}
-
-// GetCluster gets the cluster meta information.
-func (c *client) GetCluster(ctx context.Context) (*metapb.Cluster, error) {
-	var clusterInfo *metapb.Cluster
-	err := c.request(ctx, newRequestInfo().
-		WithName(getClusterName).
-		WithURI(ClusterPrefix).
-		WithMethod(http.MethodGet).
-		WithResp(&clusterInfo))
-	if err != nil {
-		return nil, err
-	}
-	return clusterInfo, nil
-}
-
-// GetClusterStatus gets the cluster status.
-func (c *client) GetClusterStatus(ctx context.Context) (*ClusterStatus, error) {
-	var clusterStatus *ClusterStatus
-	err := c.request(ctx, newRequestInfo().
-		WithName(getClusterName).
-		WithURI(ClusterStatusPrefix).
-		WithMethod(http.MethodGet).
-		WithResp(&clusterStatus))
-	if err != nil {
-		return nil, err
-	}
-	return clusterStatus, nil
 }
 
 // GetReplicateConfig gets the replication configurations.
