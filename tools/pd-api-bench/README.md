@@ -59,6 +59,12 @@ The api bench cases we support are as follows:
 -debug
 >  print the output of api response for debug
 
+-wait
+> if enable `wait`, the api-bench thread will not wait for the last request, and create a goroutinue for next request.
+
+-metrics
+> print the count of sending request and finish request.
+
 ### Run Shell
 
 You can run shell as follows.
