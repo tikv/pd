@@ -362,20 +362,7 @@ func marshalRegionInfoJSON(ctx context.Context, r *core.RegionInfo) ([]byte, err
 	default:
 	}
 
-	InitRegion(r, region)
-	// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
-	// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
-	region.Leader.setDefaultIfNil()
-	for i := range region.Peers {
-		region.Peers[i].setDefaultIfNil()
-	}
-	for i := range region.PendingPeers {
-		region.PendingPeers[i].setDefaultIfNil()
-	}
-	for i := range region.DownPeers {
-		region.DownPeers[i].setDefaultIfNil()
-	}
-	region.MarshalEasyJSON(out)
+	covertAPIRegionInfo(r, region, out)
 	return out.Buffer.BuildBytes(), out.Error
 }
 
@@ -402,25 +389,29 @@ func marshalRegionsInfoJSON(ctx context.Context, regions []*core.RegionInfo) ([]
 		if i > 0 {
 			out.RawByte(',')
 		}
-		InitRegion(r, region)
-		// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
-		// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
-		region.Leader.setDefaultIfNil()
-		for i := range region.Peers {
-			region.Peers[i].setDefaultIfNil()
-		}
-		for i := range region.PendingPeers {
-			region.PendingPeers[i].setDefaultIfNil()
-		}
-		for i := range region.DownPeers {
-			region.DownPeers[i].setDefaultIfNil()
-		}
-		region.MarshalEasyJSON(out)
+		covertAPIRegionInfo(r, region, out)
 	}
 	out.RawByte(']')
 
 	out.RawByte('}')
 	return out.Buffer.BuildBytes(), out.Error
+}
+
+func covertAPIRegionInfo(r *core.RegionInfo, region *RegionInfo, out *jwriter.Writer) {
+	InitRegion(r, region)
+	// EasyJSON will not check anonymous struct pointer field and will panic if the field is nil.
+	// So we need to set the field to default value explicitly when the anonymous struct pointer is nil.
+	region.Leader.setDefaultIfNil()
+	for i := range region.Peers {
+		region.Peers[i].setDefaultIfNil()
+	}
+	for i := range region.PendingPeers {
+		region.PendingPeers[i].setDefaultIfNil()
+	}
+	for i := range region.DownPeers {
+		region.DownPeers[i].setDefaultIfNil()
+	}
+	region.MarshalEasyJSON(out)
 }
 
 // @Tags     region
