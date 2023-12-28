@@ -134,7 +134,7 @@ func TestKeyspaceGroupUninitialized(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
-type keyspacepdTestsuite struct {
+type keyspaceTestSuite struct {
 	suite.Suite
 	ctx     context.Context
 	cancel  context.CancelFunc
@@ -142,11 +142,11 @@ type keyspacepdTestsuite struct {
 	pdAddr  string
 }
 
-func TestKeyspacepdTestsuite(t *testing.T) {
-	suite.Run(t, new(keyspacepdTestsuite))
+func TestKeyspaceTestsuite(t *testing.T) {
+	suite.Run(t, new(keyspaceTestSuite))
 }
 
-func (suite *keyspacepdTestsuite) SetupTest() {
+func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
@@ -161,14 +161,14 @@ func (suite *keyspacepdTestsuite) SetupTest() {
 	suite.pdAddr = tc.GetConfig().GetClientURL()
 }
 
-func (suite *keyspacepdTestsuite) TearDownTest() {
+func (suite *keyspaceTestSuite) TearDownTest() {
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	suite.cancel()
 }
 
-func (suite *keyspacepdTestsuite) TestshowKeyspace() {
+func (suite *keyspaceTestSuite) TestshowKeyspace() {
 	re := suite.Require()
 	keyspaceName := "DEFAULT"
 	keyspaceID := uint32(0)
@@ -188,7 +188,7 @@ func (suite *keyspacepdTestsuite) TestshowKeyspace() {
 	re.Equal(k1, k2)
 }
 
-func mustCreateKeyspace(suite *keyspacepdTestsuite, param api.CreateKeyspaceParams) api.KeyspaceMeta {
+func mustCreateKeyspace(suite *keyspaceTestSuite, param api.CreateKeyspaceParams) api.KeyspaceMeta {
 	re := suite.Require()
 	var meta api.KeyspaceMeta
 	args := []string{"-u", suite.pdAddr, "keyspace", "create", param.Name}
@@ -201,7 +201,7 @@ func mustCreateKeyspace(suite *keyspacepdTestsuite, param api.CreateKeyspacePara
 	return meta
 }
 
-func (suite *keyspacepdTestsuite) TestCreateKeyspace() {
+func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	re := suite.Require()
 	param := api.CreateKeyspaceParams{
 		Name: "test_keyspace",
@@ -217,7 +217,7 @@ func (suite *keyspacepdTestsuite) TestCreateKeyspace() {
 	}
 }
 
-func (suite *keyspacepdTestsuite) TestUpdateKeyspaceConfig() {
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 	re := suite.Require()
 	param := api.CreateKeyspaceParams{
 		Name:   "test_keyspace",
@@ -254,7 +254,7 @@ func (suite *keyspacepdTestsuite) TestUpdateKeyspaceConfig() {
 	re.Contains(string(output), "Fail")
 }
 
-func (suite *keyspacepdTestsuite) TestUpdateKeyspaceState() {
+func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
 	param := api.CreateKeyspaceParams{
 		Name: "test_keyspace",
@@ -274,7 +274,7 @@ func (suite *keyspacepdTestsuite) TestUpdateKeyspaceState() {
 	re.Contains(string(output), "Fail")
 }
 
-func (suite *keyspacepdTestsuite) TestListKeyspace() {
+func (suite *keyspaceTestSuite) TestListKeyspace() {
 	re := suite.Require()
 	var param api.CreateKeyspaceParams
 	for i := 0; i < 10; i++ {
