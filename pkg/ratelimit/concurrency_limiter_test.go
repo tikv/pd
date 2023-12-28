@@ -32,7 +32,7 @@ func TestConcurrencyLimiter(t *testing.T) {
 	re.True(cl.allow())
 	re.Equal(uint64(10), cl.getLimit())
 	re.Equal(uint64(10), cl.getMaxConcurrency())
-	re.Equal(uint64(0), cl.getMaxConcurrency())
+	re.Equal(uint64(10), cl.getMaxConcurrency())
 	cl.setLimit(5)
 	re.Equal(uint64(5), cl.getLimit())
 	re.Equal(uint64(10), cl.getCurrent())
@@ -41,8 +41,14 @@ func TestConcurrencyLimiter(t *testing.T) {
 	for i := 0; i < 9; i++ {
 		cl.release()
 	}
+	re.Equal(uint64(10), cl.getMaxConcurrency())
 	for i := 0; i < 5; i++ {
 		re.True(cl.allow())
 	}
+	re.Equal(uint64(5), cl.getCurrent())
+	for i := 0; i < 5; i++ {
+		cl.release()
+	}
 	re.Equal(uint64(5), cl.getMaxConcurrency())
+	re.Equal(uint64(0), cl.getMaxConcurrency())
 }
