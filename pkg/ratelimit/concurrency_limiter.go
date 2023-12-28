@@ -78,7 +78,7 @@ func (l *concurrencyLimiter) getCurrent() uint64 {
 func (l *concurrencyLimiter) getMaxConcurrency() uint64 {
 	l.mu.Lock()
 	defer func() {
-		l.maxLimit = 0
+		l.maxLimit = l.current
 		l.mu.Unlock()
 	}()
 
