@@ -25,16 +25,8 @@
 			"path": "tests/integrations/realcluster"
 		},
 		{
-			"name": "pd-tso-bench",
-			"path": "tools/pd-tso-bench"
-		},
-		{
-			"name": "pd-api-bench",
-			"path": "tools/pd-api-bench"
-		},
-		{
-			"name": "pd-ctl",
-			"path": "tools/pd-ctl"
+			"name": "tools",
+			"path": "tools"
 		}
 	],
 	"settings": {}

@@ -33,7 +33,7 @@ else
         [[ $1 == "github.com/tikv/pd/pkg/schedule" ]] && return 30
         [[ $1 == "github.com/tikv/pd/pkg/core" ]] && return 30
         [[ $1 == "github.com/tikv/pd/tests/server/api" ]] && return 30
-        [[ $1 == "github.com/tikv/pd/tools/pd-ctl/tests" ]] && return 30
+        [[ $1 == "github.com/tikv/pd/tools" ]] && return 30
         [[ $1 =~ "pd/tests" ]] && return 5
         return 1
     }
