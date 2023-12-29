@@ -9,23 +9,11 @@
 			"path": "client"
 		},
 		{
-			"name": "pd-client-tests",
-			"path": "tests/integrations/client"
+			"name": "pd-integration-tests",
+			"path": "tests/integrations"
 		},
 		{
-			"name": "mcs-tests",
-			"path": "tests/integrations/mcs"
-		},
-		{
-			"name": "tso-tests",
-			"path": "tests/integrations/tso"
-		},
-		{
-			"name": "real-cluster-tests",
-			"path": "tests/integrations/realcluster"
-		},
-		{
-			"name": "tools",
+			"name": "pd-tools",
 			"path": "tools"
 		}
 	],
