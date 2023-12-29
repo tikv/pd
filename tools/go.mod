@@ -2,12 +2,13 @@ module github.com/tikv/pd/tools
 
 go 1.21
 
-replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
-
 replace (
 	github.com/tikv/pd => ../
 	github.com/tikv/pd/client => ../client
 )
+
+// reset grpc and protobuf deps in order to import client and server at the same time
+replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
 
 require (
 	github.com/BurntSushi/toml v0.3.1
