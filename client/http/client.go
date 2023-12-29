@@ -425,3 +425,11 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 func (c *client) UpdateMembersInfo() {
 	c.inner.updateMembersInfo(c.inner.ctx)
 }
+
+// setLeaderAddrIdx sets the index of the leader address in the inner client.
+// only used for testing.
+func (c *client) setLeaderAddrIdx(idx int) {
+	c.inner.Lock()
+	defer c.inner.Unlock()
+	c.inner.leaderAddrIdx = idx
+}
