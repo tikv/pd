@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	"github.com/mattn/go-shellwords"
+	shellwords "github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -119,7 +119,7 @@ func MainStart(args []string) {
 
 	rootCmd.SetArgs(args)
 	rootCmd.ParseFlags(args)
-	rootCmd.SetOutput(os.Stdout)
+	rootCmd.SetOut(os.Stdout)
 
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
@@ -152,7 +152,7 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 		rootCmd.LocalFlags().MarkHidden("cacert")
 		rootCmd.LocalFlags().MarkHidden("cert")
 		rootCmd.LocalFlags().MarkHidden("key")
-		rootCmd.SetOutput(os.Stdout)
+		rootCmd.SetOut(os.Stdout)
 		return rootCmd
 	}
 
