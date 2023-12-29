@@ -1,3 +1,4 @@
 # This file is updated by running scripts/update-dashboard.sh
 # Don't edit it manullay
+# the version will become X.Y.Z-<commit-short-hash> format later
 2023.12.18.1
