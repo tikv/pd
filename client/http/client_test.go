@@ -21,6 +21,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pingcap/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
@@ -32,11 +35,13 @@ func TestPDAddrNormalization(t *testing.T) {
 	re.Len(pdAddrs, 1)
 	re.Equal(-1, leaderAddrIdx)
 	re.Contains(pdAddrs[0], httpScheme)
+	c.Close()
 	c = NewClient("test-https-pd-addr", []string{"127.0.0.1"}, WithTLSConfig(&tls.Config{}))
 	pdAddrs, leaderAddrIdx = c.(*client).inner.getPDAddrs()
 	re.Len(pdAddrs, 1)
 	re.Equal(-1, leaderAddrIdx)
 	re.Contains(pdAddrs[0], httpsScheme)
+	c.Close()
 }
 
 // requestChecker is used to check the HTTP request sent by the client.
@@ -91,5 +96,77 @@ func TestCallerID(t *testing.T) {
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
 	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())
+	c.Close()
+}
+
+func TestRedirectWithMetrics(t *testing.T) {
+	re := require.New(t)
+
+	pdAddrs := []string{"127.0.0.1", "172.0.0.1", "192.0.0.1"}
+	metricCnt := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "check",
+		}, []string{"name", ""})
+
+	// 1. Test all followers failed, need to send all followers.
+	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
+		if req.URL.Path == Schedulers {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c := NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
+	pdAddrs, leaderAddrIdx := c.(*client).inner.getPDAddrs()
+	re.Equal(-1, leaderAddrIdx)
+	c.CreateScheduler(context.Background(), "test", 0)
+	var out dto.Metric
+	failureCnt, err := c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, networkErrorStatus}...)
+	re.NoError(err)
+	failureCnt.Write(&out)
+	re.Equal(float64(3), out.Counter.GetValue())
+
+	// 2. Test the Leader success, just need to send to leader.
+	httpClient = newHTTPClientWithRequestChecker(func(req *http.Request) error {
+		// mock leader success.
+		if !strings.Contains(pdAddrs[0], req.Host) {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c.(*client).inner.cli = httpClient
+	// Force to update members info.
+	c.(*client).inner.leaderAddrIdx = 0
+	c.(*client).inner.pdAddrs = pdAddrs
+	c.CreateScheduler(context.Background(), "test", 0)
+	successCnt, err := c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, ""}...)
+	re.NoError(err)
+	successCnt.Write(&out)
+	re.Equal(float64(1), out.Counter.GetValue())
+
+	// 3. Test when the leader fails, needs to be sent to the follower in order,
+	// and returns directly if one follower succeeds
+	httpClient = newHTTPClientWithRequestChecker(func(req *http.Request) error {
+		// mock leader failure.
+		if strings.Contains(pdAddrs[0], req.Host) {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c.(*client).inner.cli = httpClient
+	// Force to update members info.
+	c.(*client).inner.leaderAddrIdx = 0
+	c.(*client).inner.pdAddrs = pdAddrs
+	c.CreateScheduler(context.Background(), "test", 0)
+	successCnt, err = c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, ""}...)
+	re.NoError(err)
+	successCnt.Write(&out)
+	// only one follower success
+	re.Equal(float64(2), out.Counter.GetValue())
+	failureCnt, err = c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, networkErrorStatus}...)
+	re.NoError(err)
+	failureCnt.Write(&out)
+	// leader failure
+	re.Equal(float64(4), out.Counter.GetValue())
+
 	c.Close()
 }

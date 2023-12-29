@@ -27,4 +27,5 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/transport.(*controlBuffer).get"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/transport.(*http2Server).keepalive"),
+	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/grpcsync.(*CallbackSerializer).run"),
 }

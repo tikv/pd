@@ -145,6 +145,14 @@ var (
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"service", "method", "caller_id", "ip"})
 
+	apiConcurrencyGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "api_concurrency",
+			Help:      "Concurrency number of the api.",
+		}, []string{"kind", "api"})
+
 	forwardFailCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
@@ -170,5 +178,6 @@ func init() {
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
+	prometheus.MustRegister(apiConcurrencyGauge)
 	prometheus.MustRegister(forwardFailCounter)
 }

@@ -41,7 +41,9 @@ type limiter struct {
 }
 
 func newLimiter() *limiter {
-	lim := &limiter{}
+	lim := &limiter{
+		concurrency: newConcurrencyLimiter(0),
+	}
 	return lim
 }
 
@@ -61,13 +63,6 @@ func (l *limiter) deleteRateLimiter() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.rate = nil
-	return l.isEmpty()
-}
-
-func (l *limiter) deleteConcurrency() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.concurrency = nil
 	return l.isEmpty()
 }
 
@@ -96,14 +91,14 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 	if oldConcurrencyLimit == limit {
 		return ConcurrencyNoChange
 	}
-	if limit < 1 {
-		l.deleteConcurrency()
-		return ConcurrencyDeleted
-	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.concurrency != nil {
+		if limit < 1 {
+			l.concurrency.setLimit(0)
+			return ConcurrencyDeleted
+		}
 		l.concurrency.setLimit(limit)
 	} else {
 		l.concurrency = newConcurrencyLimiter(limit)

@@ -278,11 +278,11 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 }
 
 // GetResourceGroup returns a copy of a resource group.
-func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
+func (m *Manager) GetResourceGroup(name string, withStats bool) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
-		return group.Copy()
+		return group.Clone(withStats)
 	}
 	return nil
 }
@@ -298,11 +298,11 @@ func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
 }
 
 // GetResourceGroupList returns copies of resource group list.
-func (m *Manager) GetResourceGroupList() []*ResourceGroup {
+func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
 	m.RLock()
 	res := make([]*ResourceGroup, 0, len(m.groups))
 	for _, group := range m.groups {
-		res = append(res, group.Copy())
+		res = append(res, group.Clone(withStats))
 	}
 	m.RUnlock()
 	sort.Slice(res, func(i, j int) bool {
@@ -338,12 +338,10 @@ func (m *Manager) persistResourceGroupRunningState() {
 	for idx := 0; idx < len(keys); idx++ {
 		m.RLock()
 		group, ok := m.groups[keys[idx]]
-		m.RUnlock()
 		if ok {
-			m.Lock()
 			group.persistStates(m.storage)
-			m.Unlock()
 		}
+		m.RUnlock()
 	}
 }
 
@@ -415,6 +413,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 
 			m.consumptionRecord[name] = time.Now()
 
+			// TODO: maybe we need to distinguish background ru.
+			if rg := m.GetMutableResourceGroup(name); rg != nil {
+				rg.UpdateRUConsumption(consumptionInfo.Consumption)
+			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
 			for name, lastTime := range m.consumptionRecord {
