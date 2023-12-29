@@ -2,16 +2,16 @@
 
 # ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX>
 
-ROOT_PATH=../
+ROOT_PATH=../../
 
 if [[ $2 -gt 10 ]]; then
     integrations_dir=./tests/integrations
-    integration_tasks=($(find "$integrations_dir" -mindepth 1 -maxdepth 1 -type d))
+    integrations_tasks=($(find "$integrations_dir" -mindepth 1 -maxdepth 1 -type d))
     # Currently, we only have 3 integration tests, so we can hardcode the task index.
-    for t in ${integration_tasks[@]}; do
+    for t in ${integrations_tasks[@]}; do
         if [[ "$t" = "$integrations_dir/client" && "$2" = 11 ]]; then
             cd ./client && make ci-test-job
-            cd $ROOT_PATH > /dev/null && cat ./client/covprofile >> covprofile
+            cd ../ > /dev/null && cat ./client/covprofile >> covprofile
             cd $integrations_dir && make ci-test-job test_name=client
             cd $ROOT_PATH > /dev/null && cat $integrations_dir/client/covprofile >> covprofile
             break
