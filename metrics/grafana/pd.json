@@ -744,7 +744,7 @@
         "y": 6
       },
       "hiddenSeries": false,
-      "id": 108,
+      "id": 107,
       "legend": {
         "alignAsTable": true,
         "avg": false,
@@ -845,7 +845,7 @@
         "x": 16,
         "y": 6
       },
-      "id": 109,
+      "id": 108,
       "interval": null,
       "links": [],
       "maxDataPoints": 100,
@@ -941,7 +941,7 @@
         "x": 0,
         "y": 13
       },
-      "id": 110,
+      "id": 109,
       "options": {
         "orientation": "auto",
         "reduceOptions": {
