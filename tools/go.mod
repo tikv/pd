@@ -1,6 +1,6 @@
 module github.com/tikv/pd/tools
 
-go 1.21.0
+go 1.21
 
 replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
 

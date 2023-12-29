@@ -10,18 +10,17 @@ if [[ $2 -gt 10 ]]; then
     # Currently, we only have 3 integration tests, so we can hardcode the task index.
     for t in ${integrations_tasks[@]}; do
         if [[ "$t" = "$integrations_dir/client" && "$2" = 11 ]]; then
-            cd ./client && make ci-test-job
-            cd ../ > /dev/null && cat ./client/covprofile >> covprofile
+            cd ./client && make ci-test-job && cd .. && cat ./client/covprofile >> covprofile
             cd $integrations_dir && make ci-test-job test_name=client
-            cd $ROOT_PATH > /dev/null && cat $integrations_dir/client/covprofile >> covprofile
+            cd $ROOT_PATH && cat $integrations_dir/client/covprofile >> covprofile
             break
         elif [[ "$t" = "$integrations_dir/tso" && "$2" = 12 ]]; then
             cd $integrations_dir && make ci-test-job test_name=tso
-            cd $ROOT_PATH > /dev/null && cat $integrations_dir/tso/covprofile >> covprofile
+            cd $ROOT_PATH && cat $integrations_dir/tso/covprofile >> covprofile
             break
         elif [[ "$t" = "$integrations_dir/mcs" && "$2" = 13 ]]; then
             cd $integrations_dir && make ci-test-job test_name=mcs
-            cd $ROOT_PATH > /dev/null && cat $integrations_dir/mcs/covprofile >> covprofile
+            cd $ROOT_PATH && cat $integrations_dir/mcs/covprofile >> covprofile
             break
         fi
     done
