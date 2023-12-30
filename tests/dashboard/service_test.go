@@ -15,7 +15,9 @@
 package dashboard_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 	"io"
@@ -25,14 +27,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"go.uber.org/goleak"
-
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/pdctl"
-	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -136,8 +135,6 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cmd := pdctlCmd.GetRootCmd()
-
 	cluster.WaitLeader()
 	servers := cluster.GetServers()
 	leader := cluster.GetLeaderServer()
@@ -154,15 +151,28 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 			break
 		}
 	}
-	args := []string{"-u", leaderAddr, "config", "set", "dashboard-address", dashboardAddress2}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
+
+	input := map[string]interface{}{
+		"dashboard-address": dashboardAddress2,
+	}
+	data, err := json.Marshal(input)
 	re.NoError(err)
+	req, _ := http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	resp, err := suite.httpClient.Do(req)
+	re.NoError(err)
+	resp.Body.Close()
 	suite.checkServiceIsStarted(re, internalProxy, servers, leader)
 	re.Equal(dashboardAddress2, leader.GetServer().GetPersistOptions().GetDashboardAddress())
 
 	// pd-ctl set stop
-	args = []string{"-u", leaderAddr, "config", "set", "dashboard-address", "none"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
+	input = map[string]interface{}{
+		"dashboard-address": "none",
+	}
+	data, err = json.Marshal(input)
 	re.NoError(err)
+	req, _ = http.NewRequest(http.MethodPost, leaderAddr+"/pd/api/v1/config", bytes.NewBuffer(data))
+	resp, err = suite.httpClient.Do(req)
+	re.NoError(err)
+	resp.Body.Close()
 	suite.checkServiceIsStopped(re, servers)
 }

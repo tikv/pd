@@ -716,6 +716,99 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	})
 }
 
+func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cluster := suite.cluster
+	cli := setupCli(re, ctx, suite.endpoints)
+	cli.UpdateOption(pd.EnableFollowerHandle, true)
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	testutil.Eventually(re, func() bool {
+		ret := true
+		for _, s := range cluster.GetServers() {
+			if s.IsLeader() {
+				continue
+			}
+			if !s.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning() {
+				ret = false
+			}
+		}
+		return ret
+	})
+	// follower have no region
+	cnt := 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+
+	// because we can't check whether this request is processed by followers from response,
+	// we can disable forward and make network problem for leader.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	time.Sleep(150 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+
+	// make network problem for follower.
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	time.Sleep(100 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+
+	// follower client failed will retry by leader service client.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/followerHandleError", "return(true)"))
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/followerHandleError"))
+
+	// test after being healthy
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastCheckAvailable", "return(true)"))
+	time.Sleep(100 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
+}
+
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {
 	for i := 0; i < tsoRequestRound; i++ {
 		physical, logical, err := cli.GetTS(context.TODO())

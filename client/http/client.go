@@ -162,7 +162,10 @@ func (ci *clientInner) requestWithRetry(
 			zap.String("source", ci.source), zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
 	}
 	// Try to send the request to the other PD followers.
-	for idx := 0; idx < len(pdAddrs) && idx != leaderAddrIdx; idx++ {
+	for idx := 0; idx < len(pdAddrs); idx++ {
+		if idx == leaderAddrIdx {
+			continue
+		}
 		addr = ci.pdAddrs[idx]
 		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 		if err == nil {
@@ -437,4 +440,12 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 // Exported for testing.
 func (c *client) UpdateMembersInfo() {
 	c.inner.updateMembersInfo(c.inner.ctx)
+}
+
+// setLeaderAddrIdx sets the index of the leader address in the inner client.
+// only used for testing.
+func (c *client) setLeaderAddrIdx(idx int) {
+	c.inner.Lock()
+	defer c.inner.Unlock()
+	c.inner.leaderAddrIdx = idx
 }

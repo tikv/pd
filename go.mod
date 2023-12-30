@@ -10,8 +10,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kms v1.20.8
 	github.com/aws/aws-sdk-go-v2/service/sts v1.18.7
 	github.com/axw/gocov v1.0.0
+	github.com/brianvoe/gofakeit/v6 v6.26.3
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
 	github.com/docker/go-units v0.4.0
 	github.com/elliotchance/pie/v2 v2.1.0
@@ -19,7 +19,6 @@ require (
 	github.com/gin-contrib/gzip v0.0.1
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.9.1
-	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/btree v1.1.2
 	github.com/google/uuid v1.3.0
@@ -27,7 +26,6 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/joho/godotenv v1.4.0
 	github.com/mailru/easyjson v0.7.6
-	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
 	github.com/pingcap/errcode v0.3.0
@@ -45,19 +43,18 @@ require (
 	github.com/soheilhy/cmux v0.1.4
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.8.3
+	github.com/stretchr/testify v1.8.4
 	github.com/swaggo/http-swagger v1.2.6
 	github.com/swaggo/swag v1.8.3
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
-	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+	github.com/tikv/pd/tools v0.0.0-20231229094228-a67ccbb8165f
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
 	go.uber.org/atomic v1.10.0
-	go.uber.org/goleak v1.1.12
-	go.uber.org/zap v1.24.0
+	go.uber.org/goleak v1.2.0
+	go.uber.org/zap v1.26.0
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
-	golang.org/x/text v0.14.0
 	golang.org/x/time v0.3.0
 	golang.org/x/tools v0.14.0
 	google.golang.org/grpc v1.59.0
@@ -81,7 +78,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.12.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.14.6 // indirect
 	github.com/aws/smithy-go v1.13.5 // indirect
-	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bitly/go-simplejson v0.5.0 // indirect
 	github.com/breeswish/gin-jwt/v2 v2.6.4-jwt-patch // indirect
@@ -192,6 +188,7 @@ require (
 	golang.org/x/sync v0.4.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/term v0.15.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20231030173426-d783a09b4405 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20231016165738-49dd2c1f3d0b // indirect
