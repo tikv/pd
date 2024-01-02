@@ -45,3 +45,6 @@ go mod tidy
 
 cd ./tests/integrations
 go mod tidy
+
+cd ../../tools
+go mod tidy
