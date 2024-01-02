@@ -76,6 +76,7 @@ type Client interface {
 	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+	GetVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]string, error)
 
@@ -722,4 +723,17 @@ func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]
 		return nil, err
 	}
 	return members, nil
+}
+
+// GetVersion gets the release version of the PD binary.
+func (c *client) GetVersion(ctx context.Context) (string, error) {
+	var ver struct {
+		Version string `json:"version"`
+	}
+	err := c.request(ctx, newRequestInfo().
+		WithName(getVersionName).
+		WithURI(Version).
+		WithMethod(http.MethodGet).
+		WithResp(&ver))
+	return ver.Version, err
 }
