@@ -56,6 +56,7 @@ func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) erro
 		storesID = append(storesID, store.GetId())
 	}
 	log.Printf("This cluster has region %d, and store %d[%v]", totalRegion, totalStore, storesID)
+	cli.UpdateOption(pd.EnableFollowerHandle, true)
 	return nil
 }
 
