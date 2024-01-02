@@ -8875,7 +8875,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_server_api_concurrency{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", kind=\"grpc\"}",
+              "expr": "max_over_time(pd_server_api_concurrency{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", kind=\"grpc\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}-{{api}}",
@@ -8908,7 +8908,7 @@
               "label": null,
               "logBase": 10,
               "max": null,
-              "min": null,
+              "min": 0,
               "show": true
             },
             {
@@ -9183,7 +9183,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_server_api_concurrency{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", kind=\"http\"}",
+              "expr": "max_over_time(pd_server_api_concurrency{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", kind=\"http\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "{{instance}}-{{api}}",
@@ -9216,7 +9216,7 @@
               "label": null,
               "logBase": 10,
               "max": null,
-              "min": null,
+              "min": 0,
               "show": true
             },
             {
