@@ -29,6 +29,7 @@ const (
 	tiflashTypeLabel          = "ap"
 	defaultTypeLabel          = "tp"
 	newResourceGroupNameLabel = "resource_group"
+	roleLabel                 = "role"
 )
 
 var (
@@ -40,21 +41,21 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "read_request_unit_sum",
 			Help:      "Counter of the read request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, roleLabel})
 	writeRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, roleLabel})
 	sqlLayerRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "sql_layer_request_unit_sum",
 			Help:      "The number of the sql layer request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, roleLabel})
 
 	// Resource cost metrics.
 	readByteCost = prometheus.NewCounterVec(
@@ -63,35 +64,35 @@ var (
 			Subsystem: resourceSubsystem,
 			Name:      "read_byte_sum",
 			Help:      "Counter of the read byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, roleLabel})
 	writeByteCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "write_byte_sum",
 			Help:      "Counter of the write byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, roleLabel})
 	kvCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "kv_cpu_time_ms_sum",
 			Help:      "Counter of the KV CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, roleLabel})
 	sqlCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "sql_cpu_time_ms_sum",
 			Help:      "Counter of the SQL CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, roleLabel})
 	requestCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "request_count",
 			Help:      "The number of read/write requests for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, roleLabel})
 
 	availableRUCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

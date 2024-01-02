@@ -156,6 +156,7 @@ type RUConfig struct {
 	// some config for client
 	LTBMaxWaitDuration       time.Duration
 	DegradedModeWaitDuration time.Duration
+	role                     string
 }
 
 // DefaultRUConfig returns the default configuration.

@@ -184,7 +184,7 @@ require (
 	golang.org/x/image v0.10.0 // indirect
 	golang.org/x/mod v0.13.0 // indirect
 	golang.org/x/net v0.18.0 // indirect
-	golang.org/x/oauth2 v0.4.0 // indirect
+	golang.org/x/oauth2 v0.11.0 // indirect
 	golang.org/x/sync v0.4.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/term v0.15.0 // indirect
@@ -210,4 +210,4 @@ replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
-// replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20240102100144-34b417c2a46f

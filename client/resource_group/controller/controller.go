@@ -105,6 +105,13 @@ func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 	}
 }
 
+// WithRoleLabel labels the ru to attribute usages to specific role.
+func WithRoleLabel(role string) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.role = role
+	}
+}
+
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
@@ -1102,6 +1109,7 @@ func initCounterNotify(counter *tokenCounter) {
 func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType) *rmpb.TokenBucketRequest {
 	req := &rmpb.TokenBucketRequest{
 		ResourceGroupName: gc.name,
+		Role:              gc.mainCfg.role,
 	}
 	// collect request resource
 	selected := gc.run.requestInProgress

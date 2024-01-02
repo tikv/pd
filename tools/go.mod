@@ -172,7 +172,7 @@ require (
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
 	golang.org/x/image v0.10.0 // indirect
 	golang.org/x/net v0.18.0 // indirect
-	golang.org/x/oauth2 v0.4.0 // indirect
+	golang.org/x/oauth2 v0.11.0 // indirect
 	golang.org/x/sync v0.4.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
@@ -192,3 +192,5 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
+
+replace github.com/pingcap/kvproto => github.com/AmoebaProtozoa/kvproto v0.0.0-20240102100144-34b417c2a46f
