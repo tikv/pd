@@ -31,11 +31,7 @@ func TestPatchResourceGroup(t *testing.T) {
 		re.NoError(err)
 		err = rg.PatchSettings(patch)
 		re.NoError(err)
-<<<<<<< HEAD
-		res, err := json.Marshal(rg.Copy())
-=======
-		res, err := json.Marshal(rg.Clone(false))
->>>>>>> ed9685a79 (resource_mananger: deep clone resource group (#7623))
+		res, err := json.Marshal(rg.Clone())
 		re.NoError(err)
 		re.Equal(ca.expectJSONString, string(res))
 	}
@@ -72,7 +68,7 @@ func TestClone(t *testing.T) {
 		gofakeit.Struct(&rg)
 		// hack to reset XXX_sizecache, gofakeit will random set this field but proto clone will not copy this field.
 		resetSizeCache(&rg)
-		rgClone := rg.Clone(true)
+		rgClone := rg.Clone()
 		require.EqualValues(t, &rg, rgClone)
 	}
 }

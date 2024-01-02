@@ -75,14 +75,8 @@ func (rg *ResourceGroup) String() string {
 	return string(res)
 }
 
-<<<<<<< HEAD
-// Copy copies the resource group.
-func (rg *ResourceGroup) Copy() *ResourceGroup {
-	// TODO: use a better way to copy
-=======
 // Clone copies the resource group.
-func (rg *ResourceGroup) Clone(withStats bool) *ResourceGroup {
->>>>>>> ed9685a79 (resource_mananger: deep clone resource group (#7623))
+func (rg *ResourceGroup) Clone() *ResourceGroup {
 	rg.RLock()
 	defer rg.RUnlock()
 	newRG := &ResourceGroup{
@@ -94,20 +88,12 @@ func (rg *ResourceGroup) Clone(withStats bool) *ResourceGroup {
 	if rg.Runaway != nil {
 		newRG.Runaway = proto.Clone(rg.Runaway).(*rmpb.RunawaySettings)
 	}
-<<<<<<< HEAD
-	return &newRG
-=======
 
 	if rg.Background != nil {
 		newRG.Background = proto.Clone(rg.Background).(*rmpb.BackgroundSettings)
 	}
 
-	if withStats && rg.RUConsumption != nil {
-		newRG.RUConsumption = proto.Clone(rg.RUConsumption).(*rmpb.Consumption)
-	}
-
 	return newRG
->>>>>>> ed9685a79 (resource_mananger: deep clone resource group (#7623))
 }
 
 func (rg *ResourceGroup) getRUToken() float64 {
