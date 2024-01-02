@@ -193,6 +193,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			// Send the consumption to update the metrics.
 			isBackground := req.GetIsBackground()
 			isTiFlash := req.GetIsTiflash()
+			role := req.GetRole()
 			if isBackground && isTiFlash {
 				return errors.New("background and tiflash cannot be true at the same time")
 			}
@@ -201,7 +202,8 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				*rmpb.Consumption
 				isBackground bool
 				isTiFlash    bool
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
+				role         string
+			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash, role}
 			if isBackground {
 				continue
 			}

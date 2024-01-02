@@ -61,6 +61,7 @@ type Manager struct {
 		*rmpb.Consumption
 		isBackground bool
 		isTiFlash    bool
+		role         string
 	}
 	// record update time of each resource group
 	consumptionRecord map[consumptionRecordKey]time.Time
@@ -69,6 +70,7 @@ type Manager struct {
 type consumptionRecordKey struct {
 	name   string
 	ruType string
+	role   string
 }
 
 // ConfigProvider is used to get resource manager config from the given
@@ -88,6 +90,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 			*rmpb.Consumption
 			isBackground bool
 			isTiFlash    bool
+			role         string
 		}, defaultConsumptionChanSize),
 		consumptionRecord: make(map[consumptionRecordKey]time.Time),
 	}
@@ -373,18 +376,19 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if consumptionInfo.isTiFlash {
 				ruLabelType = tiflashTypeLabel
 			}
+			role := consumptionInfo.role
 
 			var (
 				name                     = consumptionInfo.resourceGroupName
-				rruMetrics               = readRequestUnitCost.WithLabelValues(name, name, ruLabelType)
-				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, name, ruLabelType)
-				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name, name)
-				readByteMetrics          = readByteCost.WithLabelValues(name, name, ruLabelType)
-				writeByteMetrics         = writeByteCost.WithLabelValues(name, name, ruLabelType)
-				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, name, ruLabelType)
-				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, name, ruLabelType)
-				readRequestCountMetrics  = requestCount.WithLabelValues(name, name, readTypeLabel)
-				writeRequestCountMetrics = requestCount.WithLabelValues(name, name, writeTypeLabel)
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name, name, ruLabelType, role)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, name, ruLabelType, role)
+				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name, name, role)
+				readByteMetrics          = readByteCost.WithLabelValues(name, name, ruLabelType, role)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name, name, ruLabelType, role)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, name, ruLabelType, role)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, name, ruLabelType, role)
+				readRequestCountMetrics  = requestCount.WithLabelValues(name, name, readTypeLabel, role)
+				writeRequestCountMetrics = requestCount.WithLabelValues(name, name, writeTypeLabel, role)
 			)
 			// RU info.
 			if consumption.RRU > 0 {
@@ -426,16 +430,16 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			// Clean up the metrics that have not been updated for a long time.
 			for r, lastTime := range m.consumptionRecord {
 				if time.Since(lastTime) > metricsCleanupTimeout {
-					readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
-					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(r.name, r.name, r.ruType)
+					readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType, r.role)
+					writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType, r.role)
+					sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.role)
+					readByteCost.DeleteLabelValues(r.name, r.name, r.ruType, r.role)
+					writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType, r.role)
+					kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType, r.role)
+					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType, r.role)
+					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel, r.role)
+					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel, r.role)
+					availableRUCounter.DeleteLabelValues(r.name, r.name)
 					delete(m.consumptionRecord, r)
 				}
 			}
