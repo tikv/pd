@@ -482,7 +482,7 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 
 func (suite *httpClientTestSuite) TestVersion() {
 	re := suite.Require()
-	ver, err := suite.client.GetVersion(suite.ctx)
+	ver, err := suite.client.GetPDVersion(suite.ctx)
 	re.NoError(err)
 	re.Equal(versioninfo.PDReleaseVersion, ver)
 }

@@ -61,7 +61,7 @@ const (
 	accelerateScheduleInBatchName           = "AccelerateScheduleInBatch"
 	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
-	getVersionName                          = "GetVersion"
+	getPDVersionName                        = "GetPDVersion"
 )
 
 type requestInfo struct {
