@@ -31,7 +31,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/tlsutil"
-	"github.com/tools/pd-api-bench/cases"
+	"github.com/tikv/pd/tools/pd-api-bench/cases"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -213,6 +213,9 @@ func main() {
 
 	<-ctx.Done()
 	for _, cli := range pdClis {
+		cli.Close()
+	}
+	for _, cli := range httpClis {
 		cli.Close()
 	}
 	log.Println("Exit")

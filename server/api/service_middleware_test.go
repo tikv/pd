@@ -62,31 +62,23 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	re.True(sc.EnableAudit)
 
 	ms := map[string]interface{}{
-		"enable-audit":           "true",
-		"enable-rate-limit":      "true",
-		"enable-grpc-rate-limit": "true",
+		"audit.enable-audit": "false",
 	}
 	postData, err := json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	re.True(sc.EnableAudit)
-	re.True(sc.RateLimitConfig.EnableRateLimit)
-	re.True(sc.GRPCRateLimitConfig.EnableRateLimit)
+	re.False(sc.EnableAudit)
 	ms = map[string]interface{}{
-		"audit.enable-audit":     "false",
-		"enable-rate-limit":      "false",
-		"enable-grpc-rate-limit": "false",
+		"enable-audit": "true",
 	}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	re.False(sc.EnableAudit)
-	re.False(sc.RateLimitConfig.EnableRateLimit)
-	re.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	re.True(sc.EnableAudit)
 
 	// test empty
 	ms = map[string]interface{}{}
@@ -101,7 +93,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item audit not found")))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
 	ms = map[string]interface{}{
-		"audit.enable-audit": "true",
+		"audit.enable-audit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)
@@ -389,31 +381,31 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	sc := &config.ServiceMiddlewareConfig{}
 	re := suite.Require()
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	re.False(sc.RateLimitConfig.EnableRateLimit)
-	re.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	re.True(sc.RateLimitConfig.EnableRateLimit)
+	re.True(sc.GRPCRateLimitConfig.EnableRateLimit)
 
 	ms := map[string]interface{}{
-		"enable-rate-limit":      "true",
-		"enable-grpc-rate-limit": "true",
+		"enable-rate-limit":      "false",
+		"enable-grpc-rate-limit": "false",
 	}
 	postData, err := json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	re.True(sc.RateLimitConfig.EnableRateLimit)
-	re.True(sc.GRPCRateLimitConfig.EnableRateLimit)
+	re.False(sc.RateLimitConfig.EnableRateLimit)
+	re.False(sc.GRPCRateLimitConfig.EnableRateLimit)
 	ms = map[string]interface{}{
-		"enable-rate-limit":      "false",
-		"enable-grpc-rate-limit": "false",
+		"enable-rate-limit":      "true",
+		"enable-grpc-rate-limit": "true",
 	}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	re.False(sc.RateLimitConfig.EnableRateLimit)
-	re.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	re.True(sc.RateLimitConfig.EnableRateLimit)
+	re.True(sc.GRPCRateLimitConfig.EnableRateLimit)
 
 	// test empty
 	ms = map[string]interface{}{}
@@ -428,8 +420,8 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
 	ms = map[string]interface{}{
-		"rate-limit.enable-rate-limit":           "true",
-		"grpc-rate-limit.enable-grpc-rate-limit": "true",
+		"rate-limit.enable-rate-limit":           "false",
+		"grpc-rate-limit.enable-grpc-rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)

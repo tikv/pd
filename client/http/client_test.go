@@ -124,6 +124,7 @@ func TestRedirectWithMetrics(t *testing.T) {
 	re.NoError(err)
 	failureCnt.Write(&out)
 	re.Equal(float64(3), out.Counter.GetValue())
+	c.Close()
 
 	// 2. Test the Leader success, just need to send to leader.
 	httpClient = newHTTPClientWithRequestChecker(func(req *http.Request) error {
@@ -133,15 +134,15 @@ func TestRedirectWithMetrics(t *testing.T) {
 		}
 		return nil
 	})
-	c.(*client).inner.cli = httpClient
-	// Force to update members info.
-	c.(*client).inner.leaderAddrIdx = 0
-	c.(*client).inner.pdAddrs = pdAddrs
+	c = NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
+	// force to update members info.
+	c.(*client).setLeaderAddrIdx(0)
 	c.CreateScheduler(context.Background(), "test", 0)
 	successCnt, err := c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, ""}...)
 	re.NoError(err)
 	successCnt.Write(&out)
 	re.Equal(float64(1), out.Counter.GetValue())
+	c.Close()
 
 	// 3. Test when the leader fails, needs to be sent to the follower in order,
 	// and returns directly if one follower succeeds
@@ -152,10 +153,9 @@ func TestRedirectWithMetrics(t *testing.T) {
 		}
 		return nil
 	})
-	c.(*client).inner.cli = httpClient
-	// Force to update members info.
-	c.(*client).inner.leaderAddrIdx = 0
-	c.(*client).inner.pdAddrs = pdAddrs
+	c = NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
+	// force to update members info.
+	c.(*client).setLeaderAddrIdx(0)
 	c.CreateScheduler(context.Background(), "test", 0)
 	successCnt, err = c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, ""}...)
 	re.NoError(err)
@@ -167,6 +167,5 @@ func TestRedirectWithMetrics(t *testing.T) {
 	failureCnt.Write(&out)
 	// leader failure
 	re.Equal(float64(4), out.Counter.GetValue())
-
 	c.Close()
 }
