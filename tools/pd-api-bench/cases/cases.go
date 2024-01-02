@@ -56,7 +56,6 @@ func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) erro
 		storesID = append(storesID, store.GetId())
 	}
 	log.Printf("This cluster has region %d, and store %d[%v]", totalRegion, totalStore, storesID)
-	cli.UpdateOption(pd.EnableFollowerHandle, true)
 	return nil
 }
 
@@ -98,6 +97,7 @@ func (c *baseCase) GetBurst() int64 {
 // GRPCCase is the interface for all gRPC cases.
 type GRPCCase interface {
 	Case
+	Init(pd.Client)
 	Unary(context.Context, pd.Client) error
 }
 
@@ -197,6 +197,8 @@ func newGetRegion() *getRegion {
 	}
 }
 
+func (c *getRegion) Init(pd.Client) {}
+
 func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
@@ -218,6 +220,10 @@ func newGetRegionEnableFollower() *getRegionEnableFollower {
 			burst: 1,
 		},
 	}
+}
+
+func (c *getRegionEnableFollower) Init(cli pd.Client) {
+	cli.UpdateOption(pd.EnableFollowerHandle, true)
 }
 
 func (c *getRegionEnableFollower) Unary(ctx context.Context, cli pd.Client) error {
@@ -242,6 +248,8 @@ func newStoreHeartbeat() *storeHeartbeat {
 		},
 	}
 }
+
+func (c *storeHeartbeat) Init(pd.Client) {}
 
 func (c *storeHeartbeat) Unary(ctx context.Context, cli pd.Client) error {
 	sd := cli.GetServiceDiscovery()
@@ -283,6 +291,8 @@ func newScanRegions() *scanRegions {
 	}
 }
 
+func (c *scanRegions) Init(pd.Client) {}
+
 func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	upperBound := totalRegion / c.regionSample
 	random := rand.Intn(upperBound)
@@ -309,6 +319,8 @@ func newGetStore() *getStore {
 	}
 }
 
+func (c *getStore) Init(pd.Client) {}
+
 func (c *getStore) Unary(ctx context.Context, cli pd.Client) error {
 	storeIdx := rand.Intn(totalStore)
 	_, err := cli.GetStore(ctx, storesID[storeIdx])
@@ -331,6 +343,8 @@ func newGetStores() *getStores {
 		},
 	}
 }
+
+func (c *getStores) Init(pd.Client) {}
 
 func (c *getStores) Unary(ctx context.Context, cli pd.Client) error {
 	_, err := cli.GetAllStores(ctx)

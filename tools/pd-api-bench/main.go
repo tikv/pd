@@ -248,6 +248,7 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 		cntMu.Unlock()
 	}
 	for _, cli := range clients {
+		gcase.Init(cli)
 		go func(cli pd.Client) {
 			var ticker = time.NewTicker(tt)
 			defer ticker.Stop()
