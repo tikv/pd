@@ -51,7 +51,7 @@ var (
 
 	wait = flag.Bool("wait", true, "wait for a round")
 
-	metrics = flag.Bool("metrics", true, "metrics")
+	metrics = flag.Int("metrics", 0, "metrics")
 
 	// tls
 	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
@@ -240,12 +240,14 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 		if err != nil {
 			log.Println(err)
 		}
-		cntMu.Lock()
-		endCnt++
-		if *metrics && endCnt%1000 == 0 {
-			log.Printf("case grpc %s has finished query %d", gcase.Name(), endCnt)
+		if *metrics > 0 {
+			cntMu.Lock()
+			endCnt++
+			if endCnt%*metrics == 0 {
+				log.Printf("case grpc %s has finished query %d", gcase.Name(), endCnt)
+			}
+			cntMu.Unlock()
 		}
-		cntMu.Unlock()
 	}
 	for _, cli := range clients {
 		gcase.Init(cli)
@@ -256,12 +258,14 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 				select {
 				case <-ticker.C:
 					for i := int64(0); i < burst; i++ {
-						cntMu.Lock()
-						startCnt++
-						if *metrics && startCnt%1000 == 0 {
-							log.Printf("case grpc %s has sent query %d", gcase.Name(), startCnt)
+						if *metrics > 0 {
+							cntMu.Lock()
+							startCnt++
+							if startCnt%*metrics == 0 {
+								log.Printf("case grpc %s has sent query %d", gcase.Name(), startCnt)
+							}
+							cntMu.Unlock()
 						}
-						cntMu.Unlock()
 						if *wait {
 							doFn(cli)
 						} else {
@@ -290,12 +294,14 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp
 		if err != nil {
 			log.Println(err)
 		}
-		cntMu.Lock()
-		endCnt++
-		if *metrics && endCnt%1000 == 0 {
-			log.Printf("case http %s has finished query %d", hcase.Name(), endCnt)
+		if *metrics > 0 {
+			cntMu.Lock()
+			endCnt++
+			if endCnt%*metrics == 0 {
+				log.Printf("case http %s has finished query %d", hcase.Name(), endCnt)
+			}
+			cntMu.Unlock()
 		}
-		cntMu.Unlock()
 	}
 	for _, hCli := range httpClis {
 		go func(hCli pdHttp.Client) {
@@ -307,8 +313,13 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp
 					for i := int64(0); i < burst; i++ {
 						cntMu.Lock()
 						startCnt++
-						if *metrics && startCnt%1000 == 0 {
-							log.Printf("case http %s has done query %d", hcase.Name(), startCnt)
+						if *metrics > 0 {
+							cntMu.Lock()
+							startCnt++
+							if startCnt%*metrics == 0 {
+								log.Printf("case http %s has done query %d", hcase.Name(), startCnt)
+							}
+							cntMu.Unlock()
 						}
 						cntMu.Unlock()
 						if *wait {
