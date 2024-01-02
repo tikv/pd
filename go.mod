@@ -47,7 +47,6 @@ require (
 	github.com/swaggo/http-swagger v1.2.6
 	github.com/swaggo/swag v1.8.3
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
-	github.com/tikv/pd/tools v0.0.0-20231229094228-a67ccbb8165f
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
@@ -206,8 +205,6 @@ require (
 )
 
 replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
-
-replace github.com/tikv/pd/client => ./client
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.

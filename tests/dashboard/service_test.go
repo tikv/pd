@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 	"io"
 	"net/http"
 	"testing"
@@ -66,9 +65,6 @@ func (suite *dashboardTestSuite) SetupSuite() {
 func (suite *dashboardTestSuite) TearDownSuite() {
 	suite.cancel()
 	suite.httpClient.CloseIdleConnections()
-	if command.PDCli != nil {
-		command.PDCli.Close()
-	}
 	dashboard.SetCheckInterval(time.Second)
 }
 
