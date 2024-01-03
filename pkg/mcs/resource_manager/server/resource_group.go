@@ -20,7 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
@@ -73,14 +72,8 @@ func (rg *ResourceGroup) String() string {
 	return string(res)
 }
 
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/resource_group.go
-// Copy copies the resource group.
-func (rg *ResourceGroup) Copy() *ResourceGroup {
-	// TODO: use a better way to copy
-=======
 // Clone copies the resource group.
-func (rg *ResourceGroup) Clone(withStats bool) *ResourceGroup {
->>>>>>> ed9685a79 (resource_mananger: deep clone resource group (#7623)):pkg/mcs/resourcemanager/server/resource_group.go
+func (rg *ResourceGroup) Clone() *ResourceGroup {
 	rg.RLock()
 	defer rg.RUnlock()
 	newRG := &ResourceGroup{
@@ -89,23 +82,7 @@ func (rg *ResourceGroup) Clone(withStats bool) *ResourceGroup {
 		Priority:   rg.Priority,
 		RUSettings: rg.RUSettings.Clone(),
 	}
-	if rg.Runaway != nil {
-		newRG.Runaway = proto.Clone(rg.Runaway).(*rmpb.RunawaySettings)
-	}
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/resource_group.go
-	return &newRG
-=======
-
-	if rg.Background != nil {
-		newRG.Background = proto.Clone(rg.Background).(*rmpb.BackgroundSettings)
-	}
-
-	if withStats && rg.RUConsumption != nil {
-		newRG.RUConsumption = proto.Clone(rg.RUConsumption).(*rmpb.Consumption)
-	}
-
 	return newRG
->>>>>>> ed9685a79 (resource_mananger: deep clone resource group (#7623)):pkg/mcs/resourcemanager/server/resource_group.go
 }
 
 func (rg *ResourceGroup) getRUToken() float64 {
