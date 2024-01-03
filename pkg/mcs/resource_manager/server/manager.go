@@ -278,7 +278,7 @@ func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
-		return group.Copy()
+		return group.Clone()
 	}
 	return nil
 }
@@ -298,7 +298,7 @@ func (m *Manager) GetResourceGroupList() []*ResourceGroup {
 	m.RLock()
 	res := make([]*ResourceGroup, 0, len(m.groups))
 	for _, group := range m.groups {
-		res = append(res, group.Copy())
+		res = append(res, group.Clone())
 	}
 	m.RUnlock()
 	sort.Slice(res, func(i, j int) bool {
