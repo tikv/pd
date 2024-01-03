@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -49,6 +50,8 @@ type Client interface {
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
 	SetScheduleConfig(context.Context, map[string]interface{}) error
 	GetClusterVersion(context.Context) (string, error)
+	GetCluster(context.Context) (*metapb.Cluster, error)
+	GetClusterStatus(context.Context) (*ClusterState, error)
 	GetReplicateConfig(context.Context) (map[string]interface{}, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
@@ -76,6 +79,7 @@ type Client interface {
 	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+	GetPDVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]string, error)
 
@@ -359,6 +363,34 @@ func (c *client) GetClusterVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return version, nil
+}
+
+// GetCluster gets the cluster meta information.
+func (c *client) GetCluster(ctx context.Context) (*metapb.Cluster, error) {
+	var clusterInfo *metapb.Cluster
+	err := c.request(ctx, newRequestInfo().
+		WithName(getClusterName).
+		WithURI(Cluster).
+		WithMethod(http.MethodGet).
+		WithResp(&clusterInfo))
+	if err != nil {
+		return nil, err
+	}
+	return clusterInfo, nil
+}
+
+// GetClusterStatus gets the cluster status.
+func (c *client) GetClusterStatus(ctx context.Context) (*ClusterState, error) {
+	var clusterStatus *ClusterState
+	err := c.request(ctx, newRequestInfo().
+		WithName(getClusterName).
+		WithURI(ClusterStatus).
+		WithMethod(http.MethodGet).
+		WithResp(&clusterStatus))
+	if err != nil {
+		return nil, err
+	}
+	return clusterStatus, nil
 }
 
 // GetReplicateConfig gets the replication configurations.
@@ -722,4 +754,17 @@ func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]
 		return nil, err
 	}
 	return members, nil
+}
+
+// GetPDVersion gets the release version of the PD binary.
+func (c *client) GetPDVersion(ctx context.Context) (string, error) {
+	var ver struct {
+		Version string `json:"version"`
+	}
+	err := c.request(ctx, newRequestInfo().
+		WithName(getPDVersionName).
+		WithURI(Version).
+		WithMethod(http.MethodGet).
+		WithResp(&ver))
+	return ver.Version, err
 }
