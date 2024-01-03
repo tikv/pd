@@ -1,20 +1,19 @@
-pd-simulator
-========
+# pd-simulator
 
 pd-simulator is a tool to reproduce some scenarios and evaluate the schedulers' efficiency.
 
 ## Build
-1. [Go](https://golang.org/) Version 1.9 or later
-2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make simulator` command to compile and generate `bin/pd-simulator`
 
+1. [Go](https://golang.org/) Version 1.21 or later
+2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make simulator` command to compile and generate `bin/pd-simulator`
 
 ## Usage
 
 This section describes how to use the simulator.
 
-### Flags description
+### Flags Description
 
-```
+```shell
 -pd string
       Specify a PD address (if this parameter is not set, it will start a PD server from the simulator inside)
 -config string
@@ -29,12 +28,18 @@ This section describes how to use the simulator.
 
 Run all cases:
 
-    ./pd-simulator
+```shell
+./pd-simulator
+```
 
 Run a specific case with an internal PD:
 
-    ./pd-simulator -case="casename"
+```shell
+./pd-simulator -case="casename"
+```
 
 Run a specific case with an external PD:
 
-    ./pd-simulator -pd="http://127.0.0.1:2379" -case="casename"
+```shell
+./pd-simulator -pd="http://127.0.0.1:2379" -case="casename"
+```
