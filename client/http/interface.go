@@ -51,7 +51,7 @@ type Client interface {
 	SetScheduleConfig(context.Context, map[string]interface{}) error
 	GetClusterVersion(context.Context) (string, error)
 	GetCluster(context.Context) (*metapb.Cluster, error)
-	GetClusterStatus(context.Context) (*ClusterStatus, error)
+	GetClusterStatus(context.Context) (*ClusterState, error)
 	GetReplicateConfig(context.Context) (map[string]interface{}, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
@@ -369,7 +369,7 @@ func (c *client) GetCluster(ctx context.Context) (*metapb.Cluster, error) {
 	var clusterInfo *metapb.Cluster
 	err := c.request(ctx, newRequestInfo().
 		WithName(getClusterName).
-		WithURI(ClusterPrefix).
+		WithURI(Cluster).
 		WithMethod(http.MethodGet).
 		WithResp(&clusterInfo))
 	if err != nil {
@@ -379,11 +379,11 @@ func (c *client) GetCluster(ctx context.Context) (*metapb.Cluster, error) {
 }
 
 // GetClusterStatus gets the cluster status.
-func (c *client) GetClusterStatus(ctx context.Context) (*ClusterStatus, error) {
-	var clusterStatus *ClusterStatus
+func (c *client) GetClusterStatus(ctx context.Context) (*ClusterState, error) {
+	var clusterStatus *ClusterState
 	err := c.request(ctx, newRequestInfo().
 		WithName(getClusterName).
-		WithURI(ClusterStatusPrefix).
+		WithURI(ClusterStatus).
 		WithMethod(http.MethodGet).
 		WithResp(&clusterStatus))
 	if err != nil {

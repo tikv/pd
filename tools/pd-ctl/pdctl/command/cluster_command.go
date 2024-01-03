@@ -41,7 +41,7 @@ func NewClusterStatusCommand() *cobra.Command {
 	return r
 }
 
-func showClusterCommandFunc(cmd *cobra.Command, args []string) {
+func showClusterCommandFunc(cmd *cobra.Command, _ []string) {
 	info, err := PDCli.GetCluster(context.Background())
 	if err != nil {
 		cmd.Printf("Failed to get the cluster information: %s\n", err)
@@ -50,7 +50,7 @@ func showClusterCommandFunc(cmd *cobra.Command, args []string) {
 	jsonPrint(cmd, info)
 }
 
-func showClusterStatusCommandFunc(cmd *cobra.Command, args []string) {
+func showClusterStatusCommandFunc(cmd *cobra.Command, _ []string) {
 	status, err := PDCli.GetClusterStatus(context.Background())
 	if err != nil {
 		cmd.Printf("Failed to get the cluster status: %s\n", err)
