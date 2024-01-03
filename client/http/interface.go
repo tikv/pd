@@ -725,7 +725,7 @@ func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]
 	return members, nil
 }
 
-// GetVersion gets the release version of the PD binary.
+// GetPDVersion gets the release version of the PD binary.
 func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 	var ver struct {
 		Version string `json:"version"`
