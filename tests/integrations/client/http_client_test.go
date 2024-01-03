@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 )
 
@@ -477,4 +478,11 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
+}
+
+func (suite *httpClientTestSuite) TestVersion() {
+	re := suite.Require()
+	ver, err := suite.client.GetPDVersion(suite.ctx)
+	re.NoError(err)
+	re.Equal(versioninfo.PDReleaseVersion, ver)
 }
