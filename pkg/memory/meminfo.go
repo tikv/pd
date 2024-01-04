@@ -52,10 +52,10 @@ func MemTotalNormal() (uint64, error) {
 	if time.Since(t) < 60*time.Second {
 		return total, nil
 	}
-	return totalMem()
+	return memTotalNormal()
 }
 
-func totalMem() (uint64, error) {
+func memTotalNormal() (uint64, error) {
 	v, err := mem.VirtualMemory()
 	if err != nil {
 		return 0, err
@@ -200,7 +200,7 @@ func InitMemoryHook() {
 	if err != nil {
 		return
 	}
-	physicalValue, err := totalMem()
+	physicalValue, err := memTotalNormal()
 	if err != nil {
 		return
 	}
