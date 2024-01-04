@@ -53,6 +53,7 @@ type apiKind int
 
 const (
 	forwardAPIKind apiKind = iota
+	regionAPIKind
 	apiKindCount
 )
 
@@ -445,7 +446,7 @@ func newPDServiceDiscovery(
 		ctx:                 ctx,
 		cancel:              cancel,
 		wg:                  wg,
-		apiCandidateNodes:   [apiKindCount]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn)},
+		apiCandidateNodes:   [apiKindCount]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn), newPDServiceBalancer(regionAPIErrorFn)},
 		serviceModeUpdateCb: serviceModeUpdateCb,
 		updateKeyspaceIDCb:  updateKeyspaceIDCb,
 		keyspaceID:          keyspaceID,
@@ -563,6 +564,7 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 		}
 	}
 }
+
 func (c *pdServiceDiscovery) memberHealthCheckLoop() {
 	defer c.wg.Done()
 

@@ -38,6 +38,8 @@ import (
 const (
 	// ForwardMetadataKey is used to record the forwarded host of PD.
 	ForwardMetadataKey = "pd-forwarded-host"
+	// FollowerHandleMetadataKey is used to mark the permit of follower handle.
+	FollowerHandleMetadataKey = "pd-allow-follower-handle"
 )
 
 // TLSConfig is the configuration for supporting tls.
@@ -173,13 +175,24 @@ func ResetForwardContext(ctx context.Context) context.Context {
 func GetForwardedHost(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		log.Debug("failed to get forwarding metadata")
+		log.Debug("failed to get gRPC incoming metadata when getting forwarded host")
 		return ""
 	}
 	if t, ok := md[ForwardMetadataKey]; ok {
 		return t[0]
 	}
 	return ""
+}
+
+// IsFollowerHandleEnabled returns the follower host in metadata.
+func IsFollowerHandleEnabled(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		log.Debug("failed to get gRPC incoming metadata when checking follower handle is enabled")
+		return false
+	}
+	_, ok = md[FollowerHandleMetadataKey]
+	return ok
 }
 
 func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
