@@ -86,6 +86,7 @@ func (suite *memberTestSuite) TearDownTest() {
 	for _, cleanup := range suite.cleanupFunc {
 		cleanup()
 	}
+	suite.dialClient.Close()
 	suite.cluster.Destroy()
 }
 

@@ -43,6 +43,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -273,8 +274,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
-	s.serviceRateLimiter = ratelimit.NewController()
-	s.grpcServiceRateLimiter = ratelimit.NewController()
+	s.serviceRateLimiter = ratelimit.NewController(s.ctx, "http", apiConcurrencyGauge)
+	s.grpcServiceRateLimiter = ratelimit.NewController(s.ctx, "grpc", apiConcurrencyGauge)
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.grpcServiceLabels = make(map[string]struct{})
@@ -382,9 +383,11 @@ func (s *Server) startEtcd(ctx context.Context) error {
 }
 
 func (s *Server) initGRPCServiceLabels() {
-	for _, serviceInfo := range s.grpcServer.GetServiceInfo() {
-		for _, methodInfo := range serviceInfo.Methods {
-			s.grpcServiceLabels[methodInfo.Name] = struct{}{}
+	for name, serviceInfo := range s.grpcServer.GetServiceInfo() {
+		if name == gRPCServiceName {
+			for _, methodInfo := range serviceInfo.Methods {
+				s.grpcServiceLabels[methodInfo.Name] = struct{}{}
+			}
 		}
 	}
 }
@@ -428,7 +431,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
-	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
 	s.rootPath = endpoint.PDRootPath(s.clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
@@ -502,9 +505,17 @@ func (s *Server) startServer(ctx context.Context) error {
 		cb()
 	}
 
+	// to init all rate limiter and metrics
+	for service := range s.serviceLabels {
+		s.serviceRateLimiter.Update(service, ratelimit.InitLimiter())
+	}
+	for service := range s.grpcServiceLabels {
+		s.grpcServiceRateLimiter.Update(service, ratelimit.InitLimiter())
+	}
+
 	// Server has started.
 	atomic.StoreInt64(&s.isRunning, 1)
-	serverMaxProcs.Set(float64(runtime.GOMAXPROCS(0)))
+	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 	return nil
 }
 
@@ -559,6 +570,8 @@ func (s *Server) Close() {
 		}
 	}
 
+	s.grpcServiceRateLimiter.Close()
+	s.serviceRateLimiter.Close()
 	// Run callbacks
 	log.Info("triggering the close callback functions")
 	for _, cb := range s.closeCallbacks {

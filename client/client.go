@@ -17,29 +17,22 @@ package pd
 import (
 	"context"
 	"fmt"
-	"math/rand"
 	"runtime/trace"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -217,9 +210,6 @@ func WithAllowFollowerHandle() GetRegionOption {
 	return func(op *GetRegionOp) { op.allowFollowerHandle = true }
 }
 
-// LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
-var LeaderHealthCheckInterval = time.Second
-
 var (
 	// errUnmatchedClusterID is returned when found a PD with a different cluster ID.
 	errUnmatchedClusterID = errors.New("[pd] unmatched cluster id")
@@ -308,7 +298,7 @@ func (k *serviceModeKeeper) close() {
 type client struct {
 	keyspaceID      uint32
 	svrUrls         []string
-	pdSvcDiscovery  ServiceDiscovery
+	pdSvcDiscovery  *pdServiceDiscovery
 	tokenDispatcher *tokenDispatcher
 
 	// For service mode switching.
@@ -316,7 +306,6 @@ type client struct {
 
 	// For internal usage.
 	updateTokenConnectionCh chan struct{}
-	leaderNetworkFailure    int32
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -514,7 +503,7 @@ func newClientWithKeyspaceName(
 			return err
 		}
 		// c.keyspaceID is the source of truth for keyspace id.
-		c.pdSvcDiscovery.(*pdServiceDiscovery).SetKeyspaceID(c.keyspaceID)
+		c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
 		return nil
 	}
 
@@ -575,10 +564,6 @@ func (c *client) setup() error {
 
 	// Create dispatchers
 	c.createTokenDispatcher()
-
-	// Start the daemons.
-	c.wg.Add(1)
-	go c.leaderCheckLoop()
 	return nil
 }
 
@@ -719,46 +704,6 @@ func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
 	return nil
 }
 
-func (c *client) leaderCheckLoop() {
-	defer c.wg.Done()
-
-	leaderCheckLoopCtx, leaderCheckLoopCancel := context.WithCancel(c.ctx)
-	defer leaderCheckLoopCancel()
-
-	ticker := time.NewTicker(LeaderHealthCheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker.C:
-			c.checkLeaderHealth(leaderCheckLoopCtx)
-		}
-	}
-}
-
-func (c *client) checkLeaderHealth(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	defer cancel()
-	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
-		healthCli := healthpb.NewHealthClient(client)
-		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
-		failpoint.Inject("unreachableNetwork1", func() {
-			resp = nil
-			err = status.New(codes.Unavailable, "unavailable").Err()
-		})
-		rpcErr, ok := status.FromError(err)
-		if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
-			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
-		} else {
-			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(0))
-		}
-	} else {
-		atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
-	}
-}
-
 func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	start := time.Now()
 	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
@@ -778,50 +723,31 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	return resp.GetMembers(), nil
 }
 
-// leaderClient gets the client of current PD leader.
-func (c *client) leaderClient() pdpb.PDClient {
-	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
-		return pdpb.NewPDClient(client)
-	}
-	return nil
-}
-
-// backupClientConn gets a grpc client connection of the current reachable and healthy
-// backup service endpoints randomly. Backup service endpoints are followers in a
-// quorum-based cluster or secondaries in a primary/secondary configured cluster.
-func (c *client) backupClientConn() (*grpc.ClientConn, string) {
-	addrs := c.pdSvcDiscovery.GetBackupAddrs()
-	if len(addrs) < 1 {
-		return nil, ""
-	}
-	var (
-		cc  *grpc.ClientConn
-		err error
-	)
-	for i := 0; i < len(addrs); i++ {
-		addr := addrs[rand.Intn(len(addrs))]
-		if cc, err = c.pdSvcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
-			continue
-		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
-		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-		healthCancel()
-		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			return cc, addr
-		}
-	}
-	return nil, ""
-}
-
+// getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
+// follower pd client and the context which holds forward information.
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
-	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
-		backupClientConn, addr := c.backupClientConn()
-		if backupClientConn != nil {
-			log.Debug("[pd] use follower client", zap.String("addr", addr))
-			return pdpb.NewPDClient(backupClientConn), grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	serviceClient := c.pdSvcDiscovery.GetServiceClient()
+	if serviceClient == nil {
+		return nil, ctx
+	}
+	return pdpb.NewPDClient(serviceClient.GetClientConn()), serviceClient.BuildGRPCTargetContext(ctx, true)
+}
+
+// getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
+// follower pd client and the context which holds forward information.
+func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (ServiceClient, context.Context) {
+	var serviceClient ServiceClient
+	if allowFollower {
+		serviceClient = c.pdSvcDiscovery.getServiceClientByKind(regionAPIKind)
+		if serviceClient != nil {
+			return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 		}
 	}
-	return c.leaderClient(), ctx
+	serviceClient = c.pdSvcDiscovery.GetServiceClient()
+	if serviceClient == nil {
+		return nil, ctx
+	}
+	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
@@ -930,10 +856,6 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
-func isNetworkError(code codes.Code) bool {
-	return code == codes.Unavailable || code == codes.DeadlineExceeded
-}
-
 func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, opts ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
@@ -980,6 +902,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 
 	options := &GetRegionOp{}
 	for _, opt := range opts {
@@ -990,13 +913,18 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 		RegionKey:   key,
 		NeedBuckets: options.needBuckets,
 	}
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
-		cancel()
+	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetRegion(ctx, req)
-	cancel()
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetRegion(cctx, req)
+	}
 
 	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1012,6 +940,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 	start := time.Now()
 	defer func() { cmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 
 	options := &GetRegionOp{}
 	for _, opt := range opts {
@@ -1022,13 +951,18 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 		RegionKey:   key,
 		NeedBuckets: options.needBuckets,
 	}
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
-		cancel()
+	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetPrevRegion(ctx, req)
-	cancel()
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetPrevRegion(cctx, req)
+	}
 
 	if err = c.respForErr(cmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1044,6 +978,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 	start := time.Now()
 	defer func() { cmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 
 	options := &GetRegionOp{}
 	for _, opt := range opts {
@@ -1054,13 +989,18 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 		RegionId:    regionID,
 		NeedBuckets: options.needBuckets,
 	}
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
-		cancel()
+	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetRegionByID(ctx, req)
-	cancel()
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetRegionByID(cctx, req)
+	}
 
 	if err = c.respForErr(cmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1082,18 +1022,28 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		scanCtx, cancel = context.WithTimeout(ctx, c.option.timeout)
 		defer cancel()
 	}
+	options := &GetRegionOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	req := &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	}
-	protoClient, scanCtx := c.getClientAndContext(scanCtx)
-	if protoClient == nil {
-		cancel()
+	serviceClient, cctx := c.getRegionAPIClientAndContext(scanCtx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.ScanRegions(scanCtx, req)
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
+	if !serviceClient.IsConnectedToLeader() && err != nil || resp.Header.GetError() != nil {
+		protoClient, cctx := c.getClientAndContext(scanCtx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.ScanRegions(cctx, req)
+	}
 
 	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err

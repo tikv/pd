@@ -49,6 +49,22 @@ type GroupTokenBucket struct {
 	GroupTokenBucketState `json:"state,omitempty"`
 }
 
+// Clone returns the deep copy of GroupTokenBucket
+func (gtb *GroupTokenBucket) Clone() *GroupTokenBucket {
+	if gtb == nil {
+		return nil
+	}
+	var settings *rmpb.TokenLimitSettings
+	if gtb.Settings != nil {
+		settings = proto.Clone(gtb.Settings).(*rmpb.TokenLimitSettings)
+	}
+	stateClone := *gtb.GroupTokenBucketState.Clone()
+	return &GroupTokenBucket{
+		Settings:              settings,
+		GroupTokenBucketState: stateClone,
+	}
+}
+
 func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 	gtb.Tokens = state.Tokens
 	gtb.LastUpdate = state.LastUpdate
@@ -85,10 +101,14 @@ type GroupTokenBucketState struct {
 
 // Clone returns the copy of GroupTokenBucketState
 func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
-	tokenSlots := make(map[uint64]*TokenSlot)
-	for id, tokens := range gts.tokenSlots {
-		tokenSlots[id] = tokens
+	var tokenSlots map[uint64]*TokenSlot
+	if gts.tokenSlots != nil {
+		tokenSlots = make(map[uint64]*TokenSlot)
+		for id, tokens := range gts.tokenSlots {
+			tokenSlots[id] = tokens
+		}
 	}
+
 	var lastUpdate *time.Time
 	if gts.LastUpdate != nil {
 		newLastUpdate := *gts.LastUpdate
@@ -272,7 +292,7 @@ func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
 	if gtb.Settings.FillRate == 0 {
 		gtb.Settings.FillRate = defaultRefillRate
 	}
-	if gtb.Tokens < defaultInitialTokens {
+	if gtb.Tokens < defaultInitialTokens && gtb.Settings.BurstLimit > 0 {
 		gtb.Tokens = defaultInitialTokens
 	}
 	// init slot
@@ -291,20 +311,22 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	var elapseTokens float64
 	if !gtb.Initialized {
 		gtb.init(now, clientUniqueID)
-	} else if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
-		elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens
-		gtb.lastBurstTokens = 0
-		gtb.Tokens += elapseTokens
-		gtb.LastUpdate = &now
+	} else if burst := float64(burstLimit); burst > 0 {
+		if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
+			elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens
+			gtb.lastBurstTokens = 0
+			gtb.Tokens += elapseTokens
+		}
+		if gtb.Tokens > burst {
+			elapseTokens -= gtb.Tokens - burst
+			gtb.Tokens = burst
+		}
 	}
+	gtb.LastUpdate = &now
 	// Reloan when setting changed
 	if gtb.settingChanged && gtb.Tokens <= 0 {
 		elapseTokens = 0
 		gtb.resetLoan()
-	}
-	if burst := float64(burstLimit); burst > 0 && gtb.Tokens > burst {
-		elapseTokens -= gtb.Tokens - burst
-		gtb.Tokens = burst
 	}
 	// Balance each slots.
 	gtb.balanceSlotTokens(clientUniqueID, gtb.Settings, requiredToken, elapseTokens)

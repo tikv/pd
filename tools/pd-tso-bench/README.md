@@ -1,12 +1,11 @@
-pd-tso-bench
-========
+# pd-tso-bench
 
 pd-tso-bench is a tool to benchmark GetTS performance.
 
 ## Build
-1. [Go](https://golang.org/) Version 1.9 or later
-2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make` command to compile and generate `bin/pd-tso-bench`
 
+1. [Go](https://golang.org/) Version 1.21 or later
+2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make` command to compile and generate `bin/pd-tso-bench`
 
 ## Usage
 
@@ -14,7 +13,7 @@ This section describes how to benchmark the GetTS performance.
 
 ### Flags description
 
-```
+```shell
 -c int
   concurrency (default 1000)
 -cacert string
@@ -35,12 +34,14 @@ This section describes how to benchmark the GetTS performance.
   path of file that contains X509 key in PEM format
 -pd string
   pd address (default "127.0.0.1:2379")
--v	output statistics info every interval and output metrics info at the end
+-v output statistics info every interval and output metrics info at the end
 ```
 
 Benchmark the GetTS performance:
 
+```shell
     ./pd-tso-bench -v -duration 5s
+```
 
 It will print some benchmark results like:
 

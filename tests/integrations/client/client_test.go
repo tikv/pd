@@ -518,117 +518,37 @@ func TestCustomTimeout(t *testing.T) {
 	re.Less(time.Since(start), 2*time.Second)
 }
 
-func TestGetRegionByFollowerForwarding(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
-	cluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster.Destroy()
+type followerForwardAndHandleTestSuite struct {
+	suite.Suite
+	ctx   context.Context
+	clean context.CancelFunc
 
-	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints, pd.WithForwardingOption(true))
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
-	time.Sleep(200 * time.Millisecond)
-	r, err := cli.GetRegion(context.Background(), []byte("a"))
-	re.NoError(err)
-	re.NotNil(r)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
-	time.Sleep(200 * time.Millisecond)
-	r, err = cli.GetRegion(context.Background(), []byte("a"))
-	re.NoError(err)
-	re.NotNil(r)
+	cluster   *tests.TestCluster
+	endpoints []string
+	regionID  uint64
 }
 
-// case 1: unreachable -> normal
-func TestGetTsoByFollowerForwarding1(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
-	cluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints, pd.WithForwardingOption(true))
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
-	var lastTS uint64
-	testutil.Eventually(re, func() bool {
-		physical, logical, err := cli.GetTS(context.TODO())
-		if err == nil {
-			lastTS = tsoutil.ComposeTS(physical, logical)
-			return true
-		}
-		t.Log(err)
-		return false
-	})
-
-	lastTS = checkTS(re, cli, lastTS)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
-	time.Sleep(2 * time.Second)
-	checkTS(re, cli, lastTS)
+func TestFollowerForwardAndHandleTestSuite(t *testing.T) {
+	suite.Run(t, new(followerForwardAndHandleTestSuite))
 }
 
-// case 2: unreachable -> leader transfer -> normal
-func TestGetTsoByFollowerForwarding2(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
-	cluster, err := tests.NewTestCluster(ctx, 3)
+func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
+	re := suite.Require()
+	suite.ctx, suite.clean = context.WithCancel(context.Background())
+	pd.MemberHealthCheckInterval = 100 * time.Millisecond
+	cluster, err := tests.NewTestCluster(suite.ctx, 3)
 	re.NoError(err)
-	defer cluster.Destroy()
-
-	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints, pd.WithForwardingOption(true))
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
-	var lastTS uint64
-	testutil.Eventually(re, func() bool {
-		physical, logical, err := cli.GetTS(context.TODO())
-		if err == nil {
-			lastTS = tsoutil.ComposeTS(physical, logical)
-			return true
-		}
-		t.Log(err)
-		return false
-	})
-
-	lastTS = checkTS(re, cli, lastTS)
-	re.NoError(cluster.GetLeaderServer().ResignLeader())
-	re.NotEmpty(cluster.WaitLeader())
-	lastTS = checkTS(re, cli, lastTS)
-
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
-	time.Sleep(5 * time.Second)
-	checkTS(re, cli, lastTS)
-}
-
-// case 3: network partition between client and follower A -> transfer leader to follower A -> normal
-func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	pd.LeaderHealthCheckInterval = 100 * time.Millisecond
-	cluster, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster.Destroy()
-
-	endpoints := runServer(re, cluster)
-	re.NotEmpty(cluster.WaitLeader())
+	suite.cluster = cluster
+	suite.endpoints = runServer(re, cluster)
+	cluster.WaitLeader()
 	leader := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
+	suite.regionID = regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
-		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(ctx)
+		regionHeartbeat, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 		re.NoError(err)
-		regionID := regionIDAllocator.alloc()
 		region := &metapb.Region{
-			Id: regionID,
+			Id: suite.regionID,
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: 1,
 				Version: 1,
@@ -645,10 +565,43 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 		_, err = regionHeartbeat.Recv()
 		return err == nil
 	})
-	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+}
 
-	cli := setupCli(re, ctx, endpoints, pd.WithForwardingOption(true))
+func (suite *followerForwardAndHandleTestSuite) TearDownTest() {
+}
+
+func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
+	suite.cluster.Destroy()
+	suite.clean()
+}
+
+func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwarding() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cli := setupCli(re, ctx, suite.endpoints, pd.WithForwardingOption(true))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	time.Sleep(200 * time.Millisecond)
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
+	re.NoError(err)
+	re.NotNil(r)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	time.Sleep(200 * time.Millisecond)
+	r, err = cli.GetRegion(context.Background(), []byte("a"))
+	re.NoError(err)
+	re.NotNil(r)
+}
+
+// case 1: unreachable -> normal
+func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	cli := setupCli(re, ctx, suite.endpoints, pd.WithForwardingOption(true))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
@@ -656,7 +609,66 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 			lastTS = tsoutil.ComposeTS(physical, logical)
 			return true
 		}
-		t.Log(err)
+		suite.T().Log(err)
+		return false
+	})
+
+	lastTS = checkTS(re, cli, lastTS)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+	time.Sleep(2 * time.Second)
+	checkTS(re, cli, lastTS)
+}
+
+// case 2: unreachable -> leader transfer -> normal
+func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	cli := setupCli(re, ctx, suite.endpoints, pd.WithForwardingOption(true))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
+	var lastTS uint64
+	testutil.Eventually(re, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		suite.T().Log(err)
+		return false
+	})
+
+	lastTS = checkTS(re, cli, lastTS)
+	re.NoError(suite.cluster.GetLeaderServer().ResignLeader())
+	re.NotEmpty(suite.cluster.WaitLeader())
+	lastTS = checkTS(re, cli, lastTS)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
+	time.Sleep(5 * time.Second)
+	checkTS(re, cli, lastTS)
+}
+
+// case 3: network partition between client and follower A -> transfer leader to follower A -> normal
+func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerForwarding() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cluster := suite.cluster
+	leader := cluster.GetLeaderServer()
+
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+
+	cli := setupCli(re, ctx, suite.endpoints, pd.WithForwardingOption(true))
+	var lastTS uint64
+	testutil.Eventually(re, func() bool {
+		physical, logical, err := cli.GetTS(context.TODO())
+		if err == nil {
+			lastTS = tsoutil.ComposeTS(physical, logical)
+			return true
+		}
+		suite.T().Log(err)
 		return false
 	})
 	lastTS = checkTS(re, cli, lastTS)
@@ -672,7 +684,7 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 			lastTS = tsoutil.ComposeTS(physical, logical)
 			return true
 		}
-		t.Log(err)
+		suite.T().Log(err)
 		return false
 	})
 	lastTS = checkTS(re, cli, lastTS)
@@ -691,7 +703,7 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 			lastTS = tsoutil.ComposeTS(physical, logical)
 			return true
 		}
-		t.Log(err)
+		suite.T().Log(err)
 		return false
 	})
 	lastTS = checkTS(re, cli, lastTS)
@@ -702,6 +714,99 @@ func TestGetTsoAndRegionByFollowerForwarding(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cluster := suite.cluster
+	cli := setupCli(re, ctx, suite.endpoints)
+	cli.UpdateOption(pd.EnableFollowerHandle, true)
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+	testutil.Eventually(re, func() bool {
+		ret := true
+		for _, s := range cluster.GetServers() {
+			if s.IsLeader() {
+				continue
+			}
+			if !s.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning() {
+				ret = false
+			}
+		}
+		return ret
+	})
+	// follower have no region
+	cnt := 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+
+	// because we can't check whether this request is processed by followers from response,
+	// we can disable forward and make network problem for leader.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	time.Sleep(150 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+
+	// make network problem for follower.
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	time.Sleep(100 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+
+	// follower client failed will retry by leader service client.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/followerHandleError", "return(true)"))
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/followerHandleError"))
+
+	// test after being healthy
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastCheckAvailable", "return(true)"))
+	time.Sleep(100 * time.Millisecond)
+	cnt = 0
+	for i := 0; i < 100; i++ {
+		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		if err == nil && resp != nil {
+			cnt++
+		}
+		re.Equal(resp.Meta.Id, suite.regionID)
+	}
+	re.Equal(100, cnt)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
 }
 
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {
