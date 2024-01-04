@@ -373,15 +373,15 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 
 			var (
 				name                     = consumptionInfo.resourceGroupName
-				rruMetrics               = readRequestUnitCost.WithLabelValues(name, ruLabelType)
-				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, ruLabelType)
-				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name)
-				readByteMetrics          = readByteCost.WithLabelValues(name, ruLabelType)
-				writeByteMetrics         = writeByteCost.WithLabelValues(name, ruLabelType)
-				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, ruLabelType)
-				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, ruLabelType)
-				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
-				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name, name, ruLabelType)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, name, ruLabelType)
+				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name, name)
+				readByteMetrics          = readByteCost.WithLabelValues(name, name, ruLabelType)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name, name, ruLabelType)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, name, ruLabelType)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, name, ruLabelType)
+				readRequestCountMetrics  = requestCount.WithLabelValues(name, name, readTypeLabel)
+				writeRequestCountMetrics = requestCount.WithLabelValues(name, name, writeTypeLabel)
 			)
 			// RU info.
 			if consumption.RRU > 0 {
@@ -419,16 +419,16 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			// Clean up the metrics that have not been updated for a long time.
 			for name, lastTime := range m.consumptionRecord {
 				if time.Since(lastTime) > metricsCleanupTimeout {
-					readRequestUnitCost.DeleteLabelValues(name)
-					writeRequestUnitCost.DeleteLabelValues(name)
-					sqlLayerRequestUnitCost.DeleteLabelValues(name)
-					readByteCost.DeleteLabelValues(name)
-					writeByteCost.DeleteLabelValues(name)
-					kvCPUCost.DeleteLabelValues(name)
-					sqlCPUCost.DeleteLabelValues(name)
-					requestCount.DeleteLabelValues(name, readTypeLabel)
-					requestCount.DeleteLabelValues(name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(name)
+					readRequestUnitCost.DeleteLabelValues(name, name)
+					writeRequestUnitCost.DeleteLabelValues(name, name)
+					sqlLayerRequestUnitCost.DeleteLabelValues(name, name)
+					readByteCost.DeleteLabelValues(name, name)
+					writeByteCost.DeleteLabelValues(name, name)
+					kvCPUCost.DeleteLabelValues(name, name)
+					sqlCPUCost.DeleteLabelValues(name, name)
+					requestCount.DeleteLabelValues(name, name, readTypeLabel)
+					requestCount.DeleteLabelValues(name, name, writeTypeLabel)
+					availableRUCounter.DeleteLabelValues(name, name)
 					delete(m.consumptionRecord, name)
 				}
 			}
@@ -442,7 +442,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if ru < 0 {
 					ru = 0
 				}
-				availableRUCounter.WithLabelValues(name).Set(ru)
+				availableRUCounter.WithLabelValues(name, name).Set(ru)
 			}
 			m.RUnlock()
 		}
