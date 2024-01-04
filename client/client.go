@@ -359,7 +359,7 @@ func createClientWithKeyspace(
 	ctx context.Context, keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	pdTLSCfg := &tlsutil.TLSConfig{
+	tlsCfg, err := tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
 		KeyPath:  security.KeyPath,
@@ -367,8 +367,7 @@ func createClientWithKeyspace(
 		SSLCABytes:   security.SSLCABytes,
 		SSLCertBytes: security.SSLCertBytes,
 		SSLKEYBytes:  security.SSLKEYBytes,
-	}
-	tlsCfg, err := pdTLSCfg.ToTLSConfig()
+	}.ToTLSConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +476,7 @@ func newClientWithKeyspaceName(
 	ctx context.Context, keyspaceName string, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	pdTLSCfg := &tlsutil.TLSConfig{
+	tlsCfg, err := tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
 		KeyPath:  security.KeyPath,
@@ -485,8 +484,7 @@ func newClientWithKeyspaceName(
 		SSLCABytes:   security.SSLCABytes,
 		SSLCertBytes: security.SSLCertBytes,
 		SSLKEYBytes:  security.SSLKEYBytes,
-	}
-	tlsCfg, err := pdTLSCfg.ToTLSConfig()
+	}.ToTLSConfig()
 	if err != nil {
 		return nil, err
 	}
