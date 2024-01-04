@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -112,19 +111,15 @@ func getValueFromMetadata(ctx context.Context, key string, f func(context.Contex
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.
 // Returns the old one if's already existed in the clientConns; otherwise creates a new one and returns it.
-func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tlsutil.TLSConfig, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
+func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tls.Config, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
 	conn, ok := clientConns.Load(addr)
 	if ok {
 		// TODO: check the connection state.
 		return conn.(*grpc.ClientConn), nil
 	}
-	tlsConfig, err := tlsCfg.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
 	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	cc, err := GetClientConn(dCtx, addr, tlsConfig, opt...)
+	cc, err := GetClientConn(dCtx, addr, tlsCfg, opt...)
 	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
 		if val, ok := val.(string); ok && val == addr {
 			cc = nil

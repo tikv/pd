@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"runtime/trace"
 	"strings"
@@ -310,7 +311,7 @@ type client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	tlsCfg *tlsutil.TLSConfig
+	tlsCfg *tls.Config
 	option *option
 }
 
@@ -358,7 +359,7 @@ func createClientWithKeyspace(
 	ctx context.Context, keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	tlsCfg := &tlsutil.TLSConfig{
+	pdTlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
 		KeyPath:  security.KeyPath,
@@ -367,7 +368,10 @@ func createClientWithKeyspace(
 		SSLCertBytes: security.SSLCertBytes,
 		SSLKEYBytes:  security.SSLKEYBytes,
 	}
-
+	tlsCfg, err := pdTlsCfg.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
 		updateTokenConnectionCh: make(chan struct{}, 1),
@@ -473,7 +477,7 @@ func newClientWithKeyspaceName(
 	ctx context.Context, keyspaceName string, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	tlsCfg := &tlsutil.TLSConfig{
+	pdTlsCfg := &tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
 		KeyPath:  security.KeyPath,
@@ -482,7 +486,10 @@ func newClientWithKeyspaceName(
 		SSLCertBytes: security.SSLCertBytes,
 		SSLKEYBytes:  security.SSLKEYBytes,
 	}
-
+	tlsCfg, err := pdTlsCfg.ToTLSConfig()
+	if err != nil {
+		return nil, err
+	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
 		updateTokenConnectionCh: make(chan struct{}, 1),

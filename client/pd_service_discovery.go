@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"crypto/tls"
 	"reflect"
 	"sort"
 	"strings"
@@ -30,7 +31,6 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/retry"
-	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -427,7 +427,7 @@ type pdServiceDiscovery struct {
 
 	updateKeyspaceIDCb updateKeyspaceIDFunc
 	keyspaceID         uint32
-	tlsCfg             *tlsutil.TLSConfig
+	tlsCfg             *tls.Config
 	// Client option.
 	option *option
 }
@@ -439,7 +439,7 @@ func newPDServiceDiscovery(
 	serviceModeUpdateCb func(pdpb.ServiceMode),
 	updateKeyspaceIDCb updateKeyspaceIDFunc,
 	keyspaceID uint32,
-	urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
+	urls []string, tlsCfg *tls.Config, option *option,
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
 		checkMembershipCh:   make(chan struct{}, 1),
