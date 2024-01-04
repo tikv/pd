@@ -292,7 +292,7 @@ func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
 	if gtb.Settings.FillRate == 0 {
 		gtb.Settings.FillRate = defaultRefillRate
 	}
-	if gtb.Tokens < defaultInitialTokens {
+	if gtb.Tokens < defaultInitialTokens && gtb.Settings.BurstLimit > 0 {
 		gtb.Tokens = defaultInitialTokens
 	}
 	// init slot
@@ -311,20 +311,22 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	var elapseTokens float64
 	if !gtb.Initialized {
 		gtb.init(now, clientUniqueID)
-	} else if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
-		elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens
-		gtb.lastBurstTokens = 0
-		gtb.Tokens += elapseTokens
-		gtb.LastUpdate = &now
+	} else if burst := float64(burstLimit); burst > 0 {
+		if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
+			elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens
+			gtb.lastBurstTokens = 0
+			gtb.Tokens += elapseTokens
+		}
+		if gtb.Tokens > burst {
+			elapseTokens -= gtb.Tokens - burst
+			gtb.Tokens = burst
+		}
 	}
+	gtb.LastUpdate = &now
 	// Reloan when setting changed
 	if gtb.settingChanged && gtb.Tokens <= 0 {
 		elapseTokens = 0
 		gtb.resetLoan()
-	}
-	if burst := float64(burstLimit); burst > 0 && gtb.Tokens > burst {
-		elapseTokens -= gtb.Tokens - burst
-		gtb.Tokens = burst
 	}
 	// Balance each slots.
 	gtb.balanceSlotTokens(clientUniqueID, gtb.Settings, consumptionToken, elapseTokens)
