@@ -417,3 +417,28 @@ func sendRequest(re *require.Assertions, wg *sync.WaitGroup, done <-chan bool, a
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestCheckLeaderHealth(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/failCheckLeaderHealth", fmt.Sprintf(`return("%s")`, leader)))
+	var newLeader string
+	testutil.Eventually(re, func() bool {
+		newLeader = cluster.WaitLeader()
+		return newLeader != leader
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/failCheckLeaderHealth"))
+	newLeader = cluster.WaitLeader()
+	re.NotEmpty(newLeader)
+	re.NotEqual(leader, newLeader)
+}

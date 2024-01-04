@@ -164,6 +164,11 @@ func (m *EmbeddedEtcdMember) GetLeaderPath() string {
 	return path.Join(m.rootPath, "leader")
 }
 
+// GetLeaderHealthPath returns the path of the PD leader health.
+func (m *EmbeddedEtcdMember) GetLeaderHealthPath() string {
+	return path.Join(m.GetLeaderPath(), "health")
+}
+
 // GetLeadership returns the leadership of the PD member.
 func (m *EmbeddedEtcdMember) GetLeadership() *election.Leadership {
 	return m.leadership
@@ -277,6 +282,44 @@ func (m *EmbeddedEtcdMember) WatchLeader(ctx context.Context, leader *pdpb.Membe
 func (m *EmbeddedEtcdMember) ResetLeader() {
 	m.leadership.Reset()
 	m.unsetLeader()
+}
+
+// CheckLeaderHealth checks the health of the current etcd leader.
+func (m *EmbeddedEtcdMember) CheckLeaderHealth(ctx context.Context, leaseTimeout int64) error {
+	etcdLeader := m.GetEtcdLeader()
+	if etcdLeader != m.ID() {
+		return nil
+	}
+
+	failpoint.Inject("failCheckLeaderHealth", func(val failpoint.Value) {
+		if memberName, ok := val.(string); ok && m.Name() == memberName {
+			failpoint.Return(errs.ErrEtcdLeaderNotHealthy.FastGenByArgs("failed by failpoint"))
+		}
+	})
+
+	// Double the lease timeout to give a more relaxed check to prevent misjudgment.
+	timeout := time.Duration(leaseTimeout) * time.Second * 2
+	// Check the leader writing.
+	log.Debug("check etcd leader health via writing",
+		zap.String("health-key", m.GetLeaderHealthPath()),
+		zap.Duration("timeout", timeout))
+	timeoutCtx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), timeout)
+	_, err := m.client.Put(timeoutCtx, m.GetLeaderHealthPath(), "")
+	cancel()
+	if err != nil {
+		return errs.ErrEtcdLeaderNotHealthy.Wrap(err).FastGenByArgs("unable to write the health key")
+	}
+	// Check the leader reading.
+	log.Debug("check etcd leader health via reading",
+		zap.String("health-key", m.GetLeaderHealthPath()),
+		zap.Duration("timeout", timeout))
+	timeoutCtx, cancel = context.WithTimeout(clientv3.WithRequireLeader(ctx), timeout)
+	_, err = m.client.Get(timeoutCtx, m.GetLeaderHealthPath())
+	cancel()
+	if err != nil {
+		return errs.ErrEtcdLeaderNotHealthy.Wrap(err).FastGenByArgs("unable to read the health key")
+	}
+	return nil
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.

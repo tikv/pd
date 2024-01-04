@@ -1762,11 +1762,35 @@ func (s *Server) campaignLeader() {
 	for {
 		select {
 		case <-leaderTicker.C:
+			// Check if the current etcd leader healthy randomly. This should be performed before checking
+			// the leadership to prevent the situation that the etcd leader is unhealthy but the same PD
+			// member keeps campaigning.
+			if randFloat := rand.Float32(); randFloat < mcs.LeaderHealthCheckProbability {
+				log.Debug("check etcd leader health in this tick", zap.Float32("rand-float", randFloat))
+				err := s.member.CheckLeaderHealth(ctx, s.cfg.LeaderLease)
+				if err != nil {
+					select {
+					case <-ctx.Done():
+						// No need to resign the etcd leader if the server is closed.
+						log.Info("server is closed during checking leader health")
+						return
+					default:
+					}
+					log.Error("etcd leader is unhealthy, resign the etcd leader", errs.ZapError(err))
+					err = s.member.ResignEtcdLeader(ctx, s.member.Name(), "")
+					if err != nil {
+						log.Warn("failed to resign the etcd leader after unhealth is detected", errs.ZapError(err))
+					}
+					return
+				}
+			}
+			// Check if the leadership is still avaliavle.
 			if !s.member.IsLeader() {
 				log.Info("no longer a leader because lease has expired, pd leader will step down")
 				return
 			}
-			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
+
+			// Add failpoint to test exit leader, failpoint judge the member is the give value, then break
 			failpoint.Inject("exitCampaignLeader", func(val failpoint.Value) {
 				memberString := val.(string)
 				memberID, _ := strconv.ParseUint(memberString, 10, 64)
@@ -1776,13 +1800,13 @@ func (s *Server) campaignLeader() {
 				}
 			})
 
+			// Check if the etcd leader changed.
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
 				return
 			}
 		case <-ctx.Done():
-			// Server is closed and it should return nil.
 			log.Info("server is closed")
 			return
 		}

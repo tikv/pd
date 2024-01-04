@@ -40,6 +40,9 @@ const (
 	DefaultLeaderLease = int64(3)
 	// LeaderTickInterval is the interval to check leader
 	LeaderTickInterval = 50 * time.Millisecond
+	// LeaderHealthCheckProbability is the expected probability frequency to check leader health
+	// For example, with the default value 0.01 and tick interval 50ms, the expected probability to check leader health is 5s once.
+	LeaderHealthCheckProbability = 0.01
 
 	// DefaultKeyspaceName is the name reserved for default keyspace.
 	DefaultKeyspaceName = "DEFAULT"

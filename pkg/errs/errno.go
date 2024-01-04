@@ -62,9 +62,10 @@ var (
 
 // member errors
 var (
-	ErrEtcdLeaderNotFound = errors.Normalize("etcd leader not found", errors.RFCCodeText("PD:member:ErrEtcdLeaderNotFound"))
-	ErrMarshalLeader      = errors.Normalize("marshal leader failed", errors.RFCCodeText("PD:member:ErrMarshalLeader"))
-	ErrCheckCampaign      = errors.Normalize("check campaign failed", errors.RFCCodeText("PD:member:ErrCheckCampaign"))
+	ErrEtcdLeaderNotFound   = errors.Normalize("etcd leader not found", errors.RFCCodeText("PD:member:ErrEtcdLeaderNotFound"))
+	ErrEtcdLeaderNotHealthy = errors.Normalize("etcd leader is not healthy, %s", errors.RFCCodeText("PD:member:ErrEtcdLeaderNotHealthy"))
+	ErrMarshalLeader        = errors.Normalize("marshal leader failed", errors.RFCCodeText("PD:member:ErrMarshalLeader"))
+	ErrCheckCampaign        = errors.Normalize("check campaign failed", errors.RFCCodeText("PD:member:ErrCheckCampaign"))
 )
 
 // core errors

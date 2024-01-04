@@ -521,6 +521,11 @@ error = '''
 etcd leader not found
 '''
 
+["PD:member:ErrEtcdLeaderNotHealthy"]
+error = '''
+etcd leader is not healthy, %s
+'''
+
 ["PD:member:ErrMarshalLeader"]
 error = '''
 marshal leader failed
