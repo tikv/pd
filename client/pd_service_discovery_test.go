@@ -137,8 +137,8 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithInsecure())     //nolint
 		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithInsecure()) //nolint
 		if err1 == nil && err2 == nil {
-			suite.followerClient = newPDServiceClient(suite.followerServer.addr, suite.leaderServer.addr, followerConn, false)
-			suite.leaderClient = newPDServiceClient(suite.leaderServer.addr, suite.leaderServer.addr, leaderConn, true)
+			suite.followerClient = newPDServiceClient(suite.followerServer.addr, suite.leaderServer.addr, nil, followerConn, false)
+			suite.leaderClient = newPDServiceClient(suite.leaderServer.addr, suite.leaderServer.addr, nil, leaderConn, true)
 			suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
 			suite.followerServer.server.leaderAddr = suite.leaderClient.GetAddress()
 			return
@@ -169,6 +169,8 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 
 	re.Equal(follower.GetAddress(), followerAddress)
 	re.Equal(leader.GetAddress(), leaderAddress)
+	re.Equal(follower.GetHTTPAddress(), "http://"+followerAddress)
+	re.Equal(leader.GetHTTPAddress(), "http://"+leaderAddress)
 
 	re.True(follower.Available())
 	re.True(leader.Available())

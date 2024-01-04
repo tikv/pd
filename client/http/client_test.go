@@ -21,26 +21,29 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pingcap/errors"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	pd "github.com/tikv/pd/client"
 	"go.uber.org/atomic"
 )
 
 func TestPDAddrNormalization(t *testing.T) {
 	re := require.New(t)
-	c := NewClient("test-http-pd-addr", []string{"127.0.0.1"})
-	pdAddrs, leaderAddrIdx := c.(*client).inner.getPDAddrs()
+	ctx, cancel := context.WithCancel(context.Background())
+	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{"127.0.0.1"}, nil)
+	c := NewClient("test-http-pd-addr", sd)
+	pdAddrs := c.(*client).inner.sd.GetServiceURLs()
 	re.Len(pdAddrs, 1)
-	re.Equal(-1, leaderAddrIdx)
 	re.Contains(pdAddrs[0], httpScheme)
+	leader := c.(*client).inner.sd.GetServiceClient()
+	re.Nil(leader)
 	c.Close()
-	c = NewClient("test-https-pd-addr", []string{"127.0.0.1"}, WithTLSConfig(&tls.Config{}))
-	pdAddrs, leaderAddrIdx = c.(*client).inner.getPDAddrs()
+	sdWithTLS := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{"127.0.0.1"}, &tls.Config{})
+	c = NewClient("test-https-pd-addr", sdWithTLS)
+	pdAddrs = c.(*client).inner.sd.GetServiceURLs()
 	re.Len(pdAddrs, 1)
-	re.Equal(-1, leaderAddrIdx)
 	re.Contains(pdAddrs[0], httpsScheme)
+	leader = c.(*client).inner.sd.GetServiceClient()
+	re.Nil(leader)
 	c.Close()
 }
 
@@ -74,7 +77,9 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 		}
 		return nil
 	})
-	c := NewClient("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	ctx, cancel := context.WithCancel(context.Background())
+	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{"http://127.0.0.1"}, nil)
+	c := NewClient("test-header", sd, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
 	c.Close()
@@ -92,80 +97,11 @@ func TestCallerID(t *testing.T) {
 		}
 		return nil
 	})
-	c := NewClient("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	ctx, cancel := context.WithCancel(context.Background())
+	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{"http://127.0.0.1"}, nil)
+	c := NewClient("test-caller-id", sd, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
 	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())
-	c.Close()
-}
-
-func TestRedirectWithMetrics(t *testing.T) {
-	re := require.New(t)
-
-	pdAddrs := []string{"127.0.0.1", "172.0.0.1", "192.0.0.1"}
-	metricCnt := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "check",
-		}, []string{"name", ""})
-
-	// 1. Test all followers failed, need to send all followers.
-	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
-		if req.URL.Path == Schedulers {
-			return errors.New("mock error")
-		}
-		return nil
-	})
-	c := NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
-	pdAddrs, leaderAddrIdx := c.(*client).inner.getPDAddrs()
-	re.Equal(-1, leaderAddrIdx)
-	c.CreateScheduler(context.Background(), "test", 0)
-	var out dto.Metric
-	failureCnt, err := c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, networkErrorStatus}...)
-	re.NoError(err)
-	failureCnt.Write(&out)
-	re.Equal(float64(3), out.Counter.GetValue())
-	c.Close()
-
-	// 2. Test the Leader success, just need to send to leader.
-	httpClient = newHTTPClientWithRequestChecker(func(req *http.Request) error {
-		// mock leader success.
-		if !strings.Contains(pdAddrs[0], req.Host) {
-			return errors.New("mock error")
-		}
-		return nil
-	})
-	c = NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
-	// force to update members info.
-	c.(*client).setLeaderAddrIdx(0)
-	c.CreateScheduler(context.Background(), "test", 0)
-	successCnt, err := c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, ""}...)
-	re.NoError(err)
-	successCnt.Write(&out)
-	re.Equal(float64(1), out.Counter.GetValue())
-	c.Close()
-
-	// 3. Test when the leader fails, needs to be sent to the follower in order,
-	// and returns directly if one follower succeeds
-	httpClient = newHTTPClientWithRequestChecker(func(req *http.Request) error {
-		// mock leader failure.
-		if strings.Contains(pdAddrs[0], req.Host) {
-			return errors.New("mock error")
-		}
-		return nil
-	})
-	c = NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
-	// force to update members info.
-	c.(*client).setLeaderAddrIdx(0)
-	c.CreateScheduler(context.Background(), "test", 0)
-	successCnt, err = c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, ""}...)
-	re.NoError(err)
-	successCnt.Write(&out)
-	// only one follower success
-	re.Equal(float64(2), out.Counter.GetValue())
-	failureCnt, err = c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, networkErrorStatus}...)
-	re.NoError(err)
-	failureCnt.Write(&out)
-	// leader failure
-	re.Equal(float64(4), out.Counter.GetValue())
 	c.Close()
 }

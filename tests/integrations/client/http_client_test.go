@@ -73,7 +73,8 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
-	suite.client = pd.NewClient("pd-http-client-it", endpoints)
+	cli := setupCli(re, suite.ctx, endpoints)
+	suite.client = pd.NewClient("pd-http-client-it", cli.GetServiceDiscovery())
 }
 
 func (suite *httpClientTestSuite) TearDownSuite() {
@@ -470,10 +471,11 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.NoError(err)
 	re.NotEqual(leader.GetName(), newLeader)
 	// Force to update the members info.
-	suite.client.(interface{ UpdateMembersInfo() }).UpdateMembersInfo()
-	leader, err = suite.client.GetLeader(suite.ctx)
-	re.NoError(err)
-	re.Equal(newLeader, leader.GetName())
+	testutil.Eventually(re, func() bool {
+		leader, err = suite.client.GetLeader(suite.ctx)
+		re.NoError(err)
+		return newLeader == leader.GetName()
+	})
 	members, err = suite.client.GetMembers(suite.ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)

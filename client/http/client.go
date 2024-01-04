@@ -19,17 +19,16 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
 )
 
@@ -54,12 +53,9 @@ type respHandleFunc func(resp *http.Response, res interface{}) error
 // It is wrapped by the `client` struct to make sure the inner implementation won't be exposed and could
 // be consistent during the copy.
 type clientInner struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
 	sync.RWMutex
-	pdAddrs       []string
-	leaderAddrIdx int
+
+	sd pd.ServiceDiscovery
 
 	// source is used to mark the source of the client creation,
 	// it will also be used in the caller ID of the inner client.
@@ -71,9 +67,8 @@ type clientInner struct {
 	executionDuration *prometheus.HistogramVec
 }
 
-func newClientInner(source string) *clientInner {
-	ctx, cancel := context.WithCancel(context.Background())
-	return &clientInner{ctx: ctx, cancel: cancel, leaderAddrIdx: -1, source: source}
+func newClientInner(source string, sd pd.ServiceDiscovery) *clientInner {
+	return &clientInner{source: source, sd: sd}
 }
 
 func (ci *clientInner) init() {
@@ -86,42 +81,12 @@ func (ci *clientInner) init() {
 			ci.cli.Transport = transport
 		}
 	}
-	// Start the members info updater daemon.
-	go ci.membersInfoUpdater(ci.ctx)
 }
 
 func (ci *clientInner) close() {
-	ci.cancel()
 	if ci.cli != nil {
 		ci.cli.CloseIdleConnections()
 	}
-}
-
-// getPDAddrs returns the current PD addresses and the index of the leader address.
-func (ci *clientInner) getPDAddrs() ([]string, int) {
-	ci.RLock()
-	defer ci.RUnlock()
-	return ci.pdAddrs, ci.leaderAddrIdx
-}
-
-func (ci *clientInner) setPDAddrs(pdAddrs []string, leaderAddrIdx int) {
-	ci.Lock()
-	defer ci.Unlock()
-	// Normalize the addresses with correct scheme prefix.
-	var scheme string
-	if ci.tlsConf == nil {
-		scheme = httpScheme
-	} else {
-		scheme = httpsScheme
-	}
-	for i, addr := range pdAddrs {
-		if strings.HasPrefix(addr, httpScheme) {
-			continue
-		}
-		pdAddrs[i] = fmt.Sprintf("%s://%s", scheme, addr)
-	}
-	ci.pdAddrs = pdAddrs
-	ci.leaderAddrIdx = leaderAddrIdx
 }
 
 func (ci *clientInner) reqCounter(name, status string) {
@@ -146,33 +111,16 @@ func (ci *clientInner) requestWithRetry(
 	reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
 ) error {
-	var (
-		err                    error
-		addr                   string
-		pdAddrs, leaderAddrIdx = ci.getPDAddrs()
-	)
-	// Try to send the request to the PD leader first.
-	if leaderAddrIdx != -1 {
-		addr = pdAddrs[leaderAddrIdx]
-		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-		if err == nil {
-			return nil
-		}
-		log.Debug("[pd] request leader addr failed",
-			zap.String("source", ci.source), zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
-	}
-	// Try to send the request to the other PD followers.
-	for idx := 0; idx < len(pdAddrs); idx++ {
-		if idx == leaderAddrIdx {
-			continue
-		}
-		addr = ci.pdAddrs[idx]
+	var err error
+	clients := ci.sd.GetAllServiceClients()
+	for _, cli := range clients {
+		addr := cli.GetHTTPAddress()
 		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 		if err == nil {
 			break
 		}
-		log.Debug("[pd] request follower addr failed",
-			zap.String("source", ci.source), zap.Int("idx", idx), zap.String("addr", addr), zap.Error(err))
+		log.Debug("[pd] request addr failed",
+			zap.String("source", ci.source), zap.Bool("is-leader", cli.IsConnectedToLeader()), zap.String("addr", addr), zap.Error(err))
 	}
 	return err
 }
@@ -257,73 +205,6 @@ func (ci *clientInner) doRequest(
 	return nil
 }
 
-func (ci *clientInner) membersInfoUpdater(ctx context.Context) {
-	ci.updateMembersInfo(ctx)
-	log.Info("[pd] http client member info updater started", zap.String("source", ci.source))
-	ticker := time.NewTicker(defaultMembersInfoUpdateInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("[pd] http client member info updater stopped", zap.String("source", ci.source))
-			return
-		case <-ticker.C:
-			ci.updateMembersInfo(ctx)
-		}
-	}
-}
-
-func (ci *clientInner) updateMembersInfo(ctx context.Context) {
-	var membersInfo MembersInfo
-	err := ci.requestWithRetry(ctx, newRequestInfo().
-		WithCallerID(fmt.Sprintf("%s-%s", ci.source, defaultInnerCallerID)).
-		WithName(getMembersName).
-		WithURI(membersPrefix).
-		WithMethod(http.MethodGet).
-		WithResp(&membersInfo))
-	if err != nil {
-		log.Error("[pd] http client get members info failed", zap.String("source", ci.source), zap.Error(err))
-		return
-	}
-	if len(membersInfo.Members) == 0 {
-		log.Error("[pd] http client get empty members info", zap.String("source", ci.source))
-		return
-	}
-	var (
-		newPDAddrs       []string
-		newLeaderAddrIdx int = -1
-	)
-	for _, member := range membersInfo.Members {
-		if membersInfo.Leader != nil && member.GetMemberId() == membersInfo.Leader.GetMemberId() {
-			newLeaderAddrIdx = len(newPDAddrs)
-		}
-		newPDAddrs = append(newPDAddrs, member.GetClientUrls()...)
-	}
-	// Prevent setting empty addresses.
-	if len(newPDAddrs) == 0 {
-		log.Error("[pd] http client get empty member addresses", zap.String("source", ci.source))
-		return
-	}
-	oldPDAddrs, oldLeaderAddrIdx := ci.getPDAddrs()
-	ci.setPDAddrs(newPDAddrs, newLeaderAddrIdx)
-	// Log the member info change if it happens.
-	var oldPDLeaderAddr, newPDLeaderAddr string
-	if oldLeaderAddrIdx != -1 {
-		oldPDLeaderAddr = oldPDAddrs[oldLeaderAddrIdx]
-	}
-	if newLeaderAddrIdx != -1 {
-		newPDLeaderAddr = newPDAddrs[newLeaderAddrIdx]
-	}
-	oldMemberNum, newMemberNum := len(oldPDAddrs), len(newPDAddrs)
-	if oldPDLeaderAddr != newPDLeaderAddr || oldMemberNum != newMemberNum {
-		log.Info("[pd] http client members info changed", zap.String("source", ci.source),
-			zap.Int("old-member-num", oldMemberNum), zap.Int("new-member-num", newMemberNum),
-			zap.Strings("old-addrs", oldPDAddrs), zap.Strings("new-addrs", newPDAddrs),
-			zap.Int("old-leader-addr-idx", oldLeaderAddrIdx), zap.Int("new-leader-addr-idx", newLeaderAddrIdx),
-			zap.String("old-leader-addr", oldPDLeaderAddr), zap.String("new-leader-addr", newPDLeaderAddr))
-	}
-}
-
 type client struct {
 	inner *clientInner
 
@@ -378,15 +259,14 @@ func WithLoggerRedirection(logLevel, fileName string) ClientOption {
 // NewClient creates a PD HTTP client with the given PD addresses and TLS config.
 func NewClient(
 	source string,
-	pdAddrs []string,
+	sd pd.ServiceDiscovery,
 	opts ...ClientOption,
 ) Client {
-	c := &client{inner: newClientInner(source), callerID: defaultCallerID}
+	c := &client{inner: newClientInner(source, sd), callerID: defaultCallerID}
 	// Apply the options first.
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.inner.setPDAddrs(pdAddrs, -1)
 	c.inner.init()
 	return c
 }
@@ -434,18 +314,4 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 		WithCallerID(c.callerID).
 		WithRespHandler(c.respHandler),
 		headerOpts...)
-}
-
-// UpdateMembersInfo updates the members info of the PD cluster in the inner client.
-// Exported for testing.
-func (c *client) UpdateMembersInfo() {
-	c.inner.updateMembersInfo(c.inner.ctx)
-}
-
-// setLeaderAddrIdx sets the index of the leader address in the inner client.
-// only used for testing.
-func (c *client) setLeaderAddrIdx(idx int) {
-	c.inner.Lock()
-	defer c.inner.Unlock()
-	c.inner.leaderAddrIdx = idx
 }
