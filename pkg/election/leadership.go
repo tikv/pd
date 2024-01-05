@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -97,6 +98,24 @@ func (ls *Leadership) setLease(lease *lease) {
 	ls.lease.Store(lease)
 }
 
+// GetUnHealthyTimesNum is used to get the unHealthy times of the leader lease within `DefaultTTL`.
+func (ls *Leadership) GetUnHealthyTimesNum() int {
+	l := ls.lease.Load()
+	if l == nil {
+		return 0
+	}
+	return l.(*lease).GetUnHealthyTimesNum()
+}
+
+// ResetUnHealthyTimesNum is used to reset the unHealthy times of the leader lease.
+func (ls *Leadership) ResetUnHealthyTimesNum(ctx context.Context) {
+	l := ls.lease.Load()
+	if l == nil {
+		return
+	}
+	l.(*lease).ResetUnHealthyTimes(ctx)
+}
+
 // GetClient is used to get the etcd client.
 func (ls *Leadership) GetClient() *clientv3.Client {
 	if ls == nil {
@@ -152,9 +171,10 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
 	newLease := &lease{
-		Purpose: ls.purpose,
-		client:  ls.client,
-		lease:   clientv3.NewLease(ls.client),
+		Purpose:        ls.purpose,
+		client:         ls.client,
+		lease:          clientv3.NewLease(ls.client),
+		unHealthyTimes: cache.NewStringTTL(ls.client.Ctx(), unhealthyTTLGCInterval, unhealthyTTL),
 	}
 	ls.setLease(newLease)
 

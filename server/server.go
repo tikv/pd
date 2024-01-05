@@ -113,6 +113,8 @@ const (
 
 	lostPDLeaderMaxTimeoutSecs   = 10
 	lostPDLeaderReElectionFactor = 10
+
+	unhealthyLeaderLeaseTimes = 3
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -1780,6 +1782,13 @@ func (s *Server) campaignLeader() {
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
 				return
+			}
+			// check healthy status of etcd leader.
+			if s.member.GetLeadership().GetUnHealthyTimesNum() > unhealthyLeaderLeaseTimes {
+				s.member.GetLeadership().ResetUnHealthyTimesNum(ctx)
+				if err := s.member.ResignEtcdLeader(ctx, s.member.Name(), ""); err != nil {
+					return
+				}
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.

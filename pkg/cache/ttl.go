@@ -289,3 +289,8 @@ func (c *TTLString) GetAllID() []string {
 	}
 	return ids
 }
+
+// Remove remove key
+func (c *TTLString) Remove(key string) {
+	c.ttlCache.remove(key)
+}

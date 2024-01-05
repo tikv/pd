@@ -19,7 +19,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -32,6 +34,10 @@ const (
 	revokeLeaseTimeout = time.Second
 	requestTimeout     = etcdutil.DefaultRequestTimeout
 	slowRequestTime    = etcdutil.DefaultSlowRequestTime
+
+	unhealthyTimesRecordTimeout = 1 * time.Second
+	unhealthyTTLGCInterval      = 5 * time.Second
+	unhealthyTTL                = 5 * time.Minute
 )
 
 // lease is used as the low-level mechanism for campaigning and renewing elected leadership.
@@ -46,6 +52,8 @@ type lease struct {
 	// leaseTimeout and expireTime are used to control the lease's lifetime
 	leaseTimeout time.Duration
 	expireTime   atomic.Value
+	// unHealthyTimes is used to record the unHealthy times of the lease within `DefaultTTL`.
+	unHealthyTimes *cache.TTLString
 }
 
 // Grant uses `lease.Grant` to initialize the lease and expireTime.
@@ -85,6 +93,7 @@ func (l *lease) Close() error {
 		leaseID = l.ID.Load().(clientv3.LeaseID)
 	}
 	l.lease.Revoke(ctx, leaseID)
+	l.ResetUnHealthyTimes(l.client.Ctx())
 	return l.lease.Close()
 }
 
@@ -95,6 +104,45 @@ func (l *lease) IsExpired() bool {
 		return true
 	}
 	return time.Now().After(l.expireTime.Load().(time.Time))
+}
+
+// GetUnHealthyTimesNum is used to get the unHealthy times of the lease within `DefaultTTL`.
+func (l *lease) GetUnHealthyTimesNum() int {
+	if l == nil || l.unHealthyTimes == nil {
+		return 0
+	}
+	return l.unHealthyTimes.Len()
+}
+
+// ResetUnHealthyTimes is used to reset the unHealthy times of the lease.
+func (l *lease) ResetUnHealthyTimes(ctx context.Context) {
+	if l == nil {
+		return
+	}
+
+	if l.unHealthyTimes == nil {
+		l.unHealthyTimes = cache.NewStringTTL(ctx, unhealthyTTLGCInterval, unhealthyTTL)
+	} else {
+		l.unHealthyTimes.Clear()
+	}
+}
+
+// addUnHealthyTimesLock is used to add the unHealthy times of the lease.
+func (l *lease) addUnHealthyTimesLock(start time.Time) {
+	if l == nil || l.unHealthyTimes == nil {
+		return
+	}
+
+	l.unHealthyTimes.PutWithTTL(start.String(), start, unhealthyTTL)
+}
+
+// removeUnHealthyLastLock remove specific unHealthy times of the lease.
+func (l *lease) removeUnHealthyTimesLock(start time.Time) {
+	if l == nil || l.unHealthyTimes == nil {
+		return
+	}
+
+	l.unHealthyTimes.Remove(start.String())
 }
 
 // KeepAlive auto renews the lease and update expireTime.
@@ -165,10 +213,21 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				if l.ID.Load() != nil {
 					leaseID = l.ID.Load().(clientv3.LeaseID)
 				}
+				l.addUnHealthyTimesLock(start)
+				// add failpoint to simulate etcd is unhealthy.
+				failpoint.Inject("timeoutKeepAliveOnce", func() {
+					log.Info("timeoutKeepAliveOnce is injected, sleep 1s to simulate etcd is unhealthy")
+					time.Sleep(unhealthyTimesRecordTimeout)
+				})
+
 				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
 				if err != nil {
 					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), zap.Time("start", start), errs.ZapError(err))
 					return
+				}
+
+				if time.Since(start) < unhealthyTimesRecordTimeout {
+					l.removeUnHealthyTimesLock(start)
 				}
 				if res.TTL > 0 {
 					expire := start.Add(time.Duration(res.TTL) * time.Second)

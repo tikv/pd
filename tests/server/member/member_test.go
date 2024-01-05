@@ -346,6 +346,26 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	re.NotEqual(leader, cluster.GetLeader())
 }
 
+func TestPDEtcdLeaderUnhealthy(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leader1 := cluster.WaitLeader()
+	time.Sleep(5 * time.Second)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/timeoutKeepAliveOnce", `return(true)`))
+	leader2 := waitLeaderChange(re, cluster, leader1)
+	re.NotEqual(leader1, leader2)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/timeoutKeepAliveOnce"))
+}
+
 func TestGrantLeaseFailed(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
