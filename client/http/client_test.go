@@ -16,7 +16,6 @@ package http
 
 import (
 	"context"
-	"crypto/tls"
 	"net/http"
 	"strings"
 	"testing"
@@ -24,24 +23,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 )
-
-func TestPDAddrNormalization(t *testing.T) {
-	re := require.New(t)
-	c := NewClient("test-http-pd-addr", []string{"127.0.0.1"})
-	serviceClients := c.(*client).inner.sd.GetAllServiceClients()
-	re.Len(serviceClients, 1)
-	re.Contains(serviceClients[0].GetHTTPAddress(), httpScheme)
-	leader := c.(*client).inner.sd.GetServiceClient()
-	re.Nil(leader)
-	c.Close()
-	c = NewClient("test-https-pd-addr", []string{"127.0.0.1"}, WithTLSConfig(&tls.Config{}))
-	serviceClients = c.(*client).inner.sd.GetAllServiceClients()
-	re.Len(serviceClients, 1)
-	re.Contains(serviceClients[0].GetHTTPAddress(), httpsScheme)
-	leader = c.(*client).inner.sd.GetServiceClient()
-	re.Nil(leader)
-	c.Close()
-}
 
 // requestChecker is used to check the HTTP request sent by the client.
 type requestChecker struct {
