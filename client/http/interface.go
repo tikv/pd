@@ -38,6 +38,7 @@ type Client interface {
 	GetRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsByKeyRange(context.Context, *KeyRange, int) (*RegionsInfo, error)
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
+	GetEmptyRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
@@ -196,6 +197,20 @@ func (c *client) GetRegionsByStoreID(ctx context.Context, storeID uint64) (*Regi
 	err := c.request(ctx, newRequestInfo().
 		WithName(getRegionsByStoreIDName).
 		WithURI(RegionsByStoreID(storeID)).
+		WithMethod(http.MethodGet).
+		WithResp(&regions))
+	if err != nil {
+		return nil, err
+	}
+	return &regions, nil
+}
+
+// GetEmptyRegions gets the empty regions info.
+func (c *client) GetEmptyRegions(ctx context.Context) (*RegionsInfo, error) {
+	var regions RegionsInfo
+	err := c.request(ctx, newRequestInfo().
+		WithName(getEmptyRegionsName).
+		WithURI(EmptyRegions).
 		WithMethod(http.MethodGet).
 		WithResp(&regions))
 	if err != nil {
