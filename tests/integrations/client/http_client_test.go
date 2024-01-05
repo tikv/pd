@@ -74,7 +74,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	cli := setupCli(re, suite.ctx, endpoints)
-	suite.client = pd.NewClient("pd-http-client-it", cli.GetServiceDiscovery())
+	suite.client = pd.NewClientWithServiceDiscovery("pd-http-client-it", cli.GetServiceDiscovery())
 }
 
 func (suite *httpClientTestSuite) TearDownSuite() {

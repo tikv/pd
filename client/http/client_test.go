@@ -22,26 +22,22 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	pd "github.com/tikv/pd/client"
 	"go.uber.org/atomic"
 )
 
 func TestPDAddrNormalization(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{"127.0.0.1"}, nil)
-	c := NewClient("test-http-pd-addr", sd)
-	pdAddrs := c.(*client).inner.sd.GetServiceURLs()
-	re.Len(pdAddrs, 1)
-	re.Contains(pdAddrs[0], httpScheme)
+	c := NewClient("test-http-pd-addr", []string{"127.0.0.1"})
+	serviceClients := c.(*client).inner.sd.GetAllServiceClients()
+	re.Len(serviceClients, 1)
+	re.Contains(serviceClients[0].GetHTTPAddress(), httpScheme)
 	leader := c.(*client).inner.sd.GetServiceClient()
 	re.Nil(leader)
 	c.Close()
-	sdWithTLS := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{"127.0.0.1"}, &tls.Config{})
-	c = NewClient("test-https-pd-addr", sdWithTLS)
-	pdAddrs = c.(*client).inner.sd.GetServiceURLs()
-	re.Len(pdAddrs, 1)
-	re.Contains(pdAddrs[0], httpsScheme)
+	c = NewClient("test-https-pd-addr", []string{"127.0.0.1"}, WithTLSConfig(&tls.Config{}))
+	serviceClients = c.(*client).inner.sd.GetAllServiceClients()
+	re.Len(serviceClients, 1)
+	re.Contains(serviceClients[0].GetHTTPAddress(), httpsScheme)
 	leader = c.(*client).inner.sd.GetServiceClient()
 	re.Nil(leader)
 	c.Close()
@@ -77,9 +73,7 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 		}
 		return nil
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{"http://127.0.0.1"}, nil)
-	c := NewClient("test-header", sd, WithHTTPClient(httpClient))
+	c := NewClient("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
 	c.Close()
@@ -97,9 +91,7 @@ func TestCallerID(t *testing.T) {
 		}
 		return nil
 	})
-	ctx, cancel := context.WithCancel(context.Background())
-	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{"http://127.0.0.1"}, nil)
-	c := NewClient("test-caller-id", sd, WithHTTPClient(httpClient))
+	c := NewClient("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
 	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())

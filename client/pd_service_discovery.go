@@ -461,7 +461,6 @@ type pdServiceDiscovery struct {
 }
 
 // NewDefaultPDServiceDiscovery returns a new default PD service discovery-based client.
-// Now only used for test.
 func NewDefaultPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	urls []string, tlsCfg *tls.Config,

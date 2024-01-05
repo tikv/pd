@@ -149,8 +149,9 @@ func main() {
 		pdClis[i] = newPDClient(ctx)
 	}
 	httpClis := make([]pdHttp.Client, *client)
+	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, []string{*pdAddr}, nil)
 	for i := 0; i < *client; i++ {
-		httpClis[i] = pdHttp.NewClient("tools-api-bench", []string{*pdAddr}, pdHttp.WithTLSConfig(loadTLSConfig()))
+		httpClis[i] = pdHttp.NewClientWithServiceDiscovery("tools-api-bench", sd, pdHttp.WithTLSConfig(loadTLSConfig()))
 	}
 	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {

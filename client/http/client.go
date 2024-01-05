@@ -53,6 +53,9 @@ type respHandleFunc func(resp *http.Response, res interface{}) error
 // It is wrapped by the `client` struct to make sure the inner implementation won't be exposed and could
 // be consistent during the copy.
 type clientInner struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	sync.RWMutex
 
 	sd pd.ServiceDiscovery
@@ -67,11 +70,11 @@ type clientInner struct {
 	executionDuration *prometheus.HistogramVec
 }
 
-func newClientInner(source string, sd pd.ServiceDiscovery) *clientInner {
-	return &clientInner{source: source, sd: sd}
+func newClientInner(ctx context.Context, cancel context.CancelFunc, source string) *clientInner {
+	return &clientInner{ctx: ctx, cancel: cancel, source: source}
 }
 
-func (ci *clientInner) init() {
+func (ci *clientInner) init(sd pd.ServiceDiscovery) {
 	// Init the HTTP client if it's not configured.
 	if ci.cli == nil {
 		ci.cli = &http.Client{Timeout: defaultTimeout}
@@ -81,9 +84,11 @@ func (ci *clientInner) init() {
 			ci.cli.Transport = transport
 		}
 	}
+	ci.sd = sd
 }
 
 func (ci *clientInner) close() {
+	ci.cancel()
 	if ci.cli != nil {
 		ci.cli.CloseIdleConnections()
 	}
@@ -256,18 +261,36 @@ func WithLoggerRedirection(logLevel, fileName string) ClientOption {
 	return func(c *client) {}
 }
 
-// NewClient creates a PD HTTP client with the given PD addresses and TLS config.
-func NewClient(
+// NewClientWithServiceDiscovery creates a PD HTTP client with the given PD service discovery.
+func NewClientWithServiceDiscovery(
 	source string,
 	sd pd.ServiceDiscovery,
 	opts ...ClientOption,
 ) Client {
-	c := &client{inner: newClientInner(source, sd), callerID: defaultCallerID}
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &client{inner: newClientInner(ctx, cancel, source), callerID: defaultCallerID}
 	// Apply the options first.
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.inner.init()
+	c.inner.init(sd)
+	return c
+}
+
+// NewClient creates a PD HTTP client with the given PD addresses and TLS config.
+func NewClient(
+	source string,
+	pdAddrs []string,
+	opts ...ClientOption,
+) Client {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &client{inner: newClientInner(ctx, cancel, source), callerID: defaultCallerID}
+	// Apply the options first.
+	for _, opt := range opts {
+		opt(c)
+	}
+	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
+	c.inner.init(sd)
 	return c
 }
 
