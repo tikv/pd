@@ -1784,11 +1784,12 @@ func (s *Server) campaignLeader() {
 				return
 			}
 			// check healthy status of etcd leader.
-			if s.member.GetLeadership().GetUnHealthyTimesNum() > unhealthyLeaderLeaseTimes {
-				s.member.GetLeadership().ResetUnHealthyTimesNum(ctx)
+			if s.member.GetLeadership().GetUnHealthyTimesNum() >= unhealthyLeaderLeaseTimes {
 				if err := s.member.ResignEtcdLeader(ctx, s.member.Name(), ""); err != nil {
 					return
 				}
+				s.member.GetLeadership().ResetUnHealthyTimesNum(ctx)
+				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
