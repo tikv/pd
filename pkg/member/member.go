@@ -297,27 +297,22 @@ func (m *EmbeddedEtcdMember) CheckLeaderHealth(ctx context.Context, leaseTimeout
 		}
 	})
 
-	// Double the lease timeout to give a more relaxed check to prevent misjudgment.
-	timeout := time.Duration(leaseTimeout) * time.Second * 2
-	// Check the leader writing.
-	log.Debug("check etcd leader health via writing",
+	var (
+		// Double the lease timeout to give a more relaxed check to prevent misjudgment.
+		timeout       = time.Duration(leaseTimeout) * time.Second * 2
+		healthKeyPath = m.GetLeaderHealthPath()
+	)
+	log.Debug("check etcd leader health via txn",
+		zap.String("name", m.Name()),
 		zap.String("health-key", m.GetLeaderHealthPath()),
 		zap.Duration("timeout", timeout))
 	timeoutCtx, cancel := context.WithTimeout(clientv3.WithRequireLeader(ctx), timeout)
-	_, err := m.client.Put(timeoutCtx, m.GetLeaderHealthPath(), "")
-	cancel()
+	_, err := kv.NewSlowLogTxnWithCtx(timeoutCtx, cancel, m.client).
+		If(clientv3.Compare(clientv3.Value(healthKeyPath), "=", "")).
+		Then(clientv3.OpPut(healthKeyPath, "")).
+		Commit()
 	if err != nil {
-		return errs.ErrEtcdLeaderNotHealthy.Wrap(err).FastGenByArgs("unable to write the health key")
-	}
-	// Check the leader reading.
-	log.Debug("check etcd leader health via reading",
-		zap.String("health-key", m.GetLeaderHealthPath()),
-		zap.Duration("timeout", timeout))
-	timeoutCtx, cancel = context.WithTimeout(clientv3.WithRequireLeader(ctx), timeout)
-	_, err = m.client.Get(timeoutCtx, m.GetLeaderHealthPath())
-	cancel()
-	if err != nil {
-		return errs.ErrEtcdLeaderNotHealthy.Wrap(err).FastGenByArgs("unable to read the health key")
+		return errs.ErrEtcdLeaderNotHealthy.Wrap(err).FastGenByArgs("unable to read & write the health key")
 	}
 	return nil
 }

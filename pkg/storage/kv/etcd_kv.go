@@ -148,6 +148,14 @@ func NewSlowLogTxn(client *clientv3.Client) clientv3.Txn {
 	}
 }
 
+// NewSlowLogTxnWithCtx create a SlowLogTxn with the given context.
+func NewSlowLogTxnWithCtx(ctx context.Context, cancel context.CancelFunc, client *clientv3.Client) clientv3.Txn {
+	return &SlowLogTxn{
+		Txn:    client.Txn(ctx),
+		cancel: cancel,
+	}
+}
+
 // If takes a list of comparison. If all comparisons passed in succeed,
 // the operations passed into Then() will be executed. Or the operations
 // passed into Else() will be executed.
