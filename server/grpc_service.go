@@ -1331,11 +1331,11 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					log.Error("failed to get client", zap.Error(err))
 					continue
 				}
-				log.Info("create scheduling forwarding stream", zap.String("forwarded-host", forwardedSchedulingHost))
+				log.Debug("create scheduling forwarding stream", zap.String("forwarded-host", forwardedSchedulingHost))
 				forwardSchedulingStream, _, cancel, err = s.createRegionHeartbeatSchedulingStream(stream.Context(), client)
 				if err != nil {
 					errRegionHeartbeatStream.Inc()
-					log.Error("failed to create stream", zap.Error(err))
+					log.Debug("failed to create stream", zap.Error(err))
 					continue
 				}
 				lastForwardedSchedulingHost = forwardedSchedulingHost

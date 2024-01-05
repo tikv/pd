@@ -26,6 +26,7 @@ const (
 	getRegionsName                          = "GetRegions"
 	getRegionsByKeyRangeName                = "GetRegionsByKeyRange"
 	getRegionsByStoreIDName                 = "GetRegionsByStoreID"
+	getEmptyRegionsName                     = "GetEmptyRegions"
 	getRegionsReplicatedStateByKeyRangeName = "GetRegionsReplicatedStateByKeyRange"
 	getHotReadRegionsName                   = "GetHotReadRegions"
 	getHotWriteRegionsName                  = "GetHotWriteRegions"
