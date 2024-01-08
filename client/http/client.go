@@ -276,18 +276,17 @@ func (ci *clientInner) doRequest(
 }
 
 func (ci *clientInner) membersInfoUpdater(ctx context.Context) {
-	ci.updateMembersInfo(ctx)
 	log.Info("[pd] http client member info updater started", zap.String("source", ci.source))
 	ticker := time.NewTicker(defaultMembersInfoUpdateInterval)
 	defer ticker.Stop()
 	for {
+		ci.updateMembersInfo(ctx)
 		select {
 		case <-ctx.Done():
 			log.Info("[pd] http client member info updater stopped", zap.String("source", ci.source))
 			return
 		case <-ticker.C:
 		case <-ci.updateMembersInfoNotifier:
-			ci.updateMembersInfo(ctx)
 		}
 	}
 }
