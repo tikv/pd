@@ -584,6 +584,11 @@ func (c *Cluster) IsPrepared() bool {
 	return c.coordinator.GetPrepareChecker().IsPrepared()
 }
 
+// SetPrepared set the prepare check to prepared. Only for test purpose.
+func (c *Cluster) SetPrepared() {
+	c.coordinator.GetPrepareChecker().SetPrepared()
+}
+
 // DropCacheAllRegion removes all cached regions.
 func (c *Cluster) DropCacheAllRegion() {
 	c.ResetRegionCache()
