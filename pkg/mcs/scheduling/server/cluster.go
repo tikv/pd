@@ -55,6 +55,7 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
+	collectWaitTime       = time.Minute
 )
 
 // NewCluster creates a new cluster.
@@ -453,7 +454,7 @@ func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	// force wait for 1 minute to make prepare checker won't be directly skipped
-	c.coordinator.RunUntilStop(time.Minute)
+	c.coordinator.RunUntilStop(collectWaitTime)
 }
 
 func (c *Cluster) runMetricsCollectionJob() {
