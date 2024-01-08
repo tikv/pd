@@ -52,12 +52,14 @@ func (bo *Backoffer) Exec(
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
 			})
-			bo.currentTotal += currentInterval
 		}
+		after.Stop()
 		// If the current total time exceeds the maximum total time, return the last error.
-		if bo.total > 0 && bo.currentTotal >= bo.total {
-			after.Stop()
-			break
+		if bo.total > 0 {
+			bo.currentTotal += currentInterval
+			if bo.currentTotal >= bo.total {
+				break
+			}
 		}
 	}
 	// reset backoff before return.
@@ -70,6 +72,10 @@ func (bo *Backoffer) Exec(
 //   - `max` defines the max time interval to wait before each retry.
 //   - `total` defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
 func InitialBackoffer(base, max, total time.Duration) Backoffer {
+	// Make sure the base is less than or equal to the max.
+	if base > max {
+		base = max
+	}
 	// Make sure the total is not less than the base.
 	if total > 0 && total < base {
 		total = base
