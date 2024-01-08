@@ -30,7 +30,7 @@ import (
 
 func TestPDAddrNormalization(t *testing.T) {
 	re := require.New(t)
-	c := NewClient("test-http-pd-addr", []string{"127.0.0.1"})
+	c := NewClient("test-http-pd-addr", []string{"127.0.0.1"}, WithRetryTimes(0))
 	pdAddrs, leaderAddrIdx := c.(*client).inner.getPDAddrs()
 	re.Len(pdAddrs, 1)
 	re.Equal(-1, leaderAddrIdx)
@@ -74,7 +74,7 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 		}
 		return nil
 	})
-	c := NewClient("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := NewClient("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient), WithRetryTimes(0))
 	c.GetRegions(context.Background())
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
 	c.Close()
@@ -92,7 +92,7 @@ func TestCallerID(t *testing.T) {
 		}
 		return nil
 	})
-	c := NewClient("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := NewClient("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient), WithRetryTimes(0))
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
 	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())
@@ -115,7 +115,7 @@ func TestRedirectWithMetrics(t *testing.T) {
 		}
 		return nil
 	})
-	c := NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
+	c := NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil), WithRetryTimes(0))
 	pdAddrs, leaderAddrIdx := c.(*client).inner.getPDAddrs()
 	re.Equal(-1, leaderAddrIdx)
 	c.CreateScheduler(context.Background(), "test", 0)
@@ -134,7 +134,7 @@ func TestRedirectWithMetrics(t *testing.T) {
 		}
 		return nil
 	})
-	c = NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
+	c = NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil), WithRetryTimes(0))
 	// force to update members info.
 	c.(*client).setLeaderAddrIdx(0)
 	c.CreateScheduler(context.Background(), "test", 0)
@@ -153,7 +153,7 @@ func TestRedirectWithMetrics(t *testing.T) {
 		}
 		return nil
 	})
-	c = NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
+	c = NewClient("test-http-pd-redirect", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil), WithRetryTimes(0))
 	// force to update members info.
 	c.(*client).setLeaderAddrIdx(0)
 	c.CreateScheduler(context.Background(), "test", 0)
@@ -167,5 +167,33 @@ func TestRedirectWithMetrics(t *testing.T) {
 	failureCnt.Write(&out)
 	// leader failure
 	re.Equal(float64(4), out.Counter.GetValue())
+	c.Close()
+}
+
+func TestPDClientRetry(t *testing.T) {
+	re := require.New(t)
+
+	pdAddrs := []string{"127.0.0.1"}
+	metricCnt := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "check",
+		}, []string{"name", ""})
+
+	// 1. Test all followers failed, need to send all followers.
+	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
+		if req.URL.Path == Schedulers {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c := NewClient("test-http-pd-retry", pdAddrs, WithHTTPClient(httpClient), WithMetrics(metricCnt, nil))
+	_, leaderAddrIdx := c.(*client).inner.getPDAddrs()
+	re.Equal(-1, leaderAddrIdx)
+	c.CreateScheduler(context.Background(), "test", 0)
+	var out dto.Metric
+	failureCnt, err := c.(*client).inner.requestCounter.GetMetricWithLabelValues([]string{createSchedulerName, networkErrorStatus}...)
+	re.NoError(err)
+	failureCnt.Write(&out)
+	re.Equal(float64(11), out.Counter.GetValue())
 	c.Close()
 }

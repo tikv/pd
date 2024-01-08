@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/retry"
 	"go.uber.org/zap"
 )
 
@@ -45,6 +46,9 @@ const (
 
 	defaultMembersInfoUpdateInterval = time.Minute
 	defaultTimeout                   = 30 * time.Second
+
+	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
+	updateMemberBackOffBaseTime = 100 * time.Millisecond
 )
 
 // respHandleFunc is the function to handle the HTTP response.
@@ -329,6 +333,8 @@ type client struct {
 
 	callerID    string
 	respHandler respHandleFunc
+
+	retryTimes int
 }
 
 // ClientOption configures the HTTP client.
@@ -375,13 +381,20 @@ func WithLoggerRedirection(logLevel, fileName string) ClientOption {
 	return func(c *client) {}
 }
 
+// WithRetryTimes configures the client with the retry HTTP client.
+func WithRetryTimes(times int) ClientOption {
+	return func(c *client) {
+		c.retryTimes = times
+	}
+}
+
 // NewClient creates a PD HTTP client with the given PD addresses and TLS config.
 func NewClient(
 	source string,
 	pdAddrs []string,
 	opts ...ClientOption,
 ) Client {
-	c := &client{inner: newClientInner(source), callerID: defaultCallerID}
+	c := &client{inner: newClientInner(source), callerID: defaultCallerID, retryTimes: 10}
 	// Apply the options first.
 	for _, opt := range opts {
 		opt(c)
@@ -430,10 +443,21 @@ func WithAllowFollowerHandle() HeaderOption {
 }
 
 func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts ...HeaderOption) error {
-	return c.inner.requestWithRetry(ctx, reqInfo.
-		WithCallerID(c.callerID).
-		WithRespHandler(c.respHandler),
-		headerOpts...)
+	var err error
+	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
+
+	for i := -1; i < c.retryTimes; i++ {
+		if err = bo.Exec(ctx, func() error {
+			return c.inner.requestWithRetry(ctx, reqInfo.
+				WithCallerID(c.callerID).
+				WithRespHandler(c.respHandler),
+				headerOpts...)
+		}); err == nil {
+			return nil
+		}
+	}
+
+	return err
 }
 
 // UpdateMembersInfo updates the members info of the PD cluster in the inner client.
