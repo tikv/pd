@@ -452,7 +452,8 @@ func (c *Cluster) runUpdateStoreStats() {
 func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	c.coordinator.RunUntilStop()
+	// force wait for 1 minute to make prepare checker won't be directly skipped
+	c.coordinator.RunUntilStop(time.Minute)
 }
 
 func (c *Cluster) runMetricsCollectionJob() {
