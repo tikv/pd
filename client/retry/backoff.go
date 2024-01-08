@@ -18,6 +18,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 )
 
@@ -48,6 +49,8 @@ func (bo *Backoffer) Exec(
 		after := time.NewTimer(currentInterval)
 		select {
 		case <-ctx.Done():
+			after.Stop()
+			return errors.Trace(ctx.Err())
 		case <-after.C:
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
@@ -71,7 +74,7 @@ func (bo *Backoffer) Exec(
 //   - `base` defines the initial time interval to wait before each retry.
 //   - `max` defines the max time interval to wait before each retry.
 //   - `total` defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
-func InitialBackoffer(base, max, total time.Duration) Backoffer {
+func InitialBackoffer(base, max, total time.Duration) *Backoffer {
 	// Make sure the base is less than or equal to the max.
 	if base > max {
 		base = max
@@ -80,7 +83,7 @@ func InitialBackoffer(base, max, total time.Duration) Backoffer {
 	if total > 0 && total < base {
 		total = base
 	}
-	return Backoffer{
+	return &Backoffer{
 		base:         base,
 		max:          max,
 		total:        total,

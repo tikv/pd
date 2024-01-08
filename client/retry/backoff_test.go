@@ -26,36 +26,45 @@ import (
 func TestBackoffer(t *testing.T) {
 	re := require.New(t)
 
-	baseBackoff := 100 * time.Millisecond
-	maxBackoff := time.Second
-	totalBackoff := time.Second
+	base := time.Second
+	max := 100 * time.Millisecond
+	total := time.Millisecond
+	// Test initial backoffer.
+	bo := InitialBackoffer(base, max, total)
+	// `bo.base` will be set to `bo.max` if `bo.base` is greater than `bo.max`.
+	re.Equal(max, bo.base)
+	re.Equal(max, bo.max)
+	// `bo.total` will be set to `bo.base` if `bo.total` is greater than `bo.base`.
+	re.Equal(bo.base, bo.total)
 
-	backoff := InitialBackoffer(baseBackoff, maxBackoff, totalBackoff)
-	re.Equal(backoff.nextInterval(), baseBackoff)
-	re.Equal(backoff.nextInterval(), 2*baseBackoff)
-
+	base = 100 * time.Millisecond
+	max = time.Second
+	total = time.Second
+	// Test the nextInterval function.
+	bo = InitialBackoffer(base, max, total)
+	re.Equal(bo.nextInterval(), base)
+	re.Equal(bo.nextInterval(), 2*base)
 	for i := 0; i < 10; i++ {
-		re.LessOrEqual(backoff.nextInterval(), maxBackoff)
+		re.LessOrEqual(bo.nextInterval(), max)
 	}
-	re.Equal(backoff.nextInterval(), maxBackoff)
+	re.Equal(bo.nextInterval(), max)
 
 	// Reset backoff
-	backoff.resetBackoff()
+	bo.resetBackoff()
 	var (
 		start       time.Time
 		execCount   int
 		err         error
 		expectedErr = errors.New("test")
 	)
-	err = backoff.Exec(context.Background(), func() error {
+	err = bo.Exec(context.Background(), func() error {
 		execCount++
 		if start.IsZero() {
 			start = time.Now()
 		}
 		return expectedErr
 	})
-	total := time.Since(start)
+	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
 	re.ErrorIs(err, expectedErr)
 	re.Equal(4, execCount)
-	re.InDelta(totalBackoff, total, float64(maxBackoff/2))
 }
