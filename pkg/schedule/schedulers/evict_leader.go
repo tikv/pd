@@ -392,7 +392,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store")
+	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
 func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
