@@ -156,8 +156,7 @@ func (ci *clientInner) requestWithRetry(
 	if leaderAddrIdx != -1 {
 		addr = pdAddrs[leaderAddrIdx]
 		statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-		// No need to retry if there is no error or the status code is 404 returned by the PD leader.
-		if err == nil || statusCode == http.StatusNotFound {
+		if err == nil || noNeedRetry(statusCode) {
 			return err
 		}
 		log.Debug("[pd] request leader addr failed",
@@ -170,15 +169,19 @@ func (ci *clientInner) requestWithRetry(
 		}
 		addr = ci.pdAddrs[idx]
 		_, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-		// Since some requests are allowed to be processed by the PD followers, retry should be performed
-		// even though the status code is 404 to take a chance that other PD followers could handle it.
-		if err == nil {
+		if err == nil || noNeedRetry(statusCode) {
 			break
 		}
 		log.Debug("[pd] request follower addr failed",
 			zap.String("source", ci.source), zap.Int("idx", idx), zap.String("addr", addr), zap.Error(err))
 	}
 	return err
+}
+
+func noNeedRetry(statusCode int) bool {
+	return statusCode == http.StatusNotFound ||
+		statusCode == http.StatusForbidden ||
+		statusCode == http.StatusBadRequest
 }
 
 func (ci *clientInner) doRequest(
