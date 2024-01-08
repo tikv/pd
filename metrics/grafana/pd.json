@@ -8680,9 +8680,9 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(grpc_server_handling_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (grpc_method)",
+              "expr": "sum(rate(grpc_server_handling_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, grpc_method)",
               "intervalFactor": 2,
-              "legendFormat": "{{grpc_method}}",
+              "legendFormat": "{{instance}}-{{grpc_method}}",
               "refId": "A",
               "step": 4
             }
@@ -8777,10 +8777,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])) by (grpc_method, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(grpc_server_handling_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[5m])) by (instance, grpc_method, le))",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{grpc_method}}",
+              "legendFormat": "{{instance}}-{{grpc_method}}",
               "refId": "B",
               "step": 4
             }
@@ -8875,10 +8875,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_server_api_concurrency{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", kind=\"grpc\"}",
+              "expr": "max_over_time(pd_server_api_concurrency{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", kind=\"grpc\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{api}}",
+              "legendFormat": "{{instance}}-{{api}}",
               "refId": "E",
               "step": 20
             }
@@ -8908,7 +8908,7 @@
               "label": null,
               "logBase": 10,
               "max": null,
-              "min": null,
+              "min": 0,
               "show": true
             },
             {
@@ -8988,9 +8988,9 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "sum(rate(pd_service_audit_handling_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[1m])) by (service,ip)",
+              "expr": "sum(rate(pd_service_audit_handling_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance,service,ip)",
               "intervalFactor": 2,
-              "legendFormat": "{{service}}-{{ip}}",
+              "legendFormat": "{{instance}}-{{service}}-{{ip}}",
               "refId": "A",
               "step": 4
             }
@@ -9085,10 +9085,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(pd_service_audit_handling_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])) by (service, le))",
+              "expr": "histogram_quantile(0.99, sum(rate(pd_service_audit_handling_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[5m])) by (instance, service, le))",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{service}}",
+              "legendFormat": "{{instance}}-{{service}}",
               "refId": "A",
               "step": 4
             }
@@ -9183,10 +9183,10 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "pd_server_api_concurrency{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", kind=\"http\"}",
+              "expr": "max_over_time(pd_server_api_concurrency{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", kind=\"http\"}[1m])",
               "format": "time_series",
               "intervalFactor": 2,
-              "legendFormat": "{{api}}",
+              "legendFormat": "{{instance}}-{{api}}",
               "refId": "E",
               "step": 20
             }
@@ -9216,7 +9216,7 @@
               "label": null,
               "logBase": 10,
               "max": null,
-              "min": null,
+              "min": 0,
               "show": true
             },
             {
@@ -13320,6 +13320,31 @@
         "tagValuesQuery": "",
         "tags": [],
         "tagsQuery": "",
+        "type": "query",
+        "useTags": false
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": "${DS_TEST-CLUSTER}",
+        "definition": "",
+        "hide": 0,
+        "includeAll": true,
+        "label": "PD instance",
+        "multi": false,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}, instance)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "tagValuesQuery": null,
+        "tags": [],
+        "tagsQuery": null,
         "type": "query",
         "useTags": false
       },
