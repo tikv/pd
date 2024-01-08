@@ -223,7 +223,10 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	accessPaths = suite.svr.GetServiceLabels("GetSchedulerConfig")
 	re.Len(accessPaths, 1)
 	re.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
-	re.Equal("", accessPaths[0].Method)
+	re.Equal("GET", accessPaths[0].Method)
+	accessPaths = suite.svr.GetServiceLabels("HandleSchedulerConfig")
+	re.Len(accessPaths, 4)
+	re.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
 
 	accessPaths = suite.svr.GetServiceLabels("ResignLeader")
 	re.Len(accessPaths, 1)
