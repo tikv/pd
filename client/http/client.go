@@ -57,6 +57,8 @@ type clientInner struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	updateMembersInfoNotifier chan struct{}
+
 	sync.RWMutex
 	pdAddrs       []string
 	leaderAddrIdx int
@@ -73,7 +75,12 @@ type clientInner struct {
 
 func newClientInner(source string) *clientInner {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &clientInner{ctx: ctx, cancel: cancel, leaderAddrIdx: -1, source: source}
+	return &clientInner{
+		ctx:                       ctx,
+		cancel:                    cancel,
+		updateMembersInfoNotifier: make(chan struct{}, 1),
+		leaderAddrIdx:             -1,
+		source:                    source}
 }
 
 func (ci *clientInner) init() {
@@ -94,6 +101,13 @@ func (ci *clientInner) close() {
 	ci.cancel()
 	if ci.cli != nil {
 		ci.cli.CloseIdleConnections()
+	}
+}
+
+func (ci *clientInner) scheduleUpdateMembersInfo() {
+	select {
+	case ci.updateMembersInfoNotifier <- struct{}{}:
+	default:
 	}
 }
 
@@ -158,6 +172,8 @@ func (ci *clientInner) requestWithRetry(
 		if err == nil {
 			return nil
 		}
+		// Schedule the members info update if the leader request failed to get the latest leader as soon as possible.
+		ci.scheduleUpdateMembersInfo()
 		log.Debug("[pd] request leader addr failed",
 			zap.String("source", ci.source), zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
 	}
@@ -169,11 +185,13 @@ func (ci *clientInner) requestWithRetry(
 		addr = ci.pdAddrs[idx]
 		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 		if err == nil {
-			break
+			return nil
 		}
 		log.Debug("[pd] request follower addr failed",
 			zap.String("source", ci.source), zap.Int("idx", idx), zap.String("addr", addr), zap.Error(err))
 	}
+	// Schedule the members info update if all the requests failed to get the latest members as soon as possible.
+	ci.scheduleUpdateMembersInfo()
 	return err
 }
 
@@ -268,6 +286,7 @@ func (ci *clientInner) membersInfoUpdater(ctx context.Context) {
 			log.Info("[pd] http client member info updater stopped", zap.String("source", ci.source))
 			return
 		case <-ticker.C:
+		case <-ci.updateMembersInfoNotifier:
 			ci.updateMembersInfo(ctx)
 		}
 	}
