@@ -39,6 +39,26 @@ func TestBackoffer(t *testing.T) {
 
 	base = 100 * time.Millisecond
 	max = time.Second
+	total = base
+	// Test the same value of `bo.base` and `bo.total`.
+	bo = InitialBackoffer(base, max, total)
+	re.Equal(base, bo.base)
+	re.Equal(total, bo.total)
+	re.Equal(base, total)
+	var (
+		execCount   int
+		expectedErr = errors.New("test")
+	)
+	err := bo.Exec(context.Background(), func() error {
+		execCount++
+		return expectedErr
+	})
+	re.ErrorIs(err, expectedErr)
+	re.Equal(1, execCount)
+	re.True(isBackofferReset(bo))
+
+	base = 100 * time.Millisecond
+	max = time.Second
 	total = time.Second
 	// Test the nextInterval function.
 	bo = InitialBackoffer(base, max, total)
@@ -48,15 +68,12 @@ func TestBackoffer(t *testing.T) {
 		re.LessOrEqual(bo.nextInterval(), max)
 	}
 	re.Equal(bo.nextInterval(), max)
-
-	// Reset backoff
 	bo.resetBackoff()
-	var (
-		start       time.Time
-		execCount   int
-		err         error
-		expectedErr = errors.New("test")
-	)
+	re.True(isBackofferReset(bo))
+
+	// Test the total time cost.
+	execCount = 0
+	var start time.Time
 	err = bo.Exec(context.Background(), func() error {
 		execCount++
 		if start.IsZero() {
@@ -67,4 +84,9 @@ func TestBackoffer(t *testing.T) {
 	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
 	re.ErrorIs(err, expectedErr)
 	re.Equal(4, execCount)
+	re.True(isBackofferReset(bo))
+}
+
+func isBackofferReset(bo *Backoffer) bool {
+	return bo.next == bo.base && bo.currentTotal == 0
 }

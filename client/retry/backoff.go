@@ -40,6 +40,7 @@ func (bo *Backoffer) Exec(
 	ctx context.Context,
 	fn func() error,
 ) (err error) {
+	defer bo.resetBackoff()
 	for {
 		err = fn()
 		if err == nil {
@@ -65,8 +66,6 @@ func (bo *Backoffer) Exec(
 			}
 		}
 	}
-	// reset backoff before return.
-	bo.resetBackoff()
 	return err
 }
 
