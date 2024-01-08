@@ -617,6 +617,15 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork"))
 	time.Sleep(2 * time.Second)
 	checkTS(re, cli, lastTS)
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/responseNil", "return(true)"))
+	regions, err := cli.ScanRegions(ctx, []byte(""), []byte(""), 100)
+	re.NoError(err)
+	re.Len(regions, 0)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/responseNil"))
+	regions, err = cli.ScanRegions(ctx, []byte(""), []byte(""), 100)
+	re.NoError(err)
+	re.Len(regions, 1)
 }
 
 // case 2: unreachable -> leader transfer -> normal

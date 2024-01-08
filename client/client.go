@@ -25,6 +25,7 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -1042,6 +1043,9 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
+	failpoint.Inject("responseNil", func() {
+		resp = nil
+	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(scanCtx)
 		if protoClient == nil {
