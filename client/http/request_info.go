@@ -26,6 +26,7 @@ const (
 	getRegionsName                          = "GetRegions"
 	getRegionsByKeyRangeName                = "GetRegionsByKeyRange"
 	getRegionsByStoreIDName                 = "GetRegionsByStoreID"
+	getEmptyRegionsName                     = "GetEmptyRegions"
 	getRegionsReplicatedStateByKeyRangeName = "GetRegionsReplicatedStateByKeyRange"
 	getHotReadRegionsName                   = "GetHotReadRegions"
 	getHotWriteRegionsName                  = "GetHotWriteRegions"
@@ -37,6 +38,8 @@ const (
 	getScheduleConfigName                   = "GetScheduleConfig"
 	setScheduleConfigName                   = "SetScheduleConfig"
 	getClusterVersionName                   = "GetClusterVersion"
+	getClusterName                          = "GetCluster"
+	getClusterStatusName                    = "GetClusterStatus"
 	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"
@@ -61,6 +64,7 @@ const (
 	accelerateScheduleInBatchName           = "AccelerateScheduleInBatch"
 	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
+	getPDVersionName                        = "GetPDVersion"
 )
 
 type requestInfo struct {

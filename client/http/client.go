@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -146,6 +147,7 @@ func (ci *clientInner) requestWithRetry(
 	headerOpts ...HeaderOption,
 ) error {
 	var (
+		statusCode             int
 		err                    error
 		addr                   string
 		pdAddrs, leaderAddrIdx = ci.getPDAddrs()
@@ -153,9 +155,9 @@ func (ci *clientInner) requestWithRetry(
 	// Try to send the request to the PD leader first.
 	if leaderAddrIdx != -1 {
 		addr = pdAddrs[leaderAddrIdx]
-		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-		if err == nil {
-			return nil
+		statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+		if err == nil || noNeedRetry(statusCode) {
+			return err
 		}
 		log.Debug("[pd] request leader addr failed",
 			zap.String("source", ci.source), zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
@@ -166,8 +168,8 @@ func (ci *clientInner) requestWithRetry(
 			continue
 		}
 		addr = ci.pdAddrs[idx]
-		err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-		if err == nil {
+		_, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+		if err == nil || noNeedRetry(statusCode) {
 			break
 		}
 		log.Debug("[pd] request follower addr failed",
@@ -176,11 +178,17 @@ func (ci *clientInner) requestWithRetry(
 	return err
 }
 
+func noNeedRetry(statusCode int) bool {
+	return statusCode == http.StatusNotFound ||
+		statusCode == http.StatusForbidden ||
+		statusCode == http.StatusBadRequest
+}
+
 func (ci *clientInner) doRequest(
 	ctx context.Context,
 	addr string, reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
-) error {
+) (int, error) {
 	var (
 		source      = ci.source
 		callerID    = reqInfo.callerID
@@ -202,7 +210,7 @@ func (ci *clientInner) doRequest(
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(body))
 	if err != nil {
 		log.Error("[pd] create http request failed", append(logFields, zap.Error(err))...)
-		return errors.Trace(err)
+		return -1, errors.Trace(err)
 	}
 	for _, opt := range headerOpts {
 		opt(req.Header)
@@ -214,14 +222,14 @@ func (ci *clientInner) doRequest(
 	if err != nil {
 		ci.reqCounter(name, networkErrorStatus)
 		log.Error("[pd] do http request failed", append(logFields, zap.Error(err))...)
-		return errors.Trace(err)
+		return -1, errors.Trace(err)
 	}
 	ci.execDuration(name, time.Since(start))
 	ci.reqCounter(name, resp.Status)
 
 	// Give away the response handling to the caller if the handler is set.
 	if respHandler != nil {
-		return respHandler(resp, res)
+		return resp.StatusCode, respHandler(resp, res)
 	}
 
 	defer func() {
@@ -242,18 +250,18 @@ func (ci *clientInner) doRequest(
 		}
 
 		log.Error("[pd] request failed with a non-200 status", logFields...)
-		return errors.Errorf("request pd http api failed with status: '%s'", resp.Status)
+		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s'", resp.Status)
 	}
 
 	if res == nil {
-		return nil
+		return resp.StatusCode, nil
 	}
 
 	err = json.NewDecoder(resp.Body).Decode(res)
 	if err != nil {
-		return errors.Trace(err)
+		return resp.StatusCode, errors.Trace(err)
 	}
-	return nil
+	return resp.StatusCode, nil
 }
 
 func (ci *clientInner) membersInfoUpdater(ctx context.Context) {
@@ -357,6 +365,21 @@ func WithMetrics(
 		c.inner.requestCounter = requestCounter
 		c.inner.executionDuration = executionDuration
 	}
+}
+
+// WithLoggerRedirection configures the client with the given logger redirection.
+func WithLoggerRedirection(logLevel, fileName string) ClientOption {
+	cfg := &log.Config{}
+	cfg.Level = logLevel
+	if fileName != "" {
+		f, _ := os.CreateTemp(".", fileName)
+		fname := f.Name()
+		f.Close()
+		cfg.File.Filename = fname
+	}
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+	return func(c *client) {}
 }
 
 // NewClient creates a PD HTTP client with the given PD addresses and TLS config.
