@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 )
 
@@ -105,6 +106,10 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
 	regions, err = suite.client.GetRegionsByStoreID(suite.ctx, 1)
+	re.NoError(err)
+	re.Equal(int64(2), regions.Count)
+	re.Len(regions.Regions, 2)
+	regions, err = suite.client.GetEmptyRegions(suite.ctx)
 	re.NoError(err)
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
@@ -477,4 +482,11 @@ func (suite *httpClientTestSuite) TestTransferLeader() {
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
+}
+
+func (suite *httpClientTestSuite) TestVersion() {
+	re := suite.Require()
+	ver, err := suite.client.GetPDVersion(suite.ctx)
+	re.NoError(err)
+	re.Equal(versioninfo.PDReleaseVersion, ver)
 }

@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	"github.com/mattn/go-shellwords"
+	shellwords "github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -74,6 +74,12 @@ func GetRootCmd() *cobra.Command {
 	rootCmd.SilenceErrors = true
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		addrs, err := cmd.Flags().GetString("pd")
+		if err != nil {
+			return err
+		}
+
+		// TODO: refine code after replace dialClient with PDCli
 		CAPath, err := cmd.Flags().GetString("cacert")
 		if err == nil && len(CAPath) != 0 {
 			certPath, err := cmd.Flags().GetString("cert")
@@ -86,11 +92,14 @@ func GetRootCmd() *cobra.Command {
 				return err
 			}
 
-			if err := command.InitHTTPSClient(CAPath, certPath, keyPath); err != nil {
+			if err := command.InitHTTPSClient(addrs, CAPath, certPath, keyPath); err != nil {
 				rootCmd.Println(err)
 				return err
 			}
+		} else {
+			command.SetNewPDClient(strings.Split(addrs, ","))
 		}
+
 		return nil
 	}
 
@@ -119,7 +128,7 @@ func MainStart(args []string) {
 
 	rootCmd.SetArgs(args)
 	rootCmd.ParseFlags(args)
-	rootCmd.SetOutput(os.Stdout)
+	rootCmd.SetOut(os.Stdout)
 
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
@@ -152,7 +161,7 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 		rootCmd.LocalFlags().MarkHidden("cacert")
 		rootCmd.LocalFlags().MarkHidden("cert")
 		rootCmd.LocalFlags().MarkHidden("key")
-		rootCmd.SetOutput(os.Stdout)
+		rootCmd.SetOut(os.Stdout)
 		return rootCmd
 	}
 

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -359,6 +360,21 @@ func WithMetrics(
 	}
 }
 
+// WithLoggerRedirection configures the client with the given logger redirection.
+func WithLoggerRedirection(logLevel, fileName string) ClientOption {
+	cfg := &log.Config{}
+	cfg.Level = logLevel
+	if fileName != "" {
+		f, _ := os.CreateTemp(".", fileName)
+		fname := f.Name()
+		f.Close()
+		cfg.File.Filename = fname
+	}
+	lg, p, _ := log.InitLogger(cfg)
+	log.ReplaceGlobals(lg, p)
+	return func(c *client) {}
+}
+
 // NewClient creates a PD HTTP client with the given PD addresses and TLS config.
 func NewClient(
 	source string,
@@ -424,4 +440,12 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 // Exported for testing.
 func (c *client) UpdateMembersInfo() {
 	c.inner.updateMembersInfo(c.inner.ctx)
+}
+
+// setLeaderAddrIdx sets the index of the leader address in the inner client.
+// only used for testing.
+func (c *client) setLeaderAddrIdx(idx int) {
+	c.inner.Lock()
+	defer c.inner.Unlock()
+	c.inner.leaderAddrIdx = idx
 }

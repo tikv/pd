@@ -24,6 +24,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
+// ClusterState saves some cluster state information.
+// NOTE: This type sync with https://github.com/tikv/pd/blob/5eae459c01a797cbd0c416054c6f0cad16b8740a/server/cluster/cluster.go#L173
+type ClusterState struct {
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	IsInitialized     bool      `json:"is_initialized"`
+	ReplicationStatus string    `json:"replication_status"`
+}
+
 // KeyRange defines a range of keys in bytes.
 type KeyRange struct {
 	startKey []byte

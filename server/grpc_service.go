@@ -77,6 +77,7 @@ var (
 	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
 	ErrTSOProxyRecvFromClientTimeout    = status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
 	ErrEtcdNotStarted                   = status.Errorf(codes.Unavailable, "server is started, but etcd not started")
+	ErrFollowerHandlingNotAllowed       = status.Errorf(codes.Unavailable, "not leader and follower handling not allowed")
 )
 
 var (
@@ -234,6 +235,11 @@ type request interface {
 type forwardFn func(ctx context.Context, client *grpc.ClientConn) (interface{}, error)
 
 func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, fn forwardFn) (rsp interface{}, err error) {
+	return s.unaryFollowerMiddleware(ctx, req, fn, nil)
+}
+
+// unaryFollowerMiddleware adds the check of followers enable compared to unaryMiddleware.
+func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, fn forwardFn, allowFollower *bool) (rsp interface{}, err error) {
 	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
 	})
@@ -246,7 +252,7 @@ func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, fn forwar
 		ctx = grpcutil.ResetForwardContext(ctx)
 		return fn(ctx, client)
 	}
-	if err := s.validateRequest(req.GetHeader()); err != nil {
+	if err := s.validateRoleInRequest(ctx, req.GetHeader(), allowFollower); err != nil {
 		return nil, err
 	}
 	return nil, nil
@@ -1325,11 +1331,11 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					log.Error("failed to get client", zap.Error(err))
 					continue
 				}
-				log.Info("create scheduling forwarding stream", zap.String("forwarded-host", forwardedSchedulingHost))
+				log.Debug("create scheduling forwarding stream", zap.String("forwarded-host", forwardedSchedulingHost))
 				forwardSchedulingStream, _, cancel, err = s.createRegionHeartbeatSchedulingStream(stream.Context(), client)
 				if err != nil {
 					errRegionHeartbeatStream.Inc()
-					log.Error("failed to create stream", zap.Error(err))
+					log.Debug("failed to create stream", zap.Error(err))
 					continue
 				}
 				lastForwardedSchedulingHost = forwardedSchedulingHost
@@ -1390,22 +1396,39 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetRegion(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	followerHandle := new(bool)
+	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), nil
 	}
+	var rc *cluster.RaftCluster
+	var region *core.RegionInfo
+	if *followerHandle {
+		rc = s.cluster
+		if !rc.GetRegionSyncer().IsRunning() {
+			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+		}
+		region = rc.GetRegionByKey(request.GetRegionKey())
+		if region == nil {
+			log.Warn("follower get region nil", zap.String("key", string(request.GetRegionKey())))
+			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+		}
+	} else {
+		rc = s.GetRaftCluster()
+		if rc == nil {
+			return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+		}
+		region = rc.GetRegionByKey(request.GetRegionKey())
+		if region == nil {
+			log.Warn("leader get region nil", zap.String("key", string(request.GetRegionKey())))
+			return &pdpb.GetRegionResponse{Header: s.header()}, nil
+		}
+	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
-	}
-	region := rc.GetRegionByKey(request.GetRegionKey())
-	if region == nil {
-		return &pdpb.GetRegionResponse{Header: s.header()}, nil
-	}
 	var buckets *metapb.Buckets
-	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
+	// FIXME: If the bucket is disabled dynamically, the bucket information is returned unexpectedly
+	if !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -1434,23 +1457,37 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetPrevRegion(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	followerHandle := new(bool)
+	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+	var rc *cluster.RaftCluster
+	if *followerHandle {
+		// no need to check running status
+		rc = s.cluster
+		if !rc.GetRegionSyncer().IsRunning() {
+			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+		}
+	} else {
+		rc = s.GetRaftCluster()
+		if rc == nil {
+			return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+		}
 	}
 
 	region := rc.GetPrevRegionByKey(request.GetRegionKey())
 	if region == nil {
+		if *followerHandle {
+			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+		}
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
 	var buckets *metapb.Buckets
-	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
+	// FIXME: If the bucket is disabled dynamically, the bucket information is returned unexpectedly
+	if !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -1479,22 +1516,39 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).GetRegionByID(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	followerHandle := new(bool)
+	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+	var rc *cluster.RaftCluster
+	if *followerHandle {
+		rc = s.cluster
+		if !rc.GetRegionSyncer().IsRunning() {
+			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+		}
+	} else {
+		rc = s.GetRaftCluster()
+		if rc == nil {
+			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+		}
 	}
 	region := rc.GetRegion(request.GetRegionId())
+	failpoint.Inject("followerHandleError", func() {
+		if *followerHandle {
+			region = nil
+		}
+	})
 	if region == nil {
+		if *followerHandle {
+			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+		}
 		return &pdpb.GetRegionResponse{Header: s.header()}, nil
 	}
 	var buckets *metapb.Buckets
-	if rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
+	if !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
@@ -1523,17 +1577,29 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	fn := func(ctx context.Context, client *grpc.ClientConn) (interface{}, error) {
 		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
 	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	followerHandle := new(bool)
+	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ScanRegionsResponse), nil
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	var rc *cluster.RaftCluster
+	if *followerHandle {
+		rc = s.cluster
+		if !rc.GetRegionSyncer().IsRunning() {
+			return &pdpb.ScanRegionsResponse{Header: s.regionNotFound()}, nil
+		}
+	} else {
+		rc = s.GetRaftCluster()
+		if rc == nil {
+			return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+		}
 	}
 	regions := rc.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
+	if *followerHandle && len(regions) == 0 {
+		return &pdpb.ScanRegionsResponse{Header: s.regionNotFound()}, nil
+	}
 	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
 	for _, r := range regions {
 		leader := r.GetLeader()
@@ -2183,10 +2249,25 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 }
 
 // validateRequest checks if Server is leader and clusterID is matched.
-// TODO: Call it in gRPC interceptor.
 func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
-	if s.IsClosed() || !s.member.IsLeader() {
-		return ErrNotLeader
+	return s.validateRoleInRequest(context.TODO(), header, nil)
+}
+
+// validateRoleInRequest checks if Server is leader when disallow follower-handle and clusterID is matched.
+// TODO: Call it in gRPC interceptor.
+func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.RequestHeader, allowFollower *bool) error {
+	if s.IsClosed() {
+		return ErrNotStarted
+	}
+	if !s.member.IsLeader() {
+		if allowFollower == nil {
+			return ErrNotLeader
+		}
+		if !grpcutil.IsFollowerHandleEnabled(ctx) {
+			// TODO: change the error code
+			return ErrFollowerHandlingNotAllowed
+		}
+		*allowFollower = true
 	}
 	if header.GetClusterId() != s.clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.clusterID, header.GetClusterId())
@@ -2234,6 +2315,13 @@ func (s *GrpcServer) invalidValue(msg string) *pdpb.ResponseHeader {
 	return s.errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INVALID_VALUE,
 		Message: msg,
+	})
+}
+
+func (s *GrpcServer) regionNotFound() *pdpb.ResponseHeader {
+	return s.errorHeader(&pdpb.Error{
+		Type:    pdpb.ErrorType_REGION_NOT_FOUND,
+		Message: "region not found",
 	})
 }
 
