@@ -1819,10 +1819,10 @@
             },
             {
               "exemplar": true,
-              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "pd_server_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": false,
               "interval": "",
-              "legendFormat": "{{job}}-{{instance}}-limit",
+              "legendFormat": "quota-{{job}}-{{instance}}",
               "refId": "B"
             }
           ],
@@ -1967,6 +1967,13 @@
               "interval": "",
               "legendFormat": "GCTrigger-{{job}}-{{instance}}",
               "refId": "G"
+            },
+            {
+              "expr": "pd_server_memory_quota_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "hide": false,
+              "interval": "",
+              "legendFormat": "quota-{{job}}-{{instance}}",
+              "refId": "H"
             }
           ],
           "thresholds": [],
