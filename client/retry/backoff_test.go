@@ -16,20 +16,21 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 )
 
-func TestExponentialBackoff(t *testing.T) {
+func TestBackoffer(t *testing.T) {
 	re := require.New(t)
 
 	baseBackoff := 100 * time.Millisecond
-	maxBackoff := 1 * time.Second
+	maxBackoff := time.Second
+	totalBackoff := time.Second
 
-	backoff := InitialBackOffer(baseBackoff, maxBackoff)
+	backoff := InitialBackoffer(baseBackoff, maxBackoff, totalBackoff)
 	re.Equal(backoff.nextInterval(), baseBackoff)
 	re.Equal(backoff.nextInterval(), 2*baseBackoff)
 
@@ -40,8 +41,21 @@ func TestExponentialBackoff(t *testing.T) {
 
 	// Reset backoff
 	backoff.resetBackoff()
-	err := backoff.Exec(context.Background(), func() error {
-		return errors.New("test")
+	var (
+		start       time.Time
+		execCount   int
+		err         error
+		expectedErr = errors.New("test")
+	)
+	err = backoff.Exec(context.Background(), func() error {
+		execCount++
+		if start.IsZero() {
+			start = time.Now()
+		}
+		return expectedErr
 	})
-	re.Error(err)
+	total := time.Since(start)
+	re.ErrorIs(err, expectedErr)
+	re.Equal(4, execCount)
+	re.InDelta(totalBackoff, total, float64(maxBackoff/2))
 }

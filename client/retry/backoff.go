@@ -21,53 +21,82 @@ import (
 	"github.com/pingcap/failpoint"
 )
 
-// BackOffer is a backoff policy for retrying operations.
-type BackOffer struct {
-	max  time.Duration
-	next time.Duration
+// Backoffer is a backoff policy for retrying operations.
+type Backoffer struct {
+	// base defines the initial time interval to wait before each retry.
 	base time.Duration
+	// max defines the max time interval to wait before each retry.
+	max time.Duration
+	// total defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
+	total time.Duration
+
+	next         time.Duration
+	currentTotal time.Duration
 }
 
 // Exec is a helper function to exec backoff.
-func (bo *BackOffer) Exec(
+func (bo *Backoffer) Exec(
 	ctx context.Context,
 	fn func() error,
-) error {
-	if err := fn(); err != nil {
-		after := time.NewTimer(bo.nextInterval())
-		defer after.Stop()
+) (err error) {
+	for {
+		err = fn()
+		if err == nil {
+			break
+		}
+		currentInterval := bo.nextInterval()
+		after := time.NewTimer(currentInterval)
 		select {
 		case <-ctx.Done():
 		case <-after.C:
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
 			})
+			bo.currentTotal += currentInterval
 		}
-		return err
+		// If the current total time exceeds the maximum total time, return the last error.
+		if bo.total > 0 && bo.currentTotal >= bo.total {
+			after.Stop()
+			break
+		}
 	}
-	// reset backoff when fn() succeed.
+	// reset backoff before return.
 	bo.resetBackoff()
-	return nil
+	return err
 }
 
-// InitialBackOffer make the initial state for retrying.
-func InitialBackOffer(base, max time.Duration) BackOffer {
-	return BackOffer{
-		max:  max,
-		base: base,
-		next: base,
+// InitialBackoffer make the initial state for retrying.
+//   - `base` defines the initial time interval to wait before each retry.
+//   - `max` defines the max time interval to wait before each retry.
+//   - `total` defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
+func InitialBackoffer(base, max, total time.Duration) Backoffer {
+	// Make sure the total is not less than the base.
+	if total > 0 && total < base {
+		total = base
+	}
+	return Backoffer{
+		base:         base,
+		max:          max,
+		total:        total,
+		next:         base,
+		currentTotal: 0,
 	}
 }
 
 // nextInterval for now use the `exponentialInterval`.
-func (bo *BackOffer) nextInterval() time.Duration {
+func (bo *Backoffer) nextInterval() time.Duration {
 	return bo.exponentialInterval()
 }
 
 // exponentialInterval returns the exponential backoff duration.
-func (bo *BackOffer) exponentialInterval() time.Duration {
+func (bo *Backoffer) exponentialInterval() time.Duration {
 	backoffInterval := bo.next
+	// Make sure the total backoff time is less than the total.
+	if bo.total > 0 && bo.currentTotal+backoffInterval > bo.total {
+		backoffInterval = bo.total - bo.currentTotal
+	}
 	bo.next *= 2
+	// Make sure the next backoff time is less than the max.
 	if bo.next > bo.max {
 		bo.next = bo.max
 	}
@@ -75,8 +104,9 @@ func (bo *BackOffer) exponentialInterval() time.Duration {
 }
 
 // resetBackoff resets the backoff to initial state.
-func (bo *BackOffer) resetBackoff() {
+func (bo *Backoffer) resetBackoff() {
 	bo.next = bo.base
+	bo.currentTotal = 0
 }
 
 // Only used for test.
