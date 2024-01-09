@@ -293,8 +293,7 @@ func (ci *clientInner) updateMembersInfo(ctx context.Context) {
 		WithName(getMembersName).
 		WithURI(membersPrefix).
 		WithMethod(http.MethodGet).
-		WithResp(&membersInfo).
-		WithBackoffer(nil))
+		WithResp(&membersInfo))
 	if err != nil {
 		log.Error("[pd] http client get members info failed", zap.String("source", ci.source), zap.Error(err))
 		return
