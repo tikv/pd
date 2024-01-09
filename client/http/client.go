@@ -22,7 +22,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -55,8 +54,6 @@ type respHandleFunc func(resp *http.Response, res interface{}) error
 type clientInner struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-
-	sync.RWMutex
 
 	sd pd.ServiceDiscovery
 

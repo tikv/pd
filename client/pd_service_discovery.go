@@ -101,6 +101,7 @@ type ServiceDiscovery interface {
 	// it returns a follower/secondary ServiceClient which can forward the request to leader.
 	GetServiceClient() ServiceClient
 	// GetAllServiceClients tries to get all ServiceClient.
+	// If the leader is not nil, it will put the leader service client first in the slice.
 	GetAllServiceClients() []ServiceClient
 	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
 	GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error)
@@ -159,15 +160,26 @@ type pdServiceClient struct {
 
 func newPDServiceClient(addr, leaderAddr string, tlsCfg *tls.Config, conn *grpc.ClientConn, isLeader bool) ServiceClient {
 	var httpAddress string
-	if strings.HasPrefix(addr, httpScheme) {
-		httpAddress = addr
-	} else {
-		if tlsCfg == nil {
+	if tlsCfg == nil {
+		if strings.HasPrefix(addr, httpsScheme) {
+			addr = strings.TrimPrefix(addr, httpsScheme)
+			httpAddress = fmt.Sprintf("%s%s", httpScheme, addr)
+		} else if strings.HasPrefix(addr, httpScheme) {
+			httpAddress = addr
+		} else {
 			httpAddress = fmt.Sprintf("%s://%s", httpScheme, addr)
+		}
+	} else {
+		if strings.HasPrefix(addr, httpsScheme) {
+			httpAddress = addr
+		} else if strings.HasPrefix(addr, httpScheme) {
+			addr = strings.TrimPrefix(addr, httpScheme)
+			httpAddress = fmt.Sprintf("%s%s", httpsScheme, addr)
 		} else {
 			httpAddress = fmt.Sprintf("%s://%s", httpsScheme, addr)
 		}
 	}
+
 	cli := &pdServiceClient{
 		addr:        addr,
 		httpAddress: httpAddress,

@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log"
 	"net"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/testutil"
@@ -294,4 +296,20 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re.Equal(int32(10), suite.leaderServer.server.getHandleCount())
 	re.Equal(int32(0), suite.followerServer.server.getHandleCount())
 	re.Equal(int32(5), suite.followerServer.server.getForwardCount())
+}
+
+func TestHTTPScheme(t *testing.T) {
+	re := require.New(t)
+	cli := newPDServiceClient("127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("https://127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("http://127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("https://127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("http://127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
 }
