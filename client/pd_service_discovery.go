@@ -518,7 +518,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
-	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
+	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberTimeout, updateMemberBackOffBaseTime)
 	for {
 		select {
 		case <-ctx.Done():

@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/retry"
 	"go.uber.org/zap"
 )
 
@@ -140,42 +141,53 @@ func (ci *clientInner) execDuration(name string, duration time.Duration) {
 
 // requestWithRetry will first try to send the request to the PD leader, if it fails, it will try to send
 // the request to the other PD followers to gain a better availability.
-// TODO: support custom retry logic, e.g. retry with customizable backoffer.
 func (ci *clientInner) requestWithRetry(
 	ctx context.Context,
 	reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
 ) error {
 	var (
-		statusCode             int
-		err                    error
-		addr                   string
-		pdAddrs, leaderAddrIdx = ci.getPDAddrs()
+		statusCode int
+		err        error
 	)
-	// Try to send the request to the PD leader first.
-	if leaderAddrIdx != -1 {
-		addr = pdAddrs[leaderAddrIdx]
-		statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-		if err == nil || noNeedRetry(statusCode) {
-			return err
+	execFunc := func() error {
+		var (
+			addr                   string
+			pdAddrs, leaderAddrIdx = ci.getPDAddrs()
+		)
+		// Try to send the request to the PD leader first.
+		if leaderAddrIdx != -1 {
+			addr = pdAddrs[leaderAddrIdx]
+			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+			if err == nil || noNeedRetry(statusCode) {
+				return err
+			}
+			log.Debug("[pd] request leader addr failed",
+				zap.String("source", ci.source), zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
 		}
-		log.Debug("[pd] request leader addr failed",
-			zap.String("source", ci.source), zap.Int("leader-idx", leaderAddrIdx), zap.String("addr", addr), zap.Error(err))
+		// Try to send the request to the other PD followers.
+		for idx := 0; idx < len(pdAddrs); idx++ {
+			if idx == leaderAddrIdx {
+				continue
+			}
+			addr = ci.pdAddrs[idx]
+			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+			if err == nil || noNeedRetry(statusCode) {
+				break
+			}
+			log.Debug("[pd] request follower addr failed",
+				zap.String("source", ci.source), zap.Int("idx", idx), zap.String("addr", addr), zap.Error(err))
+		}
+		return err
 	}
-	// Try to send the request to the other PD followers.
-	for idx := 0; idx < len(pdAddrs); idx++ {
-		if idx == leaderAddrIdx {
-			continue
-		}
-		addr = ci.pdAddrs[idx]
-		_, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-		if err == nil || noNeedRetry(statusCode) {
-			break
-		}
-		log.Debug("[pd] request follower addr failed",
-			zap.String("source", ci.source), zap.Int("idx", idx), zap.String("addr", addr), zap.Error(err))
+	if reqInfo.bo == nil {
+		return execFunc()
 	}
-	return err
+	// Backoffer also needs to check the status code to determine whether to retry.
+	reqInfo.bo.SetRetryableChecker(func(err error) bool {
+		return err != nil && !noNeedRetry(statusCode)
+	})
+	return reqInfo.bo.Exec(ctx, execFunc)
 }
 
 func noNeedRetry(statusCode int) bool {
@@ -336,6 +348,7 @@ type client struct {
 
 	callerID    string
 	respHandler respHandleFunc
+	bo          *retry.Backoffer
 }
 
 // ClientOption configures the HTTP client.
@@ -420,6 +433,13 @@ func (c *client) WithRespHandler(
 	return &newClient
 }
 
+// WithBackoffer sets and returns a new client with the given backoffer.
+func (c *client) WithBackoffer(bo *retry.Backoffer) Client {
+	newClient := *c
+	newClient.bo = bo
+	return &newClient
+}
+
 // Header key definition constants.
 const (
 	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
@@ -439,7 +459,8 @@ func WithAllowFollowerHandle() HeaderOption {
 func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts ...HeaderOption) error {
 	return c.inner.requestWithRetry(ctx, reqInfo.
 		WithCallerID(c.callerID).
-		WithRespHandler(c.respHandler),
+		WithRespHandler(c.respHandler).
+		WithBackoffer(c.bo),
 		headerOpts...)
 }
 

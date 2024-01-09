@@ -20,11 +20,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/retry"
 	"go.uber.org/atomic"
 )
 
@@ -167,5 +169,31 @@ func TestRedirectWithMetrics(t *testing.T) {
 	failureCnt.Write(&out)
 	// leader failure
 	re.Equal(float64(4), out.Counter.GetValue())
+	c.Close()
+}
+
+func TestWithBackoffer(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := NewClient("test-with-backoffer", []string{"http://127.0.0.1"})
+
+	base := 100 * time.Millisecond
+	max := 500 * time.Millisecond
+	total := time.Second
+	bo := retry.InitialBackoffer(base, max, total)
+	// Test the time cost of the backoff.
+	start := time.Now()
+	_, err := c.WithBackoffer(bo).GetPDVersion(ctx)
+	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
+	re.Error(err)
+	// Test if the infinite retry works.
+	bo = retry.InitialBackoffer(base, max, 0)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	start = time.Now()
+	_, err = c.WithBackoffer(bo).GetPDVersion(timeoutCtx)
+	re.InDelta(3*time.Second, time.Since(start), float64(250*time.Millisecond))
+	re.ErrorIs(err, context.DeadlineExceeded)
 	c.Close()
 }

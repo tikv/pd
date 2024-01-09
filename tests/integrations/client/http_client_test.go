@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -489,4 +490,18 @@ func (suite *httpClientTestSuite) TestVersion() {
 	ver, err := suite.client.GetPDVersion(suite.ctx)
 	re.NoError(err)
 	re.Equal(versioninfo.PDReleaseVersion, ver)
+}
+
+func (suite *httpClientTestSuite) TestWithBackoffer() {
+	re := suite.Require()
+	// Should return with 404 error without backoffer.
+	rule, err := suite.client.GetPlacementRule(suite.ctx, "non-exist-group", "non-exist-rule")
+	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
+	re.Nil(rule)
+	// Should return with 404 error even with an infinite backoffer.
+	rule, err = suite.client.
+		WithBackoffer(retry.InitialBackoffer(100*time.Millisecond, time.Second, 0)).
+		GetPlacementRule(suite.ctx, "non-exist-group", "non-exist-rule")
+	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
+	re.Nil(rule)
 }
