@@ -26,7 +26,6 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
-	"github.com/spf13/pflag"
 	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
@@ -58,7 +57,7 @@ func main() {
 
 	switch errors.Cause(err) {
 	case nil:
-	case pflag.ErrHelp:
+	case flag.ErrHelp:
 		exit(0)
 	default:
 		log.Fatal("parse cmd flags error", zap.Error(err))
@@ -196,9 +195,8 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 	qps := gcase.GetQPS()
 	burst := gcase.GetBurst()
 	cliNum := int64(len(clients))
-	log.Info("begin to run gRPC case", zap.String("case", gcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst))
 	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
-	//log.Info("begin to run gRPC case", zap.String("case", gcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
+	log.Info("begin to run gRPC case", zap.String("case", gcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	for _, cli := range clients {
 		go func(cli pd.Client) {
 			var ticker = time.NewTicker(tt)
@@ -225,9 +223,8 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp
 	qps := hcase.GetQPS()
 	burst := hcase.GetBurst()
 	cliNum := int64(len(httpClis))
-	log.Info("begin to run http case", zap.String("case", hcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst))
 	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
-	//log.Info("begin to run http case", zap.String("case", hcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
+	log.Info("begin to run http case", zap.String("case", hcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	for _, hCli := range httpClis {
 		go func(hCli pdHttp.Client) {
 			var ticker = time.NewTicker(tt)

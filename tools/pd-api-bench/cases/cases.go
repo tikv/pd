@@ -95,7 +95,7 @@ type GRPCCase interface {
 	Unary(context.Context, pd.Client) error
 }
 
-// GRPCCraeteFn is funtion type to create GRPCCase.
+// GRPCCraeteFn is function type to create GRPCCase.
 type GRPCCraeteFn func() GRPCCase
 
 // GRPCCaseFnMap is the map for all gRPC case creation function.
@@ -116,7 +116,7 @@ type HTTPCase interface {
 	Do(context.Context, pdHttp.Client) error
 }
 
-// HTTPCraeteFn is funtion type to create GRPCCase.
+// HTTPCraeteFn is function type to create GRPCCase.
 type HTTPCraeteFn func() HTTPCase
 
 // HTTPCaseFnMap is the map for all HTTP case creation function.
