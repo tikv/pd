@@ -92,6 +92,54 @@ func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err 
 	return
 }
 
+<<<<<<< HEAD
+=======
+type evictSlowStoreHandler struct {
+	rd     *render.Render
+	config *evictSlowStoreSchedulerConfig
+}
+
+func newEvictSlowStoreHandler(config *evictSlowStoreSchedulerConfig) http.Handler {
+	h := &evictSlowStoreHandler{
+		config: config,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	return router
+}
+
+func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]interface{}
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
+	if !ok {
+		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+		return
+	}
+	handler.config.Lock()
+	defer handler.config.Unlock()
+	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
+	recoveryDurationGap := uint64(recoveryDurationGapFloat)
+	handler.config.RecoveryDurationGap = recoveryDurationGap
+	if err := handler.config.persistLocked(); err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
+		return
+	}
+	log.Info("evict-slow-store-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
+	handler.rd.JSON(w, http.StatusOK, "Config updated.")
+}
+
+func (handler *evictSlowStoreHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+	conf := handler.config.Clone()
+	handler.rd.JSON(w, http.StatusOK, conf)
+}
+
+>>>>>>> 8b8c78a78 (scheduler: add aduit log for scheduler config API and add resp msg for evict-leader (#7674))
 type evictSlowStoreScheduler struct {
 	*BaseScheduler
 	conf *evictSlowStoreSchedulerConfig

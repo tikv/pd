@@ -272,8 +272,12 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}, nil)
 	re.NotContains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}, nil)
-	re.Contains(echo, "Success!")
+	re.Contains(echo, "Success! The scheduler is created.")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}, nil)
+	re.Contains(echo, "Success! The scheduler has been applied to the store.")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
+	re.Contains(echo, "Success!")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-2"}, nil)
 	re.Contains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
 	re.Contains(echo, "404")
@@ -407,8 +411,39 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 
+<<<<<<< HEAD:tests/pdctl/scheduler/scheduler_test.go
 	// test evict-slow-trend scheduler config
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-trend-scheduler"}, nil)
+=======
+	// test evict-slow-store && evict-slow-trend schedulers config
+	evictSlownessSchedulers := []string{"evict-slow-store-scheduler", "evict-slow-trend-scheduler"}
+	for _, schedulerName := range evictSlownessSchedulers {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", schedulerName}, nil)
+		if strings.Contains(echo, "Success!") {
+			re.Contains(echo, "Success!")
+		} else {
+			re.Contains(echo, "scheduler existed")
+		}
+		testutil.Eventually(re, func() bool {
+			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+			return strings.Contains(echo, schedulerName)
+		})
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "set", "recovery-duration", "100"}, nil)
+		re.Contains(echo, "Success! Config updated.")
+		conf = make(map[string]interface{})
+		testutil.Eventually(re, func() bool {
+			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "show"}, &conf)
+			return conf["recovery-duration"] == 100.
+		})
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", schedulerName}, nil)
+		re.Contains(echo, "Success!")
+		testutil.Eventually(re, func() bool {
+			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+			return !strings.Contains(echo, schedulerName)
+		})
+	}
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-store-scheduler"}, nil)
+>>>>>>> 8b8c78a78 (scheduler: add aduit log for scheduler config API and add resp msg for evict-leader (#7674)):tools/pd-ctl/tests/scheduler/scheduler_test.go
 	re.Contains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
 	re.Contains(echo, "evict-slow-trend-scheduler")
