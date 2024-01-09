@@ -171,9 +171,18 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	suite.Equal("Profile", serviceLabel)
 
 	accessPaths = suite.svr.GetServiceLabels("GetSchedulerConfig")
+<<<<<<< HEAD
 	suite.Len(accessPaths, 1)
 	suite.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
 	suite.Equal("", accessPaths[0].Method)
+=======
+	re.Len(accessPaths, 1)
+	re.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
+	re.Equal("GET", accessPaths[0].Method)
+	accessPaths = suite.svr.GetServiceLabels("HandleSchedulerConfig")
+	re.Len(accessPaths, 4)
+	re.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
+>>>>>>> 8b8c78a78 (scheduler: add aduit log for scheduler config API and add resp msg for evict-leader (#7674))
 
 	accessPaths = suite.svr.GetServiceLabels("ResignLeader")
 	suite.Len(accessPaths, 1)
