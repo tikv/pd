@@ -183,11 +183,13 @@ func (ci *clientInner) requestWithRetry(
 	if reqInfo.bo == nil {
 		return execFunc()
 	}
+	// Copy a new backoffer for each request.
+	bo := *reqInfo.bo
 	// Backoffer also needs to check the status code to determine whether to retry.
-	reqInfo.bo.SetRetryableChecker(func(err error) bool {
+	bo.SetRetryableChecker(func(err error) bool {
 		return err != nil && !noNeedRetry(statusCode)
 	})
-	return reqInfo.bo.Exec(ctx, execFunc)
+	return bo.Exec(ctx, execFunc)
 }
 
 func noNeedRetry(statusCode int) bool {
