@@ -25,6 +25,7 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -1042,7 +1043,10 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
-	if !serviceClient.IsConnectedToLeader() && err != nil || resp.Header.GetError() != nil {
+	failpoint.Inject("responseNil", func() {
+		resp = nil
+	})
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(scanCtx)
 		if protoClient == nil {
 			return nil, errs.ErrClientGetProtoClient
@@ -1245,8 +1249,8 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 	if err != nil {
 		return err
 	}
-	if resp.Header.GetError() != nil {
-		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	if resp.GetHeader().GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.GetHeader().GetError().String())
 	}
 	return nil
 }
@@ -1369,8 +1373,8 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	if err != nil {
 		return nil, err
 	}
-	if resp.Header.GetError() != nil {
-		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.Header.GetError().String())
+	if resp.GetHeader().GetError() != nil {
+		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.GetHeader().GetError().String())
 	}
 	return resp, nil
 }
