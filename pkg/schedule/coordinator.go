@@ -368,8 +368,8 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 }
 
 // RunUntilStop runs the coordinator until receiving the stop signal.
-func (c *Coordinator) RunUntilStop() {
-	c.Run()
+func (c *Coordinator) RunUntilStop(collectWaitTime ...time.Duration) {
+	c.Run(collectWaitTime...)
 	<-c.ctx.Done()
 	log.Info("coordinator is stopping")
 	c.GetSchedulersController().Wait()
@@ -378,7 +378,7 @@ func (c *Coordinator) RunUntilStop() {
 }
 
 // Run starts coordinator.
-func (c *Coordinator) Run() {
+func (c *Coordinator) Run(collectWaitTime ...time.Duration) {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	failpoint.Inject("changeCoordinatorTicker", func() {
 		ticker = time.NewTicker(100 * time.Millisecond)
@@ -386,7 +386,7 @@ func (c *Coordinator) Run() {
 	defer ticker.Stop()
 	log.Info("coordinator starts to collect cluster information")
 	for {
-		if c.ShouldRun() {
+		if c.ShouldRun(collectWaitTime...) {
 			log.Info("coordinator has finished cluster information preparation")
 			break
 		}
@@ -721,8 +721,8 @@ func ResetHotSpotMetrics() {
 }
 
 // ShouldRun returns true if the coordinator should run.
-func (c *Coordinator) ShouldRun() bool {
-	return c.prepareChecker.check(c.cluster.GetBasicCluster())
+func (c *Coordinator) ShouldRun(collectWaitTime ...time.Duration) bool {
+	return c.prepareChecker.check(c.cluster.GetBasicCluster(), collectWaitTime...)
 }
 
 // GetSchedulersController returns the schedulers controller.

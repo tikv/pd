@@ -16,15 +16,21 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"math"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	pdCli "github.com/tikv/pd/client"
 	pd "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -40,6 +46,7 @@ type httpClientTestSuite struct {
 	cancelFunc context.CancelFunc
 	cluster    *tests.TestCluster
 	client     pd.Client
+	sd         pdCli.ServiceDiscovery
 }
 
 func TestHTTPClientTestSuite(t *testing.T) {
@@ -74,7 +81,8 @@ func (suite *httpClientTestSuite) SetupSuite() {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
 	}
 	cli := setupCli(re, suite.ctx, endpoints)
-	suite.client = pd.NewClientWithServiceDiscovery("pd-http-client-it", cli.GetServiceDiscovery())
+	suite.sd = cli.GetServiceDiscovery()
+	suite.client = pd.NewClientWithServiceDiscovery("pd-http-client-it", suite.sd)
 }
 
 func (suite *httpClientTestSuite) TearDownSuite() {
@@ -491,4 +499,76 @@ func (suite *httpClientTestSuite) TestVersion() {
 	ver, err := suite.client.GetPDVersion(suite.ctx)
 	re.NoError(err)
 	re.Equal(versioninfo.PDReleaseVersion, ver)
+}
+
+func (suite *httpClientTestSuite) TestWithBackoffer() {
+	re := suite.Require()
+	// Should return with 404 error without backoffer.
+	rule, err := suite.client.GetPlacementRule(suite.ctx, "non-exist-group", "non-exist-rule")
+	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
+	re.Nil(rule)
+	// Should return with 404 error even with an infinite backoffer.
+	rule, err = suite.client.
+		WithBackoffer(retry.InitialBackoffer(100*time.Millisecond, time.Second, 0)).
+		GetPlacementRule(suite.ctx, "non-exist-group", "non-exist-rule")
+	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
+	re.Nil(rule)
+}
+
+func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
+	re := suite.Require()
+	metricCnt := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "check",
+		}, []string{"name", ""})
+	// 1. Test all followers failed, need to send all followers.
+	httpClient := pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
+		if req.URL.Path == pd.Schedulers {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", suite.sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
+	c.CreateScheduler(context.Background(), "test", 0)
+	var out dto.Metric
+	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
+	re.NoError(err)
+	failureCnt.Write(&out)
+	re.Equal(float64(2), out.Counter.GetValue())
+	c.Close()
+
+	leader := suite.sd.GetServingAddr()
+	httpClient = pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
+		// mock leader success.
+		if !strings.Contains(leader, req.Host) {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", suite.sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
+	c.CreateScheduler(context.Background(), "test", 0)
+	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
+	re.NoError(err)
+	successCnt.Write(&out)
+	re.Equal(float64(1), out.Counter.GetValue())
+	c.Close()
+
+	httpClient = pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
+		// mock leader success.
+		if strings.Contains(leader, req.Host) {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", suite.sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
+	c.CreateScheduler(context.Background(), "test", 0)
+	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
+	re.NoError(err)
+	successCnt.Write(&out)
+	re.Equal(float64(2), out.Counter.GetValue())
+	failureCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
+	re.NoError(err)
+	failureCnt.Write(&out)
+	re.Equal(float64(3), out.Counter.GetValue())
+	c.Close()
 }

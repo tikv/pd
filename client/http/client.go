@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/retry"
 	"go.uber.org/zap"
 )
 
@@ -107,27 +108,37 @@ func (ci *clientInner) execDuration(name string, duration time.Duration) {
 
 // requestWithRetry will first try to send the request to the PD leader, if it fails, it will try to send
 // the request to the other PD followers to gain a better availability.
-// TODO: support custom retry logic, e.g. retry with customizable backoffer.
 func (ci *clientInner) requestWithRetry(
 	ctx context.Context,
 	reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
 ) error {
 	var (
-		err        error
 		statusCode int
+		err        error
 	)
-	clients := ci.sd.GetAllServiceClients()
-	for _, cli := range clients {
-		addr := cli.GetHTTPAddress()
-		statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-		if err == nil || noNeedRetry(statusCode) {
-			return err
+	execFunc := func() error {
+		// It will try to send the request to the PD leader first and then try to send the request to the other PD followers.
+		clients := ci.sd.GetAllServiceClients()
+		for _, cli := range clients {
+			addr := cli.GetHTTPAddress()
+			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+			if err == nil || noNeedRetry(statusCode) {
+				return err
+			}
+			log.Debug("[pd] request addr failed",
+				zap.String("source", ci.source), zap.Bool("is-leader", cli.IsConnectedToLeader()), zap.String("addr", addr), zap.Error(err))
 		}
-		log.Debug("[pd] request addr failed",
-			zap.String("source", ci.source), zap.Bool("is-leader", cli.IsConnectedToLeader()), zap.String("addr", addr), zap.Error(err))
+		return err
 	}
-	return err
+	if reqInfo.bo == nil {
+		return execFunc()
+	}
+	// Backoffer also needs to check the status code to determine whether to retry.
+	reqInfo.bo.SetRetryableChecker(func(err error) bool {
+		return err != nil && !noNeedRetry(statusCode)
+	})
+	return reqInfo.bo.Exec(ctx, execFunc)
 }
 
 func noNeedRetry(statusCode int) bool {
@@ -221,6 +232,7 @@ type client struct {
 
 	callerID    string
 	respHandler respHandleFunc
+	bo          *retry.Backoffer
 }
 
 // ClientOption configures the HTTP client.
@@ -322,6 +334,13 @@ func (c *client) WithRespHandler(
 	return &newClient
 }
 
+// WithBackoffer sets and returns a new client with the given backoffer.
+func (c *client) WithBackoffer(bo *retry.Backoffer) Client {
+	newClient := *c
+	newClient.bo = bo
+	return &newClient
+}
+
 // Header key definition constants.
 const (
 	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
@@ -341,6 +360,24 @@ func WithAllowFollowerHandle() HeaderOption {
 func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts ...HeaderOption) error {
 	return c.inner.requestWithRetry(ctx, reqInfo.
 		WithCallerID(c.callerID).
-		WithRespHandler(c.respHandler),
+		WithRespHandler(c.respHandler).
+		WithBackoffer(c.bo),
 		headerOpts...)
+}
+
+// requestChecker is used to check the HTTP request sent by the client.
+type requestChecker struct {
+	checker func(req *http.Request) error
+}
+
+// RoundTrip implements the `http.RoundTripper` interface.
+func (rc *requestChecker) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	return &http.Response{StatusCode: http.StatusOK}, rc.checker(req)
+}
+
+// NewHTTPClientWithRequestChecker returns a http client with checker.
+func NewHTTPClientWithRequestChecker(checker func(req *http.Request) error) *http.Client {
+	return &http.Client{
+		Transport: &requestChecker{checker: checker},
+	}
 }
