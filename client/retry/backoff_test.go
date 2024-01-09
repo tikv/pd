@@ -25,6 +25,8 @@ import (
 
 func TestBackoffer(t *testing.T) {
 	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	base := time.Second
 	max := 100 * time.Millisecond
@@ -49,7 +51,7 @@ func TestBackoffer(t *testing.T) {
 		execCount   int
 		expectedErr = errors.New("test")
 	)
-	err := bo.Exec(context.Background(), func() error {
+	err := bo.Exec(ctx, func() error {
 		execCount++
 		return expectedErr
 	})
@@ -74,7 +76,7 @@ func TestBackoffer(t *testing.T) {
 	// Test the total time cost.
 	execCount = 0
 	var start time.Time
-	err = bo.Exec(context.Background(), func() error {
+	err = bo.Exec(ctx, func() error {
 		execCount++
 		if start.IsZero() {
 			start = time.Now()
@@ -84,6 +86,20 @@ func TestBackoffer(t *testing.T) {
 	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
 	re.ErrorIs(err, expectedErr)
 	re.Equal(4, execCount)
+	re.True(isBackofferReset(bo))
+
+	// Test the retryable checker.
+	execCount = 0
+	bo = InitialBackoffer(base, max, total)
+	bo.SetRetryableChecker(func(err error) bool {
+		return execCount < 2
+	})
+	err = bo.Exec(ctx, func() error {
+		execCount++
+		return nil
+	})
+	re.NoError(err)
+	re.Equal(2, execCount)
 	re.True(isBackofferReset(bo))
 }
 

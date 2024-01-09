@@ -30,6 +30,9 @@ type Backoffer struct {
 	max time.Duration
 	// total defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
 	total time.Duration
+	// retryableChecker is used to check if the error is retryable.
+	// By default, all errors are retryable.
+	retryableChecker func(err error) bool
 
 	next         time.Duration
 	currentTotal time.Duration
@@ -39,15 +42,23 @@ type Backoffer struct {
 func (bo *Backoffer) Exec(
 	ctx context.Context,
 	fn func() error,
-) (err error) {
+) error {
 	defer bo.resetBackoff()
+	var (
+		err   error
+		after *time.Timer
+	)
 	for {
 		err = fn()
-		if err == nil {
+		if !bo.isRetryable(err) {
 			break
 		}
 		currentInterval := bo.nextInterval()
-		after := time.NewTimer(currentInterval)
+		if after == nil {
+			after = time.NewTimer(currentInterval)
+		} else {
+			after.Reset(currentInterval)
+		}
 		select {
 		case <-ctx.Done():
 			after.Stop()
@@ -83,12 +94,27 @@ func InitialBackoffer(base, max, total time.Duration) *Backoffer {
 		total = base
 	}
 	return &Backoffer{
-		base:         base,
-		max:          max,
-		total:        total,
+		base:  base,
+		max:   max,
+		total: total,
+		retryableChecker: func(err error) bool {
+			return err != nil
+		},
 		next:         base,
 		currentTotal: 0,
 	}
+}
+
+// SetRetryableChecker sets the retryable checker.
+func (bo *Backoffer) SetRetryableChecker(checker func(err error) bool) {
+	bo.retryableChecker = checker
+}
+
+func (bo *Backoffer) isRetryable(err error) bool {
+	if bo.retryableChecker == nil {
+		return true
+	}
+	return bo.retryableChecker(err)
 }
 
 // nextInterval for now use the `exponentialInterval`.

@@ -146,10 +146,12 @@ func (ci *clientInner) requestWithRetry(
 	reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
 ) error {
+	var (
+		statusCode int
+		err        error
+	)
 	execFunc := func() error {
 		var (
-			statusCode             int
-			err                    error
 			addr                   string
 			pdAddrs, leaderAddrIdx = ci.getPDAddrs()
 		)
@@ -169,7 +171,7 @@ func (ci *clientInner) requestWithRetry(
 				continue
 			}
 			addr = ci.pdAddrs[idx]
-			_, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 			if err == nil || noNeedRetry(statusCode) {
 				break
 			}
@@ -181,6 +183,10 @@ func (ci *clientInner) requestWithRetry(
 	if reqInfo.bo == nil {
 		return execFunc()
 	}
+	// Backoffer also needs to check the status code to determine whether to retry.
+	reqInfo.bo.SetRetryableChecker(func(err error) bool {
+		return err != nil && !noNeedRetry(statusCode)
+	})
 	return reqInfo.bo.Exec(ctx, execFunc)
 }
 
