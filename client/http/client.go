@@ -373,18 +373,16 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 }
 
 // requestChecker is used to check the HTTP request sent by the client.
-type requestChecker struct {
-	checker func(req *http.Request) error
-}
+type requestChecker func(req *http.Request) error
 
 // RoundTrip implements the `http.RoundTripper` interface.
-func (rc *requestChecker) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	return &http.Response{StatusCode: http.StatusOK}, rc.checker(req)
+func (rc requestChecker) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	return &http.Response{StatusCode: http.StatusOK}, rc(req)
 }
 
 // NewHTTPClientWithRequestChecker returns a http client with checker.
-func NewHTTPClientWithRequestChecker(checker func(req *http.Request) error) *http.Client {
+func NewHTTPClientWithRequestChecker(checker requestChecker) *http.Client {
 	return &http.Client{
-		Transport: &requestChecker{checker: checker},
+		Transport: checker,
 	}
 }
