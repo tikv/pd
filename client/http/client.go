@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 	"go.uber.org/zap"
 )
@@ -120,9 +122,13 @@ func (ci *clientInner) requestWithRetry(
 	execFunc := func() error {
 		// It will try to send the request to the PD leader first and then try to send the request to the other PD followers.
 		clients := ci.sd.GetAllServiceClients()
+		if len(clients) == 0 {
+			return errs.ErrClientNoAvailableMember
+		}
 		for _, cli := range clients {
 			addr := cli.GetHTTPAddress()
 			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+			fmt.Println("statusCode", statusCode)
 			if err == nil || noNeedRetry(statusCode) {
 				return err
 			}
@@ -131,6 +137,7 @@ func (ci *clientInner) requestWithRetry(
 		}
 		return err
 	}
+	fmt.Println("reqInfo.bo", reqInfo.bo == nil)
 	if reqInfo.bo == nil {
 		return execFunc()
 	}

@@ -16,6 +16,7 @@ package retry
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -50,6 +51,7 @@ func (bo *Backoffer) Exec(
 	)
 	for {
 		err = fn()
+		fmt.Println(err)
 		if !bo.isRetryable(err) {
 			break
 		}
