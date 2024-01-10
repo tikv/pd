@@ -54,6 +54,23 @@ func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) erro
 	return nil
 }
 
+type Config struct {
+	QPS   int64 `toml:"qps" json:"qps"`
+	Burst int64 `toml:"burst" json:"burst"`
+}
+
+func newConfig() *Config {
+	return &Config{
+		Burst: 1,
+	}
+}
+
+// Clone returns a cloned configuration.
+func (c *Config) Clone() *Config {
+	cfg := *c
+	return &cfg
+}
+
 // Case is the interface for all cases.
 type Case interface {
 	Name() string
@@ -61,12 +78,12 @@ type Case interface {
 	GetQPS() int64
 	SetBurst(int64)
 	GetBurst() int64
+	GetConfig() *Config
 }
 
 type baseCase struct {
-	name  string
-	qps   int64
-	burst int64
+	name string
+	cfg  *Config
 }
 
 func (c *baseCase) Name() string {
@@ -74,19 +91,23 @@ func (c *baseCase) Name() string {
 }
 
 func (c *baseCase) SetQPS(qps int64) {
-	c.qps = qps
+	c.cfg.QPS = qps
 }
 
 func (c *baseCase) GetQPS() int64 {
-	return c.qps
+	return c.cfg.QPS
 }
 
 func (c *baseCase) SetBurst(burst int64) {
-	c.burst = burst
+	c.cfg.Burst = burst
 }
 
 func (c *baseCase) GetBurst() int64 {
-	return c.burst
+	return c.cfg.Burst
+}
+
+func (c *baseCase) GetConfig() *Config {
+	return c.cfg.Clone()
 }
 
 // GRPCCase is the interface for all gRPC cases.
@@ -136,9 +157,8 @@ func newMinResolvedTS() func() HTTPCase {
 	return func() HTTPCase {
 		return &minResolvedTS{
 			baseCase: &baseCase{
-				name:  "GetMinResolvedTS",
-				qps:   1000,
-				burst: 1,
+				name: "GetMinResolvedTS",
+				cfg:  newConfig(),
 			},
 		}
 	}
@@ -164,9 +184,8 @@ func newRegionStats() func() HTTPCase {
 	return func() HTTPCase {
 		return &regionsStats{
 			baseCase: &baseCase{
-				name:  "GetRegionStatus",
-				qps:   100,
-				burst: 1,
+				name: "GetRegionStatus",
+				cfg:  newConfig(),
 			},
 			regionSample: 1000,
 		}
@@ -200,9 +219,8 @@ func newGetRegion() func() GRPCCase {
 	return func() GRPCCase {
 		return &getRegion{
 			baseCase: &baseCase{
-				name:  "GetRegion",
-				qps:   10000,
-				burst: 1,
+				name: "GetRegion",
+				cfg:  newConfig(),
 			},
 		}
 	}
@@ -226,9 +244,8 @@ func newScanRegions() func() GRPCCase {
 	return func() GRPCCase {
 		return &scanRegions{
 			baseCase: &baseCase{
-				name:  "ScanRegions",
-				qps:   10000,
-				burst: 1,
+				name: "ScanRegions",
+				cfg:  newConfig(),
 			},
 			regionSample: 10000,
 		}
@@ -255,9 +272,8 @@ func newTso() func() GRPCCase {
 	return func() GRPCCase {
 		return &tso{
 			baseCase: &baseCase{
-				name:  "Tso",
-				qps:   10000,
-				burst: 1,
+				name: "Tso",
+				cfg:  newConfig(),
 			},
 		}
 	}
@@ -279,9 +295,8 @@ func newGetStore() func() GRPCCase {
 	return func() GRPCCase {
 		return &getStore{
 			baseCase: &baseCase{
-				name:  "GetStore",
-				qps:   10000,
-				burst: 1,
+				name: "GetStore",
+				cfg:  newConfig(),
 			},
 		}
 	}
@@ -304,9 +319,8 @@ func newGetStores() func() GRPCCase {
 	return func() GRPCCase {
 		return &getStores{
 			baseCase: &baseCase{
-				name:  "GetStores",
-				qps:   10000,
-				burst: 1,
+				name: "GetStores",
+				cfg:  newConfig(),
 			},
 		}
 	}

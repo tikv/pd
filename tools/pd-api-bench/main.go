@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -24,12 +25,17 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/cors"
+	"github.com/gin-contrib/gzip"
+	"github.com/gin-contrib/pprof"
+	"github.com/gin-gonic/gin"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"
 	"github.com/tikv/pd/tools/pd-api-bench/config"
@@ -46,9 +52,8 @@ var (
 	gRPCCases = flag.String("grpc-cases", "", "grpc cases")
 )
 
-var base = int64(time.Second) / int64(time.Microsecond)
-
 func main() {
+	ctx, cancel := context.WithCancel(context.Background())
 	flagSet := flag.NewFlagSet("api-bench", flag.ContinueOnError)
 	flagSet.ParseErrorsWhitelist.UnknownFlags = true
 	cfg := config.NewConfig(flagSet)
@@ -68,7 +73,6 @@ func main() {
 	} else {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
@@ -168,12 +172,10 @@ func main() {
 		log.Fatal("InitCluster error", zap.Error(err))
 	}
 
-	for _, hcase := range cases.HTTPCaseMap {
-		handleHTTPCase(ctx, hcase, httpClis)
-	}
-	for _, gcase := range cases.GRPCCaseMap {
-		handleGRPCCase(ctx, gcase, pdClis)
-	}
+	coordinator := cases.NewCoordinator(ctx, httpClis, pdClis)
+	cfg.InitCoordinator(coordinator)
+
+	go runHTTPServer(cfg, coordinator)
 
 	<-ctx.Done()
 	for _, cli := range pdClis {
@@ -191,64 +193,103 @@ func main() {
 	}
 }
 
-func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Client) {
-	qps := gcase.GetQPS()
-	burst := gcase.GetBurst()
-	cliNum := int64(len(clients))
-	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
-	log.Info("begin to run gRPC case", zap.String("case", gcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
-	for _, cli := range clients {
-		go func(cli pd.Client) {
-			var ticker = time.NewTicker(tt)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					for i := int64(0); i < burst; i++ {
-						err := gcase.Unary(ctx, cli)
-						if err != nil {
-							log.Error("meet erorr when doing gRPC request", zap.String("case", gcase.Name()), zap.Error(err))
-						}
-					}
-				case <-ctx.Done():
-					log.Info("Got signal to exit handleGetRegion")
-					return
-				}
-			}
-		}(cli)
-	}
-}
-
-func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp.Client) {
-	qps := hcase.GetQPS()
-	burst := hcase.GetBurst()
-	cliNum := int64(len(httpClis))
-	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
-	log.Info("begin to run http case", zap.String("case", hcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
-	for _, hCli := range httpClis {
-		go func(hCli pdHttp.Client) {
-			var ticker = time.NewTicker(tt)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					for i := int64(0); i < burst; i++ {
-						err := hcase.Do(ctx, hCli)
-						if err != nil {
-							log.Error("meet erorr when doing HTTP request", zap.String("case", hcase.Name()), zap.Error(err))
-						}
-					}
-				case <-ctx.Done():
-					log.Info("Got signal to exit handleScanRegions")
-					return
-				}
-			}
-		}(hCli)
-	}
-}
-
 func exit(code int) {
 	os.Exit(code)
+}
+
+func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
+	gin.SetMode(gin.ReleaseMode)
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	engine.Use(cors.Default())
+	engine.Use(gzip.Gzip(gzip.DefaultCompression))
+	engine.GET("metrics", utils.PromHandler())
+	// profile API
+	pprof.Register(engine)
+
+	getCfg := func(c *gin.Context) *cases.Config {
+		var err error
+		cfg := &cases.Config{}
+		qpsStr := c.Query("qps")
+		if len(qpsStr) > 0 {
+			cfg.QPS, err = strconv.ParseInt(qpsStr, 10, 64)
+			if err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+			}
+		}
+		burstStr := c.Query("burst")
+		if len(burstStr) > 0 {
+			cfg.Burst, err = strconv.ParseInt(burstStr, 10, 64)
+			if err != nil {
+				c.String(http.StatusBadRequest, err.Error())
+			}
+		}
+		return cfg
+	}
+
+	engine.POST("config/http/all", func(c *gin.Context) {
+		var input map[string]cases.Config
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		for name, cfg := range input {
+			co.SetHTTPCase(name, &cfg)
+		}
+		c.String(http.StatusOK, "")
+	})
+	engine.POST("config/http/:name", func(c *gin.Context) {
+		name := c.Param("name")
+		cfg := getCfg(c)
+		co.SetHTTPCase(name, cfg)
+		c.String(http.StatusOK, "")
+	})
+	engine.POST("config/grpc/all", func(c *gin.Context) {
+		var input map[string]cases.Config
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		for name, cfg := range input {
+			co.SetGRPCCase(name, &cfg)
+		}
+		c.String(http.StatusOK, "")
+	})
+	engine.POST("config/grpc/:name", func(c *gin.Context) {
+		name := c.Param("name")
+		cfg := getCfg(c)
+		co.SetGRPCCase(name, cfg)
+		c.String(http.StatusOK, "")
+	})
+
+	engine.GET("config/http/all", func(c *gin.Context) {
+		all := co.GetAllHTTPCases()
+		c.IndentedJSON(http.StatusOK, all)
+	})
+	engine.GET("config/http/:name", func(c *gin.Context) {
+		name := c.Param("name")
+		cfg, err := co.GetHTTPCase(name)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		c.IndentedJSON(http.StatusOK, cfg)
+	})
+	engine.GET("config/grpc/all", func(c *gin.Context) {
+		all := co.GetAllGRPCCases()
+		c.IndentedJSON(http.StatusOK, all)
+	})
+	engine.GET("config/grpc/:name", func(c *gin.Context) {
+		name := c.Param("name")
+		cfg, err := co.GetGRPCCase(name)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		c.IndentedJSON(http.StatusOK, cfg)
+	})
+	// nolint
+	engine.Run(cfg.StatusAddr)
 }
 
 func trimHTTPPrefix(str string) string {
