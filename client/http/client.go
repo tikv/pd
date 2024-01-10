@@ -19,7 +19,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -136,7 +135,6 @@ func (ci *clientInner) requestWithRetry(
 		}
 		return err
 	}
-	fmt.Println("reqInfo.bo", reqInfo.bo == nil)
 	if reqInfo.bo == nil {
 		return execFunc()
 	}

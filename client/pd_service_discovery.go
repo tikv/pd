@@ -348,6 +348,7 @@ type pdServiceBalancerNode struct {
 type pdServiceBalancer struct {
 	mu        sync.Mutex
 	now       *pdServiceBalancerNode
+	leader    *pdServiceBalancerNode
 	totalNode int
 	errFn     errFn
 }
@@ -365,11 +366,11 @@ func (c *pdServiceBalancer) set(clients []ServiceClient) {
 	}
 	c.totalNode = len(clients)
 	head := &pdServiceBalancerNode{
-		pdServiceAPIClient: newPDServiceAPIClient(clients[0], c.errFn).(*pdServiceAPIClient),
+		pdServiceAPIClient: newPDServiceAPIClient(clients[c.totalNode-1], c.errFn).(*pdServiceAPIClient),
 	}
 	head.next = head
 	last := head
-	for i := 1; i < c.totalNode; i++ {
+	for i := c.totalNode - 2; i >= 0; i-- {
 		next := &pdServiceBalancerNode{
 			pdServiceAPIClient: newPDServiceAPIClient(clients[i], c.errFn).(*pdServiceAPIClient),
 			next:               head,
@@ -432,10 +433,12 @@ type pdServiceDiscovery struct {
 	isInitialized bool
 
 	urls atomic.Value // Store as []string
-	// PD leader URL
+	// PD leader
 	leader atomic.Value // Store as pdServiceClient
-	// PD follower URLs
-	followers         sync.Map // Store as map[string]pdServiceClient
+	// PD follower
+	followers sync.Map // Store as map[string]pdServiceClient
+	// PD leader and PD followers
+	all               atomic.Value // Store as []pdServiceClient
 	apiCandidateNodes [apiKindCount]*pdServiceBalancer
 	// PD follower URLs. Only for tso.
 	followerAddresses atomic.Value // Store as []string
@@ -794,17 +797,12 @@ func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 
 // GetAllServiceClients implments ServiceDiscovery
 func (c *pdServiceDiscovery) GetAllServiceClients() []ServiceClient {
-	ret := make([]ServiceClient, 0)
-	leader := c.getLeaderServiceClient()
-	if leader != nil {
-		ret = append(ret, leader)
+	all := c.all.Load()
+	if all == nil {
+		return nil
 	}
-	c.followers.Range(func(key, value any) bool {
-		serviceClient := value.(*pdServiceClient)
-		ret = append(ret, serviceClient)
-		return true
-	})
-	return ret
+	ret := all.([]ServiceClient)
+	return append(ret[:0:0], ret...)
 }
 
 // ScheduleCheckMemberChanged is used to check if there is any membership
@@ -1112,14 +1110,15 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 	}
 	// If error is not nil, still updates candidates.
 	clients := make([]ServiceClient, 0)
-	c.followers.Range(func(_, value any) bool {
-		clients = append(clients, value.(*pdServiceClient))
-		return true
-	})
 	leaderClient := c.getLeaderServiceClient()
 	if leaderClient != nil {
 		clients = append(clients, leaderClient)
 	}
+	c.followers.Range(func(_, value any) bool {
+		clients = append(clients, value.(*pdServiceClient))
+		return true
+	})
+	c.all.Store(clients)
 	// create candidate services for all kinds of request.
 	for i := 0; i < int(apiKindCount); i++ {
 		c.apiCandidateNodes[i].set(clients)
