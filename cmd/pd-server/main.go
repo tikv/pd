@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	resource_manager "github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -185,7 +186,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	}
 	// Flushing any buffered log entries
 	defer log.Sync()
-
+	memory.InitMemoryHook()
 	if len(services) != 0 {
 		versioninfo.Log(server.APIServiceMode)
 	} else {
