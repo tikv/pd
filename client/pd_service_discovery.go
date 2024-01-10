@@ -348,7 +348,6 @@ type pdServiceBalancerNode struct {
 type pdServiceBalancer struct {
 	mu        sync.Mutex
 	now       *pdServiceBalancerNode
-	leader    *pdServiceBalancerNode
 	totalNode int
 	errFn     errFn
 }
