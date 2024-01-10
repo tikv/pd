@@ -128,7 +128,6 @@ func (ci *clientInner) requestWithRetry(
 		for _, cli := range clients {
 			addr := cli.GetHTTPAddress()
 			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
-			fmt.Println("statusCode", statusCode)
 			if err == nil || noNeedRetry(statusCode) {
 				return err
 			}
