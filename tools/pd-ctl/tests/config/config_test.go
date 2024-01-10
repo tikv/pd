@@ -343,6 +343,48 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.Contains(string(output), "is invalid")
 }
 
+func (suite *configTestSuite) TestConfigForwardControl() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
+	suite.env.RunTestInTwoModes(suite.checkConfigForwardControl)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
+}
+
+func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	cmd := ctl.GetRootCmd()
+
+	args := []string{"-u", pdAddr, "config", "show", "--from_api_server"}
+	_, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "config", "show", "all", "--from_api_server"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "config", "show", "replication", "--from_api_server"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "config", "show", "schedule", "--from_api_server"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "config", "placement-rules", "show", "--from_api_server"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "config", "placement-rules", "load", "--from_api_server"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "config", "placement-rules", "rule-group", "show", placement.DefaultGroupID, "--from_api_server"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", placement.DefaultGroupID, "--from_api_server"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	args = []string{"-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--from_api_server"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+}
+
 func (suite *configTestSuite) TestPlacementRules() {
 	suite.env.RunTestInTwoModes(suite.checkPlacementRules)
 }

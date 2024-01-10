@@ -33,20 +33,21 @@ import (
 )
 
 const (
-	configPrefix             = "pd/api/v1/config"
-	schedulePrefix           = "pd/api/v1/config/schedule"
-	replicatePrefix          = "pd/api/v1/config/replicate"
-	labelPropertyPrefix      = "pd/api/v1/config/label-property"
-	clusterVersionPrefix     = "pd/api/v1/config/cluster-version"
-	rulesPrefix              = "pd/api/v1/config/rules"
-	rulesBatchPrefix         = "pd/api/v1/config/rules/batch"
-	rulePrefix               = "pd/api/v1/config/rule"
-	ruleGroupPrefix          = "pd/api/v1/config/rule_group"
-	ruleGroupsPrefix         = "pd/api/v1/config/rule_groups"
-	replicationModePrefix    = "pd/api/v1/config/replication-mode"
-	ruleBundlePrefix         = "pd/api/v1/config/placement-rule"
-	pdServerPrefix           = "pd/api/v1/config/pd-server"
-	flagRedirectMicroService = "redirect_to_mcs"
+	configPrefix          = "pd/api/v1/config"
+	schedulePrefix        = "pd/api/v1/config/schedule"
+	replicatePrefix       = "pd/api/v1/config/replicate"
+	labelPropertyPrefix   = "pd/api/v1/config/label-property"
+	clusterVersionPrefix  = "pd/api/v1/config/cluster-version"
+	rulesPrefix           = "pd/api/v1/config/rules"
+	rulesBatchPrefix      = "pd/api/v1/config/rules/batch"
+	rulePrefix            = "pd/api/v1/config/rule"
+	ruleGroupPrefix       = "pd/api/v1/config/rule_group"
+	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
+	replicationModePrefix = "pd/api/v1/config/replication-mode"
+	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
+	pdServerPrefix        = "pd/api/v1/config/pd-server"
+	// flagFromAPIServer has no influence for pd mode, but it is useful for us to debug in api mode.
+	flagFromAPIServer = "from_api_server"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -76,6 +77,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowClusterVersionCommand())
 	sc.AddCommand(newShowReplicationModeCommand())
 	sc.AddCommand(NewShowServerConfigCommand())
+	sc.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	return sc
 }
 
@@ -86,6 +88,7 @@ func NewShowAllConfigCommand() *cobra.Command {
 		Short: "show all config of PD",
 		Run:   showAllConfigCommandFunc,
 	}
+	sc.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	return sc
 }
 
@@ -96,6 +99,7 @@ func NewShowScheduleConfigCommand() *cobra.Command {
 		Short: "show schedule config of PD",
 		Run:   showScheduleConfigCommandFunc,
 	}
+	sc.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	return sc
 }
 
@@ -106,6 +110,7 @@ func NewShowReplicationConfigCommand() *cobra.Command {
 		Short: "show replication config of PD",
 		Run:   showReplicationConfigCommandFunc,
 	}
+	sc.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	return sc
 }
 
@@ -208,11 +213,7 @@ func NewDeleteLabelPropertyConfigCommand() *cobra.Command {
 }
 
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
-	header, err := buildHeader(cmd)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
-	}
+	header := buildHeader(cmd)
 	allR, err := doRequest(cmd, configPrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
@@ -268,11 +269,7 @@ var hideConfig = []string{
 }
 
 func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
-	header, err := buildHeader(cmd)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
-	}
+	header := buildHeader(cmd)
 	r, err := doRequest(cmd, schedulePrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
@@ -282,11 +279,7 @@ func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
-	header, err := buildHeader(cmd)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
-	}
+	header := buildHeader(cmd)
 	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
@@ -305,11 +298,7 @@ func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
-	header, err := buildHeader(cmd)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
-	}
+	header := buildHeader(cmd)
 	r, err := doRequest(cmd, configPrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
@@ -459,7 +448,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
 	show.Flags().Bool("detail", false, "detailed match info for region")
-	show.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
+	show.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -469,7 +458,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	load.Flags().String("id", "", "rule id")
 	load.Flags().String("region", "", "region id")
 	load.Flags().String("out", "rules.json", "the filename contains rules")
-	load.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
+	load.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	save := &cobra.Command{
 		Use:   "save",
 		Short: "save rules from file",
@@ -485,7 +474,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
-	ruleGroupShow.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
+	ruleGroupShow.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	ruleGroupSet := &cobra.Command{
 		Use:   "set <id> <index> <override>",
 		Short: "update rule group configuration",
@@ -508,7 +497,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   getRuleBundle,
 	}
 	ruleBundleGet.Flags().String("out", "", "the output file")
-	ruleBundleGet.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
+	ruleBundleGet.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	ruleBundleSet := &cobra.Command{
 		Use:   "set",
 		Short: "set rule group config and its rules from file",
@@ -527,7 +516,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   loadRuleBundle,
 	}
 	ruleBundleLoad.Flags().String("out", "rules.json", "the output file")
-	ruleBundleLoad.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
+	ruleBundleLoad.Flags().Bool(flagFromAPIServer, true, "read data from api server rather than micor service")
 	ruleBundleSave := &cobra.Command{
 		Use:   "save",
 		Short: "save all group configs and rules from file",
@@ -588,11 +577,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(`"region" should not be specified with "group" or "id" at the same time`)
 		return
 	}
-	header, err := buildHeader(cmd)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
-	}
+	header := buildHeader(cmd)
 	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
@@ -661,12 +646,7 @@ func showRuleGroupFunc(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		reqPath = path.Join(ruleGroupPrefix, args[0])
 	}
-	header, err := buildHeader(cmd)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
-	}
-
+	header := buildHeader(cmd)
 	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
@@ -708,11 +688,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 	}
 
 	reqPath := path.Join(ruleBundlePrefix, args[0])
-	header, err := buildHeader(cmd)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
-	}
+	header := buildHeader(cmd)
 	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
@@ -788,11 +764,7 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 }
 
 func loadRuleBundle(cmd *cobra.Command, args []string) {
-	header, err := buildHeader(cmd)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse flag: ", err)
-		return
-	}
+	header := buildHeader(cmd)
 	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
@@ -841,14 +813,11 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 	cmd.Println(res)
 }
 
-func buildHeader(cmd *cobra.Command) (http.Header, error) {
+func buildHeader(cmd *cobra.Command) http.Header {
 	header := http.Header{}
-	allowRedirectMicroService, err := cmd.Flags().GetBool(flagRedirectMicroService)
-	if err != nil {
-		return nil, err
-	}
-	if !allowRedirectMicroService {
+	forbiddenRedirectToMicroService, err := cmd.Flags().GetBool(flagFromAPIServer)
+	if err == nil && forbiddenRedirectToMicroService {
 		header.Add(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
 	}
-	return header, nil
+	return header
 }

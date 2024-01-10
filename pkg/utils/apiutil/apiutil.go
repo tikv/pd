@@ -59,9 +59,9 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
-	// XForbiddenForwardToMicroServiceHeader is used to mark whether this request is allowed to be forwarded to micro service.
+	// XForbiddenForwardToMicroServiceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
 	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
-	// XForwardedToMicroServiceHeader is used to mark the request is forwarded to micro service.
+	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
 	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
 
 	chunkSize = 4096

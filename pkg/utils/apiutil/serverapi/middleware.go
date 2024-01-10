@@ -202,7 +202,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		clientUrls = append(clientUrls, targetAddr)
-		// Add a header to the response, it is used to check whether the request is forwarded to the micro service
+		// Add a header to the response, it is used to mark whether the request has been forwarded to the micro service.
 		w.Header().Add(apiutil.XForwardedToMicroServiceHeader, "true")
 	} else {
 		leader := h.s.GetMember().GetLeader()
