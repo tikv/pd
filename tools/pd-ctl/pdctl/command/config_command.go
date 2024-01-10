@@ -27,24 +27,26 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server/config"
 )
 
-var (
-	configPrefix          = "pd/api/v1/config"
-	schedulePrefix        = "pd/api/v1/config/schedule"
-	replicatePrefix       = "pd/api/v1/config/replicate"
-	labelPropertyPrefix   = "pd/api/v1/config/label-property"
-	clusterVersionPrefix  = "pd/api/v1/config/cluster-version"
-	rulesPrefix           = "pd/api/v1/config/rules"
-	rulesBatchPrefix      = "pd/api/v1/config/rules/batch"
-	rulePrefix            = "pd/api/v1/config/rule"
-	ruleGroupPrefix       = "pd/api/v1/config/rule_group"
-	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
-	replicationModePrefix = "pd/api/v1/config/replication-mode"
-	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
-	pdServerPrefix        = "pd/api/v1/config/pd-server"
+const (
+	configPrefix             = "pd/api/v1/config"
+	schedulePrefix           = "pd/api/v1/config/schedule"
+	replicatePrefix          = "pd/api/v1/config/replicate"
+	labelPropertyPrefix      = "pd/api/v1/config/label-property"
+	clusterVersionPrefix     = "pd/api/v1/config/cluster-version"
+	rulesPrefix              = "pd/api/v1/config/rules"
+	rulesBatchPrefix         = "pd/api/v1/config/rules/batch"
+	rulePrefix               = "pd/api/v1/config/rule"
+	ruleGroupPrefix          = "pd/api/v1/config/rule_group"
+	ruleGroupsPrefix         = "pd/api/v1/config/rule_groups"
+	replicationModePrefix    = "pd/api/v1/config/replication-mode"
+	ruleBundlePrefix         = "pd/api/v1/config/placement-rule"
+	pdServerPrefix           = "pd/api/v1/config/pd-server"
+	flagRedirectMicroService = "redirect_mcs"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -437,6 +439,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
 	show.Flags().Bool("detail", false, "detailed match info for region")
+	show.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -446,6 +449,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	load.Flags().String("id", "", "rule id")
 	load.Flags().String("region", "", "region id")
 	load.Flags().String("out", "rules.json", "the filename contains rules")
+	load.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
 	save := &cobra.Command{
 		Use:   "save",
 		Short: "save rules from file",
@@ -461,6 +465,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
+	ruleGroupShow.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
 	ruleGroupSet := &cobra.Command{
 		Use:   "set <id> <index> <override>",
 		Short: "update rule group configuration",
@@ -483,6 +488,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   getRuleBundle,
 	}
 	ruleBundleGet.Flags().String("out", "", "the output file")
+	ruleBundleGet.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
 	ruleBundleSet := &cobra.Command{
 		Use:   "set",
 		Short: "set rule group config and its rules from file",
@@ -501,6 +507,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   loadRuleBundle,
 	}
 	ruleBundleLoad.Flags().String("out", "rules.json", "the output file")
+	ruleBundleLoad.Flags().Bool(flagRedirectMicroService, true, "allow to redirect to micro service")
 	ruleBundleSave := &cobra.Command{
 		Use:   "save",
 		Short: "save all group configs and rules from file",
@@ -561,7 +568,16 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(`"region" should not be specified with "group" or "id" at the same time`)
 		return
 	}
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	header := http.Header{}
+	allowRedirectMicroService, err := cmd.Flags().GetBool(flagRedirectMicroService)
+	if err != nil {
+		cmd.PrintErrln("Failed to parse flag: ", err)
+		return
+	}
+	if !allowRedirectMicroService {
+		header.Add(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
+	}
+	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -629,8 +645,17 @@ func showRuleGroupFunc(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		reqPath = path.Join(ruleGroupPrefix, args[0])
 	}
+	header := http.Header{}
+	allowRedirectMicroService, err := cmd.Flags().GetBool(flagRedirectMicroService)
+	if err != nil {
+		cmd.PrintErrln("Failed to parse flag: ", err)
+		return
+	}
+	if !allowRedirectMicroService {
+		header.Add(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
+	}
 
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -671,8 +696,17 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 	}
 
 	reqPath := path.Join(ruleBundlePrefix, args[0])
+	header := http.Header{}
+	allowRedirectMicroService, err := cmd.Flags().GetBool(flagRedirectMicroService)
+	if err != nil {
+		cmd.PrintErrln("Failed to parse flag: ", err)
+		return
+	}
+	if !allowRedirectMicroService {
+		header.Add(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
+	}
 
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -747,7 +781,16 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 }
 
 func loadRuleBundle(cmd *cobra.Command, args []string) {
-	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet, http.Header{})
+	header := http.Header{}
+	allowRedirectMicroService, err := cmd.Flags().GetBool(flagRedirectMicroService)
+	if err != nil {
+		cmd.PrintErrln("Failed to parse flag: ", err)
+		return
+	}
+	if !allowRedirectMicroService {
+		header.Add(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
+	}
+	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
 		return
