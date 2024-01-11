@@ -55,6 +55,7 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
+	collectWaitTime       = time.Minute
 )
 
 // NewCluster creates a new cluster.
@@ -452,7 +453,8 @@ func (c *Cluster) runUpdateStoreStats() {
 func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	c.coordinator.RunUntilStop()
+	// force wait for 1 minute to make prepare checker won't be directly skipped
+	c.coordinator.RunUntilStop(collectWaitTime)
 }
 
 func (c *Cluster) runMetricsCollectionJob() {
@@ -581,6 +583,11 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 // IsPrepared return true if the prepare checker is ready.
 func (c *Cluster) IsPrepared() bool {
 	return c.coordinator.GetPrepareChecker().IsPrepared()
+}
+
+// SetPrepared set the prepare check to prepared. Only for test purpose.
+func (c *Cluster) SetPrepared() {
+	c.coordinator.GetPrepareChecker().SetPrepared()
 }
 
 // DropCacheAllRegion removes all cached regions.

@@ -36,7 +36,7 @@ func newPrepareChecker() *prepareChecker {
 }
 
 // Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
-func (checker *prepareChecker) check(c *core.BasicCluster) bool {
+func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...time.Duration) bool {
 	checker.Lock()
 	defer checker.Unlock()
 	if checker.prepared {
@@ -45,6 +45,9 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 	if time.Since(checker.start) > collectTimeout {
 		checker.prepared = true
 		return true
+	}
+	if len(collectWaitTime) > 0 && time.Since(checker.start) < collectWaitTime[0] {
+		return false
 	}
 	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
 	totalRegionsCnt := c.GetTotalRegionCount()

@@ -130,13 +130,16 @@ var GRPCCaseFnMap = map[string]GRPCCraeteFn{
 	"Tso":                     newTso(),
 }
 
+// GRPCCaseMap is the map for all gRPC case creation function.
+var GRPCCaseMap = map[string]GRPCCase{}
+
 // HTTPCase is the interface for all HTTP cases.
 type HTTPCase interface {
 	Case
 	Do(context.Context, pdHttp.Client) error
 }
 
-// HTTPCraeteFn is function type to create GRPCCase.
+// HTTPCraeteFn is function type to create HTTPCase.
 type HTTPCraeteFn func() HTTPCase
 
 // HTTPCaseFnMap is the map for all HTTP case creation function.
@@ -144,6 +147,9 @@ var HTTPCaseFnMap = map[string]HTTPCraeteFn{
 	"GetRegionStatus":  newRegionStats(),
 	"GetMinResolvedTS": newMinResolvedTS(),
 }
+
+// HTTPCaseMap is the map for all HTTP cases.
+var HTTPCaseMap = map[string]HTTPCase{}
 
 type minResolvedTS struct {
 	*baseCase

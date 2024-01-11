@@ -46,11 +46,8 @@ import (
 )
 
 var (
-	qps   = flag.Int64("qps", 1000, "qps")
-	burst = flag.Int64("burst", 1, "burst")
-
-	httpCases = flag.String("http-cases", "", "http api cases")
-	gRPCCases = flag.String("grpc-cases", "", "grpc cases")
+	qps, burst           int64
+	httpCases, gRPCCases string
 )
 
 var (
@@ -79,6 +76,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	flagSet := flag.NewFlagSet("api-bench", flag.ContinueOnError)
 	flagSet.ParseErrorsWhitelist.UnknownFlags = true
+	flagSet.Int64Var(&qps, "qps", 1, "qps")
+	flagSet.Int64Var(&burst, "burst", 1, "burst")
+	flagSet.StringVar(&httpCases, "http-cases", "", "http api cases")
+	flagSet.StringVar(&gRPCCases, "grpc-cases", "", "grpc cases")
 	cfg := config.NewConfig(flagSet)
 	err := cfg.Parse(os.Args[1:])
 	defer logutil.LogPanic()
@@ -129,7 +130,7 @@ func main() {
 
 	coordinator := cases.NewCoordinator(ctx, httpClis, pdClis)
 
-	hcaseStr := strings.Split(*httpCases, ",")
+	hcaseStr := strings.Split(httpCases, ",")
 	for _, str := range hcaseStr {
 		name, cfg := parseCaseNameAndConfig(str)
 		if len(name) == 0 {
@@ -137,7 +138,7 @@ func main() {
 		}
 		coordinator.SetHTTPCase(name, cfg)
 	}
-	gcaseStr := strings.Split(*gRPCCases, ",")
+	gcaseStr := strings.Split(gRPCCases, ",")
 	for _, str := range gcaseStr {
 		name, cfg := parseCaseNameAndConfig(str)
 		if len(name) == 0 {
@@ -201,11 +202,11 @@ func parseCaseNameAndConfig(str string) (string, *cases.Config) {
 			}
 		}
 	}
-	if cfg.QPS == 0 && *qps > 0 {
-		cfg.QPS = *qps
+	if cfg.QPS == 0 && qps > 0 {
+		cfg.QPS = qps
 	}
-	if cfg.Burst == 0 && *burst > 0 {
-		cfg.Burst = *burst
+	if cfg.Burst == 0 && burst > 0 {
+		cfg.Burst = burst
 	}
 	return name, cfg
 }

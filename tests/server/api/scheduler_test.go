@@ -49,6 +49,7 @@ func TestScheduleTestSuite(t *testing.T) {
 
 func (suite *scheduleTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
@@ -57,6 +58,7 @@ func (suite *scheduleTestSuite) TearDownSuite() {
 	re := suite.Require()
 	suite.env.Cleanup()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
 func (suite *scheduleTestSuite) TestOriginAPI() {

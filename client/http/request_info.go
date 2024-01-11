@@ -14,7 +14,11 @@
 
 package http
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tikv/pd/client/retry"
+)
 
 // The following constants are the names of the requests.
 const (
@@ -75,6 +79,7 @@ type requestInfo struct {
 	body        []byte
 	res         interface{}
 	respHandler respHandleFunc
+	bo          *retry.Backoffer
 }
 
 // newRequestInfo creates a new request info.
@@ -121,6 +126,12 @@ func (ri *requestInfo) WithResp(res interface{}) *requestInfo {
 // WithRespHandler sets the response handle function of the request.
 func (ri *requestInfo) WithRespHandler(respHandler respHandleFunc) *requestInfo {
 	ri.respHandler = respHandler
+	return ri
+}
+
+// WithBackoffer sets the backoffer of the request.
+func (ri *requestInfo) WithBackoffer(bo *retry.Backoffer) *requestInfo {
+	ri.bo = bo
 	return ri
 }
 
