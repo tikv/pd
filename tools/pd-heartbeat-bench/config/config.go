@@ -20,6 +20,7 @@ const (
 	defaultEpochUpdateRatio  = 0.04
 	defaultSpaceUpdateRatio  = 0.15
 	defaultFlowUpdateRatio   = 0.35
+	defaultNoUpdateRatio     = 0
 	defaultRound             = 0
 	defaultSample            = false
 
@@ -45,6 +46,7 @@ type Config struct {
 	EpochUpdateRatio  float64 `toml:"epoch-update-ratio" json:"epoch-update-ratio"`
 	SpaceUpdateRatio  float64 `toml:"space-update-ratio" json:"space-update-ratio"`
 	FlowUpdateRatio   float64 `toml:"flow-update-ratio" json:"flow-update-ratio"`
+	NoUpdateRatio     float64 `toml:"no-update-ratio" json:"no-update-ratio"`
 	Sample            bool    `toml:"sample" json:"sample"`
 	Round             int     `toml:"round" json:"round"`
 }
@@ -129,6 +131,9 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 	if !meta.IsDefined("flow-update-ratio") {
 		configutil.AdjustFloat64(&c.FlowUpdateRatio, defaultFlowUpdateRatio)
 	}
+	if !meta.IsDefined("no-update-ratio") {
+		configutil.AdjustFloat64(&c.NoUpdateRatio, defaultNoUpdateRatio)
+	}
 	if !meta.IsDefined("sample") {
 		c.Sample = defaultSample
 	}
@@ -147,6 +152,7 @@ type Options struct {
 	EpochUpdateRatio  atomic.Value
 	SpaceUpdateRatio  atomic.Value
 	FlowUpdateRatio   atomic.Value
+	NoUpdateRatio     atomic.Value
 }
 
 // NewOptions creates a new option.
@@ -156,6 +162,7 @@ func NewOptions(cfg *Config) *Options {
 	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
 	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
 	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
+	o.NoUpdateRatio.Store(cfg.NoUpdateRatio)
 	return o
 }
 
@@ -179,10 +186,16 @@ func (o *Options) GetFlowUpdateRatio() float64 {
 	return o.FlowUpdateRatio.Load().(float64)
 }
 
+// GetNoUpdateRatio returns the no update ratio.
+func (o *Options) GetNoUpdateRatio() float64 {
+	return o.NoUpdateRatio.Load().(float64)
+}
+
 // SetOptions sets the option.
 func (o *Options) SetOptions(cfg *Config) {
 	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
 	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
 	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
 	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
+	o.NoUpdateRatio.Store(cfg.NoUpdateRatio)
 }
