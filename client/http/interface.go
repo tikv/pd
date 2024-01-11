@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/client/retry"
 )
 
 // Client is a PD (Placement Driver) HTTP client.
@@ -92,6 +93,8 @@ type Client interface {
 	// Additionally, it is important for the caller to handle the content of the response body properly
 	// in order to ensure that it can be read and marshaled correctly into `res`.
 	WithRespHandler(func(resp *http.Response, res interface{}) error) Client
+	// WithBackoffer sets and returns a new client with the given backoffer.
+	WithBackoffer(*retry.Backoffer) Client
 	// Close gracefully closes the HTTP client.
 	Close()
 }

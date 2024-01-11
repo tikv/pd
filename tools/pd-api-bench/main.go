@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"flag"
-	"log"
 	"os"
 	"os/signal"
 	"strconv"
@@ -26,39 +24,51 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pingcap/log"
+	"github.com/pkg/errors"
+	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"
+	"github.com/tikv/pd/tools/pd-api-bench/config"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
 
 var (
-	pdAddr    = flag.String("pd", "127.0.0.1:2379", "pd address")
-	debugFlag = flag.Bool("debug", false, "print the output of api response for debug")
-
-	httpCases = flag.String("http-cases", "", "http api cases")
-	gRPCCases = flag.String("grpc-cases", "", "grpc cases")
-
-	client = flag.Int("client", 1, "client number")
-
 	qps   = flag.Int64("qps", 1000, "qps")
 	burst = flag.Int64("burst", 1, "burst")
 
-	// tls
-	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
-	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format")
+	httpCases = flag.String("http-cases", "", "http api cases")
+	gRPCCases = flag.String("grpc-cases", "", "grpc cases")
 )
 
 var base = int64(time.Second) / int64(time.Microsecond)
 
 func main() {
-	flag.Parse()
-	ctx, cancel := context.WithCancel(context.Background())
+	flagSet := flag.NewFlagSet("api-bench", flag.ContinueOnError)
+	flagSet.ParseErrorsWhitelist.UnknownFlags = true
+	cfg := config.NewConfig(flagSet)
+	err := cfg.Parse(os.Args[1:])
+	defer logutil.LogPanic()
 
+	switch errors.Cause(err) {
+	case nil:
+	case flag.ErrHelp:
+		exit(0)
+	default:
+		log.Fatal("parse cmd flags error", zap.Error(err))
+	}
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps)
+	if err == nil {
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+	} else {
+		log.Fatal("initialize logger error", zap.Error(err))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
@@ -72,12 +82,6 @@ func main() {
 		cancel()
 	}()
 
-	cases.Debug = *debugFlag
-
-	hcases := make([]cases.HTTPCase, 0)
-	gcases := make([]cases.GRPCCase, 0)
-
-	var err error
 	hcaseStr := strings.Split(*httpCases, ",")
 	for _, str := range hcaseStr {
 		caseQPS := int64(0)
@@ -92,7 +96,7 @@ func main() {
 		if len(strsa) > 1 {
 			caseBurst, err = strconv.ParseInt(strsa[1], 10, 64)
 			if err != nil {
-				log.Printf("parse burst failed for case %s", str)
+				log.Error("parse burst failed for case", zap.String("case", cStr), zap.String("config", strsa[1]))
 			}
 		}
 		// to get case qps
@@ -100,21 +104,27 @@ func main() {
 			strsb := strings.Split(strs[1], "+")
 			caseQPS, err = strconv.ParseInt(strsb[0], 10, 64)
 			if err != nil {
-				log.Printf("parse qps failed for case %s", str)
+				if err != nil {
+					log.Error("parse qps failed for case", zap.String("case", cStr), zap.String("config", strsb[0]))
+				}
 			}
 			// to get case Burst
 			if len(strsb) > 1 {
 				caseBurst, err = strconv.ParseInt(strsb[1], 10, 64)
 				if err != nil {
-					log.Printf("parse burst failed for case %s", str)
+					log.Error("parse burst failed for case", zap.String("case", cStr), zap.String("config", strsb[1]))
 				}
 			}
 		}
 		if len(cStr) == 0 {
 			continue
 		}
-		if cas, ok := cases.HTTPCaseMap[cStr]; ok {
-			hcases = append(hcases, cas)
+		if fn, ok := cases.HTTPCaseFnMap[cStr]; ok {
+			var cas cases.HTTPCase
+			if cas, ok = cases.HTTPCaseMap[cStr]; !ok {
+				cas = fn()
+				cases.HTTPCaseMap[cStr] = cas
+			}
 			if caseBurst > 0 {
 				cas.SetBurst(caseBurst)
 			} else if *burst > 0 {
@@ -126,41 +136,42 @@ func main() {
 				cas.SetQPS(*qps)
 			}
 		} else {
-			log.Printf("no this case: '%s'", str)
+			log.Warn("HTTP case not implemented", zap.String("case", cStr))
 		}
 	}
 	gcaseStr := strings.Split(*gRPCCases, ",")
+	// todo: see pull 7345
 	for _, str := range gcaseStr {
-		if len(str) == 0 {
-			continue
-		}
-		if cas, ok := cases.GRPCCaseMap[str]; ok {
-			gcases = append(gcases, cas)
+		if fn, ok := cases.GRPCCaseFnMap[str]; ok {
+			if _, ok = cases.GRPCCaseMap[str]; !ok {
+				cases.GRPCCaseMap[str] = fn()
+			}
 		} else {
-			log.Println("no this case", str)
+			log.Warn("gRPC case not implemented", zap.String("case", str))
 		}
 	}
-	if *client == 0 {
-		log.Println("concurrency == 0, exit")
+
+	if cfg.Client == 0 {
+		log.Error("concurrency == 0, exit")
 		return
 	}
-	pdClis := make([]pd.Client, *client)
-	for i := 0; i < *client; i++ {
-		pdClis[i] = newPDClient(ctx)
+	pdClis := make([]pd.Client, cfg.Client)
+	for i := int64(0); i < cfg.Client; i++ {
+		pdClis[i] = newPDClient(ctx, cfg)
 	}
-	httpClis := make([]pdHttp.Client, *client)
-	for i := 0; i < *client; i++ {
-		httpClis[i] = pdHttp.NewClient("tools-api-bench", []string{*pdAddr}, pdHttp.WithTLSConfig(loadTLSConfig()))
+	httpClis := make([]pdHttp.Client, cfg.Client)
+	for i := int64(0); i < cfg.Client; i++ {
+		httpClis[i] = pdHttp.NewClient("tools-api-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
 	}
 	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {
-		log.Fatalf("InitCluster error %v", err)
+		log.Fatal("InitCluster error", zap.Error(err))
 	}
 
-	for _, hcase := range hcases {
+	for _, hcase := range cases.HTTPCaseMap {
 		handleHTTPCase(ctx, hcase, httpClis)
 	}
-	for _, gcase := range gcases {
+	for _, gcase := range cases.GRPCCaseMap {
 		handleGRPCCase(ctx, gcase, pdClis)
 	}
 
@@ -171,7 +182,7 @@ func main() {
 	for _, cli := range httpClis {
 		cli.Close()
 	}
-	log.Println("Exit")
+	log.Info("Exit")
 	switch sig {
 	case syscall.SIGTERM:
 		exit(0)
@@ -183,8 +194,9 @@ func main() {
 func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Client) {
 	qps := gcase.GetQPS()
 	burst := gcase.GetBurst()
-	tt := time.Duration(base/qps*burst*int64(*client)) * time.Microsecond
-	log.Printf("begin to run gRPC case %s, with qps = %d and burst = %d, interval is %v", gcase.Name(), qps, burst, tt)
+	cliNum := int64(len(clients))
+	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
+	log.Info("begin to run gRPC case", zap.String("case", gcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	for _, cli := range clients {
 		go func(cli pd.Client) {
 			var ticker = time.NewTicker(tt)
@@ -195,11 +207,11 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 					for i := int64(0); i < burst; i++ {
 						err := gcase.Unary(ctx, cli)
 						if err != nil {
-							log.Println(err)
+							log.Error("meet erorr when doing gRPC request", zap.String("case", gcase.Name()), zap.Error(err))
 						}
 					}
 				case <-ctx.Done():
-					log.Println("Got signal to exit handleGetRegion")
+					log.Info("Got signal to exit handleGetRegion")
 					return
 				}
 			}
@@ -210,8 +222,9 @@ func handleGRPCCase(ctx context.Context, gcase cases.GRPCCase, clients []pd.Clie
 func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp.Client) {
 	qps := hcase.GetQPS()
 	burst := hcase.GetBurst()
-	tt := time.Duration(base/qps*burst*int64(*client)) * time.Microsecond
-	log.Printf("begin to run http case %s, with qps = %d and burst = %d, interval is %v", hcase.Name(), qps, burst, tt)
+	cliNum := int64(len(httpClis))
+	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
+	log.Info("begin to run http case", zap.String("case", hcase.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	for _, hCli := range httpClis {
 		go func(hCli pdHttp.Client) {
 			var ticker = time.NewTicker(tt)
@@ -222,11 +235,11 @@ func handleHTTPCase(ctx context.Context, hcase cases.HTTPCase, httpClis []pdHttp
 					for i := int64(0); i < burst; i++ {
 						err := hcase.Do(ctx, hCli)
 						if err != nil {
-							log.Println(err)
+							log.Error("meet erorr when doing HTTP request", zap.String("case", hcase.Name()), zap.Error(err))
 						}
 					}
 				case <-ctx.Done():
-					log.Println("Got signal to exit handleScanRegions")
+					log.Info("Got signal to exit handleScanRegions")
 					return
 				}
 			}
@@ -245,17 +258,17 @@ func trimHTTPPrefix(str string) string {
 }
 
 // newPDClient returns a pd client.
-func newPDClient(ctx context.Context) pd.Client {
+func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 	const (
 		keepaliveTime    = 10 * time.Second
 		keepaliveTimeout = 3 * time.Second
 	)
 
-	addrs := []string{trimHTTPPrefix(*pdAddr)}
+	addrs := []string{trimHTTPPrefix(cfg.PDAddr)}
 	pdCli, err := pd.NewClientWithContext(ctx, addrs, pd.SecurityOption{
-		CAPath:   *caPath,
-		CertPath: *certPath,
-		KeyPath:  *keyPath,
+		CAPath:   cfg.CaPath,
+		CertPath: cfg.CertPath,
+		KeyPath:  cfg.KeyPath,
 	},
 		pd.WithGRPCDialOptions(
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -269,21 +282,21 @@ func newPDClient(ctx context.Context) pd.Client {
 	return pdCli
 }
 
-func loadTLSConfig() *tls.Config {
-	if len(*caPath) == 0 {
+func loadTLSConfig(cfg *config.Config) *tls.Config {
+	if len(cfg.CaPath) == 0 {
 		return nil
 	}
-	caData, err := os.ReadFile(*caPath)
+	caData, err := os.ReadFile(cfg.CaPath)
 	if err != nil {
-		log.Println("fail to read ca file", zap.Error(err))
+		log.Error("fail to read ca file", zap.Error(err))
 	}
-	certData, err := os.ReadFile(*certPath)
+	certData, err := os.ReadFile(cfg.CertPath)
 	if err != nil {
-		log.Println("fail to read cert file", zap.Error(err))
+		log.Error("fail to read cert file", zap.Error(err))
 	}
-	keyData, err := os.ReadFile(*keyPath)
+	keyData, err := os.ReadFile(cfg.KeyPath)
 	if err != nil {
-		log.Println("fail to read key file", zap.Error(err))
+		log.Error("fail to read key file", zap.Error(err))
 	}
 
 	tlsConf, err := tlsutil.TLSConfig{
