@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/pingcap/errors"
@@ -49,6 +50,8 @@ type Client interface {
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	SetStoreLabels(context.Context, int64, map[string]string) error
 	/* Config-related interfaces */
+	GetConfig(context.Context) (map[string]interface{}, error)
+	SetConfig(context.Context, map[string]interface{}, ...float64) error
 	GetScheduleConfig(context.Context) (map[string]interface{}, error)
 	SetScheduleConfig(context.Context, map[string]interface{}) error
 	GetClusterVersion(context.Context) (string, error)
@@ -79,6 +82,11 @@ type Client interface {
 	/* Scheduling-related interfaces */
 	AccelerateSchedule(context.Context, *KeyRange) error
 	AccelerateScheduleInBatch(context.Context, []*KeyRange) error
+	/* Admin-related interfaces */
+	ResetTS(context.Context, uint64, bool) error
+	ResetBaseAllocID(context.Context, uint64) error
+	SetSnapshotRecoveringMark(context.Context) error
+	DeleteSnapshotRecoveringMark(context.Context) error
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
@@ -312,6 +320,39 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 		WithURI(LabelByStoreID(storeID)).
 		WithMethod(http.MethodPost).
 		WithBody(jsonInput))
+}
+
+// GetConfig gets the configurations.
+func (c *client) GetConfig(ctx context.Context) (map[string]interface{}, error) {
+	var config map[string]interface{}
+	err := c.request(ctx, newRequestInfo().
+		WithName(getConfigName).
+		WithURI(Config).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// SetConfig sets the configurations. ttlSecond is optional.
+func (c *client) SetConfig(ctx context.Context, config map[string]interface{}, ttlSecond ...float64) error {
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	var uri string
+	if len(ttlSecond) > 0 {
+		uri = ConfigWithTTLSeconds(ttlSecond[0])
+	} else {
+		uri = Config
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(setConfigName).
+		WithURI(uri).
+		WithMethod(http.MethodPost).
+		WithBody(configJSON))
 }
 
 // GetScheduleConfig gets the schedule configurations.
@@ -705,6 +746,58 @@ func (c *client) AccelerateScheduleInBatch(ctx context.Context, keyRanges []*Key
 		WithURI(AccelerateScheduleInBatch).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
+}
+
+// ResetTS resets the PD's TS.
+func (c *client) ResetTS(ctx context.Context, ts uint64, forceUseLarger bool) error {
+	reqData, err := json.Marshal(struct {
+		Tso            string `json:"tso"`
+		ForceUseLarger bool   `json:"force-use-larger"`
+	}{
+		Tso:            strconv.FormatUint(ts, 10),
+		ForceUseLarger: forceUseLarger,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(resetTSName).
+		WithURI(ResetTS).
+		WithMethod(http.MethodPost).
+		WithBody(reqData))
+}
+
+// ResetBaseAllocID resets the PD's base alloc ID.
+func (c *client) ResetBaseAllocID(ctx context.Context, id uint64) error {
+	reqData, err := json.Marshal(struct {
+		ID string `json:"id"`
+	}{
+		ID: strconv.FormatUint(id, 10),
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(resetBaseAllocIDName).
+		WithURI(BaseAllocID).
+		WithMethod(http.MethodPost).
+		WithBody(reqData))
+}
+
+// SetSnapshotRecoveringMark sets the snapshot recovering mark.
+func (c *client) SetSnapshotRecoveringMark(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(setSnapshotRecoveringMarkName).
+		WithURI(SnapshotRecoveringMark).
+		WithMethod(http.MethodPost))
+}
+
+// DeleteSnapshotRecoveringMark deletes the snapshot recovering mark.
+func (c *client) DeleteSnapshotRecoveringMark(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteSnapshotRecoveringMarkName).
+		WithURI(SnapshotRecoveringMark).
+		WithMethod(http.MethodDelete))
 }
 
 // SetSchedulerDelay sets the delay of given scheduler.
