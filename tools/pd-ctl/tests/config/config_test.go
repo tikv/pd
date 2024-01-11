@@ -354,35 +354,207 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	cmd := ctl.GetRootCmd()
 
-	args := []string{"-u", pdAddr, "config", "show", "--from_api_server"}
-	_, err := tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "config", "show", "all", "--from_api_server"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "config", "show", "replication", "--from_api_server"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "config", "show", "schedule", "--from_api_server"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "config", "placement-rules", "show", "--from_api_server"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "config", "placement-rules", "load", "--from_api_server"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "config", "placement-rules", "rule-group", "show", placement.DefaultGroupID, "--from_api_server"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", placement.DefaultGroupID, "--from_api_server"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "config", "placement-rules", "rule-bundle", "load", "--from_api_server"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
+	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	fname := f.Name()
+	f.Close()
+	defer os.RemoveAll(fname)
+
+	checkScheduleConfig := func(scheduleCfg *sc.ScheduleConfig, isFromAPIServer bool) {
+		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+			if isFromAPIServer {
+				re.Equal(scheduleCfg.LeaderScheduleLimit, leaderServer.GetPersistOptions().GetLeaderScheduleLimit())
+				re.NotEqual(scheduleCfg.LeaderScheduleLimit, schedulingServer.GetPersistConfig().GetLeaderScheduleLimit())
+			} else {
+				re.Equal(scheduleCfg.LeaderScheduleLimit, schedulingServer.GetPersistConfig().GetLeaderScheduleLimit())
+				re.NotEqual(scheduleCfg.LeaderScheduleLimit, leaderServer.GetPersistOptions().GetLeaderScheduleLimit())
+			}
+		} else {
+			re.Equal(scheduleCfg.LeaderScheduleLimit, leaderServer.GetPersistOptions().GetLeaderScheduleLimit())
+		}
+	}
+
+	checkReplicateConfig := func(replicationCfg *sc.ReplicationConfig, isFromAPIServer bool) {
+		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+			if isFromAPIServer {
+				re.Equal(replicationCfg.MaxReplicas, uint64(leaderServer.GetPersistOptions().GetMaxReplicas()))
+				re.NotEqual(int(replicationCfg.MaxReplicas), schedulingServer.GetPersistConfig().GetMaxReplicas())
+			} else {
+				re.Equal(int(replicationCfg.MaxReplicas), schedulingServer.GetPersistConfig().GetMaxReplicas())
+				re.NotEqual(replicationCfg.MaxReplicas, uint64(leaderServer.GetPersistOptions().GetMaxReplicas()))
+			}
+		} else {
+			re.Equal(replicationCfg.MaxReplicas, uint64(leaderServer.GetPersistOptions().GetMaxReplicas()))
+		}
+	}
+
+	checkRules := func(rules []*placement.Rule, isFromAPIServer bool) {
+		apiRules := leaderServer.GetRaftCluster().GetRuleManager().GetAllRules()
+		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+			schedulingRules := schedulingServer.GetCluster().GetRuleManager().GetAllRules()
+			if isFromAPIServer {
+				re.Len(apiRules, len(rules))
+				re.NotEqual(len(schedulingRules), len(rules))
+			} else {
+				re.Len(schedulingRules, len(rules))
+				re.NotEqual(len(apiRules), len(rules))
+			}
+		} else {
+			re.Len(apiRules, len(rules))
+		}
+	}
+
+	checkGroup := func(group placement.RuleGroup, isFromAPIServer bool) {
+		apiGroup := leaderServer.GetRaftCluster().GetRuleManager().GetRuleGroup(placement.DefaultGroupID)
+		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+			schedulingGroup := schedulingServer.GetCluster().GetRuleManager().GetRuleGroup(placement.DefaultGroupID)
+			if isFromAPIServer {
+				re.Equal(apiGroup.Index, group.Index)
+				re.NotEqual(schedulingGroup.Index, group.Index)
+			} else {
+				re.Equal(schedulingGroup.Index, group.Index)
+				re.NotEqual(apiGroup.Index, group.Index)
+			}
+		} else {
+			re.Equal(apiGroup.Index, group.Index)
+		}
+	}
+
+	testConfig := func(isFromAPIServer bool, options ...string) {
+		cmd := ctl.GetRootCmd()
+		args := []string{"-u", pdAddr, "config", "show"}
+		args = append(args, options...)
+		if isFromAPIServer {
+			args = append(args, "--from_api_server")
+		}
+		output, err := tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		if len(options) == 0 || options[0] == "all" {
+			cfg := config.Config{}
+			re.NoError(json.Unmarshal(output, &cfg))
+			checkReplicateConfig(&cfg.Replication, isFromAPIServer)
+			checkScheduleConfig(&cfg.Schedule, isFromAPIServer)
+		} else if options[0] == "replication" {
+			replicationCfg := &sc.ReplicationConfig{}
+			re.NoError(json.Unmarshal(output, replicationCfg))
+			checkReplicateConfig(replicationCfg, isFromAPIServer)
+		} else if options[0] == "schedule" {
+			scheduleCfg := &sc.ScheduleConfig{}
+			re.NoError(json.Unmarshal(output, scheduleCfg))
+			checkScheduleConfig(scheduleCfg, isFromAPIServer)
+		} else {
+			re.Fail("no implement")
+		}
+	}
+
+	testRules := func(isFromAPIServer bool, options ...string) {
+		cmd := ctl.GetRootCmd()
+		args := []string{"-u", pdAddr, "config", "placement-rules"}
+		args = append(args, options...)
+		if isFromAPIServer {
+			args = append(args, "--from_api_server")
+		}
+		output, err := tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		if options[0] == "show" {
+			var rules []*placement.Rule
+			re.NoError(json.Unmarshal(output, &rules))
+			checkRules(rules, isFromAPIServer)
+		} else if options[0] == "load" {
+			var rules []*placement.Rule
+			b, _ := os.ReadFile(fname)
+			re.NoError(json.Unmarshal(b, &rules))
+			checkRules(rules, isFromAPIServer)
+		} else if options[0] == "rule-group" {
+			var group placement.RuleGroup
+			re.NoError(json.Unmarshal(output, &group), string(output))
+			checkGroup(group, isFromAPIServer)
+		} else if options[0] == "rule-bundle" && options[1] == "get" {
+			var bundle placement.GroupBundle
+			re.NoError(json.Unmarshal(output, &bundle), string(output))
+			checkRules(bundle.Rules, isFromAPIServer)
+		} else if options[0] == "rule-bundle" && options[1] == "load" {
+			var bundles []placement.GroupBundle
+			b, _ := os.ReadFile(fname)
+			re.NoError(json.Unmarshal(b, &bundles), string(output))
+			checkRules(bundles[0].Rules, isFromAPIServer)
+		} else {
+			re.Fail("no implement")
+		}
+	}
+
+	// Test Config
+	// inject different config to scheduling server
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 233
+		sche.GetPersistConfig().GetReplicationConfig().MaxReplicas = 7
+		re.Equal(uint64(233), sche.GetPersistConfig().GetLeaderScheduleLimit())
+		re.Equal(7, sche.GetPersistConfig().GetMaxReplicas())
+	}
+
+	// show config from api server rather than scheduling server
+	testConfig(true /*isFromAPIServer*/)
+	testConfig(false /*isFromAPIServer*/)
+
+	// show all config from api server rather than scheduling server
+	testConfig(true /*isFromAPIServer*/, "all")
+	testConfig(false /*isFromAPIServer*/, "all")
+
+	// show replication config from api server rather than scheduling server
+	testConfig(true /*isFromAPIServer*/, "replication")
+	testConfig(false /*isFromAPIServer*/, "replication")
+
+	// show schedule config from api server rather than scheduling server
+	testConfig(true /*isFromAPIServer*/, "schedule")
+	testConfig(false /*isFromAPIServer*/, "schedule")
+
+	// Test Rule
+	// inject different rule to scheduling server
+	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+		ruleManager := sche.GetCluster().GetRuleManager()
+		ruleManager.SetAllGroupBundles([]placement.GroupBundle{{
+			ID:       placement.DefaultGroupID,
+			Index:    233,
+			Override: true,
+			Rules: []*placement.Rule{
+				{
+					GroupID: placement.DefaultGroupID,
+					ID:      "test",
+					Index:   100,
+					Role:    placement.Voter,
+					Count:   5,
+				},
+				{
+					GroupID: placement.DefaultGroupID,
+					ID:      "pd",
+					Index:   101,
+					Role:    placement.Voter,
+					Count:   3,
+				},
+			},
+		}}, true)
+		re.Len(ruleManager.GetAllRules(), 2)
+	}
+
+	// show placement rules
+	testRules(true /*isFromAPIServer*/, "show")
+	testRules(false /*isFromAPIServer*/, "show")
+
+	// load placement rules
+	testRules(false /*isFromAPIServer*/, "load", "--out="+fname)
+	testRules(false /*isFromAPIServer*/, "load", "--out="+fname)
+
+	// show placement rules group
+	testRules(true /*isFromAPIServer*/, "rule-group", "show", placement.DefaultGroupID)
+	testRules(false /*isFromAPIServer*/, "rule-group", "show", placement.DefaultGroupID)
+
+	// show placement rules group bundle
+	testRules(true /*isFromAPIServer*/, "rule-bundle", "get", placement.DefaultGroupID)
+	testRules(false /*isFromAPIServer*/, "rule-bundle", "get", placement.DefaultGroupID)
+
+	// load placement rules bundle
+	testRules(true /*isFromAPIServer*/, "rule-bundle", "load", "--out="+fname)
+	testRules(false /*isFromAPIServer*/, "rule-bundle", "load", "--out="+fname)
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
