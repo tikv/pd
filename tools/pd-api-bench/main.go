@@ -31,6 +31,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
 	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
@@ -52,7 +53,29 @@ var (
 	gRPCCases = flag.String("grpc-cases", "", "grpc cases")
 )
 
+var (
+	pdAPIExecutionHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "api_bench",
+			Name:      "pd_api_execution_duration_seconds",
+			Help:      "Bucketed histogram of all pd api execution time (s)",
+			Buckets:   prometheus.ExponentialBuckets(0.001, 2, 20), // 1ms ~ 524s
+		}, []string{"type"})
+
+	pdAPIRequestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "api_bench",
+			Name:      "pd_api_request_total",
+			Help:      "Counter of the pd http api requests",
+		}, []string{"type", "result"})
+)
+
 func main() {
+	prometheus.MustRegister(pdAPIExecutionHistogram)
+	prometheus.MustRegister(pdAPIRequestCounter)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	flagSet := flag.NewFlagSet("api-bench", flag.ContinueOnError)
 	flagSet.ParseErrorsWhitelist.UnknownFlags = true
@@ -96,7 +119,7 @@ func main() {
 	}
 	httpClis := make([]pdHttp.Client, cfg.Client)
 	for i := int64(0); i < cfg.Client; i++ {
-		httpClis[i] = pdHttp.NewClient("tools-api-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
+		httpClis[i] = pdHttp.NewClient("tools-api-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)), pdHttp.WithMetrics(pdAPIRequestCounter, pdAPIExecutionHistogram))
 	}
 	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {
