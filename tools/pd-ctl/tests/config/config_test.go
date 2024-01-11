@@ -420,66 +420,70 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 		}
 	}
 
-	testConfig := func(isFromAPIServer bool, options ...string) {
-		cmd := ctl.GetRootCmd()
-		args := []string{"-u", pdAddr, "config", "show"}
-		args = append(args, options...)
-		if isFromAPIServer {
-			args = append(args, "--from_api_server")
-		}
-		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		if len(options) == 0 || options[0] == "all" {
-			cfg := config.Config{}
-			re.NoError(json.Unmarshal(output, &cfg))
-			checkReplicateConfig(&cfg.Replication, isFromAPIServer)
-			checkScheduleConfig(&cfg.Schedule, isFromAPIServer)
-		} else if options[0] == "replication" {
-			replicationCfg := &sc.ReplicationConfig{}
-			re.NoError(json.Unmarshal(output, replicationCfg))
-			checkReplicateConfig(replicationCfg, isFromAPIServer)
-		} else if options[0] == "schedule" {
-			scheduleCfg := &sc.ScheduleConfig{}
-			re.NoError(json.Unmarshal(output, scheduleCfg))
-			checkScheduleConfig(scheduleCfg, isFromAPIServer)
-		} else {
-			re.Fail("no implement")
+	testConfig := func(options ...string) {
+		for _, isFromAPIServer := range []bool{true, false} {
+			cmd := ctl.GetRootCmd()
+			args := []string{"-u", pdAddr, "config", "show"}
+			args = append(args, options...)
+			if isFromAPIServer {
+				args = append(args, "--from_api_server")
+			}
+			output, err := tests.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			if len(options) == 0 || options[0] == "all" {
+				cfg := config.Config{}
+				re.NoError(json.Unmarshal(output, &cfg))
+				checkReplicateConfig(&cfg.Replication, isFromAPIServer)
+				checkScheduleConfig(&cfg.Schedule, isFromAPIServer)
+			} else if options[0] == "replication" {
+				replicationCfg := &sc.ReplicationConfig{}
+				re.NoError(json.Unmarshal(output, replicationCfg))
+				checkReplicateConfig(replicationCfg, isFromAPIServer)
+			} else if options[0] == "schedule" {
+				scheduleCfg := &sc.ScheduleConfig{}
+				re.NoError(json.Unmarshal(output, scheduleCfg))
+				checkScheduleConfig(scheduleCfg, isFromAPIServer)
+			} else {
+				re.Fail("no implement")
+			}
 		}
 	}
 
-	testRules := func(isFromAPIServer bool, options ...string) {
-		cmd := ctl.GetRootCmd()
-		args := []string{"-u", pdAddr, "config", "placement-rules"}
-		args = append(args, options...)
-		if isFromAPIServer {
-			args = append(args, "--from_api_server")
-		}
-		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		if options[0] == "show" {
-			var rules []*placement.Rule
-			re.NoError(json.Unmarshal(output, &rules))
-			checkRules(rules, isFromAPIServer)
-		} else if options[0] == "load" {
-			var rules []*placement.Rule
-			b, _ := os.ReadFile(fname)
-			re.NoError(json.Unmarshal(b, &rules))
-			checkRules(rules, isFromAPIServer)
-		} else if options[0] == "rule-group" {
-			var group placement.RuleGroup
-			re.NoError(json.Unmarshal(output, &group), string(output))
-			checkGroup(group, isFromAPIServer)
-		} else if options[0] == "rule-bundle" && options[1] == "get" {
-			var bundle placement.GroupBundle
-			re.NoError(json.Unmarshal(output, &bundle), string(output))
-			checkRules(bundle.Rules, isFromAPIServer)
-		} else if options[0] == "rule-bundle" && options[1] == "load" {
-			var bundles []placement.GroupBundle
-			b, _ := os.ReadFile(fname)
-			re.NoError(json.Unmarshal(b, &bundles), string(output))
-			checkRules(bundles[0].Rules, isFromAPIServer)
-		} else {
-			re.Fail("no implement")
+	testRules := func(options ...string) {
+		for _, isFromAPIServer := range []bool{true, false} {
+			cmd := ctl.GetRootCmd()
+			args := []string{"-u", pdAddr, "config", "placement-rules"}
+			args = append(args, options...)
+			if isFromAPIServer {
+				args = append(args, "--from_api_server")
+			}
+			output, err := tests.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			if options[0] == "show" {
+				var rules []*placement.Rule
+				re.NoError(json.Unmarshal(output, &rules))
+				checkRules(rules, isFromAPIServer)
+			} else if options[0] == "load" {
+				var rules []*placement.Rule
+				b, _ := os.ReadFile(fname)
+				re.NoError(json.Unmarshal(b, &rules))
+				checkRules(rules, isFromAPIServer)
+			} else if options[0] == "rule-group" {
+				var group placement.RuleGroup
+				re.NoError(json.Unmarshal(output, &group), string(output))
+				checkGroup(group, isFromAPIServer)
+			} else if options[0] == "rule-bundle" && options[1] == "get" {
+				var bundle placement.GroupBundle
+				re.NoError(json.Unmarshal(output, &bundle), string(output))
+				checkRules(bundle.Rules, isFromAPIServer)
+			} else if options[0] == "rule-bundle" && options[1] == "load" {
+				var bundles []placement.GroupBundle
+				b, _ := os.ReadFile(fname)
+				re.NoError(json.Unmarshal(b, &bundles), string(output))
+				checkRules(bundles[0].Rules, isFromAPIServer)
+			} else {
+				re.Fail("no implement")
+			}
 		}
 	}
 
@@ -491,22 +495,14 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 		re.Equal(uint64(233), sche.GetPersistConfig().GetLeaderScheduleLimit())
 		re.Equal(7, sche.GetPersistConfig().GetMaxReplicas())
 	}
-
 	// show config from api server rather than scheduling server
-	testConfig(true /*isFromAPIServer*/)
-	testConfig(false /*isFromAPIServer*/)
-
+	testConfig()
 	// show all config from api server rather than scheduling server
-	testConfig(true /*isFromAPIServer*/, "all")
-	testConfig(false /*isFromAPIServer*/, "all")
-
+	testConfig("all")
 	// show replication config from api server rather than scheduling server
-	testConfig(true /*isFromAPIServer*/, "replication")
-	testConfig(false /*isFromAPIServer*/, "replication")
-
+	testConfig("replication")
 	// show schedule config from api server rather than scheduling server
-	testConfig(true /*isFromAPIServer*/, "schedule")
-	testConfig(false /*isFromAPIServer*/, "schedule")
+	testConfig("schedule")
 
 	// Test Rule
 	// inject different rule to scheduling server
@@ -537,24 +533,15 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	}
 
 	// show placement rules
-	testRules(true /*isFromAPIServer*/, "show")
-	testRules(false /*isFromAPIServer*/, "show")
-
+	testRules("show")
 	// load placement rules
-	testRules(false /*isFromAPIServer*/, "load", "--out="+fname)
-	testRules(false /*isFromAPIServer*/, "load", "--out="+fname)
-
+	testRules("load", "--out="+fname)
 	// show placement rules group
-	testRules(true /*isFromAPIServer*/, "rule-group", "show", placement.DefaultGroupID)
-	testRules(false /*isFromAPIServer*/, "rule-group", "show", placement.DefaultGroupID)
-
+	testRules("rule-group", "show", placement.DefaultGroupID)
 	// show placement rules group bundle
-	testRules(true /*isFromAPIServer*/, "rule-bundle", "get", placement.DefaultGroupID)
-	testRules(false /*isFromAPIServer*/, "rule-bundle", "get", placement.DefaultGroupID)
-
+	testRules("rule-bundle", "get", placement.DefaultGroupID)
 	// load placement rules bundle
-	testRules(true /*isFromAPIServer*/, "rule-bundle", "load", "--out="+fname)
-	testRules(false /*isFromAPIServer*/, "rule-bundle", "load", "--out="+fname)
+	testRules("rule-bundle", "load", "--out="+fname)
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
