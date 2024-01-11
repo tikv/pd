@@ -16,12 +16,10 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -31,12 +29,16 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-contrib/gzip"
+	"github.com/gin-contrib/pprof"
+	"github.com/gin-gonic/gin"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"go.etcd.io/etcd/pkg/report"
@@ -71,22 +73,27 @@ func newClient(cfg *config.Config) pdpb.PDClient {
 }
 
 func initClusterID(ctx context.Context, cli pdpb.PDClient) {
-	for i := 0; i < 100; i++ {
-		time.Sleep(time.Second)
-		cctx, cancel := context.WithCancel(ctx)
-		res, err := cli.GetMembers(cctx, &pdpb.GetMembersRequest{})
-		cancel()
-		if err != nil {
-			continue
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			cctx, cancel := context.WithCancel(ctx)
+			res, err := cli.GetMembers(cctx, &pdpb.GetMembersRequest{})
+			cancel()
+			if err != nil {
+				continue
+			}
+			if res.GetHeader().GetError() != nil {
+				continue
+			}
+			clusterID = res.GetHeader().GetClusterId()
+			log.Info("init cluster ID successfully", zap.Uint64("cluster-id", clusterID))
+			return
 		}
-		if res.GetHeader().GetError() != nil {
-			continue
-		}
-		clusterID = res.GetHeader().GetClusterId()
-		log.Info("init cluster ID successfully", zap.Uint64("cluster-id", clusterID))
-		return
 	}
-	log.Fatal("init cluster ID failed")
 }
 
 func header() *pdpb.RequestHeader {
@@ -545,34 +552,32 @@ func (rs *Regions) result(regionCount int, sec float64) {
 }
 
 func runHTTPServer(cfg *config.Config, options *config.Options) {
-	http.Handle("/metrics", promhttp.Handler())
+	gin.SetMode(gin.ReleaseMode)
+	engine := gin.New()
+	engine.Use(gin.Recovery())
+	engine.Use(cors.Default())
+	engine.Use(gzip.Gzip(gzip.DefaultCompression))
+	engine.GET("metrics", utils.PromHandler())
 	// profile API
-	http.HandleFunc("/pprof/profile", pprof.Profile)
-	http.HandleFunc("/pprof/trace", pprof.Trace)
-	http.HandleFunc("/pprof/symbol", pprof.Symbol)
-	http.Handle("/pprof/heap", pprof.Handler("heap"))
-	http.Handle("/pprof/mutex", pprof.Handler("mutex"))
-	http.Handle("/pprof/allocs", pprof.Handler("allocs"))
-	http.Handle("/pprof/block", pprof.Handler("block"))
-	http.Handle("/pprof/goroutine", pprof.Handler("goroutine"))
-
-	// config API
-	http.HandleFunc("/config", func(w http.ResponseWriter, r *http.Request) {
-		newCfg := config.NewConfig()
-		data, err := io.ReadAll(r.Body)
-		r.Body.Close()
-		if err != nil {
-			fmt.Fprint(w, err.Error())
-			return
-		}
-
-		if err := json.Unmarshal(data, &newCfg); err != nil {
-			fmt.Fprint(w, err.Error())
+	pprof.Register(engine)
+	engine.PUT("config", func(c *gin.Context) {
+		newCfg := cfg.Clone()
+		if err := c.BindJSON(&newCfg); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
 
 		options.SetOptions(newCfg)
+		c.String(http.StatusOK, "Successfully updated the configuration")
 	})
-	// nolint
-	http.ListenAndServe(cfg.StatusAddr, nil)
+	engine.GET("config", func(c *gin.Context) {
+		output := cfg.Clone()
+		output.FlowUpdateRatio = options.GetFlowUpdateRatio()
+		output.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
+		output.EpochUpdateRatio = options.GetEpochUpdateRatio()
+		output.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
+
+		c.IndentedJSON(http.StatusOK, output)
+	})
+	engine.Run(cfg.StatusAddr)
 }

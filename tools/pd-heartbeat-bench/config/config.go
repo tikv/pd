@@ -56,8 +56,8 @@ func NewConfig() *Config {
 	fs := cfg.flagSet
 	fs.ParseErrorsWhitelist.UnknownFlags = true
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
-	fs.StringVar(&cfg.PDAddr, "pd", "http://10.2.8.101:2379", "pd address")
-	fs.StringVar(&cfg.StatusAddr, "status-addr", "http://10.2.8.101:30180", "status address")
+	fs.StringVar(&cfg.PDAddr, "pd", "127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.StatusAddr, "status-addr", "127.0.0.1:20180", "status address")
 
 	return cfg
 }
@@ -134,6 +134,14 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 	}
 }
 
+// Clone creates a copy of current config.
+func (c *Config) Clone() *Config {
+	cfg := &Config{}
+	*cfg = *c
+	return cfg
+}
+
+// Options is the option of the heartbeat-bench.
 type Options struct {
 	LeaderUpdateRatio atomic.Value
 	EpochUpdateRatio  atomic.Value
