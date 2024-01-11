@@ -86,75 +86,6 @@ func main() {
 		cancel()
 	}()
 
-	hcaseStr := strings.Split(*httpCases, ",")
-	for _, str := range hcaseStr {
-		caseQPS := int64(0)
-		caseBurst := int64(0)
-		cStr := ""
-
-		strs := strings.Split(str, "-")
-		// to get case name
-		strsa := strings.Split(strs[0], "+")
-		cStr = strsa[0]
-		// to get case Burst
-		if len(strsa) > 1 {
-			caseBurst, err = strconv.ParseInt(strsa[1], 10, 64)
-			if err != nil {
-				log.Error("parse burst failed for case", zap.String("case", cStr), zap.String("config", strsa[1]))
-			}
-		}
-		// to get case qps
-		if len(strs) > 1 {
-			strsb := strings.Split(strs[1], "+")
-			caseQPS, err = strconv.ParseInt(strsb[0], 10, 64)
-			if err != nil {
-				if err != nil {
-					log.Error("parse qps failed for case", zap.String("case", cStr), zap.String("config", strsb[0]))
-				}
-			}
-			// to get case Burst
-			if len(strsb) > 1 {
-				caseBurst, err = strconv.ParseInt(strsb[1], 10, 64)
-				if err != nil {
-					log.Error("parse burst failed for case", zap.String("case", cStr), zap.String("config", strsb[1]))
-				}
-			}
-		}
-		if len(cStr) == 0 {
-			continue
-		}
-		if fn, ok := cases.HTTPCaseFnMap[cStr]; ok {
-			var cas cases.HTTPCase
-			if cas, ok = cases.HTTPCaseMap[cStr]; !ok {
-				cas = fn()
-				cases.HTTPCaseMap[cStr] = cas
-			}
-			if caseBurst > 0 {
-				cas.SetBurst(caseBurst)
-			} else if *burst > 0 {
-				cas.SetBurst(*burst)
-			}
-			if caseQPS > 0 {
-				cas.SetQPS(caseQPS)
-			} else if *qps > 0 {
-				cas.SetQPS(*qps)
-			}
-		} else {
-			log.Warn("HTTP case not implemented", zap.String("case", cStr))
-		}
-	}
-	gcaseStr := strings.Split(*gRPCCases, ",")
-	// todo: see pull 7345
-	for _, str := range gcaseStr {
-		if fn, ok := cases.GRPCCaseFnMap[str]; ok {
-			if _, ok = cases.GRPCCaseMap[str]; !ok {
-				cases.GRPCCaseMap[str] = fn()
-			}
-		} else {
-			log.Warn("gRPC case not implemented", zap.String("case", str))
-		}
-	}
-
 	if cfg.Client == 0 {
 		log.Error("concurrency == 0, exit")
 		return
@@ -173,6 +104,23 @@ func main() {
 	}
 
 	coordinator := cases.NewCoordinator(ctx, httpClis, pdClis)
+
+	hcaseStr := strings.Split(*httpCases, ",")
+	for _, str := range hcaseStr {
+		name, cfg := parseCaseNameAndConfig(str)
+		if len(name) == 0 {
+			continue
+		}
+		coordinator.SetHTTPCase(name, cfg)
+	}
+	gcaseStr := strings.Split(*gRPCCases, ",")
+	for _, str := range gcaseStr {
+		name, cfg := parseCaseNameAndConfig(str)
+		if len(name) == 0 {
+			continue
+		}
+		coordinator.SetGRPCCase(name, cfg)
+	}
 	cfg.InitCoordinator(coordinator)
 
 	go runHTTPServer(cfg, coordinator)
@@ -195,6 +143,47 @@ func main() {
 
 func exit(code int) {
 	os.Exit(code)
+}
+
+func parseCaseNameAndConfig(str string) (string, *cases.Config) {
+	var err error
+	cfg := &cases.Config{}
+	name := ""
+	strs := strings.Split(str, "-")
+	// to get case name
+	strsa := strings.Split(strs[0], "+")
+	name = strsa[0]
+	// to get case Burst
+	if len(strsa) > 1 {
+		cfg.Burst, err = strconv.ParseInt(strsa[1], 10, 64)
+		if err != nil {
+			log.Error("parse burst failed for case", zap.String("case", name), zap.String("config", strsa[1]))
+		}
+	}
+	// to get case qps
+	if len(strs) > 1 {
+		strsb := strings.Split(strs[1], "+")
+		cfg.QPS, err = strconv.ParseInt(strsb[0], 10, 64)
+		if err != nil {
+			if err != nil {
+				log.Error("parse qps failed for case", zap.String("case", name), zap.String("config", strsb[0]))
+			}
+		}
+		// to get case Burst
+		if len(strsb) > 1 {
+			cfg.Burst, err = strconv.ParseInt(strsb[1], 10, 64)
+			if err != nil {
+				log.Error("parse burst failed for case", zap.String("case", name), zap.String("config", strsb[1]))
+			}
+		}
+	}
+	if cfg.QPS == 0 && *qps > 0 {
+		cfg.QPS = *qps
+	}
+	if cfg.Burst == 0 && *burst > 0 {
+		cfg.Burst = *burst
+	}
+	return name, cfg
 }
 
 func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {

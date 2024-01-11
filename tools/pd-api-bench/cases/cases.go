@@ -54,6 +54,7 @@ func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) erro
 	return nil
 }
 
+// Config is the configuration for the case.
 type Config struct {
 	QPS   int64 `toml:"qps" json:"qps"`
 	Burst int64 `toml:"burst" json:"burst"`
@@ -128,9 +129,6 @@ var GRPCCaseFnMap = map[string]GRPCCraeteFn{
 	"Tso":         newTso(),
 }
 
-// GRPCCaseMap is the map for all gRPC case creation function.
-var GRPCCaseMap = map[string]GRPCCase{}
-
 // HTTPCase is the interface for all HTTP cases.
 type HTTPCase interface {
 	Case
@@ -145,9 +143,6 @@ var HTTPCaseFnMap = map[string]HTTPCraeteFn{
 	"GetRegionStatus":  newRegionStats(),
 	"GetMinResolvedTS": newMinResolvedTS(),
 }
-
-// HTTPCaseMap is the map for all HTTP cases.
-var HTTPCaseMap = map[string]HTTPCase{}
 
 type minResolvedTS struct {
 	*baseCase

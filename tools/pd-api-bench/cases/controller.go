@@ -28,28 +28,31 @@ import (
 
 var base = int64(time.Second) / int64(time.Microsecond)
 
+// Coordinator managers the operation of the gRPC and HTTP case.
 type Coordinator struct {
 	ctx context.Context
 
 	httpClients []pdHttp.Client
 	gRPCClients []pd.Client
 
-	http map[string]*HTTPController
-	grpc map[string]*GRPCController
+	http map[string]*httpController
+	grpc map[string]*gRPCController
 
 	mu sync.Mutex
 }
 
+// NewCoordinator returns a new coordinator.
 func NewCoordinator(ctx context.Context, httpClients []pdHttp.Client, gRPCClients []pd.Client) *Coordinator {
 	return &Coordinator{
 		ctx:         ctx,
 		httpClients: httpClients,
 		gRPCClients: gRPCClients,
-		http:        make(map[string]*HTTPController),
-		grpc:        make(map[string]*GRPCController),
+		http:        make(map[string]*httpController),
+		grpc:        make(map[string]*gRPCController),
 	}
 }
 
+// GetHTTPCase returns the HTTP case config.
 func (c *Coordinator) GetHTTPCase(name string) (*Config, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -59,6 +62,7 @@ func (c *Coordinator) GetHTTPCase(name string) (*Config, error) {
 	return nil, errors.Errorf("case %v does not exist.", name)
 }
 
+// GetGRPCCase returns the gRPC case config.
 func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -68,6 +72,7 @@ func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
 	return nil, errors.Errorf("case %v does not exist.", name)
 }
 
+// GetAllHTTPCases returns the all HTTP case configs.
 func (c *Coordinator) GetAllHTTPCases() map[string]*Config {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -78,6 +83,7 @@ func (c *Coordinator) GetAllHTTPCases() map[string]*Config {
 	return ret
 }
 
+// GetAllGRPCCases returns the all gRPC case configs.
 func (c *Coordinator) GetAllGRPCCases() map[string]*Config {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -88,49 +94,51 @@ func (c *Coordinator) GetAllGRPCCases() map[string]*Config {
 	return ret
 }
 
+// SetHTTPCase sets the config for the specific case.
 func (c *Coordinator) SetHTTPCase(name string, cfg *Config) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if fn, ok := HTTPCaseFnMap[name]; ok {
-		var controller *HTTPController
+		var controller *httpController
 		if controller, ok = c.http[name]; !ok {
-			controller = NewHTTPController(c.ctx, c.httpClients, fn)
+			controller = newHTTPController(c.ctx, c.httpClients, fn)
 			c.http[name] = controller
 		}
-		controller.Stop()
+		controller.stop()
 		controller.SetQPS(cfg.QPS)
 		if cfg.Burst > 0 {
 			controller.SetBurst(cfg.Burst)
 		}
-		controller.Run()
+		controller.run()
 	} else {
 		return errors.Errorf("HTTP case %s not implemented", name)
 	}
 	return nil
 }
 
+// SetGRPCCase sets the config for the specific case.
 func (c *Coordinator) SetGRPCCase(name string, cfg *Config) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if fn, ok := GRPCCaseFnMap[name]; ok {
-		var controller *GRPCController
+		var controller *gRPCController
 		if controller, ok = c.grpc[name]; !ok {
-			controller = NewGRPCController(c.ctx, c.gRPCClients, fn)
+			controller = newGRPCController(c.ctx, c.gRPCClients, fn)
 			c.grpc[name] = controller
 		}
-		controller.Stop()
+		controller.stop()
 		controller.SetQPS(cfg.QPS)
 		if cfg.Burst > 0 {
 			controller.SetBurst(cfg.Burst)
 		}
-		controller.Run()
+		controller.run()
 	} else {
 		return errors.Errorf("HTTP case %s not implemented", name)
 	}
 	return nil
 }
 
-type HTTPController struct {
+type httpController struct {
 	HTTPCase
 	clients []pdHttp.Client
 	pctx    context.Context
@@ -140,8 +148,8 @@ type HTTPController struct {
 	wg     sync.WaitGroup
 }
 
-func NewHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCraeteFn) *HTTPController {
-	c := &HTTPController{
+func newHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCraeteFn) *httpController {
+	c := &httpController{
 		pctx:     ctx,
 		clients:  clis,
 		HTTPCase: fn(),
@@ -149,7 +157,8 @@ func NewHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCraeteF
 	return c
 }
 
-func (c *HTTPController) Run() {
+// run tries to run the HTTP api bench.
+func (c *httpController) run() {
 	if c.GetQPS() <= 0 || c.cancel != nil {
 		return
 	}
@@ -183,7 +192,8 @@ func (c *HTTPController) Run() {
 	}
 }
 
-func (c *HTTPController) Stop() {
+// stop stops the HTTP api bench.
+func (c *httpController) stop() {
 	if c.cancel == nil {
 		return
 	}
@@ -192,7 +202,7 @@ func (c *HTTPController) Stop() {
 	c.wg.Wait()
 }
 
-type GRPCController struct {
+type gRPCController struct {
 	GRPCCase
 	clients []pd.Client
 	pctx    context.Context
@@ -203,8 +213,8 @@ type GRPCController struct {
 	wg sync.WaitGroup
 }
 
-func NewGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCraeteFn) *GRPCController {
-	c := &GRPCController{
+func newGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCraeteFn) *gRPCController {
+	c := &gRPCController{
 		pctx:     ctx,
 		clients:  clis,
 		GRPCCase: fn(),
@@ -212,7 +222,8 @@ func NewGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCraeteFn) *
 	return c
 }
 
-func (c *GRPCController) Run() {
+// run tries to run the gRPC api bench.
+func (c *gRPCController) run() {
 	if c.GetQPS() <= 0 || c.cancel != nil {
 		return
 	}
@@ -246,7 +257,8 @@ func (c *GRPCController) Run() {
 	}
 }
 
-func (c *GRPCController) Stop() {
+// stop stops the gRPC api bench.
+func (c *gRPCController) stop() {
 	if c.cancel == nil {
 		return
 	}

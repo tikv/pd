@@ -93,6 +93,7 @@ func (c *Config) Parse(arguments []string) error {
 	return nil
 }
 
+// InitCoordinator set case config from config itself.
 func (c *Config) InitCoordinator(co *cases.Coordinator) {
 	for name, cfg := range c.HTTP {
 		err := co.SetHTTPCase(name, &cfg)
