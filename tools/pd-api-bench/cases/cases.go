@@ -116,7 +116,7 @@ type HTTPCase interface {
 	Do(context.Context, pdHttp.Client) error
 }
 
-// HTTPCraeteFn is function type to create GRPCCase.
+// HTTPCraeteFn is function type to create HTTPCase.
 type HTTPCraeteFn func() HTTPCase
 
 // HTTPCaseFnMap is the map for all HTTP case creation function.
