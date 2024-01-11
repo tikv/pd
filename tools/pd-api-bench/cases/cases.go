@@ -122,11 +122,12 @@ type GRPCCraeteFn func() GRPCCase
 
 // GRPCCaseFnMap is the map for all gRPC case creation function.
 var GRPCCaseFnMap = map[string]GRPCCraeteFn{
-	"GetRegion":   newGetRegion(),
-	"GetStore":    newGetStore(),
-	"GetStores":   newGetStores(),
-	"ScanRegions": newScanRegions(),
-	"Tso":         newTso(),
+	"GetRegion":               newGetRegion(),
+	"GetRegionEnableFollower": newGetRegionEnableFollower(),
+	"GetStore":                newGetStore(),
+	"GetStores":               newGetStores(),
+	"ScanRegions":             newScanRegions(),
+	"Tso":                     newTso(),
 }
 
 // HTTPCase is the interface for all HTTP cases.
@@ -224,6 +225,30 @@ func newGetRegion() func() GRPCCase {
 func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type getRegionEnableFollower struct {
+	*baseCase
+}
+
+func newGetRegionEnableFollower() func() GRPCCase {
+	return func() GRPCCase {
+		return &getRegionEnableFollower{
+			baseCase: &baseCase{
+				name: "GetRegionEnableFollower",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *getRegionEnableFollower) Unary(ctx context.Context, cli pd.Client) error {
+	id := rand.Intn(totalRegion)*4 + 1
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56), pd.WithAllowFollowerHandle())
 	if err != nil {
 		return err
 	}

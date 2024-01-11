@@ -184,7 +184,7 @@ func (c *httpController) run() {
 						}
 					}
 				case <-c.ctx.Done():
-					log.Info("Got signal to exit handleScanRegions")
+					log.Info("Got signal to exit running HTTP case")
 					return
 				}
 			}
@@ -249,7 +249,7 @@ func (c *gRPCController) run() {
 						}
 					}
 				case <-c.ctx.Done():
-					log.Info("Got signal to exit handleGetRegion")
+					log.Info("Got signal to exit running gRPC case")
 					return
 				}
 			}

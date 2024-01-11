@@ -116,6 +116,7 @@ func main() {
 	pdClis := make([]pd.Client, cfg.Client)
 	for i := int64(0); i < cfg.Client; i++ {
 		pdClis[i] = newPDClient(ctx, cfg)
+		pdClis[i].UpdateOption(pd.EnableFollowerHandle, true)
 	}
 	httpClis := make([]pdHttp.Client, cfg.Client)
 	for i := int64(0); i < cfg.Client; i++ {
