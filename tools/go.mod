@@ -15,6 +15,10 @@ require (
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
 	github.com/docker/go-units v0.4.0
+	github.com/gin-contrib/cors v1.4.0
+	github.com/gin-contrib/gzip v0.0.1
+	github.com/gin-contrib/pprof v1.4.0
+	github.com/gin-gonic/gin v1.9.1
 	github.com/go-echarts/go-echarts v1.0.0
 	github.com/influxdata/tdigest v0.0.1
 	github.com/mattn/go-shellwords v1.0.12
@@ -72,11 +76,7 @@ require (
 	github.com/elliotchance/pie/v2 v2.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
-	github.com/gin-contrib/cors v1.4.0 // indirect
-	github.com/gin-contrib/gzip v0.0.1 // indirect
-	github.com/gin-contrib/pprof v1.4.0 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
-	github.com/gin-gonic/gin v1.9.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
 	github.com/go-openapi/jsonreference v0.19.6 // indirect
