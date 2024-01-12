@@ -78,6 +78,7 @@ func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 	)
 
 	kinds, ok := r.URL.Query()["kind"]
+	_, objectFlag := r.URL.Query()["object"]
 	if !ok {
 		results, err = h.Handler.GetOperators()
 	} else {
@@ -88,7 +89,15 @@ func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.r.JSON(w, http.StatusOK, results)
+	if objectFlag {
+		objResults := make([]*operator.OpObject, len(results))
+		for i, op := range results {
+			objResults[i] = op.ToJSONObject()
+		}
+		h.r.JSON(w, http.StatusOK, objResults)
+	} else {
+		h.r.JSON(w, http.StatusOK, results)
+	}
 }
 
 // FIXME: details of input json body params

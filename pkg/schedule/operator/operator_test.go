@@ -541,3 +541,20 @@ func (suite *operatorTestSuite) TestRecord() {
 	re.Equal(now, ob.FinishTime)
 	re.Greater(ob.duration.Seconds(), time.Second.Seconds())
 }
+
+func (suite *operatorTestSuite) TestToJSONObject() {
+	steps := []OpStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 2, ToStore: 1},
+		RemovePeer{FromStore: 2},
+	}
+	op := suite.newTestOperator(101, OpLeader|OpRegion, steps...)
+	op.Start()
+	obj := op.ToJSONObject()
+	suite.Equal("test", obj.Desc)
+	suite.Equal("test", obj.Brief)
+	suite.Equal(uint64(101), obj.RegionID)
+	suite.Equal(OpLeader|OpRegion, obj.Kind)
+	suite.Equal("12m0s", obj.Timeout)
+	suite.Equal(STARTED, obj.Status)
+}
