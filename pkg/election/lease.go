@@ -29,10 +29,9 @@ import (
 )
 
 const (
-	revokeLeaseTimeout    = time.Second
-	requestTimeout        = etcdutil.DefaultRequestTimeout
-	slowRequestTime       = etcdutil.DefaultSlowRequestTime
-	slowKeepLeaseInterval = 1500 * time.Millisecond
+	revokeLeaseTimeout = time.Second
+	requestTimeout     = etcdutil.DefaultRequestTimeout
+	slowRequestTime    = etcdutil.DefaultSlowRequestTime
 )
 
 // lease is used as the low-level mechanism for campaigning and renewing elected leadership.
@@ -158,7 +157,7 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 		lastTime := time.Now()
 		for {
 			start := time.Now()
-			if start.Sub(lastTime) > slowKeepLeaseInterval {
+			if start.Sub(lastTime) > interval*2 {
 				log.Warn("the interval between keeping alive lease is too long", zap.Time("last-time", lastTime))
 			}
 			go func(start time.Time) {
