@@ -440,7 +440,7 @@ func pickNoUpdatedRegions(slice []int, cfg *config.Config, ratio float64, update
 		slice[i], slice[j] = slice[j], slice[i]
 	})
 	NoUpdatedRegionsNum := int(float64(cfg.RegionCount) * ratio)
-	var res []int
+	res := make([]int, 0, NoUpdatedRegionsNum)
 	for i := 0; len(res) < NoUpdatedRegionsNum; i++ {
 		if _, ok := updatedMap[slice[i]]; !ok {
 			res = append(res, slice[i])
