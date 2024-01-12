@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"sync/atomic"
 
 	"github.com/BurntSushi/toml"
@@ -92,7 +93,7 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	c.Adjust(meta)
-	return nil
+	return c.Validate()
 }
 
 // Adjust is used to adjust configurations
@@ -137,6 +138,30 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 	if !meta.IsDefined("sample") {
 		c.Sample = defaultSample
 	}
+}
+
+// Validate is used to validate configurations
+func (c *Config) Validate() error {
+	if c.LeaderUpdateRatio < 0 || c.LeaderUpdateRatio > 1 {
+		return errors.Errorf("leader-update-ratio must be in [0, 1]")
+	}
+	if c.EpochUpdateRatio < 0 || c.EpochUpdateRatio > 1 {
+		return errors.Errorf("epoch-update-ratio must be in [0, 1]")
+	}
+	if c.SpaceUpdateRatio < 0 || c.SpaceUpdateRatio > 1 {
+		return errors.Errorf("space-update-ratio must be in [0, 1]")
+	}
+	if c.FlowUpdateRatio < 0 || c.FlowUpdateRatio > 1 {
+		return errors.Errorf("flow-update-ratio must be in [0, 1]")
+	}
+	if c.NoUpdateRatio < 0 || c.NoUpdateRatio > 1 {
+		return errors.Errorf("no-update-ratio must be in [0, 1]")
+	}
+	max := math.Max(c.LeaderUpdateRatio, math.Max(c.EpochUpdateRatio, math.Max(c.SpaceUpdateRatio, c.FlowUpdateRatio)))
+	if max+c.NoUpdateRatio > 1 {
+		return errors.Errorf("sum of update-ratio must be in [0, 1]")
+	}
+	return nil
 }
 
 // Clone creates a copy of current config.

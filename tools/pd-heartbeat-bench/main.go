@@ -440,16 +440,11 @@ func pickNoUpdatedRegions(slice []int, cfg *config.Config, ratio float64, update
 		slice[i], slice[j] = slice[j], slice[i]
 	})
 	NoUpdatedRegionsNum := int(float64(cfg.RegionCount) * ratio)
-	res := make([]int, 0, NoUpdatedRegionsNum)
-	i := 0
-	for {
-		if len(res) == NoUpdatedRegionsNum {
-			break
-		}
+	var res []int
+	for i := 0; len(res) < NoUpdatedRegionsNum; i++ {
 		if _, ok := updatedMap[slice[i]]; !ok {
 			res = append(res, slice[i])
 		}
-		i++
 	}
 	return res
 }
@@ -614,7 +609,10 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
-
+		if err := newCfg.Validate(); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		options.SetOptions(newCfg)
 		c.String(http.StatusOK, "Successfully updated the configuration")
 	})
