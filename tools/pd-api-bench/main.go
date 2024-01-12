@@ -161,7 +161,8 @@ func main() {
 	}
 	httpClis := make([]pdHttp.Client, cfg.Client)
 	for i := int64(0); i < cfg.Client; i++ {
-		httpClis[i] = pdHttp.NewClient("tools-api-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
+		sd := pdClis[i].GetServiceDiscovery()
+		httpClis[i] = pdHttp.NewClientWithServiceDiscovery("tools-api-bench", sd, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
 	}
 	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {

@@ -62,7 +62,8 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 // @Router   /config [get]
 func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := h.svr.GetConfig()
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) &&
+		r.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) != "true" {
 		schedulingServerConfig, err := h.GetSchedulingServerConfig()
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -313,7 +314,8 @@ func getConfigMap(cfg map[string]interface{}, key []string, value interface{}) m
 // @Success  200  {object}  sc.ScheduleConfig
 // @Router   /config/schedule [get]
 func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) {
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) &&
+		r.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) != "true" {
 		cfg, err := h.GetSchedulingServerConfig()
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -386,7 +388,8 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Success  200  {object}  sc.ReplicationConfig
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) &&
+		r.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) != "true" {
 		cfg, err := h.GetSchedulingServerConfig()
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
