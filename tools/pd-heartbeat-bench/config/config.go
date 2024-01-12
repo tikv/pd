@@ -1,6 +1,8 @@
 package config
 
 import (
+	"sync/atomic"
+
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -54,8 +56,8 @@ func NewConfig() *Config {
 	fs := cfg.flagSet
 	fs.ParseErrorsWhitelist.UnknownFlags = true
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
-	fs.StringVar(&cfg.PDAddr, "pd", "http://127.0.0.1:2379", "pd address")
-	fs.StringVar(&cfg.StatusAddr, "status-addr", "http://127.0.0.1:20180", "status address")
+	fs.StringVar(&cfg.PDAddr, "pd", "127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.StatusAddr, "status-addr", "127.0.0.1:20180", "status address")
 
 	return cfg
 }
@@ -130,4 +132,57 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 	if !meta.IsDefined("sample") {
 		c.Sample = defaultSample
 	}
+}
+
+// Clone creates a copy of current config.
+func (c *Config) Clone() *Config {
+	cfg := &Config{}
+	*cfg = *c
+	return cfg
+}
+
+// Options is the option of the heartbeat-bench.
+type Options struct {
+	LeaderUpdateRatio atomic.Value
+	EpochUpdateRatio  atomic.Value
+	SpaceUpdateRatio  atomic.Value
+	FlowUpdateRatio   atomic.Value
+}
+
+// NewOptions creates a new option.
+func NewOptions(cfg *Config) *Options {
+	o := &Options{}
+	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
+	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
+	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
+	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
+	return o
+}
+
+// GetLeaderUpdateRatio returns the leader update ratio.
+func (o *Options) GetLeaderUpdateRatio() float64 {
+	return o.LeaderUpdateRatio.Load().(float64)
+}
+
+// GetEpochUpdateRatio returns the epoch update ratio.
+func (o *Options) GetEpochUpdateRatio() float64 {
+	return o.EpochUpdateRatio.Load().(float64)
+}
+
+// GetSpaceUpdateRatio returns the space update ratio.
+func (o *Options) GetSpaceUpdateRatio() float64 {
+	return o.SpaceUpdateRatio.Load().(float64)
+}
+
+// GetFlowUpdateRatio returns the flow update ratio.
+func (o *Options) GetFlowUpdateRatio() float64 {
+	return o.FlowUpdateRatio.Load().(float64)
+}
+
+// SetOptions sets the option.
+func (o *Options) SetOptions(cfg *Config) {
+	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
+	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
+	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
+	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
 }
