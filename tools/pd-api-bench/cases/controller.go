@@ -38,7 +38,7 @@ type Coordinator struct {
 	http map[string]*httpController
 	grpc map[string]*gRPCController
 
-	mu sync.Mutex
+	mu sync.RWMutex
 }
 
 // NewCoordinator returns a new coordinator.
@@ -54,8 +54,8 @@ func NewCoordinator(ctx context.Context, httpClients []pdHttp.Client, gRPCClient
 
 // GetHTTPCase returns the HTTP case config.
 func (c *Coordinator) GetHTTPCase(name string) (*Config, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if controller, ok := c.http[name]; ok {
 		return controller.GetConfig(), nil
 	}
@@ -64,8 +64,8 @@ func (c *Coordinator) GetHTTPCase(name string) (*Config, error) {
 
 // GetGRPCCase returns the gRPC case config.
 func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if controller, ok := c.grpc[name]; ok {
 		return controller.GetConfig(), nil
 	}
@@ -74,8 +74,8 @@ func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
 
 // GetAllHTTPCases returns the all HTTP case configs.
 func (c *Coordinator) GetAllHTTPCases() map[string]*Config {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	ret := make(map[string]*Config)
 	for name, c := range c.http {
 		ret[name] = c.GetConfig()
@@ -85,8 +85,8 @@ func (c *Coordinator) GetAllHTTPCases() map[string]*Config {
 
 // GetAllGRPCCases returns the all gRPC case configs.
 func (c *Coordinator) GetAllGRPCCases() map[string]*Config {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	ret := make(map[string]*Config)
 	for name, c := range c.grpc {
 		ret[name] = c.GetConfig()
