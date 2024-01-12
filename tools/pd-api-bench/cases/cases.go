@@ -95,13 +95,20 @@ type GRPCCase interface {
 	Unary(context.Context, pd.Client) error
 }
 
-// GRPCCaseMap is the map for all gRPC cases.
-var GRPCCaseMap = map[string]GRPCCase{
+// GRPCCraeteFn is function type to create GRPCCase.
+type GRPCCraeteFn func() GRPCCase
+
+// GRPCCaseFnMap is the map for all gRPC case creation function.
+var GRPCCaseFnMap = map[string]GRPCCraeteFn{
 	"GetRegion":   newGetRegion(),
 	"GetStore":    newGetStore(),
 	"GetStores":   newGetStores(),
 	"ScanRegions": newScanRegions(),
+	"Tso":         newTso(),
 }
+
+// GRPCCaseMap is the map for all gRPC case creation function.
+var GRPCCaseMap = map[string]GRPCCase{}
 
 // HTTPCase is the interface for all HTTP cases.
 type HTTPCase interface {
@@ -109,23 +116,31 @@ type HTTPCase interface {
 	Do(context.Context, pdHttp.Client) error
 }
 
-// HTTPCaseMap is the map for all HTTP cases.
-var HTTPCaseMap = map[string]HTTPCase{
+// HTTPCraeteFn is function type to create HTTPCase.
+type HTTPCraeteFn func() HTTPCase
+
+// HTTPCaseFnMap is the map for all HTTP case creation function.
+var HTTPCaseFnMap = map[string]HTTPCraeteFn{
 	"GetRegionStatus":  newRegionStats(),
 	"GetMinResolvedTS": newMinResolvedTS(),
 }
+
+// HTTPCaseMap is the map for all HTTP cases.
+var HTTPCaseMap = map[string]HTTPCase{}
 
 type minResolvedTS struct {
 	*baseCase
 }
 
-func newMinResolvedTS() *minResolvedTS {
-	return &minResolvedTS{
-		baseCase: &baseCase{
-			name:  "GetMinResolvedTS",
-			qps:   1000,
-			burst: 1,
-		},
+func newMinResolvedTS() func() HTTPCase {
+	return func() HTTPCase {
+		return &minResolvedTS{
+			baseCase: &baseCase{
+				name:  "GetMinResolvedTS",
+				qps:   1000,
+				burst: 1,
+			},
+		}
 	}
 }
 
@@ -145,14 +160,16 @@ type regionsStats struct {
 	regionSample int
 }
 
-func newRegionStats() *regionsStats {
-	return &regionsStats{
-		baseCase: &baseCase{
-			name:  "GetRegionStatus",
-			qps:   100,
-			burst: 1,
-		},
-		regionSample: 1000,
+func newRegionStats() func() HTTPCase {
+	return func() HTTPCase {
+		return &regionsStats{
+			baseCase: &baseCase{
+				name:  "GetRegionStatus",
+				qps:   100,
+				burst: 1,
+			},
+			regionSample: 1000,
+		}
 	}
 }
 
@@ -179,13 +196,15 @@ type getRegion struct {
 	*baseCase
 }
 
-func newGetRegion() *getRegion {
-	return &getRegion{
-		baseCase: &baseCase{
-			name:  "GetRegion",
-			qps:   10000,
-			burst: 1,
-		},
+func newGetRegion() func() GRPCCase {
+	return func() GRPCCase {
+		return &getRegion{
+			baseCase: &baseCase{
+				name:  "GetRegion",
+				qps:   10000,
+				burst: 1,
+			},
+		}
 	}
 }
 
@@ -203,14 +222,16 @@ type scanRegions struct {
 	regionSample int
 }
 
-func newScanRegions() *scanRegions {
-	return &scanRegions{
-		baseCase: &baseCase{
-			name:  "ScanRegions",
-			qps:   10000,
-			burst: 1,
-		},
-		regionSample: 10000,
+func newScanRegions() func() GRPCCase {
+	return func() GRPCCase {
+		return &scanRegions{
+			baseCase: &baseCase{
+				name:  "ScanRegions",
+				qps:   10000,
+				burst: 1,
+			},
+			regionSample: 10000,
+		}
 	}
 }
 
@@ -226,17 +247,43 @@ func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	return nil
 }
 
+type tso struct {
+	*baseCase
+}
+
+func newTso() func() GRPCCase {
+	return func() GRPCCase {
+		return &tso{
+			baseCase: &baseCase{
+				name:  "Tso",
+				qps:   10000,
+				burst: 1,
+			},
+		}
+	}
+}
+
+func (c *tso) Unary(ctx context.Context, cli pd.Client) error {
+	_, _, err := cli.GetTS(ctx)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 type getStore struct {
 	*baseCase
 }
 
-func newGetStore() *getStore {
-	return &getStore{
-		baseCase: &baseCase{
-			name:  "GetStore",
-			qps:   10000,
-			burst: 1,
-		},
+func newGetStore() func() GRPCCase {
+	return func() GRPCCase {
+		return &getStore{
+			baseCase: &baseCase{
+				name:  "GetStore",
+				qps:   10000,
+				burst: 1,
+			},
+		}
 	}
 }
 
@@ -253,13 +300,15 @@ type getStores struct {
 	*baseCase
 }
 
-func newGetStores() *getStores {
-	return &getStores{
-		baseCase: &baseCase{
-			name:  "GetStores",
-			qps:   10000,
-			burst: 1,
-		},
+func newGetStores() func() GRPCCase {
+	return func() GRPCCase {
+		return &getStores{
+			baseCase: &baseCase{
+				name:  "GetStores",
+				qps:   10000,
+				burst: 1,
+			},
+		}
 	}
 }
 
