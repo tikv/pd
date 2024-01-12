@@ -29,9 +29,10 @@ import (
 )
 
 const (
-	revokeLeaseTimeout = time.Second
-	requestTimeout     = etcdutil.DefaultRequestTimeout
-	slowRequestTime    = etcdutil.DefaultSlowRequestTime
+	revokeLeaseTimeout    = time.Second
+	requestTimeout        = etcdutil.DefaultRequestTimeout
+	slowRequestTime       = etcdutil.DefaultSlowRequestTime
+	slowKeepLeaseInterval = 1500 * time.Millisecond
 )
 
 // lease is used as the low-level mechanism for campaigning and renewing elected leadership.
@@ -154,11 +155,14 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 
 		log.Info("start lease keep alive worker", zap.Duration("interval", interval), zap.String("purpose", l.Purpose))
 		defer log.Info("stop lease keep alive worker", zap.String("purpose", l.Purpose))
-
+		lastTime := time.Now()
 		for {
-			go func() {
+			start := time.Now()
+			if start.Sub(lastTime) > slowKeepLeaseInterval {
+				log.Warn("the interval between keeping alive lease is too long", zap.Time("last-time", lastTime))
+			}
+			go func(start time.Time) {
 				defer logutil.LogPanic()
-				start := time.Now()
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
 				var leaseID clientv3.LeaseID
@@ -180,12 +184,13 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				} else {
 					log.Error("keep alive response ttl is zero", zap.String("purpose", l.Purpose))
 				}
-			}()
+			}(start)
 
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				lastTime = start
 			}
 		}
 	}()
