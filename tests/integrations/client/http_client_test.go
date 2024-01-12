@@ -27,7 +27,7 @@ import (
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
-	config2 "github.com/tikv/pd/pkg/schedule/config"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -420,7 +420,7 @@ func (suite *httpClientTestSuite) TestConfig() {
 	}
 	err = suite.client.SetConfig(suite.ctx, newConfig, 5)
 	re.NoError(err)
-	resp, err := suite.cluster.GetEtcdClient().Get(suite.ctx, config2.TTLConfigPrefix+"/schedule.leader-schedule-limit")
+	resp, err := suite.cluster.GetEtcdClient().Get(suite.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
 	re.NoError(err)
 	re.Equal([]byte("16"), resp.Kvs[0].Value)
 }
