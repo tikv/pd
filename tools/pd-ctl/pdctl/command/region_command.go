@@ -48,6 +48,7 @@ var (
 	regionsKeyspacePrefix   = "pd/api/v1/regions/keyspace"
 	regionIDPrefix          = "pd/api/v1/region/id"
 	regionKeyPrefix         = "pd/api/v1/region/key"
+	regionRulePrefix        = "pd/api/v1/config/rules/region"
 )
 
 // NewRegionCommand returns a region subcommand of rootCmd
@@ -129,6 +130,14 @@ func NewRegionCommand() *cobra.Command {
 	scanRegion.Flags().String("jq", "", "jq query")
 	r.AddCommand(scanRegion)
 
+	rulesDetail := &cobra.Command{
+		Use:   `rules <region_id>`,
+		Short: "show rules detail of this region",
+		Run:   showRulesDetailCommandFunc,
+	}
+	rulesDetail.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	r.AddCommand(rulesDetail)
+
 	r.Flags().String("jq", "", "jq query")
 
 	return r
@@ -153,6 +162,25 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	cmd.Println(r)
+}
+
+func showRulesDetailCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) < 1 {
+		cmd.Usage()
+		return
+	}
+	if _, err := strconv.Atoi(args[0]); err != nil {
+		cmd.Println("region_id should be a number")
+		return
+	}
+	prefix := regionRulePrefix + "/" + args[0] + "/detail"
+	header := buildHeader(cmd)
+	r, err := doRequest(cmd, prefix, http.MethodGet, header)
+	if err != nil {
+		cmd.Printf("Failed to get region: %s\n", err)
+		return
+	}
 	cmd.Println(r)
 }
 

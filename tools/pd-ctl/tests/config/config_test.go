@@ -487,6 +487,27 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 		}
 	}
 
+	testRuleFits := func(regionID string) {
+		for _, isFromAPIServer := range []bool{true, false} {
+			cmd := ctl.GetRootCmd()
+			args := []string{"-u", pdAddr, "region", "rule", regionID}
+			if isFromAPIServer {
+				args = append(args, "--from_api_server")
+			}
+			output, err := tests.ExecuteCommand(cmd, args...)
+			re.NoError(err)
+			if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
+				if isFromAPIServer {
+					re.NotContains(string(output), "test")
+				} else {
+					re.Contains(string(output), "test")
+				}
+			} else {
+				re.NotContains(string(output), "test")
+			}
+		}
+	}
+
 	// Test Config
 	// inject different config to scheduling server
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
@@ -542,6 +563,16 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	testRules("rule-bundle", "get", placement.DefaultGroupID)
 	// load placement rules bundle
 	testRules("rule-bundle", "load", "--out="+fname)
+
+	// test region rules detail
+	storeID, regionID := uint64(1), uint64(2)
+	store := &metapb.Store{
+		Id:    storeID,
+		State: metapb.StoreState_Up,
+	}
+	pdTests.MustPutStore(re, cluster, store)
+	pdTests.MustPutRegion(re, cluster, regionID, storeID, []byte{}, []byte{})
+	testRuleFits(strconv.Itoa(int(regionID)))
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
