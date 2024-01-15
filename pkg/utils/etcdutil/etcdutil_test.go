@@ -413,6 +413,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 		},
 		func(kv *mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
 	)
 	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
@@ -455,7 +456,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 			result = result[:0]
 			return nil
 		},
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
@@ -508,7 +509,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				func([]*clientv3.Event) error {
 					return nil
 				},
-				clientv3.WithPrefix(),
+				true, /* withPrefix */
 			)
 			watcher.SetLoadBatchSize(int64(limit))
 			watcher.StartWatchLoop()
@@ -547,7 +548,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 		func([]*clientv3.Event) error {
 			return nil
 		},
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
@@ -586,6 +587,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 		},
 		func(kv *mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
 	)
 	watcher.watchChangeRetryInterval = 100 * time.Millisecond
 	watcher.StartWatchLoop()
@@ -664,6 +666,7 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			func(kv *mvccpb.KeyValue) error { return nil },
 			func(kv *mvccpb.KeyValue) error { return nil },
 			func([]*clientv3.Event) error { return nil },
+			false, /* withPrefix */
 		)
 
 		suite.wg.Add(1)

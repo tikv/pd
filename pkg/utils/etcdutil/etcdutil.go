@@ -580,8 +580,8 @@ type LoopWatcher struct {
 
 	// key is the etcd key to watch.
 	key string
-	// opts is used to set etcd options.
-	opts []clientv3.OpOption
+	// isWithPrefix indicates whether the watcher is with prefix.
+	isWithPrefix bool
 
 	// forceLoadCh is used to force loading data from etcd.
 	forceLoadCh chan struct{}
@@ -623,7 +623,7 @@ func NewLoopWatcher(
 	preEventsFn func([]*clientv3.Event) error,
 	putFn, deleteFn func(*mvccpb.KeyValue) error,
 	postEventsFn func([]*clientv3.Event) error,
-	opts ...clientv3.OpOption,
+	isWithPrefix bool,
 ) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:                      ctx,
@@ -638,7 +638,7 @@ func NewLoopWatcher(
 		deleteFn:                 deleteFn,
 		postEventsFn:             postEventsFn,
 		preEventsFn:              preEventsFn,
-		opts:                     opts,
+		isWithPrefix:             isWithPrefix,
 		lastTimeForceLoad:        time.Now(),
 		loadTimeout:              defaultLoadDataFromEtcdTimeout,
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
@@ -753,7 +753,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		// make sure to wrap context with "WithRequireLeader".
 		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
 		watcherCancel = cancel
-		opts := append(lw.opts, clientv3.WithRev(revision), clientv3.WithProgressNotify())
+		opts := []clientv3.OpOption{clientv3.WithRev(revision), clientv3.WithProgressNotify()}
+		if lw.isWithPrefix {
+			opts = append(opts, clientv3.WithPrefix())
+		}
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
 		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
@@ -881,23 +884,16 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		}
 	}()
 
-	// TODO: Convert withPrefix to withRange(endKey) with easier way.
 	// In most cases, 'Get(foo, WithPrefix())' is equivalent to 'Get(foo, WithRange(GetPrefixRangeEnd(foo))'.
 	// However, when the startKey changes, the two are no longer equivalent.
 	// For example, the end key for 'WithRange(GetPrefixRangeEnd(foo))' is consistently 'fop'.
 	// But when using 'Get(foo1, WithPrefix())', the end key becomes 'foo2', not 'fop'.
-	// In future version, etcd provides IsOptsWithPrefix() to determine whether the WithPrefix is called.
-	opts := append(lw.opts,
+	// So, we use 'WithRange()' to avoid this problem.
+	opts := []clientv3.OpOption{
 		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
-		clientv3.WithLimit(limit),
-	)
-	op := clientv3.NewOp()
-	op.WithKeyBytes([]byte(lw.key))
-	for _, opt := range lw.opts {
-		opt(op)
-	}
-	if len(op.RangeBytes()) != 0 {
-		opts = append(opts, clientv3.WithRange(string(op.RangeBytes())))
+		clientv3.WithLimit(limit)}
+	if lw.isWithPrefix {
+		opts = append(opts, clientv3.WithRange(clientv3.GetPrefixRangeEnd(startKey)))
 	}
 
 	for {

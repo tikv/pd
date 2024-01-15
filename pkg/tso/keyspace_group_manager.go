@@ -515,7 +515,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		putFn,
 		deleteFn,
 		func([]*clientv3.Event) error { return nil },
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
@@ -572,7 +572,7 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		putFn,
 		deleteFn,
 		postEventsFn,
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	if kgm.loadKeyspaceGroupsTimeout > 0 {
 		kgm.groupWatcher.SetLoadTimeout(kgm.loadKeyspaceGroupsTimeout)
