@@ -690,8 +690,6 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	ticker := time.NewTicker(defaultEtcdRetryInterval)
 	defer ticker.Stop()
 	for i := 0; i < lw.loadRetryTimes; i++ {
-		ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
-		defer cancel()
 		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
@@ -864,6 +862,8 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
+	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
+	defer cancel()
 	startKey := lw.key
 	// If limit is 0, it means no limit.
 	// If limit is not 0, we need to add 1 to limit to get the next key.
