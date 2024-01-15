@@ -399,12 +399,7 @@ func (suite *loopWatcherTestSuite) TearDownSuite() {
 
 func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 	re := suite.Require()
-	cache := struct {
-		syncutil.RWMutex
-		data map[string]struct{}
-	}{
-		data: make(map[string]struct{}),
-	}
+	cache := make(map[string]struct{})
 	watcher := NewLoopWatcher(
 		suite.ctx,
 		&suite.wg,
@@ -413,9 +408,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 		"TestLoadWithoutKey",
 		func([]*clientv3.Event) error { return nil },
 		func(kv *mvccpb.KeyValue) error {
-			cache.Lock()
-			defer cache.Unlock()
-			cache.data[string(kv.Key)] = struct{}{}
+			cache[string(kv.Key)] = struct{}{}
 			return nil
 		},
 		func(kv *mvccpb.KeyValue) error { return nil },
@@ -424,9 +417,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	re.NoError(err) // although no key, watcher returns no error
-	cache.RLock()
-	defer cache.RUnlock()
-	re.Empty(cache.data)
+	re.Empty(cache)
 }
 
 func (suite *loopWatcherTestSuite) TestCallBack() {
@@ -499,12 +490,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 			for i := 0; i < count; i++ {
 				suite.put(re, fmt.Sprintf("TestWatcherLoadLimit%d", i), "")
 			}
-			cache := struct {
-				syncutil.RWMutex
-				data []string
-			}{
-				data: make([]string, 0),
-			}
+			cache := make([]string, 0)
 			watcher := NewLoopWatcher(
 				ctx,
 				&suite.wg,
@@ -513,9 +499,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				"TestWatcherLoadLimit",
 				func([]*clientv3.Event) error { return nil },
 				func(kv *mvccpb.KeyValue) error {
-					cache.Lock()
-					defer cache.Unlock()
-					cache.data = append(cache.data, string(kv.Key))
+					cache = append(cache, string(kv.Key))
 					return nil
 				},
 				func(kv *mvccpb.KeyValue) error {
@@ -526,15 +510,49 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				},
 				clientv3.WithPrefix(),
 			)
+			watcher.SetLoadBatchSize(int64(limit))
 			watcher.StartWatchLoop()
 			err := watcher.WaitLoad()
 			re.NoError(err)
-			cache.RLock()
-			re.Len(cache.data, count)
-			cache.RUnlock()
+			re.Len(cache, count)
 			cancel()
 		}
 	}
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
+	re := suite.Require()
+	// use default limit to test 16384 key in etcd
+	count := 16384
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	for i := 0; i < count; i++ {
+		suite.put(re, fmt.Sprintf("TestWatcherLoadLargeKey/test-%d", i), "")
+	}
+	cache := make([]string, 0)
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestWatcherLoadLargeKey",
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache = append(cache, string(kv.Key))
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			return nil
+		},
+		func([]*clientv3.Event) error {
+			return nil
+		},
+		clientv3.WithPrefix(),
+	)
+	watcher.StartWatchLoop()
+	err := watcher.WaitLoad()
+	re.NoError(err)
+	re.Len(cache, count)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherBreak() {

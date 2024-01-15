@@ -216,7 +216,6 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 
 func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client, clusterID uint64) {
 	tsoServiceKey := discovery.TSOPath(clusterID)
-	tsoServiceEndKey := clientv3.GetPrefixRangeEnd(tsoServiceKey)
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
@@ -249,7 +248,7 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client, clusterID ui
 		putFn,
 		deleteFn,
 		func([]*clientv3.Event) error { return nil },
-		clientv3.WithRange(tsoServiceEndKey),
+		clientv3.WithPrefix(),
 	)
 }
 

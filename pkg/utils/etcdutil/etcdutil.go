@@ -691,10 +691,9 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 	)
 	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
 	defer ticker.Stop()
-	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
-	defer cancel()
-
 	for i := 0; i < lw.loadRetryTimes; i++ {
+		ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
+		defer cancel()
 		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
@@ -864,8 +863,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
-	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
-	defer cancel()
 	startKey := lw.key
 	// If limit is 0, it means no limit.
 	// If limit is not 0, we need to add 1 to limit to get the next key.
@@ -883,10 +880,29 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				zap.String("key", lw.key), zap.Error(err))
 		}
 	}()
+
+	// TODO: Convert withPrefix to withRange(endKey) with easier way.
+	// In most cases, 'Get(foo, WithPrefix())' is equivalent to 'Get(foo, WithRange(GetPrefixRangeEnd(foo))'.
+	// However, when the startKey changes, the two are no longer equivalent.
+	// For example, the end key for 'WithRange(GetPrefixRangeEnd(foo))' is consistently 'fop'.
+	// But when using 'Get(foo1, WithPrefix())', the end key becomes 'foo2', not 'fop'.
+	// In future version, etcd provides IsOptsWithPrefix() to determine whether the WithPrefix is called.
+	opts := append(lw.opts,
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		clientv3.WithLimit(limit),
+	)
+	op := clientv3.NewOp()
+	op.WithKeyBytes([]byte(lw.key))
+	for _, opt := range lw.opts {
+		opt(op)
+	}
+	if len(op.RangeBytes()) != 0 {
+		opts = append(opts, clientv3.WithRange(string(op.RangeBytes())))
+	}
+
 	for {
 		// Sort by key to get the next key and we don't need to worry about the performance,
 		// Because the default sort is just SortByKey and SortAscend
-		opts := append(lw.opts, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend), clientv3.WithLimit(limit))
 		resp, err := clientv3.NewKV(lw.client).Get(ctx, startKey, opts...)
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
