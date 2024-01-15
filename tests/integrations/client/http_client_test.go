@@ -32,6 +32,7 @@ import (
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -405,6 +406,33 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re.Len(suspectRegions, 2)
 }
 
+func (suite *httpClientTestSuite) TestConfig() {
+	re := suite.Require()
+	config, err := suite.client.GetConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(float64(4), config["schedule"].(map[string]interface{})["leader-schedule-limit"])
+
+	newConfig := map[string]interface{}{
+		"schedule.leader-schedule-limit": float64(8),
+	}
+	err = suite.client.SetConfig(suite.ctx, newConfig)
+	re.NoError(err)
+
+	config, err = suite.client.GetConfig(suite.ctx)
+	re.NoError(err)
+	re.Equal(float64(8), config["schedule"].(map[string]interface{})["leader-schedule-limit"])
+
+	// Test the config with TTL.
+	newConfig = map[string]interface{}{
+		"schedule.leader-schedule-limit": float64(16),
+	}
+	err = suite.client.SetConfig(suite.ctx, newConfig, 5)
+	re.NoError(err)
+	resp, err := suite.cluster.GetEtcdClient().Get(suite.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
+	re.NoError(err)
+	re.Equal([]byte("16"), resp.Kvs[0].Value)
+}
+
 func (suite *httpClientTestSuite) TestScheduleConfig() {
 	re := suite.Require()
 	config, err := suite.client.GetScheduleConfig(suite.ctx)
@@ -499,6 +527,18 @@ func (suite *httpClientTestSuite) TestVersion() {
 	ver, err := suite.client.GetPDVersion(suite.ctx)
 	re.NoError(err)
 	re.Equal(versioninfo.PDReleaseVersion, ver)
+}
+
+func (suite *httpClientTestSuite) TestAdmin() {
+	re := suite.Require()
+	err := suite.client.SetSnapshotRecoveringMark(suite.ctx)
+	re.NoError(err)
+	err = suite.client.ResetTS(suite.ctx, 123, true)
+	re.NoError(err)
+	err = suite.client.ResetBaseAllocID(suite.ctx, 456)
+	re.NoError(err)
+	err = suite.client.DeleteSnapshotRecoveringMark(suite.ctx)
+	re.NoError(err)
 }
 
 func (suite *httpClientTestSuite) TestWithBackoffer() {
