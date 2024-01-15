@@ -696,11 +696,6 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 				failpoint.Continue()
 			}
 		})
-		failpoint.Inject("delayLoad", func(val failpoint.Value) {
-			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
-				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
-			}
-		})
 		watchStartRevision, err = lw.load(ctx)
 		if err == nil {
 			break
@@ -864,6 +859,12 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
 	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
 	defer cancel()
+	failpoint.Inject("delayLoad", func(val failpoint.Value) {
+		if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
+			time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
+		}
+	})
+
 	startKey := lw.key
 	// If limit is 0, it means no limit.
 	// If limit is not 0, we need to add 1 to limit to get the next key.
