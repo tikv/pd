@@ -558,12 +558,10 @@ func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 }
 
 const (
-	defaultLoadDataFromEtcdTimeout   = 30 * time.Second
-	defaultLoadFromEtcdRetryInterval = 200 * time.Millisecond
-	defaultLoadFromEtcdRetryTimes    = int(defaultLoadDataFromEtcdTimeout / defaultLoadFromEtcdRetryInterval)
-	defaultLoadBatchSize             = 400
-	defaultWatchChangeRetryInterval  = 1 * time.Second
-	defaultForceLoadMinimalInterval  = 200 * time.Millisecond
+	defaultLoadDataFromEtcdTimeout = 5 * time.Minute
+	defaultEtcdRetryInterval       = time.Second
+	defaultLoadFromEtcdRetryTimes  = 3
+	defaultLoadBatchSize           = 400
 
 	// RequestProgressInterval is the interval to call RequestProgress for watcher.
 	RequestProgressInterval = 1 * time.Second
@@ -643,7 +641,7 @@ func NewLoopWatcher(
 		loadTimeout:              defaultLoadDataFromEtcdTimeout,
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
 		loadBatchSize:            defaultLoadBatchSize,
-		watchChangeRetryInterval: defaultWatchChangeRetryInterval,
+		watchChangeRetryInterval: defaultEtcdRetryInterval,
 	}
 }
 
@@ -689,7 +687,7 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		watchStartRevision int64
 		err                error
 	)
-	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
+	ticker := time.NewTicker(defaultEtcdRetryInterval)
 	defer ticker.Stop()
 	for i := 0; i < lw.loadRetryTimes; i++ {
 		ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
@@ -935,14 +933,14 @@ func (lw *LoopWatcher) ForceLoad() {
 	// Two-phase locking is also used to let most of the requests return directly without acquiring
 	// the write lock and causing the system to choke.
 	lw.forceLoadMu.RLock()
-	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+	if time.Since(lw.lastTimeForceLoad) < defaultEtcdRetryInterval {
 		lw.forceLoadMu.RUnlock()
 		return
 	}
 	lw.forceLoadMu.RUnlock()
 
 	lw.forceLoadMu.Lock()
-	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+	if time.Since(lw.lastTimeForceLoad) < defaultEtcdRetryInterval {
 		lw.forceLoadMu.Unlock()
 		return
 	}
