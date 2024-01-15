@@ -252,7 +252,7 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableDynamicSwitch = true
+	defaultEnableSchedulingFallback = true
 )
 
 // Special keys for Labels
@@ -855,12 +855,12 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // MicroServiceConfig is the configuration for micro service.
 type MicroServiceConfig struct {
-	EnableDynamicSwitch bool `toml:"enable-dynamic-switch" json:"enable-dynamic-switch,string"`
+	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
 }
 
 func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
-	if !meta.IsDefined("enable-dynamic-switch") {
-		c.EnableDynamicSwitch = defaultEnableDynamicSwitch
+	if !meta.IsDefined("enable-scheduling-fallback") {
+		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
 	}
 }
 
@@ -870,9 +870,9 @@ func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
 	return &cfg
 }
 
-// IsDynamicSwitchEnabled returns whether to enable dynamic switch.
-func (c *MicroServiceConfig) IsDynamicSwitchEnabled() bool {
-	return c.EnableDynamicSwitch
+// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to api service.
+func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
+	return c.EnableSchedulingFallback
 }
 
 // KeyspaceConfig is the configuration for keyspace management.

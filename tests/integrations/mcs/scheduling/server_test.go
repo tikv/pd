@@ -203,12 +203,12 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	})
 }
 
-func (suite *serverTestSuite) TestDynamicSwitch() {
+func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	re := suite.Require()
 	leaderServer := suite.pdLeader.GetServer()
 	conf := leaderServer.GetMicroServiceConfig().Clone()
 	// Change back to the default value.
-	conf.EnableDynamicSwitch = true
+	conf.EnableSchedulingFallback = true
 	leaderServer.SetMicroServiceConfig(*conf)
 	// API server will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
@@ -246,7 +246,7 @@ func (suite *serverTestSuite) TestDynamicSwitch() {
 	})
 }
 
-func (suite *serverTestSuite) TestDisableDynamicSwitch() {
+func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	re := suite.Require()
 
 	// API server will execute scheduling jobs since there is no scheduling server.
@@ -254,15 +254,15 @@ func (suite *serverTestSuite) TestDisableDynamicSwitch() {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
-	// After Disabling dynamic switch, the API server will stop scheduling.
+	// After Disabling scheduling service fallback, the API server will stop scheduling.
 	conf := leaderServer.GetMicroServiceConfig().Clone()
-	conf.EnableDynamicSwitch = false
+	conf.EnableSchedulingFallback = false
 	leaderServer.SetMicroServiceConfig(*conf)
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
-	// Enable dynamic switch again, the API server will restart scheduling.
-	conf.EnableDynamicSwitch = true
+	// Enable scheduling service fallback again, the API server will restart scheduling.
+	conf.EnableSchedulingFallback = true
 	leaderServer.SetMicroServiceConfig(*conf)
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
@@ -280,8 +280,8 @@ func (suite *serverTestSuite) TestDisableDynamicSwitch() {
 	testutil.Eventually(re, func() bool {
 		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
 	})
-	// Disable dynamic switch and stop scheduling server. API server won't execute scheduling jobs again.
-	conf.EnableDynamicSwitch = false
+	// Disable scheduling service fallback and stop scheduling server. API server won't execute scheduling jobs again.
+	conf.EnableSchedulingFallback = false
 	leaderServer.SetMicroServiceConfig(*conf)
 	tc.GetPrimaryServer().Close()
 	time.Sleep(time.Second)

@@ -1115,30 +1115,30 @@ func (suite *configTestSuite) TestMicroServiceConfig() {
 	suite.env.RunTestInTwoModes(suite.checkMicroServiceConfig)
 }
 
-func (suite *configTestSuite) checkMicroServiceConfig(cluster *tests.TestCluster) {
+func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	cmd := pdctlCmd.GetRootCmd()
+	cmd := ctl.GetRootCmd()
 
 	store := &metapb.Store{
 		Id:            1,
 		State:         metapb.StoreState_Up,
 		LastHeartbeat: time.Now().UnixNano(),
 	}
-	tests.MustPutStore(re, cluster, store)
+	pdTests.MustPutStore(re, cluster, store)
 	svr := leaderServer.GetServer()
-	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "all")
+	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "all")
 	re.NoError(err)
 	cfg := config.Config{}
 	re.NoError(json.Unmarshal(output, &cfg))
-	re.True(svr.GetMicroServiceConfig().EnableDynamicSwitch)
-	re.True(cfg.MicroService.EnableDynamicSwitch)
-	// config set enable-dynamic-switch <value>
-	args := []string{"-u", pdAddr, "config", "set", "enable-dynamic-switch", "false"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
+	re.True(svr.GetMicroServiceConfig().EnableSchedulingFallback)
+	re.True(cfg.MicroService.EnableSchedulingFallback)
+	// config set enable-scheduling-fallback <value>
+	args := []string{"-u", pdAddr, "config", "set", "enable-scheduling-fallback", "false"}
+	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.False(svr.GetMicroServiceConfig().EnableDynamicSwitch)
+	re.False(svr.GetMicroServiceConfig().EnableSchedulingFallback)
 }
 
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {
