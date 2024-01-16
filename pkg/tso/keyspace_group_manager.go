@@ -364,8 +364,6 @@ type KeyspaceGroupManager struct {
 	// cfg is the TSO config
 	cfg ServiceConfig
 
-	// loadKeyspaceGroupsTimeout is the timeout for loading the initial keyspace group assignment.
-	loadKeyspaceGroupsTimeout   time.Duration
 	loadKeyspaceGroupsBatchSize int64
 	loadFromEtcdMaxRetryTimes   int
 
@@ -574,9 +572,6 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		postEventsFn,
 		true, /* withPrefix */
 	)
-	if kgm.loadKeyspaceGroupsTimeout > 0 {
-		kgm.groupWatcher.SetLoadTimeout(kgm.loadKeyspaceGroupsTimeout)
-	}
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}

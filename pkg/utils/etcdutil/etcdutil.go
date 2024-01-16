@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 )
 
 const (
@@ -558,10 +560,10 @@ func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 }
 
 const (
-	defaultLoadDataFromEtcdTimeout = 5 * time.Minute
-	defaultEtcdRetryInterval       = time.Second
-	defaultLoadFromEtcdRetryTimes  = 3
-	defaultLoadBatchSize           = 400
+	defaultEtcdRetryInterval      = time.Second
+	defaultLoadFromEtcdRetryTimes = 3
+	maxLoadBatchSize              = int64(10000)
+	minLoadBatchSize              = int64(100)
 
 	// RequestProgressInterval is the interval to call RequestProgress for watcher.
 	RequestProgressInterval = 1 * time.Second
@@ -600,8 +602,6 @@ type LoopWatcher struct {
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
 	lastTimeForceLoad time.Time
 
-	// loadTimeout is used to set the timeout for loading data from etcd.
-	loadTimeout time.Duration
 	// loadRetryTimes is used to set the retry times for loading data from etcd.
 	loadRetryTimes int
 	// loadBatchSize is used to set the batch size for loading data from etcd.
@@ -638,9 +638,8 @@ func NewLoopWatcher(
 		preEventsFn:              preEventsFn,
 		isWithPrefix:             isWithPrefix,
 		lastTimeForceLoad:        time.Now(),
-		loadTimeout:              defaultLoadDataFromEtcdTimeout,
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
-		loadBatchSize:            defaultLoadBatchSize,
+		loadBatchSize:            maxLoadBatchSize,
 		watchChangeRetryInterval: defaultEtcdRetryInterval,
 	}
 }
@@ -857,14 +856,6 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
-	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
-	defer cancel()
-	failpoint.Inject("delayLoad", func(val failpoint.Value) {
-		if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
-			time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
-		}
-	})
-
 	startKey := lw.key
 	// If limit is 0, it means no limit.
 	// If limit is not 0, we need to add 1 to limit to get the next key.
@@ -902,6 +893,17 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(err))
+			if strings.Contains(err.Error(), codes.ResourceExhausted.String()) {
+				if limit == 0 {
+					limit = maxLoadBatchSize
+				} else if limit > minLoadBatchSize {
+					limit /= 2
+				} else {
+					return 0, err
+				}
+				opts = append(opts, clientv3.WithLimit(limit+1))
+				continue
+			}
 			return 0, err
 		}
 		for i, item := range resp.Kvs {
@@ -962,11 +964,6 @@ func (lw *LoopWatcher) WaitLoad() error {
 // SetLoadRetryTimes sets the retry times when loading data from etcd.
 func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 	lw.loadRetryTimes = times
-}
-
-// SetLoadTimeout sets the timeout when loading data from etcd.
-func (lw *LoopWatcher) SetLoadTimeout(timeout time.Duration) {
-	lw.loadTimeout = timeout
 }
 
 // SetLoadBatchSize sets the batch size when loading data from etcd.

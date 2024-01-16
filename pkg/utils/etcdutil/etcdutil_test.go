@@ -523,8 +523,8 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 
 func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 	re := suite.Require()
-	// use default limit to test 16384 key in etcd
-	count := 16384
+	// use default limit to test 65536 key in etcd
+	count := 65536
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 	for i := 0; i < count; i++ {
