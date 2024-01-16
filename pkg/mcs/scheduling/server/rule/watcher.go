@@ -233,7 +233,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	}
 	postEventsFn := func(events []*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()
-		rw.regionLabeler.BuildRangeList()
+		rw.regionLabeler.BuildRangeListLocked()
 		return nil
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(

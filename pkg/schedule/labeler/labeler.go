@@ -99,7 +99,7 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 		}
 	}
 	if deleted {
-		l.BuildRangeList()
+		l.BuildRangeListLocked()
 	}
 }
 
@@ -128,12 +128,12 @@ func (l *RegionLabeler) loadRules() error {
 			return err
 		}
 	}
-	l.BuildRangeList()
+	l.BuildRangeListLocked()
 	return nil
 }
 
-// BuildRangeList builds the range list.
-func (l *RegionLabeler) BuildRangeList() {
+// BuildRangeListLocked builds the range list.
+func (l *RegionLabeler) BuildRangeListLocked() {
 	builder := rangelist.NewBuilder()
 	l.minExpire = nil
 	for _, rule := range l.labelRules {
@@ -212,7 +212,7 @@ func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 	if err := l.SetLabelRuleLocked(rule); err != nil {
 		return err
 	}
-	l.BuildRangeList()
+	l.BuildRangeListLocked()
 	return nil
 }
 
@@ -235,7 +235,7 @@ func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	if err := l.DeleteLabelRuleLocked(id); err != nil {
 		return err
 	}
-	l.BuildRangeList()
+	l.BuildRangeListLocked()
 	return nil
 }
 
@@ -281,7 +281,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	for _, rule := range patch.SetRules {
 		l.labelRules[rule.ID] = rule
 	}
-	l.BuildRangeList()
+	l.BuildRangeListLocked()
 	return nil
 }
 

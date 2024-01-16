@@ -887,13 +887,19 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	}
 
 	for {
+		select {
+		case <-ctx.Done():
+			return 0, nil
+		default:
+		}
 		// Sort by key to get the next key and we don't need to worry about the performance,
 		// Because the default sort is just SortByKey and SortAscend
-		resp, err := clientv3.NewKV(lw.client).Get(ctx, startKey, opts...)
+		resp, err := EtcdKVGet(lw.client, startKey, opts...)
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(err))
-			if strings.Contains(err.Error(), codes.ResourceExhausted.String()) {
+			if strings.Contains(err.Error(), codes.ResourceExhausted.String()) ||
+				strings.Contains(err.Error(), codes.DeadlineExceeded.String()) {
 				if limit == 0 {
 					limit = maxLoadBatchSize
 				} else if limit > minLoadBatchSize {
