@@ -294,7 +294,7 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
 func (handler *grantLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
