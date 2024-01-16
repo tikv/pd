@@ -511,7 +511,13 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 }
 
 func (suite *operatorTestSuite) TestGetOperatorsAsObject() {
-	suite.env.RunFuncInTwoModes(suite.checkGetOperatorsAsObject)
+	// use a new environment to avoid being affected by other tests
+	env := tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, serverName string) {
+			conf.Replication.MaxReplicas = 1
+		})
+	env.RunTestInTwoModes(suite.checkGetOperatorsAsObject)
+	env.Cleanup()
 }
 
 func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestCluster) {
@@ -568,9 +574,16 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 		return resp[i].RegionID < resp[j].RegionID
 	}
 	sort.Slice(resp, less)
-	// Just check RegionID & Desc here. Other fields are covered by unit tests.
 	re.Equal(uint64(10), resp[0].RegionID)
 	re.Equal("admin-merge-region", resp[0].Desc)
+	re.Equal("merge: region 10 to 20", resp[0].Brief)
+	re.Equal("10m0s", resp[0].Timeout)
+	re.Equal(&metapb.RegionEpoch{
+		ConfVer: 1,
+		Version: 1,
+	}, resp[0].RegionEpoch)
+	re.Equal(operator.OpAdmin|operator.OpMerge, resp[0].Kind)
+	re.Truef(resp[0].Status == operator.CREATED || resp[0].Status == operator.STARTED, "unexpected status %s", resp[0].Status)
 	re.Equal(uint64(20), resp[1].RegionID)
 	re.Equal("admin-merge-region", resp[1].Desc)
 
