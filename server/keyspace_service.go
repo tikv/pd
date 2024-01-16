@@ -116,7 +116,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		putFn,
 		deleteFn,
 		postEventsFn,
-		clientv3.WithRange(clientv3.GetPrefixRangeEnd(startKey)),
+		true, /* withPrefix */
 	)
 	watcher.StartWatchLoop()
 	if err := watcher.WaitLoad(); err != nil {
