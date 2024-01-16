@@ -380,7 +380,8 @@ func (suite *loopWatcherTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cleans = make([]func(), 0)
 	// Start a etcd server and create a client with etcd1 as endpoint.
-	suite.config = newTestSingleConfig(suite.T())
+	suite.config = NewTestSingleConfig()
+	suite.config.Dir = suite.T().TempDir()
 	suite.startEtcd(re)
 	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls)
 	re.NoError(err)

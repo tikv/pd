@@ -107,6 +107,10 @@ func NewWatcher(
 }
 
 func (rw *Watcher) initializeRuleWatcher() error {
+	if rw.ruleManager == nil {
+		return nil
+	}
+
 	var suspectKeyRanges *core.KeyRanges
 
 	preEventsFn := func(events []*clientv3.Event) error {
@@ -211,6 +215,10 @@ func (rw *Watcher) initializeRuleWatcher() error {
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
+	if rw.regionLabeler == nil {
+		return nil
+	}
+
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	// TODO: use txn in region labeler.
 	preEventsFn := func(events []*clientv3.Event) error {
