@@ -878,6 +878,11 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		default:
 		}
 		resp, err := EtcdKVGet(lw.client, startKey, opts...)
+		failpoint.Inject("meetEtcdError", func() {
+			if limit > minLoadBatchSize {
+				err = errors.New(codes.ResourceExhausted.String())
+			}
+		})
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(err))
@@ -896,10 +901,12 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			return 0, err
 		}
 		for i, item := range resp.Kvs {
-			if resp.More && i == len(resp.Kvs)-1 {
-				// The last key is the start key of the next batch.
-				// To avoid to get the same key in the next load, we need to skip the last key.
+			if i == len(resp.Kvs)-1 && resp.More {
+				// If there are more keys, we need to load the next batch.
+				// The last key in current batch is the start key of the next batch.
 				startKey = string(item.Key)
+				// To avoid to get the same key in the next batch,
+				// we need to skip the last key for the current batch.
 				continue
 			}
 			err = lw.putFn(item)
