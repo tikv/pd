@@ -857,12 +857,9 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
 	startKey := lw.key
-	// If limit is 0, it means no limit.
-	// If limit is not 0, we need to add 1 to limit to get the next key.
 	limit := lw.loadBatchSize
-	if limit != 0 {
-		limit++
-	}
+	opts := lw.buildLoadingOpts(limit)
+
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
 		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
 			zap.String("key", lw.key), zap.Error(err))
@@ -874,26 +871,12 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 		}
 	}()
 
-	// In most cases, 'Get(foo, WithPrefix())' is equivalent to 'Get(foo, WithRange(GetPrefixRangeEnd(foo))'.
-	// However, when the startKey changes, the two are no longer equivalent.
-	// For example, the end key for 'WithRange(GetPrefixRangeEnd(foo))' is consistently 'fop'.
-	// But when using 'Get(foo1, WithPrefix())', the end key becomes 'foo2', not 'fop'.
-	// So, we use 'WithRange()' to avoid this problem.
-	opts := []clientv3.OpOption{
-		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
-		clientv3.WithLimit(limit)}
-	if lw.isWithPrefix {
-		opts = append(opts, clientv3.WithRange(clientv3.GetPrefixRangeEnd(startKey)))
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
 			return 0, nil
 		default:
 		}
-		// Sort by key to get the next key and we don't need to worry about the performance,
-		// Because the default sort is just SortByKey and SortAscend
 		resp, err := EtcdKVGet(lw.client, startKey, opts...)
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
@@ -907,7 +890,7 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				} else {
 					return 0, err
 				}
-				opts = append(opts, clientv3.WithLimit(limit+1))
+				opts = lw.buildLoadingOpts(limit)
 				continue
 			}
 			return 0, err
@@ -933,6 +916,27 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 			return resp.Header.Revision + 1, err
 		}
 	}
+}
+
+func (lw *LoopWatcher) buildLoadingOpts(limit int64) []clientv3.OpOption {
+	// Sort by key to get the next key and we don't need to worry about the performance,
+	// Because the default sort is just SortByKey and SortAscend
+	opts := []clientv3.OpOption{
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend)}
+	// In most cases, 'Get(foo, WithPrefix())' is equivalent to 'Get(foo, WithRange(GetPrefixRangeEnd(foo))'.
+	// However, when the startKey changes, the two are no longer equivalent.
+	// For example, the end key for 'WithRange(GetPrefixRangeEnd(foo))' is consistently 'fop'.
+	// But when using 'Get(foo1, WithPrefix())', the end key becomes 'foo2', not 'fop'.
+	// So, we use 'WithRange()' to avoid this problem.
+	if lw.isWithPrefix {
+		opts = append(opts, clientv3.WithRange(clientv3.GetPrefixRangeEnd(lw.key)))
+	}
+	// If limit is 0, it means no limit.
+	// If limit is not 0, we need to add 1 to limit to get the next key.
+	if limit == 0 {
+		return opts
+	}
+	return append(opts, clientv3.WithLimit(limit+1))
 }
 
 // ForceLoad forces to load the key.

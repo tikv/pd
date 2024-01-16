@@ -188,7 +188,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	}
 	postEventsFn := func(events []*clientv3.Event) error {
 		defer rw.ruleManager.Unlock()
-		if err := rw.ruleManager.TryCommitPatch(rw.patch); err != nil {
+		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
 			log.Error("failed to commit patch", zap.Error(err))
 			return err
 		}
