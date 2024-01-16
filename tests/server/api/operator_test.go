@@ -511,7 +511,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 }
 
 func (suite *operatorTestSuite) TestGetOperatorsAsObject() {
-	suite.env.RunTestInPDMode(suite.checkGetOperatorsAsObject)
+	suite.env.RunFuncInTwoModes(suite.checkGetOperatorsAsObject)
 }
 
 func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestCluster) {
@@ -542,13 +542,6 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
-	tests.MustPutRegionInfo(re, cluster, r1)
-	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
-	tests.MustPutRegionInfo(re, cluster, r2)
-	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
-	tests.MustPutRegionInfo(re, cluster, r3)
-
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	objURL := fmt.Sprintf("%s/operators?object=1", urlPrefix)
 	resp := make([]operator.OpObject, 0)
@@ -559,6 +552,13 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 	re.Empty(resp)
 
 	// Merge operator.
+	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	tests.MustPutRegionInfo(re, cluster, r1)
+	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	tests.MustPutRegionInfo(re, cluster, r2)
+	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	tests.MustPutRegionInfo(re, cluster, r3)
+
 	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
 	re.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, objURL, &resp)
@@ -568,6 +568,7 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 		return resp[i].RegionID < resp[j].RegionID
 	}
 	sort.Slice(resp, less)
+	// Just check RegionID & Desc here. Other fields are covered by unit tests.
 	re.Equal(uint64(10), resp[0].RegionID)
 	re.Equal("admin-merge-region", resp[0].Desc)
 	re.Equal(uint64(20), resp[1].RegionID)
