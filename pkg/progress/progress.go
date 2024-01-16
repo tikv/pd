@@ -24,8 +24,12 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-// speedStatisticalWindow is the speed calculation window
-const speedStatisticalWindow = 10 * time.Minute
+const (
+	// minSpeedStatisticalWindow is the minimum speed calculation window
+	minSpeedStatisticalWindow = 10 * time.Minute
+	// maxSpeedStatisticalWindow is the maximum speed calculation window
+	maxSpeedStatisticalWindow = 2 * time.Hour
+)
 
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
@@ -62,37 +66,57 @@ func (m *Manager) Reset() {
 	m.progesses = make(map[string]*progressIndicator)
 }
 
+type Option func(*progressIndicator)
+
+func WindowDurationOption(dur time.Duration) func(*progressIndicator) {
+	return func(pi *progressIndicator) {
+		if dur < minSpeedStatisticalWindow {
+			dur = minSpeedStatisticalWindow
+		} else if dur > maxSpeedStatisticalWindow {
+			dur = maxSpeedStatisticalWindow
+		}
+		pi.windowLengthLimit = int(dur / pi.updateInterval)
+	}
+}
+
 // AddProgress adds a progress into manager if it doesn't exist.
-func (m *Manager) AddProgress(progress string, current, total float64, updateInterval time.Duration) (exist bool) {
+func (m *Manager) AddProgress(progress string, current, total float64, updateInterval time.Duration, opts ...Option) (exist bool) {
 	m.Lock()
 	defer m.Unlock()
 
 	history := list.New()
 	history.PushBack(current)
 	if _, exist = m.progesses[progress]; !exist {
-		m.progesses[progress] = &progressIndicator{
+		pi := &progressIndicator{
 			total:             total,
 			remaining:         total,
 			history:           history,
-			windowLengthLimit: int(speedStatisticalWindow / updateInterval),
+			windowLengthLimit: int(minSpeedStatisticalWindow / updateInterval),
 			updateInterval:    updateInterval,
 		}
+		for _, op := range opts {
+			op(pi)
+		}
+		m.progesses[progress] = pi
 	}
 	return
 }
 
 // UpdateProgress updates the progress if it exists.
-func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool) {
+func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool, opts ...Option) {
 	m.Lock()
 	defer m.Unlock()
 
 	if p, exist := m.progesses[progress]; exist {
+		for _, op := range opts {
+			op(p)
+		}
 		p.remaining = remaining
 		if p.total < remaining {
 			p.total = remaining
 		}
 
-		if p.history.Len() > p.windowLengthLimit {
+		for p.history.Len() > p.windowLengthLimit {
 			p.history.Remove(p.history.Front())
 		}
 		p.history.PushBack(current)

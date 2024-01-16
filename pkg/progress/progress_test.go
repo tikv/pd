@@ -44,7 +44,7 @@ func TestProgress(t *testing.T) {
 	// 30/(70/1s+) > 30/70
 	re.Greater(ls, 30.0/70.0)
 	// 70/1s+ > 70
-	re.Less(cs, 70.0)
+	re.Less(math.Abs(cs-7), 1e-6)
 	// there is no scheduling
 	for i := 0; i < 100; i++ {
 		m.UpdateProgress(n, 30, 30, false)
@@ -94,4 +94,89 @@ func TestAbnormal(t *testing.T) {
 	re.Equal(0.0, p)
 	re.Equal(0.0, ls)
 	re.Equal(0.0, cs)
+}
+
+func TestProgressWithDynamicWindow(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	n := "test"
+	m := NewManager()
+	re.False(m.AddProgress(n, 100, 100, 10*time.Second))
+	p, ls, cs, err := m.Status(n)
+	re.NoError(err)
+	re.Equal(0.0, p)
+	re.Equal(math.MaxFloat64, ls)
+	re.Equal(0.0, cs)
+	time.Sleep(time.Second)
+	re.True(m.AddProgress(n, 100, 100, 10*time.Second))
+
+	m.UpdateProgress(n, 30, 30, false)
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.7, p)
+	// 30/(70/1s+) > 30/70
+	re.Greater(ls, 30.0/70.0)
+	// 70/1s+ > 70
+	re.Less(math.Abs(cs-7), 1e-6)
+	// there is no scheduling
+	for i := 0; i < 100; i++ {
+		m.UpdateProgress(n, 30, 30, false)
+	}
+	re.Equal(61, m.progesses[n].history.Len())
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.7, p)
+	re.Equal(math.MaxFloat64, ls)
+	re.Equal(0.0, cs)
+	m.UpdateProgress(n, 29, 29, false, WindowDurationOption(time.Minute*20))
+	re.Equal(62, m.progesses[n].history.Len())
+	for i := 0; i < 60; i++ {
+		m.UpdateProgress(n, 28, 28, false)
+	}
+	re.Equal(121, m.progesses[n].history.Len())
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.72, p)
+	re.Equal(float64(28/(2./120)*10.), ls)
+	re.Equal(float64(2./120/10.), cs)
+	m.UpdateProgress(n, 28, 28, false, WindowDurationOption(time.Minute*10))
+	re.Equal(61, m.progesses[n].history.Len())
+	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*10))
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.99, p)
+	re.Equal(float64(1/(27./60)*10.), ls)
+	re.Equal(float64(27./60/10.), cs)
+
+	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*5))
+	re.Equal(61, m.progesses[n].history.Len())
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.99, p)
+	re.Equal(float64(1/(27./60)*10.), ls)
+	re.Equal(float64(27./60/10.), cs)
+
+	re.Equal(61, m.progesses[n].history.Len())
+	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*180))
+	for i := 0; i < 2000; i++ {
+		m.UpdateProgress(n, 1, 1, false)
+	}
+	re.Equal(721, m.progesses[n].history.Len())
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.99, p)
+	re.Equal(math.MaxFloat64, ls)
+	re.Equal(0.0, cs)
+
+	ps := m.GetProgresses(func(p string) bool {
+		return strings.Contains(p, n)
+	})
+	re.Len(ps, 1)
+	re.Equal(n, ps[0])
+	ps = m.GetProgresses(func(p string) bool {
+		return strings.Contains(p, "a")
+	})
+	re.Empty(ps)
+	re.True(m.RemoveProgress(n))
+	re.False(m.RemoveProgress(n))
 }

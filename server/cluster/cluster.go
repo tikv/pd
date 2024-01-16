@@ -139,12 +139,13 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running          bool
-	isAPIServiceMode bool
-	meta             *metapb.Cluster
-	storage          storage.Storage
-	minResolvedTS    uint64
-	externalTS       uint64
+	running                   bool
+	isAPIServiceMode          bool
+	meta                      *metapb.Cluster
+	storage                   storage.Storage
+	minResolvedTS             uint64
+	externalTS                uint64
+	lastPatrolRegionsDuration time.Duration
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
@@ -1409,7 +1410,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	if err == nil {
 		regionSize := float64(c.core.GetStoreRegionSize(storeID))
 		c.resetProgress(storeID, store.GetAddress())
-		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval)
+		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.coordinator.GetPatrolRegionsDuration()))
 		// record the current store limit in memory
 		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
 			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
@@ -1935,21 +1936,23 @@ func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.Stor
 
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string, current, remaining float64, isInc bool) {
 	storeLabel := strconv.FormatUint(storeID, 10)
-	var progress string
+	var progressName string
+	var opts []progress.Option
 	switch action {
 	case removingAction:
-		progress = encodeRemovingProgressKey(storeID)
+		progressName = encodeRemovingProgressKey(storeID)
+		opts = []progress.Option{progress.WindowDurationOption(c.coordinator.GetPatrolRegionsDuration())}
 	case preparingAction:
-		progress = encodePreparingProgressKey(storeID)
+		progressName = encodePreparingProgressKey(storeID)
 	}
 
-	if exist := c.progressManager.AddProgress(progress, current, remaining, nodeStateCheckJobInterval); !exist {
+	if exist := c.progressManager.AddProgress(progressName, current, remaining, nodeStateCheckJobInterval, opts...); !exist {
 		return
 	}
-	c.progressManager.UpdateProgress(progress, current, remaining, isInc)
-	process, ls, cs, err := c.progressManager.Status(progress)
+	c.progressManager.UpdateProgress(progressName, current, remaining, isInc, opts...)
+	process, ls, cs, err := c.progressManager.Status(progressName)
 	if err != nil {
-		log.Error("get progress status failed", zap.String("progress", progress), zap.Float64("remaining", remaining), errs.ZapError(err))
+		log.Error("get progress status failed", zap.String("progress", progressName), zap.Float64("remaining", remaining), errs.ZapError(err))
 		return
 	}
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)

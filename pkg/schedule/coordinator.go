@@ -73,7 +73,8 @@ type Coordinator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	schedulersInitialized bool
+	schedulersInitialized      bool
+	patrolCheckRegionsDuration time.Duration
 
 	cluster           sche.ClusterInformer
 	prepareChecker    *prepareChecker
@@ -108,6 +109,18 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 		pluginInterface:       NewPluginInterface(),
 		diagnosticManager:     diagnostic.NewManager(schedulers, cluster.GetSchedulerConfig()),
 	}
+}
+
+func (c *Coordinator) GetPatrolRegionsDuration() time.Duration {
+	c.RLock()
+	defer c.RUnlock()
+	return c.patrolCheckRegionsDuration
+}
+
+func (c *Coordinator) setPatrolRegionsDuration(dur time.Duration) {
+	c.RLock()
+	defer c.RUnlock()
+	c.patrolCheckRegionsDuration = dur
 }
 
 // markSchedulersInitialized marks the scheduler initialization is finished.
@@ -157,6 +170,7 @@ func (c *Coordinator) PatrolRegions() {
 			ticker.Reset(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			patrolCheckRegionsGauge.Set(0)
+			c.setPatrolRegionsDuration(0)
 			log.Info("patrol regions has been stopped")
 			return
 		}
@@ -178,7 +192,9 @@ func (c *Coordinator) PatrolRegions() {
 		// Updates the label level isolation statistics.
 		c.cluster.UpdateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
-			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
+			dur := time.Since(start)
+			patrolCheckRegionsGauge.Set(dur.Seconds())
+			c.setPatrolRegionsDuration(dur)
 			start = time.Now()
 		}
 		failpoint.Inject("break-patrol", func() {
