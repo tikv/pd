@@ -110,7 +110,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	var suspectKeyRanges *core.KeyRanges
 
 	preEventsFn := func(events []*clientv3.Event) error {
-		// It will be locked until the postFn is finished.
+		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
 		suspectKeyRanges = &core.KeyRanges{}
@@ -212,26 +212,37 @@ func (rw *Watcher) initializeRuleWatcher() error {
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
+	// TODO: use txn in region labeler.
+	preEventsFn := func(events []*clientv3.Event) error {
+		// It will be locked until the postEventsFn is finished.
+		rw.regionLabeler.Lock()
+		return nil
+	}
 	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		log.Debug("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			return err
 		}
-		return rw.regionLabeler.SetLabelRule(rule)
+		return rw.regionLabeler.SetLabelRuleLocked(rule)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Info("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRule(strings.TrimPrefix(key, prefixToTrim))
+		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, prefixToTrim))
+	}
+	postEventsFn := func(events []*clientv3.Event) error {
+		defer rw.regionLabeler.Unlock()
+		rw.regionLabeler.BuildRangeList()
+		return nil
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
 		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
-		func([]*clientv3.Event) error { return nil },
+		preEventsFn,
 		putFn, deleteFn,
-		func([]*clientv3.Event) error { return nil },
+		postEventsFn,
 		true, /* withPrefix */
 	)
 	rw.labelWatcher.StartWatchLoop()
