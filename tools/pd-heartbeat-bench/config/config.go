@@ -59,7 +59,8 @@ func NewConfig() *Config {
 	fs := cfg.flagSet
 	fs.ParseErrorsWhitelist.UnknownFlags = true
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
-	fs.StringVar(&cfg.PDAddr, "pd", "127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.PDAddr, "pd-endpoints", "127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.StringVar(&cfg.StatusAddr, "status-addr", "127.0.0.1:20180", "status address")
 
 	return cfg
