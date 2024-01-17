@@ -111,6 +111,7 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	}
 }
 
+// GetPatrolRegionsDuration returns the duration of the last patrol region round.
 func (c *Coordinator) GetPatrolRegionsDuration() time.Duration {
 	c.RLock()
 	defer c.RUnlock()

@@ -66,8 +66,10 @@ func (m *Manager) Reset() {
 	m.progesses = make(map[string]*progressIndicator)
 }
 
+// Option is used to do some action for progressIndicator.
 type Option func(*progressIndicator)
 
+// WindowDurationOption changes the time window size.
 func WindowDurationOption(dur time.Duration) func(*progressIndicator) {
 	return func(pi *progressIndicator) {
 		if dur < minSpeedStatisticalWindow {

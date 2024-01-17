@@ -139,13 +139,12 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running                   bool
-	isAPIServiceMode          bool
-	meta                      *metapb.Cluster
-	storage                   storage.Storage
-	minResolvedTS             uint64
-	externalTS                uint64
-	lastPatrolRegionsDuration time.Duration
+	running          bool
+	isAPIServiceMode bool
+	meta             *metapb.Cluster
+	storage          storage.Storage
+	minResolvedTS    uint64
+	externalTS       uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
