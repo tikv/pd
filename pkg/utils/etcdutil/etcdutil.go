@@ -460,18 +460,8 @@ func syncUrls(client *clientv3.Client) []string {
 	return eps
 }
 
-// CreateClients creates etcd v3 client and http client.
-func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
-	client, err := CreateEtcdClient(tlsConfig, acUrls)
-	if err != nil {
-		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
-	}
-	httpClient := createHTTPClient(tlsConfig)
-	return client, httpClient, nil
-}
-
-// createHTTPClient creates a http client with the given tls config.
-func createHTTPClient(tlsConfig *tls.Config) *http.Client {
+// CreateHTTPClient creates a http client with the given tls config.
+func CreateHTTPClient(tlsConfig *tls.Config) *http.Client {
 	// FIXME: Currently, there is no timeout set for certain requests, such as GetRegions,
 	// which may take a significant amount of time. However, it might be necessary to
 	// define an appropriate timeout in the future.
