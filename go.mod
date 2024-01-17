@@ -2,6 +2,8 @@ module github.com/tikv/pd
 
 go 1.21
 
+replace go.etcd.io/etcd => github.com/JmPotato/etcd v0.5.0-alpha.5.0.20240117033806-294da54b1e98
+
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1
