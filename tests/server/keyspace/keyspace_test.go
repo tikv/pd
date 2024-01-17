@@ -55,6 +55,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.cancel = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
 		conf.Keyspace.PreAlloc = preAllocKeyspace
+		conf.Keyspace.SplitRawKVRegion = true
 	})
 	suite.cluster = cluster
 	re.NoError(err)
