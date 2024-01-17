@@ -111,7 +111,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	w.storeWatcher.StartWatchLoop()
 	return w.storeWatcher.WaitLoad()

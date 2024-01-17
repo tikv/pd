@@ -558,12 +558,10 @@ func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 }
 
 const (
-	defaultLoadDataFromEtcdTimeout   = 30 * time.Second
-	defaultLoadFromEtcdRetryInterval = 200 * time.Millisecond
-	defaultLoadFromEtcdRetryTimes    = int(defaultLoadDataFromEtcdTimeout / defaultLoadFromEtcdRetryInterval)
-	defaultLoadBatchSize             = 400
-	defaultWatchChangeRetryInterval  = 1 * time.Second
-	defaultForceLoadMinimalInterval  = 200 * time.Millisecond
+	defaultLoadDataFromEtcdTimeout = 5 * time.Minute
+	defaultEtcdRetryInterval       = time.Second
+	defaultLoadFromEtcdRetryTimes  = 3
+	defaultLoadBatchSize           = 400
 
 	// RequestProgressInterval is the interval to call RequestProgress for watcher.
 	RequestProgressInterval = 1 * time.Second
@@ -580,8 +578,8 @@ type LoopWatcher struct {
 
 	// key is the etcd key to watch.
 	key string
-	// opts is used to set etcd options.
-	opts []clientv3.OpOption
+	// isWithPrefix indicates whether the watcher is with prefix.
+	isWithPrefix bool
 
 	// forceLoadCh is used to force loading data from etcd.
 	forceLoadCh chan struct{}
@@ -623,7 +621,7 @@ func NewLoopWatcher(
 	preEventsFn func([]*clientv3.Event) error,
 	putFn, deleteFn func(*mvccpb.KeyValue) error,
 	postEventsFn func([]*clientv3.Event) error,
-	opts ...clientv3.OpOption,
+	isWithPrefix bool,
 ) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:                      ctx,
@@ -638,12 +636,12 @@ func NewLoopWatcher(
 		deleteFn:                 deleteFn,
 		postEventsFn:             postEventsFn,
 		preEventsFn:              preEventsFn,
-		opts:                     opts,
+		isWithPrefix:             isWithPrefix,
 		lastTimeForceLoad:        time.Now(),
 		loadTimeout:              defaultLoadDataFromEtcdTimeout,
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
 		loadBatchSize:            defaultLoadBatchSize,
-		watchChangeRetryInterval: defaultWatchChangeRetryInterval,
+		watchChangeRetryInterval: defaultEtcdRetryInterval,
 	}
 }
 
@@ -689,21 +687,13 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		watchStartRevision int64
 		err                error
 	)
-	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
+	ticker := time.NewTicker(defaultEtcdRetryInterval)
 	defer ticker.Stop()
-	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
-	defer cancel()
-
 	for i := 0; i < lw.loadRetryTimes; i++ {
 		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
 				failpoint.Continue()
-			}
-		})
-		failpoint.Inject("delayLoad", func(val failpoint.Value) {
-			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
-				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
 			}
 		})
 		watchStartRevision, err = lw.load(ctx)
@@ -754,7 +744,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		// make sure to wrap context with "WithRequireLeader".
 		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
 		watcherCancel = cancel
-		opts := append(lw.opts, clientv3.WithRev(revision), clientv3.WithProgressNotify())
+		opts := []clientv3.OpOption{clientv3.WithRev(revision), clientv3.WithProgressNotify()}
+		if lw.isWithPrefix {
+			opts = append(opts, clientv3.WithPrefix())
+		}
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
 		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
@@ -864,8 +857,14 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
-	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
 	defer cancel()
+	failpoint.Inject("delayLoad", func(val failpoint.Value) {
+		if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
+			time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
+		}
+	})
+
 	startKey := lw.key
 	// If limit is 0, it means no limit.
 	// If limit is not 0, we need to add 1 to limit to get the next key.
@@ -883,10 +882,22 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				zap.String("key", lw.key), zap.Error(err))
 		}
 	}()
+
+	// In most cases, 'Get(foo, WithPrefix())' is equivalent to 'Get(foo, WithRange(GetPrefixRangeEnd(foo))'.
+	// However, when the startKey changes, the two are no longer equivalent.
+	// For example, the end key for 'WithRange(GetPrefixRangeEnd(foo))' is consistently 'fop'.
+	// But when using 'Get(foo1, WithPrefix())', the end key becomes 'foo2', not 'fop'.
+	// So, we use 'WithRange()' to avoid this problem.
+	opts := []clientv3.OpOption{
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend),
+		clientv3.WithLimit(limit)}
+	if lw.isWithPrefix {
+		opts = append(opts, clientv3.WithRange(clientv3.GetPrefixRangeEnd(startKey)))
+	}
+
 	for {
 		// Sort by key to get the next key and we don't need to worry about the performance,
 		// Because the default sort is just SortByKey and SortAscend
-		opts := append(lw.opts, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend), clientv3.WithLimit(limit))
 		resp, err := clientv3.NewKV(lw.client).Get(ctx, startKey, opts...)
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
@@ -923,14 +934,14 @@ func (lw *LoopWatcher) ForceLoad() {
 	// Two-phase locking is also used to let most of the requests return directly without acquiring
 	// the write lock and causing the system to choke.
 	lw.forceLoadMu.RLock()
-	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+	if time.Since(lw.lastTimeForceLoad) < defaultEtcdRetryInterval {
 		lw.forceLoadMu.RUnlock()
 		return
 	}
 	lw.forceLoadMu.RUnlock()
 
 	lw.forceLoadMu.Lock()
-	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+	if time.Since(lw.lastTimeForceLoad) < defaultEtcdRetryInterval {
 		lw.forceLoadMu.Unlock()
 		return
 	}

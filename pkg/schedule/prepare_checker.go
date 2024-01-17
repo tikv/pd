@@ -60,6 +60,10 @@ func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...ti
 			continue
 		}
 		storeID := store.GetID()
+		// It is used to avoid sudden scheduling when scheduling service is just started.
+		if len(collectWaitTime) > 0 && (float64(store.GetStoreStats().GetRegionCount())*collectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID))) {
+			return false
+		}
 		// For each store, the number of active regions should be more than total region of the store * collectFactor
 		if float64(c.GetStoreRegionCount(storeID))*collectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
 			return false

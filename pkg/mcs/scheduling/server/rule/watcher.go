@@ -204,7 +204,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
@@ -232,7 +232,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()
