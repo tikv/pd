@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"strconv"
+	"time"
 
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
@@ -122,12 +124,14 @@ type GRPCCraeteFn func() GRPCCase
 
 // GRPCCaseFnMap is the map for all gRPC case creation function.
 var GRPCCaseFnMap = map[string]GRPCCraeteFn{
-	"GetRegion":               newGetRegion(),
-	"GetRegionEnableFollower": newGetRegionEnableFollower(),
-	"GetStore":                newGetStore(),
-	"GetStores":               newGetStores(),
-	"ScanRegions":             newScanRegions(),
-	"Tso":                     newTso(),
+	"GetRegion":                newGetRegion(),
+	"GetRegionEnableFollower":  newGetRegionEnableFollower(),
+	"GetStore":                 newGetStore(),
+	"GetStores":                newGetStores(),
+	"ScanRegions":              newScanRegions(),
+	"Tso":                      newTso(),
+	"UpdateGCSafePoint":        newUpdateGCSafePoint(),
+	"UpdateServiceGCSafePoint": newUpdateServiceGCSafePoint(),
 }
 
 // GRPCCaseMap is the map for all gRPC case creation function.
@@ -207,6 +211,55 @@ func (c *regionsStats) Do(ctx context.Context, cli pdHttp.Client) error {
 	if Debug {
 		log.Printf("Do %s: regionStats: %v err: %v", c.name, regionStats, err)
 	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type updateGCSafePoint struct {
+	*baseCase
+}
+
+func newUpdateGCSafePoint() func() GRPCCase {
+	return func() GRPCCase {
+		return &updateGCSafePoint{
+			baseCase: &baseCase{
+				name: "UpdateGCSafePoint",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *updateGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
+	s := time.Now().Unix()
+	_, err := cli.UpdateGCSafePoint(ctx, uint64(s))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type updateServiceGCSafePoint struct {
+	*baseCase
+}
+
+func newUpdateServiceGCSafePoint() func() GRPCCase {
+	return func() GRPCCase {
+		return &updateServiceGCSafePoint{
+			baseCase: &baseCase{
+				name: "UpdateServiceGCSafePoint",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *updateServiceGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
+	s := time.Now().Unix()
+	id := rand.Int63n(100) + 1
+	_, err := cli.UpdateServiceGCSafePoint(ctx, strconv.FormatInt(id, 10), id, uint64(s))
 	if err != nil {
 		return err
 	}
