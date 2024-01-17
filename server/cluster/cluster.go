@@ -1409,7 +1409,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	if err == nil {
 		regionSize := float64(c.core.GetStoreRegionSize(storeID))
 		c.resetProgress(storeID, store.GetAddress())
-		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.coordinator.GetPatrolRegionsDuration()))
+		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
 		// record the current store limit in memory
 		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
 			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
