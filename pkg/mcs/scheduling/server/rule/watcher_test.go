@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -31,64 +32,82 @@ import (
 	"go.etcd.io/etcd/embed"
 )
 
+const (
+	clusterID = uint64(20240117)
+	rulesNum  = 16384
+)
+
 func TestLoadLargeRules(t *testing.T) {
 	re := require.New(t)
-	ctx, client, clusterID, storage, labelerManager, clean := prepare(t)
+	ctx, client, clean := prepare(t)
 	defer clean()
-
-	watcher, err := NewWatcher(ctx, client, clusterID, storage, nil, nil, labelerManager)
-	re.NoError(err)
-	re.NotNil(watcher)
+	runWatcherLoadLabelRule(ctx, re, client)
 }
 
 func BenchmarkLoadLargeRules(b *testing.B) {
 	re := require.New(b)
-	ctx, client, clusterID, storage, labelerManager, clean := prepare(b)
+	ctx, client, clean := prepare(b)
 	defer clean()
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
 	for n := 0; n < b.N; n++ {
-		watcher, err := NewWatcher(ctx, client, clusterID, storage, nil, nil, labelerManager)
-		re.NoError(err)
-		re.NotNil(watcher)
+		runWatcherLoadLabelRule(ctx, re, client)
 	}
 }
 
-func prepare(t require.TestingT) (context.Context, *clientv3.Client, uint64, *endpoint.StorageEndpoint,
-	*labeler.RegionLabeler, func()) {
+func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client *clientv3.Client) {
+	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, time.Hour)
+	re.NoError(err)
+	ctx, cancel := context.WithCancel(ctx)
+	rw := &Watcher{
+		ctx:                   ctx,
+		cancel:                cancel,
+		rulesPathPrefix:       endpoint.RulesPathPrefix(clusterID),
+		ruleCommonPathPrefix:  endpoint.RuleCommonPathPrefix(clusterID),
+		ruleGroupPathPrefix:   endpoint.RuleGroupPathPrefix(clusterID),
+		regionLabelPathPrefix: endpoint.RegionLabelPathPrefix(clusterID),
+		etcdClient:            client,
+		ruleStorage:           storage,
+		regionLabeler:         labelerManager,
+	}
+	err = rw.initializeRegionLabelWatcher()
+	re.NoError(err)
+	re.Len(labelerManager.GetAllLabelRules(), rulesNum)
+	cancel()
+}
+
+func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestSingleConfig()
 	cfg.Dir = os.TempDir() + "/test_etcd"
+	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
 	client, err := etcdutil.CreateEtcdClient(nil, cfg.LCUrls)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 
-	clusterID := uint64(20240117)
-	key := endpoint.RegionLabelPathPrefix(clusterID)
-	for i := 1; i < 65536; i++ {
+	for i := 1; i < rulesNum+1; i++ {
 		rule := &labeler.LabelRule{
-			ID:       "test",
+			ID:       "test_" + strconv.Itoa(i),
 			Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
 			RuleType: labeler.KeyRange,
 			Data:     keyspace.MakeKeyRanges(uint32(i)),
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)
+		key := endpoint.RegionLabelPathPrefix(clusterID) + "/" + rule.ID
 		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
 		re.NoError(err)
 	}
 
-	storage := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, time.Hour)
-	re.NoError(err)
-	return ctx, client, clusterID, storage, labelerManager, func() {
+	return ctx, client, func() {
 		cancel()
 		client.Close()
 		etcd.Close()
-		os.Remove(cfg.Dir)
+		os.RemoveAll(cfg.Dir)
 	}
 }

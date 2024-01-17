@@ -447,7 +447,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
 	re.NoError(err)
-	re.Equal(int(maxLoadBatchSize)*2, len(cache))
+	re.Len(cache, int(maxLoadBatchSize)*2)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError"))
 }
 
