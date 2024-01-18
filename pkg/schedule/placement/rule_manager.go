@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
@@ -816,8 +817,12 @@ func (m *RuleManager) IsInitialized() bool {
 
 func (m *RuleManager) runBatchOpInTxn(batch []func(kv.Txn) error) error {
 	// execute batch in transaction with limited operations per transaction
-	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
-		end := start + etcdutil.MaxEtcdTxnOps
+	limit := etcdutil.MaxEtcdTxnOps
+	failpoint.Inject("runBatchOpInTxnLimit", func(val failpoint.Value) {
+		limit = val.(int)
+	})
+	for start := 0; start < len(batch); start += limit {
+		end := start + limit
 		if end > len(batch) {
 			end = len(batch)
 		}
@@ -850,6 +855,13 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	defer m.Unlock()
 	m.keyType = h
 	return m
+}
+
+// CleanLocked cleans up all rules.
+func (m *RuleManager) CleanLocked() {
+	m.ruleConfig = newRuleConfig()
+	m.cache = NewRegionRuleFitCacheManager()
+	m.ruleList = ruleList{}
 }
 
 func getStoresByRegion(storeSet StoreSet, region *core.RegionInfo) []*core.StoreInfo {

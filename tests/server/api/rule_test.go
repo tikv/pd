@@ -25,6 +25,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -935,6 +936,12 @@ func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
 
 func (suite *ruleTestSuite) TestLeaderAndVoter() {
 	suite.env.RunTestInTwoModes(suite.checkLeaderAndVoter)
+}
+
+func (suite *ruleTestSuite) TestLeaderAndVoterSmallTxn() {
+	failpoint.Enable("github.com/pingcap/pd/pkg/schedule/placement/runBatchOpInTxnLimit", "return(1)")
+	suite.env.RunTestInTwoModes(suite.checkLeaderAndVoter)
+	failpoint.Disable("github.com/pingcap/pd/pkg/schedule/placement/runBatchOpInTxnLimit")
 }
 
 func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
