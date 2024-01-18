@@ -157,7 +157,7 @@ func (s *Server) Run() error {
 		timeJumpBackCounter.Inc()
 	})
 
-	if err := utils.InitClient(s); err != nil {
+	if err := utils.InitClient(s, fmt.Sprintf("%s-%s", s.Name(), serviceName)); err != nil {
 		return err
 	}
 	return s.startServer()

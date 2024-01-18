@@ -113,6 +113,8 @@ const (
 
 	lostPDLeaderMaxTimeoutSecs   = 10
 	lostPDLeaderReElectionFactor = 10
+
+	TrendHealthyRatio = 0.58
 )
 
 // EtcdStartTimeout the timeout of the startup etcd.
@@ -234,6 +236,8 @@ type Server struct {
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+
+	etcdHealthyChecker []*etcdutil.HealthyChecker
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -381,17 +385,20 @@ func (s *Server) startClient() error {
 	if err != nil {
 		return err
 	}
+	var checker *etcdutil.HealthyChecker
 	/* Starting two different etcd clients here is to avoid the throttling. */
 	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
-	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
+	s.client, checker, err = etcdutil.CreateEtcdClient(fmt.Sprintf("%s-%s", s.Name(), "client"), tlsConfig, etcdCfg.ACUrls)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
+	s.etcdHealthyChecker = append(s.etcdHealthyChecker, checker)
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
-	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
+	s.electionClient, checker, err = etcdutil.CreateEtcdClient(fmt.Sprintf("%s-%s", s.Name(), "ElectionClient"), tlsConfig, etcdCfg.ACUrls)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
+	s.etcdHealthyChecker = append(s.etcdHealthyChecker, checker)
 	s.httpClient = etcdutil.CreateHTTPClient(tlsConfig)
 	return nil
 }
@@ -1679,6 +1686,23 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
+	// check current server trend
+	for _, checker := range s.etcdHealthyChecker {
+		trend := checker.GetSpecificTrend(s.cfg.ClientUrls)
+		if trend == nil {
+			continue
+		}
+		avg, _ := trend.AvgRate()
+		if avg >= TrendHealthyRatio {
+			if err := s.member.ResignEtcdLeader(s.ctx, s.member.Name(), ""); err != nil {
+				log.Error("resign etcd leader failed", errs.ZapError(err))
+				return
+			}
+			log.Warn("pd leader is unhealthy", zap.Float64("healthy-trend", avg))
+			return
+		}
+
+	}
 	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
@@ -2137,4 +2161,10 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
+}
+
+// GetHealthCheckers returns the healthy checkers.
+// Notes: it is only used for test.
+func (s *Server) GetHealthCheckers() []*etcdutil.HealthyChecker {
+	return s.etcdHealthyChecker
 }

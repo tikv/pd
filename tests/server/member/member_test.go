@@ -336,14 +336,26 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	cluster.WaitLeader()
 	leader := cluster.GetLeader()
 	re.NotEmpty(cluster.GetLeader())
-
+	// wait for etcd checker to add all clients.
+	testutil.Eventually(re, func() bool {
+		for _, checker := range cluster.GetServer(leader).GetServer().GetHealthCheckers() {
+			if len(checker.GetAllClients()) != 5 {
+				return false
+			}
+		}
+		return true
+	})
 	for i := 0; i < 3; i++ {
 		cluster.GetLeaderServer().ResetPDLeader()
 		cluster.WaitLeader()
 	}
-	// PD leader should be different from before because etcd leader changed.
+	// PD leader should be different from before because etcd leader changed frequently.
 	re.NotEmpty(cluster.GetLeader())
 	re.NotEqual(leader, cluster.GetLeader())
+
+	for _, checker := range cluster.GetServer(leader).GetServer().GetHealthCheckers() {
+		re.Len(checker.GetAllClients(), 4)
+	}
 }
 
 func TestGrantLeaseFailed(t *testing.T) {

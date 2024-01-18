@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -112,7 +113,7 @@ func (s *Server) Run() (err error) {
 			return err
 		}
 	}
-	if err := utils.InitClient(s); err != nil {
+	if err := utils.InitClient(s, fmt.Sprintf("%s-%s", s.Name(), serviceName)); err != nil {
 		return err
 	}
 	return s.startServer()

@@ -168,7 +168,7 @@ func isAPIServiceReady(s server) (bool, error) {
 }
 
 // InitClient initializes the etcd and http clients.
-func InitClient(s server) error {
+func InitClient(s server, serviceName string) error {
 	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
 	if err != nil {
 		return err
@@ -177,7 +177,7 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls)
+	etcdClient, _, err := etcdutil.CreateEtcdClient(serviceName, tlsConfig, backendUrls)
 	if err != nil {
 		return err
 	}
