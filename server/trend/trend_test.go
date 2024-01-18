@@ -118,7 +118,7 @@ func TestTrendGetAsyncMock(t *testing.T) {
 		now = now.Add(time.Millisecond * 100)
 		time.Sleep(time.Millisecond * 100)
 		res := float64(rand.Intn(8)+1) * 0.001
-		trend.Record(1, res+4, now)
+		trend.Record(1, res+10, now)
 	}
 
 	log.Info("--------------------- normal ---------------------")

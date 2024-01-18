@@ -166,7 +166,7 @@ func laLbRateSimple(laAvg, lbAvg, marginError float64) float64 {
 }
 
 // TODO: unSensitiveCause reduce influence of spike
-const unSensitiveCause = 2.0
+const unSensitiveCause = 3.0
 
 // A*(A-B)^2 / Sqrt(B) = x
 func laLbRate(laAvg float64, lbAvg float64, marginError float64) float64 {

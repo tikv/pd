@@ -365,7 +365,7 @@ func (checker *HealthyChecker) inspector(ctx context.Context) {
 			for _, ep := range lastEps {
 				// add new trend
 				if _, ok := checker.allRecordUrls[ep]; !ok {
-					checker.allRecordUrls[ep] = trend.NewTrend(fmt.Sprintf("%s-%s", checker.name, ep), 20)
+					checker.allRecordUrls[ep] = trend.NewTrend(fmt.Sprintf("%s-%s", checker.name, ep), 20*time.Second)
 					etcdAsyncVals[ep] = trend.NewAsyncFromEtcd()
 				}
 			}
