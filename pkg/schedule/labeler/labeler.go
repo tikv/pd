@@ -99,7 +99,7 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 		}
 	}
 	if deleted {
-		l.buildRangeList()
+		l.BuildRangeListLocked()
 	}
 }
 
@@ -128,11 +128,12 @@ func (l *RegionLabeler) loadRules() error {
 			return err
 		}
 	}
-	l.buildRangeList()
+	l.BuildRangeListLocked()
 	return nil
 }
 
-func (l *RegionLabeler) buildRangeList() {
+// BuildRangeListLocked builds the range list.
+func (l *RegionLabeler) BuildRangeListLocked() {
 	builder := rangelist.NewBuilder()
 	l.minExpire = nil
 	for _, rule := range l.labelRules {
@@ -206,16 +207,24 @@ func (l *RegionLabeler) getAndCheckRule(id string, now time.Time) *LabelRule {
 
 // SetLabelRule inserts or updates a LabelRule.
 func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
+	l.Lock()
+	defer l.Unlock()
+	if err := l.SetLabelRuleLocked(rule); err != nil {
+		return err
+	}
+	l.BuildRangeListLocked()
+	return nil
+}
+
+// SetLabelRuleLocked inserts or updates a LabelRule but not buildRangeList.
+func (l *RegionLabeler) SetLabelRuleLocked(rule *LabelRule) error {
 	if err := rule.checkAndAdjust(); err != nil {
 		return err
 	}
-	l.Lock()
-	defer l.Unlock()
 	if err := l.storage.SaveRegionRule(rule.ID, rule); err != nil {
 		return err
 	}
 	l.labelRules[rule.ID] = rule
-	l.buildRangeList()
 	return nil
 }
 
@@ -223,6 +232,15 @@ func (l *RegionLabeler) SetLabelRule(rule *LabelRule) error {
 func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	l.Lock()
 	defer l.Unlock()
+	if err := l.DeleteLabelRuleLocked(id); err != nil {
+		return err
+	}
+	l.BuildRangeListLocked()
+	return nil
+}
+
+// DeleteLabelRuleLocked removes a LabelRule but not buildRangeList.
+func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
 	if _, ok := l.labelRules[id]; !ok {
 		return errs.ErrRegionRuleNotFound.FastGenByArgs(id)
 	}
@@ -230,7 +248,6 @@ func (l *RegionLabeler) DeleteLabelRule(id string) error {
 		return err
 	}
 	delete(l.labelRules, id)
-	l.buildRangeList()
 	return nil
 }
 
@@ -264,7 +281,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	for _, rule := range patch.SetRules {
 		l.labelRules[rule.ID] = rule
 	}
-	l.buildRangeList()
+	l.BuildRangeListLocked()
 	return nil
 }
 

@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,7 @@ import (
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
 )
 
 const (
@@ -269,97 +271,129 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 	failpoint.Inject("closeTick", func() {
 		failpoint.Return(client, err)
 	})
-
-	checker := &healthyChecker{
-		tlsConfig: tlsConfig,
-	}
-	eps := syncUrls(client)
-	checker.update(eps)
-
-	// Create a goroutine to check the health of etcd endpoints periodically.
-	go func(client *clientv3.Client) {
-		defer logutil.LogPanic()
-		ticker := time.NewTicker(tickerInterval)
-		defer ticker.Stop()
-		lastAvailable := time.Now()
-		for {
-			select {
-			case <-client.Ctx().Done():
-				log.Info("etcd client is closed, exit health check goroutine")
-				checker.Range(func(key, value interface{}) bool {
-					client := value.(*healthyClient)
-					client.Close()
-					return true
-				})
-				return
-			case <-ticker.C:
-				usedEps := client.Endpoints()
-				healthyEps := checker.patrol(client.Ctx())
-				if len(healthyEps) == 0 {
-					// when all endpoints are unhealthy, try to reset endpoints to update connect
-					// rather than delete them to avoid there is no any endpoint in client.
-					// Note: reset endpoints will trigger subconn closed, and then trigger reconnect.
-					// otherwise, the subconn will be retrying in grpc layer and use exponential backoff,
-					// and it cannot recover as soon as possible.
-					if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
-						log.Info("no available endpoint, try to reset endpoints", zap.Strings("last-endpoints", usedEps))
-						client.SetEndpoints([]string{}...)
-						client.SetEndpoints(usedEps...)
-					}
-				} else {
-					if !typeutil.AreStringSlicesEquivalent(healthyEps, usedEps) {
-						client.SetEndpoints(healthyEps...)
-						change := fmt.Sprintf("%d->%d", len(usedEps), len(healthyEps))
-						etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
-						log.Info("update endpoints", zap.String("num-change", change),
-							zap.Strings("last-endpoints", usedEps), zap.Strings("endpoints", client.Endpoints()))
-					}
-					lastAvailable = time.Now()
-				}
-			}
-		}
-	}(client)
-
-	// Notes: use another goroutine to update endpoints to avoid blocking health check in the first goroutine.
-	go func(client *clientv3.Client) {
-		defer logutil.LogPanic()
-		ticker := time.NewTicker(tickerInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-client.Ctx().Done():
-				log.Info("etcd client is closed, exit update endpoint goroutine")
-				return
-			case <-ticker.C:
-				eps := syncUrls(client)
-				checker.update(eps)
-			}
-		}
-	}(client)
+	initHealthyChecker(tickerInterval, tlsConfig, client)
 
 	return client, err
 }
 
+// healthyClient will wrap a etcd client and record its last health time.
+// The etcd client inside will only maintain one connection to the etcd server
+// to make sure each healthyClient could be used to check the health of a certain
+// etcd endpoint without involving the load balancer of etcd client.
 type healthyClient struct {
 	*clientv3.Client
 	lastHealth time.Time
 }
 
+// healthyChecker is used to check the health of etcd endpoints. Inside the checker,
+// we will maintain a map from each available etcd endpoint to its healthyClient.
 type healthyChecker struct {
-	sync.Map  // map[string]*healthyClient
-	tlsConfig *tls.Config
+	tickerInterval time.Duration
+	tlsConfig      *tls.Config
+
+	sync.Map // map[string]*healthyClient
+	// client is the etcd client the healthy checker is guarding, it will be set with
+	// the checked healthy endpoints dynamically and periodically.
+	client *clientv3.Client
+}
+
+// initHealthyChecker initializes the healthy checker for etcd client.
+func initHealthyChecker(tickerInterval time.Duration, tlsConfig *tls.Config, client *clientv3.Client) {
+	healthyChecker := &healthyChecker{
+		tickerInterval: tickerInterval,
+		tlsConfig:      tlsConfig,
+		client:         client,
+	}
+	// Healthy checker has the same lifetime with the given etcd client.
+	ctx := client.Ctx()
+	// Sync etcd endpoints and check the last health time of each endpoint periodically.
+	go healthyChecker.syncer(ctx)
+	// Inspect the health of each endpoint by reading the health key periodically.
+	go healthyChecker.inspector(ctx)
+}
+
+func (checker *healthyChecker) syncer(ctx context.Context) {
+	defer logutil.LogPanic()
+	checker.update()
+	ticker := time.NewTicker(checker.tickerInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("etcd client is closed, exit update endpoint goroutine")
+			return
+		case <-ticker.C:
+			checker.update()
+		}
+	}
+}
+
+func (checker *healthyChecker) inspector(ctx context.Context) {
+	defer logutil.LogPanic()
+	ticker := time.NewTicker(checker.tickerInterval)
+	defer ticker.Stop()
+	lastAvailable := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("etcd client is closed, exit health check goroutine")
+			checker.close()
+			return
+		case <-ticker.C:
+			lastEps := checker.client.Endpoints()
+			healthyEps := checker.patrol(ctx)
+			if len(healthyEps) == 0 {
+				// when all endpoints are unhealthy, try to reset endpoints to update connect
+				// rather than delete them to avoid there is no any endpoint in client.
+				// Note: reset endpoints will trigger subconn closed, and then trigger reconnect.
+				// otherwise, the subconn will be retrying in grpc layer and use exponential backoff,
+				// and it cannot recover as soon as possible.
+				if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
+					log.Info("no available endpoint, try to reset endpoints",
+						zap.Strings("last-endpoints", lastEps))
+					resetClientEndpoints(checker.client, lastEps...)
+				}
+			} else {
+				if !typeutil.AreStringSlicesEquivalent(healthyEps, lastEps) {
+					checker.client.SetEndpoints(healthyEps...)
+					etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
+					log.Info("update endpoints",
+						zap.String("num-change", fmt.Sprintf("%d->%d", len(lastEps), len(healthyEps))),
+						zap.Strings("last-endpoints", lastEps),
+						zap.Strings("endpoints", checker.client.Endpoints()))
+				}
+				lastAvailable = time.Now()
+			}
+		}
+	}
+}
+
+func (checker *healthyChecker) close() {
+	checker.Range(func(key, value interface{}) bool {
+		client := value.(*healthyClient)
+		client.Close()
+		return true
+	})
+}
+
+// Reset the etcd client endpoints to trigger reconnect.
+func resetClientEndpoints(client *clientv3.Client, endpoints ...string) {
+	client.SetEndpoints()
+	client.SetEndpoints(endpoints...)
 }
 
 func (checker *healthyChecker) patrol(ctx context.Context) []string {
 	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
-	var wg sync.WaitGroup
 	count := 0
 	checker.Range(func(key, value interface{}) bool {
 		count++
 		return true
 	})
-	hch := make(chan string, count)
-	healthyList := make([]string, 0, count)
+	var (
+		wg          sync.WaitGroup
+		hch         = make(chan string, count)
+		healthyList = make([]string, 0, count)
+	)
 	checker.Range(func(key, value interface{}) bool {
 		wg.Add(1)
 		go func(key, value interface{}) {
@@ -386,8 +420,9 @@ func (checker *healthyChecker) patrol(ctx context.Context) []string {
 	return healthyList
 }
 
-func (checker *healthyChecker) update(eps []string) {
-	epMap := make(map[string]struct{})
+func (checker *healthyChecker) update() {
+	eps := syncUrls(checker.client)
+	epMap := make(map[string]struct{}, len(eps))
 	for _, ep := range eps {
 		epMap[ep] = struct{}{}
 	}
@@ -401,9 +436,7 @@ func (checker *healthyChecker) update(eps []string) {
 				checker.removeClient(ep)
 			}
 			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
-				// try to reset client endpoint to trigger reconnect
-				client.(*healthyClient).Client.SetEndpoints([]string{}...)
-				client.(*healthyClient).Client.SetEndpoints(ep)
+				resetClientEndpoints(client.(*healthyClient).Client, ep)
 			}
 			continue
 		}
@@ -460,18 +493,8 @@ func syncUrls(client *clientv3.Client) []string {
 	return eps
 }
 
-// CreateClients creates etcd v3 client and http client.
-func CreateClients(tlsConfig *tls.Config, acUrls []url.URL) (*clientv3.Client, *http.Client, error) {
-	client, err := CreateEtcdClient(tlsConfig, acUrls)
-	if err != nil {
-		return nil, nil, errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
-	}
-	httpClient := createHTTPClient(tlsConfig)
-	return client, httpClient, nil
-}
-
-// createHTTPClient creates a http client with the given tls config.
-func createHTTPClient(tlsConfig *tls.Config) *http.Client {
+// CreateHTTPClient creates a http client with the given tls config.
+func CreateHTTPClient(tlsConfig *tls.Config) *http.Client {
 	// FIXME: Currently, there is no timeout set for certain requests, such as GetRegions,
 	// which may take a significant amount of time. However, it might be necessary to
 	// define an appropriate timeout in the future.
@@ -558,12 +581,10 @@ func InitOrGetClusterID(c *clientv3.Client, key string) (uint64, error) {
 }
 
 const (
-	defaultLoadDataFromEtcdTimeout   = 30 * time.Second
-	defaultLoadFromEtcdRetryInterval = 200 * time.Millisecond
-	defaultLoadFromEtcdRetryTimes    = int(defaultLoadDataFromEtcdTimeout / defaultLoadFromEtcdRetryInterval)
-	defaultLoadBatchSize             = 400
-	defaultWatchChangeRetryInterval  = 1 * time.Second
-	defaultForceLoadMinimalInterval  = 200 * time.Millisecond
+	defaultEtcdRetryInterval      = time.Second
+	defaultLoadFromEtcdRetryTimes = 3
+	maxLoadBatchSize              = int64(10000)
+	minLoadBatchSize              = int64(100)
 
 	// RequestProgressInterval is the interval to call RequestProgress for watcher.
 	RequestProgressInterval = 1 * time.Second
@@ -580,8 +601,8 @@ type LoopWatcher struct {
 
 	// key is the etcd key to watch.
 	key string
-	// opts is used to set etcd options.
-	opts []clientv3.OpOption
+	// isWithPrefix indicates whether the watcher is with prefix.
+	isWithPrefix bool
 
 	// forceLoadCh is used to force loading data from etcd.
 	forceLoadCh chan struct{}
@@ -602,8 +623,6 @@ type LoopWatcher struct {
 	// lastTimeForceLoad is used to record the last time force loading data from etcd.
 	lastTimeForceLoad time.Time
 
-	// loadTimeout is used to set the timeout for loading data from etcd.
-	loadTimeout time.Duration
 	// loadRetryTimes is used to set the retry times for loading data from etcd.
 	loadRetryTimes int
 	// loadBatchSize is used to set the batch size for loading data from etcd.
@@ -623,7 +642,7 @@ func NewLoopWatcher(
 	preEventsFn func([]*clientv3.Event) error,
 	putFn, deleteFn func(*mvccpb.KeyValue) error,
 	postEventsFn func([]*clientv3.Event) error,
-	opts ...clientv3.OpOption,
+	isWithPrefix bool,
 ) *LoopWatcher {
 	return &LoopWatcher{
 		ctx:                      ctx,
@@ -638,12 +657,11 @@ func NewLoopWatcher(
 		deleteFn:                 deleteFn,
 		postEventsFn:             postEventsFn,
 		preEventsFn:              preEventsFn,
-		opts:                     opts,
+		isWithPrefix:             isWithPrefix,
 		lastTimeForceLoad:        time.Now(),
-		loadTimeout:              defaultLoadDataFromEtcdTimeout,
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
-		loadBatchSize:            defaultLoadBatchSize,
-		watchChangeRetryInterval: defaultWatchChangeRetryInterval,
+		loadBatchSize:            maxLoadBatchSize,
+		watchChangeRetryInterval: defaultEtcdRetryInterval,
 	}
 }
 
@@ -689,21 +707,13 @@ func (lw *LoopWatcher) initFromEtcd(ctx context.Context) int64 {
 		watchStartRevision int64
 		err                error
 	)
-	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
+	ticker := time.NewTicker(defaultEtcdRetryInterval)
 	defer ticker.Stop()
-	ctx, cancel := context.WithTimeout(ctx, lw.loadTimeout)
-	defer cancel()
-
 	for i := 0; i < lw.loadRetryTimes; i++ {
 		failpoint.Inject("loadTemporaryFail", func(val failpoint.Value) {
 			if maxFailTimes, ok := val.(int); ok && i < maxFailTimes {
 				err = errors.New("fail to read from etcd")
 				failpoint.Continue()
-			}
-		})
-		failpoint.Inject("delayLoad", func(val failpoint.Value) {
-			if sleepIntervalSeconds, ok := val.(int); ok && sleepIntervalSeconds > 0 {
-				time.Sleep(time.Duration(sleepIntervalSeconds) * time.Second)
 			}
 		})
 		watchStartRevision, err = lw.load(ctx)
@@ -754,7 +764,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		// make sure to wrap context with "WithRequireLeader".
 		watcherCtx, cancel := context.WithCancel(clientv3.WithRequireLeader(ctx))
 		watcherCancel = cancel
-		opts := append(lw.opts, clientv3.WithRev(revision), clientv3.WithProgressNotify())
+		opts := []clientv3.OpOption{clientv3.WithRev(revision), clientv3.WithProgressNotify()}
+		if lw.isWithPrefix {
+			opts = append(opts, clientv3.WithPrefix())
+		}
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
 		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
@@ -864,15 +877,10 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 }
 
 func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error) {
-	ctx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
-	defer cancel()
 	startKey := lw.key
-	// If limit is 0, it means no limit.
-	// If limit is not 0, we need to add 1 to limit to get the next key.
 	limit := lw.loadBatchSize
-	if limit != 0 {
-		limit++
-	}
+	opts := lw.buildLoadingOpts(limit)
+
 	if err := lw.preEventsFn([]*clientv3.Event{}); err != nil {
 		log.Error("run pre event failed in watch loop", zap.String("name", lw.name),
 			zap.String("key", lw.key), zap.Error(err))
@@ -883,21 +891,43 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 				zap.String("key", lw.key), zap.Error(err))
 		}
 	}()
+
 	for {
-		// Sort by key to get the next key and we don't need to worry about the performance,
-		// Because the default sort is just SortByKey and SortAscend
-		opts := append(lw.opts, clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend), clientv3.WithLimit(limit))
-		resp, err := clientv3.NewKV(lw.client).Get(ctx, startKey, opts...)
+		select {
+		case <-ctx.Done():
+			return 0, nil
+		default:
+		}
+		resp, err := EtcdKVGet(lw.client, startKey, opts...)
+		failpoint.Inject("meetEtcdError", func() {
+			if limit > minLoadBatchSize {
+				err = errors.New(codes.ResourceExhausted.String())
+			}
+		})
 		if err != nil {
 			log.Error("load failed in watch loop", zap.String("name", lw.name),
 				zap.String("key", lw.key), zap.Error(err))
+			if strings.Contains(err.Error(), codes.ResourceExhausted.String()) ||
+				strings.Contains(err.Error(), codes.DeadlineExceeded.String()) {
+				if limit == 0 {
+					limit = maxLoadBatchSize
+				} else if limit > minLoadBatchSize {
+					limit /= 2
+				} else {
+					return 0, err
+				}
+				opts = lw.buildLoadingOpts(limit)
+				continue
+			}
 			return 0, err
 		}
 		for i, item := range resp.Kvs {
-			if resp.More && i == len(resp.Kvs)-1 {
-				// The last key is the start key of the next batch.
-				// To avoid to get the same key in the next load, we need to skip the last key.
+			if i == len(resp.Kvs)-1 && resp.More {
+				// If there are more keys, we need to load the next batch.
+				// The last key in current batch is the start key of the next batch.
 				startKey = string(item.Key)
+				// To avoid to get the same key in the next batch,
+				// we need to skip the last key for the current batch.
 				continue
 			}
 			err = lw.putFn(item)
@@ -916,6 +946,27 @@ func (lw *LoopWatcher) load(ctx context.Context) (nextRevision int64, err error)
 	}
 }
 
+func (lw *LoopWatcher) buildLoadingOpts(limit int64) []clientv3.OpOption {
+	// Sort by key to get the next key and we don't need to worry about the performance,
+	// Because the default sort is just SortByKey and SortAscend
+	opts := []clientv3.OpOption{
+		clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend)}
+	// In most cases, 'Get(foo, WithPrefix())' is equivalent to 'Get(foo, WithRange(GetPrefixRangeEnd(foo))'.
+	// However, when the startKey changes, the two are no longer equivalent.
+	// For example, the end key for 'WithRange(GetPrefixRangeEnd(foo))' is consistently 'fop'.
+	// But when using 'Get(foo1, WithPrefix())', the end key becomes 'foo2', not 'fop'.
+	// So, we use 'WithRange()' to avoid this problem.
+	if lw.isWithPrefix {
+		opts = append(opts, clientv3.WithRange(clientv3.GetPrefixRangeEnd(lw.key)))
+	}
+	// If limit is 0, it means no limit.
+	// If limit is not 0, we need to add 1 to limit to get the next key.
+	if limit == 0 {
+		return opts
+	}
+	return append(opts, clientv3.WithLimit(limit+1))
+}
+
 // ForceLoad forces to load the key.
 func (lw *LoopWatcher) ForceLoad() {
 	// When NotLeader error happens, a large volume of force load requests will be received here,
@@ -923,14 +974,14 @@ func (lw *LoopWatcher) ForceLoad() {
 	// Two-phase locking is also used to let most of the requests return directly without acquiring
 	// the write lock and causing the system to choke.
 	lw.forceLoadMu.RLock()
-	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+	if time.Since(lw.lastTimeForceLoad) < defaultEtcdRetryInterval {
 		lw.forceLoadMu.RUnlock()
 		return
 	}
 	lw.forceLoadMu.RUnlock()
 
 	lw.forceLoadMu.Lock()
-	if time.Since(lw.lastTimeForceLoad) < defaultForceLoadMinimalInterval {
+	if time.Since(lw.lastTimeForceLoad) < defaultEtcdRetryInterval {
 		lw.forceLoadMu.Unlock()
 		return
 	}
@@ -951,11 +1002,6 @@ func (lw *LoopWatcher) WaitLoad() error {
 // SetLoadRetryTimes sets the retry times when loading data from etcd.
 func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 	lw.loadRetryTimes = times
-}
-
-// SetLoadTimeout sets the timeout when loading data from etcd.
-func (lw *LoopWatcher) SetLoadTimeout(timeout time.Duration) {
-	lw.loadTimeout = timeout
 }
 
 // SetLoadBatchSize sets the batch size when loading data from etcd.

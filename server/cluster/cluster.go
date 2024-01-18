@@ -355,7 +355,7 @@ var once sync.Once
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
-		if err != nil || len(servers) == 0 {
+		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.independentServices.Delete(mcsutils.SchedulingServiceName)
 		} else {

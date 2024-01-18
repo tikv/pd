@@ -29,11 +29,10 @@ import (
 	"go.etcd.io/etcd/etcdserver/etcdserverpb"
 )
 
-// newTestSingleConfig is used to create a etcd config for the unit test purpose.
-func newTestSingleConfig(t *testing.T) *embed.Config {
+// NewTestSingleConfig is used to create a etcd config for the unit test purpose.
+func NewTestSingleConfig() *embed.Config {
 	cfg := embed.NewConfig()
 	cfg.Name = genRandName()
-	cfg.Dir = t.TempDir()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
 	cfg.LogOutputs = []string{"stdout"}
@@ -60,7 +59,8 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 	re := require.New(t)
 	servers = make([]*embed.Etcd, 0, count)
 
-	cfg := newTestSingleConfig(t)
+	cfg := NewTestSingleConfig()
+	cfg.Dir = t.TempDir()
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
 	etcdClient, err = CreateEtcdClient(nil, cfg.LCUrls)
@@ -98,7 +98,8 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 // MustAddEtcdMember is used to add a new etcd member to the cluster for test.
 func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
 	re := require.New(t)
-	cfg2 := newTestSingleConfig(t)
+	cfg2 := NewTestSingleConfig()
+	cfg2.Dir = t.TempDir()
 	cfg2.Name = genRandName()
 	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
 	cfg2.ClusterState = embed.ClusterStateFlagExisting

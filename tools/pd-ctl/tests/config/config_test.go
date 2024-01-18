@@ -1111,6 +1111,36 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 	re.Equal(int(3), conf.FlowRoundByDigit)
 }
 
+func (suite *configTestSuite) TestMicroServiceConfig() {
+	suite.env.RunTestInTwoModes(suite.checkMicroServiceConfig)
+}
+
+func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	cmd := ctl.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
+	}
+	pdTests.MustPutStore(re, cluster, store)
+	svr := leaderServer.GetServer()
+	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "all")
+	re.NoError(err)
+	cfg := config.Config{}
+	re.NoError(json.Unmarshal(output, &cfg))
+	re.True(svr.GetMicroServiceConfig().EnableSchedulingFallback)
+	re.True(cfg.MicroService.EnableSchedulingFallback)
+	// config set enable-scheduling-fallback <value>
+	args := []string{"-u", pdAddr, "config", "set", "enable-scheduling-fallback", "false"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.False(svr.GetMicroServiceConfig().EnableSchedulingFallback)
+}
+
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {
 	re.Len(b, len(a))
 	for i := 0; i < len(a); i++ {
