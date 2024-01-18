@@ -871,6 +871,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			resp.AwakenRegions = &pdpb.AwakenRegions{
 				AbnormalStores: slowStoreIDs,
 			}
+			log.Info("[Debug] new store status", zap.Uint64("store-id", storeID),
+				zap.Uint64("slow score", newStore.GetSlowScore()),
+				zap.Bool("is slow by SlowTrend", newStore.IsEvictedAsSlowTrend()),
+				zap.Bool("cluster has slow stores", c.slowStat.ExistsSlowStores()))
 		} else {
 			newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), opt)
 		}
