@@ -254,14 +254,14 @@ func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, er
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client, *HealthyChecker, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
 	}
 	client, err := newClient(tlsConfig, urls...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	tickerInterval := defaultDialKeepAliveTime
@@ -269,11 +269,11 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 		tickerInterval = 100 * time.Millisecond
 	})
 	failpoint.Inject("closeTick", func() {
-		failpoint.Return(client, err)
+		failpoint.Return(client, nil, err)
 	})
-	initHealthyChecker(tickerInterval, tlsConfig, client)
+	checker := initHealthyChecker(tickerInterval, tlsConfig, client)
 
-	return client, err
+	return client, checker, err
 }
 
 // healthyClient will wrap a etcd client and record its last health time.
@@ -285,11 +285,13 @@ type healthyClient struct {
 	lastHealth time.Time
 }
 
-// healthyChecker is used to check the health of etcd endpoints. Inside the checker,
+// HealthyChecker is used to check the health of etcd endpoints. Inside the checker,
 // we will maintain a map from each available etcd endpoint to its healthyClient.
-type healthyChecker struct {
+type HealthyChecker struct {
 	tickerInterval time.Duration
 	tlsConfig      *tls.Config
+
+	isUnHealthy sync.Map // map[string]bool
 
 	sync.Map // map[string]*healthyClient
 	// client is the etcd client the healthy checker is guarding, it will be set with
@@ -298,8 +300,8 @@ type healthyChecker struct {
 }
 
 // initHealthyChecker initializes the healthy checker for etcd client.
-func initHealthyChecker(tickerInterval time.Duration, tlsConfig *tls.Config, client *clientv3.Client) {
-	healthyChecker := &healthyChecker{
+func initHealthyChecker(tickerInterval time.Duration, tlsConfig *tls.Config, client *clientv3.Client) *HealthyChecker {
+	healthyChecker := &HealthyChecker{
 		tickerInterval: tickerInterval,
 		tlsConfig:      tlsConfig,
 		client:         client,
@@ -310,9 +312,11 @@ func initHealthyChecker(tickerInterval time.Duration, tlsConfig *tls.Config, cli
 	go healthyChecker.syncer(ctx)
 	// Inspect the health of each endpoint by reading the health key periodically.
 	go healthyChecker.inspector(ctx)
+
+	return healthyChecker
 }
 
-func (checker *healthyChecker) syncer(ctx context.Context) {
+func (checker *HealthyChecker) syncer(ctx context.Context) {
 	defer logutil.LogPanic()
 	checker.update()
 	ticker := time.NewTicker(checker.tickerInterval)
@@ -328,7 +332,7 @@ func (checker *healthyChecker) syncer(ctx context.Context) {
 	}
 }
 
-func (checker *healthyChecker) inspector(ctx context.Context) {
+func (checker *HealthyChecker) inspector(ctx context.Context) {
 	defer logutil.LogPanic()
 	ticker := time.NewTicker(checker.tickerInterval)
 	defer ticker.Stop()
@@ -368,7 +372,7 @@ func (checker *healthyChecker) inspector(ctx context.Context) {
 	}
 }
 
-func (checker *healthyChecker) close() {
+func (checker *HealthyChecker) close() {
 	checker.Range(func(key, value interface{}) bool {
 		client := value.(*healthyClient)
 		client.Close()
@@ -382,7 +386,21 @@ func resetClientEndpoints(client *clientv3.Client, endpoints ...string) {
 	client.SetEndpoints(endpoints...)
 }
 
-func (checker *healthyChecker) patrol(ctx context.Context) []string {
+// SetClientStatusIsUnHealthy sets the status of the etcd client with the given endpoint and remove it from the healthy checker.
+func (checker *HealthyChecker) SetClientStatusIsUnHealthy(ep string, status bool) {
+	log.Info("set etcd client healthy status", zap.String("endpoint", ep), zap.Bool("status", status))
+	if status {
+		checker.isUnHealthy.Store(ep, true)
+		if _, ok := checker.Load(ep); ok {
+			checker.removeClient(ep)
+		}
+	} else {
+		checker.isUnHealthy.Delete(ep)
+		checker.addClient(ep, time.Now())
+	}
+}
+
+func (checker *HealthyChecker) patrol(ctx context.Context) []string {
 	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
 	count := 0
 	checker.Range(func(key, value interface{}) bool {
@@ -420,7 +438,7 @@ func (checker *healthyChecker) patrol(ctx context.Context) []string {
 	return healthyList
 }
 
-func (checker *healthyChecker) update() {
+func (checker *HealthyChecker) update() {
 	eps := syncUrls(checker.client)
 	epMap := make(map[string]struct{}, len(eps))
 	for _, ep := range eps {
@@ -440,6 +458,13 @@ func (checker *healthyChecker) update() {
 			}
 			continue
 		}
+
+		if status, ok := checker.isUnHealthy.Load(ep); ok && status.(bool) {
+			log.Info("some etcd server is unhealthy", zap.String("endpoint", ep))
+			// set unhealthy etcd client to healthy
+			checker.isUnHealthy.Delete(ep)
+			continue
+		}
 		checker.addClient(ep, time.Now())
 	}
 
@@ -454,7 +479,7 @@ func (checker *healthyChecker) update() {
 	})
 }
 
-func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
+func (checker *HealthyChecker) addClient(ep string, lastHealth time.Time) {
 	client, err := newClient(checker.tlsConfig, ep)
 	if err != nil {
 		log.Error("failed to create etcd healthy client", zap.Error(err))
@@ -466,7 +491,7 @@ func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 	})
 }
 
-func (checker *healthyChecker) removeClient(ep string) {
+func (checker *HealthyChecker) removeClient(ep string) {
 	if client, ok := checker.LoadAndDelete(ep); ok {
 		err := client.(*healthyClient).Close()
 		if err != nil {
@@ -491,6 +516,17 @@ func syncUrls(client *clientv3.Client) []string {
 		}
 	}
 	return eps
+}
+
+// GetAllClients returns all etcd clients in healthy checker.
+// just fot test
+func (checker *HealthyChecker) GetAllClients() []*healthyClient {
+	clients := make([]*healthyClient, 0)
+	checker.Range(func(key, value interface{}) bool {
+		clients = append(clients, value.(*healthyClient))
+		return true
+	})
+	return clients
 }
 
 // CreateHTTPClient creates a http client with the given tls config.

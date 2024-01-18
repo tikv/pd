@@ -234,6 +234,8 @@ type Server struct {
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+
+	etcdHealthyChecker []*etcdutil.HealthyChecker
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -381,17 +383,20 @@ func (s *Server) startClient() error {
 	if err != nil {
 		return err
 	}
+	var checker *etcdutil.HealthyChecker
 	/* Starting two different etcd clients here is to avoid the throttling. */
 	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
-	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
+	s.client, checker, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
+	s.etcdHealthyChecker = append(s.etcdHealthyChecker, checker)
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
-	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
+	s.electionClient, checker, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
+	s.etcdHealthyChecker = append(s.etcdHealthyChecker, checker)
 	s.httpClient = etcdutil.CreateHTTPClient(tlsConfig)
 	return nil
 }
@@ -1684,6 +1689,12 @@ func (s *Server) campaignLeader() {
 			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
 				zap.String("campaign-leader-name", s.Name()))
 		} else {
+			// for frequently changed etcd leader, we should set client status to unhealthy
+			if strings.Contains(err.Error(), "frequently changed") {
+				for _, checker := range s.etcdHealthyChecker {
+					checker.SetClientStatusIsUnHealthy(s.cfg.ClientUrls, true)
+				}
+			}
 			log.Error(fmt.Sprintf("campaign %s leader meets error due to etcd error", s.mode),
 				zap.String("campaign-leader-name", s.Name()),
 				errs.ZapError(err))
@@ -2137,4 +2148,10 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
+}
+
+// GetHealthCheckers returns the healthy checkers.
+// Notes: it is only used for test.
+func (s *Server) GetHealthCheckers() []*etcdutil.HealthyChecker {
+	return s.etcdHealthyChecker
 }

@@ -54,7 +54,7 @@ func genRandName() string {
 	return "test_etcd_" + strconv.FormatInt(time.Now().UnixNano()%10000, 10)
 }
 
-// NewTestEtcdCluster is used to create a etcd cluster for the unit test purpose.
+// NewTestEtcdCluster is used to create an etcd cluster for the unit test purpose.
 func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdClient *clientv3.Client, clean func()) {
 	re := require.New(t)
 	servers = make([]*embed.Etcd, 0, count)
@@ -63,7 +63,7 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 	cfg.Dir = t.TempDir()
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	etcdClient, err = CreateEtcdClient(nil, cfg.LCUrls)
+	etcdClient, _, err = CreateEtcdClient(nil, cfg.LCUrls)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 	servers = append(servers, etcd)

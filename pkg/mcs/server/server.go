@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"go.etcd.io/etcd/clientv3"
 	"google.golang.org/grpc"
@@ -33,7 +34,8 @@ import (
 type BaseServer struct {
 	ctx context.Context
 	// etcd client
-	etcdClient *clientv3.Client
+	etcdClient         *clientv3.Client
+	etcdHealthyChecker *etcdutil.HealthyChecker
 	// http client
 	httpClient *http.Client
 	grpcServer *grpc.Server
@@ -97,6 +99,11 @@ func (bs *BaseServer) GetHTTPClient() *http.Client {
 // SetETCDClient sets the etcd client.
 func (bs *BaseServer) SetETCDClient(etcdClient *clientv3.Client) {
 	bs.etcdClient = etcdClient
+}
+
+// SetETCDHealthyChecker sets the etcd healthy checker.
+func (bs *BaseServer) SetETCDHealthyChecker(checker *etcdutil.HealthyChecker) {
+	bs.etcdHealthyChecker = checker
 }
 
 // SetHTTPClient sets the http client.

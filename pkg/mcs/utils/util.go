@@ -107,6 +107,7 @@ type server interface {
 	SetGRPCServer(*grpc.Server)
 	SetHTTPServer(*http.Server)
 	SetETCDClient(*clientv3.Client)
+	SetETCDHealthyChecker(*etcdutil.HealthyChecker)
 	SetHTTPClient(*http.Client)
 	IsSecure() bool
 	RegisterGRPCService(*grpc.Server)
@@ -177,12 +178,13 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls)
+	etcdClient, checker, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls)
 	if err != nil {
 		return err
 	}
 	s.SetETCDClient(etcdClient)
 	s.SetHTTPClient(etcdutil.CreateHTTPClient(tlsConfig))
+	s.SetETCDHealthyChecker(checker)
 	return nil
 }
 
