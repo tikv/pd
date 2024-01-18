@@ -367,6 +367,7 @@ func TestEtcdWithHangLeaderWithRemoveClient(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 
 	cfg := NewTestSingleConfig()
+	cfg.Dir = t.TempDir()
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
 	etcdClient, checker, err := CreateEtcdClient(nil, cfg.LCUrls)
