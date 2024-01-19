@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -132,6 +133,49 @@ func TestGetSetRule(t *testing.T) {
 	for id, rule := range allRules {
 		expectSameRules(re, rule, rules[id+1])
 	}
+
+	for _, r := range rules {
+		labeler.DeleteLabelRule(r.ID)
+	}
+	re.Empty(labeler.GetAllLabelRules())
+
+	// test patch rules in batch
+	rulesNum := 200
+	patch.SetRules = patch.SetRules[:0]
+	patch.DeleteRules = patch.DeleteRules[:0]
+	for i := 1; i <= rulesNum; i++ {
+		patch.SetRules = append(patch.SetRules, &LabelRule{
+			ID: fmt.Sprintf("rule_%d", i),
+			Labels: []RegionLabel{
+				{Key: fmt.Sprintf("k_%d", i), Value: fmt.Sprintf("v_%d", i)},
+			},
+			RuleType: "key-range",
+			Data:     MakeKeyRanges("", ""),
+		})
+	}
+	err = labeler.Patch(patch)
+	re.NoError(err)
+	allRules = labeler.GetAllLabelRules()
+	re.Len(allRules, rulesNum)
+	sort.Slice(allRules, func(i, j int) bool {
+		i1, err := strconv.Atoi(allRules[i].ID[5:])
+		re.NoError(err)
+		j1, err := strconv.Atoi(allRules[j].ID[5:])
+		re.NoError(err)
+		return i1 < j1
+	})
+	for id, rule := range allRules {
+		expectSameRules(re, rule, patch.SetRules[id])
+	}
+	patch.SetRules = patch.SetRules[:0]
+	patch.DeleteRules = patch.DeleteRules[:0]
+	for i := 1; i <= rulesNum; i++ {
+		patch.DeleteRules = append(patch.DeleteRules, fmt.Sprintf("rule_%d", i))
+	}
+	err = labeler.Patch(patch)
+	re.NoError(err)
+	allRules = labeler.GetAllLabelRules()
+	re.Empty(allRules)
 }
 
 func TestIndex(t *testing.T) {
