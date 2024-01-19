@@ -69,7 +69,7 @@ func InitHTTPSClient(pdAddrs, caPath, certPath, keyPath string) error {
 			&http.Transport{TLSClientConfig: tlsConfig}, pdControlCallerID),
 	}
 
-	SetNewPDClient(strings.Split(pdAddrs, ","), pd.WithTLSConfig(tlsConfig))
+	SetNewPDClient(strings.Split(pdAddrs, ","), pd.WithTLSConfig(tlsConfig.Clone()))
 
 	return nil
 }
