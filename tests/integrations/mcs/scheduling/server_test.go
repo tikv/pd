@@ -607,3 +607,69 @@ func waitSyncFinish(re *require.Assertions, tc *tests.TestSchedulingCluster, typ
 		return tc.GetPrimaryServer().GetCluster().GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
 	})
 }
+
+type multipleServerTestSuite struct {
+	suite.Suite
+	ctx              context.Context
+	cancel           context.CancelFunc
+	cluster          *tests.TestCluster
+	pdLeader         *tests.TestServer
+	backendEndpoints string
+}
+
+func TestMultipleServerTestSuite(t *testing.T) {
+	suite.Run(t, new(multipleServerTestSuite))
+}
+
+func (suite *multipleServerTestSuite) SetupSuite() {
+	var err error
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 2)
+	re.NoError(err)
+
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := suite.cluster.WaitLeader()
+	suite.pdLeader = suite.cluster.GetServer(leaderName)
+	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	re.NoError(suite.pdLeader.BootstrapCluster())
+}
+
+func (suite *multipleServerTestSuite) TearDownSuite() {
+	re := suite.Require()
+	suite.cluster.Destroy()
+	suite.cancel()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+}
+
+func (suite *multipleServerTestSuite) TestReElectLeader() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	regionLen := 100
+	regions := tests.InitRegions(regionLen)
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
+
+	originLeaderName := suite.pdLeader.GetLeader().GetName()
+	suite.pdLeader.ResignLeader()
+	newLeaderName := suite.cluster.WaitLeader()
+	re.NotEqual(originLeaderName, newLeaderName)
+
+	suite.pdLeader.ResignLeader()
+	newLeaderName = suite.cluster.WaitLeader()
+	re.Equal(originLeaderName, newLeaderName)
+
+	rc = suite.pdLeader.GetServer().GetRaftCluster()
+	rc.IsPrepared()
+}

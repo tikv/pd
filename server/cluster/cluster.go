@@ -350,8 +350,6 @@ func (c *RaftCluster) Start(s Server) error {
 	return nil
 }
 
-var once sync.Once
-
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
@@ -359,14 +357,12 @@ func (c *RaftCluster) checkServices() {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.independentServices.Delete(mcsutils.SchedulingServiceName)
 		} else {
-			if c.stopSchedulingJobs() {
+			if c.stopSchedulingJobs() || c.coordinator == nil {
 				c.initCoordinator(c.ctx, c, c.hbstreams)
-			} else {
-				once.Do(func() {
-					c.initCoordinator(c.ctx, c, c.hbstreams)
-				})
 			}
-			c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			}
 		}
 	} else {
 		c.startSchedulingJobs(c, c.hbstreams)
