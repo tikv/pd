@@ -90,9 +90,11 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 		}
 		if len(rule.Labels) == 0 {
 			err = l.DeleteLabelRuleLocked(key)
-			deleted = true
+			if err == nil {
+				deleted = true
+			}
 		} else {
-			err = l.SetLabelRuleLocked(rule)
+			err = l.SaveLabelRuleLocked(rule)
 		}
 		if err != nil {
 			log.Error("failed to save rule expired label rule", zap.String("rule-key", key), zap.Error(err))
@@ -200,7 +202,7 @@ func (l *RegionLabeler) getAndCheckRule(id string, now time.Time) *LabelRule {
 		l.DeleteLabelRuleLocked(id)
 		return nil
 	}
-	l.SetLabelRuleLocked(rule)
+	l.SaveLabelRuleLocked(rule)
 	return rule
 }
 
@@ -220,13 +222,19 @@ func (l *RegionLabeler) SetLabelRuleLocked(rule *LabelRule) error {
 	if err := rule.checkAndAdjust(); err != nil {
 		return err
 	}
-	if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
-		return l.storage.SaveRegionRule(txn, rule.ID, rule)
-	}); err != nil {
+	if err := l.SaveLabelRuleLocked(rule); err != nil {
 		return err
 	}
 	l.labelRules[rule.ID] = rule
 	return nil
+}
+
+// SaveLabelRuleLocked inserts or updates a LabelRule but not buildRangeList.
+// It only saves the rule to storage, and does not update the in-memory states.
+func (l *RegionLabeler) SaveLabelRuleLocked(rule *LabelRule) error {
+	return l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
+		return l.storage.SaveRegionRule(txn, rule.ID, rule)
+	})
 }
 
 // DeleteLabelRule removes a LabelRule.
