@@ -45,7 +45,7 @@ func CPUQuotaToGOMAXPROCS(minValue int) (int, CPUQuotaStatus, error) {
 }
 
 // GetCPUPeriodAndQuota returns CPU period and quota time of cgroup.
-func GetCPUPeriodAndQuota() (int64, int64, error) {
+func GetCPUPeriodAndQuota() (period int64, quota int64, err error) {
 	return getCgroupCPUPeriodAndQuota("/")
 }
 

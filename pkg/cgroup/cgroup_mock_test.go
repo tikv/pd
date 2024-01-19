@@ -387,12 +387,12 @@ func TestCgroupsGetCPU(t *testing.T) {
 			v1MountsWithCPUControllerNSMountRelRemount = strings.ReplaceAll(v1MountsWithCPUControllerNSMountRelRemount, "rw,cpu,cpuacct", "rw,cpuacct,cpu")
 			v1MountsWithCPUControllerNS2 = strings.ReplaceAll(v1MountsWithCPUControllerNS2, "rw,cpu,cpuacct", "rw,cpuacct,cpu")
 		}
-		testCgroupsGetCPU(t)
+		testCgroupGetCPUHelper(t)
 		testCgroupsGetCPUPeriodAndQuota(t)
 	}
 }
 
-func testCgroupsGetCPU(t *testing.T) {
+func testCgroupGetCPUHelper(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		paths  map[string]string
