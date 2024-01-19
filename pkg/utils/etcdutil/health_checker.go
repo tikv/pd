@@ -23,11 +23,14 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
+
+const pickedCountThreshold = 3
 
 // healthyClient will wrap an etcd client and record its last health time.
 // The etcd client inside will only maintain one connection to the etcd server
@@ -46,6 +49,10 @@ type healthChecker struct {
 
 	// Store as endpoint(string) -> *healthyClient
 	healthyClients sync.Map
+	// evictedEps records the endpoints which are evicted from the last health patrol,
+	// the value is the count the endpoint being picked continuously after evicted.
+	// Store as endpoint(string) -> pickedCount(int)
+	evictedEps sync.Map
 	// client is the etcd client the health checker is guarding, it will be set with
 	// the checked healthy endpoints dynamically and periodically.
 	client *clientv3.Client
@@ -94,9 +101,8 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 			checker.close()
 			return
 		case <-ticker.C:
-			lastEps := checker.client.Endpoints()
-			healthyEps := checker.patrol(ctx)
-			if len(healthyEps) == 0 {
+			lastEps, pickedEps, changed := checker.patrol(ctx)
+			if len(pickedEps) == 0 {
 				// when no endpoint could be used, try to reset endpoints to update connect rather
 				// than delete them to avoid there is no any endpoint in client.
 				// Note: reset endpoints will trigger sub-connection closed, and then trigger reconnection.
@@ -107,18 +113,18 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 						zap.Strings("last-endpoints", lastEps))
 					resetClientEndpoints(checker.client, lastEps...)
 				}
-			} else {
-				if !typeutil.AreStringSlicesEquivalent(healthyEps, lastEps) {
-					oldNum, newNum := len(lastEps), len(healthyEps)
-					checker.client.SetEndpoints(healthyEps...)
-					etcdStateGauge.WithLabelValues("endpoints").Set(float64(newNum))
-					log.Info("update endpoints",
-						zap.String("num-change", fmt.Sprintf("%d->%d", oldNum, newNum)),
-						zap.Strings("last-endpoints", lastEps),
-						zap.Strings("endpoints", checker.client.Endpoints()))
-				}
-				lastAvailable = time.Now()
+				continue
 			}
+			if changed {
+				oldNum, newNum := len(lastEps), len(pickedEps)
+				checker.client.SetEndpoints(pickedEps...)
+				etcdStateGauge.WithLabelValues("endpoints").Set(float64(newNum))
+				log.Info("update endpoints",
+					zap.String("num-change", fmt.Sprintf("%d->%d", oldNum, newNum)),
+					zap.Strings("last-endpoints", lastEps),
+					zap.Strings("endpoints", checker.client.Endpoints()))
+			}
+			lastAvailable = time.Now()
 		}
 	}
 }
@@ -137,13 +143,18 @@ func resetClientEndpoints(client *clientv3.Client, endpoints ...string) {
 	client.SetEndpoints(endpoints...)
 }
 
+type healthProbe struct {
+	ep      string
+	healthy bool
+	took    time.Duration
+}
+
 // See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
-func (checker *healthChecker) patrol(ctx context.Context) []string {
+func (checker *healthChecker) patrol(ctx context.Context) ([]string, []string, bool) {
 	var (
-		count       = checker.clientCount()
-		hch         = make(chan string, count)
-		healthyList = make([]string, 0, count)
-		wg          sync.WaitGroup
+		count   = checker.clientCount()
+		probeCh = make(chan healthProbe, count)
+		wg      sync.WaitGroup
 	)
 	checker.healthyClients.Range(func(key, value interface{}) bool {
 		wg.Add(1)
@@ -152,25 +163,133 @@ func (checker *healthChecker) patrol(ctx context.Context) []string {
 			defer logutil.LogPanic()
 			var (
 				ep     = key.(string)
-				client = value.(*healthyClient)
+				client = value.(*healthyClient).Client
+				start  = time.Now()
 			)
-			if IsHealthy(ctx, client.Client) {
-				hch <- ep
+			healthy := IsHealthy(ctx, client)
+			// If the endpoint is healthy, update its last health time.
+			if healthy {
 				checker.storeClient(ep, &healthyClient{
-					Client:     client.Client,
-					lastHealth: time.Now(),
+					Client:     client,
+					lastHealth: start,
 				})
-				return
+			}
+			// Send the probe result to the channel.
+			probeCh <- healthProbe{
+				ep:      ep,
+				healthy: healthy,
+				took:    time.Since(start),
 			}
 		}(key, value)
 		return true
 	})
 	wg.Wait()
-	close(hch)
-	for h := range hch {
-		healthyList = append(healthyList, h)
+	close(probeCh)
+	healthProbes := make([]healthProbe, 0, count)
+	for probe := range probeCh {
+		// Skip the unhealthy endpoints.
+		if !probe.healthy {
+			log.Warn("etcd endpoint is unhealthy",
+				zap.String("endpoint", probe.ep),
+				zap.Duration("took", probe.took))
+			continue
+		}
+		healthProbes = append(healthProbes, probe)
 	}
-	return healthyList
+	var (
+		lastEps   = checker.client.Endpoints()
+		pickedEps = checker.pickEps(healthProbes)
+	)
+	if len(pickedEps) > 0 {
+		checker.updateEvictedEps(lastEps, pickedEps)
+		pickedEps = checker.filterEps(pickedEps)
+	}
+	return lastEps, pickedEps, !typeutil.AreStringSlicesEquivalent(lastEps, pickedEps)
+}
+
+// Divide the acceptable latency range into several parts, and pick the endpoints which are in the first acceptable latency range.
+func (checker *healthChecker) pickEps(healthyProbes []healthProbe) []string {
+	var (
+		healthyCount = len(healthyProbes)
+		pickedEps    = make([]string, 0, healthyCount)
+	)
+	if healthyCount == 0 {
+		return pickedEps
+	}
+	factor := int(DefaultRequestTimeout / DefaultSlowRequestTime)
+	for i := 0; i < factor; i++ {
+		minLatency, maxLatency := DefaultSlowRequestTime*time.Duration(i), DefaultSlowRequestTime*time.Duration(i+1)
+		for _, probe := range healthyProbes {
+			if minLatency <= probe.took && probe.took < maxLatency {
+				log.Debug("pick healthy etcd endpoint within acceptable latency range",
+					zap.Duration("min-latency", minLatency),
+					zap.Duration("max-latency", maxLatency),
+					zap.Duration("took", probe.took),
+					zap.String("endpoint", probe.ep))
+				pickedEps = append(pickedEps, probe.ep)
+			}
+		}
+		if len(pickedEps) > 0 {
+			break
+		}
+	}
+	return pickedEps
+}
+
+func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
+	// Reset the count to 0 if it's in evictedEps but not in the pickedEps.
+	checker.evictedEps.Range(func(key, _ interface{}) bool {
+		ep := key.(string)
+		if !slice.Contains[string](pickedEps, ep) {
+			checker.evictedEps.Store(ep, 0)
+			log.Info("reset evicted etcd endpoint picked count",
+				zap.String("endpoint", ep))
+		}
+		return true
+	})
+	// Find all endpoints which are in the lastEps but not in the pickedEps,
+	// and add them to the evictedEps.
+	for _, ep := range lastEps {
+		if slice.Contains[string](pickedEps, ep) {
+			continue
+		}
+		checker.evictedEps.Store(ep, 0)
+		log.Info("evicted etcd endpoint found",
+			zap.String("endpoint", ep))
+	}
+	// Find all endpoints which are in both pickedEps and evictedEps.
+	// and check if they are picked continuously for more than `pickedCountThreshold` times.
+	for _, ep := range pickedEps {
+		if count, ok := checker.evictedEps.Load(ep); ok {
+			// Increase the count the endpoint being picked continuously.
+			checker.evictedEps.Store(ep, count.(int)+1)
+			log.Info("evicted etcd endpoint picked again",
+				zap.Int("picked-count-threshold", pickedCountThreshold),
+				zap.Int("picked-count", count.(int)+1),
+				zap.String("endpoint", ep))
+		}
+	}
+}
+
+// Filter out the endpoints that are in evictedEps and have not been continuously picked
+// for `pickedCountThreshold` times still, this is to ensure the evicted endpoints truly
+// become available before adding them back to the client.
+func (checker *healthChecker) filterEps(eps []string) []string {
+	pickedEps := make([]string, 0, len(eps))
+	for _, ep := range eps {
+		if count, ok := checker.evictedEps.Load(ep); ok {
+			if count.(int) < pickedCountThreshold {
+				continue
+			}
+			checker.evictedEps.Delete(ep)
+			log.Info("add evicted etcd endpoint back",
+				zap.Int("picked-count-threshold", pickedCountThreshold),
+				zap.Int("picked-count", count.(int)),
+				zap.String("endpoint", ep))
+		}
+		pickedEps = append(pickedEps, ep)
+	}
+	return pickedEps
 }
 
 func (checker *healthChecker) update() {
@@ -263,6 +382,7 @@ func (checker *healthChecker) removeClient(ep string) {
 				zap.Error(err))
 		}
 	}
+	checker.evictedEps.Delete(ep)
 }
 
 // See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170-L183
