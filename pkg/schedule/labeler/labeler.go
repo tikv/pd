@@ -125,8 +125,10 @@ func (l *RegionLabeler) loadRules() error {
 	if err != nil {
 		return err
 	}
-	for _, d := range toDelete {
-		if err = l.DeleteLabelRuleLocked(d); err != nil {
+	for _, id := range toDelete {
+		if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
+			return l.storage.DeleteRegionRule(txn, id)
+		}); err != nil {
 			return err
 		}
 	}
