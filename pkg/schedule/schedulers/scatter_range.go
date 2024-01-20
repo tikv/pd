@@ -79,17 +79,6 @@ func (conf *scatterRangeSchedulerConfig) Clone() *scatterRangeSchedulerConfig {
 	}
 }
 
-func (conf *scatterRangeSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
-	conf.RLock()
-	defer conf.RUnlock()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
 func (conf *scatterRangeSchedulerConfig) GetRangeName() string {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -112,6 +101,10 @@ func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return fmt.Sprintf("scatter-range-%s", conf.RangeName)
+}
+
+func (conf *scatterRangeSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
 }
 
 type scatterRangeScheduler struct {
@@ -275,7 +268,9 @@ func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.
 		args = append(args, string(handler.config.GetEndKey()))
 	}
 	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
+	handler.config.RLock()
+	defer handler.config.RUnlock()
+	err := saveSchedulerConfig(handler.config)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
@@ -145,15 +146,6 @@ func CreateScheduler(typ string, oc *operator.Controller, storage endpoint.Confi
 	return fn(oc, storage, dec, removeSchedulerCb...)
 }
 
-// SaveSchedulerConfig saves the config of the specified scheduler.
-func SaveSchedulerConfig(storage endpoint.ConfigStorage, s Scheduler) error {
-	data, err := s.EncodeConfig()
-	if err != nil {
-		return err
-	}
-	return storage.SaveSchedulerConfig(s.GetName(), data)
-}
-
 // FindSchedulerTypeByName finds the type of the specified name.
 func FindSchedulerTypeByName(name string) string {
 	var typ string
@@ -165,4 +157,21 @@ func FindSchedulerTypeByName(name string) string {
 		}
 	}
 	return typ
+}
+
+type schedulerConfig interface {
+	getSchedulerName() string
+	getStorage() endpoint.ConfigStorage
+}
+
+func saveSchedulerConfig(conf schedulerConfig) error {
+	name := conf.getSchedulerName()
+	data, err := EncodeConfig(conf)
+	failpoint.Inject("persistFail", func() {
+		err = errors.New("fail to persist")
+	})
+	if err != nil {
+		return err
+	}
+	return conf.getStorage().SaveSchedulerConfig(name, data)
 }

@@ -43,6 +43,14 @@ type shuffleRegionSchedulerConfig struct {
 	Roles  []string        `json:"roles"` // can include `leader`, `follower`, `learner`.
 }
 
+func (conf *shuffleRegionSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
+}
+
+func (conf *shuffleRegionSchedulerConfig) getSchedulerName() string {
+	return ShuffleRegionName
+}
+
 func (conf *shuffleRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -99,18 +107,10 @@ func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, 
 	defer conf.Unlock()
 	old := conf.Roles
 	conf.Roles = roles
-	if err := conf.persist(); err != nil {
+	if err := saveSchedulerConfig(conf); err != nil {
 		conf.Roles = old // revert
 		rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	rd.Text(w, http.StatusOK, "Config is updated.")
-}
-
-func (conf *shuffleRegionSchedulerConfig) persist() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(ShuffleRegionName, data)
 }

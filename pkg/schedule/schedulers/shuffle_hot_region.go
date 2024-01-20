@@ -55,6 +55,10 @@ type shuffleHotRegionSchedulerConfig struct {
 	Limit   uint64 `json:"limit"`
 }
 
+func (conf *shuffleHotRegionSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
+}
+
 func (conf *shuffleHotRegionSchedulerConfig) getSchedulerName() string {
 	return conf.Name
 }
@@ -66,15 +70,6 @@ func (conf *shuffleHotRegionSchedulerConfig) Clone() *shuffleHotRegionSchedulerC
 		Name:  conf.Name,
 		Limit: conf.Limit,
 	}
-}
-
-func (conf *shuffleHotRegionSchedulerConfig) persistLocked() error {
-	name := conf.getSchedulerName()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) getLimit() uint64 {
@@ -240,7 +235,7 @@ func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *h
 	defer handler.config.Unlock()
 	previous := handler.config.Limit
 	handler.config.Limit = uint64(limit)
-	err := handler.config.persistLocked()
+	err := saveSchedulerConfig(handler.config)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.Limit = previous

@@ -97,15 +97,8 @@ func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfi
 	}
 }
 
-func (conf *grantHotRegionSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
-	conf.RLock()
-	defer conf.RUnlock()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+func (conf *grantHotRegionSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
 }
 
 func (conf *grantHotRegionSchedulerConfig) getSchedulerName() string {
@@ -230,8 +223,9 @@ func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *htt
 		_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
 		return
 	}
-
-	if err = handler.config.Persist(); err != nil {
+	handler.config.RLock()
+	defer handler.config.RUnlock()
+	if err = saveSchedulerConfig(handler.config); err != nil {
 		handler.config.SetStoreLeaderID(0)
 		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

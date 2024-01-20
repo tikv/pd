@@ -74,6 +74,14 @@ type balanceLeaderSchedulerConfig struct {
 	Batch int `json:"batch"`
 }
 
+func (conf *balanceLeaderSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
+}
+
+func (conf *balanceLeaderSchedulerConfig) getSchedulerName() string {
+	return BalanceLeaderName
+}
+
 func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{}) {
 	conf.Lock()
 	defer conf.Unlock()
@@ -89,7 +97,7 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 			json.Unmarshal(oldConfig, conf)
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		conf.persistLocked()
+		saveSchedulerConfig(conf)
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
 		return http.StatusOK, "Config is updated."
 	}
@@ -117,14 +125,6 @@ func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig 
 		Ranges: ranges,
 		Batch:  conf.Batch,
 	}
-}
-
-func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(BalanceLeaderName, data)
 }
 
 func (conf *balanceLeaderSchedulerConfig) getBatch() int {
