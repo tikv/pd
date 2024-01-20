@@ -24,19 +24,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/pkg/transport"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
+	"go.etcd.io/etcd/pkg/transport"
 )
 
 func TestStore(t *testing.T) {
