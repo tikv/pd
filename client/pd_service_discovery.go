@@ -911,7 +911,9 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 	if clusterInfo == nil || len(clusterInfo.ServiceModes) == 0 {
 		return errors.WithStack(errNoServiceModeReturned)
 	}
-	c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
+	if c.serviceModeUpdateCb != nil {
+		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
+	}
 	return nil
 }
 
