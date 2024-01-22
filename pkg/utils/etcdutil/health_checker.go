@@ -207,7 +207,10 @@ func (checker *healthChecker) patrol(ctx context.Context) ([]string, []string, b
 	return lastEps, pickedEps, !typeutil.AreStringSlicesEquivalent(lastEps, pickedEps)
 }
 
-// Divide the acceptable latency range into several parts, and pick the endpoints which are in the first acceptable latency range.
+// Divide the acceptable latency range into several parts, and pick the endpoints which
+// are in the first acceptable latency range. Currently, we only take the latency of the
+// last health check into consideration, and maybe in the future we could introduce more
+// factors to help improving the selection strategy.
 func (checker *healthChecker) pickEps(healthyProbes []healthProbe) []string {
 	var (
 		healthyCount = len(healthyProbes)
@@ -216,6 +219,17 @@ func (checker *healthChecker) pickEps(healthyProbes []healthProbe) []string {
 	if healthyCount == 0 {
 		return pickedEps
 	}
+	// Take the default value as an example, if we have 3 endpoints with latency like:
+	//   - A: 175ms
+	//   - B: 50ms
+	//   - C: 2.5s
+	// the distribution will be like:
+	//   - [0, 1s) -> {A, B}
+	//   - [1s, 2s)
+	//   - [2s, 3s) -> {C}
+	//   - ...
+	//  - [9s, 10s)
+	// Then the picked endpoints will be {A, B} and if C is in the last used endpoints, it will be evicted later.
 	factor := int(DefaultRequestTimeout / DefaultSlowRequestTime)
 	for i := 0; i < factor; i++ {
 		minLatency, maxLatency := DefaultSlowRequestTime*time.Duration(i), DefaultSlowRequestTime*time.Duration(i+1)
@@ -257,8 +271,8 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 		log.Info("evicted etcd endpoint found",
 			zap.String("endpoint", ep))
 	}
-	// Find all endpoints which are in both pickedEps and evictedEps.
-	// and check if they are picked continuously for more than `pickedCountThreshold` times.
+	// Find all endpoints which are in both pickedEps and evictedEps to
+	// increase their picked count.
 	for _, ep := range pickedEps {
 		if count, ok := checker.evictedEps.Load(ep); ok {
 			// Increase the count the endpoint being picked continuously.

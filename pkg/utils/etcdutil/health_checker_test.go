@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Test the endpoint picking and evicting logic.
 func TestPickEps(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
