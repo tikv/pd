@@ -48,7 +48,7 @@ kill_cluster:
 		echo $$pid; \
 		kill $$pid; \
 		echo "waiting for cluster to exit..."; \
-		sleep 10; \
+		sleep 30; \
 	fi
 
 test:
