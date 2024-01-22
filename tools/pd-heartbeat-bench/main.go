@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -38,12 +37,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
+	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"go.etcd.io/etcd/pkg/report"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -57,19 +56,16 @@ const (
 
 var clusterID uint64
 
-func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
-	return str
-}
-
-func newClient(cfg *config.Config) pdpb.PDClient {
-	addr := trimHTTPPrefix(cfg.PDAddr)
-	cc, err := grpc.Dial(addr, grpc.WithInsecure())
+func newClient(ctx context.Context, cfg *config.Config) (pdpb.PDClient, error) {
+	tlsConfig, err := cfg.Security.ToTLSConfig()
 	if err != nil {
-		log.Fatal("failed to create gRPC connection", zap.Error(err))
+		return nil, err
 	}
-	return pdpb.NewPDClient(cc)
+	cc, err := grpcutil.GetClientConn(ctx, cfg.PDAddr, tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	return pdpb.NewPDClient(cc), nil
 }
 
 func initClusterID(ctx context.Context, cli pdpb.PDClient) {
@@ -255,12 +251,17 @@ func (rs *Regions) init(cfg *config.Config, options *config.Options) []int {
 func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes []int) {
 	rs.updateRound += 1
 
-	rs.updateLeader = pick(indexes, cfg, options.GetLeaderUpdateRatio())
-	rs.updateEpoch = pick(indexes, cfg, options.GetEpochUpdateRatio())
-	rs.updateSpace = pick(indexes, cfg, options.GetSpaceUpdateRatio())
-	rs.updateFlow = pick(indexes, cfg, options.GetFlowUpdateRatio())
-	updatedRegionsMap := make(map[int]*pdpb.RegionHeartbeatRequest)
-	var awakenRegions []*pdpb.RegionHeartbeatRequest
+	reportRegions := pick(indexes, cfg.RegionCount, options.GetReportRatio())
+	reportCount := len(reportRegions)
+	rs.updateLeader = pick(reportRegions, reportCount, options.GetLeaderUpdateRatio())
+	rs.updateEpoch = pick(reportRegions, reportCount, options.GetEpochUpdateRatio())
+	rs.updateSpace = pick(reportRegions, reportCount, options.GetSpaceUpdateRatio())
+	rs.updateFlow = pick(reportRegions, reportCount, options.GetFlowUpdateRatio())
+	var (
+		updatedRegionsMap    = make(map[int]*pdpb.RegionHeartbeatRequest)
+		updatedStatisticsMap = make(map[int]*pdpb.RegionHeartbeatRequest)
+		awakenRegions        []*pdpb.RegionHeartbeatRequest
+	)
 
 	// update leader
 	for _, i := range rs.updateLeader {
@@ -293,24 +294,37 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes [
 			Put: uint64(queryUnit * rand.Float64()),
 		}
 		updatedRegionsMap[i] = region
+		updatedStatisticsMap[i] = region
 	}
 	// update interval
 	for _, region := range rs.regions {
 		region.Interval.StartTimestamp = region.Interval.EndTimestamp
 		region.Interval.EndTimestamp = region.Interval.StartTimestamp + regionReportInterval
 	}
-	for _, region := range updatedRegionsMap {
+	for _, i := range reportRegions {
+		region := rs.regions[i]
+		if r, exist := updatedRegionsMap[i]; exist {
+			region = r
+		}
+		// reset the statistics of the region which is not updated
+		if _, exist := updatedStatisticsMap[i]; !exist {
+			region.BytesWritten = 0
+			region.BytesRead = 0
+			region.KeysWritten = 0
+			region.KeysRead = 0
+			region.QueryStats = &pdpb.QueryStats{}
+		}
 		awakenRegions = append(awakenRegions, region)
 	}
-	noUpdatedRegions := pickNoUpdatedRegions(indexes, cfg, options.GetNoUpdateRatio(), updatedRegionsMap)
-	for _, i := range noUpdatedRegions {
-		awakenRegions = append(awakenRegions, rs.regions[i])
-	}
+
 	rs.awakenRegions.Store(awakenRegions)
 }
 
 func createHeartbeatStream(ctx context.Context, cfg *config.Config) pdpb.PD_RegionHeartbeatClient {
-	cli := newClient(cfg)
+	cli, err := newClient(ctx, cfg)
+	if err != nil {
+		log.Fatal("create client error", zap.Error(err))
+	}
 	stream, err := cli.RegionHeartbeat(ctx)
 	if err != nil {
 		log.Fatal("create stream error", zap.Error(err))
@@ -359,7 +373,7 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 			return
 		}
 	}
-	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
+	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)), zap.Int("reported-region-count", len(regions)))
 }
 
 // Stores contains store stats with lock.
@@ -425,28 +439,11 @@ func (s *Stores) update(rs *Regions) {
 	}
 }
 
-func pick(slice []int, cfg *config.Config, ratio float64) []int {
-	rand.Shuffle(cfg.RegionCount, func(i, j int) {
+func pick(slice []int, total int, ratio float64) []int {
+	rand.Shuffle(total, func(i, j int) {
 		slice[i], slice[j] = slice[j], slice[i]
 	})
-	return append(slice[:0:0], slice[0:int(float64(cfg.RegionCount)*ratio)]...)
-}
-
-func pickNoUpdatedRegions(slice []int, cfg *config.Config, ratio float64, updatedMap map[int]*pdpb.RegionHeartbeatRequest) []int {
-	if ratio == 0 {
-		return nil
-	}
-	rand.Shuffle(cfg.RegionCount, func(i, j int) {
-		slice[i], slice[j] = slice[j], slice[i]
-	})
-	NoUpdatedRegionsNum := int(float64(cfg.RegionCount) * ratio)
-	res := make([]int, 0, NoUpdatedRegionsNum)
-	for i := 0; len(res) < NoUpdatedRegionsNum; i++ {
-		if _, ok := updatedMap[slice[i]]; !ok {
-			res = append(res, slice[i])
-		}
-	}
-	return res
+	return append(slice[:0:0], slice[0:int(float64(total)*ratio)]...)
 }
 
 func main() {
@@ -487,7 +484,10 @@ func main() {
 		sig = <-sc
 		cancel()
 	}()
-	cli := newClient(cfg)
+	cli, err := newClient(ctx, cfg)
+	if err != nil {
+		log.Fatal("create client error", zap.Error(err))
+	}
 	initClusterID(ctx, cli)
 	go runHTTPServer(cfg, options)
 	regions := new(Regions)
@@ -604,7 +604,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 		newCfg.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
 		newCfg.EpochUpdateRatio = options.GetEpochUpdateRatio()
 		newCfg.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
-		newCfg.NoUpdateRatio = options.GetNoUpdateRatio()
+		newCfg.ReportRatio = options.GetReportRatio()
 		if err := c.BindJSON(&newCfg); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
@@ -622,7 +622,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 		output.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
 		output.EpochUpdateRatio = options.GetEpochUpdateRatio()
 		output.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
-		output.NoUpdateRatio = options.GetNoUpdateRatio()
+		output.ReportRatio = options.GetReportRatio()
 
 		c.IndentedJSON(http.StatusOK, output)
 	})
