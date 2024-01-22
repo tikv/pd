@@ -130,8 +130,8 @@ func (r *RegionStatistics) GetRegionStatsByType(typ RegionStatisticType) []*core
 
 // IsRegionStatsType returns whether the status of the region is the given type.
 func (r *RegionStatistics) IsRegionStatsType(regionID uint64, typ RegionStatisticType) bool {
-	r.Lock()
-	defer r.Unlock()
+	r.RLock()
+	defer r.RUnlock()
 	_, exist := r.stats[typ][regionID]
 	return exist
 }

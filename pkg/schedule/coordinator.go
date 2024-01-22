@@ -122,8 +122,8 @@ func (c *Coordinator) GetPatrolRegionsDuration() time.Duration {
 }
 
 func (c *Coordinator) setPatrolRegionsDuration(dur time.Duration) {
-	c.RLock()
-	defer c.RUnlock()
+	c.Lock()
+	defer c.Unlock()
 	c.patrolCheckRegionsDuration = dur
 }
 
