@@ -47,5 +47,6 @@ var (
 
 func init() {
 	prometheus.MustRegister(ServerMaxProcsGauge)
+	prometheus.MustRegister(ServerMemoryLimit)
 	prometheus.MustRegister(ServerInfoGauge)
 }
