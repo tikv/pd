@@ -42,9 +42,13 @@ import (
 
 type mode int
 
+// We have two ways to create HTTP client.
+// 1. using `NewClient` which created `DefaultPDServiceDiscovery`
+// 2. using `NewClientWithServiceDiscovery` which pass a `PDServiceDiscovery` as parameter
+// test cases should be run in both modes.
 const (
-	grpcMode mode = iota
-	httpMode
+	defaultServiceDiscovery mode = iota
+	specificServiceDiscovery
 )
 
 type httpClientTestSuite struct {
@@ -67,7 +71,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	suite.env = make(map[mode]*httpClientTestEnv)
 	re := suite.Require()
 
-	for _, mode := range []mode{grpcMode, httpMode} {
+	for _, mode := range []mode{defaultServiceDiscovery, specificServiceDiscovery} {
 		env := &httpClientTestEnv{}
 		env.ctx, env.cancelFunc = context.WithCancel(context.Background())
 
@@ -111,16 +115,16 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 
 // RunTestInTwoModes is to run test in two modes.
 func (suite *httpClientTestSuite) RunTestInTwoModes(test func(mode mode, client pd.Client)) {
-	// Run test in gRPC mode.
-	cli := setupCli(suite.Require(), suite.env[grpcMode].ctx, suite.env[grpcMode].endpoints)
+	// Run test with specific service discovery.
+	cli := setupCli(suite.Require(), suite.env[specificServiceDiscovery].ctx, suite.env[specificServiceDiscovery].endpoints)
 	sd := cli.GetServiceDiscovery()
 	client := pd.NewClientWithServiceDiscovery("pd-http-client-it-grpc", sd)
-	test(grpcMode, client)
+	test(specificServiceDiscovery, client)
 	client.Close()
 
-	// Run test in HTTP mode.
-	client = pd.NewClient("pd-http-client-it-http", suite.env[httpMode].endpoints)
-	test(httpMode, client)
+	// Run test with default service discovery.
+	client = pd.NewClient("pd-http-client-it-http", suite.env[defaultServiceDiscovery].endpoints)
+	test(defaultServiceDiscovery, client)
 	client.Close()
 }
 
@@ -668,7 +672,7 @@ func (suite *httpClientTestSuite) checkWithBackoffer(mode mode, client pd.Client
 
 func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	re := suite.Require()
-	env := suite.env[httpMode]
+	env := suite.env[defaultServiceDiscovery]
 
 	cli := setupCli(suite.Require(), env.ctx, env.endpoints)
 	sd := cli.GetServiceDiscovery()
