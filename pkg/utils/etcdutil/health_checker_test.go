@@ -33,14 +33,12 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "A",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "A",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "B",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "B",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{},
@@ -50,19 +48,16 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "A",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "A",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "B",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "B",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "C",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "C",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{},
@@ -72,19 +67,16 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "A",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "A",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "B",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "B",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "C",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "C",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{},
@@ -94,9 +86,8 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "C",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "C",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{"A": 0, "B": 0},
@@ -106,19 +97,16 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "A",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "A",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "B",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "B",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "C",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "C",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{"A": 1, "B": 1},
@@ -128,14 +116,12 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "B",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "B",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "C",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "C",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{"A": 0, "B": 2},
@@ -145,19 +131,16 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "A",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "A",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "B",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "B",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "C",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "C",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{"A": 1},
@@ -167,9 +150,8 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "D",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "D",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{"A": 0, "B": 0, "C": 0},
@@ -179,14 +161,12 @@ func TestPickEps(t *testing.T) {
 		{
 			[]healthProbe{
 				{
-					ep:      "B",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "B",
+					took: time.Millisecond,
 				},
 				{
-					ep:      "C",
-					healthy: true,
-					took:    time.Millisecond,
+					ep:   "C",
+					took: time.Millisecond,
 				},
 			},
 			map[string]int{"A": 0, "B": 1, "C": 1, "D": 0},
@@ -196,7 +176,14 @@ func TestPickEps(t *testing.T) {
 	checker := &healthChecker{}
 	lastEps := []string{}
 	for idx, tc := range testCases {
-		pickedEps := checker.pickEps(tc.healthProbes)
+		// Send the health probes to the channel.
+		probeCh := make(chan healthProbe, len(tc.healthProbes))
+		for _, probe := range tc.healthProbes {
+			probeCh <- probe
+		}
+		close(probeCh)
+		// Pick and filter the endpoints.
+		pickedEps := checker.pickEps(probeCh)
 		checker.updateEvictedEps(lastEps, pickedEps)
 		pickedEps = checker.filterEps(pickedEps)
 		// Check the states after finishing picking.

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -38,7 +39,9 @@ const pickedCountThreshold = 3
 // etcd endpoint without involving the load balancer of etcd client.
 type healthyClient struct {
 	*clientv3.Client
-	lastHealth time.Time
+	lastHealth  time.Time
+	healthState prometheus.Gauge
+	latency     prometheus.Observer
 }
 
 // healthChecker is used to check the health of etcd endpoints. Inside the checker,
@@ -131,8 +134,9 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 
 func (checker *healthChecker) close() {
 	checker.healthyClients.Range(func(key, value interface{}) bool {
-		client := value.(*healthyClient)
-		client.Close()
+		healthyCli := value.(*healthyClient)
+		healthyCli.healthState.Set(0)
+		healthyCli.Client.Close()
 		return true
 	})
 }
@@ -144,9 +148,8 @@ func resetClientEndpoints(client *clientv3.Client, endpoints ...string) {
 }
 
 type healthProbe struct {
-	ep      string
-	healthy bool
-	took    time.Duration
+	ep   string
+	took time.Duration
 }
 
 // See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
@@ -162,43 +165,37 @@ func (checker *healthChecker) patrol(ctx context.Context) ([]string, []string, b
 			defer wg.Done()
 			defer logutil.LogPanic()
 			var (
-				ep     = key.(string)
-				client = value.(*healthyClient).Client
-				start  = time.Now()
+				ep          = key.(string)
+				healthyCli  = value.(*healthyClient)
+				client      = healthyCli.Client
+				healthState = healthyCli.healthState
+				latency     = healthyCli.latency
+				start       = time.Now()
 			)
+			// Check the health of the endpoint.
 			healthy := IsHealthy(ctx, client)
+			took := time.Since(start)
+			latency.Observe(took.Seconds())
+			if !healthy {
+				healthState.Set(0)
+				log.Warn("etcd endpoint is unhealthy",
+					zap.String("endpoint", ep),
+					zap.Duration("took", took))
+				return
+			}
+			healthState.Set(1)
 			// If the endpoint is healthy, update its last health time.
-			if healthy {
-				checker.storeClient(ep, &healthyClient{
-					Client:     client,
-					lastHealth: start,
-				})
-			}
-			// Send the probe result to the channel.
-			probeCh <- healthProbe{
-				ep:      ep,
-				healthy: healthy,
-				took:    time.Since(start),
-			}
+			checker.storeClient(ep, client, start)
+			// Send the healthy probe result to the channel.
+			probeCh <- healthProbe{ep, took}
 		}(key, value)
 		return true
 	})
 	wg.Wait()
 	close(probeCh)
-	healthProbes := make([]healthProbe, 0, count)
-	for probe := range probeCh {
-		// Skip the unhealthy endpoints.
-		if !probe.healthy {
-			log.Warn("etcd endpoint is unhealthy",
-				zap.String("endpoint", probe.ep),
-				zap.Duration("took", probe.took))
-			continue
-		}
-		healthProbes = append(healthProbes, probe)
-	}
 	var (
 		lastEps   = checker.client.Endpoints()
-		pickedEps = checker.pickEps(healthProbes)
+		pickedEps = checker.pickEps(probeCh)
 	)
 	if len(pickedEps) > 0 {
 		checker.updateEvictedEps(lastEps, pickedEps)
@@ -211,12 +208,12 @@ func (checker *healthChecker) patrol(ctx context.Context) ([]string, []string, b
 // are in the first acceptable latency range. Currently, we only take the latency of the
 // last health check into consideration, and maybe in the future we could introduce more
 // factors to help improving the selection strategy.
-func (checker *healthChecker) pickEps(healthyProbes []healthProbe) []string {
+func (checker *healthChecker) pickEps(probeCh <-chan healthProbe) []string {
 	var (
-		healthyCount = len(healthyProbes)
-		pickedEps    = make([]string, 0, healthyCount)
+		count     = len(probeCh)
+		pickedEps = make([]string, 0, count)
 	)
-	if healthyCount == 0 {
+	if count == 0 {
 		return pickedEps
 	}
 	// Take the default value as an example, if we have 3 endpoints with latency like:
@@ -233,7 +230,7 @@ func (checker *healthChecker) pickEps(healthyProbes []healthProbe) []string {
 	factor := int(DefaultRequestTimeout / DefaultSlowRequestTime)
 	for i := 0; i < factor; i++ {
 		minLatency, maxLatency := DefaultSlowRequestTime*time.Duration(i), DefaultSlowRequestTime*time.Duration(i+1)
-		for _, probe := range healthyProbes {
+		for probe := range probeCh {
 			if minLatency <= probe.took && probe.took < maxLatency {
 				log.Debug("pick healthy etcd endpoint within acceptable latency range",
 					zap.Duration("min-latency", minLatency),
@@ -322,7 +319,7 @@ func (checker *healthChecker) update() {
 	for ep := range epMap {
 		client := checker.loadClient(ep)
 		if client == nil {
-			checker.addClient(ep, time.Now())
+			checker.initClient(ep)
 			continue
 		}
 		since := time.Since(client.lastHealth)
@@ -369,7 +366,7 @@ func (checker *healthChecker) loadClient(ep string) *healthyClient {
 	return nil
 }
 
-func (checker *healthChecker) addClient(ep string, lastHealth time.Time) {
+func (checker *healthChecker) initClient(ep string) {
 	client, err := newClient(checker.tlsConfig, ep)
 	if err != nil {
 		log.Error("failed to create etcd healthy client",
@@ -377,20 +374,23 @@ func (checker *healthChecker) addClient(ep string, lastHealth time.Time) {
 			zap.Error(err))
 		return
 	}
-	checker.healthyClients.Store(ep, &healthyClient{
-		Client:     client,
-		lastHealth: lastHealth,
-	})
+	checker.storeClient(ep, client, time.Now())
 }
 
-func (checker *healthChecker) storeClient(ep string, client *healthyClient) {
-	checker.healthyClients.Store(ep, client)
+func (checker *healthChecker) storeClient(ep string, client *clientv3.Client, lastHealth time.Time) {
+	checker.healthyClients.Store(ep, &healthyClient{
+		Client:      client,
+		lastHealth:  lastHealth,
+		healthState: etcdStateGauge.WithLabelValues(ep),
+		latency:     etcdEndpointLatency.WithLabelValues(ep),
+	})
 }
 
 func (checker *healthChecker) removeClient(ep string) {
 	if client, ok := checker.healthyClients.LoadAndDelete(ep); ok {
-		err := client.(*healthyClient).Close()
-		if err != nil {
+		healthyCli := client.(*healthyClient)
+		healthyCli.healthState.Set(0)
+		if err := healthyCli.Close(); err != nil {
 			log.Error("failed to close etcd healthy client",
 				zap.String("endpoint", ep),
 				zap.Error(err))
