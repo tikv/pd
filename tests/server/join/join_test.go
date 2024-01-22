@@ -47,7 +47,7 @@ func TestSimpleJoin(t *testing.T) {
 
 	pd1 := cluster.GetServer("pd1")
 	client := pd1.GetEtcdClient()
-	members, err := etcdutil.ListEtcdMembers(client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 1)
 
@@ -58,7 +58,7 @@ func TestSimpleJoin(t *testing.T) {
 	re.NoError(err)
 	_, err = os.Stat(path.Join(pd2.GetConfig().DataDir, "join"))
 	re.False(os.IsNotExist(err))
-	members, err = etcdutil.ListEtcdMembers(client)
+	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(pd1.GetClusterID(), pd2.GetClusterID())
@@ -73,7 +73,7 @@ func TestSimpleJoin(t *testing.T) {
 	re.NoError(err)
 	_, err = os.Stat(path.Join(pd3.GetConfig().DataDir, "join"))
 	re.False(os.IsNotExist(err))
-	members, err = etcdutil.ListEtcdMembers(client)
+	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 3)
 	re.Equal(pd1.GetClusterID(), pd3.GetClusterID())
@@ -108,7 +108,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	res := cluster.RunServer(pd3)
 	re.Error(<-res)
 
-	members, err := etcdutil.ListEtcdMembers(client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 }
@@ -141,7 +141,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 	res := cluster.RunServer(pd3)
 	re.Error(<-res)
 
-	members, err := etcdutil.ListEtcdMembers(client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 }

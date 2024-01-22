@@ -353,7 +353,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	err = s.initMember(etcd)
+	err = s.initMember(newCtx, etcd)
 	if err != nil {
 		return err
 	}
@@ -396,9 +396,9 @@ func (s *Server) startClient() error {
 	return nil
 }
 
-func (s *Server) initMember(etcd *embed.Etcd) error {
+func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
 	// Update advertise peer URLs.
-	etcdMembers, err := etcdutil.ListEtcdMembers(s.client)
+	etcdMembers, err := etcdutil.ListEtcdMembers(ctx, s.client)
 	if err != nil {
 		return err
 	}
