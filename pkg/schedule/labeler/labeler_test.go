@@ -189,20 +189,24 @@ func TestTxnWithEtcd(t *testing.T) {
 	// test patch rules in batch with duplicated rule id
 	patch.SetRules = patch.SetRules[:0]
 	patch.DeleteRules = patch.DeleteRules[:0]
-	patch.SetRules = append(patch.SetRules, &LabelRule{
-		ID: "rule_1",
-		Labels: []RegionLabel{
-			{Key: "k_1", Value: "v_1"},
-		},
-		RuleType: "key-range",
-		Data:     MakeKeyRanges("", ""),
-	})
+	for i := 0; i <= 3; i++ {
+		patch.SetRules = append(patch.SetRules, &LabelRule{
+			ID: "rule_1",
+			Labels: []RegionLabel{
+				{Key: fmt.Sprintf("k_%d", i), Value: fmt.Sprintf("v_%d", i)},
+			},
+			RuleType: "key-range",
+			Data:     MakeKeyRanges("", ""),
+		})
+	}
 	patch.DeleteRules = append(patch.DeleteRules, "rule_1")
 	err = labeler.Patch(patch)
 	re.NoError(err)
 	allRules = labeler.GetAllLabelRules()
 	re.Len(allRules, 1)
 	re.Equal("rule_1", allRules[0].ID)
+	re.Len(allRules[0].Labels, 1)
+	re.Equal("k_3", allRules[0].Labels[0].Key)
 }
 
 func TestIndex(t *testing.T) {
