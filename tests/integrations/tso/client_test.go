@@ -183,6 +183,9 @@ func (suite *tsoClientTestSuite) TearDownSuite() {
 		suite.tsoCluster.Destroy()
 	}
 	suite.cluster.Destroy()
+	for _, client := range suite.clients {
+		client.Close()
+	}
 }
 
 func (suite *tsoClientTestSuite) TestGetTS() {
@@ -252,6 +255,7 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	defer cancel()
 	client := mcs.SetupClientWithKeyspaceID(
 		ctx, re, keyspaceID, strings.Split(suite.backendEndpoints, ","))
+	defer client.Close()
 	var lastTS uint64
 	for j := 0; j < tsoRequestRound; j++ {
 		physical, logical, err := client.GetTS(ctx)
@@ -491,6 +495,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	re.NoError(err)
+	defer pdClient.Close()
 
 	// Create a TSO cluster which has 2 servers
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)

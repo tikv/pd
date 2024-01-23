@@ -396,6 +396,9 @@ func createClientWithKeyspace(
 		nil, keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
+		if c.pdSvcDiscovery != nil {
+			c.pdSvcDiscovery.Close()
+		}
 		return nil, err
 	}
 

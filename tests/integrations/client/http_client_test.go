@@ -675,6 +675,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	env := suite.env[defaultServiceDiscovery]
 
 	cli := setupCli(suite.Require(), env.ctx, env.endpoints)
+	defer cli.Close()
 	sd := cli.GetServiceDiscovery()
 
 	metricCnt := prometheus.NewCounterVec(
