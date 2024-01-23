@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
@@ -264,10 +263,15 @@ func (checker *healthChecker) pickEps(probeCh <-chan healthProbe) []string {
 }
 
 func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
+	// Create a set of picked endpoints for faster lookup
+	pickedSet := make(map[string]bool, len(pickedEps))
+	for _, ep := range pickedEps {
+		pickedSet[ep] = true
+	}
 	// Reset the count to 0 if it's in evictedEps but not in the pickedEps.
 	checker.evictedEps.Range(func(key, _ interface{}) bool {
 		ep := key.(string)
-		if !slice.Contains[string](pickedEps, ep) {
+		if !pickedSet[ep] {
 			checker.evictedEps.Store(ep, 0)
 			log.Info("reset evicted etcd endpoint picked count",
 				zap.String("endpoint", ep),
@@ -278,7 +282,7 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 	// Find all endpoints which are in the lastEps but not in the pickedEps,
 	// and add them to the evictedEps.
 	for _, ep := range lastEps {
-		if slice.Contains[string](pickedEps, ep) {
+		if pickedSet[ep] {
 			continue
 		}
 		checker.evictedEps.Store(ep, 0)
@@ -324,7 +328,7 @@ func (checker *healthChecker) filterEps(eps []string) []string {
 }
 
 func (checker *healthChecker) update() {
-	eps := checker.syncUrls()
+	eps := checker.syncURLs()
 	if len(eps) == 0 {
 		log.Warn("no available etcd endpoint returned by etcd cluster",
 			zap.String("source", checker.source))
@@ -427,7 +431,7 @@ func (checker *healthChecker) removeClient(ep string) {
 }
 
 // See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170-L183
-func (checker *healthChecker) syncUrls() (eps []string) {
+func (checker *healthChecker) syncURLs() (eps []string) {
 	resp, err := ListEtcdMembers(clientv3.WithRequireLeader(checker.client.Ctx()), checker.client)
 	if err != nil {
 		log.Error("failed to list members",
