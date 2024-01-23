@@ -10220,7 +10220,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Endpoint Health State",
+          "title": "Endpoint health state",
           "tooltip": {
             "shared": true,
             "sort": 0,
