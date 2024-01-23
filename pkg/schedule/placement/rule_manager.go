@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -202,7 +201,7 @@ func (m *RuleManager) loadRules() error {
 			return m.storage.DeleteRule(txn, localKey)
 		})
 	}
-	return m.runBatchOpInTxn(batch)
+	return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 }
 
 func (m *RuleManager) loadGroups() error {
@@ -521,7 +520,7 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 			})
 		}
 	}
-	return m.runBatchOpInTxn(batch)
+	return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 }
 
 // SetRules inserts or updates lots of Rules at once.
@@ -812,28 +811,6 @@ func (m *RuleManager) IsInitialized() bool {
 	m.RLock()
 	defer m.RUnlock()
 	return m.initialized
-}
-
-func (m *RuleManager) runBatchOpInTxn(batch []func(kv.Txn) error) error {
-	// execute batch in transaction with limited operations per transaction
-	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
-		end := start + etcdutil.MaxEtcdTxnOps
-		if end > len(batch) {
-			end = len(batch)
-		}
-		err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
-			for _, op := range batch[start:end] {
-				if err = op(txn); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // checkRule check the rule whether will have RuleFit after FitRegion

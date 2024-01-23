@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
@@ -88,11 +89,12 @@ func (l *RegionLabeler) checkAndClearExpiredLabels() {
 			continue
 		}
 		if len(rule.Labels) == 0 {
-			err = l.storage.DeleteRegionRule(key)
-			delete(l.labelRules, key)
-			deleted = true
+			err = l.DeleteLabelRuleLocked(key)
+			if err == nil {
+				deleted = true
+			}
 		} else {
-			err = l.storage.SaveRegionRule(key, rule)
+			err = l.SaveLabelRuleLocked(rule)
 		}
 		if err != nil {
 			log.Error("failed to save rule expired label rule", zap.String("rule-key", key), zap.Error(err))
@@ -123,8 +125,10 @@ func (l *RegionLabeler) loadRules() error {
 	if err != nil {
 		return err
 	}
-	for _, d := range toDelete {
-		if err = l.storage.DeleteRegionRule(d); err != nil {
+	for _, id := range toDelete {
+		if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
+			return l.storage.DeleteRegionRule(txn, id)
+		}); err != nil {
 			return err
 		}
 	}
@@ -197,11 +201,10 @@ func (l *RegionLabeler) getAndCheckRule(id string, now time.Time) *LabelRule {
 		return rule
 	}
 	if len(rule.Labels) == 0 {
-		l.storage.DeleteRegionRule(id)
-		delete(l.labelRules, id)
+		l.DeleteLabelRuleLocked(id)
 		return nil
 	}
-	l.storage.SaveRegionRule(id, rule)
+	l.SaveLabelRuleLocked(rule)
 	return rule
 }
 
@@ -221,17 +224,28 @@ func (l *RegionLabeler) SetLabelRuleLocked(rule *LabelRule) error {
 	if err := rule.checkAndAdjust(); err != nil {
 		return err
 	}
-	if err := l.storage.SaveRegionRule(rule.ID, rule); err != nil {
+	if err := l.SaveLabelRuleLocked(rule); err != nil {
 		return err
 	}
 	l.labelRules[rule.ID] = rule
 	return nil
 }
 
+// SaveLabelRuleLocked inserts or updates a LabelRule but not buildRangeList.
+// It only saves the rule to storage, and does not update the in-memory states.
+func (l *RegionLabeler) SaveLabelRuleLocked(rule *LabelRule) error {
+	return l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
+		return l.storage.SaveRegionRule(txn, rule.ID, rule)
+	})
+}
+
 // DeleteLabelRule removes a LabelRule.
 func (l *RegionLabeler) DeleteLabelRule(id string) error {
 	l.Lock()
 	defer l.Unlock()
+	if _, ok := l.labelRules[id]; !ok {
+		return errs.ErrRegionRuleNotFound.FastGenByArgs(id)
+	}
 	if err := l.DeleteLabelRuleLocked(id); err != nil {
 		return err
 	}
@@ -241,10 +255,9 @@ func (l *RegionLabeler) DeleteLabelRule(id string) error {
 
 // DeleteLabelRuleLocked removes a LabelRule but not buildRangeList.
 func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
-	if _, ok := l.labelRules[id]; !ok {
-		return errs.ErrRegionRuleNotFound.FastGenByArgs(id)
-	}
-	if err := l.storage.DeleteRegionRule(id); err != nil {
+	if err := l.storage.RunInTxn(l.ctx, func(txn kv.Txn) error {
+		return l.storage.DeleteRegionRule(txn, id)
+	}); err != nil {
 		return err
 	}
 	delete(l.labelRules, id)
@@ -253,22 +266,37 @@ func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
 
 // Patch updates multiple region rules in a batch.
 func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
+	// setRulesMap is used to solve duplicate entries in DeleteRules and SetRules.
+	// Note: We maintain compatibility with the previous behavior, which is to process DeleteRules before SetRules
+	// If there are duplicate rules, we will prioritize SetRules and select the last one from SetRules.
+	setRulesMap := make(map[string]*LabelRule)
+
 	for _, rule := range patch.SetRules {
 		if err := rule.checkAndAdjust(); err != nil {
 			return err
 		}
+		setRulesMap[rule.ID] = rule
 	}
 
 	// save to storage
+	var batch []func(kv.Txn) error
 	for _, key := range patch.DeleteRules {
-		if err := l.storage.DeleteRegionRule(key); err != nil {
-			return err
+		if _, ok := setRulesMap[key]; ok {
+			continue
 		}
+		localKey := key
+		batch = append(batch, func(txn kv.Txn) error {
+			return l.storage.DeleteRegionRule(txn, localKey)
+		})
 	}
-	for _, rule := range patch.SetRules {
-		if err := l.storage.SaveRegionRule(rule.ID, rule); err != nil {
-			return err
-		}
+	for _, rule := range setRulesMap {
+		localID, localRule := rule.ID, rule
+		batch = append(batch, func(txn kv.Txn) error {
+			return l.storage.SaveRegionRule(txn, localID, localRule)
+		})
+	}
+	if err := endpoint.RunBatchOpInTxn(l.ctx, l.storage, batch); err != nil {
+		return err
 	}
 
 	// update in-memory states.
@@ -278,7 +306,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	for _, key := range patch.DeleteRules {
 		delete(l.labelRules, key)
 	}
-	for _, rule := range patch.SetRules {
+	for _, rule := range setRulesMap {
 		l.labelRules[rule.ID] = rule
 	}
 	l.BuildRangeListLocked()

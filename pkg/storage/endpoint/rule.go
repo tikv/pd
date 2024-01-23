@@ -27,16 +27,17 @@ type RuleStorage interface {
 	LoadRule(ruleKey string) (string, error)
 	LoadRules(f func(k, v string)) error
 	LoadRuleGroups(f func(k, v string)) error
+	LoadRegionRules(f func(k, v string)) error
+
 	// We need to use txn to avoid concurrent modification.
 	// And it is helpful for the scheduling server to watch the rule.
 	SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error
 	DeleteRule(txn kv.Txn, ruleKey string) error
 	SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error
 	DeleteRuleGroup(txn kv.Txn, groupID string) error
+	SaveRegionRule(txn kv.Txn, ruleKey string, rule interface{}) error
+	DeleteRegionRule(txn kv.Txn, ruleKey string) error
 
-	LoadRegionRules(f func(k, v string)) error
-	SaveRegionRule(ruleKey string, rule interface{}) error
-	DeleteRegionRule(ruleKey string) error
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
@@ -73,13 +74,13 @@ func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
 }
 
 // SaveRegionRule saves a region rule to the storage.
-func (se *StorageEndpoint) SaveRegionRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(regionLabelKeyPath(ruleKey), rule)
+func (se *StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule interface{}) error {
+	return saveJSONInTxn(txn, regionLabelKeyPath(ruleKey), rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
-func (se *StorageEndpoint) DeleteRegionRule(ruleKey string) error {
-	return se.Remove(regionLabelKeyPath(ruleKey))
+func (se *StorageEndpoint) DeleteRegionRule(txn kv.Txn, ruleKey string) error {
+	return txn.Remove(regionLabelKeyPath(ruleKey))
 }
 
 // LoadRule load a placement rule from storage.

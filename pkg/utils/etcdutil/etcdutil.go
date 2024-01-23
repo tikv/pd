@@ -17,7 +17,6 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -114,13 +113,13 @@ func AddEtcdMember(client *clientv3.Client, urls []string) (*clientv3.MemberAddR
 }
 
 // ListEtcdMembers returns a list of internal etcd members.
-func ListEtcdMembers(client *clientv3.Client) (*clientv3.MemberListResponse, error) {
+func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.MemberListResponse, error) {
 	failpoint.Inject("SlowEtcdMemberList", func(val failpoint.Value) {
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)
 	})
-	ctx, cancel := context.WithTimeout(client.Ctx(), DefaultRequestTimeout)
-	listResp, err := client.MemberList(ctx)
+	newCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
+	listResp, err := client.MemberList(newCtx)
 	cancel()
 	if err != nil {
 		return listResp, errs.ErrEtcdMemberList.Wrap(err).GenWithStackByCause()
@@ -271,226 +270,9 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 	failpoint.Inject("closeTick", func() {
 		failpoint.Return(client, err)
 	})
-	initHealthyChecker(tickerInterval, tlsConfig, client)
+	initHealthChecker(tickerInterval, tlsConfig, client)
 
 	return client, err
-}
-
-// healthyClient will wrap a etcd client and record its last health time.
-// The etcd client inside will only maintain one connection to the etcd server
-// to make sure each healthyClient could be used to check the health of a certain
-// etcd endpoint without involving the load balancer of etcd client.
-type healthyClient struct {
-	*clientv3.Client
-	lastHealth time.Time
-}
-
-// healthyChecker is used to check the health of etcd endpoints. Inside the checker,
-// we will maintain a map from each available etcd endpoint to its healthyClient.
-type healthyChecker struct {
-	tickerInterval time.Duration
-	tlsConfig      *tls.Config
-
-	sync.Map // map[string]*healthyClient
-	// client is the etcd client the healthy checker is guarding, it will be set with
-	// the checked healthy endpoints dynamically and periodically.
-	client *clientv3.Client
-}
-
-// initHealthyChecker initializes the healthy checker for etcd client.
-func initHealthyChecker(tickerInterval time.Duration, tlsConfig *tls.Config, client *clientv3.Client) {
-	healthyChecker := &healthyChecker{
-		tickerInterval: tickerInterval,
-		tlsConfig:      tlsConfig,
-		client:         client,
-	}
-	// Healthy checker has the same lifetime with the given etcd client.
-	ctx := client.Ctx()
-	// Sync etcd endpoints and check the last health time of each endpoint periodically.
-	go healthyChecker.syncer(ctx)
-	// Inspect the health of each endpoint by reading the health key periodically.
-	go healthyChecker.inspector(ctx)
-}
-
-func (checker *healthyChecker) syncer(ctx context.Context) {
-	defer logutil.LogPanic()
-	checker.update()
-	ticker := time.NewTicker(checker.tickerInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("etcd client is closed, exit update endpoint goroutine")
-			return
-		case <-ticker.C:
-			checker.update()
-		}
-	}
-}
-
-func (checker *healthyChecker) inspector(ctx context.Context) {
-	defer logutil.LogPanic()
-	ticker := time.NewTicker(checker.tickerInterval)
-	defer ticker.Stop()
-	lastAvailable := time.Now()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("etcd client is closed, exit health check goroutine")
-			checker.close()
-			return
-		case <-ticker.C:
-			lastEps := checker.client.Endpoints()
-			healthyEps := checker.patrol(ctx)
-			if len(healthyEps) == 0 {
-				// when all endpoints are unhealthy, try to reset endpoints to update connect
-				// rather than delete them to avoid there is no any endpoint in client.
-				// Note: reset endpoints will trigger subconn closed, and then trigger reconnect.
-				// otherwise, the subconn will be retrying in grpc layer and use exponential backoff,
-				// and it cannot recover as soon as possible.
-				if time.Since(lastAvailable) > etcdServerDisconnectedTimeout {
-					log.Info("no available endpoint, try to reset endpoints",
-						zap.Strings("last-endpoints", lastEps))
-					resetClientEndpoints(checker.client, lastEps...)
-				}
-			} else {
-				if !typeutil.AreStringSlicesEquivalent(healthyEps, lastEps) {
-					checker.client.SetEndpoints(healthyEps...)
-					etcdStateGauge.WithLabelValues("endpoints").Set(float64(len(healthyEps)))
-					log.Info("update endpoints",
-						zap.String("num-change", fmt.Sprintf("%d->%d", len(lastEps), len(healthyEps))),
-						zap.Strings("last-endpoints", lastEps),
-						zap.Strings("endpoints", checker.client.Endpoints()))
-				}
-				lastAvailable = time.Now()
-			}
-		}
-	}
-}
-
-func (checker *healthyChecker) close() {
-	checker.Range(func(key, value interface{}) bool {
-		client := value.(*healthyClient)
-		client.Close()
-		return true
-	})
-}
-
-// Reset the etcd client endpoints to trigger reconnect.
-func resetClientEndpoints(client *clientv3.Client, endpoints ...string) {
-	client.SetEndpoints()
-	client.SetEndpoints(endpoints...)
-}
-
-func (checker *healthyChecker) patrol(ctx context.Context) []string {
-	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
-	count := 0
-	checker.Range(func(key, value interface{}) bool {
-		count++
-		return true
-	})
-	var (
-		wg          sync.WaitGroup
-		hch         = make(chan string, count)
-		healthyList = make([]string, 0, count)
-	)
-	checker.Range(func(key, value interface{}) bool {
-		wg.Add(1)
-		go func(key, value interface{}) {
-			defer wg.Done()
-			defer logutil.LogPanic()
-			ep := key.(string)
-			client := value.(*healthyClient)
-			if IsHealthy(ctx, client.Client) {
-				hch <- ep
-				checker.Store(ep, &healthyClient{
-					Client:     client.Client,
-					lastHealth: time.Now(),
-				})
-				return
-			}
-		}(key, value)
-		return true
-	})
-	wg.Wait()
-	close(hch)
-	for h := range hch {
-		healthyList = append(healthyList, h)
-	}
-	return healthyList
-}
-
-func (checker *healthyChecker) update() {
-	eps := syncUrls(checker.client)
-	epMap := make(map[string]struct{}, len(eps))
-	for _, ep := range eps {
-		epMap[ep] = struct{}{}
-	}
-
-	for ep := range epMap {
-		// check if client exists, if not, create one, if exists, check if it's offline or disconnected.
-		if client, ok := checker.Load(ep); ok {
-			lastHealthy := client.(*healthyClient).lastHealth
-			if time.Since(lastHealthy) > etcdServerOfflineTimeout {
-				log.Info("some etcd server maybe offline", zap.String("endpoint", ep))
-				checker.removeClient(ep)
-			}
-			if time.Since(lastHealthy) > etcdServerDisconnectedTimeout {
-				resetClientEndpoints(client.(*healthyClient).Client, ep)
-			}
-			continue
-		}
-		checker.addClient(ep, time.Now())
-	}
-
-	// check if there are some stale clients, if exists, remove them.
-	checker.Range(func(key, value interface{}) bool {
-		ep := key.(string)
-		if _, ok := epMap[ep]; !ok {
-			log.Info("remove stale etcd client", zap.String("endpoint", ep))
-			checker.removeClient(ep)
-		}
-		return true
-	})
-}
-
-func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
-	client, err := newClient(checker.tlsConfig, ep)
-	if err != nil {
-		log.Error("failed to create etcd healthy client", zap.Error(err))
-		return
-	}
-	checker.Store(ep, &healthyClient{
-		Client:     client,
-		lastHealth: lastHealth,
-	})
-}
-
-func (checker *healthyChecker) removeClient(ep string) {
-	if client, ok := checker.LoadAndDelete(ep); ok {
-		err := client.(*healthyClient).Close()
-		if err != nil {
-			log.Error("failed to close etcd healthy client", zap.Error(err))
-		}
-	}
-}
-
-func syncUrls(client *clientv3.Client) []string {
-	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/clientv3/client.go#L170-L183
-	ctx, cancel := context.WithTimeout(clientv3.WithRequireLeader(client.Ctx()), DefaultRequestTimeout)
-	defer cancel()
-	mresp, err := client.MemberList(ctx)
-	if err != nil {
-		log.Error("failed to list members", errs.ZapError(err))
-		return []string{}
-	}
-	var eps []string
-	for _, m := range mresp.Members {
-		if len(m.Name) != 0 && !m.IsLearner {
-			eps = append(eps, m.ClientURLs...)
-		}
-	}
-	return eps
 }
 
 // CreateHTTPClient creates a http client with the given tls config.

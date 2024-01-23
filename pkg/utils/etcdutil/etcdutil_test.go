@@ -53,7 +53,7 @@ func TestMemberHelpers(t *testing.T) {
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
 	// Test ListEtcdMembers
-	listResp1, err := ListEtcdMembers(client1)
+	listResp1, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp1.Members, 1)
 	// types.ID is an alias of uint64.
@@ -74,7 +74,7 @@ func TestMemberHelpers(t *testing.T) {
 	_, err = RemoveEtcdMember(client1, uint64(etcd2.Server.ID()))
 	re.NoError(err)
 
-	listResp3, err := ListEtcdMembers(client1)
+	listResp3, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp3.Members, 1)
 	re.Equal(uint64(etcd1.Server.ID()), listResp3.Members[0].ID)
