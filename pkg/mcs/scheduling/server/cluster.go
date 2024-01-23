@@ -478,8 +478,8 @@ func (c *Cluster) collectClusterMetrics() {
 func (c *Cluster) resetMetrics() {
 	statistics.Reset()
 
-	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
-	c.coordinator.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
 	c.resetClusterMetrics()
 }
 

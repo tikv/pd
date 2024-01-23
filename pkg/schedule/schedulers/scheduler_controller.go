@@ -137,7 +137,7 @@ func (c *Controller) isSchedulingHalted() bool {
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
-func (c *Controller) ResetSchedulerMetrics() {
+func ResetSchedulerMetrics() {
 	schedulerStatusGauge.Reset()
 	ruleStatusGauge.Reset()
 	// create in map again

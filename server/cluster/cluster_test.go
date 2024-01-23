@@ -2504,8 +2504,8 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 		controller.CollectSchedulerMetrics()
 		co.GetCluster().(*RaftCluster).collectClusterMetrics()
 	}
-	co.ResetHotSpotMetrics()
-	controller.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
 	co.GetCluster().(*RaftCluster).resetClusterMetrics()
 	wg.Wait()
 }
@@ -2550,8 +2550,8 @@ func TestCollectMetrics(t *testing.T) {
 		s.Stats = nil
 	}
 	re.Equal(status1, status2)
-	co.ResetHotSpotMetrics()
-	controller.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
+	schedulers.ResetSchedulerMetrics()
 	co.GetCluster().(*RaftCluster).resetClusterMetrics()
 }
 

@@ -2176,8 +2176,8 @@ func (c *RaftCluster) resetMetrics() {
 	statistics.Reset()
 
 	if !c.isAPIServiceMode {
-		c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
-		c.coordinator.ResetHotSpotMetrics()
+		schedulers.ResetSchedulerMetrics()
+		schedule.ResetHotSpotMetrics()
 		c.resetClusterMetrics()
 	}
 	c.resetHealthStatus()
