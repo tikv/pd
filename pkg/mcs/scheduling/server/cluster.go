@@ -552,9 +552,8 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	isNew, _, saveCache, _ := core.GenerateRegionGuideFunc(true)(region, origin)
-	if !saveCache && !isNew {
+	_, saveCache, _ := core.GenerateRegionGuideFunc(true)(region, origin)
+	if !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
@@ -576,7 +575,7 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		cluster.HandleOverlaps(c, overlaps)
 	}
 
-	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, c.IsPrepared())
+	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
 	return nil
 }
 
