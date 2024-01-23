@@ -213,7 +213,7 @@ func TestRegionNoLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
@@ -240,7 +240,7 @@ func TestRegionNoLeader(t *testing.T) {
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	for i := 0; i < len(stores); i++ {
-		pdTests.MustPutStore(re, cluster, stores[i])
+		tests.MustPutStore(re, cluster, stores[i])
 	}
 
 	metaRegion := &metapb.Region{
@@ -257,7 +257,7 @@ func TestRegionNoLeader(t *testing.T) {
 
 	cluster.GetLeaderServer().GetRaftCluster().GetBasicCluster().SetRegion(r)
 
-	cmd := ctl.GetRootCmd()
-	_, err = tests.ExecuteCommand(cmd, "-u", url, "region", "100")
+	cmd := pdctlCmd.GetRootCmd()
+	_, err = pdctl.ExecuteCommand(cmd, "-u", url, "region", "100")
 	re.NoError(err)
 }
