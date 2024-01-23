@@ -375,8 +375,9 @@ func NewHTTPClientWithRequestChecker(checker requestChecker) *http.Client {
 	}
 }
 
-// newClientWithoutServiceDiscovery creates a PD HTTP client with the given PD addresses and TLS config without service discovery.
-func newClientWithoutServiceDiscovery(
+// newClientWithoutInitServiceDiscovery creates a PD HTTP client
+// with the given PD addresses and TLS config without init service discovery.
+func newClientWithoutInitServiceDiscovery(
 	source string,
 	pdAddrs []string,
 	opts ...ClientOption,
