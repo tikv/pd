@@ -40,32 +40,32 @@ func TestLeadership(t *testing.T) {
 	leadership1 := NewLeadership(client, "/test_leader", "test_leader_1")
 	leadership2 := NewLeadership(client, "/test_leader", "test_leader_2")
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	// leadership1 starts first and get the leadership
-	err := leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+	err := leadership1.Campaign(ctx, defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	// leadership2 starts then and can not get the leadership
-	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
+	err = leadership2.Campaign(ctx, defaultLeaseTimeout, "test_leader_2")
 	re.Error(err)
 
 	re.True(leadership1.Check())
 	// leadership2 failed, so the check should return false
 	re.False(leadership2.Check())
 
-	// Sleep longer than the defaultLeaseTimeout to wait for the lease expires
+	// Sleep longer than the defaultLeaseTimeout
+	// and keep alive will keep the leadership
 	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
 
-	re.False(leadership1.Check())
+	re.True(leadership1.Check())
 	re.False(leadership2.Check())
 
 	// Delete the leader key and campaign for leadership1
 	err = leadership1.DeleteLeaderKey()
 	re.NoError(err)
-	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+	err = leadership1.Campaign(ctx, defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	re.True(leadership1.Check())
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go leadership1.Keep(ctx)
 
 	// Sleep longer than the defaultLeaseTimeout
 	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
@@ -76,12 +76,9 @@ func TestLeadership(t *testing.T) {
 	// Delete the leader key and re-campaign for leadership2
 	err = leadership1.DeleteLeaderKey()
 	re.NoError(err)
-	err = leadership2.Campaign(defaultLeaseTimeout, "test_leader_2")
+	err = leadership2.Campaign(ctx, defaultLeaseTimeout, "test_leader_2")
 	re.NoError(err)
 	re.True(leadership2.Check())
-	ctx, cancel = context.WithCancel(context.Background())
-	defer cancel()
-	go leadership2.Keep(ctx)
 
 	// Sleep longer than the defaultLeaseTimeout
 	time.Sleep((defaultLeaseTimeout + 1) * time.Second)
@@ -94,10 +91,6 @@ func TestLeadership(t *testing.T) {
 	leadership2.Reset()
 	re.False(leadership1.Check())
 	re.False(leadership2.Check())
-
-	// Try to keep the reset leadership.
-	leadership1.Keep(ctx)
-	leadership2.Keep(ctx)
 
 	// Check the lease.
 	lease1 := leadership1.getLease()
@@ -193,9 +186,12 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 	re.NoError(err)
 	defer client2.Close()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
 	leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
-	err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+	err = leadership1.Campaign(ctx, defaultLeaseTimeout, "test_leader_1")
 	re.NoError(err)
 	resp, err := client2.Get(context.Background(), leaderKey)
 	re.NoError(err)
@@ -229,14 +225,14 @@ func TestRequestProgress(t *testing.T) {
 		re.NoError(err)
 		defer client2.Close()
 
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 		leaderKey := "/test_leader"
 		leadership1 := NewLeadership(client1, leaderKey, "test_leader_1")
 		leadership2 := NewLeadership(client2, leaderKey, "test_leader_2")
-		err = leadership1.Campaign(defaultLeaseTimeout, "test_leader_1")
+		err = leadership1.Campaign(ctx, defaultLeaseTimeout, "test_leader_1")
 		re.NoError(err)
 
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 		resp, err := client2.Get(ctx, leaderKey)
 		re.NoError(err)
 		go func() {

@@ -1679,7 +1679,10 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
-	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	// Campaign leader and maintain the leadership.
+	if err := s.member.CampaignLeader(ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
 				zap.String("campaign-leader-name", s.Name()))
@@ -1691,21 +1694,16 @@ func (s *Server) campaignLeader() {
 		return
 	}
 
-	// Start keepalive the leadership and enable TSO service.
+	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
+	// After the leadership granted, TSO could be ready to provide service.
 	// TSO service is strictly enabled/disabled by PD leader lease for 2 reasons:
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
 		cancel()
 		s.member.ResetLeader()
 	})
-
-	// maintain the PD leadership, after this, TSO can be service.
-	s.member.KeepLeader(ctx)
-	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
-
 	if !s.IsAPIServiceMode() {
 		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
 		if err != nil {

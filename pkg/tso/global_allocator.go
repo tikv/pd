@@ -568,7 +568,10 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	log.Info("start to campaign the primary",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
-	if err := gta.am.member.CampaignLeader(gta.ctx, gta.am.leaderLease); err != nil {
+	ctx, cancel := context.WithCancel(gta.ctx)
+	defer cancel()
+	// Campaign leader and maintain the leadership.
+	if err := gta.am.member.CampaignLeader(ctx, gta.am.leaderLease); err != nil {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
@@ -585,23 +588,18 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		return
 	}
 
-	// Start keepalive the leadership and enable TSO service.
+	// After the leadership granted, TSO could be ready to provide service.
 	// TSO service is strictly enabled/disabled by the leader lease for 2 reasons:
 	//   1. lease based approach is not affected by thread pause, slow runtime schedule, etc.
 	//   2. load region could be slow. Based on lease we can recover TSO service faster.
-	ctx, cancel := context.WithCancel(gta.ctx)
+	log.Info("campaign tso primary ok",
+		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
+		zap.String("campaign-tso-primary-name", gta.member.Name()))
 	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
 		cancel()
 		gta.member.ResetLeader()
 	})
-
-	// maintain the the leadership, after this, TSO can be service.
-	gta.member.KeepLeader(ctx)
-	log.Info("campaign tso primary ok",
-		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-		zap.String("campaign-tso-primary-name", gta.member.Name()))
-
 	allocator, err := gta.am.GetAllocator(GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get the global tso allocator",

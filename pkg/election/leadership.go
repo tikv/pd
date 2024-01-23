@@ -147,7 +147,7 @@ func (ls *Leadership) addCampaignTimes() {
 }
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
-func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
+func (ls *Leadership) Campaign(ctx context.Context, leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.addCampaignTimes()
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
@@ -170,6 +170,9 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	if err := newLease.Grant(leaseTimeout); err != nil {
 		return err
 	}
+	// Start keepalive to maintain the leadership.
+	ls.Keep(ctx)
+
 	finalCmps := make([]clientv3.Cmp, 0, len(cmps)+1)
 	finalCmps = append(finalCmps, cmps...)
 	// The leader key must not exist, so the CreateRevision is 0.

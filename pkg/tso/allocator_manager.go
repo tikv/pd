@@ -121,9 +121,7 @@ type ElectionMember interface {
 	CheckLeader() (leader member.ElectionLeader, checkAgain bool)
 	// EnableLeader declares the member itself to be the leader.
 	EnableLeader()
-	// KeepLeader is used to keep the leader's leadership.
-	KeepLeader(ctx context.Context)
-	// CampaignLeader is used to campaign the leadership and make it become a leader in an election group.
+	// CampaignLeader is used to campaign and maintain the leadership, and make it become a leader in an election group.
 	CampaignLeader(ctx context.Context, leaseTimeout int64) error
 	// ResetLeader is used to reset the member's current leadership.
 	// Basically it will reset the leader lease and unset leader info.
@@ -640,7 +638,10 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 			}
 		}
 	})
-	if err := allocator.CampaignAllocatorLeader(am.leaderLease, cmps...); err != nil {
+	ctx, cancel := context.WithCancel(loopCtx)
+	defer cancel()
+	// Campaign the Local TSO Allocator leader and maintain the leadership.
+	if err := allocator.CampaignAllocatorLeader(ctx, am.leaderLease, cmps...); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("failed to campaign local tso allocator leader due to txn conflict, another allocator may campaign successfully",
 				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
@@ -658,12 +659,8 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 		return
 	}
 
-	// Start keepalive the Local TSO Allocator leadership and enable Local TSO service.
-	ctx, cancel := context.WithCancel(loopCtx)
-	defer cancel()
+	// After the leadership granted, Local TSO could be ready to provide service.
 	defer am.ResetAllocatorGroup(allocator.GetDCLocation())
-	// Maintain the Local TSO Allocator leader
-	go allocator.KeepAllocatorLeader(ctx)
 	log.Info("campaign local tso allocator leader ok",
 		logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
 		zap.String("dc-location", allocator.GetDCLocation()),

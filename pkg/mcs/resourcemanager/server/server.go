@@ -153,7 +153,10 @@ func (s *Server) primaryElectionLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
+	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	defer cancel()
+	// Campaign leader and maintain the leadership.
+	if err := s.participant.CampaignLeader(ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign resource manager primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
@@ -165,19 +168,13 @@ func (s *Server) campaignLeader() {
 		return
 	}
 
-	// Start keepalive the leadership and enable Resource Manager service.
-	ctx, cancel := context.WithCancel(s.serverLoopCtx)
+	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
+	// After the leadership granted, Resource Manager could be ready to provide service.
 	var resetLeaderOnce sync.Once
 	defer resetLeaderOnce.Do(func() {
-		cancel()
 		s.participant.ResetLeader()
 		member.ServiceMemberGauge.WithLabelValues(serviceName).Set(0)
 	})
-
-	// maintain the leadership, after this, Resource Manager could be ready to provide service.
-	s.participant.KeepLeader(ctx)
-	log.Info("campaign resource manager primary ok", zap.String("campaign-resource-manager-primary-name", s.participant.Name()))
-
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
 		cb(ctx)

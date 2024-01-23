@@ -67,10 +67,10 @@ func newTestKeyFile(t *testing.T, re *require.Assertions, key ...string) (keyFil
 	return keyFilePath
 }
 
-func newTestLeader(re *require.Assertions, client *clientv3.Client) *election.Leadership {
+func newTestLeader(ctx context.Context, re *require.Assertions, client *clientv3.Client) *election.Leadership {
 	leader := election.NewLeadership(client, "test_leader", "test")
 	timeout := int64(30000000) // about a year.
-	err := leader.Campaign(timeout, "")
+	err := leader.Campaign(ctx, timeout, "")
 	re.NoError(err)
 	return leader
 }
@@ -148,7 +148,9 @@ func TestNewKeyManagerLoadKeys(t *testing.T) {
 	// Initialize.
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	leadership := newTestLeader(ctx, re, client)
 	// Use default config.
 	config := &Config{}
 	err := config.Adjust()
@@ -232,7 +234,9 @@ func TestGetKey(t *testing.T) {
 	// Initialize.
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	leadership := newTestLeader(ctx, re, client)
 	// Store initial keys in etcd.
 	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
@@ -287,7 +291,9 @@ func TestLoadKeyEmpty(t *testing.T) {
 	// Initialize.
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	leadership := newTestLeader(ctx, re, client)
 	// Store initial keys in etcd.
 	masterKeyMeta := newTestMasterKey(keyFile)
 	keys := &encryptionpb.KeyDictionary{
@@ -323,7 +329,7 @@ func TestWatcher(t *testing.T) {
 	defer cancel()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
@@ -407,7 +413,9 @@ func TestSetLeadershipWithEncryptionOff(t *testing.T) {
 	re.NoError(err)
 	re.Nil(m.keys.Load())
 	// Set leadership
-	leadership := newTestLeader(re, client)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	leadership := newTestLeader(ctx, re, client)
 	err = m.SetLeadership(leadership)
 	re.NoError(err)
 	// Check encryption stays off.
@@ -424,7 +432,7 @@ func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 	defer cancel()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
@@ -477,7 +485,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	defer cancel()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Mock time
@@ -553,7 +561,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	defer cancel()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Mock time
@@ -624,7 +632,7 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 	defer cancel()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Mock time
@@ -700,7 +708,7 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	keyFile2 := newTestKeyFile(t, re, testMasterKey2)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Mock time
@@ -764,7 +772,9 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	// Initialize.
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Mock time
@@ -842,7 +852,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	defer cancel()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Listen on watcher event
@@ -898,7 +908,7 @@ func TestKeyRotation(t *testing.T) {
 	defer cancel()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Mock time
@@ -994,7 +1004,7 @@ func TestKeyRotationConflict(t *testing.T) {
 	defer cancel()
 	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
-	leadership := newTestLeader(re, client)
+	leadership := newTestLeader(ctx, re, client)
 	// Setup helper
 	helper := defaultKeyManagerHelper()
 	// Mock time
