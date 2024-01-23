@@ -47,6 +47,7 @@ type healthyClient struct {
 // healthChecker is used to check the health of etcd endpoints. Inside the checker,
 // we will maintain a map from each available etcd endpoint to its healthyClient.
 type healthChecker struct {
+	source         string
 	tickerInterval time.Duration
 	tlsConfig      *tls.Config
 
@@ -59,14 +60,23 @@ type healthChecker struct {
 	// client is the etcd client the health checker is guarding, it will be set with
 	// the checked healthy endpoints dynamically and periodically.
 	client *clientv3.Client
+
+	endpointCountState prometheus.Gauge
 }
 
 // initHealthChecker initializes the health checker for etcd client.
-func initHealthChecker(tickerInterval time.Duration, tlsConfig *tls.Config, client *clientv3.Client) {
+func initHealthChecker(
+	tickerInterval time.Duration,
+	tlsConfig *tls.Config,
+	client *clientv3.Client,
+	source string,
+) {
 	healthChecker := &healthChecker{
-		tickerInterval: tickerInterval,
-		tlsConfig:      tlsConfig,
-		client:         client,
+		source:             source,
+		tickerInterval:     tickerInterval,
+		tlsConfig:          tlsConfig,
+		client:             client,
+		endpointCountState: etcdStateGauge.WithLabelValues(source, endpointLabel),
 	}
 	// A health checker has the same lifetime with the given etcd client.
 	ctx := client.Ctx()
@@ -121,7 +131,7 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 			if changed {
 				oldNum, newNum := len(lastEps), len(pickedEps)
 				checker.client.SetEndpoints(pickedEps...)
-				etcdStateGauge.WithLabelValues("endpoints").Set(float64(newNum))
+				checker.endpointCountState.Set(float64(newNum))
 				log.Info("update endpoints",
 					zap.String("num-change", fmt.Sprintf("%d->%d", oldNum, newNum)),
 					zap.Strings("last-endpoints", lastEps),
@@ -381,8 +391,8 @@ func (checker *healthChecker) storeClient(ep string, client *clientv3.Client, la
 	checker.healthyClients.Store(ep, &healthyClient{
 		Client:      client,
 		lastHealth:  lastHealth,
-		healthState: etcdStateGauge.WithLabelValues(ep),
-		latency:     etcdEndpointLatency.WithLabelValues(ep),
+		healthState: etcdStateGauge.WithLabelValues(checker.source, ep),
+		latency:     etcdEndpointLatency.WithLabelValues(checker.source, ep),
 	})
 }
 
