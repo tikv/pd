@@ -1499,7 +1499,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer cmdDurationScanRegions.Observe(time.Since(start).Seconds())
+	defer func() { cmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx
