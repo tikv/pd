@@ -27,8 +27,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 func TestAdjustRule(t *testing.T) {
@@ -138,11 +140,18 @@ func TestGetSetRule(t *testing.T) {
 		labeler.DeleteLabelRule(r.ID)
 	}
 	re.Empty(labeler.GetAllLabelRules())
+}
 
+func TestTxnWithEtcd(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client, "")
+	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	re.NoError(err)
 	// test patch rules in batch
 	rulesNum := 200
-	patch.SetRules = patch.SetRules[:0]
-	patch.DeleteRules = patch.DeleteRules[:0]
+	patch := LabelRulePatch{}
 	for i := 1; i <= rulesNum; i++ {
 		patch.SetRules = append(patch.SetRules, &LabelRule{
 			ID: fmt.Sprintf("rule_%d", i),
@@ -155,7 +164,7 @@ func TestGetSetRule(t *testing.T) {
 	}
 	err = labeler.Patch(patch)
 	re.NoError(err)
-	allRules = labeler.GetAllLabelRules()
+	allRules := labeler.GetAllLabelRules()
 	re.Len(allRules, rulesNum)
 	sort.Slice(allRules, func(i, j int) bool {
 		i1, err := strconv.Atoi(allRules[i].ID[5:])
@@ -176,6 +185,24 @@ func TestGetSetRule(t *testing.T) {
 	re.NoError(err)
 	allRules = labeler.GetAllLabelRules()
 	re.Empty(allRules)
+
+	// test patch rules in batch with duplicated rule id
+	patch.SetRules = patch.SetRules[:0]
+	patch.DeleteRules = patch.DeleteRules[:0]
+	patch.SetRules = append(patch.SetRules, &LabelRule{
+		ID: "rule_1",
+		Labels: []RegionLabel{
+			{Key: "k_1", Value: "v_1"},
+		},
+		RuleType: "key-range",
+		Data:     MakeKeyRanges("", ""),
+	})
+	patch.DeleteRules = append(patch.DeleteRules, "rule_1")
+	err = labeler.Patch(patch)
+	re.NoError(err)
+	allRules = labeler.GetAllLabelRules()
+	re.Len(allRules, 1)
+	re.Equal("rule_1", allRules[0].ID)
 }
 
 func TestIndex(t *testing.T) {

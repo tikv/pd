@@ -266,15 +266,24 @@ func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
 
 // Patch updates multiple region rules in a batch.
 func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
+	// setRulesMap is used to solve duplicate entries in DeleteRules and SetRules.
+	// Note: We maintain compatibility with the previous behavior, which is to process DeleteRules before SetRules
+	// If there are duplicate rules, we will prioritize SetRules.
+	setRulesMap := make(map[string]*LabelRule)
+
 	for _, rule := range patch.SetRules {
 		if err := rule.checkAndAdjust(); err != nil {
 			return err
 		}
+		setRulesMap[rule.ID] = rule
 	}
 
 	// save to storage
 	var batch []func(kv.Txn) error
 	for _, key := range patch.DeleteRules {
+		if _, ok := setRulesMap[key]; ok {
+			continue
+		}
 		localKey := key
 		batch = append(batch, func(txn kv.Txn) error {
 			return l.storage.DeleteRegionRule(txn, localKey)
