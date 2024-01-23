@@ -177,10 +177,8 @@ func TestEtcdClientSync(t *testing.T) {
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
 	defer etcd2.Close()
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
-	testutil.Eventually(re, func() bool {
-		// wait for etcd client sync endpoints
-		return len(client1.Endpoints()) == 2
-	})
+	// wait for etcd client sync endpoints
+	checkEtcdEndpointNum(re, client1, 2)
 
 	// Remove the first member and close the etcd1.
 	_, err := RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
@@ -188,12 +186,21 @@ func TestEtcdClientSync(t *testing.T) {
 	etcd1.Close()
 
 	// Check the client can get the new member with the new endpoints.
-	testutil.Eventually(re, func() bool {
-		// wait for etcd client sync endpoints
-		return len(client1.Endpoints()) == 1
-	})
+	checkEtcdEndpointNum(re, client1, 1)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+}
+
+func checkEtcdEndpointNum(re *require.Assertions, client *clientv3.Client, num int) {
+	testutil.Eventually(re, func() bool {
+		return len(client.Endpoints()) == num
+	})
+}
+
+func checkEtcdClientHealth(re *require.Assertions, client *clientv3.Client) {
+	testutil.Eventually(re, func() bool {
+		return IsHealthy(context.Background(), client)
+	})
 }
 
 func TestEtcdScaleInAndOut(t *testing.T) {
@@ -228,25 +235,21 @@ func TestRandomKillEtcd(t *testing.T) {
 	// Start a etcd server.
 	etcds, client1, clean := NewTestEtcdCluster(t, 3)
 	defer clean()
-	testutil.Eventually(re, func() bool {
-		return len(client1.Endpoints()) == 3
-	})
+	checkEtcdEndpointNum(re, client1, 3)
 
 	// Randomly kill an etcd server and restart it
 	cfgs := []embed.Config{etcds[0].Config(), etcds[1].Config(), etcds[2].Config()}
 	for i := 0; i < 10; i++ {
 		killIndex := rand.Intn(len(etcds))
 		etcds[killIndex].Close()
-		testutil.Eventually(re, func() bool {
-			return IsHealthy(context.Background(), client1)
-		})
+		checkEtcdEndpointNum(re, client1, 2)
+		checkEtcdClientHealth(re, client1)
 		etcd, err := embed.StartEtcd(&cfgs[killIndex])
 		re.NoError(err)
 		<-etcd.Server.ReadyNotify()
 		etcds[killIndex] = etcd
-		testutil.Eventually(re, func() bool {
-			return IsHealthy(context.Background(), client1)
-		})
+		checkEtcdEndpointNum(re, client1, 3)
+		checkEtcdClientHealth(re, client1)
 	}
 	for _, etcd := range etcds {
 		if etcd != nil {
