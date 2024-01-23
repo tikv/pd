@@ -185,7 +185,7 @@ func (suite *ruleTestSuite) TestSet() {
 }
 
 func (suite *ruleTestSuite) TestGet() {
-	rule := placement.Rule{GroupID: "a", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
+	rule := &placement.Rule{GroupID: "a", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1}
 	data, err := json.Marshal(rule)
 	suite.NoError(err)
 	re := suite.Require()
@@ -194,7 +194,7 @@ func (suite *ruleTestSuite) TestGet() {
 
 	testCases := []struct {
 		name  string
-		rule  placement.Rule
+		rule  *placement.Rule
 		found bool
 		code  int
 	}{
@@ -206,7 +206,7 @@ func (suite *ruleTestSuite) TestGet() {
 		},
 		{
 			name:  "not found",
-			rule:  placement.Rule{GroupID: "a", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
+			rule:  &placement.Rule{GroupID: "a", ID: "30", StartKeyHex: "1111", EndKeyHex: "3333", Role: "voter", Count: 1},
 			found: false,
 			code:  404,
 		},
@@ -217,7 +217,7 @@ func (suite *ruleTestSuite) TestGet() {
 		url := fmt.Sprintf("%s/rule/%s/%s", suite.urlPrefix, testCase.rule.GroupID, testCase.rule.ID)
 		if testCase.found {
 			err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-			suite.compareRule(&resp, &testCase.rule)
+			suite.compareRule(&resp, testCase.rule)
 		} else {
 			err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, testCase.code))
 		}
