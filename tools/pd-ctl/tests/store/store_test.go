@@ -17,6 +17,10 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,10 +29,13 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
+	"go.etcd.io/etcd/pkg/transport"
 )
 
 func TestStore(t *testing.T) {
@@ -543,4 +550,96 @@ func TestTombstoneStore(t *testing.T) {
 	message := string(output)
 	re.Contains(message, "2")
 	re.Contains(message, "3")
+}
+
+func TestStoreTLS(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	certPath := "../cert"
+	certScript := "../cert_opt.sh"
+	// generate certs
+	if err := os.Mkdir(certPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(certPath); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	tlsInfo := transport.TLSInfo{
+		KeyFile:       filepath.Join(certPath, "pd-server-key.pem"),
+		CertFile:      filepath.Join(certPath, "pd-server.pem"),
+		TrustedCAFile: filepath.Join(certPath, "ca.pem"),
+	}
+	cluster, err := pdTests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+		conf.Security.TLSConfig = grpcutil.TLSConfig{
+			KeyPath:  tlsInfo.KeyFile,
+			CertPath: tlsInfo.CertFile,
+			CAPath:   tlsInfo.TrustedCAFile,
+		}
+		conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
+		conf.ClientUrls = strings.ReplaceAll(conf.ClientUrls, "http", "https")
+		conf.AdvertisePeerUrls = strings.ReplaceAll(conf.AdvertisePeerUrls, "http", "https")
+		conf.PeerUrls = strings.ReplaceAll(conf.PeerUrls, "http", "https")
+		conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
+	})
+	re.NoError(err)
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	cmd := ctl.GetRootCmd()
+
+	stores := []*api.StoreInfo{
+		{
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            1,
+					State:         metapb.StoreState_Up,
+					NodeState:     metapb.NodeState_Serving,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Up.String(),
+			},
+		},
+		{
+			Store: &api.MetaStore{
+				Store: &metapb.Store{
+					Id:            2,
+					State:         metapb.StoreState_Up,
+					NodeState:     metapb.NodeState_Serving,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Up.String(),
+			},
+		},
+	}
+
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+
+	for _, store := range stores {
+		pdTests.MustPutStore(re, cluster, store.Store.Store)
+	}
+	defer cluster.Destroy()
+
+	pdAddr := cluster.GetConfig().GetClientURL()
+	pdAddr = strings.ReplaceAll(pdAddr, "http", "https")
+	// store command
+	args := []string{"-u", pdAddr, "store",
+		"--cacert=../cert/ca.pem",
+		"--cert=../cert/client.pem",
+		"--key=../cert/client-key.pem"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	storesInfo := new(api.StoresInfo)
+	re.NoError(json.Unmarshal(output, &storesInfo))
+	tests.CheckStoresInfo(re, storesInfo.Stores, stores)
 }

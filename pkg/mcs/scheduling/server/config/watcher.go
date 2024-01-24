@@ -146,6 +146,7 @@ func (cw *Watcher) initializeConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
 	)
 	cw.configWatcher.StartWatchLoop()
 	return cw.configWatcher.WaitLoad()
@@ -176,7 +177,7 @@ func (cw *Watcher) initializeTTLConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	cw.ttlConfigWatcher.StartWatchLoop()
 	return cw.ttlConfigWatcher.WaitLoad()
@@ -217,7 +218,7 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	cw.schedulerConfigWatcher.StartWatchLoop()
 	return cw.schedulerConfigWatcher.WaitLoad()

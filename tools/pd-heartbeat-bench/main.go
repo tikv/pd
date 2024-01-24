@@ -186,7 +186,8 @@ func newEndKey(id uint64, keyLen int) []byte {
 
 // Regions simulates all regions to heartbeat.
 type Regions struct {
-	regions []*pdpb.RegionHeartbeatRequest
+	regions       []*pdpb.RegionHeartbeatRequest
+	awakenRegions atomic.Value
 
 	updateRound int
 
@@ -258,22 +259,27 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes [
 	rs.updateEpoch = pick(indexes, cfg, options.GetEpochUpdateRatio())
 	rs.updateSpace = pick(indexes, cfg, options.GetSpaceUpdateRatio())
 	rs.updateFlow = pick(indexes, cfg, options.GetFlowUpdateRatio())
+	updatedRegionsMap := make(map[int]*pdpb.RegionHeartbeatRequest)
+	var awakenRegions []*pdpb.RegionHeartbeatRequest
 
 	// update leader
 	for _, i := range rs.updateLeader {
 		region := rs.regions[i]
 		region.Leader = region.Region.Peers[rs.updateRound%cfg.Replica]
+		updatedRegionsMap[i] = region
 	}
 	// update epoch
 	for _, i := range rs.updateEpoch {
 		region := rs.regions[i]
 		region.Region.RegionEpoch.Version += 1
+		updatedRegionsMap[i] = region
 	}
 	// update space
 	for _, i := range rs.updateSpace {
 		region := rs.regions[i]
 		region.ApproximateSize = uint64(bytesUnit * rand.Float64())
 		region.ApproximateKeys = uint64(keysUint * rand.Float64())
+		updatedRegionsMap[i] = region
 	}
 	// update flow
 	for _, i := range rs.updateFlow {
@@ -286,12 +292,21 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes [
 			Get: uint64(queryUnit * rand.Float64()),
 			Put: uint64(queryUnit * rand.Float64()),
 		}
+		updatedRegionsMap[i] = region
 	}
 	// update interval
 	for _, region := range rs.regions {
 		region.Interval.StartTimestamp = region.Interval.EndTimestamp
 		region.Interval.EndTimestamp = region.Interval.StartTimestamp + regionReportInterval
 	}
+	for _, region := range updatedRegionsMap {
+		awakenRegions = append(awakenRegions, region)
+	}
+	noUpdatedRegions := pickNoUpdatedRegions(indexes, cfg, options.GetNoUpdateRatio(), updatedRegionsMap)
+	for _, i := range noUpdatedRegions {
+		awakenRegions = append(awakenRegions, rs.regions[i])
+	}
+	rs.awakenRegions.Store(awakenRegions)
 }
 
 func createHeartbeatStream(ctx context.Context, cfg *config.Config) pdpb.PD_RegionHeartbeatClient {
@@ -312,8 +327,14 @@ func createHeartbeatStream(ctx context.Context, cfg *config.Config) pdpb.PD_Regi
 
 func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_RegionHeartbeatClient, storeID uint64, rep report.Report) {
 	defer wg.Done()
-	var regions []*pdpb.RegionHeartbeatRequest
-	for _, region := range rs.regions {
+	var regions, toUpdate []*pdpb.RegionHeartbeatRequest
+	updatedRegions := rs.awakenRegions.Load()
+	if updatedRegions == nil {
+		toUpdate = rs.regions
+	} else {
+		toUpdate = updatedRegions.([]*pdpb.RegionHeartbeatRequest)
+	}
+	for _, region := range toUpdate {
 		if region.Leader.StoreId != storeID {
 			continue
 		}
@@ -409,6 +430,23 @@ func pick(slice []int, cfg *config.Config, ratio float64) []int {
 		slice[i], slice[j] = slice[j], slice[i]
 	})
 	return append(slice[:0:0], slice[0:int(float64(cfg.RegionCount)*ratio)]...)
+}
+
+func pickNoUpdatedRegions(slice []int, cfg *config.Config, ratio float64, updatedMap map[int]*pdpb.RegionHeartbeatRequest) []int {
+	if ratio == 0 {
+		return nil
+	}
+	rand.Shuffle(cfg.RegionCount, func(i, j int) {
+		slice[i], slice[j] = slice[j], slice[i]
+	})
+	NoUpdatedRegionsNum := int(float64(cfg.RegionCount) * ratio)
+	res := make([]int, 0, NoUpdatedRegionsNum)
+	for i := 0; len(res) < NoUpdatedRegionsNum; i++ {
+		if _, ok := updatedMap[slice[i]]; !ok {
+			res = append(res, slice[i])
+		}
+	}
+	return res
 }
 
 func main() {
@@ -562,11 +600,19 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 	pprof.Register(engine)
 	engine.PUT("config", func(c *gin.Context) {
 		newCfg := cfg.Clone()
+		newCfg.FlowUpdateRatio = options.GetFlowUpdateRatio()
+		newCfg.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
+		newCfg.EpochUpdateRatio = options.GetEpochUpdateRatio()
+		newCfg.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
+		newCfg.NoUpdateRatio = options.GetNoUpdateRatio()
 		if err := c.BindJSON(&newCfg); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}
-
+		if err := newCfg.Validate(); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
 		options.SetOptions(newCfg)
 		c.String(http.StatusOK, "Successfully updated the configuration")
 	})
@@ -576,6 +622,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 		output.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
 		output.EpochUpdateRatio = options.GetEpochUpdateRatio()
 		output.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
+		output.NoUpdateRatio = options.GetNoUpdateRatio()
 
 		c.IndentedJSON(http.StatusOK, output)
 	})

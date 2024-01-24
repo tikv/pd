@@ -1139,12 +1139,19 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if buckets == nil || len(buckets.Keys) == 0 {
 			continue
 		}
+		var (
+			storeLabel   string
+			storeAddress string
+		)
 		store := rc.GetLeaderStoreByRegionID(buckets.GetRegionId())
 		if store == nil {
-			return errors.Errorf("the store of the bucket in region %v is not found ", buckets.GetRegionId())
+			// As TiKV report buckets just after the region heartbeat, for new created region, PD may receive buckets report before the first region heartbeat is handled.
+			// So we should not return error here.
+			log.Warn("the store of the bucket in region is not found ", zap.Uint64("region-id", buckets.GetRegionId()))
+		} else {
+			storeLabel = strconv.FormatUint(store.GetID(), 10)
+			storeAddress = store.GetAddress()
 		}
-		storeLabel := strconv.FormatUint(store.GetID(), 10)
-		storeAddress := store.GetAddress()
 		bucketReportCounter.WithLabelValues(storeAddress, storeLabel, "report", "recv").Inc()
 
 		start := time.Now()

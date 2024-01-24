@@ -43,8 +43,7 @@ func SetNewPDClient(addrs []string, opts ...pd.ClientOption) {
 	if PDCli != nil {
 		PDCli.Close()
 	}
-	withOpts := append(opts, pd.WithLoggerRedirection("fatal", ""))
-	PDCli = pd.NewClient(pdControlCallerID, addrs, withOpts...)
+	PDCli = pd.NewClient(pdControlCallerID, addrs, opts...)
 }
 
 // TODO: replace dialClient with PDCli
@@ -69,7 +68,7 @@ func InitHTTPSClient(pdAddrs, caPath, certPath, keyPath string) error {
 			&http.Transport{TLSClientConfig: tlsConfig}, pdControlCallerID),
 	}
 
-	SetNewPDClient(strings.Split(pdAddrs, ","), pd.WithTLSConfig(tlsConfig))
+	SetNewPDClient(strings.Split(pdAddrs, ","), pd.WithTLSConfig(tlsConfig.Clone()))
 
 	return nil
 }
@@ -135,6 +134,11 @@ func dial(req *http.Request) (string, error) {
 	content, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
+	}
+	if req.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) == "true" {
+		if resp.Header.Get(apiutil.XForwardedToMicroServiceHeader) == "true" {
+			return string(content), errors.Errorf("the request is forwarded to micro service unexpectedly")
+		}
 	}
 	return string(content), nil
 }

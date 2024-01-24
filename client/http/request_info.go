@@ -39,6 +39,8 @@ const (
 	getStoresName                           = "GetStores"
 	getStoreName                            = "GetStore"
 	setStoreLabelsName                      = "SetStoreLabels"
+	getConfigName                           = "GetConfig"
+	setConfigName                           = "SetConfig"
 	getScheduleConfigName                   = "GetScheduleConfig"
 	setScheduleConfigName                   = "SetScheduleConfig"
 	getClusterVersionName                   = "GetClusterVersion"
@@ -69,6 +71,10 @@ const (
 	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
 	getPDVersionName                        = "GetPDVersion"
+	resetTSName                             = "ResetTS"
+	resetBaseAllocIDName                    = "ResetBaseAllocID"
+	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
+	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
 )
 
 type requestInfo struct {

@@ -37,6 +37,7 @@ import (
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -364,4 +365,47 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		})
 		s.clusters[apiMode] = cluster
 	}
+}
+
+type idAllocator struct {
+	allocator *mockid.IDAllocator
+}
+
+func (i *idAllocator) alloc() uint64 {
+	v, _ := i.allocator.Alloc()
+	return v
+}
+
+// InitRegions is used for test purpose.
+func InitRegions(regionLen int) []*core.RegionInfo {
+	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
+	regions := make([]*core.RegionInfo, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		r := &metapb.Region{
+			Id: allocator.alloc(),
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers: []*metapb.Peer{
+				{Id: allocator.alloc(), StoreId: uint64(1)},
+				{Id: allocator.alloc(), StoreId: uint64(2)},
+				{Id: allocator.alloc(), StoreId: uint64(3)},
+			},
+		}
+		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
+		// Here is used to simulate the upgrade process.
+		if i < regionLen/2 {
+			buckets := &metapb.Buckets{
+				RegionId: r.Id,
+				Keys:     [][]byte{r.StartKey, r.EndKey},
+				Version:  1,
+			}
+			region.UpdateBuckets(buckets, region.GetBuckets())
+		}
+		regions = append(regions, region)
+	}
+	return regions
 }

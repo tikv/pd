@@ -19,14 +19,19 @@ import (
 	"math"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/pingcap/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -35,12 +40,27 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
+type mode int
+
+// We have two ways to create HTTP client.
+// 1. using `NewClient` which created `DefaultPDServiceDiscovery`
+// 2. using `NewClientWithServiceDiscovery` which pass a `PDServiceDiscovery` as parameter
+// test cases should be run in both modes.
+const (
+	defaultServiceDiscovery mode = iota
+	specificServiceDiscovery
+)
+
 type httpClientTestSuite struct {
 	suite.Suite
+	env map[mode]*httpClientTestEnv
+}
+
+type httpClientTestEnv struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 	cluster    *tests.TestCluster
-	client     pd.Client
+	endpoints  []string
 }
 
 func TestHTTPClientTestSuite(t *testing.T) {
@@ -48,114 +68,150 @@ func TestHTTPClientTestSuite(t *testing.T) {
 }
 
 func (suite *httpClientTestSuite) SetupSuite() {
+	suite.env = make(map[mode]*httpClientTestEnv)
 	re := suite.Require()
-	var err error
-	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 2)
-	re.NoError(err)
-	err = suite.cluster.RunInitialServers()
-	re.NoError(err)
-	leader := suite.cluster.WaitLeader()
-	re.NotEmpty(leader)
-	leaderServer := suite.cluster.GetLeaderServer()
-	err = leaderServer.BootstrapCluster()
-	re.NoError(err)
-	for _, region := range []*core.RegionInfo{
-		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
-		core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
-	} {
-		err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+
+	for _, mode := range []mode{defaultServiceDiscovery, specificServiceDiscovery} {
+		env := &httpClientTestEnv{}
+		env.ctx, env.cancelFunc = context.WithCancel(context.Background())
+
+		cluster, err := tests.NewTestCluster(env.ctx, 2)
 		re.NoError(err)
+
+		err = cluster.RunInitialServers()
+		re.NoError(err)
+		leader := cluster.WaitLeader()
+		re.NotEmpty(leader)
+		leaderServer := cluster.GetLeaderServer()
+		err = leaderServer.BootstrapCluster()
+		re.NoError(err)
+		for _, region := range []*core.RegionInfo{
+			core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
+			core.NewTestRegionInfo(11, 1, []byte("a2"), []byte("a3")),
+		} {
+			err := leaderServer.GetRaftCluster().HandleRegionHeartbeat(region)
+			re.NoError(err)
+		}
+		var (
+			testServers = cluster.GetServers()
+			endpoints   = make([]string, 0, len(testServers))
+		)
+		for _, s := range testServers {
+			endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+		}
+		env.endpoints = endpoints
+		env.cluster = cluster
+
+		suite.env[mode] = env
 	}
-	var (
-		testServers = suite.cluster.GetServers()
-		endpoints   = make([]string, 0, len(testServers))
-	)
-	for _, s := range testServers {
-		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-	}
-	suite.client = pd.NewClient("pd-http-client-it", endpoints)
 }
 
 func (suite *httpClientTestSuite) TearDownSuite() {
-	suite.cancelFunc()
-	suite.client.Close()
-	suite.cluster.Destroy()
+	for _, env := range suite.env {
+		env.cancelFunc()
+		env.cluster.Destroy()
+	}
+}
+
+// RunTestInTwoModes is to run test in two modes.
+func (suite *httpClientTestSuite) RunTestInTwoModes(test func(mode mode, client pd.Client)) {
+	// Run test with specific service discovery.
+	cli := setupCli(suite.Require(), suite.env[specificServiceDiscovery].ctx, suite.env[specificServiceDiscovery].endpoints)
+	sd := cli.GetServiceDiscovery()
+	client := pd.NewClientWithServiceDiscovery("pd-http-client-it-grpc", sd)
+	test(specificServiceDiscovery, client)
+	client.Close()
+
+	// Run test with default service discovery.
+	client = pd.NewClient("pd-http-client-it-http", suite.env[defaultServiceDiscovery].endpoints)
+	test(defaultServiceDiscovery, client)
+	client.Close()
 }
 
 func (suite *httpClientTestSuite) TestMeta() {
+	suite.RunTestInTwoModes(suite.checkMeta)
+}
+
+func (suite *httpClientTestSuite) checkMeta(mode mode, client pd.Client) {
 	re := suite.Require()
-	replicateConfig, err := suite.client.GetReplicateConfig(suite.ctx)
+	env := suite.env[mode]
+	replicateConfig, err := client.GetReplicateConfig(env.ctx)
 	re.NoError(err)
 	re.Equal(3.0, replicateConfig["max-replicas"])
-	region, err := suite.client.GetRegionByID(suite.ctx, 10)
+	region, err := client.GetRegionByID(env.ctx, 10)
 	re.NoError(err)
 	re.Equal(int64(10), region.ID)
 	re.Equal(core.HexRegionKeyStr([]byte("a1")), region.StartKey)
 	re.Equal(core.HexRegionKeyStr([]byte("a2")), region.EndKey)
-	region, err = suite.client.GetRegionByKey(suite.ctx, []byte("a2"))
+	region, err = client.GetRegionByKey(env.ctx, []byte("a2"))
 	re.NoError(err)
 	re.Equal(int64(11), region.ID)
 	re.Equal(core.HexRegionKeyStr([]byte("a2")), region.StartKey)
 	re.Equal(core.HexRegionKeyStr([]byte("a3")), region.EndKey)
-	regions, err := suite.client.GetRegions(suite.ctx)
+	regions, err := client.GetRegions(env.ctx)
 	re.NoError(err)
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
-	regions, err = suite.client.GetRegionsByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), -1)
+	regions, err = client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), -1)
 	re.NoError(err)
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
-	regions, err = suite.client.GetRegionsByStoreID(suite.ctx, 1)
+	regions, err = client.GetRegionsByStoreID(env.ctx, 1)
 	re.NoError(err)
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
-	regions, err = suite.client.GetEmptyRegions(suite.ctx)
+	regions, err = client.GetEmptyRegions(env.ctx)
 	re.NoError(err)
 	re.Equal(int64(2), regions.Count)
 	re.Len(regions.Regions, 2)
-	state, err := suite.client.GetRegionsReplicatedStateByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
+	state, err := client.GetRegionsReplicatedStateByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")))
 	re.NoError(err)
 	re.Equal("INPROGRESS", state)
-	regionStats, err := suite.client.GetRegionStatusByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), false)
+	regionStats, err := client.GetRegionStatusByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), false)
 	re.NoError(err)
 	re.Greater(regionStats.Count, 0)
 	re.NotEmpty(regionStats.StoreLeaderCount)
-	regionStats, err = suite.client.GetRegionStatusByKeyRange(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), true)
+	regionStats, err = client.GetRegionStatusByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), true)
 	re.NoError(err)
 	re.Greater(regionStats.Count, 0)
 	re.Empty(regionStats.StoreLeaderCount)
-	hotReadRegions, err := suite.client.GetHotReadRegions(suite.ctx)
+	hotReadRegions, err := client.GetHotReadRegions(env.ctx)
 	re.NoError(err)
 	re.Len(hotReadRegions.AsPeer, 1)
 	re.Len(hotReadRegions.AsLeader, 1)
-	hotWriteRegions, err := suite.client.GetHotWriteRegions(suite.ctx)
+	hotWriteRegions, err := client.GetHotWriteRegions(env.ctx)
 	re.NoError(err)
 	re.Len(hotWriteRegions.AsPeer, 1)
 	re.Len(hotWriteRegions.AsLeader, 1)
-	historyHorRegions, err := suite.client.GetHistoryHotRegions(suite.ctx, &pd.HistoryHotRegionsRequest{
+	historyHorRegions, err := client.GetHistoryHotRegions(env.ctx, &pd.HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
 	})
 	re.NoError(err)
 	re.Empty(historyHorRegions.HistoryHotRegion)
-	store, err := suite.client.GetStores(suite.ctx)
+	store, err := client.GetStores(env.ctx)
 	re.NoError(err)
 	re.Equal(1, store.Count)
 	re.Len(store.Stores, 1)
 	storeID := uint64(store.Stores[0].Store.ID) // TODO: why type is different?
-	store2, err := suite.client.GetStore(suite.ctx, storeID)
+	store2, err := client.GetStore(env.ctx, storeID)
 	re.NoError(err)
 	re.EqualValues(storeID, store2.Store.ID)
-	version, err := suite.client.GetClusterVersion(suite.ctx)
+	version, err := client.GetClusterVersion(env.ctx)
 	re.NoError(err)
 	re.Equal("0.0.0", version)
 }
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
+	suite.RunTestInTwoModes(suite.checkGetMinResolvedTSByStoresIDs)
+}
+
+func (suite *httpClientTestSuite) checkGetMinResolvedTSByStoresIDs(mode mode, client pd.Client) {
 	re := suite.Require()
+	env := suite.env[mode]
+
 	testMinResolvedTS := tsoutil.TimeToTS(time.Now())
-	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
+	raftCluster := env.cluster.GetLeaderServer().GetRaftCluster()
 	err := raftCluster.SetMinResolvedTS(1, testMinResolvedTS)
 	re.NoError(err)
 	// Make sure the min resolved TS is updated.
@@ -164,18 +220,18 @@ func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
 		return minResolvedTS == testMinResolvedTS
 	})
 	// Wait for the cluster-level min resolved TS to be initialized.
-	minResolvedTS, storeMinResolvedTSMap, err := suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, nil)
+	minResolvedTS, storeMinResolvedTSMap, err := client.GetMinResolvedTSByStoresIDs(env.ctx, nil)
 	re.NoError(err)
 	re.Equal(testMinResolvedTS, minResolvedTS)
 	re.Empty(storeMinResolvedTSMap)
 	// Get the store-level min resolved TS.
-	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1})
+	minResolvedTS, storeMinResolvedTSMap, err = client.GetMinResolvedTSByStoresIDs(env.ctx, []uint64{1})
 	re.NoError(err)
 	re.Equal(testMinResolvedTS, minResolvedTS)
 	re.Len(storeMinResolvedTSMap, 1)
 	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
 	// Get the store-level min resolved TS with an invalid store ID.
-	minResolvedTS, storeMinResolvedTSMap, err = suite.client.GetMinResolvedTSByStoresIDs(suite.ctx, []uint64{1, 2})
+	minResolvedTS, storeMinResolvedTSMap, err = client.GetMinResolvedTSByStoresIDs(env.ctx, []uint64{1, 2})
 	re.NoError(err)
 	re.Equal(testMinResolvedTS, minResolvedTS)
 	re.Len(storeMinResolvedTSMap, 2)
@@ -184,16 +240,22 @@ func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
 }
 
 func (suite *httpClientTestSuite) TestRule() {
+	suite.RunTestInTwoModes(suite.checkRule)
+}
+
+func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 	re := suite.Require()
-	bundles, err := suite.client.GetAllPlacementRuleBundles(suite.ctx)
+	env := suite.env[mode]
+
+	bundles, err := client.GetAllPlacementRuleBundles(env.ctx)
 	re.NoError(err)
 	re.Len(bundles, 1)
 	re.Equal(placement.DefaultGroupID, bundles[0].ID)
-	bundle, err := suite.client.GetPlacementRuleBundleByGroup(suite.ctx, placement.DefaultGroupID)
+	bundle, err := client.GetPlacementRuleBundleByGroup(env.ctx, placement.DefaultGroupID)
 	re.NoError(err)
 	re.Equal(bundles[0], bundle)
 	// Check if we have the default rule.
-	suite.checkRule(re, &pd.Rule{
+	suite.checkRuleResult(re, env, client, &pd.Rule{
 		GroupID:  placement.DefaultGroupID,
 		ID:       placement.DefaultRuleID,
 		Role:     pd.Voter,
@@ -202,7 +264,7 @@ func (suite *httpClientTestSuite) TestRule() {
 		EndKey:   []byte{},
 	}, 1, true)
 	// Should be the same as the rules in the bundle.
-	suite.checkRule(re, bundle.Rules[0], 1, true)
+	suite.checkRuleResult(re, env, client, bundle.Rules[0], 1, true)
 	testRule := &pd.Rule{
 		GroupID:  placement.DefaultGroupID,
 		ID:       "test",
@@ -211,39 +273,39 @@ func (suite *httpClientTestSuite) TestRule() {
 		StartKey: []byte{},
 		EndKey:   []byte{},
 	}
-	err = suite.client.SetPlacementRule(suite.ctx, testRule)
+	err = client.SetPlacementRule(env.ctx, testRule)
 	re.NoError(err)
-	suite.checkRule(re, testRule, 2, true)
-	err = suite.client.DeletePlacementRule(suite.ctx, placement.DefaultGroupID, "test")
+	suite.checkRuleResult(re, env, client, testRule, 2, true)
+	err = client.DeletePlacementRule(env.ctx, placement.DefaultGroupID, "test")
 	re.NoError(err)
-	suite.checkRule(re, testRule, 1, false)
+	suite.checkRuleResult(re, env, client, testRule, 1, false)
 	testRuleOp := &pd.RuleOp{
 		Rule:   testRule,
 		Action: pd.RuleOpAdd,
 	}
-	err = suite.client.SetPlacementRuleInBatch(suite.ctx, []*pd.RuleOp{testRuleOp})
+	err = client.SetPlacementRuleInBatch(env.ctx, []*pd.RuleOp{testRuleOp})
 	re.NoError(err)
-	suite.checkRule(re, testRule, 2, true)
+	suite.checkRuleResult(re, env, client, testRule, 2, true)
 	testRuleOp = &pd.RuleOp{
 		Rule:   testRule,
 		Action: pd.RuleOpDel,
 	}
-	err = suite.client.SetPlacementRuleInBatch(suite.ctx, []*pd.RuleOp{testRuleOp})
+	err = client.SetPlacementRuleInBatch(env.ctx, []*pd.RuleOp{testRuleOp})
 	re.NoError(err)
-	suite.checkRule(re, testRule, 1, false)
-	err = suite.client.SetPlacementRuleBundles(suite.ctx, []*pd.GroupBundle{
+	suite.checkRuleResult(re, env, client, testRule, 1, false)
+	err = client.SetPlacementRuleBundles(env.ctx, []*pd.GroupBundle{
 		{
 			ID:    placement.DefaultGroupID,
 			Rules: []*pd.Rule{testRule},
 		},
 	}, true)
 	re.NoError(err)
-	suite.checkRule(re, testRule, 1, true)
-	ruleGroups, err := suite.client.GetAllPlacementRuleGroups(suite.ctx)
+	suite.checkRuleResult(re, env, client, testRule, 1, true)
+	ruleGroups, err := client.GetAllPlacementRuleGroups(env.ctx)
 	re.NoError(err)
 	re.Len(ruleGroups, 1)
 	re.Equal(placement.DefaultGroupID, ruleGroups[0].ID)
-	ruleGroup, err := suite.client.GetPlacementRuleGroupByID(suite.ctx, placement.DefaultGroupID)
+	ruleGroup, err := client.GetPlacementRuleGroupByID(env.ctx, placement.DefaultGroupID)
 	re.NoError(err)
 	re.Equal(ruleGroups[0], ruleGroup)
 	testRuleGroup := &pd.RuleGroup{
@@ -251,14 +313,14 @@ func (suite *httpClientTestSuite) TestRule() {
 		Index:    1,
 		Override: true,
 	}
-	err = suite.client.SetPlacementRuleGroup(suite.ctx, testRuleGroup)
+	err = client.SetPlacementRuleGroup(env.ctx, testRuleGroup)
 	re.NoError(err)
-	ruleGroup, err = suite.client.GetPlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	ruleGroup, err = client.GetPlacementRuleGroupByID(env.ctx, testRuleGroup.ID)
 	re.NoError(err)
 	re.Equal(testRuleGroup, ruleGroup)
-	err = suite.client.DeletePlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	err = client.DeletePlacementRuleGroupByID(env.ctx, testRuleGroup.ID)
 	re.NoError(err)
-	ruleGroup, err = suite.client.GetPlacementRuleGroupByID(suite.ctx, testRuleGroup.ID)
+	ruleGroup, err = client.GetPlacementRuleGroupByID(env.ctx, testRuleGroup.ID)
 	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
 	re.Empty(ruleGroup)
 	// Test the start key and end key.
@@ -270,32 +332,34 @@ func (suite *httpClientTestSuite) TestRule() {
 		StartKey: []byte("a1"),
 		EndKey:   []byte(""),
 	}
-	err = suite.client.SetPlacementRule(suite.ctx, testRule)
+	err = client.SetPlacementRule(env.ctx, testRule)
 	re.NoError(err)
-	suite.checkRule(re, testRule, 1, true)
+	suite.checkRuleResult(re, env, client, testRule, 1, true)
 }
 
-func (suite *httpClientTestSuite) checkRule(
+func (suite *httpClientTestSuite) checkRuleResult(
 	re *require.Assertions,
+	env *httpClientTestEnv,
+	client pd.Client,
 	rule *pd.Rule, totalRuleCount int, exist bool,
 ) {
 	if exist {
-		got, err := suite.client.GetPlacementRule(suite.ctx, rule.GroupID, rule.ID)
+		got, err := client.GetPlacementRule(env.ctx, rule.GroupID, rule.ID)
 		re.NoError(err)
 		// skip comparison of the generated field
 		got.StartKeyHex = rule.StartKeyHex
 		got.EndKeyHex = rule.EndKeyHex
 		re.Equal(rule, got)
 	} else {
-		_, err := suite.client.GetPlacementRule(suite.ctx, rule.GroupID, rule.ID)
+		_, err := client.GetPlacementRule(env.ctx, rule.GroupID, rule.ID)
 		re.ErrorContains(err, http.StatusText(http.StatusNotFound))
 	}
 	// Check through the `GetPlacementRulesByGroup` API.
-	rules, err := suite.client.GetPlacementRulesByGroup(suite.ctx, rule.GroupID)
+	rules, err := client.GetPlacementRulesByGroup(env.ctx, rule.GroupID)
 	re.NoError(err)
 	checkRuleFunc(re, rules, rule, totalRuleCount, exist)
 	// Check through the `GetPlacementRuleBundleByGroup` API.
-	bundle, err := suite.client.GetPlacementRuleBundleByGroup(suite.ctx, rule.GroupID)
+	bundle, err := client.GetPlacementRuleBundleByGroup(env.ctx, rule.GroupID)
 	re.NoError(err)
 	checkRuleFunc(re, bundle.Rules, rule, totalRuleCount, exist)
 }
@@ -323,8 +387,14 @@ func checkRuleFunc(
 }
 
 func (suite *httpClientTestSuite) TestRegionLabel() {
+	suite.RunTestInTwoModes(suite.checkRegionLabel)
+}
+
+func (suite *httpClientTestSuite) checkRegionLabel(mode mode, client pd.Client) {
 	re := suite.Require()
-	labelRules, err := suite.client.GetAllRegionLabelRules(suite.ctx)
+	env := suite.env[mode]
+
+	labelRules, err := client.GetAllRegionLabelRules(env.ctx)
 	re.NoError(err)
 	re.Len(labelRules, 1)
 	re.Equal("keyspaces/0", labelRules[0].ID)
@@ -335,9 +405,9 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 		RuleType: "key-range",
 		Data:     labeler.MakeKeyRanges("1234", "5678"),
 	}
-	err = suite.client.SetRegionLabelRule(suite.ctx, labelRule)
+	err = client.SetRegionLabelRule(env.ctx, labelRule)
 	re.NoError(err)
-	labelRules, err = suite.client.GetAllRegionLabelRules(suite.ctx)
+	labelRules, err = client.GetAllRegionLabelRules(env.ctx)
 	re.NoError(err)
 	re.Len(labelRules, 2)
 	sort.Slice(labelRules, func(i, j int) bool {
@@ -357,9 +427,9 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 		SetRules:    []*pd.LabelRule{labelRule},
 		DeleteRules: []string{"rule1"},
 	}
-	err = suite.client.PatchRegionLabelRules(suite.ctx, patch)
+	err = client.PatchRegionLabelRules(env.ctx, patch)
 	re.NoError(err)
-	allLabelRules, err := suite.client.GetAllRegionLabelRules(suite.ctx)
+	allLabelRules, err := client.GetAllRegionLabelRules(env.ctx)
 	re.NoError(err)
 	re.Len(labelRules, 2)
 	sort.Slice(allLabelRules, func(i, j int) bool {
@@ -368,7 +438,7 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	re.Equal(labelRule.ID, allLabelRules[1].ID)
 	re.Equal(labelRule.Labels, allLabelRules[1].Labels)
 	re.Equal(labelRule.RuleType, allLabelRules[1].RuleType)
-	labelRules, err = suite.client.GetRegionLabelRulesByIDs(suite.ctx, []string{"keyspaces/0", "rule2"})
+	labelRules, err = client.GetRegionLabelRulesByIDs(env.ctx, []string{"keyspaces/0", "rule2"})
 	re.NoError(err)
 	sort.Slice(labelRules, func(i, j int) bool {
 		return labelRules[i].ID < labelRules[j].ID
@@ -377,18 +447,24 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 }
 
 func (suite *httpClientTestSuite) TestAccelerateSchedule() {
+	suite.RunTestInTwoModes(suite.checkAccelerateSchedule)
+}
+
+func (suite *httpClientTestSuite) checkAccelerateSchedule(mode mode, client pd.Client) {
 	re := suite.Require()
-	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
+	env := suite.env[mode]
+
+	raftCluster := env.cluster.GetLeaderServer().GetRaftCluster()
 	suspectRegions := raftCluster.GetSuspectRegions()
 	re.Empty(suspectRegions)
-	err := suite.client.AccelerateSchedule(suite.ctx, pd.NewKeyRange([]byte("a1"), []byte("a2")))
+	err := client.AccelerateSchedule(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a2")))
 	re.NoError(err)
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Len(suspectRegions, 1)
 	raftCluster.ClearSuspectRegions()
 	suspectRegions = raftCluster.GetSuspectRegions()
 	re.Empty(suspectRegions)
-	err = suite.client.AccelerateScheduleInBatch(suite.ctx, []*pd.KeyRange{
+	err = client.AccelerateScheduleInBatch(env.ctx, []*pd.KeyRange{
 		pd.NewKeyRange([]byte("a1"), []byte("a2")),
 		pd.NewKeyRange([]byte("a2"), []byte("a3")),
 	})
@@ -397,51 +473,102 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	re.Len(suspectRegions, 2)
 }
 
-func (suite *httpClientTestSuite) TestScheduleConfig() {
+func (suite *httpClientTestSuite) TestConfig() {
+	suite.RunTestInTwoModes(suite.checkConfig)
+}
+
+func (suite *httpClientTestSuite) checkConfig(mode mode, client pd.Client) {
 	re := suite.Require()
-	config, err := suite.client.GetScheduleConfig(suite.ctx)
+	env := suite.env[mode]
+
+	config, err := client.GetConfig(env.ctx)
+	re.NoError(err)
+	re.Equal(float64(4), config["schedule"].(map[string]interface{})["leader-schedule-limit"])
+
+	newConfig := map[string]interface{}{
+		"schedule.leader-schedule-limit": float64(8),
+	}
+	err = client.SetConfig(env.ctx, newConfig)
+	re.NoError(err)
+
+	config, err = client.GetConfig(env.ctx)
+	re.NoError(err)
+	re.Equal(float64(8), config["schedule"].(map[string]interface{})["leader-schedule-limit"])
+
+	// Test the config with TTL.
+	newConfig = map[string]interface{}{
+		"schedule.leader-schedule-limit": float64(16),
+	}
+	err = client.SetConfig(env.ctx, newConfig, 5)
+	re.NoError(err)
+	resp, err := env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
+	re.NoError(err)
+	re.Equal([]byte("16"), resp.Kvs[0].Value)
+}
+
+func (suite *httpClientTestSuite) TestScheduleConfig() {
+	suite.RunTestInTwoModes(suite.checkScheduleConfig)
+}
+
+func (suite *httpClientTestSuite) checkScheduleConfig(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	config, err := client.GetScheduleConfig(env.ctx)
 	re.NoError(err)
 	re.Equal(float64(4), config["leader-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])
 	config["leader-schedule-limit"] = float64(8)
-	err = suite.client.SetScheduleConfig(suite.ctx, config)
+	err = client.SetScheduleConfig(env.ctx, config)
 	re.NoError(err)
-	config, err = suite.client.GetScheduleConfig(suite.ctx)
+	config, err = client.GetScheduleConfig(env.ctx)
 	re.NoError(err)
 	re.Equal(float64(8), config["leader-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])
 }
 
 func (suite *httpClientTestSuite) TestSchedulers() {
+	suite.RunTestInTwoModes(suite.checkSchedulers)
+}
+
+func (suite *httpClientTestSuite) checkSchedulers(mode mode, client pd.Client) {
 	re := suite.Require()
-	schedulers, err := suite.client.GetSchedulers(suite.ctx)
+	env := suite.env[mode]
+
+	schedulers, err := client.GetSchedulers(env.ctx)
 	re.NoError(err)
 	re.Empty(schedulers)
 
-	err = suite.client.CreateScheduler(suite.ctx, "evict-leader-scheduler", 1)
+	err = client.CreateScheduler(env.ctx, "evict-leader-scheduler", 1)
 	re.NoError(err)
-	schedulers, err = suite.client.GetSchedulers(suite.ctx)
+	schedulers, err = client.GetSchedulers(env.ctx)
 	re.NoError(err)
 	re.Len(schedulers, 1)
-	err = suite.client.SetSchedulerDelay(suite.ctx, "evict-leader-scheduler", 100)
+	err = client.SetSchedulerDelay(env.ctx, "evict-leader-scheduler", 100)
 	re.NoError(err)
-	err = suite.client.SetSchedulerDelay(suite.ctx, "not-exist", 100)
+	err = client.SetSchedulerDelay(env.ctx, "not-exist", 100)
 	re.ErrorContains(err, "500 Internal Server Error") // TODO: should return friendly error message
 }
 
 func (suite *httpClientTestSuite) TestSetStoreLabels() {
+	suite.RunTestInTwoModes(suite.checkSetStoreLabels)
+}
+
+func (suite *httpClientTestSuite) checkSetStoreLabels(mode mode, client pd.Client) {
 	re := suite.Require()
-	resp, err := suite.client.GetStores(suite.ctx)
+	env := suite.env[mode]
+
+	resp, err := client.GetStores(env.ctx)
 	re.NoError(err)
 	setStore := resp.Stores[0]
 	re.Empty(setStore.Store.Labels, nil)
 	storeLabels := map[string]string{
 		"zone": "zone1",
 	}
-	err = suite.client.SetStoreLabels(suite.ctx, 1, storeLabels)
+	err = client.SetStoreLabels(env.ctx, 1, storeLabels)
 	re.NoError(err)
 
-	resp, err = suite.client.GetStores(suite.ctx)
+	resp, err = client.GetStores(env.ctx)
 	re.NoError(err)
 	for _, store := range resp.Stores {
 		if store.Store.ID == setStore.Store.ID {
@@ -453,55 +580,156 @@ func (suite *httpClientTestSuite) TestSetStoreLabels() {
 }
 
 func (suite *httpClientTestSuite) TestTransferLeader() {
+	suite.RunTestInTwoModes(suite.checkTransferLeader)
+}
+
+func (suite *httpClientTestSuite) checkTransferLeader(mode mode, client pd.Client) {
 	re := suite.Require()
-	members, err := suite.client.GetMembers(suite.ctx)
+	env := suite.env[mode]
+
+	members, err := client.GetMembers(env.ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 
-	leader, err := suite.client.GetLeader(suite.ctx)
+	leader, err := client.GetLeader(env.ctx)
 	re.NoError(err)
 
 	// Transfer leader to another pd
 	for _, member := range members.Members {
 		if member.GetName() != leader.GetName() {
-			err = suite.client.TransferLeader(suite.ctx, member.GetName())
+			err = client.TransferLeader(env.ctx, member.GetName())
 			re.NoError(err)
 			break
 		}
 	}
 
-	newLeader := suite.cluster.WaitLeader()
+	newLeader := env.cluster.WaitLeader()
 	re.NotEmpty(newLeader)
 	re.NoError(err)
 	re.NotEqual(leader.GetName(), newLeader)
 	// Force to update the members info.
-	suite.client.(interface{ UpdateMembersInfo() }).UpdateMembersInfo()
-	leader, err = suite.client.GetLeader(suite.ctx)
-	re.NoError(err)
-	re.Equal(newLeader, leader.GetName())
-	members, err = suite.client.GetMembers(suite.ctx)
+	testutil.Eventually(re, func() bool {
+		leader, err = client.GetLeader(env.ctx)
+		re.NoError(err)
+		return newLeader == leader.GetName()
+	})
+	members, err = client.GetMembers(env.ctx)
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(leader.GetName(), members.Leader.GetName())
 }
 
 func (suite *httpClientTestSuite) TestVersion() {
+	suite.RunTestInTwoModes(suite.checkVersion)
+}
+
+func (suite *httpClientTestSuite) checkVersion(mode mode, client pd.Client) {
 	re := suite.Require()
-	ver, err := suite.client.GetPDVersion(suite.ctx)
+	env := suite.env[mode]
+
+	ver, err := client.GetPDVersion(env.ctx)
 	re.NoError(err)
 	re.Equal(versioninfo.PDReleaseVersion, ver)
 }
 
-func (suite *httpClientTestSuite) TestWithBackoffer() {
+func (suite *httpClientTestSuite) TestAdmin() {
+	suite.RunTestInTwoModes(suite.checkAdmin)
+}
+
+func (suite *httpClientTestSuite) checkAdmin(mode mode, client pd.Client) {
 	re := suite.Require()
+	env := suite.env[mode]
+
+	err := client.SetSnapshotRecoveringMark(env.ctx)
+	re.NoError(err)
+	err = client.ResetTS(env.ctx, 123, true)
+	re.NoError(err)
+	err = client.ResetBaseAllocID(env.ctx, 456)
+	re.NoError(err)
+	err = client.DeleteSnapshotRecoveringMark(env.ctx)
+	re.NoError(err)
+}
+
+func (suite *httpClientTestSuite) TestWithBackoffer() {
+	suite.RunTestInTwoModes(suite.checkWithBackoffer)
+}
+
+func (suite *httpClientTestSuite) checkWithBackoffer(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
 	// Should return with 404 error without backoffer.
-	rule, err := suite.client.GetPlacementRule(suite.ctx, "non-exist-group", "non-exist-rule")
+	rule, err := client.GetPlacementRule(env.ctx, "non-exist-group", "non-exist-rule")
 	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
 	re.Nil(rule)
 	// Should return with 404 error even with an infinite backoffer.
-	rule, err = suite.client.
+	rule, err = client.
 		WithBackoffer(retry.InitialBackoffer(100*time.Millisecond, time.Second, 0)).
-		GetPlacementRule(suite.ctx, "non-exist-group", "non-exist-rule")
+		GetPlacementRule(env.ctx, "non-exist-group", "non-exist-rule")
 	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
 	re.Nil(rule)
+}
+
+func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
+	re := suite.Require()
+	env := suite.env[defaultServiceDiscovery]
+
+	cli := setupCli(suite.Require(), env.ctx, env.endpoints)
+	defer cli.Close()
+	sd := cli.GetServiceDiscovery()
+
+	metricCnt := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "check",
+		}, []string{"name", ""})
+	// 1. Test all followers failed, need to send all followers.
+	httpClient := pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
+		if req.URL.Path == pd.Schedulers {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
+	c.CreateScheduler(context.Background(), "test", 0)
+	var out dto.Metric
+	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
+	re.NoError(err)
+	failureCnt.Write(&out)
+	re.Equal(float64(2), out.Counter.GetValue())
+	c.Close()
+
+	leader := sd.GetServingAddr()
+	httpClient = pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
+		// mock leader success.
+		if !strings.Contains(leader, req.Host) {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
+	c.CreateScheduler(context.Background(), "test", 0)
+	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
+	re.NoError(err)
+	successCnt.Write(&out)
+	re.Equal(float64(1), out.Counter.GetValue())
+	c.Close()
+
+	httpClient = pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
+		// mock leader success.
+		if strings.Contains(leader, req.Host) {
+			return errors.New("mock error")
+		}
+		return nil
+	})
+	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
+	c.CreateScheduler(context.Background(), "test", 0)
+	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
+	re.NoError(err)
+	successCnt.Write(&out)
+	re.Equal(float64(2), out.Counter.GetValue())
+	failureCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
+	re.NoError(err)
+	failureCnt.Write(&out)
+	re.Equal(float64(3), out.Counter.GetValue())
+	c.Close()
 }

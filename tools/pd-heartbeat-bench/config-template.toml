@@ -10,5 +10,6 @@ leader-update-ratio = 0.06
 epoch-update-ratio = 0.04
 space-update-ratio = 0.15
 flow-update-ratio = 0.35
+no-update-ratio = 0.0
 
 sample = false

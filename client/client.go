@@ -141,6 +141,9 @@ type Client interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
+	// GetServiceDiscovery returns ServiceDiscovery
+	GetServiceDiscovery() ServiceDiscovery
+
 	// TSOClient is the TSO client.
 	TSOClient
 	// MetaStorageClient is the meta storage client.
@@ -393,6 +396,9 @@ func createClientWithKeyspace(
 		nil, keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
+		if c.pdSvcDiscovery != nil {
+			c.pdSvcDiscovery.Close()
+		}
 		return nil, err
 	}
 
@@ -519,6 +525,9 @@ func newClientWithKeyspaceName(
 		clientCtx, clientCancel, &c.wg, c.setServiceMode, updateKeyspaceIDCb, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
+		if c.pdSvcDiscovery != nil {
+			c.pdSvcDiscovery.Close()
+		}
 		return nil, err
 	}
 	log.Info("[pd] create pd client with endpoints and keyspace",

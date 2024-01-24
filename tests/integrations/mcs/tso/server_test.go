@@ -186,6 +186,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	defer cleanup()
 
 	cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
+	defer cli.Close()
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	ts := tsoutil.ComposeTS(physical, logical)

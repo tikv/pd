@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"log"
 	"net"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/testutil"
@@ -137,8 +139,8 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithInsecure())     //nolint
 		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithInsecure()) //nolint
 		if err1 == nil && err2 == nil {
-			suite.followerClient = newPDServiceClient(suite.followerServer.addr, suite.leaderServer.addr, followerConn, false)
-			suite.leaderClient = newPDServiceClient(suite.leaderServer.addr, suite.leaderServer.addr, leaderConn, true)
+			suite.followerClient = newPDServiceClient(suite.followerServer.addr, suite.leaderServer.addr, nil, followerConn, false)
+			suite.leaderClient = newPDServiceClient(suite.leaderServer.addr, suite.leaderServer.addr, nil, leaderConn, true)
 			suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
 			suite.followerServer.server.leaderAddr = suite.leaderClient.GetAddress()
 			return
@@ -156,6 +158,8 @@ func (suite *serviceClientTestSuite) TearDownTest() {
 func (suite *serviceClientTestSuite) TearDownSuite() {
 	suite.leaderServer.grpcServer.GracefulStop()
 	suite.followerServer.grpcServer.GracefulStop()
+	suite.leaderClient.GetClientConn().Close()
+	suite.followerClient.GetClientConn().Close()
 	suite.clean()
 }
 
@@ -169,6 +173,8 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 
 	re.Equal(follower.GetAddress(), followerAddress)
 	re.Equal(leader.GetAddress(), leaderAddress)
+	re.Equal(follower.GetHTTPAddress(), "http://"+followerAddress)
+	re.Equal(leader.GetHTTPAddress(), "http://"+leaderAddress)
 
 	re.True(follower.Available())
 	re.True(leader.Available())
@@ -292,4 +298,20 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re.Equal(int32(10), suite.leaderServer.server.getHandleCount())
 	re.Equal(int32(0), suite.followerServer.server.getHandleCount())
 	re.Equal(int32(5), suite.followerServer.server.getForwardCount())
+}
+
+func TestHTTPScheme(t *testing.T) {
+	re := require.New(t)
+	cli := newPDServiceClient("127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("https://127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("http://127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("https://127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli = newPDServiceClient("http://127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
 }

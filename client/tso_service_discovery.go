@@ -378,6 +378,11 @@ func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
 	return c.apiSvcDiscovery.GetServiceClient()
 }
 
+// GetAllServiceClients implements ServiceDiscovery
+func (c *tsoServiceDiscovery) GetAllServiceClients() []ServiceClient {
+	return c.apiSvcDiscovery.GetAllServiceClients()
+}
+
 // getPrimaryAddr returns the primary address.
 func (c *tsoServiceDiscovery) getPrimaryAddr() string {
 	c.keyspaceGroupSD.RLock()

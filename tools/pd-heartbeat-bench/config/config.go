@@ -1,6 +1,7 @@
 package config
 
 import (
+	"math"
 	"sync/atomic"
 
 	"github.com/BurntSushi/toml"
@@ -20,6 +21,7 @@ const (
 	defaultEpochUpdateRatio  = 0.04
 	defaultSpaceUpdateRatio  = 0.15
 	defaultFlowUpdateRatio   = 0.35
+	defaultNoUpdateRatio     = 0
 	defaultRound             = 0
 	defaultSample            = false
 
@@ -45,6 +47,7 @@ type Config struct {
 	EpochUpdateRatio  float64 `toml:"epoch-update-ratio" json:"epoch-update-ratio"`
 	SpaceUpdateRatio  float64 `toml:"space-update-ratio" json:"space-update-ratio"`
 	FlowUpdateRatio   float64 `toml:"flow-update-ratio" json:"flow-update-ratio"`
+	NoUpdateRatio     float64 `toml:"no-update-ratio" json:"no-update-ratio"`
 	Sample            bool    `toml:"sample" json:"sample"`
 	Round             int     `toml:"round" json:"round"`
 }
@@ -56,7 +59,8 @@ func NewConfig() *Config {
 	fs := cfg.flagSet
 	fs.ParseErrorsWhitelist.UnknownFlags = true
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
-	fs.StringVar(&cfg.PDAddr, "pd", "127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.PDAddr, "pd-endpoints", "127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.StringVar(&cfg.StatusAddr, "status-addr", "127.0.0.1:20180", "status address")
 
 	return cfg
@@ -90,7 +94,7 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	c.Adjust(meta)
-	return nil
+	return c.Validate()
 }
 
 // Adjust is used to adjust configurations
@@ -129,9 +133,36 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 	if !meta.IsDefined("flow-update-ratio") {
 		configutil.AdjustFloat64(&c.FlowUpdateRatio, defaultFlowUpdateRatio)
 	}
+	if !meta.IsDefined("no-update-ratio") {
+		configutil.AdjustFloat64(&c.NoUpdateRatio, defaultNoUpdateRatio)
+	}
 	if !meta.IsDefined("sample") {
 		c.Sample = defaultSample
 	}
+}
+
+// Validate is used to validate configurations
+func (c *Config) Validate() error {
+	if c.LeaderUpdateRatio < 0 || c.LeaderUpdateRatio > 1 {
+		return errors.Errorf("leader-update-ratio must be in [0, 1]")
+	}
+	if c.EpochUpdateRatio < 0 || c.EpochUpdateRatio > 1 {
+		return errors.Errorf("epoch-update-ratio must be in [0, 1]")
+	}
+	if c.SpaceUpdateRatio < 0 || c.SpaceUpdateRatio > 1 {
+		return errors.Errorf("space-update-ratio must be in [0, 1]")
+	}
+	if c.FlowUpdateRatio < 0 || c.FlowUpdateRatio > 1 {
+		return errors.Errorf("flow-update-ratio must be in [0, 1]")
+	}
+	if c.NoUpdateRatio < 0 || c.NoUpdateRatio > 1 {
+		return errors.Errorf("no-update-ratio must be in [0, 1]")
+	}
+	max := math.Max(c.LeaderUpdateRatio, math.Max(c.EpochUpdateRatio, math.Max(c.SpaceUpdateRatio, c.FlowUpdateRatio)))
+	if max+c.NoUpdateRatio > 1 {
+		return errors.Errorf("sum of update-ratio must be in [0, 1]")
+	}
+	return nil
 }
 
 // Clone creates a copy of current config.
@@ -147,6 +178,7 @@ type Options struct {
 	EpochUpdateRatio  atomic.Value
 	SpaceUpdateRatio  atomic.Value
 	FlowUpdateRatio   atomic.Value
+	NoUpdateRatio     atomic.Value
 }
 
 // NewOptions creates a new option.
@@ -156,6 +188,7 @@ func NewOptions(cfg *Config) *Options {
 	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
 	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
 	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
+	o.NoUpdateRatio.Store(cfg.NoUpdateRatio)
 	return o
 }
 
@@ -179,10 +212,16 @@ func (o *Options) GetFlowUpdateRatio() float64 {
 	return o.FlowUpdateRatio.Load().(float64)
 }
 
+// GetNoUpdateRatio returns the no update ratio.
+func (o *Options) GetNoUpdateRatio() float64 {
+	return o.NoUpdateRatio.Load().(float64)
+}
+
 // SetOptions sets the option.
 func (o *Options) SetOptions(cfg *Config) {
 	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
 	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
 	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
 	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
+	o.NoUpdateRatio.Store(cfg.NoUpdateRatio)
 }

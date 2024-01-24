@@ -15,12 +15,14 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -73,4 +75,32 @@ func (se *StorageEndpoint) loadRangeByPrefix(prefix string, f func(k, v string))
 		}
 		nextKey = keys[len(keys)-1] + "\x00"
 	}
+}
+
+// TxnStorage is the interface with RunInTxn
+type TxnStorage interface {
+	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
+}
+
+// RunBatchOpInTxn runs a batch of operations in transaction.
+// The batch is split into multiple transactions if it exceeds the maximum number of operations per transaction.
+func RunBatchOpInTxn(ctx context.Context, storage TxnStorage, batch []func(kv.Txn) error) error {
+	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
+		end := start + etcdutil.MaxEtcdTxnOps
+		if end > len(batch) {
+			end = len(batch)
+		}
+		err := storage.RunInTxn(ctx, func(txn kv.Txn) (err error) {
+			for _, op := range batch[start:end] {
+				if err = op(txn); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
