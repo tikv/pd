@@ -543,11 +543,19 @@ func TestGetPDMembers(t *testing.T) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	req := &pdpb.GetMembersRequest{Header: testutil.NewRequestHeader(clusterID)}
-	resp, err := grpcPDClient.GetMembers(context.Background(), req)
+	resp, err := grpcPDClient.GetMembers(ctx, req)
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
-	// A more strict test can be found at api/member_test.go
 	re.NotEmpty(resp.GetMembers())
+	re.Equal(leaderServer.GetLeader(), resp.GetLeader())
+	// Test the member list does not include the PD leader.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/noLeaderInMembers", `return(true)`))
+	resp, err = grpcPDClient.GetMembers(ctx, req)
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	re.NotEmpty(resp.GetMembers())
+	re.Equal(leaderServer.GetLeader(), resp.GetLeader())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/noLeaderInMembers"))
 }
 
 func TestNotLeader(t *testing.T) {

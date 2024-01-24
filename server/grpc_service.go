@@ -499,6 +499,14 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 			break
 		}
 	}
+	failpoint.Inject("noLeaderInMembers", func() {
+		pdLeader = nil
+	})
+	// If the leader is not in the member list, we should fallback
+	// to the `leader` set in the PD server to gain a chance to work.
+	if pdLeader == nil && leader.GetMemberId() == leaderID {
+		pdLeader = leader
+	}
 
 	return &pdpb.GetMembersResponse{
 		Header:              s.header(),
