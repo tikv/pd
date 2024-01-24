@@ -112,7 +112,7 @@ func (c *baseCase) GetConfig() *Config {
 	return c.cfg.Clone()
 }
 
-// GRPCCase is the interface for all etcd api cases.
+// ETCDCase is the interface for all etcd api cases.
 type ETCDCase interface {
 	Case
 	Unary(context.Context, *clientv3.Client) error
@@ -395,7 +395,7 @@ func newGetKV() func() ETCDCase {
 }
 
 func (c *getKV) Unary(ctx context.Context, cli *clientv3.Client) error {
-	_, err := cli.Get(ctx, "/test/0001/0000")
+	_, err := cli.Get(ctx, "/test/0001", clientv3.WithPrefix())
 	return err
 }
 
@@ -457,7 +457,7 @@ func newTxnKV() func() ETCDCase {
 func (c *txnKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	txn := cli.Txn(ctx)
 	txn = txn.If(clientv3.Compare(clientv3.Value("/test/0001/0000"), "=", "test"))
-	txn = txn.Then(clientv3.OpPut("/test/0001/0000", "test"))
+	txn = txn.Then(clientv3.OpPut("/test/0001/0000", "test2"))
 	_, err := txn.Commit()
 	return err
 }

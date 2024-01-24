@@ -122,7 +122,7 @@ func main() {
 	}
 	etcdClis := make([]*clientv3.Client, cfg.Client)
 	for i := int64(0); i < cfg.Client; i++ {
-		etcdClis[i] = newEtcdClient(ctx, cfg)
+		etcdClis[i] = newEtcdClient(cfg)
 	}
 	httpClis := make([]pdHttp.Client, cfg.Client)
 	for i := int64(0); i < cfg.Client; i++ {
@@ -161,6 +161,9 @@ func main() {
 		cli.Close()
 	}
 	for _, cli := range httpClis {
+		cli.Close()
+	}
+	for _, cli := range etcdClis {
 		cli.Close()
 	}
 	log.Info("Exit")
@@ -353,7 +356,7 @@ const (
 	keepaliveTimeout = 3 * time.Second
 )
 
-func newEtcdClient(ctx context.Context, cfg *config.Config) *clientv3.Client {
+func newEtcdClient(cfg *config.Config) *clientv3.Client {
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
 	tlsCfg, err := tlsutil.TLSConfig{
