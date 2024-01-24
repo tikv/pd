@@ -724,7 +724,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Now, no need to hold `isNew` because `saveCache` must be true if if the region in cache does not have leader.
+	// Now, no need to hold `isNew` because `saveCache` must be true if the region in cache does not have leader.
 	return func(region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
 		if origin == nil {
 			if log.GetLevel() <= zap.DebugLevel {
