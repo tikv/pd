@@ -1645,7 +1645,7 @@ func (s *Server) leaderLoop() {
 		}
 
 		// To make sure the etcd leader and PD leader are on the same server.
-		etcdLeader := s.member.GetEtcdLeader()
+		etcdLeader := s.member.GetEtcdLeaderID()
 		if etcdLeader != s.member.ID() {
 			if s.member.GetLeader() == nil {
 				lastUpdated := s.member.GetLastLeaderUpdatedTime()
@@ -1800,7 +1800,7 @@ func (s *Server) campaignLeader() {
 				}
 			})
 
-			etcdLeader := s.member.GetEtcdLeader()
+			etcdLeader := s.member.GetEtcdLeaderID()
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
 				return
