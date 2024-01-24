@@ -66,6 +66,8 @@ type clientInner struct {
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
+	// defaultSD indicates whether the client is created with the default service discovery.
+	defaultSD bool
 }
 
 func newClientInner(ctx context.Context, cancel context.CancelFunc, source string) *clientInner {
@@ -89,6 +91,10 @@ func (ci *clientInner) close() {
 	ci.cancel()
 	if ci.cli != nil {
 		ci.cli.CloseIdleConnections()
+	}
+	// only close the service discovery if it's created by the client.
+	if ci.defaultSD && ci.sd != nil {
+		ci.sd.Close()
 	}
 }
 
@@ -238,8 +244,6 @@ type client struct {
 	callerID    string
 	respHandler respHandleFunc
 	bo          *retry.Backoffer
-	// defaultSD indicates whether the client is created with the default service discovery.
-	defaultSD bool
 }
 
 // ClientOption configures the HTTP client.
@@ -305,17 +309,13 @@ func NewClient(
 		return nil
 	}
 	c.inner.init(sd)
-	c.defaultSD = true
+	c.inner.defaultSD = true
 	return c
 }
 
 // Close gracefully closes the HTTP client.
 func (c *client) Close() {
 	c.inner.close()
-	// only close the service discovery if it's created by the client.
-	if c.defaultSD && c.inner.sd != nil {
-		c.inner.sd.Close()
-	}
 	log.Info("[pd] http client closed", zap.String("source", c.inner.source))
 }
 
