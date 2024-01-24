@@ -1358,14 +1358,14 @@ func checkRegionsReplicated(c *gin.Context) {
 }
 
 // @Tags        store
-// @Summary  Get a store's information.
-// @Param    id  path  integer  true  "Store Id"
+// @Summary     Get a store's information.
+// @Param       id path integer true "Store Id"
 // @Produce     json
-// @Success  200  {object}  StoreInfo
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  404  {string}  string  "The store does not exist."
-// @Failure     500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores/{id} [get]
+// @Success     200 {object} response.StoreInfo
+// @Failure     400 {string} string "The input is invalid."
+// @Failure     404 {string} string "The store does not exist."
+// @Failure     500 {string} string "PD server failed to proceed the request."
+// @Router      /stores/{id} [get]
 func getStoreByID(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
 	idStr := c.Param("id")
@@ -1384,11 +1384,11 @@ func getStoreByID(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, storeInfo)
 }
 
-// @Tags     store
+// @Tags        store
 // @Summary     Get all stores in the cluster.
-// @Produce  json
-// @Success     200  {object}  StoresInfo
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Produce     json
+// @Success     200 {object} response.StoresInfo
+// @Failure     500 {string} string "PD server failed to proceed the request."
 // @Router      /stores [get]
 func getAllStores(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -1417,7 +1417,7 @@ func getAllStores(c *gin.Context) {
 // @Tags     region
 // @Summary  List all regions in the cluster.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Router   /regions [get]
 func getAllRegions(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -1433,7 +1433,7 @@ func getAllRegions(c *gin.Context) {
 // @Tags     region
 // @Summary  Get count of regions.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Router   /regions/count [get]
 func getRegionCount(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
@@ -1445,7 +1445,7 @@ func getRegionCount(c *gin.Context) {
 // @Summary  Search for a region by region ID.
 // @Param    id  path  integer  true  "Region Id"
 // @Produce  json
-// @Success  200  {object}  RegionInfo
+// @Success  200  {object}  response.RegionInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/{id} [get]
 func getRegionByID(c *gin.Context) {
