@@ -151,6 +151,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
+	for _, client := range clients {
+		client.Close()
+	}
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKeyspaceGroups() {
@@ -232,6 +235,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
+	for _, client := range clients {
+		client.Close()
+	}
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {

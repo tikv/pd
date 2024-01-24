@@ -173,13 +173,13 @@ func testTLSReload(
 				CertPath: testClientTLSInfo.CertFile,
 				KeyPath:  testClientTLSInfo.KeyFile,
 			}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+			cli.Close()
 			if err != nil {
 				errc <- err
 				dcancel()
 				return
 			}
 			dcancel()
-			cli.Close()
 		}
 	}()
 
@@ -212,12 +212,13 @@ func testTLSReload(
 	caData, certData, keyData := loadTLSContent(re,
 		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
 	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
-	_, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
+	cli, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
 		SSLCABytes:   caData,
 		SSLCertBytes: certData,
 		SSLKEYBytes:  keyData,
 	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 	re.NoError(err)
+	defer cli.Close()
 	cancel1()
 }
 

@@ -43,8 +43,7 @@ func SetNewPDClient(addrs []string, opts ...pd.ClientOption) {
 	if PDCli != nil {
 		PDCli.Close()
 	}
-	withOpts := append(opts, pd.WithLoggerRedirection("fatal", ""))
-	PDCli = pd.NewClient(pdControlCallerID, addrs, withOpts...)
+	PDCli = pd.NewClient(pdControlCallerID, addrs, opts...)
 }
 
 // TODO: replace dialClient with PDCli

@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -67,6 +66,8 @@ type clientInner struct {
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
+	// defaultSD indicates whether the client is created with the default service discovery.
+	defaultSD bool
 }
 
 func newClientInner(ctx context.Context, cancel context.CancelFunc, source string) *clientInner {
@@ -90,6 +91,10 @@ func (ci *clientInner) close() {
 	ci.cancel()
 	if ci.cli != nil {
 		ci.cli.CloseIdleConnections()
+	}
+	// only close the service discovery if it's created by the client.
+	if ci.defaultSD && ci.sd != nil {
+		ci.sd.Close()
 	}
 }
 
@@ -270,21 +275,6 @@ func WithMetrics(
 	}
 }
 
-// WithLoggerRedirection configures the client with the given logger redirection.
-func WithLoggerRedirection(logLevel, fileName string) ClientOption {
-	cfg := &log.Config{}
-	cfg.Level = logLevel
-	if fileName != "" {
-		f, _ := os.CreateTemp(".", fileName)
-		fname := f.Name()
-		f.Close()
-		cfg.File.Filename = fname
-	}
-	lg, p, _ := log.InitLogger(cfg)
-	log.ReplaceGlobals(lg, p)
-	return func(c *client) {}
-}
-
 // NewClientWithServiceDiscovery creates a PD HTTP client with the given PD service discovery.
 func NewClientWithServiceDiscovery(
 	source string,
@@ -314,7 +304,12 @@ func NewClient(
 		opt(c)
 	}
 	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
+	if err := sd.Init(); err != nil {
+		log.Error("[pd] init service discovery failed", zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
+		return nil
+	}
 	c.inner.init(sd)
+	c.inner.defaultSD = true
 	return c
 }
 
@@ -371,6 +366,7 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 		headerOpts...)
 }
 
+/* The following functions are only for test */
 // requestChecker is used to check the HTTP request sent by the client.
 type requestChecker func(req *http.Request) error
 
@@ -384,4 +380,22 @@ func NewHTTPClientWithRequestChecker(checker requestChecker) *http.Client {
 	return &http.Client{
 		Transport: checker,
 	}
+}
+
+// newClientWithoutInitServiceDiscovery creates a PD HTTP client
+// with the given PD addresses and TLS config without init service discovery.
+func newClientWithoutInitServiceDiscovery(
+	source string,
+	pdAddrs []string,
+	opts ...ClientOption,
+) Client {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &client{inner: newClientInner(ctx, cancel, source), callerID: defaultCallerID}
+	// Apply the options first.
+	for _, opt := range opts {
+		opt(c)
+	}
+	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
+	c.inner.init(sd)
+	return c
 }
