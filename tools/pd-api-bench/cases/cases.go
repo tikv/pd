@@ -115,6 +115,7 @@ func (c *baseCase) GetConfig() *Config {
 // ETCDCase is the interface for all etcd api cases.
 type ETCDCase interface {
 	Case
+	Init(context.Context, *clientv3.Client) error
 	Unary(context.Context, *clientv3.Client) error
 }
 
@@ -394,6 +395,16 @@ func newGetKV() func() ETCDCase {
 	}
 }
 
+func (c *getKV) Init(ctx context.Context, cli *clientv3.Client) error {
+	for i := 0; i < 100; i++ {
+		_, err := cli.Put(ctx, fmt.Sprintf("/test/0001/%4d", i), fmt.Sprintf("%4d", i))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *getKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	_, err := cli.Get(ctx, "/test/0001", clientv3.WithPrefix())
 	return err
@@ -413,6 +424,8 @@ func newPutKV() func() ETCDCase {
 		}
 	}
 }
+
+func (c *putKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
 
 func (c *putKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	_, err := cli.Put(ctx, "/test/0001/0000", "test")
@@ -434,6 +447,8 @@ func newDeleteKV() func() ETCDCase {
 	}
 }
 
+func (c *deleteKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
+
 func (c *deleteKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	_, err := cli.Delete(ctx, "/test/0001/0000")
 	return err
@@ -453,6 +468,8 @@ func newTxnKV() func() ETCDCase {
 		}
 	}
 }
+
+func (c *txnKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
 
 func (c *txnKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	txn := cli.Txn(ctx)

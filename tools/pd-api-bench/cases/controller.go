@@ -346,6 +346,11 @@ func (c *etcdController) run() {
 	cliNum := int64(len(c.clients))
 	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
 	log.Info("begin to run etcd case", zap.String("case", c.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
+	err := c.Init(c.ctx, c.clients[0])
+	if err != nil {
+		log.Error("init error", zap.String("case", c.Name()), zap.Error(err))
+		return
+	}
 	for _, cli := range c.clients {
 		c.wg.Add(1)
 		go func(cli *clientv3.Client) {
