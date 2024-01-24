@@ -53,7 +53,7 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 // @Summary  Search for a region by region ID.
 // @Param    id  path  integer  true  "Region Id"
 // @Produce  json
-// @Success  200  {object}  RegionInfo
+// @Success  200  {object}  response.RegionInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /region/id/{id} [get]
 func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +81,7 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 // @Summary  Search for a region by a key. GetRegion is named to be consistent with gRPC
 // @Param    key  path  string  true  "Region key"
 // @Produce  json
-// @Success  200  {object}  RegionInfo
+// @Success  200  {object}  response.RegionInfo
 // @Router   /region/key/{key} [get]
 func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
@@ -150,7 +150,7 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 // @Tags     region
 // @Summary  List all regions in the cluster.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Router   /regions [get]
 func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
@@ -169,7 +169,7 @@ func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 // @Param    endkey  query  string   true   "Region range end key"
 // @Param    limit   query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/key [get]
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
@@ -194,7 +194,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 // @Tags     region
 // @Summary  Get count of regions.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Router   /regions/count [get]
 func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
@@ -206,7 +206,7 @@ func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) 
 // @Summary  List all regions of a specific store.
 // @Param    id  path  integer  true  "Store Id"
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/store/{id} [get]
 func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +232,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 // @Param    keyspace_id  query  string   true   "Keyspace ID"
 // @Param    limit        query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/keyspace/id/{id} [get]
 func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Request) {
@@ -278,7 +278,7 @@ func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Reque
 // @Tags     region
 // @Summary  List all regions that miss peer.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/miss-peer [get]
 func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Request) {
@@ -307,7 +307,7 @@ func (h *regionsHandler) getRegionsByType(
 // @Tags     region
 // @Summary  List all regions that has extra peer.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/extra-peer [get]
 func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Request) {
@@ -317,7 +317,7 @@ func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Requ
 // @Tags     region
 // @Summary  List all regions that has pending peer.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/pending-peer [get]
 func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +327,7 @@ func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Re
 // @Tags     region
 // @Summary  List all regions that has down peer.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/down-peer [get]
 func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Request) {
@@ -337,7 +337,7 @@ func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Reque
 // @Tags     region
 // @Summary  List all regions that has learner peer.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/learner-peer [get]
 func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Request) {
@@ -347,7 +347,7 @@ func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Re
 // @Tags     region
 // @Summary  List all regions that has offline peer.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/offline-peer [get]
 func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Request) {
@@ -357,7 +357,7 @@ func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Re
 // @Tags     region
 // @Summary  List all regions that are oversized.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/oversized-region [get]
 func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, r *http.Request) {
@@ -367,7 +367,7 @@ func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, r *http.Requ
 // @Tags     region
 // @Summary  List all regions that are undersized.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/undersized-region [get]
 func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Request) {
@@ -377,7 +377,7 @@ func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Req
 // @Tags     region
 // @Summary  List all empty regions.
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/empty-region [get]
 func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, r *http.Request) {
@@ -501,7 +501,7 @@ func (h *regionsHandler) GetRangeHoles(w http.ResponseWriter, r *http.Request) {
 // @Summary  List sibling regions of a specific region.
 // @Param    id  path  integer  true  "Region Id"
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  404  {string}  string  "The region does not exist."
 // @Router   /regions/sibling/{id} [get]
@@ -538,7 +538,7 @@ const (
 // @Summary  List regions with the highest write flow.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/writeflow [get]
 func (h *regionsHandler) GetTopWriteFlowRegions(w http.ResponseWriter, r *http.Request) {
@@ -549,7 +549,7 @@ func (h *regionsHandler) GetTopWriteFlowRegions(w http.ResponseWriter, r *http.R
 // @Summary  List regions with the highest read flow.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/readflow [get]
 func (h *regionsHandler) GetTopReadFlowRegions(w http.ResponseWriter, r *http.Request) {
@@ -560,7 +560,7 @@ func (h *regionsHandler) GetTopReadFlowRegions(w http.ResponseWriter, r *http.Re
 // @Summary  List regions with the largest conf version.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/confver [get]
 func (h *regionsHandler) GetTopConfVerRegions(w http.ResponseWriter, r *http.Request) {
@@ -573,7 +573,7 @@ func (h *regionsHandler) GetTopConfVerRegions(w http.ResponseWriter, r *http.Req
 // @Summary  List regions with the largest version.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/version [get]
 func (h *regionsHandler) GetTopVersionRegions(w http.ResponseWriter, r *http.Request) {
@@ -586,7 +586,7 @@ func (h *regionsHandler) GetTopVersionRegions(w http.ResponseWriter, r *http.Req
 // @Summary  List regions with the largest size.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/size [get]
 func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Request) {
@@ -599,7 +599,7 @@ func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Reques
 // @Summary  List regions with the largest keys.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/keys [get]
 func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Request) {
@@ -612,7 +612,7 @@ func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Reques
 // @Summary  List regions with the highest CPU usage.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
 // @Produce  json
-// @Success  200  {object}  RegionsInfo
+// @Success  200  {object}  response.RegionsInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/cpu [get]
 func (h *regionsHandler) GetTopCPURegions(w http.ResponseWriter, r *http.Request) {

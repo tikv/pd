@@ -66,7 +66,7 @@ func (h *labelsHandler) GetLabels(w http.ResponseWriter, r *http.Request) {
 // @Param    name   query  string  true  "name of store label filter"
 // @Param    value  query  string  true  "value of store label filter"
 // @Produce  json
-// @Success  200  {object}  StoresInfo
+// @Success  200  {object}  response.StoresInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /labels/stores [get]
 func (h *labelsHandler) GetStoresByLabel(w http.ResponseWriter, r *http.Request) {
