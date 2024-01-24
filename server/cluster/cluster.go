@@ -1005,6 +1005,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	saveKV, saveCache, needSync := regionGuide(region, origin)
+	fmt.Println("@@@@@", saveKV, saveCache, needSync)
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.

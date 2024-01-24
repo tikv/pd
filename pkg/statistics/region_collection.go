@@ -159,7 +159,7 @@ func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 		region.NeedMerge(int64(r.conf.GetMaxMergeRegionSize()), int64(r.conf.GetMaxMergeRegionKeys()))
 }
 
-// isObserved returns whether the region is observed. And it also shows whether PD recived heartbeat of this region.
+// isObserved returns whether the region is observed. And it also shows whether PD received heartbeat of this region.
 func (r *RegionStatistics) isObserved(id uint64) bool {
 	r.RLock()
 	defer r.RUnlock()
