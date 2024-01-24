@@ -66,6 +66,8 @@ type clientInner struct {
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
+	// defaultSD indicates whether the client is created with the default service discovery.
+	defaultSD bool
 }
 
 func newClientInner(ctx context.Context, cancel context.CancelFunc, source string) *clientInner {
@@ -89,6 +91,10 @@ func (ci *clientInner) close() {
 	ci.cancel()
 	if ci.cli != nil {
 		ci.cli.CloseIdleConnections()
+	}
+	// only close the service discovery if it's created by the client.
+	if ci.defaultSD && ci.sd != nil {
+		ci.sd.Close()
 	}
 }
 
@@ -303,6 +309,7 @@ func NewClient(
 		return nil
 	}
 	c.inner.init(sd)
+	c.inner.defaultSD = true
 	return c
 }
 
