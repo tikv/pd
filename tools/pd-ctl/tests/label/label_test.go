@@ -23,7 +23,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -42,9 +42,9 @@ func TestLabel(t *testing.T) {
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*api.StoreInfo{
+	stores := []*response.StoreInfo{
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:    1,
 					State: metapb.StoreState_Up,
@@ -60,7 +60,7 @@ func TestLabel(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:    2,
 					State: metapb.StoreState_Up,
@@ -76,7 +76,7 @@ func TestLabel(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:    3,
 					State: metapb.StoreState_Up,
@@ -128,9 +128,9 @@ func TestLabel(t *testing.T) {
 	args = []string{"-u", pdAddr, "label", "store", "zone", "us-west"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storesInfo := new(api.StoresInfo)
+	storesInfo := new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
-	sss := []*api.StoreInfo{stores[0], stores[2]}
+	sss := []*response.StoreInfo{stores[0], stores[2]}
 	tests.CheckStoresInfo(re, storesInfo.Stores, sss)
 
 	// label isolation [label]

@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -79,8 +80,8 @@ func (h *labelsHandler) GetStoresByLabel(w http.ResponseWriter, r *http.Request)
 	}
 
 	stores := rc.GetMetaStores()
-	storesInfo := &StoresInfo{
-		Stores: make([]*StoreInfo, 0, len(stores)),
+	storesInfo := &response.StoresInfo{
+		Stores: make([]*response.StoreInfo, 0, len(stores)),
 	}
 
 	stores = filter.filter(stores)
@@ -92,7 +93,7 @@ func (h *labelsHandler) GetStoresByLabel(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		storeInfo := newStoreInfo(h.svr.GetScheduleConfig(), store)
+		storeInfo := response.BuildStoreInfoResp(h.svr.GetScheduleConfig(), store)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 	storesInfo.Count = len(storesInfo.Stores)

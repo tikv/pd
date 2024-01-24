@@ -74,13 +74,22 @@ func (suite *regionTestSuite) TearDownTest() {
 		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(re))
 		re.NoError(err)
 		// clean stores
-		// TODO: cannot sync to scheduling server?
 		for _, store := range leader.GetStores() {
 			re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true))
 			re.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
 		}
 		re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
 		re.Empty(leader.GetStores())
+		tu.Eventually(re, func() bool {
+			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+				for _, s := range sche.GetBasicCluster().GetStores() {
+					if s.GetState() != metapb.StoreState_Tombstone {
+						return false
+					}
+				}
+			}
+			return true
+		})
 	}
 	suite.env.RunFuncInTwoModes(cleanFunc)
 }

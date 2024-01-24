@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
@@ -601,4 +602,113 @@ func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
 	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
 	re.Equal(versioninfo.PDGitHash, status.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, status.Version)
+}
+
+func (suite *apiTestSuite) TestStores() {
+	suite.env.RunTestInAPIMode(suite.checkStores)
+}
+
+func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
+	re := suite.Require()
+	stores := []*metapb.Store{
+		{
+			// metapb.StoreState_Up == 0
+			Id:        1,
+			Address:   "tikv1",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "2.0.0",
+		},
+		{
+			Id:        4,
+			Address:   "tikv4",
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+			Version:   "2.0.0",
+		},
+		{
+			// metapb.StoreState_Offline == 1
+			Id:        6,
+			Address:   "tikv6",
+			State:     metapb.StoreState_Offline,
+			NodeState: metapb.NodeState_Removing,
+			Version:   "2.0.0",
+		},
+		{
+			// metapb.StoreState_Tombstone == 2
+			Id:        7,
+			Address:   "tikv7",
+			State:     metapb.StoreState_Tombstone,
+			NodeState: metapb.NodeState_Removed,
+			Version:   "2.0.0",
+		},
+	}
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+	// Test /stores
+	apiServerAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/stores", apiServerAddr)
+	var resp map[string]interface{}
+	err := testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	re.Equal(3, int(resp["count"].(float64)))
+	re.Len(resp["stores"].([]interface{}), 3)
+	scheServerAddr := cluster.GetSchedulingPrimaryServer().GetAddr()
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores", scheServerAddr)
+	err = testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	re.Equal(3, int(resp["count"].(float64)))
+	re.Len(resp["stores"].([]interface{}), 3)
+	// Test /stores/{id}
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/1", scheServerAddr)
+	err = testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	re.Equal("tikv1", resp["store"].(map[string]interface{})["address"])
+	re.Equal("Up", resp["store"].(map[string]interface{})["state_name"])
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/6", scheServerAddr)
+	err = testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	re.Equal("tikv6", resp["store"].(map[string]interface{})["address"])
+	re.Equal("Offline", resp["store"].(map[string]interface{})["state_name"])
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/7", scheServerAddr)
+	err = testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	re.Equal("tikv7", resp["store"].(map[string]interface{})["address"])
+	re.Equal("Tombstone", resp["store"].(map[string]interface{})["state_name"])
+}
+
+func (suite *apiTestSuite) TestRegions() {
+	suite.env.RunTestInAPIMode(suite.checkRegions)
+}
+
+func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
+	re := suite.Require()
+	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"))
+	tests.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"))
+	// Test /regions
+	apiServerAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/regions", apiServerAddr)
+	var resp map[string]interface{}
+	err := testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	re.Equal(3, int(resp["count"].(float64)))
+	re.Len(resp["regions"].([]interface{}), 3)
+	scheServerAddr := cluster.GetSchedulingPrimaryServer().GetAddr()
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/regions", scheServerAddr)
+	err = testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	re.Equal(3, int(resp["count"].(float64)))
+	re.Len(resp["regions"].([]interface{}), 3)
+	// Test /regions/{id} and /regions/count
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/regions/1", scheServerAddr)
+	err = testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	key := fmt.Sprintf("%x", "a")
+	re.Equal(key, resp["start_key"])
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/regions/count", scheServerAddr)
+	err = testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
+	re.NoError(err)
+	re.Equal(3., resp["count"])
 }
