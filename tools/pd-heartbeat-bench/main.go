@@ -258,7 +258,6 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes [
 	rs.updateSpace = pick(reportRegions, reportCount, options.GetSpaceUpdateRatio())
 	rs.updateFlow = pick(reportRegions, reportCount, options.GetFlowUpdateRatio())
 	var (
-		updatedRegionsMap    = make(map[int]*pdpb.RegionHeartbeatRequest)
 		updatedStatisticsMap = make(map[int]*pdpb.RegionHeartbeatRequest)
 		awakenRegions        []*pdpb.RegionHeartbeatRequest
 	)
@@ -267,20 +266,17 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes [
 	for _, i := range rs.updateLeader {
 		region := rs.regions[i]
 		region.Leader = region.Region.Peers[rs.updateRound%cfg.Replica]
-		updatedRegionsMap[i] = region
 	}
 	// update epoch
 	for _, i := range rs.updateEpoch {
 		region := rs.regions[i]
 		region.Region.RegionEpoch.Version += 1
-		updatedRegionsMap[i] = region
 	}
 	// update space
 	for _, i := range rs.updateSpace {
 		region := rs.regions[i]
 		region.ApproximateSize = uint64(bytesUnit * rand.Float64())
 		region.ApproximateKeys = uint64(keysUint * rand.Float64())
-		updatedRegionsMap[i] = region
 	}
 	// update flow
 	for _, i := range rs.updateFlow {
@@ -293,7 +289,6 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes [
 			Get: uint64(queryUnit * rand.Float64()),
 			Put: uint64(queryUnit * rand.Float64()),
 		}
-		updatedRegionsMap[i] = region
 		updatedStatisticsMap[i] = region
 	}
 	// update interval
@@ -303,9 +298,6 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes [
 	}
 	for _, i := range reportRegions {
 		region := rs.regions[i]
-		if r, exist := updatedRegionsMap[i]; exist {
-			region = r
-		}
 		// reset the statistics of the region which is not updated
 		if _, exist := updatedStatisticsMap[i]; !exist {
 			region.BytesWritten = 0
