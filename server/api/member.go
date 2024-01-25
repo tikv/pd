@@ -87,7 +87,7 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 		if e != nil {
 			log.Error("failed to load deploy path", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 		}
-		if svr.GetMember().GetEtcdLeaderID() == 0 {
+		if svr.GetMember().GetEtcdLeader() == 0 {
 			log.Warn("no etcd leader, skip get leader priority", zap.Uint64("member", m.GetMemberId()))
 			continue
 		}

@@ -204,7 +204,7 @@ func (m *EmbeddedEtcdMember) KeepLeader(ctx context.Context) {
 
 // PreCheckLeader does some pre-check before checking whether it's the leader.
 func (m *EmbeddedEtcdMember) PreCheckLeader() error {
-	if m.GetEtcdLeaderID() == 0 {
+	if m.GetEtcdLeader() == 0 {
 		return errs.ErrEtcdLeaderNotFound
 	}
 	return nil
@@ -281,7 +281,7 @@ func (m *EmbeddedEtcdMember) ResetLeader() {
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
 func (m *EmbeddedEtcdMember) CheckPriority(ctx context.Context) {
-	etcdLeader := m.GetEtcdLeaderID()
+	etcdLeader := m.GetEtcdLeader()
 	if etcdLeader == m.ID() || etcdLeader == 0 {
 		return
 	}
@@ -318,8 +318,8 @@ func (m *EmbeddedEtcdMember) MoveEtcdLeader(ctx context.Context, old, new uint64
 	return nil
 }
 
-// GetEtcdLeaderID returns the etcd leader ID.
-func (m *EmbeddedEtcdMember) GetEtcdLeaderID() uint64 {
+// GetEtcdLeader returns the etcd leader ID.
+func (m *EmbeddedEtcdMember) GetEtcdLeader() uint64 {
 	return m.etcd.Server.Lead()
 }
 

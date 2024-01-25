@@ -473,9 +473,9 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	var etcdLeader, pdLeader *pdpb.Member
-	etcdLeaderID := s.member.GetEtcdLeaderID()
+	leaderID := s.member.GetEtcdLeader()
 	for _, m := range members {
-		if m.MemberId == etcdLeaderID {
+		if m.MemberId == leaderID {
 			etcdLeader = m
 			break
 		}
@@ -498,15 +498,6 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 			pdLeader = m
 			break
 		}
-	}
-	failpoint.Inject("noLeaderInMembers", func() {
-		pdLeader = nil
-	})
-	// If the leader is not in the member list, we should fallback to
-	// the `leader` set in the PD server to gain a better availability.
-	// See https://github.com/tikv/pd/issues/7752 for more details.
-	if pdLeader == nil && leader.GetMemberId() == etcdLeaderID {
-		pdLeader = leader
 	}
 
 	return &pdpb.GetMembersResponse{
