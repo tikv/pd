@@ -676,6 +676,9 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 	re.NoError(err)
 	re.Equal("tikv7", resp["store"].(map[string]interface{})["address"])
 	re.Equal("Tombstone", resp["store"].(map[string]interface{})["state_name"])
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/233", scheServerAddr)
+	testutil.CheckGetJSON(testDialClient, urlPrefix, nil,
+		testutil.Status(re, http.StatusNotFound), testutil.StringContain(re, "not found"))
 }
 
 func (suite *apiTestSuite) TestRegions() {
@@ -711,4 +714,7 @@ func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
 	err = testutil.ReadGetJSON(re, testDialClient, urlPrefix, &resp)
 	re.NoError(err)
 	re.Equal(3., resp["count"])
+	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/regions/233", scheServerAddr)
+	testutil.CheckGetJSON(testDialClient, urlPrefix, nil,
+		testutil.Status(re, http.StatusNotFound), testutil.StringContain(re, "not found"))
 }
