@@ -72,7 +72,7 @@ func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	storeInfo := response.BuildStoreInfoResp(h.handler.GetScheduleConfig(), store)
+	storeInfo := response.BuildStoreInfo(h.handler.GetScheduleConfig(), store)
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
@@ -640,7 +640,7 @@ func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		storeInfo := response.BuildStoreInfoResp(h.GetScheduleConfig(), store)
+		storeInfo := response.BuildStoreInfo(h.GetScheduleConfig(), store)
 		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
 	}
 	StoresInfo.Count = len(StoresInfo.Stores)
@@ -688,7 +688,7 @@ func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		storeInfo := response.BuildStoreInfoResp(h.GetScheduleConfig(), store)
+		storeInfo := response.BuildStoreInfo(h.GetScheduleConfig(), store)
 		if queryStates != nil && !slice.Contains(queryStates, strings.ToLower(storeInfo.Store.StateName)) {
 			continue
 		}

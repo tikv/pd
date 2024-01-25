@@ -459,15 +459,15 @@ func (suite *storeTestSuite) TestDownState() {
 		core.SetStoreStats(&pdpb.StoreStats{}),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	storeInfo := response.BuildStoreInfoResp(suite.svr.GetScheduleConfig(), store)
+	storeInfo := response.BuildStoreInfo(suite.svr.GetScheduleConfig(), store)
 	re.Equal(metapb.StoreState_Up.String(), storeInfo.Store.StateName)
 
 	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)))
-	storeInfo = response.BuildStoreInfoResp(suite.svr.GetScheduleConfig(), newStore)
+	storeInfo = response.BuildStoreInfo(suite.svr.GetScheduleConfig(), newStore)
 	re.Equal(response.DisconnectedName, storeInfo.Store.StateName)
 
 	newStore = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)))
-	storeInfo = response.BuildStoreInfoResp(suite.svr.GetScheduleConfig(), newStore)
+	storeInfo = response.BuildStoreInfo(suite.svr.GetScheduleConfig(), newStore)
 	re.Equal(response.DownStateName, storeInfo.Store.StateName)
 }
 

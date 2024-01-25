@@ -137,7 +137,7 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	}
 	trendStores := make([]trendStore, 0, len(stores))
 	for _, store := range stores {
-		info := response.BuildStoreInfoResp(h.svr.GetScheduleConfig(), store)
+		info := response.BuildStoreInfo(h.svr.GetScheduleConfig(), store)
 		s := trendStore{
 			ID:              info.Store.GetId(),
 			Address:         info.Store.GetAddress(),

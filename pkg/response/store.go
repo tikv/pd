@@ -87,8 +87,8 @@ const (
 	DownStateName = "Down"
 )
 
-// BuildStoreInfoResp builds a storeInfo response.
-func BuildStoreInfoResp(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
+// BuildStoreInfo builds a storeInfo response.
+func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 	var slowTrend *SlowTrend
 	coreSlowTrend := store.GetSlowTrend()
 	if coreSlowTrend != nil {

@@ -93,7 +93,7 @@ func (h *labelsHandler) GetStoresByLabel(w http.ResponseWriter, r *http.Request)
 			return
 		}
 
-		storeInfo := response.BuildStoreInfoResp(h.svr.GetScheduleConfig(), store)
+		storeInfo := response.BuildStoreInfo(h.svr.GetScheduleConfig(), store)
 		storesInfo.Stores = append(storesInfo.Stores, storeInfo)
 	}
 	storesInfo.Count = len(storesInfo.Stores)

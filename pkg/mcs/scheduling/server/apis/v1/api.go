@@ -1380,7 +1380,7 @@ func getStoreByID(c *gin.Context) {
 		return
 	}
 
-	storeInfo := response.BuildStoreInfoResp(&svr.GetConfig().Schedule, store)
+	storeInfo := response.BuildStoreInfo(&svr.GetConfig().Schedule, store)
 	c.IndentedJSON(http.StatusOK, storeInfo)
 }
 
@@ -1407,7 +1407,7 @@ func getAllStores(c *gin.Context) {
 		if store.GetMeta().State == metapb.StoreState_Tombstone {
 			continue
 		}
-		storeInfo := response.BuildStoreInfoResp(&svr.GetConfig().Schedule, store)
+		storeInfo := response.BuildStoreInfo(&svr.GetConfig().Schedule, store)
 		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
 	}
 	StoresInfo.Count = len(StoresInfo.Stores)
