@@ -18,6 +18,7 @@ import (
 	"context"
 	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -97,7 +98,10 @@ func (suite *httpClientTestSuite) SetupSuite() {
 			endpoints   = make([]string, 0, len(testServers))
 		)
 		for _, s := range testServers {
-			endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+			addr := s.GetConfig().AdvertiseClientUrls
+			url, err := url.Parse(addr)
+			re.NoError(err)
+			endpoints = append(endpoints, url.Host)
 		}
 		env.endpoints = endpoints
 		env.cluster = cluster

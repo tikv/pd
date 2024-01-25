@@ -381,7 +381,7 @@ func createClientWithKeyspace(
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
 		keyspaceID:              keyspaceID,
-		svrUrls:                 addrsToUrls(svrAddrs),
+		svrUrls:                 AddrsToUrls(svrAddrs),
 		tlsCfg:                  tlsCfg,
 		option:                  newOption(),
 	}
@@ -500,7 +500,7 @@ func newClientWithKeyspaceName(
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
-		svrUrls:                 addrsToUrls(svrAddrs),
+		svrUrls:                 AddrsToUrls(svrAddrs),
 		tlsCfg:                  tlsCfg,
 		option:                  newOption(),
 	}
@@ -1388,7 +1388,7 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	return resp, nil
 }
 
-func addrsToUrls(addrs []string) []string {
+func AddrsToUrls(addrs []string) []string {
 	// Add default schema "http://" to addrs.
 	urls := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
