@@ -303,7 +303,6 @@ func NewClient(
 	for _, opt := range opts {
 		opt(c)
 	}
-	pdAddrs = pd.AddrsToUrls(pdAddrs)
 	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
 	if err := sd.Init(); err != nil {
 		log.Error("[pd] init service discovery failed", zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
