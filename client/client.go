@@ -1388,6 +1388,7 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	return resp, nil
 }
 
+// AddrsToUrls is used to add scheme for urls.
 func AddrsToUrls(addrs []string) []string {
 	// Add default schema "http://" to addrs.
 	urls := make([]string, 0, len(addrs))
