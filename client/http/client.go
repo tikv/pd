@@ -170,7 +170,7 @@ func (ci *clientInner) requestWithRetry(
 			if idx == leaderAddrIdx {
 				continue
 			}
-			addr = ci.pdAddrs[idx]
+			addr = pdAddrs[idx]
 			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 			if err == nil || noNeedRetry(statusCode) {
 				break
