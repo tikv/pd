@@ -364,9 +364,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	defaultSchedulerNames := []string{
 		schedulers.BalanceLeaderName,
 		schedulers.BalanceRegionName,
-		schedulers.BalanceWitnessName,
 		schedulers.HotRegionName,
-		schedulers.TransferWitnessLeaderName,
 	}
 	checkDisabled := func(name string, shouldDisabled bool) {
 		re.NotNil(schedulersController.GetScheduler(name), name)

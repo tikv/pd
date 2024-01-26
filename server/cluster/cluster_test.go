@@ -3015,8 +3015,6 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	re.Empty(controller.GetSchedulerNames())
 
@@ -3112,8 +3110,6 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
@@ -3226,8 +3222,6 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()

@@ -553,9 +553,7 @@ type SchedulerConfig struct {
 var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
-	{Type: "balance-witness"},
 	{Type: "hot-region"},
-	{Type: "transfer-witness-leader"},
 	{Type: "evict-slow-store"},
 }
 
