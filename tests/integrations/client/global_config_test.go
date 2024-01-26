@@ -80,6 +80,7 @@ func (suite *globalConfigTestSuite) SetupSuite() {
 func (suite *globalConfigTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.cleanup()
+	suite.client.Close()
 }
 
 func (suite *globalConfigTestSuite) GetEtcdPath(configPath string) string {

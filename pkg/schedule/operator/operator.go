@@ -149,6 +149,39 @@ func (o *Operator) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + o.String() + `"`), nil
 }
 
+// OpObject is used to return Operator as a json object for API.
+type OpObject struct {
+	Desc        string              `json:"desc"`
+	Brief       string              `json:"brief"`
+	RegionID    uint64              `json:"region_id"`
+	RegionEpoch *metapb.RegionEpoch `json:"region_epoch"`
+	Kind        OpKind              `json:"kind"`
+	Timeout     string              `json:"timeout"`
+	Status      OpStatus            `json:"status"`
+}
+
+// ToJSONObject serializes Operator as JSON object.
+func (o *Operator) ToJSONObject() *OpObject {
+	var status OpStatus
+	if o.CheckSuccess() {
+		status = SUCCESS
+	} else if o.CheckTimeout() {
+		status = TIMEOUT
+	} else {
+		status = o.Status()
+	}
+
+	return &OpObject{
+		Desc:        o.desc,
+		Brief:       o.brief,
+		RegionID:    o.regionID,
+		RegionEpoch: o.regionEpoch,
+		Kind:        o.kind,
+		Timeout:     o.timeout.String(),
+		Status:      status,
+	}
+}
+
 // Desc returns the operator's short description.
 func (o *Operator) Desc() string {
 	return o.desc

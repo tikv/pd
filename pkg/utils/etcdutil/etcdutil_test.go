@@ -53,7 +53,7 @@ func TestMemberHelpers(t *testing.T) {
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
 	// Test ListEtcdMembers
-	listResp1, err := ListEtcdMembers(client1)
+	listResp1, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp1.Members, 1)
 	// types.ID is an alias of uint64.
@@ -74,7 +74,7 @@ func TestMemberHelpers(t *testing.T) {
 	_, err = RemoveEtcdMember(client1, uint64(etcd2.Server.ID()))
 	re.NoError(err)
 
-	listResp3, err := ListEtcdMembers(client1)
+	listResp3, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp3.Members, 1)
 	re.Equal(uint64(etcd1.Server.ID()), listResp3.Members[0].ID)
@@ -380,7 +380,8 @@ func (suite *loopWatcherTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cleans = make([]func(), 0)
 	// Start a etcd server and create a client with etcd1 as endpoint.
-	suite.config = newTestSingleConfig(suite.T())
+	suite.config = NewTestSingleConfig()
+	suite.config.Dir = suite.T().TempDir()
 	suite.startEtcd(re)
 	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls)
 	re.NoError(err)
@@ -397,36 +398,57 @@ func (suite *loopWatcherTestSuite) TearDownSuite() {
 	}
 }
 
-func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
+func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re := suite.Require()
-	cache := struct {
-		syncutil.RWMutex
-		data map[string]struct{}
-	}{
-		data: make(map[string]struct{}),
+	cache := make(map[string]struct{})
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestLoadNoExistedKey",
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache[string(kv.Key)] = struct{}{}
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
+	)
+	watcher.StartWatchLoop()
+	err := watcher.WaitLoad()
+	re.NoError(err) // although no key, watcher returns no error
+	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError", `return()`))
+	cache := make(map[string]struct{})
+	for i := 0; i < int(maxLoadBatchSize)*2; i++ {
+		suite.put(re, fmt.Sprintf("TestLoadWithLimitChange%d", i), "")
 	}
 	watcher := NewLoopWatcher(
 		suite.ctx,
 		&suite.wg,
 		suite.client,
 		"test",
-		"TestLoadWithoutKey",
+		"TestLoadWithLimitChange",
 		func([]*clientv3.Event) error { return nil },
 		func(kv *mvccpb.KeyValue) error {
-			cache.Lock()
-			defer cache.Unlock()
-			cache.data[string(kv.Key)] = struct{}{}
+			cache[string(kv.Key)] = struct{}{}
 			return nil
 		},
 		func(kv *mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
 	)
 	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
-	re.NoError(err) // although no key, watcher returns no error
-	cache.RLock()
-	defer cache.RUnlock()
-	re.Empty(cache.data)
+	re.NoError(err)
+	re.Len(cache, int(maxLoadBatchSize)*2)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError"))
 }
 
 func (suite *loopWatcherTestSuite) TestCallBack() {
@@ -464,7 +486,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 			result = result[:0]
 			return nil
 		},
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	watcher.StartWatchLoop()
 	err := watcher.WaitLoad()
@@ -499,12 +521,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 			for i := 0; i < count; i++ {
 				suite.put(re, fmt.Sprintf("TestWatcherLoadLimit%d", i), "")
 			}
-			cache := struct {
-				syncutil.RWMutex
-				data []string
-			}{
-				data: make([]string, 0),
-			}
+			cache := make([]string, 0)
 			watcher := NewLoopWatcher(
 				ctx,
 				&suite.wg,
@@ -513,9 +530,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				"TestWatcherLoadLimit",
 				func([]*clientv3.Event) error { return nil },
 				func(kv *mvccpb.KeyValue) error {
-					cache.Lock()
-					defer cache.Unlock()
-					cache.data = append(cache.data, string(kv.Key))
+					cache = append(cache, string(kv.Key))
 					return nil
 				},
 				func(kv *mvccpb.KeyValue) error {
@@ -524,17 +539,51 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 				func([]*clientv3.Event) error {
 					return nil
 				},
-				clientv3.WithPrefix(),
+				true, /* withPrefix */
 			)
+			watcher.SetLoadBatchSize(int64(limit))
 			watcher.StartWatchLoop()
 			err := watcher.WaitLoad()
 			re.NoError(err)
-			cache.RLock()
-			re.Len(cache.data, count)
-			cache.RUnlock()
+			re.Len(cache, count)
 			cancel()
 		}
 	}
+}
+
+func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
+	re := suite.Require()
+	// use default limit to test 65536 key in etcd
+	count := 65536
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	for i := 0; i < count; i++ {
+		suite.put(re, fmt.Sprintf("TestWatcherLoadLargeKey/test-%d", i), "")
+	}
+	cache := make([]string, 0)
+	watcher := NewLoopWatcher(
+		ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestWatcherLoadLargeKey",
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache = append(cache, string(kv.Key))
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error {
+			return nil
+		},
+		func([]*clientv3.Event) error {
+			return nil
+		},
+		true, /* withPrefix */
+	)
+	watcher.StartWatchLoop()
+	err := watcher.WaitLoad()
+	re.NoError(err)
+	re.Len(cache, count)
 }
 
 func (suite *loopWatcherTestSuite) TestWatcherBreak() {
@@ -568,6 +617,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 		},
 		func(kv *mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
 	)
 	watcher.watchChangeRetryInterval = 100 * time.Millisecond
 	watcher.StartWatchLoop()
@@ -646,6 +696,7 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			func(kv *mvccpb.KeyValue) error { return nil },
 			func(kv *mvccpb.KeyValue) error { return nil },
 			func([]*clientv3.Event) error { return nil },
+			false, /* withPrefix */
 		)
 
 		suite.wg.Add(1)

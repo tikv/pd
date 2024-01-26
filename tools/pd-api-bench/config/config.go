@@ -55,6 +55,7 @@ func NewConfig(flagSet *flag.FlagSet) *Config {
 	fs := cfg.flagSet
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
 	fs.StringVar(&cfg.PDAddr, "pd", "http://127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.StringVar(&cfg.StatusAddr, "status", "127.0.0.1:10081", "status address")
 	fs.Int64Var(&cfg.Client, "client", 1, "client number")
 	fs.StringVar(&cfg.CaPath, "cacert", "", "path of file that contains list of trusted SSL CAs")

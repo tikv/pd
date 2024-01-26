@@ -541,3 +541,36 @@ func (suite *operatorTestSuite) TestRecord() {
 	re.Equal(now, ob.FinishTime)
 	re.Greater(ob.duration.Seconds(), time.Second.Seconds())
 }
+
+func (suite *operatorTestSuite) TestToJSONObject() {
+	steps := []OpStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 3, ToStore: 1},
+		RemovePeer{FromStore: 3},
+	}
+	op := suite.newTestOperator(101, OpLeader|OpRegion, steps...)
+	op.Start()
+	obj := op.ToJSONObject()
+	suite.Equal("test", obj.Desc)
+	suite.Equal("test", obj.Brief)
+	suite.Equal(uint64(101), obj.RegionID)
+	suite.Equal(OpLeader|OpRegion, obj.Kind)
+	suite.Equal("12m0s", obj.Timeout)
+	suite.Equal(STARTED, obj.Status)
+
+	// Test SUCCESS status.
+	region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	suite.Nil(op.Check(region))
+	suite.Equal(SUCCESS, op.Status())
+	obj = op.ToJSONObject()
+	suite.Equal(SUCCESS, obj.Status)
+
+	// Test TIMEOUT status.
+	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
+	op = suite.newTestOperator(1, OpLeader, steps...)
+	op.Start()
+	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
+	suite.True(op.CheckTimeout())
+	obj = op.ToJSONObject()
+	suite.Equal(TIMEOUT, obj.Status)
+}
