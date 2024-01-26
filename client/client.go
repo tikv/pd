@@ -381,7 +381,7 @@ func createClientWithKeyspace(
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
 		keyspaceID:              keyspaceID,
-		svrUrls:                 addrsToUrls(svrAddrs),
+		svrUrls:                 svrAddrs,
 		tlsCfg:                  tlsCfg,
 		option:                  newOption(),
 	}
@@ -500,7 +500,7 @@ func newClientWithKeyspaceName(
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
-		svrUrls:                 addrsToUrls(svrAddrs),
+		svrUrls:                 svrAddrs,
 		tlsCfg:                  tlsCfg,
 		option:                  newOption(),
 	}
@@ -1386,19 +1386,6 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.GetHeader().GetError().String())
 	}
 	return resp, nil
-}
-
-func addrsToUrls(addrs []string) []string {
-	// Add default schema "http://" to addrs.
-	urls := make([]string, 0, len(addrs))
-	for _, addr := range addrs {
-		if strings.Contains(addr, "://") {
-			urls = append(urls, addr)
-		} else {
-			urls = append(urls, "http://"+addr)
-		}
-	}
-	return urls
 }
 
 // IsLeaderChange will determine whether there is a leader change.
