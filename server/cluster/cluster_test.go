@@ -3041,8 +3041,12 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
+<<<<<<< HEAD
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
 	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
+=======
+	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
+>>>>>>> 5b939c6fc (config: disable witness related schedulers by default (#7765))
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3137,9 +3141,15 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
+<<<<<<< HEAD
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
 	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.Len(controller.GetSchedulerNames(), defaultCount-3)
+=======
+	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
+	// only remains 2 items with independent config.
+	re.Len(controller.GetSchedulerNames(), 2)
+>>>>>>> 5b939c6fc (config: disable witness related schedulers by default (#7765))
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
 	co.Stop()
 	co.GetSchedulersController().Wait()
@@ -3249,8 +3259,12 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
+<<<<<<< HEAD
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
 	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
+=======
+	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
+>>>>>>> 5b939c6fc (config: disable witness related schedulers by default (#7765))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)

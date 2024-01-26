@@ -525,9 +525,12 @@ type SchedulerConfig struct {
 var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
-	{Type: "balance-witness"},
 	{Type: "hot-region"},
+<<<<<<< HEAD
 	{Type: "transfer-witness-leader"},
+=======
+	{Type: "evict-slow-store"},
+>>>>>>> 5b939c6fc (config: disable witness related schedulers by default (#7765))
 }
 
 // IsDefaultScheduler checks whether the scheduler is enable by default.
