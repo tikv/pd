@@ -480,18 +480,7 @@ func NewDefaultPDServiceDiscovery(
 	urls []string, tlsCfg *tls.Config,
 ) *pdServiceDiscovery {
 	var wg sync.WaitGroup
-	pdsd := &pdServiceDiscovery{
-		checkMembershipCh: make(chan struct{}, 1),
-		ctx:               ctx,
-		cancel:            cancel,
-		wg:                &wg,
-		apiCandidateNodes: [apiKindCount]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn), newPDServiceBalancer(regionAPIErrorFn)},
-		keyspaceID:        defaultKeyspaceID,
-		tlsCfg:            tlsCfg,
-		option:            newOption(),
-	}
-	pdsd.urls.Store(urls)
-	return pdsd
+	return newPDServiceDiscovery(ctx, cancel, &wg, nil, nil, defaultKeyspaceID, urls, tlsCfg, newOption())
 }
 
 // newPDServiceDiscovery returns a new PD service discovery-based client.
@@ -515,6 +504,7 @@ func newPDServiceDiscovery(
 		tlsCfg:              tlsCfg,
 		option:              option,
 	}
+	urls = addrsToUrls(urls)
 	pdsd.urls.Store(urls)
 	return pdsd
 }
@@ -1154,4 +1144,17 @@ func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
 func (c *pdServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
+}
+
+func addrsToUrls(addrs []string) []string {
+	// Add default schema "http://" to addrs.
+	urls := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		if strings.Contains(addr, "://") {
+			urls = append(urls, addr)
+		} else {
+			urls = append(urls, "http://"+addr)
+		}
+	}
+	return urls
 }
