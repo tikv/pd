@@ -48,7 +48,7 @@ type Controller struct {
 	ctx     context.Context
 	cluster sche.SchedulerCluster
 	storage endpoint.ConfigStorage
-	// schedulers is used to manage all schedulers, which will only be initialized
+	// schedulers are used to manage all schedulers, which will only be initialized
 	// and used in the PD leader service mode now.
 	schedulers map[string]*ScheduleController
 	// schedulerHandlers is used to manage the HTTP handlers of schedulers,

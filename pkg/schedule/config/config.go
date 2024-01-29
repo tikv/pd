@@ -557,7 +557,7 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: "evict-slow-store"},
 }
 
-// IsDefaultScheduler checks whether the scheduler is enable by default.
+// IsDefaultScheduler checks whether the scheduler is enabled by default.
 func IsDefaultScheduler(typ string) bool {
 	for _, c := range DefaultSchedulers {
 		if typ == c.Type {
