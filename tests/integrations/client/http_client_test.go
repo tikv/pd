@@ -18,6 +18,7 @@ import (
 	"context"
 	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"testing"
@@ -97,7 +98,10 @@ func (suite *httpClientTestSuite) SetupSuite() {
 			endpoints   = make([]string, 0, len(testServers))
 		)
 		for _, s := range testServers {
-			endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+			addr := s.GetConfig().AdvertiseClientUrls
+			url, err := url.Parse(addr)
+			re.NoError(err)
+			endpoints = append(endpoints, url.Host)
 		}
 		env.endpoints = endpoints
 		env.cluster = cluster
@@ -504,6 +508,12 @@ func (suite *httpClientTestSuite) checkConfig(mode mode, client pd.Client) {
 	resp, err := env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
 	re.NoError(err)
 	re.Equal([]byte("16"), resp.Kvs[0].Value)
+	// delete the config with TTL.
+	err = client.SetConfig(env.ctx, newConfig, 0)
+	re.NoError(err)
+	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
+	re.NoError(err)
+	re.Empty(resp.Kvs)
 }
 
 func (suite *httpClientTestSuite) TestScheduleConfig() {
@@ -516,14 +526,14 @@ func (suite *httpClientTestSuite) checkScheduleConfig(mode mode, client pd.Clien
 
 	config, err := client.GetScheduleConfig(env.ctx)
 	re.NoError(err)
-	re.Equal(float64(4), config["leader-schedule-limit"])
+	re.Equal(float64(4), config["hot-region-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])
-	config["leader-schedule-limit"] = float64(8)
+	config["hot-region-schedule-limit"] = float64(8)
 	err = client.SetScheduleConfig(env.ctx, config)
 	re.NoError(err)
 	config, err = client.GetScheduleConfig(env.ctx)
 	re.NoError(err)
-	re.Equal(float64(8), config["leader-schedule-limit"])
+	re.Equal(float64(8), config["hot-region-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])
 }
 
@@ -675,6 +685,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	env := suite.env[defaultServiceDiscovery]
 
 	cli := setupCli(suite.Require(), env.ctx, env.endpoints)
+	defer cli.Close()
 	sd := cli.GetServiceDiscovery()
 
 	metricCnt := prometheus.NewCounterVec(

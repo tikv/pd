@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -34,21 +35,25 @@ type Coordinator struct {
 
 	httpClients []pdHttp.Client
 	gRPCClients []pd.Client
+	etcdClients []*clientv3.Client
 
 	http map[string]*httpController
 	grpc map[string]*gRPCController
+	etcd map[string]*etcdController
 
 	mu sync.RWMutex
 }
 
 // NewCoordinator returns a new coordinator.
-func NewCoordinator(ctx context.Context, httpClients []pdHttp.Client, gRPCClients []pd.Client) *Coordinator {
+func NewCoordinator(ctx context.Context, httpClients []pdHttp.Client, gRPCClients []pd.Client, etcdClients []*clientv3.Client) *Coordinator {
 	return &Coordinator{
 		ctx:         ctx,
 		httpClients: httpClients,
 		gRPCClients: gRPCClients,
+		etcdClients: etcdClients,
 		http:        make(map[string]*httpController),
 		grpc:        make(map[string]*gRPCController),
+		etcd:        make(map[string]*etcdController),
 	}
 }
 
@@ -72,6 +77,16 @@ func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
 	return nil, errors.Errorf("case %v does not exist.", name)
 }
 
+// GetETCDCase returns the etcd case config.
+func (c *Coordinator) GetETCDCase(name string) (*Config, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if controller, ok := c.etcd[name]; ok {
+		return controller.GetConfig(), nil
+	}
+	return nil, errors.Errorf("case %v does not exist.", name)
+}
+
 // GetAllHTTPCases returns the all HTTP case configs.
 func (c *Coordinator) GetAllHTTPCases() map[string]*Config {
 	c.mu.RLock()
@@ -89,6 +104,17 @@ func (c *Coordinator) GetAllGRPCCases() map[string]*Config {
 	defer c.mu.RUnlock()
 	ret := make(map[string]*Config)
 	for name, c := range c.grpc {
+		ret[name] = c.GetConfig()
+	}
+	return ret
+}
+
+// GetAllETCDCases returns the all etcd case configs.
+func (c *Coordinator) GetAllETCDCases() map[string]*Config {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	ret := make(map[string]*Config)
+	for name, c := range c.etcd {
 		ret[name] = c.GetConfig()
 	}
 	return ret
@@ -133,7 +159,29 @@ func (c *Coordinator) SetGRPCCase(name string, cfg *Config) error {
 		}
 		controller.run()
 	} else {
-		return errors.Errorf("HTTP case %s not implemented", name)
+		return errors.Errorf("gRPC case %s not implemented", name)
+	}
+	return nil
+}
+
+// SetETCDCase sets the config for the specific case.
+func (c *Coordinator) SetETCDCase(name string, cfg *Config) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if fn, ok := ETCDCaseFnMap[name]; ok {
+		var controller *etcdController
+		if controller, ok = c.etcd[name]; !ok {
+			controller = newEtcdController(c.ctx, c.etcdClients, fn)
+			c.etcd[name] = controller
+		}
+		controller.stop()
+		controller.SetQPS(cfg.QPS)
+		if cfg.Burst > 0 {
+			controller.SetBurst(cfg.Burst)
+		}
+		controller.run()
+	} else {
+		return errors.Errorf("etcd case %s not implemented", name)
 	}
 	return nil
 }
@@ -259,6 +307,76 @@ func (c *gRPCController) run() {
 
 // stop stops the gRPC api bench.
 func (c *gRPCController) stop() {
+	if c.cancel == nil {
+		return
+	}
+	c.cancel()
+	c.cancel = nil
+	c.wg.Wait()
+}
+
+type etcdController struct {
+	ETCDCase
+	clients []*clientv3.Client
+	pctx    context.Context
+
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	wg sync.WaitGroup
+}
+
+func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn ETCDCraeteFn) *etcdController {
+	c := &etcdController{
+		pctx:     ctx,
+		clients:  clis,
+		ETCDCase: fn(),
+	}
+	return c
+}
+
+// run tries to run the gRPC api bench.
+func (c *etcdController) run() {
+	if c.GetQPS() <= 0 || c.cancel != nil {
+		return
+	}
+	c.ctx, c.cancel = context.WithCancel(c.pctx)
+	qps := c.GetQPS()
+	burst := c.GetBurst()
+	cliNum := int64(len(c.clients))
+	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
+	log.Info("begin to run etcd case", zap.String("case", c.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
+	err := c.Init(c.ctx, c.clients[0])
+	if err != nil {
+		log.Error("init error", zap.String("case", c.Name()), zap.Error(err))
+		return
+	}
+	for _, cli := range c.clients {
+		c.wg.Add(1)
+		go func(cli *clientv3.Client) {
+			defer c.wg.Done()
+			var ticker = time.NewTicker(tt)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					for i := int64(0); i < burst; i++ {
+						err := c.Unary(c.ctx, cli)
+						if err != nil {
+							log.Error("meet erorr when doing etcd request", zap.String("case", c.Name()), zap.Error(err))
+						}
+					}
+				case <-c.ctx.Done():
+					log.Info("Got signal to exit running etcd case")
+					return
+				}
+			}
+		}(cli)
+	}
+}
+
+// stop stops the etcd api bench.
+func (c *etcdController) stop() {
 	if c.cancel == nil {
 		return
 	}

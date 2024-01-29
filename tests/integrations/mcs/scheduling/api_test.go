@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
@@ -44,11 +45,18 @@ func TestAPI(t *testing.T) {
 }
 
 func (suite *apiTestSuite) SetupSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *apiTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
+	testDialClient.CloseIdleConnections()
 }
 
 func (suite *apiTestSuite) TestGetCheckerByName() {
@@ -191,12 +199,10 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
 	re.NoError(err)
 	re.Contains(resp, "balance-leader-scheduler")
-	re.Contains(resp, "balance-witness-scheduler")
 	re.Contains(resp, "balance-hot-region-scheduler")
 
 	schedulers := []string{
 		"balance-leader-scheduler",
-		"balance-witness-scheduler",
 		"balance-hot-region-scheduler",
 	}
 	for _, schedulerName := range schedulers {
@@ -398,13 +404,11 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 	re.Equal(cfg.DataDir, s.GetConfig().DataDir)
 	testutil.Eventually(re, func() bool {
 		// wait for all schedulers to be loaded in scheduling server.
-		return len(cfg.Schedule.SchedulersPayload) == 6
+		return len(cfg.Schedule.SchedulersPayload) == 4
 	})
 	re.Contains(cfg.Schedule.SchedulersPayload, "balance-leader-scheduler")
 	re.Contains(cfg.Schedule.SchedulersPayload, "balance-region-scheduler")
 	re.Contains(cfg.Schedule.SchedulersPayload, "balance-hot-region-scheduler")
-	re.Contains(cfg.Schedule.SchedulersPayload, "balance-witness-scheduler")
-	re.Contains(cfg.Schedule.SchedulersPayload, "transfer-witness-leader-scheduler")
 	re.Contains(cfg.Schedule.SchedulersPayload, "evict-slow-store-scheduler")
 }
 
@@ -429,7 +433,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 		re.Equal(cfg["replication"].(map[string]interface{})["max-replicas"],
 			float64(opts.GetReplicationConfig().MaxReplicas))
 		schedulers := cfg["schedule"].(map[string]interface{})["schedulers-payload"].(map[string]interface{})
-		return len(schedulers) == 6
+		return len(schedulers) == 4
 	})
 
 	// Test to change config in api server

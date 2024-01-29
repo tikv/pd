@@ -406,7 +406,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       s.clusterID,
+			ClusterId:       s.ClusterID(),
 			KeyspaceId:      utils.DefaultKeyspaceID,
 			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
 		},
