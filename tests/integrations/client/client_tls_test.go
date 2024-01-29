@@ -173,12 +173,12 @@ func testTLSReload(
 				CertPath: testClientTLSInfo.CertFile,
 				KeyPath:  testClientTLSInfo.KeyFile,
 			}, pd.WithGRPCDialOptions(grpc.WithBlock()))
-			cli.Close()
 			if err != nil {
 				errc <- err
 				dcancel()
 				return
 			}
+			cli.Close()
 			dcancel()
 		}
 	}()
