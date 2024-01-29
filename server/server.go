@@ -348,19 +348,57 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
-	// start client
-	s.client, s.httpClient, err = s.startClient()
+	// Start the etcd and HTTP clients, then init the member.
+	err = s.startClient()
+	if err != nil {
+		return err
+	}
+	err = s.initMember(newCtx, etcd)
 	if err != nil {
 		return err
 	}
 
-	s.electionClient, err = s.startElectionClient()
+	s.initGRPCServiceLabels()
+	return nil
+}
+
+func (s *Server) initGRPCServiceLabels() {
+	for name, serviceInfo := range s.grpcServer.GetServiceInfo() {
+		if name == gRPCServiceName {
+			for _, methodInfo := range serviceInfo.Methods {
+				s.grpcServiceLabels[methodInfo.Name] = struct{}{}
+			}
+		}
+	}
+}
+
+func (s *Server) startClient() error {
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
 	}
+	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return err
+	}
+	/* Starting two different etcd clients here is to avoid the throttling. */
+	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
+	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
+	if err != nil {
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
+	if err != nil {
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	s.httpClient = etcdutil.CreateHTTPClient(tlsConfig)
+	return nil
+}
 
-	// update advertise peer urls.
-	etcdMembers, err := etcdutil.ListEtcdMembers(s.client)
+func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
+	// Update advertise peer URLs.
+	etcdMembers, err := etcdutil.ListEtcdMembers(ctx, s.client)
 	if err != nil {
 		return err
 	}
@@ -378,43 +416,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		time.Sleep(1500 * time.Millisecond)
 	})
 	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
-	s.initGRPCServiceLabels()
 	return nil
-}
-
-func (s *Server) initGRPCServiceLabels() {
-	for name, serviceInfo := range s.grpcServer.GetServiceInfo() {
-		if name == gRPCServiceName {
-			for _, methodInfo := range serviceInfo.Methods {
-				s.grpcServiceLabels[methodInfo.Name] = struct{}{}
-			}
-		}
-	}
-}
-
-func (s *Server) startClient() (*clientv3.Client, *http.Client, error) {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return nil, nil, err
-	}
-	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
-	if err != nil {
-		return nil, nil, err
-	}
-	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls)
-}
-
-func (s *Server) startElectionClient() (*clientv3.Client, error) {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	return etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
 }
 
 // AddStartCallback adds a callback in the startServer phase.
@@ -952,6 +954,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.Keyspace = *s.persistOptions.GetKeyspaceConfig().Clone()
+	cfg.MicroService = *s.persistOptions.GetMicroServiceConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
 	if s.storage == nil {
@@ -987,6 +990,27 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 	}
 	s.keyspaceManager.UpdateConfig(&cfg)
 	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetMicroServiceConfig gets the micro service config information.
+func (s *Server) GetMicroServiceConfig() *config.MicroServiceConfig {
+	return s.persistOptions.GetMicroServiceConfig().Clone()
+}
+
+// SetMicroServiceConfig sets the micro service config information.
+func (s *Server) SetMicroServiceConfig(cfg config.MicroServiceConfig) error {
+	old := s.persistOptions.GetMicroServiceConfig()
+	s.persistOptions.SetMicroServiceConfig(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetMicroServiceConfig(old)
+		log.Error("failed to update micro service config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("micro service config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -2034,6 +2058,7 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		putFn,
 		deleteFn,
 		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
 	)
 }
 

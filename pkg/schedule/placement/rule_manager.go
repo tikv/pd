@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -202,7 +201,7 @@ func (m *RuleManager) loadRules() error {
 			return m.storage.DeleteRule(txn, localKey)
 		})
 	}
-	return m.runBatchOpInTxn(batch)
+	return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 }
 
 func (m *RuleManager) loadGroups() error {
@@ -311,7 +310,7 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 	defer m.Unlock()
 	p := m.BeginPatch()
 	p.SetRule(rule)
-	if err := m.TryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("placement rule updated", zap.String("rule", fmt.Sprint(rule)))
@@ -324,7 +323,7 @@ func (m *RuleManager) DeleteRule(group, id string) error {
 	defer m.Unlock()
 	p := m.BeginPatch()
 	p.DeleteRule(group, id)
-	if err := m.TryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("placement rule is removed", zap.String("group", group), zap.String("id", id))
@@ -469,8 +468,8 @@ func (m *RuleManager) BeginPatch() *RuleConfigPatch {
 	return m.ruleConfig.beginPatch()
 }
 
-// TryCommitPatch tries to commit a patch.
-func (m *RuleManager) TryCommitPatch(patch *RuleConfigPatch) error {
+// TryCommitPatchLocked tries to commit a patch.
+func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 	patch.adjust()
 
 	ruleList, err := buildRuleList(patch)
@@ -521,7 +520,7 @@ func (m *RuleManager) savePatch(p *ruleConfig) error {
 			})
 		}
 	}
-	return m.runBatchOpInTxn(batch)
+	return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 }
 
 // SetRules inserts or updates lots of Rules at once.
@@ -535,7 +534,7 @@ func (m *RuleManager) SetRules(rules []*Rule) error {
 		}
 		p.SetRule(r)
 	}
-	if err := m.TryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 
@@ -598,7 +597,7 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 		}
 	}
 
-	if err := m.TryCommitPatch(patch); err != nil {
+	if err := m.TryCommitPatchLocked(patch); err != nil {
 		return err
 	}
 
@@ -634,7 +633,7 @@ func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 	defer m.Unlock()
 	p := m.BeginPatch()
 	p.SetGroup(group)
-	if err := m.TryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("group config updated", zap.String("group", fmt.Sprint(group)))
@@ -647,7 +646,7 @@ func (m *RuleManager) DeleteRuleGroup(id string) error {
 	defer m.Unlock()
 	p := m.BeginPatch()
 	p.DeleteGroup(id)
-	if err := m.TryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("group config reset", zap.String("group", id))
@@ -737,7 +736,7 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) er
 			p.SetRule(r)
 		}
 	}
-	if err := m.TryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("full config reset", zap.String("config", fmt.Sprint(groups)))
@@ -768,7 +767,7 @@ func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
 		}
 		p.SetRule(r)
 	}
-	if err := m.TryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("group is reset", zap.String("group", fmt.Sprint(group)))
@@ -800,7 +799,7 @@ func (m *RuleManager) DeleteGroupBundle(id string, regex bool) error {
 			p.DeleteGroup(g.ID)
 		}
 	}
-	if err := m.TryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("groups are removed", zap.String("id", id), zap.Bool("regexp", regex))
@@ -812,28 +811,6 @@ func (m *RuleManager) IsInitialized() bool {
 	m.RLock()
 	defer m.RUnlock()
 	return m.initialized
-}
-
-func (m *RuleManager) runBatchOpInTxn(batch []func(kv.Txn) error) error {
-	// execute batch in transaction with limited operations per transaction
-	for start := 0; start < len(batch); start += etcdutil.MaxEtcdTxnOps {
-		end := start + etcdutil.MaxEtcdTxnOps
-		if end > len(batch) {
-			end = len(batch)
-		}
-		err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
-			for _, op := range batch[start:end] {
-				if err = op(txn); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // checkRule check the rule whether will have RuleFit after FitRegion

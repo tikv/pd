@@ -20,11 +20,9 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -33,15 +31,6 @@ import (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
-
-type idAllocator struct {
-	allocator *mockid.IDAllocator
-}
-
-func (i *idAllocator) alloc() uint64 {
-	v, _ := i.allocator.Alloc()
-	return v
 }
 
 func TestRegionSyncer(t *testing.T) {
@@ -77,7 +66,7 @@ func TestRegionSyncer(t *testing.T) {
 	})
 
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -186,7 +175,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -230,7 +219,7 @@ func TestPrepareChecker(t *testing.T) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -279,7 +268,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 100
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -305,37 +294,4 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re.Equal("pd1", cluster.WaitLeader())
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-}
-
-func initRegions(regionLen int) []*core.RegionInfo {
-	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
-	regions := make([]*core.RegionInfo, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
-		r := &metapb.Region{
-			Id: allocator.alloc(),
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
-			Peers: []*metapb.Peer{
-				{Id: allocator.alloc(), StoreId: uint64(1)},
-				{Id: allocator.alloc(), StoreId: uint64(2)},
-				{Id: allocator.alloc(), StoreId: uint64(3)},
-			},
-		}
-		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
-		// Here is used to simulate the upgrade process.
-		if i < regionLen/2 {
-			buckets := &metapb.Buckets{
-				RegionId: r.Id,
-				Keys:     [][]byte{r.StartKey, r.EndKey},
-				Version:  1,
-			}
-			region.UpdateBuckets(buckets, region.GetBuckets())
-		}
-		regions = append(regions, region)
-	}
-	return regions
 }

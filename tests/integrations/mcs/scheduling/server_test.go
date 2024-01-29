@@ -59,6 +59,8 @@ func TestServerTestSuite(t *testing.T) {
 func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
@@ -78,6 +80,8 @@ func (suite *serverTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
@@ -137,7 +141,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 6
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
 	})
 	// change primary
 	primary.Close()
@@ -148,7 +152,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 6
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
 	})
 }
 
@@ -203,9 +207,14 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	})
 }
 
-func (suite *serverTestSuite) TestDynamicSwitch() {
+func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	re := suite.Require()
-	// API server will execute scheduling jobs since there is no scheduler server.
+	leaderServer := suite.pdLeader.GetServer()
+	conf := leaderServer.GetMicroServiceConfig().Clone()
+	// Change back to the default value.
+	conf.EnableSchedulingFallback = true
+	leaderServer.SetMicroServiceConfig(*conf)
+	// API server will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -238,6 +247,50 @@ func (suite *serverTestSuite) TestDynamicSwitch() {
 	// Scheduling server is responsible for executing scheduling jobs again.
 	testutil.Eventually(re, func() bool {
 		return tc1.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+	})
+}
+
+func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
+	re := suite.Require()
+
+	// API server will execute scheduling jobs since there is no scheduling server.
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	leaderServer := suite.pdLeader.GetServer()
+	// After Disabling scheduling service fallback, the API server will stop scheduling.
+	conf := leaderServer.GetMicroServiceConfig().Clone()
+	conf.EnableSchedulingFallback = false
+	leaderServer.SetMicroServiceConfig(*conf)
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	// Enable scheduling service fallback again, the API server will restart scheduling.
+	conf.EnableSchedulingFallback = true
+	leaderServer.SetMicroServiceConfig(*conf)
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+	// After scheduling server is started, API server will not execute scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
+	})
+	// Scheduling server is responsible for executing scheduling jobs.
+	testutil.Eventually(re, func() bool {
+		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
+	})
+	// Disable scheduling service fallback and stop scheduling server. API server won't execute scheduling jobs again.
+	conf.EnableSchedulingFallback = false
+	leaderServer.SetMicroServiceConfig(*conf)
+	tc.GetPrimaryServer().Close()
+	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 }
 
@@ -315,9 +368,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	defaultSchedulerNames := []string{
 		schedulers.BalanceLeaderName,
 		schedulers.BalanceRegionName,
-		schedulers.BalanceWitnessName,
 		schedulers.HotRegionName,
-		schedulers.TransferWitnessLeaderName,
 	}
 	checkDisabled := func(name string, shouldDisabled bool) {
 		re.NotNil(schedulersController.GetScheduler(name), name)
@@ -557,4 +608,70 @@ func waitSyncFinish(re *require.Assertions, tc *tests.TestSchedulingCluster, typ
 	testutil.Eventually(re, func() bool {
 		return tc.GetPrimaryServer().GetCluster().GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
 	})
+}
+
+type multipleServerTestSuite struct {
+	suite.Suite
+	ctx              context.Context
+	cancel           context.CancelFunc
+	cluster          *tests.TestCluster
+	pdLeader         *tests.TestServer
+	backendEndpoints string
+}
+
+func TestMultipleServerTestSuite(t *testing.T) {
+	suite.Run(t, new(multipleServerTestSuite))
+}
+
+func (suite *multipleServerTestSuite) SetupSuite() {
+	var err error
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 2)
+	re.NoError(err)
+
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := suite.cluster.WaitLeader()
+	suite.pdLeader = suite.cluster.GetServer(leaderName)
+	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	re.NoError(suite.pdLeader.BootstrapCluster())
+}
+
+func (suite *multipleServerTestSuite) TearDownSuite() {
+	re := suite.Require()
+	suite.cluster.Destroy()
+	suite.cancel()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+}
+
+func (suite *multipleServerTestSuite) TestReElectLeader() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	regionLen := 100
+	regions := tests.InitRegions(regionLen)
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
+
+	originLeaderName := suite.pdLeader.GetLeader().GetName()
+	suite.pdLeader.ResignLeader()
+	newLeaderName := suite.cluster.WaitLeader()
+	re.NotEqual(originLeaderName, newLeaderName)
+
+	suite.pdLeader.ResignLeader()
+	newLeaderName = suite.cluster.WaitLeader()
+	re.Equal(originLeaderName, newLeaderName)
+
+	rc = suite.pdLeader.GetServer().GetRaftCluster()
+	rc.IsPrepared()
 }

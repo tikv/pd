@@ -29,6 +29,7 @@ type Config struct {
 	flagSet    *flag.FlagSet
 	configFile string
 	PDAddr     string `toml:"pd" json:"pd"`
+	StatusAddr string `toml:"status" json:"status"`
 
 	Log      log.Config `toml:"log" json:"log"`
 	Logger   *zap.Logger
@@ -42,13 +43,9 @@ type Config struct {
 	KeyPath  string `toml:"key-path" json:"key-path"`
 
 	// only for init
-	HTTP map[string]caseConfig `toml:"http" json:"http"`
-	GRPC map[string]caseConfig `toml:"grpc" json:"grpc"`
-}
-
-type caseConfig struct {
-	QPS   int64 `toml:"qps" json:"qps"`
-	Burst int64 `toml:"burst" json:"burst"`
+	HTTP map[string]cases.Config `toml:"http" json:"http"`
+	GRPC map[string]cases.Config `toml:"grpc" json:"grpc"`
+	ETCD map[string]cases.Config `toml:"etcd" json:"etcd"`
 }
 
 // NewConfig return a set of settings.
@@ -58,6 +55,8 @@ func NewConfig(flagSet *flag.FlagSet) *Config {
 	fs := cfg.flagSet
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
 	fs.StringVar(&cfg.PDAddr, "pd", "http://127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
+	fs.StringVar(&cfg.StatusAddr, "status", "127.0.0.1:10081", "status address")
 	fs.Int64Var(&cfg.Client, "client", 1, "client number")
 	fs.StringVar(&cfg.CaPath, "cacert", "", "path of file that contains list of trusted SSL CAs")
 	fs.StringVar(&cfg.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
@@ -93,43 +92,29 @@ func (c *Config) Parse(arguments []string) error {
 		return errors.Errorf("'%s' is an invalid flag", c.flagSet.Arg(0))
 	}
 
-	for name, cfg := range c.HTTP {
-		if fn, ok := cases.HTTPCaseFnMap[name]; ok {
-			var cas cases.HTTPCase
-			if cas, ok = cases.HTTPCaseMap[name]; !ok {
-				cas = fn()
-				cases.HTTPCaseMap[name] = cas
-			}
-			if cfg.QPS > 0 {
-				cas.SetQPS(cfg.QPS)
-			}
-			if cfg.Burst > 0 {
-				cas.SetBurst(cfg.Burst)
-			}
-		} else {
-			log.Warn("HTTP case not implemented", zap.String("case", name))
-		}
-	}
-
-	for name, cfg := range c.GRPC {
-		if fn, ok := cases.GRPCCaseFnMap[name]; ok {
-			var cas cases.GRPCCase
-			if cas, ok = cases.GRPCCaseMap[name]; !ok {
-				cas = fn()
-				cases.GRPCCaseMap[name] = cas
-			}
-			if cfg.QPS > 0 {
-				cas.SetQPS(cfg.QPS)
-			}
-			if cfg.Burst > 0 {
-				cas.SetBurst(cfg.Burst)
-			}
-		} else {
-			log.Warn("gRPC case not implemented", zap.String("case", name))
-		}
-	}
-
 	return nil
+}
+
+// InitCoordinator set case config from config itself.
+func (c *Config) InitCoordinator(co *cases.Coordinator) {
+	for name, cfg := range c.HTTP {
+		err := co.SetHTTPCase(name, &cfg)
+		if err != nil {
+			log.Error("create HTTP case failed", zap.Error(err))
+		}
+	}
+	for name, cfg := range c.GRPC {
+		err := co.SetGRPCCase(name, &cfg)
+		if err != nil {
+			log.Error("create gRPC case failed", zap.Error(err))
+		}
+	}
+	for name, cfg := range c.ETCD {
+		err := co.SetETCDCase(name, &cfg)
+		if err != nil {
+			log.Error("create etcd case failed", zap.Error(err))
+		}
+	}
 }
 
 // Adjust is used to adjust configurations

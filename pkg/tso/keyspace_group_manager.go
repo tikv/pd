@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -365,8 +364,6 @@ type KeyspaceGroupManager struct {
 	// cfg is the TSO config
 	cfg ServiceConfig
 
-	// loadKeyspaceGroupsTimeout is the timeout for loading the initial keyspace group assignment.
-	loadKeyspaceGroupsTimeout   time.Duration
 	loadKeyspaceGroupsBatchSize int64
 	loadFromEtcdMaxRetryTimes   int
 
@@ -485,8 +482,6 @@ func (kgm *KeyspaceGroupManager) GetServiceConfig() ServiceConfig {
 // Key: /ms/{cluster_id}/tso/registry/{tsoServerAddress}
 // Value: discover.ServiceRegistryEntry
 func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
-	tsoServiceEndKey := clientv3.GetPrefixRangeEnd(kgm.tsoServiceKey) + "/"
-
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
 		if err := json.Unmarshal(kv.Value, s); err != nil {
@@ -518,7 +513,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		putFn,
 		deleteFn,
 		func([]*clientv3.Event) error { return nil },
-		clientv3.WithRange(tsoServiceEndKey),
+		true, /* withPrefix */
 	)
 	kgm.tsoNodesWatcher.StartWatchLoop()
 	if err := kgm.tsoNodesWatcher.WaitLoad(); err != nil {
@@ -535,9 +530,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 	rootPath := kgm.legacySvcRootPath
-	startKey := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(mcsutils.DefaultKeyspaceGroupID)}, "/")
-	endKey := strings.Join(
-		[]string{rootPath, clientv3.GetPrefixRangeEnd(endpoint.KeyspaceGroupIDPrefix())}, "/")
+	startKey := rootPath + "/" + endpoint.KeyspaceGroupIDPrefix()
 
 	defaultKGConfigured := false
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -577,11 +570,8 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		putFn,
 		deleteFn,
 		postEventsFn,
-		clientv3.WithRange(endKey),
+		true, /* withPrefix */
 	)
-	if kgm.loadKeyspaceGroupsTimeout > 0 {
-		kgm.groupWatcher.SetLoadTimeout(kgm.loadKeyspaceGroupsTimeout)
-	}
 	if kgm.loadFromEtcdMaxRetryTimes > 0 {
 		kgm.groupWatcher.SetLoadRetryTimes(kgm.loadFromEtcdMaxRetryTimes)
 	}

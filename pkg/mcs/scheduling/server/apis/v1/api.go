@@ -324,7 +324,8 @@ func getOperatorByRegion(c *gin.Context) {
 
 // @Tags     operators
 // @Summary  List operators.
-// @Param    kind  query  string  false  "Specify the operator kind."  Enums(admin, leader, region, waiting)
+// @Param    kind   query  string  false  "Specify the operator kind."  Enums(admin, leader, region, waiting)
+// @Param    object query  bool    false  "Whether to return as JSON object."
 // @Produce  json
 // @Success  200  {array}   operator.Operator
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
@@ -337,6 +338,7 @@ func getOperators(c *gin.Context) {
 	)
 
 	kinds := c.QueryArray("kind")
+	_, objectFlag := c.GetQuery("object")
 	if len(kinds) == 0 {
 		results, err = handler.GetOperators()
 	} else {
@@ -347,7 +349,15 @@ func getOperators(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.IndentedJSON(http.StatusOK, results)
+	if objectFlag {
+		objResults := make([]*operator.OpObject, len(results))
+		for i, op := range results {
+			objResults[i] = op.ToJSONObject()
+		}
+		c.IndentedJSON(http.StatusOK, objResults)
+	} else {
+		c.IndentedJSON(http.StatusOK, results)
+	}
 }
 
 // @Tags     operator
