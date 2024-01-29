@@ -345,12 +345,6 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 	engine.Run(cfg.StatusAddr)
 }
 
-func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
-	return str
-}
-
 const (
 	keepaliveTime    = 10 * time.Second
 	keepaliveTimeout = 3 * time.Second
@@ -369,7 +363,7 @@ func newEtcdClient(cfg *config.Config) *clientv3.Client {
 		return nil
 	}
 	clientConfig := clientv3.Config{
-		Endpoints:   []string{trimHTTPPrefix(cfg.PDAddr)},
+		Endpoints:   []string{cfg.PDAddr},
 		DialTimeout: keepaliveTimeout,
 		TLS:         tlsCfg,
 		LogConfig:   &lgc,
@@ -383,7 +377,7 @@ func newEtcdClient(cfg *config.Config) *clientv3.Client {
 
 // newPDClient returns a pd client.
 func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
-	addrs := []string{trimHTTPPrefix(cfg.PDAddr)}
+	addrs := []string{cfg.PDAddr}
 	pdCli, err := pd.NewClientWithContext(ctx, addrs, pd.SecurityOption{
 		CAPath:   cfg.CaPath,
 		CertPath: cfg.CertPath,

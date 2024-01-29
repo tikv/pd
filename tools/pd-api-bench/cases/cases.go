@@ -17,12 +17,13 @@ package cases
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
 
+	"github.com/pingcap/log"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 var (
@@ -51,7 +52,7 @@ func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) erro
 	for _, store := range stores {
 		storesID = append(storesID, store.GetId())
 	}
-	log.Printf("This cluster has region %d, and store %d[%v]", totalRegion, totalStore, storesID)
+	log.Info("init cluster info", zap.Int("total-region", totalRegion), zap.Int("total-store", totalStore), zap.Any("store-ids", storesID))
 	return nil
 }
 
@@ -182,7 +183,7 @@ func newMinResolvedTS() func() HTTPCase {
 func (c *minResolvedTS) Do(ctx context.Context, cli pdHttp.Client) error {
 	minResolvedTS, storesMinResolvedTS, err := cli.GetMinResolvedTSByStoresIDs(ctx, storesID)
 	if Debug {
-		log.Printf("Do %s: minResolvedTS: %d storesMinResolvedTS: %v err: %v", c.name, minResolvedTS, storesMinResolvedTS, err)
+		log.Info("do HTTP case", zap.String("case", c.name), zap.Uint64("min-resolved-ts", minResolvedTS), zap.Any("store-min-resolved-ts", storesMinResolvedTS), zap.Error(err))
 	}
 	if err != nil {
 		return err
@@ -218,7 +219,7 @@ func (c *regionsStats) Do(ctx context.Context, cli pdHttp.Client) error {
 	regionStats, err := cli.GetRegionStatusByKeyRange(ctx,
 		pdHttp.NewKeyRange(generateKeyForSimulator(startID, 56), generateKeyForSimulator(endID, 56)), false)
 	if Debug {
-		log.Printf("Do %s: regionStats: %v err: %v", c.name, regionStats, err)
+		log.Info("do HTTP case", zap.String("case", c.name), zap.Any("region-stats", regionStats), zap.Error(err))
 	}
 	if err != nil {
 		return err
