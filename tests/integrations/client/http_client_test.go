@@ -520,14 +520,14 @@ func (suite *httpClientTestSuite) checkScheduleConfig(mode mode, client pd.Clien
 
 	config, err := client.GetScheduleConfig(env.ctx)
 	re.NoError(err)
-	re.Equal(float64(4), config["leader-schedule-limit"])
+	re.Equal(float64(4), config["hot-region-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])
-	config["leader-schedule-limit"] = float64(8)
+	config["hot-region-schedule-limit"] = float64(8)
 	err = client.SetScheduleConfig(env.ctx, config)
 	re.NoError(err)
 	config, err = client.GetScheduleConfig(env.ctx)
 	re.NoError(err)
-	re.Equal(float64(8), config["leader-schedule-limit"])
+	re.Equal(float64(8), config["hot-region-schedule-limit"])
 	re.Equal(float64(2048), config["region-schedule-limit"])
 }
 
