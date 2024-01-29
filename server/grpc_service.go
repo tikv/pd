@@ -2276,8 +2276,7 @@ func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.Req
 		}
 		*allowFollower = true
 	}
-	clusterID := s.ClusterID()
-	if header.GetClusterId() != clusterID {
+	if clusterID := s.ClusterID(); header.GetClusterId() != clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", clusterID, header.GetClusterId())
 	}
 	return nil
