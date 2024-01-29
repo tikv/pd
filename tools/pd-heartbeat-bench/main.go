@@ -401,7 +401,14 @@ func (s *Stores) update(rs *Regions) {
 			},
 		}
 	}
-	for _, region := range rs.regions {
+	var toUpdate []*pdpb.RegionHeartbeatRequest
+	updatedRegions := rs.awakenRegions.Load()
+	if updatedRegions == nil {
+		toUpdate = rs.regions
+	} else {
+		toUpdate = updatedRegions.([]*pdpb.RegionHeartbeatRequest)
+	}
+	for _, region := range toUpdate {
 		for _, peer := range region.Region.Peers {
 			store := stats[peer.StoreId]
 			store.UsedSize += region.ApproximateSize
