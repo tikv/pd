@@ -52,7 +52,7 @@ func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) erro
 	for _, store := range stores {
 		storesID = append(storesID, store.GetId())
 	}
-	log.Info("init cluster infon", zap.Int("total-region", totalRegion), zap.Int("total-store", totalStore), zap.Any("store-ids", storesID))
+	log.Info("init cluster info", zap.Int("total-region", totalRegion), zap.Int("total-store", totalStore), zap.Any("store-ids", storesID))
 	return nil
 }
 
