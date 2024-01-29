@@ -8,20 +8,14 @@ if [[ $2 -gt 10 ]]; then
     integrations_dir=./tests/integrations
     integrations_tasks=($(find "$integrations_dir" -mindepth 1 -maxdepth 1 -type d))
     # Currently, we only have 3 integration tests, so we can hardcode the task index.
-    for t in ${integrations_tasks[@]}; do
-        if [[ "$t" = "$integrations_dir/client" && "$2" = 11 ]]; then
+    for t in "${integrations_tasks[@]}"; do
+        if [[ "$t" = "$integrations_dir/client" && $2 -eq 11 ]]; then
             cd ./client && make ci-test-job && cd .. && cat ./client/covprofile >> covprofile
-            cd $integrations_dir && make ci-test-job test_name=client
-            cd $ROOT_PATH && cat $integrations_dir/client/covprofile >> covprofile
-            break
-        elif [[ "$t" = "$integrations_dir/tso" && "$2" = 12 ]]; then
-            cd $integrations_dir && make ci-test-job test_name=tso
-            cd $ROOT_PATH && cat $integrations_dir/tso/covprofile >> covprofile
-            break
-        elif [[ "$t" = "$integrations_dir/mcs" && "$2" = 13 ]]; then
-            cd $integrations_dir && make ci-test-job test_name=mcs
-            cd $ROOT_PATH && cat $integrations_dir/mcs/covprofile >> covprofile
-            break
+            cd $integrations_dir && make ci-test-job test_name=client && cat ./client/covprofile >> "$ROOT_PATH/covprofile" || exit 1
+        elif [[ "$t" = "$integrations_dir/tso" && $2 -eq 12 ]]; then
+            cd $integrations_dir && make ci-test-job test_name=tso && cat ./tso/covprofile >> "$ROOT_PATH/covprofile" || exit 1
+        elif [[ "$t" = "$integrations_dir/mcs" && $2 -eq 13 ]]; then
+            cd $integrations_dir && make ci-test-job test_name=mcs && cat ./mcs/covprofile >> "$ROOT_PATH/covprofile" || exit 1
         fi
     done
 else
