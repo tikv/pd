@@ -22,6 +22,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
+	"go.etcd.io/etcd/clientv3"
 )
 
 var (
@@ -111,6 +112,24 @@ func (c *baseCase) GetConfig() *Config {
 	return c.cfg.Clone()
 }
 
+// ETCDCase is the interface for all etcd api cases.
+type ETCDCase interface {
+	Case
+	Init(context.Context, *clientv3.Client) error
+	Unary(context.Context, *clientv3.Client) error
+}
+
+// ETCDCraeteFn is function type to create ETCDCase.
+type ETCDCraeteFn func() ETCDCase
+
+// ETCDCaseFnMap is the map for all ETCD case creation function.
+var ETCDCaseFnMap = map[string]ETCDCraeteFn{
+	"Get":    newGetKV(),
+	"Put":    newPutKV(),
+	"Delete": newDeleteKV(),
+	"Txn":    newTxnKV(),
+}
+
 // GRPCCase is the interface for all gRPC cases.
 type GRPCCase interface {
 	Case
@@ -130,9 +149,6 @@ var GRPCCaseFnMap = map[string]GRPCCraeteFn{
 	"Tso":                     newTso(),
 }
 
-// GRPCCaseMap is the map for all gRPC case creation function.
-var GRPCCaseMap = map[string]GRPCCase{}
-
 // HTTPCase is the interface for all HTTP cases.
 type HTTPCase interface {
 	Case
@@ -147,9 +163,6 @@ var HTTPCaseFnMap = map[string]HTTPCraeteFn{
 	"GetRegionStatus":  newRegionStats(),
 	"GetMinResolvedTS": newMinResolvedTS(),
 }
-
-// HTTPCaseMap is the map for all HTTP cases.
-var HTTPCaseMap = map[string]HTTPCase{}
 
 type minResolvedTS struct {
 	*baseCase
@@ -365,4 +378,103 @@ func generateKeyForSimulator(id int, keyLen int) []byte {
 	k := make([]byte, keyLen)
 	copy(k, fmt.Sprintf("%010d", id))
 	return k
+}
+
+type getKV struct {
+	*baseCase
+}
+
+func newGetKV() func() ETCDCase {
+	return func() ETCDCase {
+		return &getKV{
+			baseCase: &baseCase{
+				name: "Get",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *getKV) Init(ctx context.Context, cli *clientv3.Client) error {
+	for i := 0; i < 100; i++ {
+		_, err := cli.Put(ctx, fmt.Sprintf("/test/0001/%4d", i), fmt.Sprintf("%4d", i))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *getKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+	_, err := cli.Get(ctx, "/test/0001", clientv3.WithPrefix())
+	return err
+}
+
+type putKV struct {
+	*baseCase
+}
+
+func newPutKV() func() ETCDCase {
+	return func() ETCDCase {
+		return &putKV{
+			baseCase: &baseCase{
+				name: "Put",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *putKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
+
+func (c *putKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+	_, err := cli.Put(ctx, "/test/0001/0000", "test")
+	return err
+}
+
+type deleteKV struct {
+	*baseCase
+}
+
+func newDeleteKV() func() ETCDCase {
+	return func() ETCDCase {
+		return &deleteKV{
+			baseCase: &baseCase{
+				name: "Put",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *deleteKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
+
+func (c *deleteKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+	_, err := cli.Delete(ctx, "/test/0001/0000")
+	return err
+}
+
+type txnKV struct {
+	*baseCase
+}
+
+func newTxnKV() func() ETCDCase {
+	return func() ETCDCase {
+		return &txnKV{
+			baseCase: &baseCase{
+				name: "Put",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *txnKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
+
+func (c *txnKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+	txn := cli.Txn(ctx)
+	txn = txn.If(clientv3.Compare(clientv3.Value("/test/0001/0000"), "=", "test"))
+	txn = txn.Then(clientv3.OpPut("/test/0001/0000", "test2"))
+	_, err := txn.Commit()
+	return err
 }
