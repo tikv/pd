@@ -21,14 +21,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type testCase struct {
+	healthProbes       []healthProbe
+	expectedEvictedEps map[string]int
+	expectedPickedEps  []string
+}
+
+func check(re *require.Assertions, testCases []*testCase) {
+	checker := &healthChecker{}
+	lastEps := []string{}
+	for idx, tc := range testCases {
+		// Send the health probes to the channel.
+		probeCh := make(chan healthProbe, len(tc.healthProbes))
+		for _, probe := range tc.healthProbes {
+			probeCh <- probe
+		}
+		close(probeCh)
+		// Pick and filter the endpoints.
+		pickedEps := checker.pickEps(probeCh)
+		checker.updateEvictedEps(lastEps, pickedEps)
+		pickedEps = checker.filterEps(pickedEps)
+		// Check the evicted states after finishing picking.
+		count := 0
+		checker.evictedEps.Range(func(key, value interface{}) bool {
+			count++
+			ep := key.(string)
+			times := value.(int)
+			re.Equal(tc.expectedEvictedEps[ep], times, "case %d ep %s", idx, ep)
+			return true
+		})
+		re.Len(tc.expectedEvictedEps, count, "case %d", idx)
+		re.Equal(tc.expectedPickedEps, pickedEps, "case %d", idx)
+		lastEps = pickedEps
+	}
+}
+
 // Test the endpoint picking and evicting logic.
 func TestPickEps(t *testing.T) {
 	re := require.New(t)
-	testCases := []struct {
-		healthProbes       []healthProbe
-		expectedEvictedEps map[string]int
-		expectedPickedEps  []string
-	}{
+	testCases := []*testCase{
 		// {} -> {A, B}
 		{
 			[]healthProbe{
@@ -173,30 +204,122 @@ func TestPickEps(t *testing.T) {
 			[]string{},
 		},
 	}
-	checker := &healthChecker{}
-	lastEps := []string{}
-	for idx, tc := range testCases {
-		// Send the health probes to the channel.
-		probeCh := make(chan healthProbe, len(tc.healthProbes))
-		for _, probe := range tc.healthProbes {
-			probeCh <- probe
-		}
-		close(probeCh)
-		// Pick and filter the endpoints.
-		pickedEps := checker.pickEps(probeCh)
-		checker.updateEvictedEps(lastEps, pickedEps)
-		pickedEps = checker.filterEps(pickedEps)
-		// Check the states after finishing picking.
-		count := 0
-		checker.evictedEps.Range(func(key, value interface{}) bool {
-			count++
-			ep := key.(string)
-			times := value.(int)
-			re.Equal(tc.expectedEvictedEps[ep], times, "case %d ep %s", idx, ep)
-			return true
-		})
-		re.Len(tc.expectedEvictedEps, count, "case %d", idx)
-		re.Equal(tc.expectedPickedEps, pickedEps, "case %d", idx)
-		lastEps = pickedEps
+	check(re, testCases)
+}
+
+func TestLatencyPick(t *testing.T) {
+	re := require.New(t)
+	testCases := []*testCase{
+		// {} -> {A, B}
+		{
+			[]healthProbe{
+				{
+					ep:   "A",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "B",
+					took: time.Millisecond,
+				},
+			},
+			map[string]int{},
+			[]string{"A", "B"},
+		},
+		// {A, B} -> {A, B, C}
+		{
+			[]healthProbe{
+				{
+					ep:   "A",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "B",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "C",
+					took: time.Second,
+				},
+			},
+			map[string]int{},
+			[]string{"A", "B"},
+		},
+		// {A, B} -> {A, B, C}
+		{
+			[]healthProbe{
+				{
+					ep:   "A",
+					took: time.Second,
+				},
+				{
+					ep:   "B",
+					took: time.Second,
+				},
+				{
+					ep:   "C",
+					took: 2 * time.Second,
+				},
+			},
+			map[string]int{},
+			[]string{"A", "B"},
+		},
+		// {A, B} -> {A, B, C}
+		{
+			[]healthProbe{
+				{
+					ep:   "A",
+					took: time.Second,
+				},
+				{
+					ep:   "B",
+					took: 2 * time.Second,
+				},
+				{
+					ep:   "C",
+					took: 3 * time.Second,
+				},
+			},
+			map[string]int{"B": 0},
+			[]string{"A"},
+		},
+		// {A} -> {A, B, C}
+		{
+			[]healthProbe{
+				{
+					ep:   "A",
+					took: time.Second,
+				},
+				{
+					ep:   "B",
+					took: time.Second,
+				},
+				{
+					ep:   "C",
+					took: time.Millisecond,
+				},
+			},
+			map[string]int{"A": 0, "B": 0},
+			[]string{"C"},
+		},
+		// {C} -> {A, B, C}
+		{
+			[]healthProbe{
+				{
+					ep:   "A",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "B",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "C",
+					took: time.Second,
+				},
+			},
+			map[string]int{"A": 1, "B": 1, "C": 0},
+			[]string{},
+		},
 	}
+	check(re, testCases)
 }

@@ -230,6 +230,11 @@ func (checker *healthChecker) pickEps(probeCh <-chan healthProbe) []string {
 	if count == 0 {
 		return pickedEps
 	}
+	// Consume the `probeCh` to build a reusable slice.
+	probes := make([]healthProbe, 0, count)
+	for probe := range probeCh {
+		probes = append(probes, probe)
+	}
 	// Take the default value as an example, if we have 3 endpoints with latency like:
 	//   - A: 175ms
 	//   - B: 50ms
@@ -244,7 +249,7 @@ func (checker *healthChecker) pickEps(probeCh <-chan healthProbe) []string {
 	factor := int(DefaultRequestTimeout / DefaultSlowRequestTime)
 	for i := 0; i < factor; i++ {
 		minLatency, maxLatency := DefaultSlowRequestTime*time.Duration(i), DefaultSlowRequestTime*time.Duration(i+1)
-		for probe := range probeCh {
+		for _, probe := range probes {
 			if minLatency <= probe.took && probe.took < maxLatency {
 				log.Debug("pick healthy etcd endpoint within acceptable latency range",
 					zap.Duration("min-latency", minLatency),
