@@ -216,7 +216,7 @@ func parseOptionalArgs(prefix string, param string, args []string) (string, erro
 	return prefix, nil
 }
 
-func parseHotRegionsHistoryArgs(args []string) (map[string]interface{}, error) {
+func parseHotRegionsHistoryArgs(args []string) (map[string]any, error) {
 	startTime, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil {
 		return nil, errors.Errorf("start_time should be a number,but got %s", args[0])
@@ -225,7 +225,7 @@ func parseHotRegionsHistoryArgs(args []string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, errors.Errorf("end_time should be a number,but got %s", args[1])
 	}
-	input := map[string]interface{}{
+	input := map[string]any{
 		"start_time": startTime,
 		"end_time":   endTime,
 	}

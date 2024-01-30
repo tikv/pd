@@ -124,7 +124,7 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 }
 
 func (checker *healthChecker) close() {
-	checker.healthyClients.Range(func(key, value interface{}) bool {
+	checker.healthyClients.Range(func(key, value any) bool {
 		client := value.(*healthyClient)
 		client.Close()
 		return true
@@ -145,9 +145,9 @@ func (checker *healthChecker) patrol(ctx context.Context) []string {
 		healthyList = make([]string, 0, count)
 		wg          sync.WaitGroup
 	)
-	checker.healthyClients.Range(func(key, value interface{}) bool {
+	checker.healthyClients.Range(func(key, value any) bool {
 		wg.Add(1)
-		go func(key, value interface{}) {
+		go func(key, value any) {
 			defer wg.Done()
 			defer logutil.LogPanic()
 			var (
@@ -210,7 +210,7 @@ func (checker *healthChecker) update() {
 		}
 	}
 	// Clean up the stale clients which are not in the etcd cluster anymore.
-	checker.healthyClients.Range(func(key, value interface{}) bool {
+	checker.healthyClients.Range(func(key, value any) bool {
 		ep := key.(string)
 		if _, ok := epMap[ep]; !ok {
 			log.Info("remove stale etcd client", zap.String("endpoint", ep))
@@ -222,7 +222,7 @@ func (checker *healthChecker) update() {
 
 func (checker *healthChecker) clientCount() int {
 	count := 0
-	checker.healthyClients.Range(func(_, _ interface{}) bool {
+	checker.healthyClients.Range(func(_, _ any) bool {
 		count++
 		return true
 	})

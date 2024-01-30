@@ -662,7 +662,7 @@ func (c *pdServiceDiscovery) checkFollowerHealth(ctx context.Context) {
 func (c *pdServiceDiscovery) Close() {
 	c.closeOnce.Do(func() {
 		log.Info("[pd] close pd service discovery client")
-		c.clientConns.Range(func(key, cc interface{}) bool {
+		c.clientConns.Range(func(key, cc any) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
 				log.Error("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 			}

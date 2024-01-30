@@ -885,7 +885,7 @@ func (h *regionsHandler) GetTopCPURegions(w http.ResponseWriter, r *http.Request
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/accelerate-schedule [post]
 func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -920,7 +920,7 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/accelerate-schedule/batch [post]
 func (h *regionsHandler) AccelerateRegionsScheduleInRanges(w http.ResponseWriter, r *http.Request) {
-	var input []map[string]interface{}
+	var input []map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -982,7 +982,7 @@ func (h *regionsHandler) GetTopNRegions(w http.ResponseWriter, r *http.Request, 
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/scatter [post]
 func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -1021,7 +1021,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/split [post]
 func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -1030,7 +1030,7 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
-	rawSplitKeys := s.([]interface{})
+	rawSplitKeys := s.([]any)
 	if len(rawSplitKeys) < 1 {
 		h.rd.JSON(w, http.StatusBadRequest, "empty split keys.")
 		return
@@ -1058,13 +1058,13 @@ func (h *RegionHeap) Less(i, j int) bool { return h.less(h.regions[i], h.regions
 func (h *RegionHeap) Swap(i, j int)      { h.regions[i], h.regions[j] = h.regions[j], h.regions[i] }
 
 // Push pushes an element x onto the heap.
-func (h *RegionHeap) Push(x interface{}) {
+func (h *RegionHeap) Push(x any) {
 	h.regions = append(h.regions, x.(*core.RegionInfo))
 }
 
 // Pop removes the minimum element (according to Less) from the heap and returns
 // it.
-func (h *RegionHeap) Pop() interface{} {
+func (h *RegionHeap) Pop() any {
 	pos := len(h.regions) - 1
 	x := h.regions[pos]
 	h.regions = h.regions[:pos]

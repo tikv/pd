@@ -803,7 +803,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 		ID:       "schedulelabel",
 		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
 		RuleType: labeler.KeyRange,
-		Data:     []interface{}{map[string]interface{}{"start_key": "1a", "end_key": "1b"}},
+		Data:     []any{map[string]any{"start_key": "1a", "end_key": "1b"}},
 	})
 
 	re.True(labelerManager.ScheduleDisabled(source))

@@ -67,7 +67,7 @@ func NewAdminHandler(handler Handler, rd *render.Render) *AdminHandler {
 // during EBS based restore, we call this to make sure ts of pd >= resolved_ts in backup.
 func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	handler := h.handler
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}

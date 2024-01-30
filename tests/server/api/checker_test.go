@@ -70,7 +70,7 @@ func (suite *checkerTestSuite) checkAPI(cluster *tests.TestCluster) {
 func (suite *checkerTestSuite) testErrCases(re *require.Assertions, cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/checker", cluster.GetLeaderServer().GetAddr())
 	// missing args
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	pauseArgs, err := json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/merge", pauseArgs, tu.StatusNotOK(re))
@@ -98,10 +98,10 @@ func (suite *checkerTestSuite) testErrCases(re *require.Assertions, cluster *tes
 }
 
 func (suite *checkerTestSuite) testGetStatus(re *require.Assertions, cluster *tests.TestCluster, name string) {
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/checker", cluster.GetLeaderServer().GetAddr())
 	// normal run
-	resp := make(map[string]interface{})
+	resp := make(map[string]any)
 	err := tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 	re.NoError(err)
 	re.False(resp["paused"].(bool))
@@ -111,7 +111,7 @@ func (suite *checkerTestSuite) testGetStatus(re *require.Assertions, cluster *te
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/"+name, pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
-	resp = make(map[string]interface{})
+	resp = make(map[string]any)
 	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 	re.NoError(err)
 	re.True(resp["paused"].(bool))
@@ -122,16 +122,16 @@ func (suite *checkerTestSuite) testGetStatus(re *require.Assertions, cluster *te
 	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/"+name, pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	time.Sleep(time.Second)
-	resp = make(map[string]interface{})
+	resp = make(map[string]any)
 	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 	re.NoError(err)
 	re.False(resp["paused"].(bool))
 }
 
 func (suite *checkerTestSuite) testPauseOrResume(re *require.Assertions, cluster *tests.TestCluster, name string) {
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/checker", cluster.GetLeaderServer().GetAddr())
-	resp := make(map[string]interface{})
+	resp := make(map[string]any)
 
 	// test pause.
 	input["delay"] = 30
@@ -153,7 +153,7 @@ func (suite *checkerTestSuite) testPauseOrResume(re *require.Assertions, cluster
 	re.False(resp["paused"].(bool))
 
 	// test resume.
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)

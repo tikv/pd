@@ -85,7 +85,7 @@ func (db *TestDB) Gorm() *gorm.DB {
 }
 
 // MustExec executes a query
-func (db *TestDB) MustExec(sql string, values ...interface{}) {
+func (db *TestDB) MustExec(sql string, values ...any) {
 	err := db.inner.Exec(sql, values...).Error
 	db.require.NoError(err)
 }

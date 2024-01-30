@@ -624,7 +624,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 			member, kg, localPriority, nextGroupID := kgm.getNextPrimaryToReset(groupID, kgm.tsoServiceID.ServiceAddr)
 			if member != nil {
 				aliveTSONodes := make(map[string]struct{})
-				kgm.tsoNodes.Range(func(key, _ interface{}) bool {
+				kgm.tsoNodes.Range(func(key, _ any) bool {
 					aliveTSONodes[key.(string)] = struct{}{}
 					return true
 				})

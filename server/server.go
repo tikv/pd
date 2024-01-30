@@ -1176,7 +1176,7 @@ func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.Dimens
 }
 
 // UpdateRateLimit is used to update rate-limit config which will overwrite limiter-config
-func (s *Server) UpdateRateLimit(cfg *config.RateLimitConfig, key string, value interface{}) error {
+func (s *Server) UpdateRateLimit(cfg *config.RateLimitConfig, key string, value any) error {
 	updated, found, err := jsonutil.AddKeyValue(cfg, key, value)
 	if err != nil {
 		return err
@@ -1225,7 +1225,7 @@ func (s *Server) UpdateGRPCRateLimitConfig(key, label string, value ratelimit.Di
 }
 
 // UpdateGRPCRateLimit is used to update gRPC rate-limit config which will overwrite limiter-config
-func (s *Server) UpdateGRPCRateLimit(cfg *config.GRPCRateLimitConfig, key string, value interface{}) error {
+func (s *Server) UpdateGRPCRateLimit(cfg *config.GRPCRateLimitConfig, key string, value any) error {
 	updated, found, err := jsonutil.AddKeyValue(cfg, key, value)
 	if err != nil {
 		return err
@@ -1924,7 +1924,7 @@ func (s *Server) PersistFile(name string, data []byte) error {
 }
 
 // SaveTTLConfig save ttl config
-func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) error {
+func (s *Server) SaveTTLConfig(data map[string]any, ttl time.Duration) error {
 	for k := range data {
 		if !config.IsSupportedTTLConfig(k) {
 			return fmt.Errorf("unsupported ttl config %s", k)

@@ -86,8 +86,8 @@ type data struct {
 }
 
 type result struct {
-	Metric metric        `json:"metric"`
-	Value  []interface{} `json:"value"`
+	Metric metric `json:"metric"`
+	Value  []any  `json:"value"`
 }
 
 type metric struct {
@@ -121,7 +121,7 @@ func (c *normalClient) buildCPUMockData(component ComponentType) {
 	var results []result
 	for i := 0; i < instanceCount; i++ {
 		results = append(results, result{
-			Value: []interface{}{time.Now().Unix(), fmt.Sprintf("%f", mockResultValue)},
+			Value: []any{time.Now().Unix(), fmt.Sprintf("%f", mockResultValue)},
 			Metric: metric{
 				Instance:            pods[i],
 				Cluster:             mockClusterName,

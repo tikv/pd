@@ -2442,7 +2442,7 @@ func TestCompatibilityConfig(t *testing.T) {
 	// from 4.0 or 5.0 or 5.1 cluster
 	var data []byte
 	storage := storage.NewStorageWithMemoryBackend()
-	data, err = EncodeConfig(map[string]interface{}{
+	data, err = EncodeConfig(map[string]any{
 		"min-hot-byte-rate":         100,
 		"min-hot-key-rate":          10,
 		"max-zombie-rounds":         3,

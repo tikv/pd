@@ -139,7 +139,7 @@ func (lta *LocalTSOAllocator) Reset() {
 }
 
 // setAllocatorLeader sets the current Local TSO Allocator leader.
-func (lta *LocalTSOAllocator) setAllocatorLeader(member interface{}) {
+func (lta *LocalTSOAllocator) setAllocatorLeader(member any) {
 	lta.allocatorLeader.Store(member)
 }
 

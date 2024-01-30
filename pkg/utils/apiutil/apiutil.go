@@ -280,7 +280,7 @@ func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *Fiel
 }
 
 // CollectEscapeStringOption is used to collect string using escaping from input map for given option
-func CollectEscapeStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+func CollectEscapeStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
 		value, err := url.QueryUnescape(v)
 		if err != nil {
@@ -295,7 +295,7 @@ func CollectEscapeStringOption(option string, input map[string]interface{}, coll
 }
 
 // CollectStringOption is used to collect string using from input map for given option
-func CollectStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
 		for _, c := range collectors {
 			c(v)
@@ -306,7 +306,7 @@ func CollectStringOption(option string, input map[string]interface{}, collectors
 }
 
 // ParseKey is used to parse interface into []byte and string
-func ParseKey(name string, input map[string]interface{}) ([]byte, string, error) {
+func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 	k, ok := input[name]
 	if !ok {
 		return nil, "", fmt.Errorf("missing %s", name)
@@ -324,7 +324,7 @@ func ParseKey(name string, input map[string]interface{}) ([]byte, string, error)
 
 // ReadJSON reads a JSON data from r and then closes it.
 // An error due to invalid json will be returned as a JSONError
-func ReadJSON(r io.ReadCloser, data interface{}) error {
+func ReadJSON(r io.ReadCloser, data any) error {
 	var err error
 	defer DeferClose(r, &err)
 	b, err := io.ReadAll(r)
@@ -342,7 +342,7 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 
 // ReadJSONRespondError writes json into data.
 // On error respond with a 400 Bad Request
-func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data any) error {
 	err := ReadJSON(body, data)
 	if err == nil {
 		return nil

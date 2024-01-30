@@ -142,7 +142,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
 
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-audit": "true",
 	}
 	data, err := json.Marshal(input)
@@ -153,7 +153,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	resp.Body.Close()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 
-	labels := make(map[string]interface{})
+	labels := make(map[string]any)
 	labels["testkey"] = "testvalue"
 	data, _ = json.Marshal(labels)
 	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
@@ -170,7 +170,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.Equal("anonymous", resp.Header.Get("caller-id"))
 	re.Equal("127.0.0.1", resp.Header.Get("ip"))
 
-	input = map[string]interface{}{
+	input = map[string]any{
 		"enable-audit": "false",
 	}
 	data, err = json.Marshal(input)
@@ -194,7 +194,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetLeaderServer()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
@@ -213,7 +213,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	re := suite.Require()
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-rate-limit": "true",
 	}
 	data, err := json.Marshal(input)
@@ -232,7 +232,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	resp.Body.Close()
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = "SetLogLevel"
 	input["qps"] = 0.5
@@ -353,7 +353,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		re.Equal(string(data), fmt.Sprintf("%s\n", http.StatusText(http.StatusTooManyRequests)))
 	}
 
-	input = map[string]interface{}{
+	input = map[string]any{
 		"enable-rate-limit": "false",
 	}
 	data, err = json.Marshal(input)
@@ -390,7 +390,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	re := suite.Require()
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-audit": "true",
 	}
 	data, err := json.Marshal(input)
@@ -442,7 +442,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	output = string(content)
 	re.Contains(output, "pd_service_audit_handling_seconds_count{caller_id=\"anonymous\",ip=\"127.0.0.1\",method=\"HTTP\",service=\"GetTrend\"} 2")
 
-	input = map[string]interface{}{
+	input = map[string]any{
 		"enable-audit": "false",
 	}
 	data, err = json.Marshal(input)
@@ -460,7 +460,7 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	defer os.RemoveAll(fname)
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-audit": "true",
 	}
 	data, err := json.Marshal(input)
@@ -489,7 +489,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetLeaderServer()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
@@ -511,7 +511,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetLeaderServer()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-audit": "true",
 	}
 	data, _ := json.Marshal(input)
@@ -533,7 +533,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	cluster.RunInitialServers()
 	cluster.WaitLeader()
 	leader := cluster.GetLeaderServer()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-audit": "false",
 	}
 	data, _ := json.Marshal(input)

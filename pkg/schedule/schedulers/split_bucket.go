@@ -138,7 +138,7 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

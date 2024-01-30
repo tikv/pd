@@ -1312,10 +1312,10 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
 		"store_id": 1,
 	})
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
 		"store_id": 2,
 	})
 	// Check scheduler updated.

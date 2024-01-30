@@ -82,14 +82,14 @@ func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
 	for _, testCase := range testCases {
 		name := testCase.name
 		// normal run
-		resp := make(map[string]interface{})
+		resp := make(map[string]any)
 		err := testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 		re.NoError(err)
 		re.False(resp["paused"].(bool))
 		// paused
 		err = co.PauseOrResumeChecker(name, 30)
 		re.NoError(err)
-		resp = make(map[string]interface{})
+		resp = make(map[string]any)
 		err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 		re.NoError(err)
 		re.True(resp["paused"].(bool))
@@ -97,7 +97,7 @@ func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
 		err = co.PauseOrResumeChecker(name, 1)
 		re.NoError(err)
 		time.Sleep(time.Second)
-		resp = make(map[string]interface{})
+		resp = make(map[string]any)
 		err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, name), &resp)
 		re.NoError(err)
 		re.False(resp["paused"].(bool))
@@ -114,7 +114,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	leader := cluster.GetLeaderServer().GetServer()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leader.GetAddr())
 	var respSlice []string
-	var resp map[string]interface{}
+	var resp map[string]any
 	testutil.Eventually(re, func() bool {
 		return leader.GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
 	})
@@ -149,7 +149,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 
 	// Test pause
 	postChecker := func(delay int) {
-		input := make(map[string]interface{})
+		input := make(map[string]any)
 		input["delay"] = delay
 		pauseArgs, err := json.Marshal(input)
 		re.NoError(err)
@@ -179,7 +179,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	})
 
 	postScheduler := func(delay int) {
-		input := make(map[string]interface{})
+		input := make(map[string]any)
 		input["delay"] = delay
 		pauseArgs, err := json.Marshal(input)
 		re.NoError(err)
@@ -218,7 +218,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
 	re.NoError(err)
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = "balance-leader-scheduler"
 	b, err := json.Marshal(input)
 	re.NoError(err)
@@ -419,7 +419,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	re := suite.Require()
 	sche := cluster.GetSchedulingPrimaryServer()
 	opts := sche.GetPersistConfig()
-	var cfg map[string]interface{}
+	var cfg map[string]any
 	addr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", addr)
 
@@ -427,17 +427,17 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	// Expect to get same config in scheduling server and api server
 	testutil.Eventually(re, func() bool {
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		re.Equal(cfg["schedule"].(map[string]interface{})["leader-schedule-limit"],
+		re.Equal(cfg["schedule"].(map[string]any)["leader-schedule-limit"],
 			float64(opts.GetLeaderScheduleLimit()))
-		re.Equal(cfg["replication"].(map[string]interface{})["max-replicas"],
+		re.Equal(cfg["replication"].(map[string]any)["max-replicas"],
 			float64(opts.GetReplicationConfig().MaxReplicas))
-		schedulers := cfg["schedule"].(map[string]interface{})["schedulers-payload"].(map[string]interface{})
+		schedulers := cfg["schedule"].(map[string]any)["schedulers-payload"].(map[string]any)
 		return len(schedulers) == 4
 	})
 
 	// Test to change config in api server
 	// Expect to get new config in scheduling server and api server
-	reqData, err := json.Marshal(map[string]interface{}{
+	reqData, err := json.Marshal(map[string]any{
 		"max-replicas": 4,
 	})
 	re.NoError(err)
@@ -445,7 +445,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-		return cfg["replication"].(map[string]interface{})["max-replicas"] == 4. &&
+		return cfg["replication"].(map[string]any)["max-replicas"] == 4. &&
 			opts.GetReplicationConfig().MaxReplicas == 4.
 	})
 
@@ -454,11 +454,11 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	opts.GetScheduleConfig().LeaderScheduleLimit = 100
 	re.Equal(100, int(opts.GetLeaderScheduleLimit()))
 	testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-	re.Equal(100., cfg["schedule"].(map[string]interface{})["leader-schedule-limit"])
+	re.Equal(100., cfg["schedule"].(map[string]any)["leader-schedule-limit"])
 	opts.GetReplicationConfig().MaxReplicas = 5
 	re.Equal(5, int(opts.GetReplicationConfig().MaxReplicas))
 	testutil.ReadGetJSON(re, testDialClient, urlPrefix, &cfg)
-	re.Equal(5., cfg["replication"].(map[string]interface{})["max-replicas"])
+	re.Equal(5., cfg["replication"].(map[string]any)["max-replicas"])
 }
 
 func (suite *apiTestSuite) TestAdminRegionCache() {
@@ -558,7 +558,7 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 
 	// follower will forward to leader server
 	re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
-	results := make(map[string]interface{})
+	results := make(map[string]any)
 	err = testutil.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config"), &results,
 		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader),
 	)

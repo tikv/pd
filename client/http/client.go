@@ -47,7 +47,7 @@ const (
 )
 
 // respHandleFunc is the function to handle the HTTP response.
-type respHandleFunc func(resp *http.Response, res interface{}) error
+type respHandleFunc func(resp *http.Response, res any) error
 
 // clientInner is the inner implementation of the PD HTTP client, which contains some fundamental fields.
 // It is wrapped by the `client` struct to make sure the inner implementation won't be exposed and could
@@ -328,7 +328,7 @@ func (c *client) WithCallerID(callerID string) Client {
 
 // WithRespHandler sets and returns a new client with the given HTTP response handler.
 func (c *client) WithRespHandler(
-	handler func(resp *http.Response, res interface{}) error,
+	handler func(resp *http.Response, res any) error,
 ) Client {
 	newClient := *c
 	newClient.respHandler = handler

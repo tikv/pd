@@ -58,7 +58,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 	limitCfg := make(map[string]ratelimit.DimensionConfig)
 	limitCfg["GetRegions"] = ratelimit.DimensionConfig{QPS: 1}
 
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-rate-limit": "true",
 		"limiter-config":    limitCfg,
 	}
@@ -123,7 +123,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
-	l := map[string]interface{}{
+	l := map[string]any{
 		"location-labels":       "zone,rack",
 		"region-schedule-limit": 10,
 	}
@@ -132,7 +132,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
 
-	l = map[string]interface{}{
+	l = map[string]any{
 		"metric-storage": "http://127.0.0.1:9090",
 	}
 	postData, err = json.Marshal(l)
@@ -150,7 +150,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.Equal(newCfg, cfg)
 
 	// the new way
-	l = map[string]interface{}{
+	l = map[string]any{
 		"schedule.tolerant-size-ratio":            2.5,
 		"schedule.enable-tikv-split-region":       "false",
 		"replication.location-labels":             "idc,host",
@@ -187,7 +187,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// illegal prefix
-	l = map[string]interface{}{
+	l = map[string]any{
 		"replicate.max-replicas": 1,
 	}
 	postData, err = json.Marshal(l)
@@ -198,7 +198,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// update prefix directly
-	l = map[string]interface{}{
+	l = map[string]any{
 		"replication-mode": nil,
 	}
 	postData, err = json.Marshal(l)
@@ -209,7 +209,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// config item not found
-	l = map[string]interface{}{
+	l = map[string]any{
 		"schedule.region-limit": 10,
 	}
 	postData, err = json.Marshal(l)
@@ -355,7 +355,7 @@ func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
-	l := map[string]interface{}{
+	l := map[string]any{
 		"location-labels":       "zone,rack",
 		"region-schedule-limit": 10,
 	}
@@ -364,7 +364,7 @@ func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
 
-	l = map[string]interface{}{
+	l = map[string]any{
 		"metric-storage": "http://127.0.0.1:9090",
 	}
 	postData, err = json.Marshal(l)
@@ -393,7 +393,7 @@ func (suite *configTestSuite) checkConfigPDServer(cluster *tests.TestCluster) {
 	urlPrefix := leaderServer.GetAddr()
 
 	addrPost := urlPrefix + "/pd/api/v1/config"
-	ms := map[string]interface{}{
+	ms := map[string]any{
 		"metric-storage": "",
 	}
 	postData, err := json.Marshal(ms)
@@ -414,7 +414,7 @@ func (suite *configTestSuite) checkConfigPDServer(cluster *tests.TestCluster) {
 	re.Equal(24*time.Hour, sc.MaxResetTSGap.Duration)
 }
 
-var ttlConfig = map[string]interface{}{
+var ttlConfig = map[string]any{
 	"schedule.max-snapshot-count":             999,
 	"schedule.enable-location-replacement":    false,
 	"schedule.max-merge-region-size":          999,
@@ -428,7 +428,7 @@ var ttlConfig = map[string]interface{}{
 	"schedule.enable-tikv-split-region":       false,
 }
 
-var invalidTTLConfig = map[string]interface{}{
+var invalidTTLConfig = map[string]any{
 	"schedule.invalid-ttl-config": 0,
 }
 
@@ -486,7 +486,7 @@ func (suite *configTestSuite) assertTTLConfigItemEqual(
 	re *require.Assertions,
 	cluster *tests.TestCluster,
 	item string,
-	expectedValue interface{},
+	expectedValue any,
 ) {
 	checkFunc := func(options ttlConfigInterface) bool {
 		switch item {
@@ -550,7 +550,7 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// only set max-merge-region-size
-	mergeConfig := map[string]interface{}{
+	mergeConfig := map[string]any{
 		"schedule.max-merge-region-size": 999,
 	}
 	postData, err = json.Marshal(mergeConfig)
@@ -563,7 +563,7 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 	suite.assertTTLConfigItemEqual(re, cluster, "max-merge-region-keys", uint64(999*10000))
 
 	// on invalid value, we use default config
-	mergeConfig = map[string]interface{}{
+	mergeConfig = map[string]any{
 		"schedule.enable-tikv-split-region": "invalid",
 	}
 	postData, err = json.Marshal(mergeConfig)
@@ -588,7 +588,7 @@ func (suite *configTestSuite) checkTTLConflict(cluster *tests.TestCluster) {
 	re.NoError(err)
 	suite.assertTTLConfig(re, cluster, true)
 
-	cfg := map[string]interface{}{"max-snapshot-count": 30}
+	cfg := map[string]any{"max-snapshot-count": 30}
 	postData, err = json.Marshal(cfg)
 	re.NoError(err)
 	addr = fmt.Sprintf("%s/pd/api/v1/config", urlPrefix)
@@ -597,7 +597,7 @@ func (suite *configTestSuite) checkTTLConflict(cluster *tests.TestCluster) {
 	addr = fmt.Sprintf("%s/pd/api/v1/config/schedule", urlPrefix)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusNotOK(re), tu.StringEqual(re, "\"need to clean up TTL first for schedule.max-snapshot-count\"\n"))
 	re.NoError(err)
-	cfg = map[string]interface{}{"schedule.max-snapshot-count": 30}
+	cfg = map[string]any{"schedule.max-snapshot-count": 30}
 	postData, err = json.Marshal(cfg)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 0), postData, tu.StatusOK(re))

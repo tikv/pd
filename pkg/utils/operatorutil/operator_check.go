@@ -41,7 +41,7 @@ func CheckTransferLeaderFrom(re *require.Assertions, op *operator.Operator, kind
 func CheckMultiTargetTransferLeader(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
 	re.NotNil(op)
 	re.Equal(1, op.Len())
-	expectedOps := make([]interface{}, 0, len(targetIDs))
+	expectedOps := make([]any, 0, len(targetIDs))
 	for _, targetID := range targetIDs {
 		expectedOps = append(expectedOps, operator.TransferLeader{FromStore: sourceID, ToStore: targetID, ToStores: targetIDs})
 	}

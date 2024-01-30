@@ -509,7 +509,7 @@ func (suite *storeTestSuite) TestGetAllLimit() {
 	re := suite.Require()
 	for _, testCase := range testCases {
 		suite.T().Logf(testCase.name)
-		info := make(map[uint64]interface{}, 4)
+		info := make(map[uint64]any, 4)
 		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
 		re.NoError(err)
 		re.Len(info, len(testCase.expectedStores))
@@ -524,7 +524,7 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 	re := suite.Require()
 	// add peer
 	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", suite.urlPrefix, 5)
-	data := map[string]interface{}{
+	data := map[string]any{
 		"type": "add-peer",
 		"rate": 999,
 	}
@@ -533,7 +533,7 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
 	re.NoError(err)
 	// remove peer
-	data = map[string]interface{}{
+	data = map[string]any{
 		"type": "remove-peer",
 		"rate": 998,
 	}
@@ -543,7 +543,7 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 	re.NoError(err)
 	// all store limit add peer
 	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", suite.urlPrefix, 3)
-	data = map[string]interface{}{
+	data = map[string]any{
 		"type": "add-peer",
 		"rate": 997,
 	}
@@ -552,7 +552,7 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
 	re.NoError(err)
 	// all store limit remove peer
-	data = map[string]interface{}{
+	data = map[string]any{
 		"type": "remove-peer",
 		"rate": 996,
 	}

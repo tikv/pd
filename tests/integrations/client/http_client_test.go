@@ -487,9 +487,9 @@ func (suite *httpClientTestSuite) checkConfig(mode mode, client pd.Client) {
 
 	config, err := client.GetConfig(env.ctx)
 	re.NoError(err)
-	re.Equal(float64(4), config["schedule"].(map[string]interface{})["leader-schedule-limit"])
+	re.Equal(float64(4), config["schedule"].(map[string]any)["leader-schedule-limit"])
 
-	newConfig := map[string]interface{}{
+	newConfig := map[string]any{
 		"schedule.leader-schedule-limit": float64(8),
 	}
 	err = client.SetConfig(env.ctx, newConfig)
@@ -497,10 +497,10 @@ func (suite *httpClientTestSuite) checkConfig(mode mode, client pd.Client) {
 
 	config, err = client.GetConfig(env.ctx)
 	re.NoError(err)
-	re.Equal(float64(8), config["schedule"].(map[string]interface{})["leader-schedule-limit"])
+	re.Equal(float64(8), config["schedule"].(map[string]any)["leader-schedule-limit"])
 
 	// Test the config with TTL.
-	newConfig = map[string]interface{}{
+	newConfig = map[string]any{
 		"schedule.leader-schedule-limit": float64(16),
 	}
 	err = client.SetConfig(env.ctx, newConfig, 5)

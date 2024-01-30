@@ -411,7 +411,7 @@ func (suite *regionTestSuite) checkRegionCount(re *require.Assertions, cluster *
 func (suite *regionTestSuite) pauseRuleChecker(re *require.Assertions, cluster *tests.TestCluster) {
 	checkerName := "rule"
 	addr := cluster.GetLeaderServer().GetAddr()
-	resp := make(map[string]interface{})
+	resp := make(map[string]any)
 	url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
 	err := tu.CheckPostJSON(testDialClient, url, []byte(`{"delay":1000}`), tu.StatusOK(re))
 	re.NoError(err)
