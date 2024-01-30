@@ -59,6 +59,7 @@ func init() {
 		s := NewService(srv)
 		return s.apiHandlerEngine, apiServiceGroup
 	}
+	// refer https://github.com/tikv/pd/issues/7484
 	if testing.Testing() {
 		once.Do(func() {
 			// These global modification will be effective only for the first invoke.
