@@ -329,6 +329,14 @@ func (checker *healthChecker) filterEps(eps []string) []string {
 		}
 		pickedEps = append(pickedEps, ep)
 	}
+	// If the pickedEps is empty, it means all endpoints are evicted,
+	// to gain better availability, just use the original picked endpoints.
+	if len(pickedEps) == 0 {
+		log.Warn("all etcd endpoints are evicted, use the picked endpoints directly",
+			zap.Strings("endpoints", eps),
+			zap.String("source", checker.source))
+		return eps
+	}
 	return pickedEps
 }
 
