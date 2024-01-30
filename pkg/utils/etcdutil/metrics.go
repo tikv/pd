@@ -16,14 +16,32 @@ package etcdutil
 
 import "github.com/prometheus/client_golang/prometheus"
 
-var etcdStateGauge = prometheus.NewGaugeVec(
-	prometheus.GaugeOpts{
-		Namespace: "pd",
-		Subsystem: "server",
-		Name:      "etcd_client",
-		Help:      "Etcd client states.",
-	}, []string{"type"})
+var (
+	sourceLabel   = "source"
+	typeLabel     = "type"
+	endpointLabel = "endpoint"
+)
+
+var (
+	etcdStateGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "etcd_client",
+			Help:      "Etcd client states.",
+		}, []string{sourceLabel, typeLabel})
+
+	etcdEndpointLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "etcd_endpoint_latency_seconds",
+			Help:      "Bucketed histogram of latency of health check.",
+			Buckets:   []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+		}, []string{sourceLabel, endpointLabel})
+)
 
 func init() {
 	prometheus.MustRegister(etcdStateGauge)
+	prometheus.MustRegister(etcdEndpointLatency)
 }
