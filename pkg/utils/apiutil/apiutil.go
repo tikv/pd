@@ -27,9 +27,12 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -66,6 +69,16 @@ const (
 
 	chunkSize = 4096
 )
+
+var once sync.Once
+
+func init() {
+	once.Do(func() {
+		// These global modification will be effective only for the first invoke.
+		_ = godotenv.Load()
+		gin.SetMode(gin.ReleaseMode)
+	})
+}
 
 // DeferClose captures the error returned from closing (if an error occurs).
 // This is designed to be used in a defer statement.
