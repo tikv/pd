@@ -93,7 +93,7 @@ func (checker *healthChecker) syncer(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("etcd client is closed, exit update endpoint goroutine",
+			log.Info("etcd client is closed, exit the endpoint syncer goroutine",
 				zap.String("source", checker.source))
 			return
 		case <-ticker.C:
@@ -110,7 +110,7 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("etcd client is closed, exit health check goroutine",
+			log.Info("etcd client is closed, exit the health inspector goroutine",
 				zap.String("source", checker.source))
 			checker.close()
 			return
