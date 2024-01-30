@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
@@ -64,6 +65,14 @@ func init() {
 	scheserver.SetUpRestHandler = func(srv *scheserver.Service) (http.Handler, apiutil.APIServiceGroup) {
 		s := NewService(srv)
 		return s.apiHandlerEngine, apiServiceGroup
+	}
+	// refer https://github.com/tikv/pd/issues/7484
+	if testing.Testing() {
+		once.Do(func() {
+			// These global modification will be effective only for the first invoke.
+			_ = godotenv.Load()
+			gin.SetMode(gin.ReleaseMode)
+		})
 	}
 }
 
