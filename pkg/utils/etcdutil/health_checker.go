@@ -274,7 +274,7 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 		pickedSet[ep] = true
 	}
 	// Reset the count to 0 if it's in evictedEps but not in the pickedEps.
-	checker.evictedEps.Range(func(key, _ interface{}) bool {
+	checker.evictedEps.Range(func(key, _ any) bool {
 		ep := key.(string)
 		if !pickedSet[ep] {
 			checker.evictedEps.Store(ep, 0)

@@ -43,7 +43,7 @@ func check(re *require.Assertions, testCases []*testCase) {
 		pickedEps = checker.filterEps(pickedEps)
 		// Check the evicted states after finishing picking.
 		count := 0
-		checker.evictedEps.Range(func(key, value interface{}) bool {
+		checker.evictedEps.Range(func(key, value any) bool {
 			count++
 			ep := key.(string)
 			times := value.(int)
