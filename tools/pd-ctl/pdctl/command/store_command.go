@@ -25,7 +25,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/pkg/response"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -280,7 +280,7 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func convertToStoreInfo(content string) string {
-	store := &api.StoreInfo{}
+	store := &response.StoreInfo{}
 	err := json.Unmarshal([]byte(content), store)
 	if err != nil {
 		return content
@@ -296,7 +296,7 @@ func convertToStoreInfo(content string) string {
 }
 
 func convertToStoresInfo(content string) string {
-	stores := &api.StoresInfo{}
+	stores := &response.StoresInfo{}
 	err := json.Unmarshal([]byte(content), stores)
 	if err != nil {
 		return content

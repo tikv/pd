@@ -201,7 +201,45 @@ func TestPickEps(t *testing.T) {
 				},
 			},
 			map[string]int{"A": 0, "B": 1, "C": 1, "D": 0},
-			[]string{},
+			[]string{"B", "C"},
+		},
+		// {B, C} -> {A, B, C}
+		{
+			[]healthProbe{
+				{
+					ep:   "A",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "B",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "C",
+					took: time.Millisecond,
+				},
+			},
+			map[string]int{"A": 1, "B": 2, "C": 2, "D": 0},
+			[]string{"A", "B", "C"},
+		},
+		// {A, B, C} -> {A, C, E}
+		{
+			[]healthProbe{
+				{
+					ep:   "A",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "C",
+					took: time.Millisecond,
+				},
+				{
+					ep:   "E",
+					took: time.Millisecond,
+				},
+			},
+			map[string]int{"A": 2, "B": 0, "D": 0},
+			[]string{"C", "E"},
 		},
 	}
 	check(re, testCases)
@@ -318,7 +356,7 @@ func TestLatencyPick(t *testing.T) {
 				},
 			},
 			map[string]int{"A": 1, "B": 1, "C": 0},
-			[]string{},
+			[]string{"A", "B"},
 		},
 	}
 	check(re, testCases)

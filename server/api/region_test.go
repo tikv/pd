@@ -32,56 +32,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
-
-func TestPeer(t *testing.T) {
-	re := require.New(t)
-	peers := []*metapb.Peer{
-		{Id: 1, StoreId: 10, Role: metapb.PeerRole_Voter},
-		{Id: 2, StoreId: 20, Role: metapb.PeerRole_Learner},
-		{Id: 3, StoreId: 30, Role: metapb.PeerRole_IncomingVoter},
-		{Id: 4, StoreId: 40, Role: metapb.PeerRole_DemotingVoter},
-	}
-	// float64 is the default numeric type for JSON
-	expected := []map[string]any{
-		{"id": float64(1), "store_id": float64(10), "role_name": "Voter"},
-		{"id": float64(2), "store_id": float64(20), "role": float64(1), "role_name": "Learner", "is_learner": true},
-		{"id": float64(3), "store_id": float64(30), "role": float64(2), "role_name": "IncomingVoter"},
-		{"id": float64(4), "store_id": float64(40), "role": float64(3), "role_name": "DemotingVoter"},
-	}
-
-	data, err := json.Marshal(fromPeerSlice(peers))
-	re.NoError(err)
-	var ret []map[string]any
-	re.NoError(json.Unmarshal(data, &ret))
-	re.Equal(expected, ret)
-}
-
-func TestPeerStats(t *testing.T) {
-	re := require.New(t)
-	peers := []*pdpb.PeerStats{
-		{Peer: &metapb.Peer{Id: 1, StoreId: 10, Role: metapb.PeerRole_Voter}, DownSeconds: 0},
-		{Peer: &metapb.Peer{Id: 2, StoreId: 20, Role: metapb.PeerRole_Learner}, DownSeconds: 1},
-		{Peer: &metapb.Peer{Id: 3, StoreId: 30, Role: metapb.PeerRole_IncomingVoter}, DownSeconds: 2},
-		{Peer: &metapb.Peer{Id: 4, StoreId: 40, Role: metapb.PeerRole_DemotingVoter}, DownSeconds: 3},
-	}
-	// float64 is the default numeric type for JSON
-	expected := []map[string]any{
-		{"peer": map[string]any{"id": float64(1), "store_id": float64(10), "role_name": "Voter"}},
-		{"peer": map[string]any{"id": float64(2), "store_id": float64(20), "role": float64(1), "role_name": "Learner", "is_learner": true}, "down_seconds": float64(1)},
-		{"peer": map[string]any{"id": float64(3), "store_id": float64(30), "role": float64(2), "role_name": "IncomingVoter"}, "down_seconds": float64(2)},
-		{"peer": map[string]any{"id": float64(4), "store_id": float64(40), "role": float64(3), "role_name": "DemotingVoter"}, "down_seconds": float64(3)},
-	}
-
-	data, err := json.Marshal(fromPeerStatsSlice(peers))
-	re.NoError(err)
-	var ret []map[string]any
-	re.NoError(json.Unmarshal(data, &ret))
-	re.Equal(expected, ret)
-}
 
 type regionTestSuite struct {
 	suite.Suite
@@ -124,11 +79,11 @@ func (suite *regionTestSuite) TestRegion() {
 	re := suite.Require()
 	mustRegionHeartbeat(re, suite.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
-	r1 := &RegionInfo{}
+	r1 := &response.RegionInfo{}
 	r1m := make(map[string]any)
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r1))
 	r1.Adjust()
-	re.Equal(NewAPIRegionInfo(r), r1)
+	re.Equal(response.NewAPIRegionInfo(r), r1)
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &r1m))
 	re.Equal(float64(r.GetBytesWritten()), r1m["written_bytes"].(float64))
 	re.Equal(float64(r.GetKeysWritten()), r1m["written_keys"].(float64))
@@ -140,16 +95,16 @@ func (suite *regionTestSuite) TestRegion() {
 	re.Equal(core.HexRegionKeyStr([]byte("b")), keys[1].(string))
 
 	url = fmt.Sprintf("%s/region/key/%s", suite.urlPrefix, "a")
-	r2 := &RegionInfo{}
+	r2 := &response.RegionInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
 	r2.Adjust()
-	re.Equal(NewAPIRegionInfo(r), r2)
+	re.Equal(response.NewAPIRegionInfo(r), r2)
 
 	url = fmt.Sprintf("%s/region/key/%s?format=hex", suite.urlPrefix, hex.EncodeToString([]byte("a")))
-	r2 = &RegionInfo{}
+	r2 = &response.RegionInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
 	r2.Adjust()
-	re.Equal(NewAPIRegionInfo(r), r2)
+	re.Equal(response.NewAPIRegionInfo(r), r2)
 }
 
 func (suite *regionTestSuite) TestRegionCheck() {
@@ -164,36 +119,36 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	re := suite.Require()
 	mustRegionHeartbeat(re, suite.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
-	r1 := &RegionInfo{}
+	r1 := &response.RegionInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r1))
 	r1.Adjust()
-	re.Equal(NewAPIRegionInfo(r), r1)
+	re.Equal(response.NewAPIRegionInfo(r), r1)
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "down-peer")
-	r2 := &RegionsInfo{}
+	r2 := &response.RegionsInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
 	r2.Adjust()
-	re.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r2)
+	re.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "pending-peer")
-	r3 := &RegionsInfo{}
+	r3 := &response.RegionsInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r3))
 	r3.Adjust()
-	re.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r3)
+	re.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r3)
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
-	r4 := &RegionsInfo{}
+	r4 := &response.RegionsInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r4))
 	r4.Adjust()
-	re.Equal(&RegionsInfo{Count: 0, Regions: []RegionInfo{}}, r4)
+	re.Equal(&response.RegionsInfo{Count: 0, Regions: []response.RegionInfo{}}, r4)
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "empty-region")
-	r5 := &RegionsInfo{}
+	r5 := &response.RegionsInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r5))
 	r5.Adjust()
-	re.Equal(&RegionsInfo{Count: 1, Regions: []RegionInfo{*NewAPIRegionInfo(r)}}, r5)
+	re.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
@@ -214,7 +169,7 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	mustPutStore(re, suite.svr, 2, metapb.StoreState_Offline, metapb.NodeState_Removing, []*metapb.StoreLabel{})
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
-	r8 := &RegionsInfo{}
+	r8 := &response.RegionsInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r8))
 	r4.Adjust()
 	re.Equal(1, r8.Count)
@@ -223,7 +178,7 @@ func (suite *regionTestSuite) TestRegionCheck() {
 
 func (suite *regionTestSuite) TestRegions() {
 	re := suite.Require()
-	r := NewAPIRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}, nil))
+	r := response.NewAPIRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}, nil))
 	re.Nil(r.Leader.Peer)
 	re.Empty(r.Leader.RoleName)
 
@@ -232,13 +187,13 @@ func (suite *regionTestSuite) TestRegions() {
 		core.NewTestRegionInfo(3, 1, []byte("b"), []byte("c"), core.SetApproximateKeys(10), core.SetApproximateSize(10)),
 		core.NewTestRegionInfo(4, 2, []byte("c"), []byte("d"), core.SetApproximateKeys(10), core.SetApproximateSize(10)),
 	}
-	regions := make([]RegionInfo, 0, len(rs))
+	regions := make([]response.RegionInfo, 0, len(rs))
 	for _, r := range rs {
-		regions = append(regions, *NewAPIRegionInfo(r))
+		regions = append(regions, *response.NewAPIRegionInfo(r))
 		mustRegionHeartbeat(re, suite.svr, r)
 	}
 	url := fmt.Sprintf("%s/regions", suite.urlPrefix)
-	regionsInfo := &RegionsInfo{}
+	regionsInfo := &response.RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, regionsInfo)
 	re.NoError(err)
 	re.Len(regions, regionsInfo.Count)
@@ -263,7 +218,7 @@ func (suite *regionTestSuite) TestStoreRegions() {
 
 	regionIDs := []uint64{2, 3}
 	url := fmt.Sprintf("%s/regions/store/%d", suite.urlPrefix, 1)
-	r4 := &RegionsInfo{}
+	r4 := &response.RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, r4)
 	re.NoError(err)
 	re.Len(regionIDs, r4.Count)
@@ -274,7 +229,7 @@ func (suite *regionTestSuite) TestStoreRegions() {
 
 	regionIDs = []uint64{4}
 	url = fmt.Sprintf("%s/regions/store/%d", suite.urlPrefix, 2)
-	r5 := &RegionsInfo{}
+	r5 := &response.RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, r5)
 	re.NoError(err)
 	re.Len(regionIDs, r5.Count)
@@ -284,7 +239,7 @@ func (suite *regionTestSuite) TestStoreRegions() {
 
 	regionIDs = []uint64{}
 	url = fmt.Sprintf("%s/regions/store/%d", suite.urlPrefix, 3)
-	r6 := &RegionsInfo{}
+	r6 := &response.RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, r6)
 	re.NoError(err)
 	re.Len(regionIDs, r6.Count)
@@ -335,7 +290,7 @@ func (suite *regionTestSuite) TestTop() {
 }
 
 func (suite *regionTestSuite) checkTopRegions(re *require.Assertions, url string, regionIDs []uint64) {
-	regions := &RegionsInfo{}
+	regions := &response.RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, regions)
 	re.NoError(err)
 	re.Len(regionIDs, regions.Count)
@@ -431,7 +386,7 @@ func (suite *getRegionTestSuite) TestRegionKey() {
 	r := core.NewTestRegionInfo(99, 1, []byte{0xFF, 0xFF, 0xAA}, []byte{0xFF, 0xFF, 0xCC}, core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url := fmt.Sprintf("%s/region/key/%s", suite.urlPrefix, url.QueryEscape(string([]byte{0xFF, 0xFF, 0xBB})))
-	RegionInfo := &RegionInfo{}
+	RegionInfo := &response.RegionInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, RegionInfo)
 	re.NoError(err)
 	re.Equal(RegionInfo.ID, r.GetID())
@@ -452,7 +407,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 
 	url := fmt.Sprintf("%s/regions/key?key=%s", suite.urlPrefix, "b")
 	regionIDs := []uint64{3, 4, 5, 99}
-	regions := &RegionsInfo{}
+	regions := &response.RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, regions)
 	re.NoError(err)
 	re.Len(regionIDs, regions.Count)
@@ -461,7 +416,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s", suite.urlPrefix, "d")
 	regionIDs = []uint64{4, 5, 99}
-	regions = &RegionsInfo{}
+	regions = &response.RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	re.NoError(err)
 	re.Len(regionIDs, regions.Count)
@@ -470,7 +425,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s", suite.urlPrefix, "g")
 	regionIDs = []uint64{5, 99}
-	regions = &RegionsInfo{}
+	regions = &response.RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	re.NoError(err)
 	re.Len(regionIDs, regions.Count)
@@ -479,7 +434,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	}
 	url = fmt.Sprintf("%s/regions/key?end_key=%s", suite.urlPrefix, "e")
 	regionIDs = []uint64{2, 3, 4}
-	regions = &RegionsInfo{}
+	regions = &response.RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	re.NoError(err)
 	re.Len(regionIDs, regions.Count)
@@ -488,7 +443,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", suite.urlPrefix, "b", "g")
 	regionIDs = []uint64{3, 4}
-	regions = &RegionsInfo{}
+	regions = &response.RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	re.NoError(err)
 	re.Len(regionIDs, regions.Count)
@@ -497,7 +452,7 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	}
 	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s", suite.urlPrefix, "b", []byte{0xFF, 0xFF, 0xCC})
 	regionIDs = []uint64{3, 4, 5, 99}
-	regions = &RegionsInfo{}
+	regions = &response.RegionsInfo{}
 	err = tu.ReadGetJSON(re, testDialClient, url, regions)
 	re.NoError(err)
 	re.Len(regionIDs, regions.Count)
@@ -605,9 +560,9 @@ func TestRegionsInfoMarshal(t *testing.T) {
 				core.SetReadKeys(10), core.SetWrittenKeys(10)),
 		},
 	}
-	regionsInfo := &RegionsInfo{}
+	regionsInfo := &response.RegionsInfo{}
 	for _, regions := range cases {
-		b, err := marshalRegionsInfoJSON(context.Background(), regions)
+		b, err := response.MarshalRegionsInfoJSON(context.Background(), regions)
 		re.NoError(err)
 		err = json.Unmarshal(b, regionsInfo)
 		re.NoError(err)
@@ -648,7 +603,7 @@ func BenchmarkGetRegions(b *testing.B) {
 		mustRegionHeartbeat(re, svr, r)
 	}
 	resp, _ := apiutil.GetJSON(testDialClient, url, nil)
-	regions := &RegionsInfo{}
+	regions := &response.RegionsInfo{}
 	err := json.NewDecoder(resp.Body).Decode(regions)
 	re.NoError(err)
 	re.Equal(regionCount, regions.Count)
