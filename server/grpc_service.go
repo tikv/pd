@@ -1332,7 +1332,6 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					cancel()
 				}
 
-				s.closeDelegateClient(lastForwardedSchedulingHost)
 				client, err := s.getDelegateClient(s.ctx, forwardedSchedulingHost)
 				if err != nil {
 					errRegionHeartbeatClient.Inc()

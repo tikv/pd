@@ -143,7 +143,6 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 				cancelForward()
 			}
 
-			s.closeDelegateClient(lastForwardedHost)
 			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
 			if err != nil {
 				tsoStreamErr = errors.WithStack(err)
@@ -378,6 +377,7 @@ func (s *GrpcServer) closeDelegateClient(forwardedHost string) {
 		return
 	}
 	client.(*grpc.ClientConn).Close()
+	log.Debug("close delegate client connection", zap.String("forwarded-host", forwardedHost))
 }
 
 func (s *GrpcServer) isLocalRequest(host string) bool {
