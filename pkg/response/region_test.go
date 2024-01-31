@@ -32,7 +32,7 @@ func TestPeer(t *testing.T) {
 		{Id: 4, StoreId: 40, Role: metapb.PeerRole_DemotingVoter},
 	}
 	// float64 is the default numeric type for JSON
-	expected := []map[string]interface{}{
+	expected := []map[string]any{
 		{"id": float64(1), "store_id": float64(10), "role_name": "Voter"},
 		{"id": float64(2), "store_id": float64(20), "role": float64(1), "role_name": "Learner", "is_learner": true},
 		{"id": float64(3), "store_id": float64(30), "role": float64(2), "role_name": "IncomingVoter"},
@@ -41,7 +41,7 @@ func TestPeer(t *testing.T) {
 
 	data, err := json.Marshal(fromPeerSlice(peers))
 	re.NoError(err)
-	var ret []map[string]interface{}
+	var ret []map[string]any
 	re.NoError(json.Unmarshal(data, &ret))
 	re.Equal(expected, ret)
 }
@@ -55,16 +55,16 @@ func TestPeerStats(t *testing.T) {
 		{Peer: &metapb.Peer{Id: 4, StoreId: 40, Role: metapb.PeerRole_DemotingVoter}, DownSeconds: 3},
 	}
 	// float64 is the default numeric type for JSON
-	expected := []map[string]interface{}{
-		{"peer": map[string]interface{}{"id": float64(1), "store_id": float64(10), "role_name": "Voter"}},
-		{"peer": map[string]interface{}{"id": float64(2), "store_id": float64(20), "role": float64(1), "role_name": "Learner", "is_learner": true}, "down_seconds": float64(1)},
-		{"peer": map[string]interface{}{"id": float64(3), "store_id": float64(30), "role": float64(2), "role_name": "IncomingVoter"}, "down_seconds": float64(2)},
-		{"peer": map[string]interface{}{"id": float64(4), "store_id": float64(40), "role": float64(3), "role_name": "DemotingVoter"}, "down_seconds": float64(3)},
+	expected := []map[string]any{
+		{"peer": map[string]any{"id": float64(1), "store_id": float64(10), "role_name": "Voter"}},
+		{"peer": map[string]any{"id": float64(2), "store_id": float64(20), "role": float64(1), "role_name": "Learner", "is_learner": true}, "down_seconds": float64(1)},
+		{"peer": map[string]any{"id": float64(3), "store_id": float64(30), "role": float64(2), "role_name": "IncomingVoter"}, "down_seconds": float64(2)},
+		{"peer": map[string]any{"id": float64(4), "store_id": float64(40), "role": float64(3), "role_name": "DemotingVoter"}, "down_seconds": float64(3)},
 	}
 
 	data, err := json.Marshal(fromPeerStatsSlice(peers))
 	re.NoError(err)
-	var ret []map[string]interface{}
+	var ret []map[string]any
 	re.NoError(json.Unmarshal(data, &ret))
 	re.Equal(expected, ret)
 }
