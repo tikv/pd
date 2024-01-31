@@ -31,11 +31,11 @@ type RuleStorage interface {
 
 	// We need to use txn to avoid concurrent modification.
 	// And it is helpful for the scheduling server to watch the rule.
-	SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error
+	SaveRule(txn kv.Txn, ruleKey string, rule any) error
 	DeleteRule(txn kv.Txn, ruleKey string) error
-	SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error
+	SaveRuleGroup(txn kv.Txn, groupID string, group any) error
 	DeleteRuleGroup(txn kv.Txn, groupID string) error
-	SaveRegionRule(txn kv.Txn, ruleKey string, rule interface{}) error
+	SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error
 	DeleteRegionRule(txn kv.Txn, ruleKey string) error
 
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
@@ -44,7 +44,7 @@ type RuleStorage interface {
 var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
-func (se *StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error {
+func (se *StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule any) error {
 	return saveJSONInTxn(txn, ruleKeyPath(ruleKey), rule)
 }
 
@@ -59,7 +59,7 @@ func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
 }
 
 // SaveRuleGroup stores a rule group config to storage.
-func (se *StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error {
+func (se *StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group any) error {
 	return saveJSONInTxn(txn, ruleGroupIDPath(groupID), group)
 }
 
@@ -74,7 +74,7 @@ func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
 }
 
 // SaveRegionRule saves a region rule to the storage.
-func (se *StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule interface{}) error {
+func (se *StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error {
 	return saveJSONInTxn(txn, regionLabelKeyPath(ruleKey), rule)
 }
 

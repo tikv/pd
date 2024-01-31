@@ -170,7 +170,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	<-ch
 
 	time.Sleep(time.Second * 1)
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["new-id"] = 1
 	input["keyspaces"] = []uint32{2}
 	jsonBody, err := json.Marshal(input)

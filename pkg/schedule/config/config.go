@@ -267,7 +267,7 @@ type ScheduleConfig struct {
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
-	SchedulersPayload map[string]interface{} `toml:"schedulers-payload" json:"schedulers-payload"`
+	SchedulersPayload map[string]any `toml:"schedulers-payload" json:"schedulers-payload"`
 
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`

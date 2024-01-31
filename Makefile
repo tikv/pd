@@ -186,6 +186,11 @@ static: install-tools pre-build
 
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
 
+# Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
+fmt:
+	@ echo "gofmt ..."
+	@ gofmt -s -l -w -r 'interface{} -> any' -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
+
 tidy:
 	@ go mod tidy
 	git diff go.mod go.sum | cat

@@ -108,10 +108,10 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 	re.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)
 }
 
-func makeKeyRanges(keys ...string) []interface{} {
-	var res []interface{}
+func makeKeyRanges(keys ...string) []any {
+	var res []any
 	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]interface{}{"start_key": keys[i], "end_key": keys[i+1]})
+		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res
 }

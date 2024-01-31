@@ -89,12 +89,16 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		forwardStream     tsopb.TSO_TsoClient
 		forwardCtx        context.Context
 		cancelForward     context.CancelFunc
+		tsoStreamErr      error
 		lastForwardedHost string
 	)
 	defer func() {
 		s.concurrentTSOProxyStreamings.Add(-1)
 		if cancelForward != nil {
 			cancelForward()
+		}
+		if grpcutil.NeedRebuildConnection(tsoStreamErr) {
+			s.closeDelegateClient(lastForwardedHost)
 		}
 	}()
 
@@ -131,7 +135,8 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 
 		forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), utils.TSOServiceName)
 		if !ok || len(forwardedHost) == 0 {
-			return errors.WithStack(ErrNotFoundTSOAddr)
+			tsoStreamErr = errors.WithStack(ErrNotFoundTSOAddr)
+			return tsoStreamErr
 		}
 		if forwardStream == nil || lastForwardedHost != forwardedHost {
 			if cancelForward != nil {
@@ -140,18 +145,21 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 
 			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
 			if err != nil {
-				return errors.WithStack(err)
+				tsoStreamErr = errors.WithStack(err)
+				return tsoStreamErr
 			}
 			forwardStream, forwardCtx, cancelForward, err = s.createTSOForwardStream(stream.Context(), clientConn)
 			if err != nil {
-				return errors.WithStack(err)
+				tsoStreamErr = errors.WithStack(err)
+				return tsoStreamErr
 			}
 			lastForwardedHost = forwardedHost
 		}
 
 		tsopbResp, err := s.forwardTSORequestWithDeadLine(forwardCtx, cancelForward, forwardStream, request, tsDeadlineCh)
 		if err != nil {
-			return errors.WithStack(err)
+			tsoStreamErr = errors.WithStack(err)
+			return tsoStreamErr
 		}
 
 		// The error types defined for tsopb and pdpb are different, so we need to convert them.
@@ -363,25 +371,13 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 	return conn.(*grpc.ClientConn), nil
 }
 
-func (s *GrpcServer) getForwardedHost(ctx, streamCtx context.Context, serviceName ...string) (forwardedHost string, err error) {
-	if s.IsAPIServiceMode() {
-		var ok bool
-		if len(serviceName) == 0 {
-			return "", ErrNotFoundService
-		}
-		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, serviceName[0])
-		if !ok || len(forwardedHost) == 0 {
-			switch serviceName[0] {
-			case utils.TSOServiceName:
-				return "", ErrNotFoundTSOAddr
-			case utils.SchedulingServiceName:
-				return "", ErrNotFoundSchedulingAddr
-			}
-		}
-	} else if fh := grpcutil.GetForwardedHost(streamCtx); !s.isLocalRequest(fh) {
-		forwardedHost = fh
+func (s *GrpcServer) closeDelegateClient(forwardedHost string) {
+	client, ok := s.clientConns.LoadAndDelete(forwardedHost)
+	if !ok {
+		return
 	}
-	return forwardedHost, nil
+	client.(*grpc.ClientConn).Close()
+	log.Debug("close delegate client connection", zap.String("forwarded-host", forwardedHost))
 }
 
 func (s *GrpcServer) isLocalRequest(host string) bool {

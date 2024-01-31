@@ -30,7 +30,7 @@ const (
 type splitPoint struct {
 	ty   splitPointType
 	key  []byte
-	data interface{}
+	data any
 }
 
 // Builder is used to create key range list.
@@ -45,12 +45,12 @@ func NewBuilder() *Builder {
 }
 
 // SetCompareFunc sets up the comparer to determine item order (ascending) for a key range.
-func (b *Builder) SetCompareFunc(f func(a, b interface{}) int) {
+func (b *Builder) SetCompareFunc(f func(a, b any) int) {
 	b.compare = f
 }
 
 // AddItem pushes an item to key range list.
-func (b *Builder) AddItem(start, end []byte, data interface{}) {
+func (b *Builder) AddItem(start, end []byte, data any) {
 	b.splitPoints = append(b.splitPoints, splitPoint{ty: tStart, key: start, data: data})
 	if len(end) > 0 {
 		b.splitPoints = append(b.splitPoints, splitPoint{ty: tEnd, key: end, data: data})
@@ -59,10 +59,10 @@ func (b *Builder) AddItem(start, end []byte, data interface{}) {
 
 // An item slice that keeps items in ascending order.
 type sortedItems struct {
-	items []interface{}
+	items []any
 }
 
-func (si *sortedItems) insertItem(item interface{}, comparer compareFunc) {
+func (si *sortedItems) insertItem(item any, comparer compareFunc) {
 	pos := len(si.items)
 	if comparer != nil {
 		pos = sort.Search(len(si.items), func(i int) bool {
@@ -77,7 +77,7 @@ func (si *sortedItems) insertItem(item interface{}, comparer compareFunc) {
 	si.items[pos] = item
 }
 
-func (si *sortedItems) deleteItem(del interface{}) {
+func (si *sortedItems) deleteItem(del any) {
 	for i, item := range si.items {
 		if item == del {
 			si.items = append(si.items[:i], si.items[i+1:]...)

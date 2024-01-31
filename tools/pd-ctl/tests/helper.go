@@ -21,8 +21,8 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
@@ -39,9 +39,9 @@ func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err err
 
 // CheckStoresInfo is used to check the test results.
 // CheckStoresInfo will not check Store.State because this field has been omitted pd-ctl output
-func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*api.StoreInfo) {
+func CheckStoresInfo(re *require.Assertions, stores []*response.StoreInfo, want []*response.StoreInfo) {
 	re.Len(stores, len(want))
-	mapWant := make(map[uint64]*api.StoreInfo)
+	mapWant := make(map[uint64]*response.StoreInfo)
 	for _, s := range want {
 		if _, ok := mapWant[s.Store.Id]; !ok {
 			mapWant[s.Store.Id] = s
@@ -64,14 +64,14 @@ func CheckStoresInfo(re *require.Assertions, stores []*api.StoreInfo, want []*ap
 }
 
 // CheckRegionInfo is used to check the test results.
-func CheckRegionInfo(re *require.Assertions, output *api.RegionInfo, expected *core.RegionInfo) {
-	region := api.NewAPIRegionInfo(expected)
+func CheckRegionInfo(re *require.Assertions, output *response.RegionInfo, expected *core.RegionInfo) {
+	region := response.NewAPIRegionInfo(expected)
 	output.Adjust()
 	re.Equal(region, output)
 }
 
 // CheckRegionsInfo is used to check the test results.
-func CheckRegionsInfo(re *require.Assertions, output *api.RegionsInfo, expected []*core.RegionInfo) {
+func CheckRegionsInfo(re *require.Assertions, output *response.RegionsInfo, expected []*core.RegionInfo) {
 	re.Len(expected, output.Count)
 	got := output.Regions
 	sort.Slice(got, func(i, j int) bool {

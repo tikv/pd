@@ -241,7 +241,7 @@ func (s *Service) getControllerConfig(c *gin.Context) {
 //	@Failure	400 	{string}	error
 //	@Router		/config/controller [POST]
 func (s *Service) setControllerConfig(c *gin.Context) {
-	conf := make(map[string]interface{})
+	conf := make(map[string]any)
 	if err := c.ShouldBindJSON(&conf); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return

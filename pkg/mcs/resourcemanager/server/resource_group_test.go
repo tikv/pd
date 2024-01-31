@@ -37,7 +37,7 @@ func TestPatchResourceGroup(t *testing.T) {
 	}
 }
 
-func resetSizeCache(obj interface{}) {
+func resetSizeCache(obj any) {
 	resetSizeCacheRecursive(reflect.ValueOf(obj))
 }
 

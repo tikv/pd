@@ -112,7 +112,7 @@ func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /operators [post]
 func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}

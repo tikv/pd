@@ -382,10 +382,10 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 }
 
 // MakeKeyRanges is a helper function to make key ranges.
-func MakeKeyRanges(keys ...string) []interface{} {
-	var res []interface{}
+func MakeKeyRanges(keys ...string) []any {
+	var res []any
 	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]interface{}{"start_key": keys[i], "end_key": keys[i+1]})
+		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res
 }

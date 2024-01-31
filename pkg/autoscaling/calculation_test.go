@@ -70,7 +70,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 		informer         core.StoreSetInformer
 		healthyInstances []instance
 		expectedPlan     []*Plan
-		errorChecker     func(err error, msgAndArgs ...interface{})
+		errorChecker     func(err error, msgAndArgs ...any)
 	}{
 		{
 			name:     "no scaled tikv group",

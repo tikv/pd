@@ -134,7 +134,7 @@ type Client interface {
 	// WatchGlobalConfig returns a stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error)
 	// UpdateOption updates the client option.
-	UpdateOption(option DynamicOption, value interface{}) error
+	UpdateOption(option DynamicOption, value any) error
 
 	// GetExternalTimestamp returns external timestamp
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
@@ -691,7 +691,7 @@ func (c *client) GetServiceDiscovery() ServiceDiscovery {
 }
 
 // UpdateOption updates the client option.
-func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
+func (c *client) UpdateOption(option DynamicOption, value any) error {
 	switch option {
 	case MaxTSOBatchWaitInterval:
 		interval, ok := value.(time.Duration)

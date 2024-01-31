@@ -2660,7 +2660,7 @@ func TestCheckRegionWithScheduleDeny(t *testing.T) {
 		ID:       "schedulelabel",
 		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
 		RuleType: labeler.KeyRange,
-		Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
+		Data:     []any{map[string]any{"start_key": "", "end_key": ""}},
 	})
 
 	// should allow to do rule checker
@@ -3038,7 +3038,7 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	conf, err := bl.EncodeConfig()
 	re.NoError(err)
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 	err = json.Unmarshal(conf, &data)
 	re.NoError(err)
 	batch := data["batch"].(float64)
@@ -3056,7 +3056,7 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	conf, err = hb.EncodeConfig()
 	re.NoError(err)
-	data = make(map[string]interface{})
+	data = make(map[string]any)
 	re.NoError(json.Unmarshal(conf, &data))
 	re.Contains(data, "enable-for-tiflash")
 	re.Equal("true", data["enable-for-tiflash"].(string))

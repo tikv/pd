@@ -184,13 +184,13 @@ func (m *Manager) Init(ctx context.Context) error {
 }
 
 // UpdateControllerConfigItem updates the controller config item.
-func (m *Manager) UpdateControllerConfigItem(key string, value interface{}) error {
+func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	kp := strings.Split(key, ".")
 	if len(kp) == 0 {
 		return errors.Errorf("invalid key %s", key)
 	}
 	m.Lock()
-	var config interface{}
+	var config any
 	switch kp[0] {
 	case "request-unit":
 		config = &m.controllerConfig.RequestUnit

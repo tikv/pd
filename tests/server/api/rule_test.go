@@ -1429,7 +1429,7 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 		re, errs.ErrRegionInvalidID.Error()))
 	re.NoError(err)
 
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 	data["enable-placement-rules"] = "false"
 	reqData, e := json.Marshal(data)
 	re.NoError(e)

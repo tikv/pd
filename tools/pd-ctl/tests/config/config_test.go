@@ -49,8 +49,8 @@ var testDialClient = &http.Client{
 
 type testCase struct {
 	name  string
-	value interface{}
-	read  func(scheduleConfig *sc.ScheduleConfig) interface{}
+	value any
+	read  func(scheduleConfig *sc.ScheduleConfig) any
 }
 
 func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.ScheduleConfig) {
@@ -282,20 +282,20 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 
 	// test config read and write
 	testCases := []testCase{
-		{"leader-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		{"leader-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.LeaderScheduleLimit
-		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.HotRegionScheduleLimit
-		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.HotRegionCacheHitsThreshold
-		}}, {"enable-remove-down-replica", false, func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		}}, {"enable-remove-down-replica", false, func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.EnableRemoveDownReplica
 		}},
-		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 		// set again
-		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 	}

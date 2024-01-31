@@ -179,7 +179,7 @@ func (h *adminHandler) UnmarkSnapshotRecovering(w http.ResponseWriter, r *http.R
 // RecoverAllocID recover base alloc id
 // body should be in {"id": "123"} format
 func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}

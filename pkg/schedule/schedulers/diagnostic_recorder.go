@@ -86,7 +86,7 @@ func (d *DiagnosticRecorder) GetLastResult() *DiagnosticResult {
 	if d.results.Len() == 0 {
 		return nil
 	}
-	items := d.results.FromLastSameElems(func(i interface{}) (bool, string) {
+	items := d.results.FromLastSameElems(func(i any) (bool, string) {
 		result, ok := i.(*DiagnosticResult)
 		if result == nil {
 			return ok, ""
