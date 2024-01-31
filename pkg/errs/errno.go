@@ -217,6 +217,7 @@ var (
 	ErrServerNotStarted       = errors.Normalize("server not started", errors.RFCCodeText("PD:server:ErrServerNotStarted"))
 	ErrRateLimitExceeded      = errors.Normalize("rate limit exceeded", errors.RFCCodeText("PD:server:ErrRateLimitExceeded"))
 	ErrLeaderFrequentlyChange = errors.Normalize("leader %s frequently changed, leader-key is [%s]", errors.RFCCodeText("PD:server:ErrLeaderFrequentlyChange"))
+	ErrMissingStoreID         = errors.Normalize("missing store id", errors.RFCCodeText("PD:server:ErrMissingStoreID"))
 )
 
 // logutil errors
