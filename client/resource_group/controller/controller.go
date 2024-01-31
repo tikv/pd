@@ -346,7 +346,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 								continue
 							}
 							if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
-								resourceGroupStatusGauge.DeleteLabelValues(group.Name)
+								resourceGroupStatusGauge.DeleteLabelValues(group.Name, group.Name)
 							}
 						} else {
 							// Prev-kv is compacted means there must have been a delete event before this event,
@@ -431,7 +431,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	// Check again to prevent initializing the same resource group concurrently.
 	tmp, loaded := c.groupsController.LoadOrStore(group.GetName(), gc)
 	if !loaded {
-		resourceGroupStatusGauge.WithLabelValues(name).Set(1)
+		resourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 		log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
 	}
 	return tmp.(*groupCostController), nil
@@ -448,7 +448,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.tombstone {
 				c.groupsController.Delete(resourceGroupName)
-				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
+				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				return true
 			}
 			gc.tombstone = true
@@ -713,11 +713,11 @@ func newGroupCostController(
 		name:                       group.Name,
 		mainCfg:                    mainCfg,
 		mode:                       group.GetMode(),
-		successfulRequestDuration:  successfulRequestDuration.WithLabelValues(group.Name),
-		failedLimitReserveDuration: failedLimitReserveDuration.WithLabelValues(group.Name),
-		failedRequestCounter:       failedRequestCounter.WithLabelValues(group.Name),
-		requestRetryCounter:        requestRetryCounter.WithLabelValues(group.Name),
-		tokenRequestCounter:        resourceGroupTokenRequestCounter.WithLabelValues(group.Name),
+		successfulRequestDuration:  successfulRequestDuration.WithLabelValues(group.Name, group.Name),
+		failedLimitReserveDuration: failedLimitReserveDuration.WithLabelValues(group.Name, group.Name),
+		failedRequestCounter:       failedRequestCounter.WithLabelValues(group.Name, group.Name),
+		requestRetryCounter:        requestRetryCounter.WithLabelValues(group.Name, group.Name),
+		tokenRequestCounter:        resourceGroupTokenRequestCounter.WithLabelValues(group.Name, group.Name),
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),

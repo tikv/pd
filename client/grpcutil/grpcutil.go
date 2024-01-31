@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/tlsutil"
@@ -88,6 +90,12 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string
 	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	cc, err := GetClientConn(dCtx, addr, tlsConfig, opt...)
+	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
+		if val, ok := val.(string); ok && val == addr {
+			cc = nil
+			err = errors.Errorf("unreachable network")
+		}
+	})
 	if err != nil {
 		return nil, err
 	}

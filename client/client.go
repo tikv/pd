@@ -732,16 +732,18 @@ func (c *client) checkLeaderHealth(ctx context.Context) {
 	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
 		healthCli := healthpb.NewHealthClient(client)
 		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
-		rpcErr, ok := status.FromError(err)
 		failpoint.Inject("unreachableNetwork1", func() {
 			resp = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
 		})
+		rpcErr, ok := status.FromError(err)
 		if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
 		} else {
 			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(0))
 		}
+	} else {
+		atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
 	}
 }
 
@@ -1062,7 +1064,9 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() {
+		cmdDurationScanRegions.Observe(time.Since(start).Seconds())
+	}()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx

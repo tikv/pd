@@ -254,7 +254,7 @@ func (c *tsoClient) checkAllocator(
 		requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(0)
 	}()
 	cc, u := c.GetTSOAllocatorClientConnByDCLocation(dc)
-	healthCli := healthpb.NewHealthClient(cc)
+	var healthCli healthpb.HealthClient
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -263,20 +263,25 @@ func (c *tsoClient) checkAllocator(
 			log.Info("[tso] the leader of the allocator leader is changed", zap.String("dc", dc), zap.String("origin", url), zap.String("new", u))
 			return
 		}
-		healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
-		resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-		failpoint.Inject("unreachableNetwork", func() {
-			resp.Status = healthpb.HealthCheckResponse_UNKNOWN
-		})
-		healthCancel()
-		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			// create a stream of the original allocator
-			cctx, cancel := context.WithCancel(dispatcherCtx)
-			stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
-			if err == nil && stream != nil {
-				log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
-				updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
-				return
+		if healthCli == nil && cc != nil {
+			healthCli = healthpb.NewHealthClient(cc)
+		}
+		if healthCli != nil {
+			healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
+			resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
+			failpoint.Inject("unreachableNetwork", func() {
+				resp.Status = healthpb.HealthCheckResponse_UNKNOWN
+			})
+			healthCancel()
+			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
+				// create a stream of the original allocator
+				cctx, cancel := context.WithCancel(dispatcherCtx)
+				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
+				if err == nil && stream != nil {
+					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
+					updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
+					return
+				}
 			}
 		}
 		select {
@@ -285,7 +290,7 @@ func (c *tsoClient) checkAllocator(
 		case <-ticker.C:
 			// To ensure we can get the latest allocator leader
 			// and once the leader is changed, we can exit this function.
-			_, u = c.GetTSOAllocatorClientConnByDCLocation(dc)
+			cc, u = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		}
 	}
 }
@@ -407,7 +412,7 @@ tsoBatchLoop:
 			} else {
 				log.Error("[tso] fetch pending tso requests error",
 					zap.String("dc-location", dc),
-					errs.ZapError(errs.ErrClientGetTSO.FastGenByArgs("when fetch pending tso requests"), err))
+					errs.ZapError(errs.ErrClientGetTSO, err))
 			}
 			return
 		}
@@ -490,10 +495,10 @@ tsoBatchLoop:
 			default:
 			}
 			c.svcDiscovery.ScheduleCheckMemberChanged()
-			log.Error("[tso] getTS error",
+			log.Error("[tso] getTS error after processing requests",
 				zap.String("dc-location", dc),
 				zap.String("stream-addr", streamAddr),
-				errs.ZapError(errs.ErrClientGetTSO.FastGenByArgs("after processing requests"), err))
+				errs.ZapError(errs.ErrClientGetTSO, err))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
@@ -597,29 +602,32 @@ func (c *tsoClient) tryConnectToTSO(
 	for i := 0; i < maxRetryTimes; i++ {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
-		cctx, cancel := context.WithCancel(dispatcherCtx)
-		stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
-		failpoint.Inject("unreachableNetwork", func() {
-			stream = nil
-			err = status.New(codes.Unavailable, "unavailable").Err()
-		})
-		if stream != nil && err == nil {
-			updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
-			return nil
-		}
-
-		if err != nil && c.option.enableForwarding {
-			// The reason we need to judge if the error code is equal to "Canceled" here is that
-			// when we create a stream we use a goroutine to manually control the timeout of the connection.
-			// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
-			// But it conflicts with the retry mechanism since we use the error code to decide if it is caused by network error.
-			// And actually the `Canceled` error can be regarded as a kind of network error in some way.
-			if rpcErr, ok := status.FromError(err); ok && (isNetworkError(rpcErr.Code()) || rpcErr.Code() == codes.Canceled) {
-				networkErrNum++
+		if cc != nil {
+			cctx, cancel := context.WithCancel(dispatcherCtx)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
+			failpoint.Inject("unreachableNetwork", func() {
+				stream = nil
+				err = status.New(codes.Unavailable, "unavailable").Err()
+			})
+			if stream != nil && err == nil {
+				updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
+				return nil
 			}
-		}
 
-		cancel()
+			if err != nil && c.option.enableForwarding {
+				// The reason we need to judge if the error code is equal to "Canceled" here is that
+				// when we create a stream we use a goroutine to manually control the timeout of the connection.
+				// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
+				// But it conflicts with the retry mechanism since we use the error code to decide if it is caused by network error.
+				// And actually the `Canceled` error can be regarded as a kind of network error in some way.
+				if rpcErr, ok := status.FromError(err); ok && (isNetworkError(rpcErr.Code()) || rpcErr.Code() == codes.Canceled) {
+					networkErrNum++
+				}
+			}
+			cancel()
+		} else {
+			networkErrNum++
+		}
 		select {
 		case <-dispatcherCtx.Done():
 			return err
