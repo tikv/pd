@@ -178,7 +178,7 @@ check: tidy static generate-errdoc
 
 static: install-tools pre-build
 	@ echo "gofmt ..."
-	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
+	@ gofmt -s -l -w -r 'interface{} -> any' -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ echo "revive ..."
