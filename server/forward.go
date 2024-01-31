@@ -159,7 +159,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		tsopbResp, err := s.forwardTSORequestWithDeadLine(forwardCtx, cancelForward, forwardStream, request, tsDeadlineCh)
 		if err != nil {
 			tsoStreamErr = errors.WithStack(err)
-			return errors.WithStack(err)
+			return tsoStreamErr
 		}
 
 		// The error types defined for tsopb and pdpb are different, so we need to convert them.

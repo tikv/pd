@@ -252,10 +252,7 @@ func CheckStream(ctx context.Context, cancel context.CancelFunc, done chan struc
 
 // NeedRebuildConnection checks if the error is a connection error.
 func NeedRebuildConnection(err error) bool {
-	if err == nil {
-		return false
-	}
-	return err == io.EOF ||
+	return err != nil && err == io.EOF ||
 		strings.Contains(err.Error(), codes.Unavailable.String()) || // Unavailable indicates the service is currently unavailable. This is a most likely a transient condition.
 		strings.Contains(err.Error(), codes.DeadlineExceeded.String()) || // DeadlineExceeded means operation expired before completion.
 		strings.Contains(err.Error(), codes.Internal.String()) || // Internal errors.
