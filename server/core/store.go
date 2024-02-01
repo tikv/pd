@@ -742,5 +742,5 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
 	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
 	// And we will skip tiflash, because it does not report min resolved ts.
-	return !s.IsRemoved() && !s.IsTiFlash() && s.GetLeaderCount() != 0
+	return !s.IsRemoved() && !s.IsTiFlash()
 }
