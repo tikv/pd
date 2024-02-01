@@ -25,6 +25,30 @@ var (
 			Help:      "Counter of background state check count",
 		})
 
+	drStateGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "replication",
+			Name:      "dr_state",
+			Help:      "State of DR",
+		})
+
+	drStateIDGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "replication",
+			Name:      "dr_state_id",
+			Help:      "State ID of DR",
+		})
+
+	drRecoveredRegionGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "replication",
+			Name:      "dr_recovered_region",
+			Help:      "Number of recovered regions",
+		})
+
 	drRecoverProgressGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -33,3 +57,11 @@ var (
 			Help:      "Progress of sync_recover process",
 		})
 )
+
+func init() {
+	prometheus.MustRegister(drTickCounter)
+	prometheus.MustRegister(drStateGauge)
+	prometheus.MustRegister(drStateIDGauge)
+	prometheus.MustRegister(drRecoveredRegionGauge)
+	prometheus.MustRegister(drRecoverProgressGauge)
+}

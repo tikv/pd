@@ -475,6 +475,7 @@ func (m *ModeManager) tickDR() {
 		} else {
 			m.updateProgress()
 			progress := m.estimateProgress()
+			drRecoveredRegionGauge.Set(float64(m.drRecoverCount))
 			drRecoverProgressGauge.Set(float64(progress))
 
 			if progress == 1.0 {
@@ -485,7 +486,59 @@ func (m *ModeManager) tickDR() {
 		}
 	}
 
+<<<<<<< HEAD:server/replication/replication_mode.go
 	m.checkReplicateFile()
+=======
+func (m *ModeManager) tickReplicateStatus() {
+	if m.getModeName() != modeDRAutoSync {
+		return
+	}
+
+	m.RLock()
+	state := drAutoSyncStatus{
+		State:            m.drAutoSync.State,
+		StateID:          m.drAutoSync.StateID,
+		AvailableStores:  m.drAutoSync.AvailableStores,
+		RecoverStartTime: m.drAutoSync.RecoverStartTime,
+	}
+	m.RUnlock()
+
+	// recording metrics
+	var stateNumber float64
+	switch state.State {
+	case drStateSync:
+		stateNumber = 1
+	case drStateAsyncWait:
+		stateNumber = 2
+	case drStateAsync:
+		stateNumber = 3
+	case drStateSyncRecover:
+		stateNumber = 4
+	}
+	drStateGauge.Set(stateNumber)
+	drStateIDGauge.Set(float64(state.StateID))
+
+	data, _ := json.Marshal(state)
+
+	members, err := m.fileReplicater.GetMembers()
+	if err != nil {
+		log.Warn("failed to get members", zap.String("replicate-mode", modeDRAutoSync))
+		return
+	}
+	for _, member := range members {
+		stateID, ok := m.replicateState.Load(member.GetMemberId())
+		if !ok || stateID.(uint64) != state.StateID {
+			ctx, cancel := context.WithTimeout(context.Background(), persistFileTimeout)
+			err := m.fileReplicater.ReplicateFileToMember(ctx, member, DrStatusFile, data)
+			if err != nil {
+				log.Warn("failed to switch state", zap.String("replicate-mode", modeDRAutoSync), zap.String("new-state", state.State), errs.ZapError(err))
+			} else {
+				m.replicateState.Store(member.GetMemberId(), state.StateID)
+			}
+			cancel()
+		}
+	}
+>>>>>>> eb6953f8c (dr-autosync: add metrics (#7110)):pkg/replication/replication_mode.go
 }
 
 const (
