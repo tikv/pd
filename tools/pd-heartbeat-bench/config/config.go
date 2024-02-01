@@ -23,6 +23,7 @@ const (
 	defaultReportRatio       = 1
 	defaultRound             = 0
 	defaultSample            = false
+	defaultInitialVersion    = 1
 
 	defaultLogFormat = "text"
 )
@@ -40,6 +41,7 @@ type Config struct {
 
 	Security configutil.SecurityConfig `toml:"security" json:"security"`
 
+	InitEpochVer      uint64  `toml:"epoch-ver" json:"epoch-ver"`
 	StoreCount        int     `toml:"store-count" json:"store-count"`
 	RegionCount       int     `toml:"region-count" json:"region-count"`
 	KeyLength         int     `toml:"key-length" json:"key-length"`
@@ -66,6 +68,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "path of file that contains list of trusted TLS CAs")
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
+	fs.Uint64Var(&cfg.InitEpochVer, "epoch-ver", 1, "the initial epoch version value")
 
 	return cfg
 }
@@ -142,6 +145,9 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 	}
 	if !meta.IsDefined("sample") {
 		c.Sample = defaultSample
+	}
+	if !meta.IsDefined("epoch-ver") {
+		c.InitEpochVer = defaultInitialVersion
 	}
 }
 
