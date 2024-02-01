@@ -38,6 +38,38 @@ import (
 	"go.etcd.io/etcd/pkg/transport"
 )
 
+func TestStoreLimitV2(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	defer cluster.Destroy()
+
+	// store command
+	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+
+	args = []string{"-u", pdAddr, "store", "limit"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "not support get limit")
+
+	args = []string{"-u", pdAddr, "store", "limit", "1", "10"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "not support set limit")
+}
+
 func TestStore(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
