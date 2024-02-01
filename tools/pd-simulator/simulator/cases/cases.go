@@ -91,6 +91,7 @@ var CaseMap = map[string]func() *Case{
 	"redundant-balance-region":  newRedundantBalanceRegion,
 	"add-nodes":                 newAddNodes,
 	"add-nodes-dynamic":         newAddNodesDynamic,
+	"scale-in-out":              newScaleInOut,
 	"delete-nodes":              newDeleteNodes,
 	"region-split":              newRegionSplit,
 	"region-merge":              newRegionMerge,
