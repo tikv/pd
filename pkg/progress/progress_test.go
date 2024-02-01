@@ -46,10 +46,10 @@ func TestProgress(t *testing.T) {
 	// 70/1s+ > 70
 	re.Less(math.Abs(cs-7), 1e-6)
 	// there is no scheduling
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		m.UpdateProgress(n, 30, 30, false)
 	}
-	re.Equal(61, m.progesses[n].history.Len())
+	re.Equal(721, m.progesses[n].history.Len())
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.7, p)
@@ -110,37 +110,69 @@ func TestProgressWithDynamicWindow(t *testing.T) {
 	time.Sleep(time.Second)
 	re.True(m.AddProgress(n, 100, 100, 10*time.Second))
 
-	m.UpdateProgress(n, 30, 30, false)
+	m.UpdateProgress(n, 31, 31, false)
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.69, p)
+	// 31/(69/1s+) > 31/69
+	re.Greater(ls, 31.0/69.0)
+	// 70/1s+ > 70
+	re.Less(math.Abs(cs-6.9), 1e-6)
+	re.Equal(2, m.progesses[n].position)
+	re.Equal(100.0, m.progesses[n].front.Value.(float64))
+
+	m.UpdateProgress(n, 30, 30, false, WindowDurationOption(time.Minute*20))
+	re.Equal(3, m.progesses[n].position)
+	re.Equal(100.0, m.progesses[n].front.Value.(float64))
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.7, p)
-	// 30/(70/1s+) > 30/70
-	re.Greater(ls, 30.0/70.0)
-	// 70/1s+ > 70
-	re.Less(math.Abs(cs-7), 1e-6)
-	// there is no scheduling
-	for i := 0; i < 100; i++ {
+	re.Greater(ls, 30.0/(70.0/2))
+	re.Less(math.Abs(cs-3.5), 1e-6)
+
+	for i := 0; i < 1000; i++ {
 		m.UpdateProgress(n, 30, 30, false)
 	}
-	re.Equal(61, m.progesses[n].history.Len())
+	re.Equal(721, m.progesses[n].history.Len())
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.7, p)
 	re.Equal(math.MaxFloat64, ls)
 	re.Equal(0.0, cs)
 	m.UpdateProgress(n, 29, 29, false, WindowDurationOption(time.Minute*20))
-	re.Equal(62, m.progesses[n].history.Len())
+	re.Equal(121, m.progesses[n].position)
+	re.Equal(30.0, m.progesses[n].front.Value.(float64))
+	re.Equal(721, m.progesses[n].history.Len())
+
 	for i := 0; i < 60; i++ {
 		m.UpdateProgress(n, 28, 28, false)
 	}
-	re.Equal(121, m.progesses[n].history.Len())
+	re.Equal(721, m.progesses[n].history.Len())
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.72, p)
 	re.Equal(float64(28/(2./120)*10.), ls)
 	re.Equal(float64(2./120/10.), cs)
+
 	m.UpdateProgress(n, 28, 28, false, WindowDurationOption(time.Minute*10))
-	re.Equal(61, m.progesses[n].history.Len())
+	re.Equal(721, m.progesses[n].history.Len())
+	re.Equal(61, m.progesses[n].position)
+	re.Equal(28.0, m.progesses[n].front.Value.(float64))
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.72, p)
+	re.Equal(math.MaxFloat64, ls)
+	re.Equal(0.0, cs)
+
+	m.UpdateProgress(n, 28, 28, false, WindowDurationOption(time.Minute*20))
+	re.Equal(121, m.progesses[n].position)
+	re.Equal(30.0, m.progesses[n].front.Value.(float64))
+	p, ls, cs, err = m.Status(n)
+	re.NoError(err)
+	re.Equal(0.72, p)
+	re.Equal(float64(28/(2./120)*10.), ls)
+	re.Equal(float64(2./120/10.), cs)
+
 	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*10))
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
@@ -149,15 +181,20 @@ func TestProgressWithDynamicWindow(t *testing.T) {
 	re.Equal(float64(27./60/10.), cs)
 
 	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*5))
-	re.Equal(61, m.progesses[n].history.Len())
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.99, p)
 	re.Equal(float64(1/(27./60)*10.), ls)
 	re.Equal(float64(27./60/10.), cs)
 
-	re.Equal(61, m.progesses[n].history.Len())
 	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*180))
+	p, ls, cs, err = m.Status(n)
+	re.Equal(721, m.progesses[n].position)
+	re.Equal(30.0, m.progesses[n].front.Value.(float64))
+	re.NoError(err)
+	re.Equal(0.99, p)
+	re.Equal(float64(1/(29./720)*10.), ls)
+	re.Equal(float64(29./720/10.), cs)
 	for i := 0; i < 2000; i++ {
 		m.UpdateProgress(n, 1, 1, false)
 	}
