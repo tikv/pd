@@ -350,23 +350,19 @@ func (c *RaftCluster) Start(s Server) error {
 	return nil
 }
 
-var once sync.Once
-
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
-		if err != nil || len(servers) == 0 {
+		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.independentServices.Delete(mcsutils.SchedulingServiceName)
 		} else {
-			if c.stopSchedulingJobs() {
+			if c.stopSchedulingJobs() || c.coordinator == nil {
 				c.initCoordinator(c.ctx, c, c.hbstreams)
-			} else {
-				once.Do(func() {
-					c.initCoordinator(c.ctx, c, c.hbstreams)
-				})
 			}
-			c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			}
 		}
 	} else {
 		c.startSchedulingJobs(c, c.hbstreams)
@@ -1850,7 +1846,7 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 			if slice.Contains(validLabels, label.Key) {
 				weight /= float64(len(topo))
 			}
-			topo = topo[label.Value].(map[string]interface{})
+			topo = topo[label.Value].(map[string]any)
 		} else {
 			break
 		}
@@ -1859,8 +1855,8 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 	return weight / sameLocationStoreNum
 }
 
-func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]interface{}, []string, float64, bool) {
-	topology := make(map[string]interface{})
+func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]any, []string, float64, bool) {
+	topology := make(map[string]any)
 	sameLocationStoreNum := 1.0
 	totalLabelCount := make([]int, len(locationLabels))
 	for _, store := range stores {
@@ -1917,7 +1913,7 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 }
 
 // updateTopology records stores' topology in the `topology` variable.
-func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.StoreLabel) []int {
+func updateTopology(topology map[string]any, sortedLabels []*metapb.StoreLabel) []int {
 	labelCount := make([]int, len(sortedLabels))
 	if len(sortedLabels) == 0 {
 		return labelCount
@@ -1925,10 +1921,10 @@ func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.Stor
 	topo := topology
 	for i, l := range sortedLabels {
 		if _, exist := topo[l.Value]; !exist {
-			topo[l.Value] = make(map[string]interface{})
+			topo[l.Value] = make(map[string]any)
 			labelCount[i] += 1
 		}
-		topo = topo[l.Value].(map[string]interface{})
+		topo = topo[l.Value].(map[string]any)
 	}
 	return labelCount
 }
@@ -2508,7 +2504,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 
 // GetMembers return a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
-	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
+	listResp, err := etcdutil.ListEtcdMembers(etcdClient.Ctx(), etcdClient)
 	if err != nil {
 		return nil, err
 	}

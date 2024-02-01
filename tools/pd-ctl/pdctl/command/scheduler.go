@@ -73,7 +73,7 @@ func pauseSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	path := schedulersPrefix + "/" + args[0]
-	input := map[string]interface{}{"delay": delay}
+	input := map[string]any{"delay": delay}
 	postJSON(cmd, path, input)
 }
 
@@ -93,7 +93,7 @@ func resumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	path := schedulersPrefix + "/" + args[0]
-	input := map[string]interface{}{"delay": 0}
+	input := map[string]any{"delay": 0}
 	postJSON(cmd, path, input)
 }
 
@@ -217,7 +217,7 @@ func addSchedulerForStoreCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 
-		input := make(map[string]interface{})
+		input := make(map[string]any)
 		input["name"] = cmd.Name()
 		input["store_id"] = storeID
 		postJSON(cmd, schedulersPrefix, input)
@@ -268,7 +268,7 @@ func addSchedulerForShuffleHotRegionCommandFunc(cmd *cobra.Command, args []strin
 		}
 		limit = l
 	}
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["limit"] = limit
 	postJSON(cmd, schedulersPrefix, input)
@@ -385,7 +385,7 @@ func NewSlowTrendEvictLeaderSchedulerCommand() *cobra.Command {
 }
 
 func addSchedulerForSplitBucketCommandFunc(cmd *cobra.Command, args []string) {
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	postJSON(cmd, schedulersPrefix, input)
 }
@@ -395,7 +395,7 @@ func addSchedulerForGrantHotRegionCommandFunc(cmd *cobra.Command, args []string)
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["store-leader-id"] = args[0]
 	input["store-id"] = args[1]
@@ -407,7 +407,7 @@ func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	postJSON(cmd, schedulersPrefix, input)
 }
@@ -439,7 +439,7 @@ func addSchedulerForScatterRangeCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["start_key"] = url.QueryEscape(startKey)
 	input["end_key"] = url.QueryEscape(endKey)
@@ -635,7 +635,7 @@ func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []
 		cmd.Println(err)
 		return
 	}
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = schedulerName
 	input["store_id"] = storeID
 
@@ -697,7 +697,7 @@ func setGrantHotRegionCommandFunc(cmd *cobra.Command, schedulerName string, args
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["store-leader-id"] = args[0]
 	input["store-id"] = args[1]
 	postJSON(cmd, path.Join(schedulerConfigPrefix, schedulerName, "config"), input)
@@ -708,8 +708,8 @@ func postSchedulerConfigCommandFunc(cmd *cobra.Command, schedulerName string, ar
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	var val interface{}
-	input := make(map[string]interface{})
+	var val any
+	input := make(map[string]any)
 	key, value := args[0], args[1]
 	val, err := strconv.ParseFloat(value, 64)
 	if err != nil {

@@ -455,7 +455,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 	url := fmt.Sprintf("%s/pd/api/v1/config", svr.GetAddr())
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
-		data := make(map[string]interface{})
+		data := make(map[string]any)
 		if testCase.placementRuleEnable {
 			data["enable-placement-rules"] = "true"
 		} else {
@@ -466,7 +466,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		err := tu.CheckPostJSON(testDialClient, url, reqData, tu.StatusOK(re))
 		re.NoError(err)
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-			// wait for the scheduler server to update the config
+			// wait for the scheduling server to update the config
 			tu.Eventually(re, func() bool {
 				return sche.GetCluster().GetCheckerConfig().IsPlacementRulesEnabled() == testCase.placementRuleEnable
 			})
@@ -616,7 +616,7 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 func (suite *operatorTestSuite) pauseRuleChecker(re *require.Assertions, cluster *tests.TestCluster) {
 	checkerName := "rule"
 	addr := cluster.GetLeaderServer().GetAddr()
-	resp := make(map[string]interface{})
+	resp := make(map[string]any)
 	url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
 	err := tu.CheckPostJSON(testDialClient, url, []byte(`{"delay":1000}`), tu.StatusOK(re))
 	re.NoError(err)

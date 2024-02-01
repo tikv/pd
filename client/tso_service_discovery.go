@@ -231,7 +231,7 @@ func (c *tsoServiceDiscovery) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.clientConns.Range(func(key, cc interface{}) bool {
+	c.clientConns.Range(func(key, cc any) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
 			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}

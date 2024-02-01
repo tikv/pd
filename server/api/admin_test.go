@@ -186,7 +186,7 @@ func makeTS(offset time.Duration) uint64 {
 
 func (suite *adminTestSuite) TestResetTS() {
 	re := suite.Require()
-	args := make(map[string]interface{})
+	args := make(map[string]any)
 	t1 := makeTS(time.Hour)
 	url := fmt.Sprintf("%s/admin/reset-ts", suite.urlPrefix)
 	args["tso"] = fmt.Sprintf("%d", t1)

@@ -55,7 +55,7 @@ type tsoRequest struct {
 }
 
 var tsoReqPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &tsoRequest{
 			done:     make(chan error, 1),
 			physical: 0,
@@ -137,7 +137,7 @@ func (c *tsoClient) Close() {
 	c.wg.Wait()
 
 	log.Info("close tso client")
-	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
+	c.tsoDispatcher.Range(func(_, dispatcherInterface any) bool {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
 			tsoErr := errors.WithStack(errClosing)
@@ -237,7 +237,7 @@ func (c *tsoClient) updateTSOGlobalServAddr(addr string) error {
 
 func (c *tsoClient) gcAllocatorServingAddr(curAllocatorMap map[string]string) {
 	// Clean up the old TSO allocators
-	c.tsoAllocators.Range(func(dcLocationKey, _ interface{}) bool {
+	c.tsoAllocators.Range(func(dcLocationKey, _ any) bool {
 		dcLocation := dcLocationKey.(string)
 		// Skip the Global TSO Allocator
 		if dcLocation == globalDCLocation {

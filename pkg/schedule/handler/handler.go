@@ -229,7 +229,7 @@ func (h *Handler) GetRecords(from time.Time) ([]*operator.OpRecord, error) {
 // HandleOperatorCreation processes the request and creates an operator based on the provided input.
 // It supports various types of operators such as transfer-leader, transfer-region, add-peer, remove-peer, merge-region, split-region, scatter-region, and scatter-regions.
 // The function validates the input, performs the corresponding operation, and returns the HTTP status code, response body, and any error encountered during the process.
-func (h *Handler) HandleOperatorCreation(input map[string]interface{}) (int, interface{}, error) {
+func (h *Handler) HandleOperatorCreation(input map[string]any) (int, any, error) {
 	name, ok := input["name"].(string)
 	if !ok {
 		return http.StatusBadRequest, nil, errors.Errorf("missing operator name")
@@ -337,7 +337,7 @@ func (h *Handler) HandleOperatorCreation(input map[string]interface{}) (int, int
 		}
 		var keys []string
 		if ks, ok := input["keys"]; ok {
-			for _, k := range ks.([]interface{}) {
+			for _, k := range ks.([]any) {
 				key, ok := k.(string)
 				if !ok {
 					return http.StatusBadRequest, nil, errors.Errorf("bad format keys")
@@ -729,8 +729,8 @@ func checkStoreState(c sche.SharedCluster, storeID uint64) error {
 	return nil
 }
 
-func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]placement.PeerRoleType, bool) {
-	items, ok := ids.([]interface{})
+func parseStoreIDsAndPeerRole(ids any, roles any) (map[uint64]placement.PeerRoleType, bool) {
+	items, ok := ids.([]any)
 	if !ok {
 		return nil, false
 	}
@@ -745,7 +745,7 @@ func parseStoreIDsAndPeerRole(ids interface{}, roles interface{}) (map[uint64]pl
 		storeIDToPeerRole[uint64(id)] = ""
 	}
 
-	peerRoles, ok := roles.([]interface{})
+	peerRoles, ok := roles.([]any)
 	// only consider roles having the same length with ids as the valid case
 	if ok && len(peerRoles) == len(storeIDs) {
 		for i, v := range storeIDs {
@@ -799,7 +799,7 @@ type schedulerPausedPeriod struct {
 }
 
 // GetSchedulerByStatus returns all names of schedulers by status.
-func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (interface{}, error) {
+func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) {
 	sc, err := h.GetSchedulersController()
 	if err != nil {
 		return nil, err
@@ -1221,7 +1221,7 @@ type SplitRegionsResponse struct {
 }
 
 // SplitRegions splits regions by split keys.
-func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []interface{}, retryLimit int) (*SplitRegionsResponse, error) {
+func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []any, retryLimit int) (*SplitRegionsResponse, error) {
 	co := h.GetCoordinator()
 	if co == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()

@@ -46,7 +46,7 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 // @Router   /admin/unsafe/remove-failed-stores [POST]
 func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return

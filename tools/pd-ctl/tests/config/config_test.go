@@ -49,8 +49,8 @@ var testDialClient = &http.Client{
 
 type testCase struct {
 	name  string
-	value interface{}
-	read  func(scheduleConfig *sc.ScheduleConfig) interface{}
+	value any
+	read  func(scheduleConfig *sc.ScheduleConfig) any
 }
 
 func (t *testCase) judge(re *require.Assertions, scheduleConfigs ...*sc.ScheduleConfig) {
@@ -282,20 +282,20 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 
 	// test config read and write
 	testCases := []testCase{
-		{"leader-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		{"leader-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.LeaderScheduleLimit
-		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		}}, {"hot-region-schedule-limit", uint64(64), func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.HotRegionScheduleLimit
-		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		}}, {"hot-region-cache-hits-threshold", uint64(5), func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.HotRegionCacheHitsThreshold
-		}}, {"enable-remove-down-replica", false, func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		}}, {"enable-remove-down-replica", false, func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.EnableRemoveDownReplica
 		}},
-		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 		// set again
-		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) interface{} {
+		{"enable-debug-metrics", true, func(scheduleConfig *sc.ScheduleConfig) any {
 			return scheduleConfig.EnableDebugMetrics
 		}},
 	}
@@ -1109,6 +1109,36 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 		re.Equal(leaderServer.GetAddr(), conf.DashboardAddress)
 	}
 	re.Equal(int(3), conf.FlowRoundByDigit)
+}
+
+func (suite *configTestSuite) TestMicroServiceConfig() {
+	suite.env.RunTestInTwoModes(suite.checkMicroServiceConfig)
+}
+
+func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	cmd := ctl.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
+	}
+	pdTests.MustPutStore(re, cluster, store)
+	svr := leaderServer.GetServer()
+	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "all")
+	re.NoError(err)
+	cfg := config.Config{}
+	re.NoError(json.Unmarshal(output, &cfg))
+	re.True(svr.GetMicroServiceConfig().EnableSchedulingFallback)
+	re.True(cfg.MicroService.EnableSchedulingFallback)
+	// config set enable-scheduling-fallback <value>
+	args := []string{"-u", pdAddr, "config", "set", "enable-scheduling-fallback", "false"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.False(svr.GetMicroServiceConfig().EnableSchedulingFallback)
 }
 
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {

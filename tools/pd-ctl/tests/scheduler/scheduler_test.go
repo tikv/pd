@@ -153,9 +153,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		})
 	}
 
-	checkSchedulerConfigCommand := func(expectedConfig map[string]interface{}, schedulerName string) {
+	checkSchedulerConfigCommand := func(expectedConfig map[string]any, schedulerName string) {
 		testutil.Eventually(re, func() bool {
-			configInfo := make(map[string]interface{})
+			configInfo := make(map[string]any)
 			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName}, &configInfo)
 			return reflect.DeepEqual(expectedConfig, configInfo)
 		})
@@ -238,8 +238,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		checkSchedulerCommand(args, expected)
 
 		// scheduler config show command
-		expectedConfig := make(map[string]interface{})
-		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
+		expectedConfig := make(map[string]any)
+		expectedConfig["store-id-ranges"] = map[string]any{"2": []any{map[string]any{"end-key": "", "start-key": ""}}}
 		checkSchedulerConfigCommand(expectedConfig, schedulers[idx])
 		checkStorePause([]uint64{2}, schedulers[idx])
 
@@ -256,7 +256,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 
 		// check update success
 		checkSchedulerCommand(args, expected)
-		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "3": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
+		expectedConfig["store-id-ranges"] = map[string]any{"2": []any{map[string]any{"end-key": "", "start-key": ""}}, "3": []any{map[string]any{"end-key": "", "start-key": ""}}}
 		checkSchedulerConfigCommand(expectedConfig, schedulers[idx])
 		checkStorePause([]uint64{2, 3}, schedulers[idx])
 
@@ -298,7 +298,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		checkSchedulerCommand(args, expected)
 
 		// check add success
-		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}, "4": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
+		expectedConfig["store-id-ranges"] = map[string]any{"2": []any{map[string]any{"end-key": "", "start-key": ""}}, "4": []any{map[string]any{"end-key": "", "start-key": ""}}}
 		checkSchedulerConfigCommand(expectedConfig, schedulers[idx])
 		checkStorePause([]uint64{2, 4}, schedulers[idx])
 
@@ -315,7 +315,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		checkSchedulerCommand(args, expected)
 
 		// check remove success
-		expectedConfig["store-id-ranges"] = map[string]interface{}{"2": []interface{}{map[string]interface{}{"end-key": "", "start-key": ""}}}
+		expectedConfig["store-id-ranges"] = map[string]any{"2": []any{map[string]any{"end-key": "", "start-key": ""}}}
 		checkSchedulerConfigCommand(expectedConfig, schedulers[idx])
 		checkStorePause([]uint64{2}, schedulers[idx])
 
@@ -363,9 +363,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		"balance-witness-scheduler":         true,
 		"evict-slow-store-scheduler":        true,
 	})
-	var conf3 map[string]interface{}
-	expected3 := map[string]interface{}{
-		"store-id":        []interface{}{float64(1), float64(2), float64(3)},
+	var conf3 map[string]any
+	expected3 := map[string]any{
+		"store-id":        []any{float64(1), float64(2), float64(3)},
 		"store-leader-id": float64(1),
 	}
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
@@ -404,7 +404,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	})
 
 	// test hot region config
-	expected1 := map[string]interface{}{
+	expected1 := map[string]any{
 		"min-hot-byte-rate":          float64(100),
 		"min-hot-key-rate":           float64(10),
 		"min-hot-query-rate":         float64(10),
@@ -418,23 +418,23 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		"minor-dec-ratio":            0.99,
 		"src-tolerance-ratio":        1.05,
 		"dst-tolerance-ratio":        1.05,
-		"read-priorities":            []interface{}{"byte", "key"},
-		"write-leader-priorities":    []interface{}{"key", "byte"},
-		"write-peer-priorities":      []interface{}{"byte", "key"},
+		"read-priorities":            []any{"byte", "key"},
+		"write-leader-priorities":    []any{"key", "byte"},
+		"write-peer-priorities":      []any{"byte", "key"},
 		"strict-picking-store":       "true",
 		"enable-for-tiflash":         "true",
 		"rank-formula-version":       "v2",
 		"split-thresholds":           0.2,
 	}
-	checkHotSchedulerConfig := func(expect map[string]interface{}) {
+	checkHotSchedulerConfig := func(expect map[string]any) {
 		testutil.Eventually(re, func() bool {
-			var conf1 map[string]interface{}
+			var conf1 map[string]any
 			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 			return reflect.DeepEqual(expect, conf1)
 		})
 	}
 
-	var conf map[string]interface{}
+	var conf map[string]any
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
 	re.Equal(expected1, conf)
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "show"}, &conf)
@@ -446,7 +446,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,key"}, nil)
 	re.Contains(echo, "Success!")
-	expected1["read-priorities"] = []interface{}{"byte", "key"}
+	expected1["read-priorities"] = []any{"byte", "key"}
 	checkHotSchedulerConfig(expected1)
 
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key"}, nil)
@@ -454,7 +454,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	checkHotSchedulerConfig(expected1)
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "key,byte"}, nil)
 	re.Contains(echo, "Success!")
-	expected1["read-priorities"] = []interface{}{"key", "byte"}
+	expected1["read-priorities"] = []any{"key", "byte"}
 	checkHotSchedulerConfig(expected1)
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "foo,bar"}, nil)
 	re.Contains(echo, "Failed!")
@@ -518,8 +518,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	re.Contains(echo, "Success")
 
 	// test balance leader config
-	conf = make(map[string]interface{})
-	conf1 := make(map[string]interface{})
+	conf = make(map[string]any)
+	conf1 := make(map[string]any)
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler", "show"}, &conf)
 	re.Equal(4., conf["batch"])
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler", "set", "batch", "3"}, nil)
@@ -556,7 +556,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		})
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "set", "recovery-duration", "100"}, nil)
 		re.Contains(echo, "Success! Config updated.")
-		conf = make(map[string]interface{})
+		conf = make(map[string]any)
 		testutil.Eventually(re, func() bool {
 			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName, "show"}, &conf)
 			return conf["recovery-duration"] == 100.
@@ -580,7 +580,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-hot-region-scheduler", "set", "limit", "127"}, nil)
 	re.Contains(echo, "Success!")
-	conf = make(map[string]interface{})
+	conf = make(map[string]any)
 	testutil.Eventually(re, func() bool {
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-hot-region-scheduler", "show"}, &conf)
 		return conf["limit"] == 127.
@@ -607,7 +607,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	checkSchedulerWithStatusCommand("paused", []string{
 		"balance-leader-scheduler",
 	})
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	testutil.Eventually(re, func() bool {
 		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", "balance-leader-scheduler"}, &result)
 		return len(result) != 0 && result["status"] == "paused" && result["summary"] == ""
@@ -644,7 +644,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 	cmd := ctl.GetRootCmd()
 
 	checkSchedulerDescribeCommand := func(schedulerName, expectedStatus, expectedSummary string) {
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		testutil.Eventually(re, func() bool {
 			mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "describe", schedulerName}, &result)
 			return len(result) != 0 && expectedStatus == result["status"] && expectedSummary == result["summary"]
@@ -696,7 +696,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
 }
 
-func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v interface{}) string {
+func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) string {
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	if v == nil {
@@ -706,7 +706,7 @@ func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v inter
 	return ""
 }
 
-func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v interface{}) {
+func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) {
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	if v == nil {

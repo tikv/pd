@@ -170,7 +170,7 @@ func setLeaderPriorityFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("failed to parse priority: %v\n", err)
 		return
 	}
-	data := map[string]interface{}{"leader-priority": priority}
+	data := map[string]any{"leader-priority": priority}
 	reqData, _ := json.Marshal(data)
 	_, err = doRequest(cmd, prefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
 	if err != nil {

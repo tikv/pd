@@ -53,12 +53,12 @@ func TestFindJSONFullTagByChildTag(t *testing.T) {
 func TestFindSameFieldByJSON(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
-	input := map[string]interface{}{
+	input := map[string]any{
 		"name": "test2",
 	}
 	t2 := testStruct2{}
 	re.True(FindSameFieldByJSON(&t2, input))
-	input = map[string]interface{}{
+	input = map[string]any{
 		"enable": "test2",
 	}
 	re.False(FindSameFieldByJSON(&t2, input))

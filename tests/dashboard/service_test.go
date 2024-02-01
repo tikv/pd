@@ -148,7 +148,7 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 		}
 	}
 
-	input := map[string]interface{}{
+	input := map[string]any{
 		"dashboard-address": dashboardAddress2,
 	}
 	data, err := json.Marshal(input)
@@ -161,7 +161,7 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	re.Equal(dashboardAddress2, leader.GetServer().GetPersistOptions().GetDashboardAddress())
 
 	// pd-ctl set stop
-	input = map[string]interface{}{
+	input = map[string]any{
 		"dashboard-address": "none",
 	}
 	data, err = json.Marshal(input)

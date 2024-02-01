@@ -70,7 +70,7 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers [post]
 func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.r, w, r.Body, &input); err != nil {
 		return
 	}
@@ -204,7 +204,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
-func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[string]interface{}, name string) {
+func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[string]any, name string) {
 	storeID, ok := input["store_id"].(float64)
 	if !ok {
 		h.r.JSON(w, http.StatusBadRequest, "missing store id")

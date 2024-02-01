@@ -2660,7 +2660,7 @@ func TestCheckRegionWithScheduleDeny(t *testing.T) {
 		ID:       "schedulelabel",
 		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
 		RuleType: labeler.KeyRange,
-		Data:     []interface{}{map[string]interface{}{"start_key": "", "end_key": ""}},
+		Data:     []any{map[string]any{"start_key": "", "end_key": ""}},
 	})
 
 	// should allow to do rule checker
@@ -3015,8 +3015,6 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	re.Empty(controller.GetSchedulerNames())
 
@@ -3040,7 +3038,7 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	conf, err := bl.EncodeConfig()
 	re.NoError(err)
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 	err = json.Unmarshal(conf, &data)
 	re.NoError(err)
 	batch := data["batch"].(float64)
@@ -3058,7 +3056,7 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	conf, err = hb.EncodeConfig()
 	re.NoError(err)
-	data = make(map[string]interface{})
+	data = make(map[string]any)
 	re.NoError(json.Unmarshal(conf, &data))
 	re.Contains(data, "enable-for-tiflash")
 	re.Equal("true", data["enable-for-tiflash"].(string))
@@ -3112,8 +3110,6 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
@@ -3226,8 +3222,6 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
