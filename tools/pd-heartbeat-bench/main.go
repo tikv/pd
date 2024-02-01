@@ -38,6 +38,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
@@ -46,9 +47,12 @@ import (
 )
 
 const (
-	bytesUnit            = 8 * units.MiB
-	keysUint             = 8 * units.KiB
-	queryUnit            = 1 * units.KiB
+	bytesUnit            = 128
+	keysUint             = 8
+	queryUnit            = 8
+	hotByteUnit          = 16 * units.KiB
+	hotKeysUint          = 256
+	hotQueryUnit         = 256
 	regionReportInterval = 60 // 60s
 	storeReportInterval  = 10 // 10s
 	capacity             = 4 * units.TiB
@@ -168,18 +172,6 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 	}
 }
 
-func newStartKey(id uint64, keyLen int) []byte {
-	k := make([]byte, keyLen)
-	copy(k, fmt.Sprintf("%010d", id))
-	return k
-}
-
-func newEndKey(id uint64, keyLen int) []byte {
-	k := newStartKey(id, keyLen)
-	k[len(k)-1]++
-	return k
-}
-
 // Regions simulates all regions to heartbeat.
 type Regions struct {
 	regions       []*pdpb.RegionHeartbeatRequest
@@ -193,7 +185,7 @@ type Regions struct {
 	updateFlow   []int
 }
 
-func (rs *Regions) init(cfg *config.Config, options *config.Options) []int {
+func (rs *Regions) init(cfg *config.Config, options *config.Options) {
 	rs.regions = make([]*pdpb.RegionHeartbeatRequest, 0, cfg.RegionCount)
 	rs.updateRound = 0
 
@@ -201,14 +193,13 @@ func (rs *Regions) init(cfg *config.Config, options *config.Options) []int {
 	id := uint64(1)
 	now := uint64(time.Now().Unix())
 
-	keyLen := cfg.KeyLength
 	for i := 0; i < cfg.RegionCount; i++ {
 		region := &pdpb.RegionHeartbeatRequest{
 			Header: header(),
 			Region: &metapb.Region{
 				Id:          id,
-				StartKey:    newStartKey(id, keyLen),
-				EndKey:      newEndKey(id, keyLen),
+				StartKey:    codec.GenerateTableKey(int64(i)),
+				EndKey:      codec.GenerateTableKey(int64(i + 1)),
 				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1},
 			},
 			ApproximateSize: bytesUnit,
@@ -238,25 +229,23 @@ func (rs *Regions) init(cfg *config.Config, options *config.Options) []int {
 		region.Leader = peers[0]
 		rs.regions = append(rs.regions, region)
 	}
+}
+
+func (rs *Regions) update(cfg *config.Config, options *config.Options) {
+	rs.updateRound += 1
 
 	// Generate sample index
 	indexes := make([]int, cfg.RegionCount)
 	for i := range indexes {
 		indexes[i] = i
 	}
-
-	return indexes
-}
-
-func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes []int) {
-	rs.updateRound += 1
-
 	reportRegions := pick(indexes, cfg.RegionCount, options.GetReportRatio())
+
 	reportCount := len(reportRegions)
-	rs.updateLeader = pick(reportRegions, reportCount, options.GetLeaderUpdateRatio())
-	rs.updateEpoch = pick(reportRegions, reportCount, options.GetEpochUpdateRatio())
-	rs.updateSpace = pick(reportRegions, reportCount, options.GetSpaceUpdateRatio())
 	rs.updateFlow = pick(reportRegions, reportCount, options.GetFlowUpdateRatio())
+	rs.updateLeader = randomPick(reportRegions, reportCount, options.GetLeaderUpdateRatio())
+	rs.updateEpoch = randomPick(reportRegions, reportCount, options.GetEpochUpdateRatio())
+	rs.updateSpace = randomPick(reportRegions, reportCount, options.GetSpaceUpdateRatio())
 	var (
 		updatedStatisticsMap = make(map[int]*pdpb.RegionHeartbeatRequest)
 		awakenRegions        []*pdpb.RegionHeartbeatRequest
@@ -281,13 +270,24 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes [
 	// update flow
 	for _, i := range rs.updateFlow {
 		region := rs.regions[i]
-		region.BytesWritten = uint64(bytesUnit * rand.Float64())
-		region.BytesRead = uint64(bytesUnit * rand.Float64())
-		region.KeysWritten = uint64(keysUint * rand.Float64())
-		region.KeysRead = uint64(keysUint * rand.Float64())
-		region.QueryStats = &pdpb.QueryStats{
-			Get: uint64(queryUnit * rand.Float64()),
-			Put: uint64(queryUnit * rand.Float64()),
+		if region.Leader.StoreId <= uint64(options.GetHotStoreCount()) {
+			region.BytesWritten = uint64(hotByteUnit * (1 + rand.Float64()))
+			region.BytesRead = uint64(hotByteUnit * (1 + rand.Float64()))
+			region.KeysWritten = uint64(hotKeysUint * (1 + rand.Float64()))
+			region.KeysRead = uint64(hotKeysUint * (1 + rand.Float64()))
+			region.QueryStats = &pdpb.QueryStats{
+				Get: uint64(hotQueryUnit * (1 + rand.Float64())),
+				Put: uint64(hotQueryUnit * (1 + rand.Float64())),
+			}
+		} else {
+			region.BytesWritten = uint64(bytesUnit * rand.Float64())
+			region.BytesRead = uint64(bytesUnit * rand.Float64())
+			region.KeysWritten = uint64(keysUint * rand.Float64())
+			region.KeysRead = uint64(keysUint * rand.Float64())
+			region.QueryStats = &pdpb.QueryStats{
+				Get: uint64(queryUnit * rand.Float64()),
+				Put: uint64(queryUnit * rand.Float64()),
+			}
 		}
 		updatedStatisticsMap[i] = region
 	}
@@ -438,10 +438,14 @@ func (s *Stores) update(rs *Regions) {
 	}
 }
 
-func pick(slice []int, total int, ratio float64) []int {
+func randomPick(slice []int, total int, ratio float64) []int {
 	rand.Shuffle(total, func(i, j int) {
 		slice[i], slice[j] = slice[j], slice[i]
 	})
+	return append(slice[:0:0], slice[0:int(float64(total)*ratio)]...)
+}
+
+func pick(slice []int, total int, ratio float64) []int {
 	return append(slice[:0:0], slice[0:int(float64(total)*ratio)]...)
 }
 
@@ -490,7 +494,7 @@ func main() {
 	initClusterID(ctx, cli)
 	go runHTTPServer(cfg, options)
 	regions := new(Regions)
-	indexes := regions.init(cfg, options)
+	regions.init(cfg, options)
 	log.Info("finish init regions")
 	stores := newStores(cfg.StoreCount)
 	stores.update(regions)
@@ -533,7 +537,7 @@ func main() {
 				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
 			)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
-			regions.update(cfg, options, indexes)
+			regions.update(cfg, options)
 			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
 		case <-ctx.Done():
 			log.Info("got signal to exit")
@@ -599,6 +603,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 	pprof.Register(engine)
 	engine.PUT("config", func(c *gin.Context) {
 		newCfg := cfg.Clone()
+		newCfg.HotStoreCount = options.GetHotStoreCount()
 		newCfg.FlowUpdateRatio = options.GetFlowUpdateRatio()
 		newCfg.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
 		newCfg.EpochUpdateRatio = options.GetEpochUpdateRatio()
@@ -617,6 +622,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 	})
 	engine.GET("config", func(c *gin.Context) {
 		output := cfg.Clone()
+		output.HotStoreCount = options.GetHotStoreCount()
 		output.FlowUpdateRatio = options.GetFlowUpdateRatio()
 		output.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
 		output.EpochUpdateRatio = options.GetEpochUpdateRatio()
