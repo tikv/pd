@@ -81,6 +81,7 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	re := suite.Require()
 	suite.cleanupFunc()
 	suite.cluster.Destroy()
+	suite.dialClient.CloseIdleConnections()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
 
