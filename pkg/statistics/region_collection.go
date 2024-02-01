@@ -33,6 +33,8 @@ type RegionInfoProvider interface {
 // RegionStatisticType represents the type of the region's status.
 type RegionStatisticType uint32
 
+const emptyStatistic = RegionStatisticType(0)
+
 // region status type
 const (
 	MissPeer RegionStatisticType = 1 << iota
@@ -250,7 +252,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		}
 	}
 	// Remove the info if any of the conditions are not met any more.
-	if oldIndex, ok := r.index[regionID]; ok && oldIndex > 0 {
+	if oldIndex, ok := r.index[regionID]; ok && oldIndex > emptyStatistic {
 		deleteIndex := oldIndex &^ peerTypeIndex
 		r.deleteEntry(deleteIndex, regionID)
 	}
@@ -263,7 +265,7 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 	defer r.Unlock()
 	if oldIndex, ok := r.index[regionID]; ok {
 		delete(r.index, regionID)
-		if oldIndex > 0 {
+		if oldIndex > emptyStatistic {
 			r.deleteEntry(oldIndex, regionID)
 		}
 	}
