@@ -253,7 +253,7 @@ func newClient(tlsConfig *tls.Config, endpoints ...string) (*clientv3.Client, er
 }
 
 // CreateEtcdClient creates etcd v3 client with detecting endpoints.
-func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client, error) {
+func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL, sourceOpt ...string) (*clientv3.Client, error) {
 	urls := make([]string, 0, len(acURLs))
 	for _, u := range acURLs {
 		urls = append(urls, u.String())
@@ -270,7 +270,11 @@ func CreateEtcdClient(tlsConfig *tls.Config, acURLs []url.URL) (*clientv3.Client
 	failpoint.Inject("closeTick", func() {
 		failpoint.Return(client, err)
 	})
-	initHealthChecker(tickerInterval, tlsConfig, client)
+	source := "default-etcd-client"
+	if len(sourceOpt) > 0 {
+		source = sourceOpt[0]
+	}
+	initHealthChecker(tickerInterval, tlsConfig, client, source)
 
 	return client, err
 }

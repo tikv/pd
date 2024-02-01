@@ -60,7 +60,7 @@ type balanceWitnessSchedulerConfig struct {
 	Batch int `json:"batch"`
 }
 
-func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}) {
+func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -79,7 +79,7 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
 		return http.StatusOK, "Config is updated."
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}

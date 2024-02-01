@@ -71,7 +71,7 @@ func createIndentRender() *render.Render {
 	})
 }
 
-func getFunctionName(f interface{}) string {
+func getFunctionName(f any) string {
 	strs := strings.Split(runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), ".")
 	return strings.Split(strs[len(strs)-1], "-")[0]
 }

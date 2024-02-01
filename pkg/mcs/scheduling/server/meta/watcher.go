@@ -78,6 +78,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
 			return err
 		}
+		log.Debug("update store meta", zap.Stringer("store", store))
 		origin := w.basicCluster.GetStore(store.GetId())
 		if origin == nil {
 			w.basicCluster.PutStore(core.NewStoreInfo(store))
@@ -101,6 +102,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		origin := w.basicCluster.GetStore(storeID)
 		if origin != nil {
 			w.basicCluster.DeleteStore(origin)
+			log.Info("delete store meta", zap.Uint64("store-id", storeID))
 		}
 		return nil
 	}

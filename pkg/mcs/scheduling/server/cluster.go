@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
@@ -454,7 +455,11 @@ func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	// force wait for 1 minute to make prepare checker won't be directly skipped
-	c.coordinator.RunUntilStop(collectWaitTime)
+	runCollectWaitTime := collectWaitTime
+	failpoint.Inject("changeRunCollectWaitTime", func() {
+		runCollectWaitTime = 1 * time.Second
+	})
+	c.coordinator.RunUntilStop(runCollectWaitTime)
 }
 
 func (c *Cluster) runMetricsCollectionJob() {

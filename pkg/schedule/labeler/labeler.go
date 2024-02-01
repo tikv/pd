@@ -266,21 +266,30 @@ func (l *RegionLabeler) DeleteLabelRuleLocked(id string) error {
 
 // Patch updates multiple region rules in a batch.
 func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
+	// setRulesMap is used to solve duplicate entries in DeleteRules and SetRules.
+	// Note: We maintain compatibility with the previous behavior, which is to process DeleteRules before SetRules
+	// If there are duplicate rules, we will prioritize SetRules and select the last one from SetRules.
+	setRulesMap := make(map[string]*LabelRule)
+
 	for _, rule := range patch.SetRules {
 		if err := rule.checkAndAdjust(); err != nil {
 			return err
 		}
+		setRulesMap[rule.ID] = rule
 	}
 
 	// save to storage
 	var batch []func(kv.Txn) error
 	for _, key := range patch.DeleteRules {
+		if _, ok := setRulesMap[key]; ok {
+			continue
+		}
 		localKey := key
 		batch = append(batch, func(txn kv.Txn) error {
 			return l.storage.DeleteRegionRule(txn, localKey)
 		})
 	}
-	for _, rule := range patch.SetRules {
+	for _, rule := range setRulesMap {
 		localID, localRule := rule.ID, rule
 		batch = append(batch, func(txn kv.Txn) error {
 			return l.storage.SaveRegionRule(txn, localID, localRule)
@@ -297,7 +306,7 @@ func (l *RegionLabeler) Patch(patch LabelRulePatch) error {
 	for _, key := range patch.DeleteRules {
 		delete(l.labelRules, key)
 	}
-	for _, rule := range patch.SetRules {
+	for _, rule := range setRulesMap {
 		l.labelRules[rule.ID] = rule
 	}
 	l.BuildRangeListLocked()
@@ -373,10 +382,10 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 }
 
 // MakeKeyRanges is a helper function to make key ranges.
-func MakeKeyRanges(keys ...string) []interface{} {
-	var res []interface{}
+func MakeKeyRanges(keys ...string) []any {
+	var res []any
 	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]interface{}{"start_key": keys[i], "end_key": keys[i+1]})
+		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res
 }

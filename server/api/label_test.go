@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/response"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -178,7 +179,7 @@ func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
 	}
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", suite.urlPrefix, testCase.name, testCase.value)
-		info := new(StoresInfo)
+		info := new(response.StoresInfo)
 		err := tu.ReadGetJSON(re, testDialClient, url, info)
 		re.NoError(err)
 		checkStoresInfo(re, info.Stores, testCase.want)

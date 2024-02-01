@@ -219,16 +219,16 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	allData := make(map[string]interface{})
+	allData := make(map[string]any)
 	err = json.Unmarshal([]byte(allR), &allData)
 	if err != nil {
 		cmd.Printf("Failed to unmarshal config: %s\n", err)
 		return
 	}
 
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 	data["replication"] = allData["replication"]
-	scheduleConfig := make(map[string]interface{})
+	scheduleConfig := make(map[string]any)
 	scheduleConfigData, err := json.Marshal(allData["schedule"])
 	if err != nil {
 		cmd.Printf("Failed to marshal schedule config: %s\n", err)
@@ -335,8 +335,8 @@ func showServerCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
-	var val interface{}
-	data := make(map[string]interface{})
+	var val any
+	data := make(map[string]any)
 	val, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		val = value
@@ -381,7 +381,7 @@ func postLabelProperty(cmd *cobra.Command, action string, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	input := map[string]interface{}{
+	input := map[string]any{
 		"type":        args[0],
 		"action":      action,
 		"label-key":   args[1],
@@ -396,7 +396,7 @@ func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	input := map[string]interface{}{
+	input := map[string]any{
 		"cluster-version": args[0],
 	}
 	postJSON(cmd, clusterVersionPrefix, input)
@@ -404,7 +404,7 @@ func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 
 func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
-		postJSON(cmd, replicationModePrefix, map[string]interface{}{"replication-mode": args[0]})
+		postJSON(cmd, replicationModePrefix, map[string]any{"replication-mode": args[0]})
 	} else if len(args) == 3 {
 		t := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
 		if t != nil && t.Kind() == reflect.Int {
@@ -414,10 +414,10 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 				cmd.Printf("value %v cannot covert to number: %v", args[2], err)
 				return
 			}
-			postJSON(cmd, replicationModePrefix, map[string]interface{}{args[0]: map[string]interface{}{args[1]: arg2}})
+			postJSON(cmd, replicationModePrefix, map[string]any{args[0]: map[string]any{args[1]: arg2}})
 			return
 		}
-		postJSON(cmd, replicationModePrefix, map[string]interface{}{args[0]: map[string]string{args[1]: args[2]}})
+		postJSON(cmd, replicationModePrefix, map[string]any{args[0]: map[string]string{args[1]: args[2]}})
 	} else {
 		cmd.Println(cmd.UsageString())
 	}
@@ -674,7 +674,7 @@ func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("override %s should be a boolean\n", args[2])
 		return
 	}
-	postJSON(cmd, ruleGroupPrefix, map[string]interface{}{
+	postJSON(cmd, ruleGroupPrefix, map[string]any{
 		"id":       args[0],
 		"index":    index,
 		"override": override,

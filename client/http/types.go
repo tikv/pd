@@ -575,7 +575,7 @@ type LabelRule struct {
 	Index    int           `json:"index"`
 	Labels   []RegionLabel `json:"labels"`
 	RuleType string        `json:"rule_type"`
-	Data     interface{}   `json:"data"`
+	Data     any           `json:"data"`
 }
 
 // LabelRulePatch is the patch to update the label rules.

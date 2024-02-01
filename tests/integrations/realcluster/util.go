@@ -23,7 +23,7 @@ import (
 const physicalShiftBits = 18
 
 var (
-	pdAddrs   = []string{"127.0.0.1:2379"}
+	pdAddrs   = []string{"http://127.0.0.1:2379"}
 	pdHTTPCli = http.NewClient("pd-real-cluster-test", pdAddrs)
 )
 

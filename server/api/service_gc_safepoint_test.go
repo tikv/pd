@@ -77,7 +77,8 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 				SafePoint: 3,
 			},
 		},
-		GCSafePoint: 1,
+		GCSafePoint:           1,
+		MinServiceGcSafepoint: 1,
 	}
 	for _, ssp := range list.ServiceGCSafepoints {
 		err := storage.SaveServiceGCSafePoint(ssp)
