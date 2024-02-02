@@ -181,12 +181,14 @@ func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
 // and make it become a PD leader.
 // leader should be changed when campaign leader frequently.
 func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
-	if len(m.leadership.CampaignTimes) >= campaignLeaderFrequencyTimes {
+	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
 		log.Warn("campaign times is too frequent, resign and campaign again",
 			zap.String("leader-name", m.Name()), zap.String("leader-key", m.GetLeaderPath()))
-		// remove all campaign times
-		m.leadership.CampaignTimes = nil
-		return m.ResignEtcdLeader(ctx, m.Name(), "")
+		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
+			return err
+		}
+		m.leadership.ResetCampaignTimes()
+		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
