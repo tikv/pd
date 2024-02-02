@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"math/rand"
@@ -38,8 +39,11 @@ import (
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/client/grpcutil"
+	pdHttp "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"go.etcd.io/etcd/pkg/report"
@@ -271,13 +275,13 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options) {
 	for _, i := range rs.updateFlow {
 		region := rs.regions[i]
 		if region.Leader.StoreId <= uint64(options.GetHotStoreCount()) {
-			region.BytesWritten = uint64(hotByteUnit * (1 + rand.Float64()))
-			region.BytesRead = uint64(hotByteUnit * (1 + rand.Float64()))
-			region.KeysWritten = uint64(hotKeysUint * (1 + rand.Float64()))
-			region.KeysRead = uint64(hotKeysUint * (1 + rand.Float64()))
+			region.BytesWritten = uint64(hotByteUnit * (1 + rand.Float64()) * 60)
+			region.BytesRead = uint64(hotByteUnit * (1 + rand.Float64()) * 10)
+			region.KeysWritten = uint64(hotKeysUint * (1 + rand.Float64()) * 60)
+			region.KeysRead = uint64(hotKeysUint * (1 + rand.Float64()) * 10)
 			region.QueryStats = &pdpb.QueryStats{
-				Get: uint64(hotQueryUnit * (1 + rand.Float64())),
-				Put: uint64(hotQueryUnit * (1 + rand.Float64())),
+				Get: uint64(hotQueryUnit * (1 + rand.Float64()) * 10),
+				Put: uint64(hotQueryUnit * (1 + rand.Float64()) * 60),
 			}
 		} else {
 			region.BytesWritten = uint64(bytesUnit * rand.Float64())
@@ -451,6 +455,7 @@ func pick(slice []int, total int, ratio float64) []int {
 
 func main() {
 	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
+	statistics.Denoising = false
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 	defer logutil.LogPanic()
@@ -491,6 +496,7 @@ func main() {
 	if err != nil {
 		log.Fatal("create client error", zap.Error(err))
 	}
+
 	initClusterID(ctx, cli)
 	go runHTTPServer(cfg, options)
 	regions := new(Regions)
@@ -501,6 +507,8 @@ func main() {
 	bootstrap(ctx, cli)
 	putStores(ctx, cfg, cli, stores)
 	log.Info("finish put stores")
+	httpCli := pdHttp.NewClient("tools-heartbeat-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
+	go deleteOperators(ctx, httpCli)
 	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
 	for i := 1; i <= cfg.StoreCount; i++ {
 		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
@@ -553,6 +561,22 @@ func main() {
 
 func exit(code int) {
 	os.Exit(code)
+}
+
+func deleteOperators(ctx context.Context, httpCli pdHttp.Client) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			err := httpCli.DeleteOperators(ctx)
+			if err != nil {
+				log.Error("fail to delete operators", zap.Error(err))
+			}
+		}
+	}
 }
 
 func newReport(cfg *config.Config) report.Report {
@@ -632,4 +656,33 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 		c.IndentedJSON(http.StatusOK, output)
 	})
 	engine.Run(cfg.StatusAddr)
+}
+
+func loadTLSConfig(cfg *config.Config) *tls.Config {
+	if len(cfg.Security.CAPath) == 0 {
+		return nil
+	}
+	caData, err := os.ReadFile(cfg.Security.CAPath)
+	if err != nil {
+		log.Error("fail to read ca file", zap.Error(err))
+	}
+	certData, err := os.ReadFile(cfg.Security.CertPath)
+	if err != nil {
+		log.Error("fail to read cert file", zap.Error(err))
+	}
+	keyData, err := os.ReadFile(cfg.Security.KeyPath)
+	if err != nil {
+		log.Error("fail to read key file", zap.Error(err))
+	}
+
+	tlsConf, err := tlsutil.TLSConfig{
+		SSLCABytes:   caData,
+		SSLCertBytes: certData,
+		SSLKEYBytes:  keyData,
+	}.ToTLSConfig()
+	if err != nil {
+		log.Fatal("failed to load tlc config", zap.Error(err))
+	}
+
+	return tlsConf
 }
