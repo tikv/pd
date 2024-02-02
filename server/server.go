@@ -1640,7 +1640,7 @@ func (s *Server) leaderLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
-	if err := s.member.CampaignLeader(s.cfg.LeaderLease); err != nil {
+	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
 				zap.String("campaign-leader-name", s.Name()))

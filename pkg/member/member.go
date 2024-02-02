@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
@@ -42,6 +43,8 @@ const (
 	// The timeout to wait transfer etcd leader to complete.
 	moveLeaderTimeout          = 5 * time.Second
 	dcLocationConfigEtcdPrefix = "dc-location"
+	// If the campaign times is more than this value in `campaignTimesRecordTimeout`, the PD will resign and campaign again.
+	campaignLeaderFrequencyTimes = 3
 )
 
 // EmbeddedEtcdMember is used for the election related logic. It implements Member interface.
@@ -177,7 +180,20 @@ func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
 
 // CampaignLeader is used to campaign a PD member's leadership
 // and make it become a PD leader.
-func (m *EmbeddedEtcdMember) CampaignLeader(leaseTimeout int64) error {
+// leader should be changed when campaign leader frequently.
+func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
+	failpoint.Inject("skipCampaignLeaderCheck", func() {
+		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
+	})
+	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
+		log.Warn("campaign times is too frequent, resign and campaign again",
+			zap.String("leader-name", m.Name()), zap.String("leader-key", m.GetLeaderPath()))
+		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
+			return err
+		}
+		m.leadership.ResetCampaignTimes()
+		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
+	}
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
