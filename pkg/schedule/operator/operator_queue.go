@@ -35,12 +35,12 @@ func (opn operatorQueue) Swap(i, j int) {
 	opn[i], opn[j] = opn[j], opn[i]
 }
 
-func (opn *operatorQueue) Push(x interface{}) {
+func (opn *operatorQueue) Push(x any) {
 	item := x.(*operatorWithTime)
 	*opn = append(*opn, item)
 }
 
-func (opn *operatorQueue) Pop() interface{} {
+func (opn *operatorQueue) Pop() any {
 	old := *opn
 	n := len(old)
 	if n == 0 {

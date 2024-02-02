@@ -40,7 +40,7 @@ type testCase struct {
 	Peers           []*metapb.Peer // first is leader
 	ConfVerChanged  uint64
 	IsFinish        bool
-	CheckInProgress func(err error, msgAndArgs ...interface{})
+	CheckInProgress func(err error, msgAndArgs ...any)
 }
 
 func (suite *operatorStepTestSuite) SetupTest() {

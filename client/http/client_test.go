@@ -40,7 +40,7 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 		}
 		return nil
 	})
-	c := NewClient("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := newClientWithoutInitServiceDiscovery("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
 	c.Close()
@@ -58,7 +58,7 @@ func TestCallerID(t *testing.T) {
 		}
 		return nil
 	})
-	c := NewClient("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := newClientWithoutInitServiceDiscovery("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
 	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())
@@ -69,7 +69,7 @@ func TestWithBackoffer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := NewClient("test-with-backoffer", []string{"http://127.0.0.1"})
+	c := newClientWithoutInitServiceDiscovery("test-with-backoffer", []string{"http://127.0.0.1"})
 
 	base := 100 * time.Millisecond
 	max := 500 * time.Millisecond

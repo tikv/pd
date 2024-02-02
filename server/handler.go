@@ -495,7 +495,7 @@ func (h *Handler) GetAddr() string {
 
 // SetStoreLimitTTL set storeLimit with ttl
 func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) error {
-	return h.s.SaveTTLConfig(map[string]interface{}{
+	return h.s.SaveTTLConfig(map[string]any{
 		data: value,
 	}, ttl)
 }
@@ -568,7 +568,7 @@ func (h *Handler) GetHistoryHotRegionIter(
 
 // RedirectSchedulerUpdate update scheduler config. Export this func to help handle damaged store.
 func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = name
 	input["store_id"] = storeID
 	updateURL, err := url.JoinPath(h.GetAddr(), "pd", SchedulerConfigHandlerPath, name, "config")

@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"
 	"github.com/tikv/pd/tools/pd-api-bench/config"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -119,6 +120,10 @@ func main() {
 		pdClis[i] = newPDClient(ctx, cfg)
 		pdClis[i].UpdateOption(pd.EnableFollowerHandle, true)
 	}
+	etcdClis := make([]*clientv3.Client, cfg.Client)
+	for i := int64(0); i < cfg.Client; i++ {
+		etcdClis[i] = newEtcdClient(cfg)
+	}
 	httpClis := make([]pdHttp.Client, cfg.Client)
 	for i := int64(0); i < cfg.Client; i++ {
 		sd := pdClis[i].GetServiceDiscovery()
@@ -129,7 +134,7 @@ func main() {
 		log.Fatal("InitCluster error", zap.Error(err))
 	}
 
-	coordinator := cases.NewCoordinator(ctx, httpClis, pdClis)
+	coordinator := cases.NewCoordinator(ctx, httpClis, pdClis, etcdClis)
 
 	hcaseStr := strings.Split(httpCases, ",")
 	for _, str := range hcaseStr {
@@ -156,6 +161,9 @@ func main() {
 		cli.Close()
 	}
 	for _, cli := range httpClis {
+		cli.Close()
+	}
+	for _, cli := range etcdClis {
 		cli.Close()
 	}
 	log.Info("Exit")
@@ -276,6 +284,23 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		co.SetGRPCCase(name, cfg)
 		c.String(http.StatusOK, "")
 	})
+	engine.POST("config/etcd/all", func(c *gin.Context) {
+		var input map[string]cases.Config
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		for name, cfg := range input {
+			co.SetETCDCase(name, &cfg)
+		}
+		c.String(http.StatusOK, "")
+	})
+	engine.POST("config/etcd/:name", func(c *gin.Context) {
+		name := c.Param("name")
+		cfg := getCfg(c)
+		co.SetETCDCase(name, cfg)
+		c.String(http.StatusOK, "")
+	})
 
 	engine.GET("config/http/all", func(c *gin.Context) {
 		all := co.GetAllHTTPCases()
@@ -303,24 +328,56 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		}
 		c.IndentedJSON(http.StatusOK, cfg)
 	})
+	engine.GET("config/etcd/all", func(c *gin.Context) {
+		all := co.GetAllETCDCases()
+		c.IndentedJSON(http.StatusOK, all)
+	})
+	engine.GET("config/etcd/:name", func(c *gin.Context) {
+		name := c.Param("name")
+		cfg, err := co.GetETCDCase(name)
+		if err != nil {
+			c.String(http.StatusBadRequest, err.Error())
+			return
+		}
+		c.IndentedJSON(http.StatusOK, cfg)
+	})
 	// nolint
 	engine.Run(cfg.StatusAddr)
 }
 
-func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
-	return str
+const (
+	keepaliveTime    = 10 * time.Second
+	keepaliveTimeout = 3 * time.Second
+)
+
+func newEtcdClient(cfg *config.Config) *clientv3.Client {
+	lgc := zap.NewProductionConfig()
+	lgc.Encoding = log.ZapEncodingName
+	tlsCfg, err := tlsutil.TLSConfig{
+		CAPath:   cfg.CaPath,
+		CertPath: cfg.CertPath,
+		KeyPath:  cfg.KeyPath,
+	}.ToTLSConfig()
+	if err != nil {
+		log.Fatal("fail to create etcd client", zap.Error(err))
+		return nil
+	}
+	clientConfig := clientv3.Config{
+		Endpoints:   []string{cfg.PDAddr},
+		DialTimeout: keepaliveTimeout,
+		TLS:         tlsCfg,
+		LogConfig:   &lgc,
+	}
+	client, err := clientv3.New(clientConfig)
+	if err != nil {
+		log.Fatal("fail to create pd client", zap.Error(err))
+	}
+	return client
 }
 
 // newPDClient returns a pd client.
 func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
-	const (
-		keepaliveTime    = 10 * time.Second
-		keepaliveTimeout = 3 * time.Second
-	)
-
-	addrs := []string{trimHTTPPrefix(cfg.PDAddr)}
+	addrs := []string{cfg.PDAddr}
 	pdCli, err := pd.NewClientWithContext(ctx, addrs, pd.SecurityOption{
 		CAPath:   cfg.CaPath,
 		CertPath: cfg.CertPath,

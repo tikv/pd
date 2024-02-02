@@ -85,7 +85,7 @@ func (m *EmbeddedEtcdMember) Name() string {
 }
 
 // GetMember returns the member.
-func (m *EmbeddedEtcdMember) GetMember() interface{} {
+func (m *EmbeddedEtcdMember) GetMember() any {
 	return m.member
 }
 

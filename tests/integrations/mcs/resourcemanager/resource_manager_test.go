@@ -1447,7 +1447,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 
 	testCases := []struct {
 		configJSON string
-		value      interface{}
+		value      any
 		expected   func(ruConfig *controller.RUConfig)
 	}{
 		{

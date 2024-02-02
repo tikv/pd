@@ -22,8 +22,8 @@ import (
 )
 
 // AddKeyValue is used to add a key value pair into `old`
-func AddKeyValue(old interface{}, key string, value interface{}) (updated bool, found bool, err error) {
-	data, err := json.Marshal(map[string]interface{}{key: value})
+func AddKeyValue(old any, key string, value any) (updated bool, found bool, err error) {
+	data, err := json.Marshal(map[string]any{key: value})
 	if err != nil {
 		return false, false, err
 	}
@@ -31,7 +31,7 @@ func AddKeyValue(old interface{}, key string, value interface{}) (updated bool, 
 }
 
 // MergeJSONObject is used to merge a marshaled json object into v
-func MergeJSONObject(v interface{}, data []byte) (updated bool, found bool, err error) {
+func MergeJSONObject(v any, data []byte) (updated bool, found bool, err error) {
 	old, _ := json.Marshal(v)
 	if err := json.Unmarshal(data, v); err != nil {
 		return false, false, err
@@ -40,7 +40,7 @@ func MergeJSONObject(v interface{}, data []byte) (updated bool, found bool, err 
 	if !bytes.Equal(old, new) {
 		return true, true, nil
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		return false, false, err
 	}

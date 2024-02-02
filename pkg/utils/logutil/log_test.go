@@ -39,9 +39,9 @@ func TestRedactLog(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		name            string
-		arg             interface{}
+		arg             any
 		enableRedactLog bool
-		expect          interface{}
+		expect          any
 	}{
 		{
 			name:            "string arg, enable redact",

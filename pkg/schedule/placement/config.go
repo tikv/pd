@@ -180,7 +180,7 @@ func (p *RuleConfigPatch) commit() {
 	p.c.adjust()
 }
 
-func jsonEquals(a, b interface{}) bool {
+func jsonEquals(a, b any) bool {
 	aa, _ := json.Marshal(a)
 	bb, _ := json.Marshal(b)
 	return bytes.Equal(aa, bb)

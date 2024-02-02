@@ -84,7 +84,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, cfg))
 	re.True(cfg.Schedule.EnableDiagnostic)
 
-	ms := map[string]interface{}{
+	ms := map[string]any{
 		"enable-diagnostic": "true",
 		"max-replicas":      1,
 	}
@@ -104,7 +104,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	evictLeaderURL := suite.urlPrefix + "/" + schedulers.EvictLeaderName
 	re.NoError(tu.CheckGetJSON(testDialClient, evictLeaderURL, nil, tu.StatusNotOK(re)))
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = schedulers.BalanceRegionName
 	body, err := json.Marshal(input)
 	re.NoError(err)
@@ -112,7 +112,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	re.NoError(err)
 	suite.checkStatus("pending", balanceRegionURL)
 
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	re.NoError(err)

@@ -43,8 +43,7 @@ func SetNewPDClient(addrs []string, opts ...pd.ClientOption) {
 	if PDCli != nil {
 		PDCli.Close()
 	}
-	withOpts := append(opts, pd.WithLoggerRedirection("fatal", ""))
-	PDCli = pd.NewClient(pdControlCallerID, addrs, withOpts...)
+	PDCli = pd.NewClient(pdControlCallerID, addrs, opts...)
 }
 
 // TODO: replace dialClient with PDCli
@@ -187,7 +186,7 @@ func getEndpoints(cmd *cobra.Command) []string {
 	return strings.Split(addrs, ",")
 }
 
-func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]interface{}) {
+func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]any) {
 	data, err := json.Marshal(input)
 	if err != nil {
 		cmd.Println(err)
@@ -232,11 +231,11 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]int
 	cmd.Printf("Success! %s\n", strings.Trim(string(msg), "\""))
 }
 
-func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+func postJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 	requestJSON(cmd, http.MethodPost, prefix, input)
 }
 
-func patchJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+func patchJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 	requestJSON(cmd, http.MethodPatch, prefix, input)
 }
 

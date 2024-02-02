@@ -56,25 +56,25 @@ func (suite *unsafeOperationTestSuite) TearDownTest() {
 func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
 	re := suite.Require()
 
-	input := map[string]interface{}{"stores": []uint64{}}
+	input := map[string]any{"stores": []uint64{}}
 	data, _ := json.Marshal(input)
 	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
 	re.NoError(err)
 
-	input = map[string]interface{}{"stores": []string{"abc", "def"}}
+	input = map[string]any{"stores": []string{"abc", "def"}}
 	data, _ = json.Marshal(input)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
 	re.NoError(err)
 
-	input = map[string]interface{}{"stores": []uint64{1, 2}}
+	input = map[string]any{"stores": []uint64{1, 2}}
 	data, _ = json.Marshal(input)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input store 2 doesn't exist\"\n"))
 	re.NoError(err)
 
-	input = map[string]interface{}{"stores": []uint64{1}}
+	input = map[string]any{"stores": []uint64{1}}
 	data, _ = json.Marshal(input)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
 	re.NoError(err)
@@ -88,13 +88,13 @@ func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
 func (suite *unsafeOperationTestSuite) TestRemoveFailedStoresAutoDetect() {
 	re := suite.Require()
 
-	input := map[string]interface{}{"auto-detect": false}
+	input := map[string]any{"auto-detect": false}
 	data, _ := json.Marshal(input)
 	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
 	re.NoError(err)
 
-	input = map[string]interface{}{"auto-detect": true}
+	input = map[string]any{"auto-detect": true}
 	data, _ = json.Marshal(input)
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
 	re.NoError(err)

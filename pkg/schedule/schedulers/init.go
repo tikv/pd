@@ -37,7 +37,7 @@ func Register() {
 func schedulersRegister() {
 	// balance leader
 	RegisterSliceDecoderBuilder(BalanceLeaderType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			conf, ok := v.(*balanceLeaderSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -65,7 +65,7 @@ func schedulersRegister() {
 
 	// balance region
 	RegisterSliceDecoderBuilder(BalanceRegionType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			conf, ok := v.(*balanceRegionSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -90,7 +90,7 @@ func schedulersRegister() {
 
 	// balance witness
 	RegisterSliceDecoderBuilder(BalanceWitnessType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			conf, ok := v.(*balanceWitnessSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -118,7 +118,7 @@ func schedulersRegister() {
 
 	// evict leader
 	RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			if len(args) != 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
@@ -153,7 +153,7 @@ func schedulersRegister() {
 
 	// evict slow store
 	RegisterSliceDecoderBuilder(EvictSlowStoreType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			return nil
 		}
 	})
@@ -169,7 +169,7 @@ func schedulersRegister() {
 
 	// grant hot region
 	RegisterSliceDecoderBuilder(GrantHotRegionType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			if len(args) != 2 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
@@ -209,14 +209,14 @@ func schedulersRegister() {
 
 	// hot region
 	RegisterSliceDecoderBuilder(HotRegionType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			return nil
 		}
 	})
 
 	RegisterScheduler(HotRegionType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 		conf := initHotRegionScheduleConfig()
-		var data map[string]interface{}
+		var data map[string]any
 		if err := decoder(&data); err != nil {
 			return nil, err
 		}
@@ -236,7 +236,7 @@ func schedulersRegister() {
 
 	// grant leader
 	RegisterSliceDecoderBuilder(GrantLeaderType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			if len(args) != 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
@@ -271,7 +271,7 @@ func schedulersRegister() {
 
 	// label
 	RegisterSliceDecoderBuilder(LabelType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			conf, ok := v.(*labelSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -296,7 +296,7 @@ func schedulersRegister() {
 
 	// random merge
 	RegisterSliceDecoderBuilder(RandomMergeType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			conf, ok := v.(*randomMergeSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -322,7 +322,7 @@ func schedulersRegister() {
 	// scatter range
 	// args: [start-key, end-key, range-name].
 	RegisterSliceDecoderBuilder(ScatterRangeType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			if len(args) != 3 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("ranges and name")
 			}
@@ -356,7 +356,7 @@ func schedulersRegister() {
 
 	// shuffle hot region
 	RegisterSliceDecoderBuilder(ShuffleHotRegionType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			conf, ok := v.(*shuffleHotRegionSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -385,7 +385,7 @@ func schedulersRegister() {
 
 	// shuffle leader
 	RegisterSliceDecoderBuilder(ShuffleLeaderType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			conf, ok := v.(*shuffleLeaderSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -410,7 +410,7 @@ func schedulersRegister() {
 
 	// shuffle region
 	RegisterSliceDecoderBuilder(ShuffleRegionType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			conf, ok := v.(*shuffleRegionSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
@@ -435,7 +435,7 @@ func schedulersRegister() {
 
 	// split bucket
 	RegisterSliceDecoderBuilder(SplitBucketType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			return nil
 		}
 	})
@@ -451,7 +451,7 @@ func schedulersRegister() {
 
 	// transfer witness leader
 	RegisterSliceDecoderBuilder(TransferWitnessLeaderType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			return nil
 		}
 	})
@@ -462,7 +462,7 @@ func schedulersRegister() {
 
 	// evict slow store by trend
 	RegisterSliceDecoderBuilder(EvictSlowTrendType, func(args []string) ConfigDecoder {
-		return func(v interface{}) error {
+		return func(v any) error {
 			return nil
 		}
 	})

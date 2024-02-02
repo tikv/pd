@@ -108,7 +108,7 @@ type ElectionMember interface {
 	// MemberValue returns the member value.
 	MemberValue() string
 	// GetMember returns the current member
-	GetMember() interface{}
+	GetMember() any
 	// Client returns the etcd client.
 	Client() *clientv3.Client
 	// IsLeader returns whether the participant is the leader or not by checking its

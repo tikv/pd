@@ -43,7 +43,7 @@ func StatusNotOK(re *require.Assertions) func([]byte, int, http.Header) {
 }
 
 // ExtractJSON is used to check whether given data can be extracted successfully.
-func ExtractJSON(re *require.Assertions, data interface{}) func([]byte, int, http.Header) {
+func ExtractJSON(re *require.Assertions, data any) func([]byte, int, http.Header) {
 	return func(resp []byte, _ int, _ http.Header) {
 		re.NoError(json.Unmarshal(resp, data), "resp: "+string(resp))
 	}
@@ -78,7 +78,7 @@ func WithoutHeader(re *require.Assertions, key string) func([]byte, int, http.He
 }
 
 // ReadGetJSON is used to do get request and check whether given data can be extracted successfully.
-func ReadGetJSON(re *require.Assertions, client *http.Client, url string, data interface{}, checkOpts ...func([]byte, int, http.Header)) error {
+func ReadGetJSON(re *require.Assertions, client *http.Client, url string, data any, checkOpts ...func([]byte, int, http.Header)) error {
 	resp, err := apiutil.GetJSON(client, url, nil)
 	if err != nil {
 		return err
@@ -88,7 +88,7 @@ func ReadGetJSON(re *require.Assertions, client *http.Client, url string, data i
 }
 
 // ReadGetJSONWithBody is used to do get request with input and check whether given data can be extracted successfully.
-func ReadGetJSONWithBody(re *require.Assertions, client *http.Client, url string, input []byte, data interface{}, checkOpts ...func([]byte, int, http.Header)) error {
+func ReadGetJSONWithBody(re *require.Assertions, client *http.Client, url string, input []byte, data any, checkOpts ...func([]byte, int, http.Header)) error {
 	resp, err := apiutil.GetJSON(client, url, input)
 	if err != nil {
 		return err
