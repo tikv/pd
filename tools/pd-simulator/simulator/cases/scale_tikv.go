@@ -19,7 +19,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
 func newScaleInOut() *Case {
@@ -58,31 +57,22 @@ func newScaleInOut() *Case {
 	scaleInTick := int64(regionNum * 3 / storeNum)
 	addEvent := &AddNodesDescriptor{}
 	addEvent.Step = func(tick int64) uint64 {
-		if tick > scaleInTick {
-			storeNum++
-			return uint64(storeNum)
+		if tick == scaleInTick {
+			return uint64(storeNum + 1)
 		}
 		return 0
 	}
 
 	removeEvent := &DeleteNodesDescriptor{}
 	removeEvent.Step = func(tick int64) uint64 {
-		if tick > scaleInTick*2 {
-			return uint64(storeNum)
+		if tick == scaleInTick*2 {
+			return uint64(storeNum + 1)
 		}
 		return 0
 	}
-
 	simCase.Events = []EventDescriptor{addEvent, removeEvent}
 
-	// storesLastUpdateTime := make([]int64, storeNum+1)
-	// storeLastAvailable := make([]uint64, storeNum+1)
-
 	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		newStore := stats[storeNum-1]
-		simutil.Logger.Info("current counts",
-			zap.Uint32("peer-count", newStore.GetRegionCount()),
-		)
 		return false
 	}
 	return &simCase

@@ -43,3 +43,14 @@ Run a specific case with an external PD:
 ```shell
 ./pd-simulator -pd="http://127.0.0.1:2379" -case="casename"
 ```
+
+Run with tiup playgroudn :
+```shell
+tiup playground nightly --host 127.0.0.1 --kv.binpath ./pd-simulator --kv=1 --db=0 --kv.config=./tikv.conf
+```
+tikv conf
+```
+case-name="redundant-balance-region"
+sim-tick-interval="1s"
+store-io-per-second=100
+```
