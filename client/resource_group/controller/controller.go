@@ -1265,11 +1265,7 @@ func (gc *groupCostController) onRequestWait(
 	*gc.mu.storeCounter[info.StoreID()] = *gc.mu.globalCounter
 	gc.mu.Unlock()
 
-<<<<<<< HEAD
-	return delta, penalty, gc.getMeta().GetPriority(), nil
-=======
-	return delta, penalty, waitDuration, gc.meta.Priority, nil
->>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488))
+	return delta, penalty, waitDuration, gc.getMeta().GetPriority(), nil
 }
 
 func (gc *groupCostController) onResponse(
