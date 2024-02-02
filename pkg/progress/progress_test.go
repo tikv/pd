@@ -97,6 +97,7 @@ func TestAbnormal(t *testing.T) {
 }
 
 func TestProgressWithDynamicWindow(t *testing.T) {
+	// The full capacity of queue is 721.
 	t.Parallel()
 	re := require.New(t)
 	n := "test"
@@ -173,14 +174,18 @@ func TestProgressWithDynamicWindow(t *testing.T) {
 	re.Equal(float64(28/(2./120)*10.), ls)
 	re.Equal(float64(2./120/10.), cs)
 
-	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*10))
+	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*12))
+	re.Equal(73, m.progesses[n].position)
+	re.Equal(30.0, m.progesses[n].front.Value.(float64))
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.99, p)
-	re.Equal(float64(1/(27./60)*10.), ls)
-	re.Equal(float64(27./60/10.), cs)
+	re.Equal(float64(1/(29./72)*10.), ls)
+	re.Equal(float64(29./72/10.), cs)
 
 	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*5))
+	re.Equal(61, m.progesses[n].position)
+	re.Equal(28.0, m.progesses[n].front.Value.(float64))
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.99, p)

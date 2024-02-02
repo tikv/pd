@@ -52,15 +52,18 @@ type progressIndicator struct {
 	remaining float64
 	// We use a fixed interval's history to calculate the latest average speed.
 	history *list.List
-	// We use speedStatisticalWindowCapacity / updateInterval to get the windowCapacity.
-	// Assume that the windowCapacity is 3, the init value is 1. after update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
+	// We use (speedStatisticalWindowCapacity / updateInterval + 1) to get the windowCapacity.
+	// Assume that the windowCapacity is 4, the init value is 1. After update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
 	// Then we update it again with 5, the window will become [2, 3, 4, 5].
 	windowCapacity int
 	// windowLength is used to determine what data will be computed.
+	// Assume that the windowLength is 2, the init value is 1. The value that will be calculated are [1]. After update 3 times with 2, 3, 4 separately. The value that will be calculated are [3,4] and the values in queue are [(1,2),3,4].
+	// It helps us avoid calculation results jumping change when patrol-region-duration changes.
 	windowLength int
 	// front is the first element which should be used.
-	front *list.Element
 	// position indicates where the front is currently in the queue
+	// Assume that the windowLength is 2, the init value is 1. The front is [1] and position is 1. After update 3 times with 2, 3, 4 separately. The front is [3], and the position is 2.
+	front    *list.Element
 	position int
 
 	updateInterval time.Duration
@@ -133,6 +136,7 @@ func (m *Manager) UpdateProgress(progress string, current, remaining float64, is
 		p.history.PushBack(current)
 		p.position++
 
+		// try to move `front` into correct place.
 		for p.position > p.windowLength {
 			p.front = p.front.Next()
 			p.position--
