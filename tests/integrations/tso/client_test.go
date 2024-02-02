@@ -300,6 +300,10 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 
 	for i := 0; i < len(suite.clients); i++ {
 		client := suite.clients[i]
@@ -336,6 +340,11 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 
 	parallelAct := func() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
@@ -373,7 +382,6 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 	}
 
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 }
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
