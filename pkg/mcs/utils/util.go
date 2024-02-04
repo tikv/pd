@@ -161,12 +161,12 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	etcdClient, httpClient, err := etcdutil.CreateClients(tlsConfig, backendUrls)
+	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, "mcs-etcd-client")
 	if err != nil {
 		return err
 	}
 	s.SetETCDClient(etcdClient)
-	s.SetHTTPClient(httpClient)
+	s.SetHTTPClient(etcdutil.CreateHTTPClient(tlsConfig))
 	return nil
 }
 
