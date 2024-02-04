@@ -601,6 +601,33 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		})
 	}
 
+	// test scatter range scheduler
+	for _, name := range []string{"test", "test#", "tes&t=", "?test"} {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "scatter-range", "--format=raw", "a", "b", name}, nil)
+		re.Contains(echo, "Success!")
+		schedulerName := fmt.Sprintf("scatter-range-%s", name)
+		// test show scheduler
+		testutil.Eventually(re, func() bool {
+			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+			return strings.Contains(echo, schedulerName)
+		})
+		// test pause scheduler
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", schedulerName, "60"}, nil)
+		re.Contains(echo, "Success!")
+		checkSchedulerWithStatusCommand("paused", []string{schedulerName})
+		// test resume scheduler
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", schedulerName}, nil)
+		re.Contains(echo, "Success!")
+		checkSchedulerWithStatusCommand("paused", []string{})
+		// test remove scheduler
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", schedulerName}, nil)
+		re.Contains(echo, "Success!")
+		testutil.Eventually(re, func() bool {
+			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+			return !strings.Contains(echo, schedulerName)
+		})
+	}
+
 	mustUsage([]string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler"})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
 	re.Contains(echo, "Success!")
