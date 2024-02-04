@@ -18,13 +18,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -44,7 +42,6 @@ const (
 )
 
 var (
-	once            sync.Once
 	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "tso",
 		Version:    "v1",
@@ -77,11 +74,6 @@ func createIndentRender() *render.Render {
 
 // NewService returns a new Service.
 func NewService(srv *tsoserver.Service) *Service {
-	once.Do(func() {
-		// These global modification will be effective only for the first invoke.
-		_ = godotenv.Load()
-		gin.SetMode(gin.ReleaseMode)
-	})
 	apiHandlerEngine := gin.New()
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.Default())
