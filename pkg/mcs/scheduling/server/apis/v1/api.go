@@ -379,7 +379,7 @@ func getOperators(c *gin.Context) {
 // @Produce  json
 // @Success  200  {string}  string  "All pending operator are canceled."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators [DELETE]
+// @Router   /operators [delete]
 func deleteOperators(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 	if err := handler.RemoveOperators(); err != nil {
@@ -397,7 +397,7 @@ func deleteOperators(c *gin.Context) {
 // @Success  200  {string}  string  "The pending operator is canceled."
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators/{region_id} [DELETE]
+// @Router   /operators/{region_id} [delete]
 func deleteOperatorByRegion(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 	id := c.Param("id")

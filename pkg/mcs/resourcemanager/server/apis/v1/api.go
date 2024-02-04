@@ -220,7 +220,7 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 //	@Param		name	path		string	true	"Name of the resource group to be deleted"
 //	@Success	200		{string}	string	"Success!"
 //	@Failure	404		{string}	error
-//	@Router		/config/group/{name} [DELETE]
+//	@Router		/config/group/{name} [delete]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
 	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
