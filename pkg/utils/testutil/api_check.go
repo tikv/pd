@@ -56,6 +56,13 @@ func StringContain(re *require.Assertions, sub string) func([]byte, int, http.He
 	}
 }
 
+// StringNotContain is used to check whether response context doesn't contain given string.
+func StringNotContain(re *require.Assertions, sub string) func([]byte, int, http.Header) {
+	return func(resp []byte, _ int, _ http.Header) {
+		re.NotContains(string(resp), sub, "resp: "+string(resp))
+	}
+}
+
 // StringEqual is used to check whether response context equal given string.
 func StringEqual(re *require.Assertions, str string) func([]byte, int, http.Header) {
 	return func(resp []byte, _ int, _ http.Header) {

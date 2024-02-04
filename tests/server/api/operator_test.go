@@ -624,3 +624,58 @@ func (suite *operatorTestSuite) pauseRuleChecker(re *require.Assertions, cluster
 	re.NoError(err)
 	re.True(resp["paused"].(bool))
 }
+
+func (suite *operatorTestSuite) TestRemoveOperators() {
+	suite.env.RunTestInTwoModes(suite.checkRemoveOperators)
+}
+
+func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster) {
+	re := suite.Require()
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	suite.pauseRuleChecker(re, cluster)
+	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	tests.MustPutRegionInfo(re, cluster, r1)
+	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	tests.MustPutRegionInfo(re, cluster, r2)
+	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	tests.MustPutRegionInfo(re, cluster, r3)
+	r4 := core.NewTestRegionInfo(40, 1, []byte("d"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	tests.MustPutRegionInfo(re, cluster, r4)
+
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
+	re.NoError(err)
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 30, "target_region_id": 40}`), tu.StatusOK(re))
+	re.NoError(err)
+	url := fmt.Sprintf("%s/operators", urlPrefix)
+	err = tu.CheckGetJSON(testDialClient, url, nil, tu.StatusOK(re), tu.StringContain(re, "merge: region 10 to 20"), tu.StringContain(re, "merge: region 30 to 40"))
+	re.NoError(err)
+	err = tu.CheckDelete(testDialClient, url, tu.StatusOK(re))
+	re.NoError(err)
+	err = tu.CheckGetJSON(testDialClient, url, nil, tu.StatusOK(re), tu.StringNotContain(re, "merge: region 10 to 20"), tu.StringNotContain(re, "merge: region 30 to 40"))
+	re.NoError(err)
+}
