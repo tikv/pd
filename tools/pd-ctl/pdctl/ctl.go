@@ -95,11 +95,8 @@ func GetRootCmd() *cobra.Command {
 				rootCmd.Println(err)
 				return err
 			}
-		} else {
-			// TODO: refine code after replace dialClient with PDCli
-			if !command.CiTest {
-				command.SetNewPDClient(strings.Split(addrs, ","))
-			}
+		} else if !command.CiTest {
+			command.SetNewPDClient(strings.Split(addrs, ","))
 		}
 
 		return nil
