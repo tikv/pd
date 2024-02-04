@@ -38,8 +38,6 @@ const (
 // PDCli is a pd HTTP client
 var PDCli pd.Client
 
-var CiTest = false
-
 // SetNewPDClient creates a PD HTTP client with the given PD addresses and options.
 func SetNewPDClient(addrs []string, opts ...pd.ClientOption) {
 	if PDCli != nil {
@@ -296,3 +294,7 @@ func jsonPrint(cmd *cobra.Command, val any) {
 
 	cmd.Println(string(jsonBytes))
 }
+
+// CiTest is a flag mark just for CI test
+// TODO: remove it after replacing dialClient with PDCli
+var CiTest = false
