@@ -645,7 +645,7 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 			LastHeartbeat: time.Now().UnixNano(),
 		},
 		{
-			Id:            3,
+			Id:            4,
 			State:         metapb.StoreState_Up,
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
@@ -667,13 +667,13 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"merge-region", "source_region_id": 10, "target_region_id": 20}`), tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 30, "store_id": 3}`), tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 30, "store_id": 4}`), tu.StatusOK(re))
 	re.NoError(err)
 	url := fmt.Sprintf("%s/operators", urlPrefix)
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.StatusOK(re), tu.StringContain(re, "merge: region 10 to 20"), tu.StringContain(re, "add peer: store [3]"))
+	err = tu.CheckGetJSON(testDialClient, url, nil, tu.StatusOK(re), tu.StringContain(re, "merge: region 10 to 20"), tu.StringContain(re, "add peer: store [4]"))
 	re.NoError(err)
 	err = tu.CheckDelete(testDialClient, url, tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckGetJSON(testDialClient, url, nil, tu.StatusOK(re), tu.StringNotContain(re, "merge: region 10 to 20"), tu.StringNotContain(re, "add peer: store [3]"))
+	err = tu.CheckGetJSON(testDialClient, url, nil, tu.StatusOK(re), tu.StringNotContain(re, "merge: region 10 to 20"), tu.StringNotContain(re, "add peer: store [4]"))
 	re.NoError(err)
 }
