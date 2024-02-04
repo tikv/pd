@@ -79,7 +79,6 @@ func GetRootCmd() *cobra.Command {
 			return err
 		}
 
-		// TODO: refine code after replace dialClient with PDCli
 		CAPath, err := cmd.Flags().GetString("cacert")
 		if err == nil && len(CAPath) != 0 {
 			certPath, err := cmd.Flags().GetString("cert")
@@ -97,7 +96,10 @@ func GetRootCmd() *cobra.Command {
 				return err
 			}
 		} else {
-			command.SetNewPDClient(strings.Split(addrs, ","))
+			// TODO: refine code after replace dialClient with PDCli
+			if !command.CiTest {
+				command.SetNewPDClient(strings.Split(addrs, ","))
+			}
 		}
 
 		return nil
