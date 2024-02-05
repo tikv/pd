@@ -14,11 +14,7 @@
 
 package command
 
-import (
-	"context"
-
-	"github.com/spf13/cobra"
-)
+import "github.com/spf13/cobra"
 
 // NewClusterCommand return a cluster subcommand of rootCmd
 func NewClusterCommand() *cobra.Command {
@@ -42,7 +38,7 @@ func NewClusterStatusCommand() *cobra.Command {
 }
 
 func showClusterCommandFunc(cmd *cobra.Command, _ []string) {
-	info, err := PDCli.GetCluster(context.Background())
+	info, err := PDCli.GetCluster(cmd.Context())
 	if err != nil {
 		cmd.Printf("Failed to get the cluster information: %s\n", err)
 		return
@@ -51,7 +47,7 @@ func showClusterCommandFunc(cmd *cobra.Command, _ []string) {
 }
 
 func showClusterStatusCommandFunc(cmd *cobra.Command, _ []string) {
-	status, err := PDCli.GetClusterStatus(context.Background())
+	status, err := PDCli.GetClusterStatus(cmd.Context())
 	if err != nil {
 		cmd.Printf("Failed to get the cluster status: %s\n", err)
 		return
