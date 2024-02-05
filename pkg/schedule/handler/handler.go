@@ -133,6 +133,17 @@ func (h *Handler) RemoveOperator(regionID uint64) error {
 	return nil
 }
 
+// RemoveOperators removes the all operators.
+func (h *Handler) RemoveOperators() error {
+	c, err := h.GetOperatorController()
+	if err != nil {
+		return err
+	}
+
+	c.RemoveOperators(operator.AdminStop)
+	return nil
+}
+
 // GetOperators returns the running operators.
 func (h *Handler) GetOperators() ([]*operator.Operator, error) {
 	c, err := h.GetOperatorController()

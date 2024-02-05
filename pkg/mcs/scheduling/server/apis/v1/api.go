@@ -164,6 +164,7 @@ func (s *Service) RegisterOperatorsRouter() {
 	router := s.root.Group("operators")
 	router.GET("", getOperators)
 	router.POST("", createOperator)
+	router.DELETE("", deleteOperators)
 	router.GET("/:id", getOperatorByRegion)
 	router.DELETE("/:id", deleteOperatorByRegion)
 	router.GET("/records", getOperatorRecords)
@@ -307,7 +308,7 @@ func deleteRegionCacheByID(c *gin.Context) {
 // @Success  200  {object}  operator.OpWithStatus
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators/{id} [GET]
+// @Router   /operators/{id} [get]
 func getOperatorByRegion(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 	id := c.Param("id")
@@ -334,7 +335,7 @@ func getOperatorByRegion(c *gin.Context) {
 // @Produce  json
 // @Success  200  {array}   operator.Operator
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators [GET]
+// @Router   /operators [get]
 func getOperators(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 	var (
@@ -363,6 +364,22 @@ func getOperators(c *gin.Context) {
 	} else {
 		c.IndentedJSON(http.StatusOK, results)
 	}
+}
+
+// @Tags     operators
+// @Summary  Delete operators.
+// @Produce  json
+// @Success  200  {string}  string  "All pending operator are canceled."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /operators [delete]
+func deleteOperators(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	if err := handler.RemoveOperators(); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.String(http.StatusOK, "All pending operator are canceled.")
 }
 
 // @Tags     operator

@@ -101,6 +101,21 @@ func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// @Tags     operator
+// @Summary  Cancel all pending operators.
+// @Produce  json
+// @Success  200  {string}  string  "All pending operators are canceled."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /operators [delete]
+func (h *operatorHandler) DeleteOperators(w http.ResponseWriter, r *http.Request) {
+	if err := h.RemoveOperators(); err != nil {
+		h.r.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	h.r.JSON(w, http.StatusOK, "All pending operators are canceled.")
+}
+
 // FIXME: details of input json body params
 // @Tags     operator
 // @Summary  Create an operator.

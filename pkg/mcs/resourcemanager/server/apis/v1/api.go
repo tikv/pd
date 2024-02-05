@@ -137,7 +137,7 @@ func changeLogLevel(c *gin.Context) {
 //	@Success	200			{string}	string	"Success"
 //	@Failure	400			{string}	error
 //	@Failure	500			{string}	error
-//	@Router		/config/group [POST]
+//	@Router		/config/group [post]
 func (s *Service) postResourceGroup(c *gin.Context) {
 	var group rmpb.ResourceGroup
 	if err := c.ShouldBindJSON(&group); err != nil {
@@ -181,7 +181,7 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 //	@Failure	404		    {string}	error
 //	@Param		name	    path		string	true	"groupName"
 //	@Param		with_stats	query		bool	false	"whether to return statistics data."
-//	@Router		/config/group/{name} [GET]
+//	@Router		/config/group/{name} [get]
 func (s *Service) getResourceGroup(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
 	group := s.manager.GetResourceGroup(c.Param("name"), withStats)
@@ -198,7 +198,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Success	200	{string}	json	format	of	[]rmserver.ResourceGroup
 //	@Failure	404	{string}	error
 //	@Param		with_stats		query	bool	false	"whether to return statistics data."
-//	@Router		/config/groups [GET]
+//	@Router		/config/groups [get]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
 	groups := s.manager.GetResourceGroupList(withStats)
@@ -212,7 +212,7 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 //	@Param		name	path		string	true	"Name of the resource group to be deleted"
 //	@Success	200		{string}	string	"Success!"
 //	@Failure	404		{string}	error
-//	@Router		/config/group/{name} [DELETE]
+//	@Router		/config/group/{name} [delete]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
 	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
@@ -226,7 +226,7 @@ func (s *Service) deleteResourceGroup(c *gin.Context) {
 //	@Summary	Get the resource controller config.
 //	@Success	200		{string}	json	format	of	rmserver.ControllerConfig
 //	@Failure	400 	{string}	error
-//	@Router		/config/controller [GET]
+//	@Router		/config/controller [get]
 func (s *Service) getControllerConfig(c *gin.Context) {
 	config := s.manager.GetControllerConfig()
 	c.IndentedJSON(http.StatusOK, config)
@@ -239,7 +239,7 @@ func (s *Service) getControllerConfig(c *gin.Context) {
 //	@Param		config	body	object	true	"json params, rmserver.ControllerConfig"
 //	@Success	200		{string}	string	"Success!"
 //	@Failure	400 	{string}	error
-//	@Router		/config/controller [POST]
+//	@Router		/config/controller [post]
 func (s *Service) setControllerConfig(c *gin.Context) {
 	conf := make(map[string]any)
 	if err := c.ShouldBindJSON(&conf); err != nil {
