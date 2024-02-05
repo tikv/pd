@@ -267,7 +267,7 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 
 // RunTestInTwoModes is to run test in two modes.
 func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
-	//s.RunTestInPDMode(test)
+	s.RunTestInPDMode(test)
 	s.RunTestInAPIMode(test)
 }
 
