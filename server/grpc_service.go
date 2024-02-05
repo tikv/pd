@@ -2592,7 +2592,20 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	if s.client == nil {
 		return ErrEtcdNotStarted
 	}
+<<<<<<< HEAD
 	ctx, cancel := context.WithCancel(s.Context())
+=======
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if done, err := limiter.Allow(fName); err == nil {
+			defer done()
+		} else {
+			return err
+		}
+	}
+	ctx, cancel := context.WithCancel(server.Context())
+>>>>>>> 37be34ef1 (*: fix context usage when watch etcd (#7806))
 	defer cancel()
 	configPath := req.GetConfigPath()
 	if configPath == "" {
@@ -2607,6 +2620,8 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	for {
 		select {
 		case <-ctx.Done():
+			return nil
+		case <-s.Context().Done():
 			return nil
 		case res := <-watchChan:
 			if res.Err() != nil {

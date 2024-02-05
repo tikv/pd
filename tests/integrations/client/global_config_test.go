@@ -15,6 +15,7 @@
 package client_test
 
 import (
+	"context"
 	"path"
 	"strconv"
 	"testing"
@@ -37,7 +38,8 @@ import (
 const globalConfigPath = "/global/config/"
 
 type testReceiver struct {
-	re *require.Assertions
+	re  *require.Assertions
+	ctx context.Context
 	grpc.ServerStream
 }
 
@@ -47,6 +49,10 @@ func (s testReceiver) Send(m *pdpb.WatchGlobalConfigResponse) error {
 		s.re.Contains(change.Name, globalConfigPath+string(change.Payload))
 	}
 	return nil
+}
+
+func (s testReceiver) Context() context.Context {
+	return s.ctx
 }
 
 type globalConfigTestSuite struct {
@@ -189,7 +195,9 @@ func (suite *globalConfigTestSuite) TestWatch() {
 			suite.NoError(err)
 		}
 	}()
-	server := testReceiver{re: suite.Require()}
+	ctx, cancel := context.WithCancel(suite.server.Context())
+	defer cancel()
+	server := testReceiver{re: suite.Require(), ctx: ctx}
 	go suite.server.WatchGlobalConfig(&pdpb.WatchGlobalConfigRequest{
 		ConfigPath: globalConfigPath,
 		Revision:   0,
