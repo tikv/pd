@@ -63,7 +63,12 @@ type Manager struct {
 		isTiFlash    bool
 	}
 	// record update time of each resource group
-	consumptionRecord map[string]time.Time
+	consumptionRecord map[consumptionRecordKey]time.Time
+}
+
+type consumptionRecordKey struct {
+	name   string
+	ruType string
 }
 
 // ConfigProvider is used to get resource manager config from the given
@@ -84,7 +89,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 			isBackground bool
 			isTiFlash    bool
 		}, defaultConsumptionChanSize),
-		consumptionRecord: make(map[string]time.Time),
+		consumptionRecord: make(map[consumptionRecordKey]time.Time),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -413,23 +418,23 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
 			}
 
-			m.consumptionRecord[name] = time.Now()
+			m.consumptionRecord[consumptionRecordKey{name: name, ruType: ruLabelType}] = time.Now()
 
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for name, lastTime := range m.consumptionRecord {
+			for r, lastTime := range m.consumptionRecord {
 				if time.Since(lastTime) > metricsCleanupTimeout {
-					readRequestUnitCost.DeleteLabelValues(name, name)
-					writeRequestUnitCost.DeleteLabelValues(name, name)
-					sqlLayerRequestUnitCost.DeleteLabelValues(name, name)
-					readByteCost.DeleteLabelValues(name, name)
-					writeByteCost.DeleteLabelValues(name, name)
-					kvCPUCost.DeleteLabelValues(name, name)
-					sqlCPUCost.DeleteLabelValues(name, name)
-					requestCount.DeleteLabelValues(name, name, readTypeLabel)
-					requestCount.DeleteLabelValues(name, name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(name, name)
-					delete(m.consumptionRecord, name)
+					readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
+					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
+					availableRUCounter.DeleteLabelValues(r.name, r.name, r.ruType)
+					delete(m.consumptionRecord, r)
 				}
 			}
 		case <-availableRUTicker.C:
