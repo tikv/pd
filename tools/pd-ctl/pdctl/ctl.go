@@ -39,7 +39,7 @@ func GetRootCmd() *cobra.Command {
 		Short: "Placement Driver control",
 	}
 
-	rootCmd.PersistentFlags().StringP("pd", "u", "http://127.0.0.1:2379", "address of pd")
+	rootCmd.PersistentFlags().StringP("pd", "u", "http://127.0.0.1:2379", "address of PD")
 	rootCmd.PersistentFlags().String("cacert", "", "path of file that contains list of trusted SSL CAs")
 	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")
 	rootCmd.PersistentFlags().String("key", "", "path of file that contains X509 key in PEM format")
@@ -74,32 +74,33 @@ func GetRootCmd() *cobra.Command {
 	rootCmd.SilenceErrors = true
 
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		addrs, err := cmd.Flags().GetString("pd")
-		if err != nil {
-			return err
-		}
-
-		// TODO: refine code after replace dialClient with PDCli
-		CAPath, err := cmd.Flags().GetString("cacert")
-		if err == nil && len(CAPath) != 0 {
+		caPath, err := cmd.Flags().GetString("cacert")
+		if err == nil && len(caPath) != 0 {
 			certPath, err := cmd.Flags().GetString("cert")
 			if err != nil {
 				return err
 			}
-
 			keyPath, err := cmd.Flags().GetString("key")
 			if err != nil {
 				return err
 			}
-
-			if err := command.InitHTTPSClient(addrs, CAPath, certPath, keyPath); err != nil {
+			err = command.InitHTTPSClient(caPath, certPath, keyPath)
+			if err != nil {
+				rootCmd.Println(err)
+				return err
+			}
+			err = command.InitNewPDClientWithTLS(cmd, caPath, certPath, keyPath)
+			if err != nil {
 				rootCmd.Println(err)
 				return err
 			}
 		} else {
-			command.SetNewPDClient(strings.Split(addrs, ","))
+			err = command.InitNewPDClient(cmd)
+			if err != nil {
+				rootCmd.Println(err)
+				return err
+			}
 		}
-
 		return nil
 	}
 
