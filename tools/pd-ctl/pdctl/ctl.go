@@ -89,17 +89,6 @@ func GetRootCmd() *cobra.Command {
 				rootCmd.Println(err)
 				return err
 			}
-			err = command.InitNewPDClientWithTLS(cmd, caPath, certPath, keyPath)
-			if err != nil {
-				rootCmd.Println(err)
-				return err
-			}
-		} else {
-			err = command.InitNewPDClient(cmd)
-			if err != nil {
-				rootCmd.Println(err)
-				return err
-			}
 		}
 		return nil
 	}

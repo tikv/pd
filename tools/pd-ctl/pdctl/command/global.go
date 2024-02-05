@@ -54,17 +54,30 @@ func initTLSConfig(caPath, certPath, keyPath string) (*tls.Config, error) {
 // PDCli is a pd HTTP client
 var PDCli pd.Client
 
+func requirePDClient(cmd *cobra.Command, _ []string) error {
+	var (
+		caPath string
+		err    error
+	)
+	caPath, err = cmd.Flags().GetString("cacert")
+	if err == nil && len(caPath) != 0 {
+		var certPath, keyPath string
+		certPath, err = cmd.Flags().GetString("cert")
+		if err != nil {
+			return err
+		}
+		keyPath, err = cmd.Flags().GetString("key")
+		if err != nil {
+			return err
+		}
+		return InitNewPDClientWithTLS(cmd, caPath, certPath, keyPath)
+	}
+	return InitNewPDClient(cmd)
+}
+
 // shouldInitPDClient checks whether we should create a new PD client according to the cluster information.
 func shouldInitPDClient(cmd *cobra.Command) (bool, error) {
-	if PDCli == nil {
-		return true, nil
-	}
-	// Use PD client to get the current cluster information.
-	currentClusterInfo, err := PDCli.GetCluster(cmd.Context())
-	if err != nil {
-		return false, err
-	}
-	// Use HTTP request to get the new cluster information.
+	// Get the cluster information the current command assigned to.
 	newClusterInfoJSON, err := doRequest(cmd, clusterPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		return false, err
@@ -74,34 +87,39 @@ func shouldInitPDClient(cmd *cobra.Command) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// If the PD client is nil and we get the cluster information successfully,
+	// we should initialize the PD client directly.
+	if PDCli == nil {
+		return true, nil
+	}
+	// Get current cluster information that the PD client connects to.
+	currentClusterInfo, err := PDCli.GetCluster(cmd.Context())
+	if err != nil {
+		return true, nil
+	}
+	// Compare the cluster ID to determine whether we should re-initialize the PD client.
 	return currentClusterInfo.GetId() == 0 || newClusterInfo.GetId() != currentClusterInfo.GetId(), nil
 }
 
 // InitNewPDClient creates a PD HTTP client with the given PD addresses.
-func InitNewPDClient(cmd *cobra.Command) error {
+func InitNewPDClient(cmd *cobra.Command, opts ...pd.ClientOption) error {
 	if should, err := shouldInitPDClient(cmd); !should || err != nil {
 		return err
 	}
 	if PDCli != nil {
 		PDCli.Close()
 	}
-	PDCli = pd.NewClient(pdControlCallerID, getEndpoints(cmd))
+	PDCli = pd.NewClient(pdControlCallerID, getEndpoints(cmd), opts...)
 	return nil
 }
 
 // InitNewPDClientWithTLS creates a PD HTTP client with the given PD addresses and TLS config.
 func InitNewPDClientWithTLS(cmd *cobra.Command, caPath, certPath, keyPath string) error {
-	if should, err := shouldInitPDClient(cmd); !should || err != nil {
-		return err
-	}
-	if PDCli != nil {
-		PDCli.Close()
-	}
 	tlsConfig, err := initTLSConfig(caPath, certPath, keyPath)
 	if err != nil {
 		return err
 	}
-	PDCli = pd.NewClient(pdControlCallerID, getEndpoints(cmd), pd.WithTLSConfig(tlsConfig))
+	InitNewPDClient(cmd, pd.WithTLSConfig(tlsConfig))
 	return nil
 }
 
