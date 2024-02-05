@@ -34,7 +34,6 @@ import (
 
 const (
 	pdControlCallerID = "pd-ctl"
-	pingPrefix        = "pd/api/v1/ping"
 	clusterPrefix     = "pd/api/v1/cluster"
 )
 
@@ -70,9 +69,9 @@ func requirePDClient(cmd *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
-		return InitNewPDClientWithTLS(cmd, caPath, certPath, keyPath)
+		return initNewPDClientWithTLS(cmd, caPath, certPath, keyPath)
 	}
-	return InitNewPDClient(cmd)
+	return initNewPDClient(cmd)
 }
 
 // shouldInitPDClient checks whether we should create a new PD client according to the cluster information.
@@ -101,8 +100,7 @@ func shouldInitPDClient(cmd *cobra.Command) (bool, error) {
 	return currentClusterInfo.GetId() == 0 || newClusterInfo.GetId() != currentClusterInfo.GetId(), nil
 }
 
-// InitNewPDClient creates a PD HTTP client with the given PD addresses.
-func InitNewPDClient(cmd *cobra.Command, opts ...pd.ClientOption) error {
+func initNewPDClient(cmd *cobra.Command, opts ...pd.ClientOption) error {
 	if should, err := shouldInitPDClient(cmd); !should || err != nil {
 		return err
 	}
@@ -113,13 +111,12 @@ func InitNewPDClient(cmd *cobra.Command, opts ...pd.ClientOption) error {
 	return nil
 }
 
-// InitNewPDClientWithTLS creates a PD HTTP client with the given PD addresses and TLS config.
-func InitNewPDClientWithTLS(cmd *cobra.Command, caPath, certPath, keyPath string) error {
+func initNewPDClientWithTLS(cmd *cobra.Command, caPath, certPath, keyPath string) error {
 	tlsConfig, err := initTLSConfig(caPath, certPath, keyPath)
 	if err != nil {
 		return err
 	}
-	InitNewPDClient(cmd, pd.WithTLSConfig(tlsConfig))
+	initNewPDClient(cmd, pd.WithTLSConfig(tlsConfig))
 	return nil
 }
 
@@ -128,8 +125,28 @@ var dialClient = &http.Client{
 	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, pdControlCallerID),
 }
 
-// InitHTTPSClient creates https client with ca file
-func InitHTTPSClient(caPath, certPath, keyPath string) error {
+// RequireHTTPSClient creates a HTTPS client if the related flags are set
+func RequireHTTPSClient(cmd *cobra.Command, args []string) error {
+	caPath, err := cmd.Flags().GetString("cacert")
+	if err == nil && len(caPath) != 0 {
+		certPath, err := cmd.Flags().GetString("cert")
+		if err != nil {
+			return err
+		}
+		keyPath, err := cmd.Flags().GetString("key")
+		if err != nil {
+			return err
+		}
+		err = initHTTPSClient(caPath, certPath, keyPath)
+		if err != nil {
+			cmd.Println(err)
+			return err
+		}
+	}
+	return nil
+}
+
+func initHTTPSClient(caPath, certPath, keyPath string) error {
 	tlsConfig, err := initTLSConfig(caPath, certPath, keyPath)
 	if err != nil {
 		return err

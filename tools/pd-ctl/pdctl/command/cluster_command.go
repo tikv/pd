@@ -21,8 +21,8 @@ func NewClusterCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "cluster",
 		Short:             "show the cluster information",
-		Run:               showClusterCommandFunc,
 		PersistentPreRunE: requirePDClient,
+		Run:               showClusterCommandFunc,
 	}
 	cmd.AddCommand(NewClusterStatusCommand())
 	return cmd
