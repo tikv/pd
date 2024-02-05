@@ -26,7 +26,6 @@ import (
 	clusterpkg "github.com/tikv/pd/server/cluster"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
 )
 
@@ -46,10 +45,6 @@ func TestClusterAndPing(t *testing.T) {
 	i := strings.Index(pdAddr, "//")
 	pdAddr = pdAddr[i+2:]
 	cmd := ctl.GetRootCmd()
-
-	// TODO: remove SetNewPDClient after replacing dialClient with PDCli
-	command.SetNewPDClient([]string{pdAddr})
-	defer command.PDCli.Close()
 
 	// cluster
 	args := []string{"-u", pdAddr, "cluster"}

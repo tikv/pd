@@ -36,7 +36,7 @@ func TestTSO(t *testing.T) {
 
 	// tso command
 	ts := "395181938313123110"
-	args := []string{"-u", "127.0.0.1", "tso", ts}
+	args := []string{"tso", ts}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	tsTime, err := strconv.ParseUint(ts, 10, 64)

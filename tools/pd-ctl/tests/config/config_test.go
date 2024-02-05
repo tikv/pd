@@ -545,7 +545,10 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRules)
+	// use a new environment to avoid affecting other tests
+	env := pdTests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRules)
+	env.Cleanup()
 }
 
 func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) {
@@ -611,7 +614,10 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+	// use a new environment to avoid being affected by other tests
+	env := pdTests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+	env.Cleanup()
 }
 
 func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestCluster) {
@@ -688,7 +694,10 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 }
 
 func (suite *configTestSuite) TestPlacementRuleBundle() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+	// use a new environment to avoid being affected by other tests
+	env := pdTests.NewSchedulingTestEnvironment(suite.T())
+	env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+	env.Cleanup()
 }
 
 func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestCluster) {
@@ -877,6 +886,7 @@ func TestReplicationMode(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
