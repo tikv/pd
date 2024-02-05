@@ -70,7 +70,7 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 
 	for i := 1; i < count; i++ {
 		// Check the client can get the new member.
-		listResp, err := ListEtcdMembers(etcdClient)
+		listResp, err := ListEtcdMembers(etcdClient.Ctx(), etcdClient)
 		re.NoError(err)
 		re.Len(listResp.Members, i)
 		// Add a new member.
@@ -107,7 +107,7 @@ func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client
 	re.NoError(err)
 	// Check the client can get the new member.
 	testutil.Eventually(re, func() bool {
-		members, err := ListEtcdMembers(client)
+		members, err := ListEtcdMembers(client.Ctx(), client)
 		re.NoError(err)
 		return len(addResp.Members) == len(members.Members)
 	})
@@ -121,7 +121,7 @@ func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client
 
 func checkMembers(re *require.Assertions, client *clientv3.Client, etcds []*embed.Etcd) {
 	// Check the client can get the new member.
-	listResp, err := ListEtcdMembers(client)
+	listResp, err := ListEtcdMembers(client.Ctx(), client)
 	re.NoError(err)
 	re.Len(listResp.Members, len(etcds))
 	inList := func(m *etcdserverpb.Member) bool {
