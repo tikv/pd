@@ -93,7 +93,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 	suite.env.RunFuncInTwoModes(cleanFunc)
 }
 
-func (suite *schedulerTestSuite) TestSchedulerA() {
+func (suite *schedulerTestSuite) TestScheduler() {
 	// use a new environment to avoid affecting other tests
 	env := pdTests.NewSchedulingTestEnvironment(suite.T())
 	env.RunTestInTwoModes(suite.checkScheduler)
@@ -636,10 +636,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
-	// use a new environment to avoid affecting other tests
-	env := pdTests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
-	env.Cleanup()
+	suite.env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestCluster) {

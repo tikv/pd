@@ -75,6 +75,7 @@ const (
 	resetBaseAllocIDName                    = "ResetBaseAllocID"
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
+	deleteOperators                         = "DeleteOperators"
 )
 
 type requestInfo struct {
