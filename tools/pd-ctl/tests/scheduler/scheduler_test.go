@@ -483,7 +483,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		pdTests.MustPutStore(re, cluster, store)
 	}
 	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
-	// After upgrading, we should not use query.
+	// After upgrading, we can use query.
+	expected1["write-leader-priorities"] = []any{"query", "byte"}
 	checkHotSchedulerConfig(expected1)
 	// cannot set qps as write-peer-priorities
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)

@@ -8,7 +8,7 @@ if [[ $2 -gt 9 ]]; then
     # run tools tests
     if [[ $2 -eq 10 ]]; then
         cd ./tools && make ci-test-job && cd .. && cat ./covprofile >> covprofile || exit 1
-        return
+        exit
     fi
 
     # Currently, we only have 3 integration tests, so we can hardcode the task index.

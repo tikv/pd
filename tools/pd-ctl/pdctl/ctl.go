@@ -35,14 +35,18 @@ func init() {
 // GetRootCmd is exposed for integration tests. But it can be embedded into another suite, too.
 func GetRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "pd-ctl",
-		Short: "Placement Driver control",
+		Use:               "pd-ctl",
+		Short:             "Placement Driver control",
+		PersistentPreRunE: command.RequireHTTPSClient,
+		SilenceErrors:     true,
 	}
 
 	rootCmd.PersistentFlags().StringP("pd", "u", "http://127.0.0.1:2379", "address of PD")
 	rootCmd.PersistentFlags().String("cacert", "", "path of file that contains list of trusted SSL CAs")
 	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")
 	rootCmd.PersistentFlags().String("key", "", "path of file that contains X509 key in PEM format")
+
+	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
 
 	rootCmd.AddCommand(
 		command.NewConfigCommand(),
@@ -69,40 +73,6 @@ func GetRootCmd() *cobra.Command {
 		command.NewKeyspaceCommand(),
 		command.NewResourceManagerCommand(),
 	)
-
-	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
-	rootCmd.SilenceErrors = true
-
-	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		caPath, err := cmd.Flags().GetString("cacert")
-		if err == nil && len(caPath) != 0 {
-			certPath, err := cmd.Flags().GetString("cert")
-			if err != nil {
-				return err
-			}
-			keyPath, err := cmd.Flags().GetString("key")
-			if err != nil {
-				return err
-			}
-			err = command.InitHTTPSClient(caPath, certPath, keyPath)
-			if err != nil {
-				rootCmd.Println(err)
-				return err
-			}
-			err = command.InitNewPDClientWithTLS(cmd, caPath, certPath, keyPath)
-			if err != nil {
-				rootCmd.Println(err)
-				return err
-			}
-		} else {
-			err = command.InitNewPDClient(cmd)
-			if err != nil {
-				rootCmd.Println(err)
-				return err
-			}
-		}
-		return nil
-	}
 
 	return rootCmd
 }
