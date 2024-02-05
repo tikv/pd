@@ -1119,10 +1119,10 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 }
 
 // AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
-func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
-	if exist, err := h.IsSchedulerExisted(name); !exist {
+func (h *Handler) AddEvictOrGrant(storeID float64, name string) (exist bool, err error) {
+	if exist, err = h.IsSchedulerExisted(name); !exist {
 		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-			return err
+			return exist, err
 		}
 		switch name {
 		case schedulers.EvictLeaderName:
@@ -1131,15 +1131,16 @@ func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
 			err = h.AddGrantLeaderScheduler(uint64(storeID))
 		}
 		if err != nil {
-			return err
+			return exist, err
 		}
 	} else {
 		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
-			return err
+			return exist, err
 		}
 		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+		return exist, nil
 	}
-	return nil
+	return exist, nil
 }
 
 // GetPausedSchedulerDelayAt returns paused unix timestamp when a scheduler is paused
