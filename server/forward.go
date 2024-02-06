@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/server/cluster"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -249,7 +250,7 @@ func (s *GrpcServer) createRegionHeartbeatSchedulingStream(ctx context.Context, 
 	return forwardStream, forwardCtx, cancelForward, err
 }
 
-func forwardRegionHeartbeatToScheduling(forwardStream schedulingpb.Scheduling_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
+func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream schedulingpb.Scheduling_RegionHeartbeatClient, server *heartbeatServer, errCh chan error) {
 	defer logutil.LogPanic()
 	defer close(errCh)
 	for {
@@ -261,6 +262,10 @@ func forwardRegionHeartbeatToScheduling(forwardStream schedulingpb.Scheduling_Re
 		if err != nil {
 			errCh <- errors.WithStack(err)
 			return
+		}
+		// TODO: find a better way to halt scheduling immediately.
+		if rc.GetOpts().IsSchedulingHalted() {
+			continue
 		}
 		// The error types defined for schedulingpb and pdpb are different, so we need to convert them.
 		var pdpbErr *pdpb.Error
