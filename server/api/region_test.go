@@ -203,7 +203,7 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	r7 := make([]*histItem, 1)
 	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, &r7))
 	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
-	suite.Equal(histKeys, r7)
+	re.Equal(histKeys, r7)
 }
 
 func (suite *regionTestSuite) TestRegions() {
