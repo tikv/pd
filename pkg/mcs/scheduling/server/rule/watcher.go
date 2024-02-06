@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -36,6 +37,10 @@ type Watcher struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
+	// ruleCommonPathPrefix:
+	//  - Key: /pd/{cluster_id}/rule
+	//  - Value: placement.Rule or placement.RuleGroup
+	ruleCommonPathPrefix string
 	// rulesPathPrefix:
 	//   - Key: /pd/{cluster_id}/rules/{group_id}-{rule_id}
 	//   - Value: placement.Rule
@@ -60,8 +65,10 @@ type Watcher struct {
 	regionLabeler *labeler.RegionLabeler
 
 	ruleWatcher  *etcdutil.LoopWatcher
-	groupWatcher *etcdutil.LoopWatcher
 	labelWatcher *etcdutil.LoopWatcher
+
+	// patch is used to cache the placement rule changes.
+	patch *placement.RuleConfigPatch
 }
 
 // NewWatcher creates a new watcher to watch the Placement Rule change from PD API server.
@@ -79,6 +86,7 @@ func NewWatcher(
 		ctx:                   ctx,
 		cancel:                cancel,
 		rulesPathPrefix:       endpoint.RulesPathPrefix(clusterID),
+		ruleCommonPathPrefix:  endpoint.RuleCommonPathPrefix(clusterID),
 		ruleGroupPathPrefix:   endpoint.RuleGroupPathPrefix(clusterID),
 		regionLabelPathPrefix: endpoint.RegionLabelPathPrefix(clusterID),
 		etcdClient:            etcdClient,
@@ -91,10 +99,6 @@ func NewWatcher(
 	if err != nil {
 		return nil, err
 	}
-	err = rw.initializeGroupWatcher()
-	if err != nil {
-		return nil, err
-	}
 	err = rw.initializeRegionLabelWatcher()
 	if err != nil {
 		return nil, err
@@ -103,109 +107,143 @@ func NewWatcher(
 }
 
 func (rw *Watcher) initializeRuleWatcher() error {
-	prefixToTrim := rw.rulesPathPrefix + "/"
+	var suspectKeyRanges *core.KeyRanges
+
+	preEventsFn := func(events []*clientv3.Event) error {
+		// It will be locked until the postEventsFn is finished.
+		rw.ruleManager.Lock()
+		rw.patch = rw.ruleManager.BeginPatch()
+		suspectKeyRanges = &core.KeyRanges{}
+		return nil
+	}
+
 	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("update placement rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
-		rule, err := placement.NewRuleFromJSON(kv.Value)
-		if err != nil {
-			return err
+		key := string(kv.Key)
+		if strings.HasPrefix(key, rw.rulesPathPrefix) {
+			log.Info("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+			rule, err := placement.NewRuleFromJSON(kv.Value)
+			if err != nil {
+				return err
+			}
+			// Try to add the rule change to the patch.
+			if err := rw.ruleManager.AdjustRule(rule, ""); err != nil {
+				return err
+			}
+			rw.patch.SetRule(rule)
+			// Update the suspect key ranges in lock.
+			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
+			if oldRule := rw.ruleManager.GetRuleLocked(rule.GroupID, rule.ID); oldRule != nil {
+				suspectKeyRanges.Append(oldRule.StartKey, oldRule.EndKey)
+			}
+			return nil
+		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
+			log.Info("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
+			ruleGroup, err := placement.NewRuleGroupFromJSON(kv.Value)
+			if err != nil {
+				return err
+			}
+			// Try to add the rule group change to the patch.
+			rw.patch.SetGroup(ruleGroup)
+			// Update the suspect key ranges
+			for _, rule := range rw.ruleManager.GetRulesByGroupLocked(ruleGroup.ID) {
+				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
+			}
+			return nil
+		} else {
+			log.Warn("unknown key when updating placement rule", zap.String("key", key))
+			return nil
 		}
-		// Update the suspect key ranges in the checker.
-		rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
-		if oldRule := rw.ruleManager.GetRule(rule.GroupID, rule.ID); oldRule != nil {
-			rw.checkerController.AddSuspectKeyRange(oldRule.StartKey, oldRule.EndKey)
-		}
-		return rw.ruleManager.SetRule(rule)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		log.Info("delete placement rule", zap.String("key", key))
-		ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, prefixToTrim))
-		if err != nil {
+		if strings.HasPrefix(key, rw.rulesPathPrefix) {
+			log.Info("delete placement rule", zap.String("key", key))
+			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix+"/"))
+			if err != nil {
+				return err
+			}
+			rule, err := placement.NewRuleFromJSON([]byte(ruleJSON))
+			if err != nil {
+				return err
+			}
+			// Try to add the rule change to the patch.
+			rw.patch.DeleteRule(rule.GroupID, rule.ID)
+			// Update the suspect key ranges
+			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			return err
+		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
+			log.Info("delete placement rule group", zap.String("key", key))
+			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix+"/")
+			// Try to add the rule group change to the patch.
+			rw.patch.DeleteGroup(trimmedKey)
+			// Update the suspect key ranges
+			for _, rule := range rw.ruleManager.GetRulesByGroupLocked(trimmedKey) {
+				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
+			}
+			return nil
+		} else {
+			log.Warn("unknown key when deleting placement rule", zap.String("key", key))
+			return nil
 		}
-		rule, err := placement.NewRuleFromJSON([]byte(ruleJSON))
-		if err != nil {
-			return err
-		}
-		rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
-		return rw.ruleManager.DeleteRule(rule.GroupID, rule.ID)
 	}
-	postEventFn := func() error {
+	postEventsFn := func(events []*clientv3.Event) error {
+		defer rw.ruleManager.Unlock()
+		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
+			log.Error("failed to commit patch", zap.Error(err))
+			return err
+		}
+		for _, kr := range suspectKeyRanges.Ranges() {
+			rw.checkerController.AddSuspectKeyRange(kr.StartKey, kr.EndKey)
+		}
 		return nil
 	}
 	rw.ruleWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-rule-watcher", rw.rulesPathPrefix,
-		putFn, deleteFn, postEventFn,
-		clientv3.WithPrefix(),
+		"scheduling-rule-watcher", rw.ruleCommonPathPrefix,
+		preEventsFn,
+		putFn, deleteFn,
+		postEventsFn,
+		true, /* withPrefix */
 	)
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
 }
 
-func (rw *Watcher) initializeGroupWatcher() error {
-	prefixToTrim := rw.ruleGroupPathPrefix + "/"
-	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("update placement rule group", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
-		ruleGroup, err := placement.NewRuleGroupFromJSON(kv.Value)
-		if err != nil {
-			return err
-		}
-		// Add all rule key ranges within the group to the suspect key ranges.
-		for _, rule := range rw.ruleManager.GetRulesByGroup(ruleGroup.ID) {
-			rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
-		}
-		return rw.ruleManager.SetRuleGroup(ruleGroup)
-	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
-		key := string(kv.Key)
-		log.Info("delete placement rule group", zap.String("key", key))
-		trimmedKey := strings.TrimPrefix(key, prefixToTrim)
-		for _, rule := range rw.ruleManager.GetRulesByGroup(trimmedKey) {
-			rw.checkerController.AddSuspectKeyRange(rule.StartKey, rule.EndKey)
-		}
-		return rw.ruleManager.DeleteRuleGroup(trimmedKey)
-	}
-	postEventFn := func() error {
-		return nil
-	}
-	rw.groupWatcher = etcdutil.NewLoopWatcher(
-		rw.ctx, &rw.wg,
-		rw.etcdClient,
-		"scheduling-rule-group-watcher", rw.ruleGroupPathPrefix,
-		putFn, deleteFn, postEventFn,
-		clientv3.WithPrefix(),
-	)
-	rw.groupWatcher.StartWatchLoop()
-	return rw.groupWatcher.WaitLoad()
-}
-
 func (rw *Watcher) initializeRegionLabelWatcher() error {
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
+	// TODO: use txn in region labeler.
+	preEventsFn := func(events []*clientv3.Event) error {
+		// It will be locked until the postEventsFn is finished.
+		rw.regionLabeler.Lock()
+		return nil
+	}
 	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		log.Debug("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			return err
 		}
-		return rw.regionLabeler.SetLabelRule(rule)
+		return rw.regionLabeler.SetLabelRuleLocked(rule)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Info("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRule(strings.TrimPrefix(key, prefixToTrim))
+		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, prefixToTrim))
 	}
-	postEventFn := func() error {
+	postEventsFn := func(events []*clientv3.Event) error {
+		defer rw.regionLabeler.Unlock()
+		rw.regionLabeler.BuildRangeListLocked()
 		return nil
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
 		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
-		putFn, deleteFn, postEventFn,
-		clientv3.WithPrefix(),
+		preEventsFn,
+		putFn, deleteFn,
+		postEventsFn,
+		true, /* withPrefix */
 	)
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()

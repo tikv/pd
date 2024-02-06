@@ -21,9 +21,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/server/api"
 )
 
 var (
@@ -114,7 +114,7 @@ func getStores(cmd *cobra.Command, _ []string) ([]*core.StoreInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	var storesInfo api.StoresInfo
+	var storesInfo response.StoresInfo
 	if err := json.Unmarshal([]byte(body), &storesInfo); err != nil {
 		return nil, err
 	}
@@ -125,13 +125,13 @@ func getStores(cmd *cobra.Command, _ []string) ([]*core.StoreInfo, error) {
 	return stores, nil
 }
 
-func getRegions(cmd *cobra.Command, _ []string) ([]api.RegionInfo, error) {
+func getRegions(cmd *cobra.Command, _ []string) ([]response.RegionInfo, error) {
 	prefix := regionsPrefix
 	body, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		return nil, err
 	}
-	var RegionsInfo api.RegionsInfo
+	var RegionsInfo response.RegionsInfo
 	if err := json.Unmarshal([]byte(body), &RegionsInfo); err != nil {
 		return nil, err
 	}

@@ -221,6 +221,11 @@ func (c *Controller) ClearSuspectKeyRanges() {
 	c.suspectKeyRanges.Clear()
 }
 
+// ClearSuspectRegions clears the suspect regions, only for unit test
+func (c *Controller) ClearSuspectRegions() {
+	c.suspectRegions.Clear()
+}
+
 // IsPendingRegion returns true if the given region is in the pending list.
 func (c *Controller) IsPendingRegion(regionID uint64) bool {
 	_, exist := c.ruleChecker.pendingList.Get(regionID)

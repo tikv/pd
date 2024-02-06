@@ -1158,7 +1158,7 @@ func TestExecutionTimeout(t *testing.T) {
 	re.Equal(Failed, recoveryController.GetStage())
 
 	output := recoveryController.Show()
-	re.Equal(len(output), 3)
+	re.Len(output, 3)
 	re.Contains(output[1].Details[0], "triggered by error: Exceeds timeout")
 }
 
@@ -1768,7 +1768,7 @@ func TestEpochComparsion(t *testing.T) {
 		cluster.PutStore(store)
 	}
 	recoveryController := NewController(cluster)
-	re.Nil(recoveryController.RemoveFailedStores(map[uint64]struct{}{
+	re.NoError(recoveryController.RemoveFailedStores(map[uint64]struct{}{
 		2: {},
 		3: {},
 	}, 60, false))
@@ -1829,7 +1829,7 @@ func TestEpochComparsion(t *testing.T) {
 		if expect, ok := expects[storeID]; ok {
 			re.Equal(expect.PeerReports, report.PeerReports)
 		} else {
-			re.Empty(len(report.PeerReports))
+			re.Empty(report.PeerReports)
 		}
 	}
 }

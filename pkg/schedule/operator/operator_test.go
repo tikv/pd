@@ -17,12 +17,12 @@ package operator
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -86,27 +86,29 @@ func (suite *operatorTestSuite) newTestRegion(regionID uint64, leaderPeer uint64
 }
 
 func (suite *operatorTestSuite) TestOperatorStep() {
+	re := suite.Require()
 	region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
-	suite.False(TransferLeader{FromStore: 1, ToStore: 2}.IsFinish(region))
-	suite.True(TransferLeader{FromStore: 2, ToStore: 1}.IsFinish(region))
-	suite.False(AddPeer{ToStore: 3, PeerID: 3}.IsFinish(region))
-	suite.True(AddPeer{ToStore: 1, PeerID: 1}.IsFinish(region))
-	suite.False(RemovePeer{FromStore: 1}.IsFinish(region))
-	suite.True(RemovePeer{FromStore: 3}.IsFinish(region))
+	re.False(TransferLeader{FromStore: 1, ToStore: 2}.IsFinish(region))
+	re.True(TransferLeader{FromStore: 2, ToStore: 1}.IsFinish(region))
+	re.False(AddPeer{ToStore: 3, PeerID: 3}.IsFinish(region))
+	re.True(AddPeer{ToStore: 1, PeerID: 1}.IsFinish(region))
+	re.False(RemovePeer{FromStore: 1}.IsFinish(region))
+	re.True(RemovePeer{FromStore: 3}.IsFinish(region))
 }
 
 func (suite *operatorTestSuite) newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
 	return NewTestOperator(regionID, &metapb.RegionEpoch{}, kind, steps...)
 }
 
-func (suite *operatorTestSuite) checkSteps(op *Operator, steps []OpStep) {
-	suite.Len(steps, op.Len())
+func (suite *operatorTestSuite) checkSteps(re *require.Assertions, op *Operator, steps []OpStep) {
+	re.Len(steps, op.Len())
 	for i := range steps {
-		suite.Equal(steps[i], op.Step(i))
+		re.Equal(steps[i], op.Step(i))
 	}
 }
 
 func (suite *operatorTestSuite) TestOperator() {
+	re := suite.Require()
 	region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	// addPeer1, transferLeader1, removePeer3
 	steps := []OpStep{
@@ -115,14 +117,14 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 3},
 	}
 	op := suite.newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
-	suite.Equal(constant.Urgent, op.GetPriorityLevel())
-	suite.checkSteps(op, steps)
+	re.Equal(constant.Urgent, op.GetPriorityLevel())
+	suite.checkSteps(re, op, steps)
 	op.Start()
-	suite.Nil(op.Check(region))
+	re.Nil(op.Check(region))
 
-	suite.Equal(SUCCESS, op.Status())
+	re.Equal(SUCCESS, op.Status())
 	op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime-time.Second))
-	suite.False(op.CheckTimeout())
+	re.False(op.CheckTimeout())
 
 	// addPeer1, transferLeader1, removePeer2
 	steps = []OpStep{
@@ -131,38 +133,39 @@ func (suite *operatorTestSuite) TestOperator() {
 		RemovePeer{FromStore: 2},
 	}
 	op = suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-	suite.Equal(constant.Medium, op.GetPriorityLevel())
-	suite.checkSteps(op, steps)
+	re.Equal(constant.Medium, op.GetPriorityLevel())
+	suite.checkSteps(re, op, steps)
 	op.Start()
-	suite.Equal(RemovePeer{FromStore: 2}, op.Check(region))
-	suite.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
-	suite.False(op.CheckTimeout())
+	re.Equal(RemovePeer{FromStore: 2}, op.Check(region))
+	re.Equal(int32(2), atomic.LoadInt32(&op.currentStep))
+	re.False(op.CheckTimeout())
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-2*FastStepWaitTime+time.Second))
-	suite.False(op.CheckTimeout())
+	re.False(op.CheckTimeout())
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-SlowStepWaitTime-2*FastStepWaitTime-time.Second))
-	suite.True(op.CheckTimeout())
+	re.True(op.CheckTimeout())
 	res, err := json.Marshal(op)
-	suite.NoError(err)
-	suite.Len(res, len(op.String())+2)
+	re.NoError(err)
+	re.Len(res, len(op.String())+2)
 
 	// check short timeout for transfer leader only operators.
 	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
 	op = suite.newTestOperator(1, OpLeader, steps...)
 	op.Start()
-	suite.False(op.CheckTimeout())
+	re.False(op.CheckTimeout())
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
-	suite.True(op.CheckTimeout())
+	re.True(op.CheckTimeout())
 
 	// case2: check timeout operator will return false not panic.
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, TransferLeader{ToStore: 1, FromStore: 4})
 	op.currentStep = 1
-	suite.True(op.status.To(STARTED))
-	suite.True(op.status.To(TIMEOUT))
-	suite.False(op.CheckSuccess())
-	suite.True(op.CheckTimeout())
+	re.True(op.status.To(STARTED))
+	re.True(op.status.To(TIMEOUT))
+	re.False(op.CheckSuccess())
+	re.True(op.CheckTimeout())
 }
 
 func (suite *operatorTestSuite) TestInfluence() {
+	re := suite.Require()
 	region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	opInfluence := OpInfluence{StoresInfluence: make(map[uint64]*StoreInfluence)}
 	storeOpInfluence := opInfluence.StoresInfluence
@@ -175,7 +178,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}
 
 	AddLearner{ToStore: 2, PeerID: 2, SendStore: 1}.Influence(opInfluence, region)
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
 		RegionSize:  50,
@@ -183,7 +186,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:    map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[2])
 
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
 		RegionSize:  0,
@@ -193,7 +196,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	resetInfluence()
 
 	BecomeNonWitness{SendStore: 2, PeerID: 2, StoreID: 1}.Influence(opInfluence, region)
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:   0,
 		LeaderCount:  0,
 		RegionSize:   50,
@@ -202,7 +205,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 		StepCost:     map[storelimit.Type]int64{storelimit.AddPeer: 1000},
 	}, *storeOpInfluence[1])
 
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
 		RegionSize:  0,
@@ -212,7 +215,7 @@ func (suite *operatorTestSuite) TestInfluence() {
 	resetInfluence()
 
 	AddPeer{ToStore: 2, PeerID: 2}.Influence(opInfluence, region)
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  0,
 		LeaderCount: 0,
 		RegionSize:  50,
@@ -221,14 +224,14 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[2])
 
 	TransferLeader{FromStore: 1, ToStore: 2}.Influence(opInfluence, region)
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
 		RegionSize:  0,
 		RegionCount: 0,
 		StepCost:    nil,
 	}, *storeOpInfluence[1])
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  50,
 		LeaderCount: 1,
 		RegionSize:  50,
@@ -237,14 +240,14 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[2])
 
 	RemovePeer{FromStore: 1}.Influence(opInfluence, region)
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
 		RegionSize:  -50,
 		RegionCount: -1,
 		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	}, *storeOpInfluence[1])
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  50,
 		LeaderCount: 1,
 		RegionSize:  50,
@@ -253,14 +256,14 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: false}.Influence(opInfluence, region)
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -1,
 		RegionSize:  -50,
 		RegionCount: -1,
 		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	}, *storeOpInfluence[1])
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  50,
 		LeaderCount: 1,
 		RegionSize:  50,
@@ -269,14 +272,14 @@ func (suite *operatorTestSuite) TestInfluence() {
 	}, *storeOpInfluence[2])
 
 	MergeRegion{IsPassive: true}.Influence(opInfluence, region)
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  -50,
 		LeaderCount: -2,
 		RegionSize:  -50,
 		RegionCount: -2,
 		StepCost:    map[storelimit.Type]int64{storelimit.RemovePeer: 1000},
 	}, *storeOpInfluence[1])
-	suite.Equal(StoreInfluence{
+	re.Equal(StoreInfluence{
 		LeaderSize:  50,
 		LeaderCount: 1,
 		RegionSize:  50,
@@ -286,18 +289,20 @@ func (suite *operatorTestSuite) TestInfluence() {
 }
 
 func (suite *operatorTestSuite) TestOperatorKind() {
-	suite.Equal("replica,leader", (OpLeader | OpReplica).String())
-	suite.Equal("unknown", OpKind(0).String())
+	re := suite.Require()
+	re.Equal("replica,leader", (OpLeader | OpReplica).String())
+	re.Equal("unknown", OpKind(0).String())
 	k, err := ParseOperatorKind("region,leader")
-	suite.NoError(err)
-	suite.Equal(OpRegion|OpLeader, k)
+	re.NoError(err)
+	re.Equal(OpRegion|OpLeader, k)
 	_, err = ParseOperatorKind("leader,region")
-	suite.NoError(err)
+	re.NoError(err)
 	_, err = ParseOperatorKind("foobar")
-	suite.Error(err)
+	re.Error(err)
 }
 
 func (suite *operatorTestSuite) TestCheckSuccess() {
+	re := suite.Require()
 	{
 		steps := []OpStep{
 			AddPeer{ToStore: 1, PeerID: 1},
@@ -305,13 +310,13 @@ func (suite *operatorTestSuite) TestCheckSuccess() {
 			RemovePeer{FromStore: 2},
 		}
 		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-		suite.Equal(CREATED, op.Status())
-		suite.False(op.CheckSuccess())
-		suite.True(op.Start())
-		suite.False(op.CheckSuccess())
+		re.Equal(CREATED, op.Status())
+		re.False(op.CheckSuccess())
+		re.True(op.Start())
+		re.False(op.CheckSuccess())
 		op.currentStep = int32(len(op.steps))
-		suite.True(op.CheckSuccess())
-		suite.True(op.CheckSuccess())
+		re.True(op.CheckSuccess())
+		re.True(op.CheckSuccess())
 	}
 	{
 		steps := []OpStep{
@@ -321,15 +326,16 @@ func (suite *operatorTestSuite) TestCheckSuccess() {
 		}
 		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
 		op.currentStep = int32(len(op.steps))
-		suite.Equal(CREATED, op.Status())
-		suite.False(op.CheckSuccess())
-		suite.True(op.Start())
-		suite.True(op.CheckSuccess())
-		suite.True(op.CheckSuccess())
+		re.Equal(CREATED, op.Status())
+		re.False(op.CheckSuccess())
+		re.True(op.Start())
+		re.True(op.CheckSuccess())
+		re.True(op.CheckSuccess())
 	}
 }
 
 func (suite *operatorTestSuite) TestCheckTimeout() {
+	re := suite.Require()
 	{
 		steps := []OpStep{
 			AddPeer{ToStore: 1, PeerID: 1},
@@ -337,11 +343,11 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 			RemovePeer{FromStore: 2},
 		}
 		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-		suite.Equal(CREATED, op.Status())
-		suite.True(op.Start())
+		re.Equal(CREATED, op.Status())
+		re.True(op.Start())
 		op.currentStep = int32(len(op.steps))
-		suite.False(op.CheckTimeout())
-		suite.Equal(SUCCESS, op.Status())
+		re.False(op.CheckTimeout())
+		re.Equal(SUCCESS, op.Status())
 	}
 	{
 		steps := []OpStep{
@@ -350,44 +356,47 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 			RemovePeer{FromStore: 2},
 		}
 		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-		suite.Equal(CREATED, op.Status())
-		suite.True(op.Start())
+		re.Equal(CREATED, op.Status())
+		re.True(op.Start())
 		op.currentStep = int32(len(op.steps))
 		op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime))
-		suite.False(op.CheckTimeout())
-		suite.Equal(SUCCESS, op.Status())
+		re.False(op.CheckTimeout())
+		re.Equal(SUCCESS, op.Status())
 	}
 }
 
 func (suite *operatorTestSuite) TestStart() {
+	re := suite.Require()
 	steps := []OpStep{
 		AddPeer{ToStore: 1, PeerID: 1},
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
 	op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-	suite.Equal(0, op.GetStartTime().Nanosecond())
-	suite.Equal(CREATED, op.Status())
-	suite.True(op.Start())
-	suite.NotEqual(0, op.GetStartTime().Nanosecond())
-	suite.Equal(STARTED, op.Status())
+	re.Equal(0, op.GetStartTime().Nanosecond())
+	re.Equal(CREATED, op.Status())
+	re.True(op.Start())
+	re.NotEqual(0, op.GetStartTime().Nanosecond())
+	re.Equal(STARTED, op.Status())
 }
 
 func (suite *operatorTestSuite) TestCheckExpired() {
+	re := suite.Require()
 	steps := []OpStep{
 		AddPeer{ToStore: 1, PeerID: 1},
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
 	op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-	suite.False(op.CheckExpired())
-	suite.Equal(CREATED, op.Status())
+	re.False(op.CheckExpired())
+	re.Equal(CREATED, op.Status())
 	op.SetStatusReachTime(CREATED, time.Now().Add(-OperatorExpireTime))
-	suite.True(op.CheckExpired())
-	suite.Equal(EXPIRED, op.Status())
+	re.True(op.CheckExpired())
+	re.Equal(EXPIRED, op.Status())
 }
 
 func (suite *operatorTestSuite) TestCheck() {
+	re := suite.Require()
 	{
 		region := suite.newTestRegion(2, 2, [2]uint64{1, 1}, [2]uint64{2, 2})
 		steps := []OpStep{
@@ -396,14 +405,14 @@ func (suite *operatorTestSuite) TestCheck() {
 			RemovePeer{FromStore: 2},
 		}
 		op := suite.newTestOperator(2, OpLeader|OpRegion, steps...)
-		suite.True(op.Start())
-		suite.NotNil(op.Check(region))
+		re.True(op.Start())
+		re.NotNil(op.Check(region))
 
-		suite.Equal(STARTED, op.Status())
+		re.Equal(STARTED, op.Status())
 		region = suite.newTestRegion(1, 1, [2]uint64{1, 1})
-		suite.Nil(op.Check(region))
+		re.Nil(op.Check(region))
 
-		suite.Equal(SUCCESS, op.Status())
+		re.Equal(SUCCESS, op.Status())
 	}
 	{
 		region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
@@ -413,12 +422,12 @@ func (suite *operatorTestSuite) TestCheck() {
 			RemovePeer{FromStore: 2},
 		}
 		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-		suite.True(op.Start())
-		suite.NotNil(op.Check(region))
-		suite.Equal(STARTED, op.Status())
+		re.True(op.Start())
+		re.NotNil(op.Check(region))
+		re.Equal(STARTED, op.Status())
 		op.SetStatusReachTime(STARTED, time.Now().Add(-SlowStepWaitTime-2*FastStepWaitTime))
-		suite.NotNil(op.Check(region))
-		suite.Equal(TIMEOUT, op.Status())
+		re.NotNil(op.Check(region))
+		re.Equal(TIMEOUT, op.Status())
 	}
 	{
 		region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
@@ -428,17 +437,18 @@ func (suite *operatorTestSuite) TestCheck() {
 			RemovePeer{FromStore: 2},
 		}
 		op := suite.newTestOperator(1, OpLeader|OpRegion, steps...)
-		suite.True(op.Start())
-		suite.NotNil(op.Check(region))
-		suite.Equal(STARTED, op.Status())
+		re.True(op.Start())
+		re.NotNil(op.Check(region))
+		re.Equal(STARTED, op.Status())
 		op.status.setTime(STARTED, time.Now().Add(-SlowStepWaitTime))
 		region = suite.newTestRegion(1, 1, [2]uint64{1, 1})
-		suite.Nil(op.Check(region))
-		suite.Equal(SUCCESS, op.Status())
+		re.Nil(op.Check(region))
+		re.Equal(SUCCESS, op.Status())
 	}
 }
 
 func (suite *operatorTestSuite) TestSchedulerKind() {
+	re := suite.Require()
 	testData := []struct {
 		op     *Operator
 		expect OpKind
@@ -470,11 +480,12 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 		},
 	}
 	for _, v := range testData {
-		suite.Equal(v.expect, v.op.SchedulerKind())
+		re.Equal(v.expect, v.op.SchedulerKind())
 	}
 }
 
 func (suite *operatorTestSuite) TestOpStepTimeout() {
+	re := suite.Require()
 	testData := []struct {
 		step       []OpStep
 		regionSize int64
@@ -514,18 +525,52 @@ func (suite *operatorTestSuite) TestOpStepTimeout() {
 		},
 	}
 	for i, v := range testData {
-		fmt.Printf("case:%d\n", i)
+		suite.T().Logf("case: %d", i)
 		for _, step := range v.step {
-			suite.Equal(v.expect, step.Timeout(v.regionSize))
+			re.Equal(v.expect, step.Timeout(v.regionSize))
 		}
 	}
 }
 
 func (suite *operatorTestSuite) TestRecord() {
+	re := suite.Require()
 	operator := suite.newTestOperator(1, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
 	now := time.Now()
 	time.Sleep(time.Second)
 	ob := operator.Record(now)
-	suite.Equal(now, ob.FinishTime)
-	suite.Greater(ob.duration.Seconds(), time.Second.Seconds())
+	re.Equal(now, ob.FinishTime)
+	re.Greater(ob.duration.Seconds(), time.Second.Seconds())
+}
+
+func (suite *operatorTestSuite) TestToJSONObject() {
+	steps := []OpStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 3, ToStore: 1},
+		RemovePeer{FromStore: 3},
+	}
+	op := suite.newTestOperator(101, OpLeader|OpRegion, steps...)
+	op.Start()
+	obj := op.ToJSONObject()
+	suite.Equal("test", obj.Desc)
+	suite.Equal("test", obj.Brief)
+	suite.Equal(uint64(101), obj.RegionID)
+	suite.Equal(OpLeader|OpRegion, obj.Kind)
+	suite.Equal("12m0s", obj.Timeout)
+	suite.Equal(STARTED, obj.Status)
+
+	// Test SUCCESS status.
+	region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	suite.Nil(op.Check(region))
+	suite.Equal(SUCCESS, op.Status())
+	obj = op.ToJSONObject()
+	suite.Equal(SUCCESS, obj.Status)
+
+	// Test TIMEOUT status.
+	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
+	op = suite.newTestOperator(1, OpLeader, steps...)
+	op.Start()
+	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
+	suite.True(op.CheckTimeout())
+	obj = op.ToJSONObject()
+	suite.Equal(TIMEOUT, obj.Status)
 }

@@ -54,7 +54,7 @@ var (
 )
 
 type grantHotRegionSchedulerConfig struct {
-	mu            syncutil.RWMutex
+	syncutil.RWMutex
 	storage       endpoint.ConfigStorage
 	cluster       *core.BasicCluster
 	StoreIDs      []uint64 `json:"store-id"`
@@ -62,8 +62,8 @@ type grantHotRegionSchedulerConfig struct {
 }
 
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) bool {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 	ret := slice.AnyOf(peers, func(i int) bool {
 		return leaderID == peers[i]
 	})
@@ -75,20 +75,20 @@ func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uin
 }
 
 func (conf *grantHotRegionSchedulerConfig) GetStoreLeaderID() uint64 {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	return conf.StoreLeaderID
 }
 
 func (conf *grantHotRegionSchedulerConfig) SetStoreLeaderID(id uint64) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+	conf.Lock()
+	defer conf.Unlock()
 	conf.StoreLeaderID = id
 }
 
 func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	newStoreIDs := make([]uint64, len(conf.StoreIDs))
 	copy(newStoreIDs, conf.StoreIDs)
 	return &grantHotRegionSchedulerConfig{
@@ -99,8 +99,8 @@ func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfi
 
 func (conf *grantHotRegionSchedulerConfig) Persist() error {
 	name := conf.getSchedulerName()
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
@@ -113,11 +113,19 @@ func (conf *grantHotRegionSchedulerConfig) getSchedulerName() string {
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	return slice.AnyOf(conf.StoreIDs, func(i int) bool {
 		return storeID == conf.StoreIDs[i]
 	})
+}
+
+func (conf *grantHotRegionSchedulerConfig) getStoreIDs() []uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	storeIDs := make([]uint64, len(conf.StoreIDs))
+	copy(storeIDs, conf.StoreIDs)
+	return storeIDs
 }
 
 // grantLeaderScheduler transfers all hot peers to peers  and transfer leader to the fixed store
@@ -151,6 +159,25 @@ func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+func (s *grantHotRegionScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &grantHotRegionSchedulerConfig{}
+	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	s.conf.StoreIDs = newCfg.StoreIDs
+	s.conf.StoreLeaderID = newCfg.StoreLeaderID
+	return nil
+}
+
 // IsScheduleAllowed returns whether the scheduler is allowed to schedule.
 // TODO it should check if there is any scheduler such as evict or hot region scheduler
 func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
@@ -176,7 +203,7 @@ type grantHotRegionHandler struct {
 }
 
 func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -294,7 +321,8 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 	}
 
-	destStoreIDs := make([]uint64, 0, len(s.conf.StoreIDs))
+	storeIDs := s.conf.getStoreIDs()
+	destStoreIDs := make([]uint64, 0, len(storeIDs))
 	var candidate []uint64
 	if isLeader {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.High})
@@ -302,7 +330,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
-		candidate = s.conf.StoreIDs
+		candidate = storeIDs
 	}
 	for _, storeID := range candidate {
 		store := cluster.GetStore(storeID)

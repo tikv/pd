@@ -125,8 +125,8 @@ func (w *HotCache) CollectMetrics() {
 	w.CheckReadAsync(newCollectMetricsTask())
 }
 
-// ResetMetrics resets the hot cache metrics.
-func (w *HotCache) ResetMetrics() {
+// ResetHotCacheStatusMetrics resets the hot cache metrics.
+func ResetHotCacheStatusMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
@@ -204,4 +204,11 @@ func (w *HotCache) GetThresholds(kind utils.RWType, storeID uint64) []float64 {
 		return w.readCache.calcHotThresholds(storeID)
 	}
 	return nil
+}
+
+// CleanCache cleans the cache.
+// This is used for test purpose.
+func (w *HotCache) CleanCache() {
+	w.writeCache.removeAllItem()
+	w.readCache.removeAllItem()
 }

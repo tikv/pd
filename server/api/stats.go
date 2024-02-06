@@ -36,8 +36,9 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 
 // @Tags     stats
 // @Summary  Get region statistics of a specified range.
-// @Param    start_key  query  string  true  "Start key"
-// @Param    end_key    query  string  true  "End key"
+// @Param    start_key  query  string  true   "Start key"
+// @Param    end_key    query  string  true   "End key"
+// @Param    count      query  bool    false  "Whether only count the number of regions"
 // @Produce  json
 // @Success  200  {object}  statistics.RegionStats
 // @Router   /stats/region [get]

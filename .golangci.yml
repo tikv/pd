@@ -11,15 +11,12 @@ linters:
     - makezero
     - gosec
     - bodyclose
+    - testifylint
+    - gofmt
   disable:
     - errcheck
 linters-settings:
   gocritic:
-    # Which checks should be enabled; can't be combined with 'disabled-checks';
-    # See https://go-critic.github.io/overview#checks-overview
-    # To check which checks are enabled run `GL_DEBUG=gocritic golangci-lint run`
-    # By default list of stable checks is used.
-    enabled-checks:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:
       - regexpMust
@@ -33,3 +30,22 @@ linters-settings:
       - G402
       - G404
       - G601
+  testifylint:
+    enable:
+      - bool-compare
+      - compares
+      - empty
+      - error-is-as
+      - error-nil
+      - expected-actual
+      - len
+      - require-error
+      - suite-dont-use-pkg
+      - suite-extra-assert-call
+  gofmt:
+    # https://golangci-lint.run/usage/linters/#gofmt
+    # disable for faster check
+    simplify: false
+    rewrite-rules:
+      - pattern: 'interface{}'
+        replacement: 'any'

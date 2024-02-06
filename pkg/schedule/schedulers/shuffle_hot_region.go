@@ -15,6 +15,9 @@
 package schedulers
 
 import (
+	"net/http"
+
+	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -24,6 +27,10 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
@@ -42,8 +49,38 @@ var (
 )
 
 type shuffleHotRegionSchedulerConfig struct {
-	Name  string `json:"name"`
-	Limit uint64 `json:"limit"`
+	syncutil.RWMutex
+	storage endpoint.ConfigStorage
+	Name    string `json:"name"`
+	Limit   uint64 `json:"limit"`
+}
+
+func (conf *shuffleHotRegionSchedulerConfig) getSchedulerName() string {
+	return conf.Name
+}
+
+func (conf *shuffleHotRegionSchedulerConfig) Clone() *shuffleHotRegionSchedulerConfig {
+	conf.RLock()
+	defer conf.RUnlock()
+	return &shuffleHotRegionSchedulerConfig{
+		Name:  conf.Name,
+		Limit: conf.Limit,
+	}
+}
+
+func (conf *shuffleHotRegionSchedulerConfig) persistLocked() error {
+	name := conf.getSchedulerName()
+	data, err := EncodeConfig(conf)
+	if err != nil {
+		return err
+	}
+	return conf.storage.SaveSchedulerConfig(name, data)
+}
+
+func (conf *shuffleHotRegionSchedulerConfig) getLimit() uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.Limit
 }
 
 // ShuffleHotRegionScheduler mainly used to test.
@@ -52,17 +89,24 @@ type shuffleHotRegionSchedulerConfig struct {
 // the hot peer.
 type shuffleHotRegionScheduler struct {
 	*baseHotScheduler
-	conf *shuffleHotRegionSchedulerConfig
+	conf    *shuffleHotRegionSchedulerConfig
+	handler http.Handler
 }
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
 func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuffleHotRegionSchedulerConfig) Scheduler {
 	base := newBaseHotScheduler(opController)
+	handler := newShuffleHotRegionHandler(conf)
 	ret := &shuffleHotRegionScheduler{
 		baseHotScheduler: base,
 		conf:             conf,
+		handler:          handler,
 	}
 	return ret
+}
+
+func (s *shuffleHotRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
 }
 
 func (s *shuffleHotRegionScheduler) GetName() string {
@@ -77,8 +121,26 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+func (s *shuffleHotRegionScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &shuffleHotRegionSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	s.conf.Limit = newCfg.Limit
+	return nil
+}
+
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
-	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.Limit
+	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.getLimit()
 	conf := cluster.GetSchedulerConfig()
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
@@ -157,4 +219,48 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 	}
 	shuffleHotRegionSkipCounter.Inc()
 	return nil
+}
+
+type shuffleHotRegionHandler struct {
+	rd     *render.Render
+	config *shuffleHotRegionSchedulerConfig
+}
+
+func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	var input map[string]any
+	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	limit, ok := input["limit"].(float64)
+	if !ok {
+		handler.rd.JSON(w, http.StatusBadRequest, "invalid limit")
+		return
+	}
+	handler.config.Lock()
+	defer handler.config.Unlock()
+	previous := handler.config.Limit
+	handler.config.Limit = uint64(limit)
+	err := handler.config.persistLocked()
+	if err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.config.Limit = previous
+		return
+	}
+	handler.rd.JSON(w, http.StatusOK, nil)
+}
+
+func (handler *shuffleHotRegionHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+	conf := handler.config.Clone()
+	handler.rd.JSON(w, http.StatusOK, conf)
+}
+
+func newShuffleHotRegionHandler(config *shuffleHotRegionSchedulerConfig) http.Handler {
+	h := &shuffleHotRegionHandler{
+		config: config,
+		rd:     render.New(render.Options{IndentJSON: true}),
+	}
+	router := mux.NewRouter()
+	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	return router
 }

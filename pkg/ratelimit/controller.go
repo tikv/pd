@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,15 @@
 package ratelimit
 
 import (
+	"context"
 	"sync"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/time/rate"
 )
+
+const limiterMetricsInterval = time.Second * 15
 
 var emptyFunc = func() {}
 
@@ -27,12 +32,52 @@ type Controller struct {
 	limiters sync.Map
 	// the label which is in labelAllowList won't be limited, and only inited by hard code.
 	labelAllowList map[string]struct{}
+
+	ctx              context.Context
+	cancel           context.CancelFunc
+	apiType          string
+	concurrencyGauge *prometheus.GaugeVec
 }
 
 // NewController returns a global limiter which can be updated in the later.
-func NewController() *Controller {
-	return &Controller{
-		labelAllowList: make(map[string]struct{}),
+func NewController(ctx context.Context, typ string, concurrencyGauge *prometheus.GaugeVec) *Controller {
+	ctx, cancel := context.WithCancel(ctx)
+	l := &Controller{
+		ctx:              ctx,
+		cancel:           cancel,
+		labelAllowList:   make(map[string]struct{}),
+		apiType:          typ,
+		concurrencyGauge: concurrencyGauge,
+	}
+	if concurrencyGauge != nil {
+		go l.collectMetrics()
+	}
+	return l
+}
+
+// Close closes the Controller.
+func (l *Controller) Close() {
+	l.cancel()
+}
+
+func (l *Controller) collectMetrics() {
+	tricker := time.NewTicker(limiterMetricsInterval)
+	defer tricker.Stop()
+	for {
+		select {
+		case <-l.ctx.Done():
+			return
+		case <-tricker.C:
+			l.limiters.Range(func(key, value any) bool {
+				limiter := value.(*limiter)
+				label := key.(string)
+				// Due to not in hot path, no need to save sub Gauge.
+				if con := limiter.getConcurrencyLimiter(); con != nil {
+					l.concurrencyGauge.WithLabelValues(l.apiType, label).Set(float64(con.getMaxConcurrency()))
+				}
+				return true
+			})
+		}
 	}
 }
 

@@ -30,9 +30,13 @@ import (
 func Redirector() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		svr := c.MustGet(ServerContextKey).(*server.Server)
+
+		if svr.IsClosed() {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrServerNotStarted.FastGenByArgs().Error())
+			return
+		}
 		allowFollowerHandle := len(c.Request.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
-		isLeader := svr.GetMember().IsLeader()
-		if !svr.IsClosed() && (allowFollowerHandle || isLeader) {
+		if allowFollowerHandle || svr.GetMember().IsLeader() {
 			c.Next()
 			return
 		}
@@ -46,12 +50,11 @@ func Redirector() gin.HandlerFunc {
 
 		c.Request.Header.Set(apiutil.PDRedirectorHeader, svr.Name())
 
-		leader := svr.GetMember().GetLeader()
-		if leader == nil {
+		if svr.GetMember().GetLeader() == nil {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 			return
 		}
-		clientUrls := leader.GetClientUrls()
+		clientUrls := svr.GetMember().GetLeader().GetClientUrls()
 		urls := make([]url.URL, 0, len(clientUrls))
 		for _, item := range clientUrls {
 			u, err := url.Parse(item)

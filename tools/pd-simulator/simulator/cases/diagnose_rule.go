@@ -46,8 +46,8 @@ func newRule1() *Case {
 		},
 		LocationLabels: []string{"host"},
 	}, &placement.Rule{
-		GroupID:     "pd",
-		ID:          "default",
+		GroupID:     placement.DefaultGroupID,
+		ID:          placement.DefaultRuleID,
 		StartKeyHex: "",
 		EndKeyHex:   "",
 		Role:        placement.Voter,

@@ -41,7 +41,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const randomRegionMaxRetry = 10
+const (
+	randomRegionMaxRetry = 10
+	scanRegionLimit      = 1000
+)
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
@@ -1337,11 +1340,23 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	return
 }
 
-// GetClusterNotFromStorageRegionsCnt gets the total count of regions that not loaded from storage anymore
+// GetClusterNotFromStorageRegionsCnt gets the `NotFromStorageRegionsCnt` count of regions that not loaded from storage anymore.
 func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	return r.tree.notFromStorageRegionsCnt
+	return r.tree.notFromStorageRegionsCount()
+}
+
+// GetNotFromStorageRegionsCntByStore gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
+func (r *RegionsInfo) GetNotFromStorageRegionsCntByStore(storeID uint64) int {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.getNotFromStorageRegionsCntByStoreLocked(storeID)
+}
+
+// getNotFromStorageRegionsCntByStoreLocked gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
+func (r *RegionsInfo) getNotFromStorageRegionsCntByStoreLocked(storeID uint64) int {
+	return r.leaders[storeID].notFromStorageRegionsCount() + r.followers[storeID].notFromStorageRegionsCount() + r.learners[storeID].notFromStorageRegionsCount()
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
@@ -1377,7 +1392,7 @@ func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.getStoreRegionCountLocked(storeID)
 }
 
-// GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
+// getStoreRegionCountLocked gets the total count of a store's leader, follower and learner RegionInfo by storeID
 func (r *RegionsInfo) getStoreRegionCountLocked(storeID uint64) int {
 	return r.leaders[storeID].length() + r.followers[storeID].length() + r.learners[storeID].length()
 }
@@ -1610,16 +1625,31 @@ func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(regi
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	r.t.RLock()
-	defer r.t.RUnlock()
 	var size int64
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-			return false
+	for {
+		r.t.RLock()
+		var cnt int
+		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+				return false
+			}
+			if cnt >= scanRegionLimit {
+				return false
+			}
+			cnt++
+			startKey = region.GetEndKey()
+			size += region.GetApproximateSize()
+			return true
+		})
+		r.t.RUnlock()
+		if cnt == 0 {
+			break
 		}
-		size += region.GetApproximateSize()
-		return true
-	})
+		if len(startKey) == 0 {
+			break
+		}
+	}
+
 	return size
 }
 

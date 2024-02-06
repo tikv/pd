@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
@@ -52,12 +53,13 @@ func (suite *clusterTestSuite) TearDownSuite() {
 }
 
 func (suite *clusterTestSuite) TestCluster() {
+	re := suite.Require()
 	// Test get cluster status, and bootstrap cluster
 	suite.testGetClusterStatus()
 	suite.svr.GetPersistOptions().SetPlacementRuleEnabled(true)
 	suite.svr.GetPersistOptions().GetReplicationConfig().LocationLabels = []string{"host"}
 	rm := suite.svr.GetRaftCluster().GetRuleManager()
-	rule := rm.GetRule("pd", "default")
+	rule := rm.GetRule(placement.DefaultGroupID, placement.DefaultRuleID)
 	rule.LocationLabels = []string{"host"}
 	rule.Count = 1
 	rm.SetRule(rule)
@@ -65,42 +67,41 @@ func (suite *clusterTestSuite) TestCluster() {
 	// Test set the config
 	url := fmt.Sprintf("%s/cluster", suite.urlPrefix)
 	c1 := &metapb.Cluster{}
-	re := suite.Require()
 	err := tu.ReadGetJSON(re, testDialClient, url, c1)
-	suite.NoError(err)
+	re.NoError(err)
 
 	c2 := &metapb.Cluster{}
 	r := sc.ReplicationConfig{
 		MaxReplicas:          6,
 		EnablePlacementRules: true,
 	}
-	suite.NoError(suite.svr.SetReplicationConfig(r))
+	re.NoError(suite.svr.SetReplicationConfig(r))
 
 	err = tu.ReadGetJSON(re, testDialClient, url, c2)
-	suite.NoError(err)
+	re.NoError(err)
 
 	c1.MaxPeerCount = 6
-	suite.Equal(c2, c1)
-	suite.Equal(int(r.MaxReplicas), suite.svr.GetRaftCluster().GetRuleManager().GetRule("pd", "default").Count)
+	re.Equal(c2, c1)
+	re.Equal(int(r.MaxReplicas), suite.svr.GetRaftCluster().GetRuleManager().GetRule(placement.DefaultGroupID, placement.DefaultRuleID).Count)
 }
 
 func (suite *clusterTestSuite) testGetClusterStatus() {
+	re := suite.Require()
 	url := fmt.Sprintf("%s/cluster/status", suite.urlPrefix)
 	status := cluster.Status{}
-	re := suite.Require()
 	err := tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.True(status.RaftBootstrapTime.IsZero())
-	suite.False(status.IsInitialized)
+	re.NoError(err)
+	re.True(status.RaftBootstrapTime.IsZero())
+	re.False(status.IsInitialized)
 	now := time.Now()
 	mustBootstrapCluster(re, suite.svr)
 	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.True(status.RaftBootstrapTime.After(now))
-	suite.False(status.IsInitialized)
+	re.NoError(err)
+	re.True(status.RaftBootstrapTime.After(now))
+	re.False(status.IsInitialized)
 	suite.svr.SetReplicationConfig(sc.ReplicationConfig{MaxReplicas: 1})
 	err = tu.ReadGetJSON(re, testDialClient, url, &status)
-	suite.NoError(err)
-	suite.True(status.RaftBootstrapTime.After(now))
-	suite.True(status.IsInitialized)
+	re.NoError(err)
+	re.True(status.RaftBootstrapTime.After(now))
+	re.True(status.IsInitialized)
 }

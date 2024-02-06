@@ -35,14 +35,6 @@ var (
 			Help:      "Record critical metadata.",
 		}, []string{"type"})
 
-	serverInfo = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: "server",
-			Name:      "info",
-			Help:      "Indicate the tso server info, and the value is the start timestamp (s).",
-		}, []string{"version", "hash"})
-
 	tsoHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
@@ -56,6 +48,5 @@ var (
 func init() {
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(metaDataGauge)
-	prometheus.MustRegister(serverInfo)
 	prometheus.MustRegister(tsoHandleDuration)
 }

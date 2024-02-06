@@ -18,7 +18,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -28,6 +30,7 @@ import (
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 )
@@ -35,6 +38,8 @@ import (
 const (
 	// ForwardMetadataKey is used to record the forwarded host of PD.
 	ForwardMetadataKey = "pd-forwarded-host"
+	// FollowerHandleMetadataKey is used to mark the permit of follower handle.
+	FollowerHandleMetadataKey = "pd-allow-follower-handle"
 )
 
 // TLSConfig is the configuration for supporting tls.
@@ -51,6 +56,24 @@ type TLSConfig struct {
 	SSLCABytes   []byte
 	SSLCertBytes []byte
 	SSLKEYBytes  []byte
+}
+
+// ToTLSInfo converts TLSConfig to transport.TLSInfo.
+func (s TLSConfig) ToTLSInfo() (*transport.TLSInfo, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+	allowedCN, err := s.GetOneAllowedCN()
+	if err != nil {
+		return nil, err
+	}
+
+	return &transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+		AllowedCN:     allowedCN,
+	}, nil
 }
 
 // ToTLSConfig generates tls config.
@@ -74,19 +97,12 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 		}, nil
 	}
 
-	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+	tlsInfo, err := s.ToTLSInfo()
+	if tlsInfo == nil {
 		return nil, nil
 	}
-	allowedCN, err := s.GetOneAllowedCN()
 	if err != nil {
-		return nil, err
-	}
-
-	tlsInfo := transport.TLSInfo{
-		CertFile:      s.CertPath,
-		KeyFile:       s.KeyPath,
-		TrustedCAFile: s.CAPath,
-		AllowedCN:     allowedCN,
+		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 
 	tlsConfig, err := tlsInfo.ClientConfig()
@@ -159,12 +175,24 @@ func ResetForwardContext(ctx context.Context) context.Context {
 func GetForwardedHost(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		log.Debug("failed to get forwarding metadata")
+		log.Debug("failed to get gRPC incoming metadata when getting forwarded host")
+		return ""
 	}
 	if t, ok := md[ForwardMetadataKey]; ok {
 		return t[0]
 	}
 	return ""
+}
+
+// IsFollowerHandleEnabled returns the follower host in metadata.
+func IsFollowerHandleEnabled(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		log.Debug("failed to get gRPC incoming metadata when checking follower handle is enabled")
+		return false
+	}
+	_, ok = md[FollowerHandleMetadataKey]
+	return ok
 }
 
 func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
@@ -220,4 +248,15 @@ func CheckStream(ctx context.Context, cancel context.CancelFunc, done chan struc
 	case <-ctx.Done():
 	}
 	<-done
+}
+
+// NeedRebuildConnection checks if the error is a connection error.
+func NeedRebuildConnection(err error) bool {
+	return (err != nil) && (err == io.EOF ||
+		strings.Contains(err.Error(), codes.Unavailable.String()) || // Unavailable indicates the service is currently unavailable. This is a most likely a transient condition.
+		strings.Contains(err.Error(), codes.DeadlineExceeded.String()) || // DeadlineExceeded means operation expired before completion.
+		strings.Contains(err.Error(), codes.Internal.String()) || // Internal errors.
+		strings.Contains(err.Error(), codes.Unknown.String()) || // Unknown error.
+		strings.Contains(err.Error(), codes.ResourceExhausted.String())) // ResourceExhausted is returned when either the client or the server has exhausted their resources.
+	// Besides, we don't need to rebuild the connection if the code is Canceled, which means the client cancelled the request.
 }

@@ -61,7 +61,7 @@ func NewRemoveFailedStoresShowCommand() *cobra.Command {
 
 func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	prefix := fmt.Sprintf("%s/remove-failed-stores", unsafePrefix)
-	postInput := make(map[string]interface{}, 3)
+	postInput := make(map[string]any, 3)
 
 	autoDetect, err := cmd.Flags().GetBool("auto-detect")
 	if err != nil {

@@ -17,6 +17,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
@@ -80,8 +81,73 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				mcs.SchedulingServiceName,
 				[]string{http.MethodPost, http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
+				prefix+"/region/id",
+				scheapi.APIPathPrefix+"/config/regions",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet},
+				func(r *http.Request) bool {
+					// The original code uses the path "/region/id" to get the region id.
+					// However, the path "/region/id" is used to get the region by id, which is not what we want.
+					return strings.Contains(r.URL.Path, "label")
+				}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/regions/accelerate-schedule",
+				scheapi.APIPathPrefix+"/regions/accelerate-schedule",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/regions/scatter",
+				scheapi.APIPathPrefix+"/regions/scatter",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/regions/split",
+				scheapi.APIPathPrefix+"/regions/split",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodPost}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/regions/replicated",
+				scheapi.APIPathPrefix+"/regions/replicated",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/region-label/rules",
+				scheapi.APIPathPrefix+"/config/region-label/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/region-label/rule/", // Note: this is a typo in the original code
+				scheapi.APIPathPrefix+"/config/region-label/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
 				prefix+"/hotspot",
 				scheapi.APIPathPrefix+"/hotspot",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rules",
+				scheapi.APIPathPrefix+"/config/rules",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule/",
+				scheapi.APIPathPrefix+"/config/rule",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule_group/",
+				scheapi.APIPathPrefix+"/config/rule_groups", // Note: this is a typo in the original code
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/rule_groups",
+				scheapi.APIPathPrefix+"/config/rule_groups",
+				mcs.SchedulingServiceName,
+				[]string{http.MethodGet}),
+			serverapi.MicroserviceRedirectRule(
+				prefix+"/config/placement-rule",
+				scheapi.APIPathPrefix+"/config/placement-rule",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			// because the writing of all the meta information of the scheduling service is in the API server,
@@ -101,8 +167,6 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/schedulers",
 				mcs.SchedulingServiceName,
 				[]string{http.MethodPost}),
-			// TODO: we need to consider the case that v1 api not support restful api.
-			// we might change the previous path parameters to query parameters.
 		),
 		negroni.Wrap(r)),
 	)

@@ -208,58 +208,62 @@ func (suite *serviceTestSuite) TearDownSuite() {
 }
 
 func (suite *serviceTestSuite) TestServiceLabels() {
+	re := suite.Require()
 	accessPaths := suite.svr.GetServiceLabels("Profile")
-	suite.Len(accessPaths, 1)
-	suite.Equal("/pd/api/v1/debug/pprof/profile", accessPaths[0].Path)
-	suite.Equal("", accessPaths[0].Method)
+	re.Len(accessPaths, 1)
+	re.Equal("/pd/api/v1/debug/pprof/profile", accessPaths[0].Path)
+	re.Equal("", accessPaths[0].Method)
 	serviceLabel := suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", ""))
-	suite.Equal("Profile", serviceLabel)
+	re.Equal("Profile", serviceLabel)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", http.MethodGet))
-	suite.Equal("Profile", serviceLabel)
+	re.Equal("Profile", serviceLabel)
 
 	accessPaths = suite.svr.GetServiceLabels("GetSchedulerConfig")
-	suite.Len(accessPaths, 1)
-	suite.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
-	suite.Equal("", accessPaths[0].Method)
+	re.Len(accessPaths, 1)
+	re.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
+	re.Equal("GET", accessPaths[0].Method)
+	accessPaths = suite.svr.GetServiceLabels("HandleSchedulerConfig")
+	re.Len(accessPaths, 4)
+	re.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
 
 	accessPaths = suite.svr.GetServiceLabels("ResignLeader")
-	suite.Len(accessPaths, 1)
-	suite.Equal("/pd/api/v1/leader/resign", accessPaths[0].Path)
-	suite.Equal(http.MethodPost, accessPaths[0].Method)
+	re.Len(accessPaths, 1)
+	re.Equal("/pd/api/v1/leader/resign", accessPaths[0].Path)
+	re.Equal(http.MethodPost, accessPaths[0].Method)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodPost))
-	suite.Equal("ResignLeader", serviceLabel)
+	re.Equal("ResignLeader", serviceLabel)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodGet))
-	suite.Equal("", serviceLabel)
+	re.Equal("", serviceLabel)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", ""))
-	suite.Equal("", serviceLabel)
+	re.Equal("", serviceLabel)
 
 	accessPaths = suite.svr.GetServiceLabels("QueryMetric")
-	suite.Len(accessPaths, 4)
+	re.Len(accessPaths, 4)
 	sort.Slice(accessPaths, func(i, j int) bool {
 		if accessPaths[i].Path == accessPaths[j].Path {
 			return accessPaths[i].Method < accessPaths[j].Method
 		}
 		return accessPaths[i].Path < accessPaths[j].Path
 	})
-	suite.Equal("/pd/api/v1/metric/query", accessPaths[0].Path)
-	suite.Equal(http.MethodGet, accessPaths[0].Method)
-	suite.Equal("/pd/api/v1/metric/query", accessPaths[1].Path)
-	suite.Equal(http.MethodPost, accessPaths[1].Method)
-	suite.Equal("/pd/api/v1/metric/query_range", accessPaths[2].Path)
-	suite.Equal(http.MethodGet, accessPaths[2].Method)
-	suite.Equal("/pd/api/v1/metric/query_range", accessPaths[3].Path)
-	suite.Equal(http.MethodPost, accessPaths[3].Method)
+	re.Equal("/pd/api/v1/metric/query", accessPaths[0].Path)
+	re.Equal(http.MethodGet, accessPaths[0].Method)
+	re.Equal("/pd/api/v1/metric/query", accessPaths[1].Path)
+	re.Equal(http.MethodPost, accessPaths[1].Method)
+	re.Equal("/pd/api/v1/metric/query_range", accessPaths[2].Path)
+	re.Equal(http.MethodGet, accessPaths[2].Method)
+	re.Equal("/pd/api/v1/metric/query_range", accessPaths[3].Path)
+	re.Equal(http.MethodPost, accessPaths[3].Method)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodPost))
-	suite.Equal("QueryMetric", serviceLabel)
+	re.Equal("QueryMetric", serviceLabel)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
-	suite.Equal("QueryMetric", serviceLabel)
+	re.Equal("QueryMetric", serviceLabel)
 }
 
 func (suite *adminTestSuite) TestCleanPath() {
@@ -268,12 +272,12 @@ func (suite *adminTestSuite) TestCleanPath() {
 	url := fmt.Sprintf("%s/admin/persist-file/../../config", suite.urlPrefix)
 	cfg := &config.Config{}
 	err := testutil.ReadGetJSON(re, testDialClient, url, cfg)
-	suite.NoError(err)
+	re.NoError(err)
 
 	// handled by router
 	response := httptest.NewRecorder()
 	r, _, _ := NewHandler(context.Background(), suite.svr)
-	request, err := http.NewRequest(http.MethodGet, url, nil)
+	request, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	r.ServeHTTP(response, request)
 	// handled by `cleanPath` which is in `mux.ServeHTTP`

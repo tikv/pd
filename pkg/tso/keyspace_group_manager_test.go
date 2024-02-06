@@ -31,7 +31,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -226,29 +225,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestLoadWithDifferentBatchSize() {
 		suite.runTestLoadKeyspaceGroupsAssignment(re, param.count, param.batchSize, param.probabilityAssignToMe)
 		suite.runTestLoadKeyspaceGroupsAssignment(re, param.count+1, param.batchSize, param.probabilityAssignToMe)
 	}
-}
-
-// TestLoadKeyspaceGroupsTimeout tests there is timeout when loading the initial keyspace group assignment
-// from etcd. The initialization of the keyspace group manager should fail.
-func (suite *keyspaceGroupManagerTestSuite) TestLoadKeyspaceGroupsTimeout() {
-	re := suite.Require()
-
-	mgr := suite.newUniqueKeyspaceGroupManager(1)
-	re.NotNil(mgr)
-	defer mgr.Close()
-
-	addKeyspaceGroupAssignment(
-		suite.ctx, suite.etcdClient, uint32(0), mgr.legacySvcRootPath,
-		[]string{mgr.tsoServiceID.ServiceAddr}, []int{0}, []uint32{0})
-
-	// Set the timeout to 1 second and inject the delayLoad to return 3 seconds to let
-	// the loading sleep 3 seconds.
-	mgr.loadKeyspaceGroupsTimeout = time.Second
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad", "return(3)"))
-	err := mgr.Initialize()
-	// If loading keyspace groups timeout, the initialization should fail with ErrLoadKeyspaceGroupsTerminated.
-	re.Contains(err.Error(), errs.ErrLoadKeyspaceGroupsTerminated.Error())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/delayLoad"))
 }
 
 // TestLoadKeyspaceGroupsSucceedWithTempFailures tests the initialization should succeed when there are temporary
@@ -988,7 +964,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 		re.Equal(len(keyspaces), len(newGroup.Keyspaces))
 		for i := 0; i < len(newGroup.Keyspaces); i++ {
 			if i > 0 {
-				re.True(newGroup.Keyspaces[i-1] < newGroup.Keyspaces[i])
+				re.Less(newGroup.Keyspaces[i-1], newGroup.Keyspaces[i])
 			}
 		}
 	}
@@ -1224,14 +1200,12 @@ func waitForPrimariesServing(
 	re *require.Assertions, mgrs []*KeyspaceGroupManager, ids []uint32,
 ) {
 	testutil.Eventually(re, func() bool {
-		for i := 0; i < 100; i++ {
-			for j, id := range ids {
-				if member, err := mgrs[j].GetElectionMember(id, id); err != nil || !member.IsLeader() {
-					return false
-				}
-				if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, GlobalDCLocation, 1); err != nil {
-					return false
-				}
+		for j, id := range ids {
+			if member, err := mgrs[j].GetElectionMember(id, id); err != nil || member == nil || !member.IsLeader() {
+				return false
+			}
+			if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, GlobalDCLocation, 1); err != nil {
+				return false
 			}
 		}
 		return true

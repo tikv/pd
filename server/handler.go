@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -192,7 +193,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	}
 
 	var removeSchedulerCb func(string) error
-	if h.s.IsAPIServiceMode() {
+	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveSchedulerHandler
 	} else {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveScheduler
@@ -202,7 +203,7 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 		return err
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
-	if h.s.IsAPIServiceMode() {
+	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		if err = c.AddSchedulerHandler(s, args...); err != nil {
 			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
@@ -229,7 +230,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return err
 	}
-	if h.s.IsAPIServiceMode() {
+	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		if err = c.RemoveSchedulerHandler(name); err != nil {
 			log.Error("can not remove scheduler handler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {
@@ -469,7 +470,7 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 	// make sure path is in data dir
 	filePath, err := filepath.Abs(pluginPath)
 	if err != nil || !isPathInDirectory(filePath, h.s.GetConfig().DataDir) {
-		return errs.ErrFilePathAbs.Wrap(err).FastGenWithCause()
+		return errs.ErrFilePathAbs.Wrap(err)
 	}
 
 	c.LoadPlugin(pluginPath, ch)
@@ -494,7 +495,7 @@ func (h *Handler) GetAddr() string {
 
 // SetStoreLimitTTL set storeLimit with ttl
 func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) error {
-	return h.s.SaveTTLConfig(map[string]interface{}{
+	return h.s.SaveTTLConfig(map[string]any{
 		data: value,
 	}, ttl)
 }
@@ -567,7 +568,7 @@ func (h *Handler) GetHistoryHotRegionIter(
 
 // RedirectSchedulerUpdate update scheduler config. Export this func to help handle damaged store.
 func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = name
 	input["store_id"] = storeID
 	updateURL, err := url.JoinPath(h.GetAddr(), "pd", SchedulerConfigHandlerPath, name, "config")
@@ -582,10 +583,10 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 }
 
 // AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
-func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
-	if exist, err := h.IsSchedulerExisted(name); !exist {
+func (h *Handler) AddEvictOrGrant(storeID float64, name string) (exist bool, err error) {
+	if exist, err = h.IsSchedulerExisted(name); !exist {
 		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-			return err
+			return exist, err
 		}
 		switch name {
 		case schedulers.EvictLeaderName:
@@ -594,13 +595,14 @@ func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
 			err = h.AddGrantLeaderScheduler(uint64(storeID))
 		}
 		if err != nil {
-			return err
+			return exist, err
 		}
 	} else {
 		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
-			return err
+			return exist, err
 		}
 		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+		return exist, nil
 	}
-	return nil
+	return exist, nil
 }

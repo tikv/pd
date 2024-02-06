@@ -27,9 +27,11 @@ import (
 
 // RequestInfo holds service information from http.Request
 type RequestInfo struct {
-	ServiceLabel   string
-	Method         string
-	Component      string
+	ServiceLabel string
+	Method       string
+	// CallerID is used to identify the specific source of a HTTP request, it will be marked in
+	// the PD HTTP client, with granularity that can be refined to a specific functionality within a component.
+	CallerID       string
 	IP             string
 	Port           string
 	URLParam       string
@@ -38,8 +40,8 @@ type RequestInfo struct {
 }
 
 func (info *RequestInfo) String() string {
-	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, Component:%s, IP:%s, Port:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
-		info.ServiceLabel, info.Method, info.Component, info.IP, info.Port, time.Unix(info.StartTimeStamp, 0), info.URLParam, info.BodyParam)
+	s := fmt.Sprintf("{ServiceLabel:%s, Method:%s, CallerID:%s, IP:%s, Port:%s, StartTime:%s, URLParam:%s, BodyParam:%s}",
+		info.ServiceLabel, info.Method, info.CallerID, info.IP, info.Port, time.Unix(info.StartTimeStamp, 0), info.URLParam, info.BodyParam)
 	return s
 }
 
@@ -49,7 +51,7 @@ func GetRequestInfo(r *http.Request) RequestInfo {
 	return RequestInfo{
 		ServiceLabel:   apiutil.GetRouteName(r),
 		Method:         fmt.Sprintf("%s/%s:%s", r.Proto, r.Method, r.URL.Path),
-		Component:      apiutil.GetComponentNameOnHTTP(r),
+		CallerID:       apiutil.GetCallerIDOnHTTP(r),
 		IP:             ip,
 		Port:           port,
 		URLParam:       getURLParam(r),

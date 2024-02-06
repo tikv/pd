@@ -366,7 +366,7 @@ func isPriorityValid(priorities []string) (map[string]bool, error) {
 	return priorityMap, nil
 }
 
-func (conf *hotRegionSchedulerConfig) valid() error {
+func (conf *hotRegionSchedulerConfig) validateLocked() error {
 	if _, err := isPriorityValid(conf.ReadPriorities); err != nil {
 		return err
 	}
@@ -409,7 +409,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := conf.valid(); err != nil {
+	if err := conf.validateLocked(); err != nil {
 		// revert to old version
 		if err2 := json.Unmarshal(oldc, conf); err2 != nil {
 			rd.JSON(w, http.StatusInternalServerError, err2.Error())
@@ -426,7 +426,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		return
 	}
 
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

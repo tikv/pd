@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -32,7 +33,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const watchLoopUnhealthyTimeout = 60 * time.Second
+const (
+	defaultCampaignTimesSlot   = 10
+	watchLoopUnhealthyTimeout  = 60 * time.Second
+	campaignTimesRecordTimeout = 5 * time.Minute
+)
 
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
@@ -62,20 +67,24 @@ type Leadership struct {
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
 	keepAliveCancelFuncLock syncutil.Mutex
+	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
+	// It is ordered by time to prevent the leader from campaigning too frequently.
+	campaignTimes []time.Time
 }
 
 // NewLeadership creates a new Leadership.
 func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadership {
 	leadership := &Leadership{
-		purpose:   purpose,
-		client:    client,
-		leaderKey: leaderKey,
+		purpose:       purpose,
+		client:        client,
+		leaderKey:     leaderKey,
+		campaignTimes: make([]time.Time, 0, defaultCampaignTimesSlot),
 	}
 	return leadership
 }
 
 // getLease gets the lease of leadership, only if leadership is valid,
-// i.e the owner is a true leader, the lease is not nil.
+// i.e. the owner is a true leader, the lease is not nil.
 func (ls *Leadership) getLease() *lease {
 	l := ls.lease.Load()
 	if l == nil {
@@ -104,8 +113,42 @@ func (ls *Leadership) GetLeaderKey() string {
 	return ls.leaderKey
 }
 
+// GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
+func (ls *Leadership) GetCampaignTimesNum() int {
+	if ls == nil {
+		return 0
+	}
+	return len(ls.campaignTimes)
+}
+
+// ResetCampaignTimes is used to reset the campaign times of the leader.
+func (ls *Leadership) ResetCampaignTimes() {
+	if ls == nil {
+		return
+	}
+	ls.campaignTimes = make([]time.Time, 0, defaultCampaignTimesSlot)
+}
+
+// addCampaignTimes is used to add the campaign times of the leader.
+func (ls *Leadership) addCampaignTimes() {
+	if ls == nil {
+		return
+	}
+	for i := len(ls.campaignTimes) - 1; i >= 0; i-- {
+		if time.Since(ls.campaignTimes[i]) > campaignTimesRecordTimeout {
+			// remove the time which is more than `campaignTimesRecordTimeout`
+			// array is sorted by time
+			ls.campaignTimes = ls.campaignTimes[i:]
+			break
+		}
+	}
+
+	ls.campaignTimes = append(ls.campaignTimes, time.Now())
+}
+
 // Campaign is used to campaign the leader with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
+	ls.addCampaignTimes()
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
 	newLease := &lease{
@@ -114,6 +157,16 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 		lease:   clientv3.NewLease(ls.client),
 	}
 	ls.setLease(newLease)
+
+	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
+		var member pdpb.Member
+		member.Unmarshal([]byte(leaderData))
+		name, ok := val.(string)
+		if ok && member.Name == name {
+			failpoint.Return(errors.Errorf("failed to grant lease"))
+		}
+	})
+
 	if err := newLease.Grant(leaseTimeout); err != nil {
 		return err
 	}
@@ -260,6 +313,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				continue
 			}
 		}
+		lastReceivedResponseTime = time.Now()
 		log.Info("watch channel is created", zap.Int64("revision", revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 
 	watchChanLoop:
