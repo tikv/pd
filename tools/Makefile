@@ -39,8 +39,6 @@ ci-test-job: failpoint-enable
 
 failpoint-enable:
 	cd $(ROOT_PATH) && $(MAKE) failpoint-enable
-	go mod tidy
 
 failpoint-disable:
 	cd $(ROOT_PATH) && $(MAKE) failpoint-disable
-	go mod tidy
