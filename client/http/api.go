@@ -77,6 +77,7 @@ const (
 	ClusterStatus       = "/pd/api/v1/cluster/status"
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
+	operators           = "/pd/api/v1/operators"
 	// Micro Service
 	microServicePrefix = "/pd/api/v2/ms"
 )

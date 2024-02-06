@@ -1,13 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX>
 
 ROOT_PATH=../../
 
-if [[ $2 -gt 10 ]]; then
+if [[ $2 -gt 9 ]]; then
+    # run tools tests
+    if [[ $2 -eq 10 ]]; then
+        cd ./tools && make ci-test-job && cd .. && cat ./covprofile >> covprofile || exit 1
+        exit
+    fi
+
+    # Currently, we only have 3 integration tests, so we can hardcode the task index.
     integrations_dir=./tests/integrations
     integrations_tasks=($(find "$integrations_dir" -mindepth 1 -maxdepth 1 -type d))
-    # Currently, we only have 3 integration tests, so we can hardcode the task index.
     for t in "${integrations_tasks[@]}"; do
         if [[ "$t" = "$integrations_dir/client" && $2 -eq 11 ]]; then
             cd ./client && make ci-test-job && cd .. && cat ./covprofile >> covprofile || exit 1
@@ -29,7 +35,6 @@ else
         [[ $1 == "github.com/tikv/pd/pkg/schedule" ]] && return 30
         [[ $1 == "github.com/tikv/pd/pkg/core" ]] && return 30
         [[ $1 == "github.com/tikv/pd/tests/server/api" ]] && return 30
-        [[ $1 == "github.com/tikv/pd/tools" ]] && return 30
         [[ $1 =~ "pd/tests" ]] && return 5
         return 1
     }

@@ -2810,7 +2810,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			return err
 		}
 	}
-	ctx, cancel := context.WithCancel(s.Context())
+	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
 	configPath := req.GetConfigPath()
 	if configPath == "" {
@@ -2825,6 +2825,8 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	for {
 		select {
 		case <-ctx.Done():
+			return nil
+		case <-s.Context().Done():
 			return nil
 		case res := <-watchChan:
 			if res.Err() != nil {
