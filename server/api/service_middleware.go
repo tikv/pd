@@ -140,7 +140,7 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 // @Success  200  {string}  string
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "config item not found"
-// @Router   /service-middleware/config/rate-limit [POST]
+// @Router   /service-middleware/config/rate-limit [post]
 func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
@@ -236,7 +236,7 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 // @Success  200  {string}  string
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "config item not found"
-// @Router   /service-middleware/config/grpc-rate-limit [POST]
+// @Router   /service-middleware/config/grpc-rate-limit [post]
 func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {

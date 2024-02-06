@@ -1004,9 +1004,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
-	if !saveKV && !saveCache && !isNew {
+	saveKV, saveCache, needSync := regionGuide(region, origin)
+	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1037,11 +1036,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionUpdateCacheEventCounter.Inc()
 	}
 
-	isPrepared := true
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		isPrepared = c.IsPrepared()
-	}
-	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, isPrepared)
+	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
 
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if

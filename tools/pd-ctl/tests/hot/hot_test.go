@@ -405,6 +405,7 @@ func TestHistoryHotRegions(t *testing.T) {
 		},
 	)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
@@ -521,6 +522,7 @@ func TestBuckets(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, serverName string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
