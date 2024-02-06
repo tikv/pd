@@ -46,4 +46,11 @@ func TestTSO(t *testing.T) {
 	physicalTime := time.Unix(int64(physical/1000), int64(physical%1000)*time.Millisecond.Nanoseconds())
 	str := fmt.Sprintln("system: ", physicalTime) + fmt.Sprintln("logic:  ", logicalTime)
 	re.Equal(string(output), str)
+
+	// test with invalid address
+	args = []string{"-u", "127.0.0.1", "tso", ts}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	tsTime, err = strconv.ParseUint(ts, 10, 64)
+	re.NoError(err)
 }

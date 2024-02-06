@@ -70,7 +70,8 @@ func TestConfigTestSuite(t *testing.T) {
 	suite.Run(t, new(configTestSuite))
 }
 
-func (suite *configTestSuite) SetupSuite() {
+func (suite *configTestSuite) SetupTest() {
+	// use a new environment to avoid affecting other tests
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 }
 
@@ -96,6 +97,7 @@ func (suite *configTestSuite) TearDownTest() {
 		re.NoError(err)
 	}
 	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.Cleanup()
 }
 
 func (suite *configTestSuite) TestConfig() {
@@ -545,10 +547,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
-	// use a new environment to avoid affecting other tests
-	env := pdTests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRules)
-	env.Cleanup()
+	suite.env.RunTestInTwoModes(suite.checkPlacementRules)
 }
 
 func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) {
@@ -614,10 +613,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
-	// use a new environment to avoid being affected by other tests
-	env := pdTests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
-	env.Cleanup()
+	suite.env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
 }
 
 func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestCluster) {
@@ -694,10 +690,7 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 }
 
 func (suite *configTestSuite) TestPlacementRuleBundle() {
-	// use a new environment to avoid being affected by other tests
-	env := pdTests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
-	env.Cleanup()
+	suite.env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
 }
 
 func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestCluster) {

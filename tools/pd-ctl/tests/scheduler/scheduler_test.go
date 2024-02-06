@@ -50,13 +50,17 @@ func TestSchedulerTestSuite(t *testing.T) {
 func (suite *schedulerTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
-	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 	suite.defaultSchedulers = []string{
 		"balance-leader-scheduler",
 		"balance-region-scheduler",
 		"balance-hot-region-scheduler",
 		"evict-slow-store-scheduler",
 	}
+}
+
+func (suite *schedulerTestSuite) SetupTest() {
+	// use a new environment to avoid affecting other tests
+	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *schedulerTestSuite) TearDownSuite() {
@@ -91,13 +95,11 @@ func (suite *schedulerTestSuite) TearDownTest() {
 		}
 	}
 	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.Cleanup()
 }
 
 func (suite *schedulerTestSuite) TestScheduler() {
-	// use a new environment to avoid affecting other tests
-	env := pdTests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkScheduler)
-	env.Cleanup()
+	suite.env.RunTestInTwoModes(suite.checkScheduler)
 }
 
 func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
@@ -637,10 +639,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
-	// use a new environment to avoid affecting other tests
-	env := pdTests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
-	env.Cleanup()
+	suite.env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestCluster) {
