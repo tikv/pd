@@ -582,6 +582,14 @@ func (s *Server) Close() {
 		cb()
 	}
 
+	s.clientConns.Range(func(key, value any) bool {
+		conn := value.(*grpc.ClientConn)
+		if err := conn.Close(); err != nil {
+			log.Error("close grpc client meet error", errs.ZapError(err))
+		}
+		return true
+	})
+
 	log.Info("close server")
 }
 

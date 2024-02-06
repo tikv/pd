@@ -158,7 +158,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 			s.hbStreams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
-		region := core.RegionFromHeartbeat(request, core.SetSource(core.Heartbeat))
+		region := core.RegionFromHeartbeat(request)
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
 			// TODO: if we need to send the error back to API server.

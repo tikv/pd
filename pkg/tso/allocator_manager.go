@@ -325,6 +325,12 @@ func (am *AllocatorManager) close() {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
 	}
 
+	for _, cc := range am.localAllocatorConn.clientConns {
+		if err := cc.Close(); err != nil {
+			log.Error("failed to close allocator manager grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+		}
+	}
+
 	am.cancel()
 	am.svcLoopWG.Wait()
 
