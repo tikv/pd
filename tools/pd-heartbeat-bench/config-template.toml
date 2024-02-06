@@ -1,7 +1,7 @@
 round = 0
 
-store-count = 10
-region-count = 200
+store-count = 100
+region-count = 2000000
 
 key-length = 56
 replica = 3
