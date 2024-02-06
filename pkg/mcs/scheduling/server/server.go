@@ -319,6 +319,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
+	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -327,13 +328,6 @@ func (s *Server) Close() {
 			log.Error("close etcd client meet error", errs.ZapError(errs.ErrCloseEtcdClient, err))
 		}
 	}
-	s.BaseServer.GetClientConns().Range(func(key, value any) bool {
-		conn := value.(*grpc.ClientConn)
-		if err := conn.Close(); err != nil {
-			log.Error("close client connection meet error")
-		}
-		return true
-	})
 
 	if s.GetHTTPClient() != nil {
 		s.GetHTTPClient().CloseIdleConnections()
