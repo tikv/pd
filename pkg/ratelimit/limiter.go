@@ -137,6 +137,7 @@ func (l *limiter) allow() (DoneFunc, error) {
 	if concurrency != nil && !concurrency.allow() {
 		return nil, errs.ErrRateLimitExceeded
 	}
+
 	rate := l.getRateLimiter()
 	if rate != nil && !rate.Allow() {
 		if concurrency != nil {

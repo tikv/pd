@@ -61,6 +61,7 @@ func (l *concurrencyLimiter) getLimit() uint64 {
 	return l.limit
 }
 
+// Only used for test.
 func (l *concurrencyLimiter) tryToSetLimit(limit uint64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
