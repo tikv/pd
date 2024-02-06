@@ -53,7 +53,7 @@ func TestMemberHelpers(t *testing.T) {
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
 	// Test ListEtcdMembers
-	listResp1, err := ListEtcdMembers(client1)
+	listResp1, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp1.Members, 1)
 	// types.ID is an alias of uint64.
@@ -74,7 +74,7 @@ func TestMemberHelpers(t *testing.T) {
 	_, err = RemoveEtcdMember(client1, uint64(etcd2.Server.ID()))
 	re.NoError(err)
 
-	listResp3, err := ListEtcdMembers(client1)
+	listResp3, err := ListEtcdMembers(client1.Ctx(), client1)
 	re.NoError(err)
 	re.Len(listResp3.Members, 1)
 	re.Equal(uint64(etcd1.Server.ID()), listResp3.Members[0].ID)
@@ -177,10 +177,8 @@ func TestEtcdClientSync(t *testing.T) {
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
 	defer etcd2.Close()
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
-	testutil.Eventually(re, func() bool {
-		// wait for etcd client sync endpoints
-		return len(client1.Endpoints()) == 2
-	})
+	// wait for etcd client sync endpoints
+	checkEtcdEndpointNum(re, client1, 2)
 
 	// Remove the first member and close the etcd1.
 	_, err := RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
@@ -188,12 +186,21 @@ func TestEtcdClientSync(t *testing.T) {
 	etcd1.Close()
 
 	// Check the client can get the new member with the new endpoints.
-	testutil.Eventually(re, func() bool {
-		// wait for etcd client sync endpoints
-		return len(client1.Endpoints()) == 1
-	})
+	checkEtcdEndpointNum(re, client1, 1)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
+}
+
+func checkEtcdEndpointNum(re *require.Assertions, client *clientv3.Client, num int) {
+	testutil.Eventually(re, func() bool {
+		return len(client.Endpoints()) == num
+	})
+}
+
+func checkEtcdClientHealth(re *require.Assertions, client *clientv3.Client) {
+	testutil.Eventually(re, func() bool {
+		return IsHealthy(context.Background(), client)
+	})
 }
 
 func TestEtcdScaleInAndOut(t *testing.T) {
@@ -228,25 +235,21 @@ func TestRandomKillEtcd(t *testing.T) {
 	// Start a etcd server.
 	etcds, client1, clean := NewTestEtcdCluster(t, 3)
 	defer clean()
-	testutil.Eventually(re, func() bool {
-		return len(client1.Endpoints()) == 3
-	})
+	checkEtcdEndpointNum(re, client1, 3)
 
 	// Randomly kill an etcd server and restart it
 	cfgs := []embed.Config{etcds[0].Config(), etcds[1].Config(), etcds[2].Config()}
 	for i := 0; i < 10; i++ {
 		killIndex := rand.Intn(len(etcds))
 		etcds[killIndex].Close()
-		testutil.Eventually(re, func() bool {
-			return IsHealthy(context.Background(), client1)
-		})
+		checkEtcdEndpointNum(re, client1, 2)
+		checkEtcdClientHealth(re, client1)
 		etcd, err := embed.StartEtcd(&cfgs[killIndex])
 		re.NoError(err)
 		<-etcd.Server.ReadyNotify()
 		etcds[killIndex] = etcd
-		testutil.Eventually(re, func() bool {
-			return IsHealthy(context.Background(), client1)
-		})
+		checkEtcdEndpointNum(re, client1, 3)
+		checkEtcdClientHealth(re, client1)
 	}
 	for _, etcd := range etcds {
 		if etcd != nil {
@@ -380,7 +383,8 @@ func (suite *loopWatcherTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cleans = make([]func(), 0)
 	// Start a etcd server and create a client with etcd1 as endpoint.
-	suite.config = newTestSingleConfig(suite.T())
+	suite.config = NewTestSingleConfig()
+	suite.config.Dir = suite.T().TempDir()
 	suite.startEtcd(re)
 	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls)
 	re.NoError(err)
@@ -397,7 +401,7 @@ func (suite *loopWatcherTestSuite) TearDownSuite() {
 	}
 }
 
-func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
+func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 	re := suite.Require()
 	cache := make(map[string]struct{})
 	watcher := NewLoopWatcher(
@@ -405,7 +409,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 		&suite.wg,
 		suite.client,
 		"test",
-		"TestLoadWithoutKey",
+		"TestLoadNoExistedKey",
 		func([]*clientv3.Event) error { return nil },
 		func(kv *mvccpb.KeyValue) error {
 			cache[string(kv.Key)] = struct{}{}
@@ -419,6 +423,35 @@ func (suite *loopWatcherTestSuite) TestLoadWithoutKey() {
 	err := watcher.WaitLoad()
 	re.NoError(err) // although no key, watcher returns no error
 	re.Empty(cache)
+}
+
+func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError", `return()`))
+	cache := make(map[string]struct{})
+	for i := 0; i < int(maxLoadBatchSize)*2; i++ {
+		suite.put(re, fmt.Sprintf("TestLoadWithLimitChange%d", i), "")
+	}
+	watcher := NewLoopWatcher(
+		suite.ctx,
+		&suite.wg,
+		suite.client,
+		"test",
+		"TestLoadWithLimitChange",
+		func([]*clientv3.Event) error { return nil },
+		func(kv *mvccpb.KeyValue) error {
+			cache[string(kv.Key)] = struct{}{}
+			return nil
+		},
+		func(kv *mvccpb.KeyValue) error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
+	)
+	watcher.StartWatchLoop()
+	err := watcher.WaitLoad()
+	re.NoError(err)
+	re.Len(cache, int(maxLoadBatchSize)*2)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError"))
 }
 
 func (suite *loopWatcherTestSuite) TestCallBack() {
@@ -523,8 +556,8 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 
 func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 	re := suite.Require()
-	// use default limit to test 16384 key in etcd
-	count := 16384
+	// use default limit to test 65536 key in etcd
+	count := 65536
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 	for i := 0; i < count; i++ {

@@ -45,6 +45,7 @@ type Config struct {
 	// only for init
 	HTTP map[string]cases.Config `toml:"http" json:"http"`
 	GRPC map[string]cases.Config `toml:"grpc" json:"grpc"`
+	ETCD map[string]cases.Config `toml:"etcd" json:"etcd"`
 }
 
 // NewConfig return a set of settings.
@@ -106,6 +107,12 @@ func (c *Config) InitCoordinator(co *cases.Coordinator) {
 		err := co.SetGRPCCase(name, &cfg)
 		if err != nil {
 			log.Error("create gRPC case failed", zap.Error(err))
+		}
+	}
+	for name, cfg := range c.ETCD {
+		err := co.SetETCDCase(name, &cfg)
+		if err != nil {
+			log.Error("create etcd case failed", zap.Error(err))
 		}
 	}
 }

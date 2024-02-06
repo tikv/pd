@@ -61,7 +61,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
 	re.True(sc.EnableAudit)
 
-	ms := map[string]interface{}{
+	ms := map[string]any{
 		"audit.enable-audit": "false",
 	}
 	postData, err := json.Marshal(ms)
@@ -70,7 +70,7 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	sc = &config.ServiceMiddlewareConfig{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
 	re.False(sc.EnableAudit)
-	ms = map[string]interface{}{
+	ms = map[string]any{
 		"enable-audit": "true",
 	}
 	postData, err = json.Marshal(ms)
@@ -81,25 +81,25 @@ func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
 	re.True(sc.EnableAudit)
 
 	// test empty
-	ms = map[string]interface{}{}
+	ms = map[string]any{}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re), tu.StringContain(re, "The input is empty.")))
-	ms = map[string]interface{}{
+	ms = map[string]any{
 		"audit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item audit not found")))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
-	ms = map[string]interface{}{
+	ms = map[string]any{
 		"audit.enable-audit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest)))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail"))
-	ms = map[string]interface{}{
+	ms = map[string]any{
 		"audit.audit": "false",
 	}
 	postData, err = json.Marshal(ms)
@@ -135,7 +135,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/rate-limit", suite.svr.GetAddr(), apiPrefix)
 
 	// test empty type
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["type"] = 123
 	jsonBody, err := json.Marshal(input)
 	re.NoError(err)
@@ -143,7 +143,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The type is empty.\"\n"))
 	re.NoError(err)
 	// test invalid type
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "url"
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
@@ -152,7 +152,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.NoError(err)
 
 	// test empty label
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = ""
 	jsonBody, err = json.Marshal(input)
@@ -161,7 +161,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The label is empty.\"\n"))
 	re.NoError(err)
 	// test no label matched
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = "TestLabel"
 	jsonBody, err = json.Marshal(input)
@@ -171,7 +171,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.NoError(err)
 
 	// test empty path
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = ""
 	jsonBody, err = json.Marshal(input)
@@ -181,7 +181,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.NoError(err)
 
 	// test path but no label matched
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/test"
 	jsonBody, err = json.Marshal(input)
@@ -191,7 +191,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.NoError(err)
 
 	// no change
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = "GetHealthStatus"
 	jsonBody, err = json.Marshal(input)
@@ -201,7 +201,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.NoError(err)
 
 	// change concurrency
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/health"
 	input["method"] = http.MethodGet
@@ -219,7 +219,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.NoError(err)
 
 	// change qps
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/health"
 	input["method"] = http.MethodGet
@@ -230,7 +230,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
 	re.NoError(err)
 
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/health"
 	input["method"] = http.MethodGet
@@ -250,7 +250,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.NoError(err)
 
 	// change both
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/debug/pprof/profile"
 	input["qps"] = 100
@@ -272,7 +272,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	limiter.Update("SetRateLimitConfig", ratelimit.AddLabelAllowList())
 
 	// Allow list
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = "SetRateLimitConfig"
 	input["qps"] = 100
@@ -289,7 +289,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	re := suite.Require()
 
 	// test empty label
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["label"] = ""
 	jsonBody, err := json.Marshal(input)
 	re.NoError(err)
@@ -297,7 +297,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The label is empty.\"\n"))
 	re.NoError(err)
 	// test no label matched
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "TestLabel"
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
@@ -306,7 +306,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	re.NoError(err)
 
 	// no change
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
@@ -315,7 +315,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	re.NoError(err)
 
 	// change concurrency
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
@@ -331,7 +331,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	re.NoError(err)
 
 	// change qps
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	input["qps"] = 100
 	jsonBody, err = json.Marshal(input)
@@ -340,7 +340,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
 	re.NoError(err)
 
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	input["qps"] = 0.3
 	jsonBody, err = json.Marshal(input)
@@ -358,7 +358,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	re.NoError(err)
 
 	// change both
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "GetStore"
 	input["qps"] = 100
 	input["concurrency"] = 100
@@ -384,7 +384,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	re.True(sc.RateLimitConfig.EnableRateLimit)
 	re.True(sc.GRPCRateLimitConfig.EnableRateLimit)
 
-	ms := map[string]interface{}{
+	ms := map[string]any{
 		"enable-rate-limit":      "false",
 		"enable-grpc-rate-limit": "false",
 	}
@@ -395,7 +395,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
 	re.False(sc.RateLimitConfig.EnableRateLimit)
 	re.False(sc.GRPCRateLimitConfig.EnableRateLimit)
-	ms = map[string]interface{}{
+	ms = map[string]any{
 		"enable-rate-limit":      "true",
 		"enable-grpc-rate-limit": "true",
 	}
@@ -408,18 +408,18 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	re.True(sc.GRPCRateLimitConfig.EnableRateLimit)
 
 	// test empty
-	ms = map[string]interface{}{}
+	ms = map[string]any{}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re), tu.StringContain(re, "The input is empty.")))
-	ms = map[string]interface{}{
+	ms = map[string]any{
 		"rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
-	ms = map[string]interface{}{
+	ms = map[string]any{
 		"rate-limit.enable-rate-limit":           "false",
 		"grpc-rate-limit.enable-grpc-rate-limit": "false",
 	}
@@ -427,7 +427,7 @@ func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	re.NoError(err)
 	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest)))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail"))
-	ms = map[string]interface{}{
+	ms = map[string]any{
 		"rate-limit.rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
@@ -440,10 +440,10 @@ func (suite *rateLimitConfigTestSuite) TestConfigLimiterConfigByOriginAPI() {
 	// this test case is used to test updating `limiter-config` by origin API simply
 	addr := fmt.Sprintf("%s/service-middleware/config", suite.urlPrefix)
 	dimensionConfig := ratelimit.DimensionConfig{QPS: 1}
-	limiterConfig := map[string]interface{}{
+	limiterConfig := map[string]any{
 		"CreateOperator": dimensionConfig,
 	}
-	ms := map[string]interface{}{
+	ms := map[string]any{
 		"limiter-config": limiterConfig,
 	}
 	postData, err := json.Marshal(ms)

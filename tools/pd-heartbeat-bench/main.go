@@ -16,13 +16,13 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -38,18 +38,25 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
+	"github.com/tikv/pd/client/grpcutil"
+	pdHttp "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"go.etcd.io/etcd/pkg/report"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 const (
-	bytesUnit            = 8 * units.MiB
-	keysUint             = 8 * units.KiB
-	queryUnit            = 1 * units.KiB
+	bytesUnit            = 128
+	keysUint             = 8
+	queryUnit            = 8
+	hotByteUnit          = 16 * units.KiB
+	hotKeysUint          = 256
+	hotQueryUnit         = 256
 	regionReportInterval = 60 // 60s
 	storeReportInterval  = 10 // 10s
 	capacity             = 4 * units.TiB
@@ -57,19 +64,16 @@ const (
 
 var clusterID uint64
 
-func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
-	return str
-}
-
-func newClient(cfg *config.Config) pdpb.PDClient {
-	addr := trimHTTPPrefix(cfg.PDAddr)
-	cc, err := grpc.Dial(addr, grpc.WithInsecure())
+func newClient(ctx context.Context, cfg *config.Config) (pdpb.PDClient, error) {
+	tlsConfig, err := cfg.Security.ToTLSConfig()
 	if err != nil {
-		log.Fatal("failed to create gRPC connection", zap.Error(err))
+		return nil, err
 	}
-	return pdpb.NewPDClient(cc)
+	cc, err := grpcutil.GetClientConn(ctx, cfg.PDAddr, tlsConfig)
+	if err != nil {
+		return nil, err
+	}
+	return pdpb.NewPDClient(cc), nil
 }
 
 func initClusterID(ctx context.Context, cli pdpb.PDClient) {
@@ -172,18 +176,6 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 	}
 }
 
-func newStartKey(id uint64, keyLen int) []byte {
-	k := make([]byte, keyLen)
-	copy(k, fmt.Sprintf("%010d", id))
-	return k
-}
-
-func newEndKey(id uint64, keyLen int) []byte {
-	k := newStartKey(id, keyLen)
-	k[len(k)-1]++
-	return k
-}
-
 // Regions simulates all regions to heartbeat.
 type Regions struct {
 	regions       []*pdpb.RegionHeartbeatRequest
@@ -197,7 +189,7 @@ type Regions struct {
 	updateFlow   []int
 }
 
-func (rs *Regions) init(cfg *config.Config, options *config.Options) []int {
+func (rs *Regions) init(cfg *config.Config, options *config.Options) {
 	rs.regions = make([]*pdpb.RegionHeartbeatRequest, 0, cfg.RegionCount)
 	rs.updateRound = 0
 
@@ -205,14 +197,13 @@ func (rs *Regions) init(cfg *config.Config, options *config.Options) []int {
 	id := uint64(1)
 	now := uint64(time.Now().Unix())
 
-	keyLen := cfg.KeyLength
 	for i := 0; i < cfg.RegionCount; i++ {
 		region := &pdpb.RegionHeartbeatRequest{
 			Header: header(),
 			Region: &metapb.Region{
 				Id:          id,
-				StartKey:    newStartKey(id, keyLen),
-				EndKey:      newEndKey(id, keyLen),
+				StartKey:    codec.GenerateTableKey(int64(i)),
+				EndKey:      codec.GenerateTableKey(int64(i + 1)),
 				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1},
 			},
 			ApproximateSize: bytesUnit,
@@ -242,75 +233,94 @@ func (rs *Regions) init(cfg *config.Config, options *config.Options) []int {
 		region.Leader = peers[0]
 		rs.regions = append(rs.regions, region)
 	}
+}
+
+func (rs *Regions) update(cfg *config.Config, options *config.Options) {
+	rs.updateRound += 1
 
 	// Generate sample index
 	indexes := make([]int, cfg.RegionCount)
 	for i := range indexes {
 		indexes[i] = i
 	}
+	reportRegions := pick(indexes, cfg.RegionCount, options.GetReportRatio())
 
-	return indexes
-}
-
-func (rs *Regions) update(cfg *config.Config, options *config.Options, indexes []int) {
-	rs.updateRound += 1
-
-	rs.updateLeader = pick(indexes, cfg, options.GetLeaderUpdateRatio())
-	rs.updateEpoch = pick(indexes, cfg, options.GetEpochUpdateRatio())
-	rs.updateSpace = pick(indexes, cfg, options.GetSpaceUpdateRatio())
-	rs.updateFlow = pick(indexes, cfg, options.GetFlowUpdateRatio())
-	updatedRegionsMap := make(map[int]*pdpb.RegionHeartbeatRequest)
-	var awakenRegions []*pdpb.RegionHeartbeatRequest
+	reportCount := len(reportRegions)
+	rs.updateFlow = pick(reportRegions, reportCount, options.GetFlowUpdateRatio())
+	rs.updateLeader = randomPick(reportRegions, reportCount, options.GetLeaderUpdateRatio())
+	rs.updateEpoch = randomPick(reportRegions, reportCount, options.GetEpochUpdateRatio())
+	rs.updateSpace = randomPick(reportRegions, reportCount, options.GetSpaceUpdateRatio())
+	var (
+		updatedStatisticsMap = make(map[int]*pdpb.RegionHeartbeatRequest)
+		awakenRegions        []*pdpb.RegionHeartbeatRequest
+	)
 
 	// update leader
 	for _, i := range rs.updateLeader {
 		region := rs.regions[i]
 		region.Leader = region.Region.Peers[rs.updateRound%cfg.Replica]
-		updatedRegionsMap[i] = region
 	}
 	// update epoch
 	for _, i := range rs.updateEpoch {
 		region := rs.regions[i]
 		region.Region.RegionEpoch.Version += 1
-		updatedRegionsMap[i] = region
 	}
 	// update space
 	for _, i := range rs.updateSpace {
 		region := rs.regions[i]
 		region.ApproximateSize = uint64(bytesUnit * rand.Float64())
 		region.ApproximateKeys = uint64(keysUint * rand.Float64())
-		updatedRegionsMap[i] = region
 	}
 	// update flow
 	for _, i := range rs.updateFlow {
 		region := rs.regions[i]
-		region.BytesWritten = uint64(bytesUnit * rand.Float64())
-		region.BytesRead = uint64(bytesUnit * rand.Float64())
-		region.KeysWritten = uint64(keysUint * rand.Float64())
-		region.KeysRead = uint64(keysUint * rand.Float64())
-		region.QueryStats = &pdpb.QueryStats{
-			Get: uint64(queryUnit * rand.Float64()),
-			Put: uint64(queryUnit * rand.Float64()),
+		if region.Leader.StoreId <= uint64(options.GetHotStoreCount()) {
+			region.BytesWritten = uint64(hotByteUnit * (1 + rand.Float64()) * 60)
+			region.BytesRead = uint64(hotByteUnit * (1 + rand.Float64()) * 10)
+			region.KeysWritten = uint64(hotKeysUint * (1 + rand.Float64()) * 60)
+			region.KeysRead = uint64(hotKeysUint * (1 + rand.Float64()) * 10)
+			region.QueryStats = &pdpb.QueryStats{
+				Get: uint64(hotQueryUnit * (1 + rand.Float64()) * 10),
+				Put: uint64(hotQueryUnit * (1 + rand.Float64()) * 60),
+			}
+		} else {
+			region.BytesWritten = uint64(bytesUnit * rand.Float64())
+			region.BytesRead = uint64(bytesUnit * rand.Float64())
+			region.KeysWritten = uint64(keysUint * rand.Float64())
+			region.KeysRead = uint64(keysUint * rand.Float64())
+			region.QueryStats = &pdpb.QueryStats{
+				Get: uint64(queryUnit * rand.Float64()),
+				Put: uint64(queryUnit * rand.Float64()),
+			}
 		}
-		updatedRegionsMap[i] = region
+		updatedStatisticsMap[i] = region
 	}
 	// update interval
 	for _, region := range rs.regions {
 		region.Interval.StartTimestamp = region.Interval.EndTimestamp
 		region.Interval.EndTimestamp = region.Interval.StartTimestamp + regionReportInterval
 	}
-	for _, region := range updatedRegionsMap {
+	for _, i := range reportRegions {
+		region := rs.regions[i]
+		// reset the statistics of the region which is not updated
+		if _, exist := updatedStatisticsMap[i]; !exist {
+			region.BytesWritten = 0
+			region.BytesRead = 0
+			region.KeysWritten = 0
+			region.KeysRead = 0
+			region.QueryStats = &pdpb.QueryStats{}
+		}
 		awakenRegions = append(awakenRegions, region)
 	}
-	noUpdatedRegions := pickNoUpdatedRegions(indexes, cfg, options.GetNoUpdateRatio(), updatedRegionsMap)
-	for _, i := range noUpdatedRegions {
-		awakenRegions = append(awakenRegions, rs.regions[i])
-	}
+
 	rs.awakenRegions.Store(awakenRegions)
 }
 
 func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClient, pdpb.PD_RegionHeartbeatClient) {
-	cli := newClient(cfg)
+	cli, err := newClient(ctx, cfg)
+	if err != nil {
+		log.Fatal("create client error", zap.Error(err))
+	}
 	stream, err := cli.RegionHeartbeat(ctx)
 	if err != nil {
 		log.Fatal("create stream error", zap.Error(err))
@@ -359,7 +369,7 @@ func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_Regi
 			return
 		}
 	}
-	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)))
+	log.Info("store finish one round region heartbeat", zap.Uint64("store-id", storeID), zap.Duration("cost-time", time.Since(start)), zap.Int("reported-region-count", len(regions)))
 }
 
 // Stores contains store stats with lock.
@@ -395,7 +405,14 @@ func (s *Stores) update(rs *Regions) {
 			},
 		}
 	}
-	for _, region := range rs.regions {
+	var toUpdate []*pdpb.RegionHeartbeatRequest
+	updatedRegions := rs.awakenRegions.Load()
+	if updatedRegions == nil {
+		toUpdate = rs.regions
+	} else {
+		toUpdate = updatedRegions.([]*pdpb.RegionHeartbeatRequest)
+	}
+	for _, region := range toUpdate {
 		for _, peer := range region.Region.Peers {
 			store := stats[peer.StoreId]
 			store.UsedSize += region.ApproximateSize
@@ -425,32 +442,20 @@ func (s *Stores) update(rs *Regions) {
 	}
 }
 
-func pick(slice []int, cfg *config.Config, ratio float64) []int {
-	rand.Shuffle(cfg.RegionCount, func(i, j int) {
+func randomPick(slice []int, total int, ratio float64) []int {
+	rand.Shuffle(total, func(i, j int) {
 		slice[i], slice[j] = slice[j], slice[i]
 	})
-	return append(slice[:0:0], slice[0:int(float64(cfg.RegionCount)*ratio)]...)
+	return append(slice[:0:0], slice[0:int(float64(total)*ratio)]...)
 }
 
-func pickNoUpdatedRegions(slice []int, cfg *config.Config, ratio float64, updatedMap map[int]*pdpb.RegionHeartbeatRequest) []int {
-	if ratio == 0 {
-		return nil
-	}
-	rand.Shuffle(cfg.RegionCount, func(i, j int) {
-		slice[i], slice[j] = slice[j], slice[i]
-	})
-	NoUpdatedRegionsNum := int(float64(cfg.RegionCount) * ratio)
-	res := make([]int, 0, NoUpdatedRegionsNum)
-	for i := 0; len(res) < NoUpdatedRegionsNum; i++ {
-		if _, ok := updatedMap[slice[i]]; !ok {
-			res = append(res, slice[i])
-		}
-	}
-	return res
+func pick(slice []int, total int, ratio float64) []int {
+	return append(slice[:0:0], slice[0:int(float64(total)*ratio)]...)
 }
 
 func main() {
 	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
+	statistics.Denoising = false
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])
 	defer logutil.LogPanic()
@@ -487,11 +492,15 @@ func main() {
 		sig = <-sc
 		cancel()
 	}()
-	cli := newClient(cfg)
+	cli, err := newClient(ctx, cfg)
+	if err != nil {
+		log.Fatal("create client error", zap.Error(err))
+	}
+
 	initClusterID(ctx, cli)
 	go runHTTPServer(cfg, options)
 	regions := new(Regions)
-	indexes := regions.init(cfg, options)
+	regions.init(cfg, options)
 	log.Info("finish init regions")
 	stores := newStores(cfg.StoreCount)
 	stores.update(regions)
@@ -499,6 +508,8 @@ func main() {
 	putStores(ctx, cfg, cli, stores)
 	log.Info("finish put stores")
 	clis := make(map[uint64]pdpb.PDClient, cfg.StoreCount)
+	httpCli := pdHttp.NewClient("tools-heartbeat-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
+	go deleteOperators(ctx, httpCli)
 	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
 	for i := 1; i <= cfg.StoreCount; i++ {
 		clis[uint64(i)], streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
@@ -540,7 +551,7 @@ func main() {
 				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
 			)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
-			regions.update(cfg, options, indexes)
+			regions.update(cfg, options)
 			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
 		case <-resolvedTSTicker.C:
 			wg := &sync.WaitGroup{}
@@ -576,6 +587,22 @@ func main() {
 
 func exit(code int) {
 	os.Exit(code)
+}
+
+func deleteOperators(ctx context.Context, httpCli pdHttp.Client) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			err := httpCli.DeleteOperators(ctx)
+			if err != nil {
+				log.Error("fail to delete operators", zap.Error(err))
+			}
+		}
+	}
 }
 
 func newReport(cfg *config.Config) report.Report {
@@ -626,11 +653,12 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 	pprof.Register(engine)
 	engine.PUT("config", func(c *gin.Context) {
 		newCfg := cfg.Clone()
+		newCfg.HotStoreCount = options.GetHotStoreCount()
 		newCfg.FlowUpdateRatio = options.GetFlowUpdateRatio()
 		newCfg.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
 		newCfg.EpochUpdateRatio = options.GetEpochUpdateRatio()
 		newCfg.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
-		newCfg.NoUpdateRatio = options.GetNoUpdateRatio()
+		newCfg.ReportRatio = options.GetReportRatio()
 		if err := c.BindJSON(&newCfg); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
@@ -644,13 +672,43 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 	})
 	engine.GET("config", func(c *gin.Context) {
 		output := cfg.Clone()
+		output.HotStoreCount = options.GetHotStoreCount()
 		output.FlowUpdateRatio = options.GetFlowUpdateRatio()
 		output.LeaderUpdateRatio = options.GetLeaderUpdateRatio()
 		output.EpochUpdateRatio = options.GetEpochUpdateRatio()
 		output.SpaceUpdateRatio = options.GetSpaceUpdateRatio()
-		output.NoUpdateRatio = options.GetNoUpdateRatio()
+		output.ReportRatio = options.GetReportRatio()
 
 		c.IndentedJSON(http.StatusOK, output)
 	})
 	engine.Run(cfg.StatusAddr)
+}
+
+func loadTLSConfig(cfg *config.Config) *tls.Config {
+	if len(cfg.Security.CAPath) == 0 {
+		return nil
+	}
+	caData, err := os.ReadFile(cfg.Security.CAPath)
+	if err != nil {
+		log.Error("fail to read ca file", zap.Error(err))
+	}
+	certData, err := os.ReadFile(cfg.Security.CertPath)
+	if err != nil {
+		log.Error("fail to read cert file", zap.Error(err))
+	}
+	keyData, err := os.ReadFile(cfg.Security.KeyPath)
+	if err != nil {
+		log.Error("fail to read key file", zap.Error(err))
+	}
+
+	tlsConf, err := tlsutil.TLSConfig{
+		SSLCABytes:   caData,
+		SSLCertBytes: certData,
+		SSLKEYBytes:  keyData,
+	}.ToTLSConfig()
+	if err != nil {
+		log.Fatal("failed to load tlc config", zap.Error(err))
+	}
+
+	return tlsConf
 }

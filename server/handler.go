@@ -495,7 +495,7 @@ func (h *Handler) GetAddr() string {
 
 // SetStoreLimitTTL set storeLimit with ttl
 func (h *Handler) SetStoreLimitTTL(data string, value float64, ttl time.Duration) error {
-	return h.s.SaveTTLConfig(map[string]interface{}{
+	return h.s.SaveTTLConfig(map[string]any{
 		data: value,
 	}, ttl)
 }
@@ -568,7 +568,7 @@ func (h *Handler) GetHistoryHotRegionIter(
 
 // RedirectSchedulerUpdate update scheduler config. Export this func to help handle damaged store.
 func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = name
 	input["store_id"] = storeID
 	updateURL, err := url.JoinPath(h.GetAddr(), "pd", SchedulerConfigHandlerPath, name, "config")
@@ -583,10 +583,10 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 }
 
 // AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
-func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
-	if exist, err := h.IsSchedulerExisted(name); !exist {
+func (h *Handler) AddEvictOrGrant(storeID float64, name string) (exist bool, err error) {
+	if exist, err = h.IsSchedulerExisted(name); !exist {
 		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-			return err
+			return exist, err
 		}
 		switch name {
 		case schedulers.EvictLeaderName:
@@ -595,13 +595,14 @@ func (h *Handler) AddEvictOrGrant(storeID float64, name string) error {
 			err = h.AddGrantLeaderScheduler(uint64(storeID))
 		}
 		if err != nil {
-			return err
+			return exist, err
 		}
 	} else {
 		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
-			return err
+			return exist, err
 		}
 		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+		return exist, nil
 	}
-	return nil
+	return exist, nil
 }

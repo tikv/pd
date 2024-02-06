@@ -12,6 +12,7 @@ linters:
     - gosec
     - bodyclose
     - testifylint
+    - gofmt
   disable:
     - errcheck
 linters-settings:
@@ -41,3 +42,10 @@ linters-settings:
       - require-error
       - suite-dont-use-pkg
       - suite-extra-assert-call
+  gofmt:
+    # https://golangci-lint.run/usage/linters/#gofmt
+    # disable for faster check
+    simplify: false
+    rewrite-rules:
+      - pattern: 'interface{}'
+        replacement: 'any'

@@ -55,7 +55,7 @@ func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ConfigProvider is used to get tso config from the given
 // `bs.server` without modifying its interface.
-type ConfigProvider interface{}
+type ConfigProvider any
 
 // Service is the TSO grpc service.
 type Service struct {

@@ -74,7 +74,7 @@ type balanceLeaderSchedulerConfig struct {
 	Batch int `json:"batch"`
 }
 
-func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{}) {
+func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -93,7 +93,7 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
 		return http.StatusOK, "Config is updated."
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}

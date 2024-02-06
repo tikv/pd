@@ -75,6 +75,7 @@ const (
 	resetBaseAllocIDName                    = "ResetBaseAllocID"
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
+	deleteOperators                         = "DeleteOperators"
 )
 
 type requestInfo struct {
@@ -83,7 +84,7 @@ type requestInfo struct {
 	uri         string
 	method      string
 	body        []byte
-	res         interface{}
+	res         any
 	respHandler respHandleFunc
 	bo          *retry.Backoffer
 }
@@ -124,7 +125,7 @@ func (ri *requestInfo) WithBody(body []byte) *requestInfo {
 }
 
 // WithResp sets the response struct of the request.
-func (ri *requestInfo) WithResp(res interface{}) *requestInfo {
+func (ri *requestInfo) WithResp(res any) *requestInfo {
 	ri.res = res
 	return ri
 }

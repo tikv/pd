@@ -104,7 +104,7 @@ func (m *Participant) Name() string {
 }
 
 // GetMember returns the member.
-func (m *Participant) GetMember() interface{} {
+func (m *Participant) GetMember() any {
 	return m.member
 }
 

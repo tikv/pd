@@ -240,7 +240,7 @@ func newEvictSlowTrendHandler(config *evictSlowTrendSchedulerConfig) http.Handle
 }
 
 func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}

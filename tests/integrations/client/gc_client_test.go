@@ -89,6 +89,7 @@ func (suite *gcClientTestSuite) TearDownSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/checkKeyspace"))
 	suite.cleanup()
+	suite.client.Close()
 }
 
 func (suite *gcClientTestSuite) TearDownTest() {

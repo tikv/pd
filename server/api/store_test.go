@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -116,7 +117,7 @@ func (suite *storeTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
-func checkStoresInfo(re *require.Assertions, ss []*StoreInfo, want []*metapb.Store) {
+func checkStoresInfo(re *require.Assertions, ss []*response.StoreInfo, want []*metapb.Store) {
 	re.Len(ss, len(want))
 	mapWant := make(map[uint64]*metapb.Store)
 	for _, s := range want {
@@ -135,32 +136,32 @@ func checkStoresInfo(re *require.Assertions, ss []*StoreInfo, want []*metapb.Sto
 
 func (suite *storeTestSuite) TestStoresList() {
 	url := fmt.Sprintf("%s/stores", suite.urlPrefix)
-	info := new(StoresInfo)
+	info := new(response.StoresInfo)
 	re := suite.Require()
 	err := tu.ReadGetJSON(re, testDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[:3])
 
 	url = fmt.Sprintf("%s/stores/check?state=up", suite.urlPrefix)
-	info = new(StoresInfo)
+	info = new(response.StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[:2])
 
 	url = fmt.Sprintf("%s/stores/check?state=offline", suite.urlPrefix)
-	info = new(StoresInfo)
+	info = new(response.StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[2:3])
 
 	url = fmt.Sprintf("%s/stores/check?state=tombstone", suite.urlPrefix)
-	info = new(StoresInfo)
+	info = new(response.StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[3:])
 
 	url = fmt.Sprintf("%s/stores/check?state=tombstone&state=offline", suite.urlPrefix)
-	info = new(StoresInfo)
+	info = new(response.StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, suite.stores[2:])
@@ -181,7 +182,7 @@ func (suite *storeTestSuite) TestStoresList() {
 	re.NoError(err)
 
 	url = fmt.Sprintf("%s/stores/check?state=down", suite.urlPrefix)
-	info = new(StoresInfo)
+	info = new(response.StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, []*metapb.Store{store})
@@ -195,7 +196,7 @@ func (suite *storeTestSuite) TestStoresList() {
 	re.NoError(err)
 
 	url = fmt.Sprintf("%s/stores/check?state=disconnected", suite.urlPrefix)
-	info = new(StoresInfo)
+	info = new(response.StoresInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, []*metapb.Store{store})
@@ -215,20 +216,20 @@ func (suite *storeTestSuite) TestStoreGet() {
 			},
 		},
 	)
-	info := new(StoreInfo)
+	info := new(response.StoreInfo)
 	err := tu.ReadGetJSON(re, testDialClient, url, info)
 	re.NoError(err)
 	capacity, _ := units.RAMInBytes("1.636TiB")
 	available, _ := units.RAMInBytes("1.555TiB")
 	re.Equal(capacity, int64(info.Status.Capacity))
 	re.Equal(available, int64(info.Status.Available))
-	checkStoresInfo(re, []*StoreInfo{info}, suite.stores[:1])
+	checkStoresInfo(re, []*response.StoreInfo{info}, suite.stores[:1])
 }
 
 func (suite *storeTestSuite) TestStoreLabel() {
 	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
 	re := suite.Require()
-	var info StoreInfo
+	var info response.StoreInfo
 	err := tu.ReadGetJSON(re, testDialClient, url, &info)
 	re.NoError(err)
 	re.Empty(info.Store.Labels)
@@ -325,7 +326,7 @@ func (suite *storeTestSuite) TestStoreDelete() {
 	}
 	// store 6 origin status:offline
 	url := fmt.Sprintf("%s/store/6", suite.urlPrefix)
-	store := new(StoreInfo)
+	store := new(response.StoreInfo)
 	err := tu.ReadGetJSON(re, testDialClient, url, store)
 	re.NoError(err)
 	re.False(store.Store.PhysicallyDestroyed)
@@ -337,7 +338,7 @@ func (suite *storeTestSuite) TestStoreDelete() {
 
 	status = suite.requestStatusBody(re, testDialClient, http.MethodGet, url)
 	re.Equal(http.StatusOK, status)
-	store = new(StoreInfo)
+	store = new(response.StoreInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, store)
 	re.NoError(err)
 	re.Equal(metapb.StoreState_Up, store.Store.State)
@@ -366,13 +367,13 @@ func (suite *storeTestSuite) TestStoreSetState() {
 		mustPutStore(re, suite.svr, uint64(id), metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	}
 	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
-	info := StoreInfo{}
+	info := response.StoreInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, &info)
 	re.NoError(err)
 	re.Equal(metapb.StoreState_Up, info.Store.State)
 
 	// Set to Offline.
-	info = StoreInfo{}
+	info = response.StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Offline", nil, tu.StatusOK(re))
 	re.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
@@ -380,14 +381,14 @@ func (suite *storeTestSuite) TestStoreSetState() {
 	re.Equal(metapb.StoreState_Offline, info.Store.State)
 
 	// store not found
-	info = StoreInfo{}
+	info = response.StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/store/10086/state?state=Offline", nil, tu.StatusNotOK(re))
 	re.NoError(err)
 
 	// Invalid state.
 	invalidStates := []string{"Foo", "Tombstone"}
 	for _, state := range invalidStates {
-		info = StoreInfo{}
+		info = response.StoreInfo{}
 		err = tu.CheckPostJSON(testDialClient, url+"/state?state="+state, nil, tu.StatusNotOK(re))
 		re.NoError(err)
 		err := tu.ReadGetJSON(re, testDialClient, url, &info)
@@ -396,7 +397,7 @@ func (suite *storeTestSuite) TestStoreSetState() {
 	}
 
 	// Set back to Up.
-	info = StoreInfo{}
+	info = response.StoreInfo{}
 	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Up", nil, tu.StatusOK(re))
 	re.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, url, &info)
@@ -458,16 +459,16 @@ func (suite *storeTestSuite) TestDownState() {
 		core.SetStoreStats(&pdpb.StoreStats{}),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	storeInfo := newStoreInfo(suite.svr.GetScheduleConfig(), store)
+	storeInfo := response.BuildStoreInfo(suite.svr.GetScheduleConfig(), store)
 	re.Equal(metapb.StoreState_Up.String(), storeInfo.Store.StateName)
 
 	newStore := store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Minute * 2)))
-	storeInfo = newStoreInfo(suite.svr.GetScheduleConfig(), newStore)
-	re.Equal(disconnectedName, storeInfo.Store.StateName)
+	storeInfo = response.BuildStoreInfo(suite.svr.GetScheduleConfig(), newStore)
+	re.Equal(response.DisconnectedName, storeInfo.Store.StateName)
 
 	newStore = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-time.Hour * 2)))
-	storeInfo = newStoreInfo(suite.svr.GetScheduleConfig(), newStore)
-	re.Equal(downStateName, storeInfo.Store.StateName)
+	storeInfo = response.BuildStoreInfo(suite.svr.GetScheduleConfig(), newStore)
+	re.Equal(response.DownStateName, storeInfo.Store.StateName)
 }
 
 func (suite *storeTestSuite) TestGetAllLimit() {
@@ -509,7 +510,7 @@ func (suite *storeTestSuite) TestGetAllLimit() {
 	re := suite.Require()
 	for _, testCase := range testCases {
 		suite.T().Logf(testCase.name)
-		info := make(map[uint64]interface{}, 4)
+		info := make(map[uint64]any, 4)
 		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
 		re.NoError(err)
 		re.Len(info, len(testCase.expectedStores))
@@ -524,7 +525,7 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 	re := suite.Require()
 	// add peer
 	url := fmt.Sprintf("%s/store/1/limit?ttlSecond=%v", suite.urlPrefix, 5)
-	data := map[string]interface{}{
+	data := map[string]any{
 		"type": "add-peer",
 		"rate": 999,
 	}
@@ -533,7 +534,7 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
 	re.NoError(err)
 	// remove peer
-	data = map[string]interface{}{
+	data = map[string]any{
 		"type": "remove-peer",
 		"rate": 998,
 	}
@@ -543,7 +544,7 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 	re.NoError(err)
 	// all store limit add peer
 	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", suite.urlPrefix, 3)
-	data = map[string]interface{}{
+	data = map[string]any{
 		"type": "add-peer",
 		"rate": 997,
 	}
@@ -552,7 +553,7 @@ func (suite *storeTestSuite) TestStoreLimitTTL() {
 	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
 	re.NoError(err)
 	// all store limit remove peer
-	data = map[string]interface{}{
+	data = map[string]any{
 		"type": "remove-peer",
 		"rate": 996,
 	}

@@ -35,6 +35,7 @@ func TestMember(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 3)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
@@ -87,14 +88,14 @@ func TestMember(t *testing.T) {
 	// member delete name <member_name>
 	err = svr.Destroy()
 	re.NoError(err)
-	members, err := etcdutil.ListEtcdMembers(client)
+	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 3)
 	args = []string{"-u", pdAddr, "member", "delete", "name", name}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		members, err = etcdutil.ListEtcdMembers(client)
+		members, err = etcdutil.ListEtcdMembers(ctx, client)
 		re.NoError(err)
 		return len(members.Members) == 2
 	})
@@ -104,7 +105,7 @@ func TestMember(t *testing.T) {
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		members, err = etcdutil.ListEtcdMembers(client)
+		members, err = etcdutil.ListEtcdMembers(ctx, client)
 		re.NoError(err)
 		return len(members.Members) == 2
 	})

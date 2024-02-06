@@ -50,14 +50,14 @@ type Client interface {
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	SetStoreLabels(context.Context, int64, map[string]string) error
 	/* Config-related interfaces */
-	GetConfig(context.Context) (map[string]interface{}, error)
-	SetConfig(context.Context, map[string]interface{}, ...float64) error
-	GetScheduleConfig(context.Context) (map[string]interface{}, error)
-	SetScheduleConfig(context.Context, map[string]interface{}) error
+	GetConfig(context.Context) (map[string]any, error)
+	SetConfig(context.Context, map[string]any, ...float64) error
+	GetScheduleConfig(context.Context) (map[string]any, error)
+	SetScheduleConfig(context.Context, map[string]any) error
 	GetClusterVersion(context.Context) (string, error)
 	GetCluster(context.Context) (*metapb.Cluster, error)
 	GetClusterStatus(context.Context) (*ClusterState, error)
-	GetReplicateConfig(context.Context) (map[string]interface{}, error)
+	GetReplicateConfig(context.Context) (map[string]any, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
@@ -92,6 +92,7 @@ type Client interface {
 	GetPDVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]string, error)
+	DeleteOperators(context.Context) error
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -100,7 +101,7 @@ type Client interface {
 	// This allows the caller to customize how the response is handled, including error handling logic.
 	// Additionally, it is important for the caller to handle the content of the response body properly
 	// in order to ensure that it can be read and marshaled correctly into `res`.
-	WithRespHandler(func(resp *http.Response, res interface{}) error) Client
+	WithRespHandler(func(resp *http.Response, res any) error) Client
 	// WithBackoffer sets and returns a new client with the given backoffer.
 	WithBackoffer(*retry.Backoffer) Client
 	// Close gracefully closes the HTTP client.
@@ -323,8 +324,8 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 }
 
 // GetConfig gets the configurations.
-func (c *client) GetConfig(ctx context.Context) (map[string]interface{}, error) {
-	var config map[string]interface{}
+func (c *client) GetConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getConfigName).
 		WithURI(Config).
@@ -337,7 +338,7 @@ func (c *client) GetConfig(ctx context.Context) (map[string]interface{}, error) 
 }
 
 // SetConfig sets the configurations. ttlSecond is optional.
-func (c *client) SetConfig(ctx context.Context, config map[string]interface{}, ttlSecond ...float64) error {
+func (c *client) SetConfig(ctx context.Context, config map[string]any, ttlSecond ...float64) error {
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return errors.Trace(err)
@@ -356,8 +357,8 @@ func (c *client) SetConfig(ctx context.Context, config map[string]interface{}, t
 }
 
 // GetScheduleConfig gets the schedule configurations.
-func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{}, error) {
-	var config map[string]interface{}
+func (c *client) GetScheduleConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getScheduleConfigName).
 		WithURI(ScheduleConfig).
@@ -370,7 +371,7 @@ func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{},
 }
 
 // SetScheduleConfig sets the schedule configurations.
-func (c *client) SetScheduleConfig(ctx context.Context, config map[string]interface{}) error {
+func (c *client) SetScheduleConfig(ctx context.Context, config map[string]any) error {
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return errors.Trace(err)
@@ -453,8 +454,8 @@ func (c *client) GetClusterStatus(ctx context.Context) (*ClusterState, error) {
 }
 
 // GetReplicateConfig gets the replication configurations.
-func (c *client) GetReplicateConfig(ctx context.Context) (map[string]interface{}, error) {
-	var config map[string]interface{}
+func (c *client) GetReplicateConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getReplicateConfigName).
 		WithURI(ReplicateConfig).
@@ -694,7 +695,7 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 
 // CreateScheduler creates a scheduler to PD cluster.
 func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
-	inputJSON, err := json.Marshal(map[string]interface{}{
+	inputJSON, err := json.Marshal(map[string]any{
 		"name":     name,
 		"store_id": storeID,
 	})
@@ -878,4 +879,12 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 		WithMethod(http.MethodGet).
 		WithResp(&ver))
 	return ver.Version, err
+}
+
+// DeleteOperators deletes the running operators.
+func (c *client) DeleteOperators(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteOperators).
+		WithURI(operators).
+		WithMethod(http.MethodDelete))
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -35,6 +36,7 @@ func TestRegionKeyFormat(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
@@ -61,6 +63,7 @@ func TestRegion(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
@@ -168,7 +171,7 @@ func TestRegion(t *testing.T) {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		regions := &api.RegionsInfo{}
+		regions := &response.RegionsInfo{}
 		re.NoError(json.Unmarshal(output, regions))
 		tests.CheckRegionsInfo(re, regions, testCase.expect)
 	}
@@ -191,7 +194,7 @@ func TestRegion(t *testing.T) {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		region := &api.RegionInfo{}
+		region := &response.RegionInfo{}
 		re.NoError(json.Unmarshal(output, region))
 		tests.CheckRegionInfo(re, region, testCase.expect)
 	}
@@ -215,6 +218,7 @@ func TestRegionNoLeader(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()

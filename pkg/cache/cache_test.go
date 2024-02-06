@@ -238,7 +238,7 @@ func TestFifoFromLastSameElems(t *testing.T) {
 	cache.Put(1, &testStruct{value: "3"})
 	fun := func() []*Item {
 		return cache.FromLastSameElems(
-			func(i interface{}) (bool, string) {
+			func(i any) (bool, string) {
 				result, ok := i.(*testStruct)
 				if result == nil {
 					return ok, ""

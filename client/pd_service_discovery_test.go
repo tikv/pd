@@ -158,6 +158,8 @@ func (suite *serviceClientTestSuite) TearDownTest() {
 func (suite *serviceClientTestSuite) TearDownSuite() {
 	suite.leaderServer.grpcServer.GracefulStop()
 	suite.followerServer.grpcServer.GracefulStop()
+	suite.leaderClient.GetClientConn().Close()
+	suite.followerClient.GetClientConn().Close()
 	suite.clean()
 }
 

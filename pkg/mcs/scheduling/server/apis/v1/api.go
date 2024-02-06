@@ -22,17 +22,17 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/response"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -51,7 +51,6 @@ const APIPathPrefix = "/scheduling/api/v1"
 const handlerKey = "handler"
 
 var (
-	once            sync.Once
 	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "scheduling",
 		Version:    "v1",
@@ -92,11 +91,6 @@ func createIndentRender() *render.Render {
 
 // NewService returns a new Service.
 func NewService(srv *scheserver.Service) *Service {
-	once.Do(func() {
-		// These global modification will be effective only for the first invoke.
-		_ = godotenv.Load()
-		gin.SetMode(gin.ReleaseMode)
-	})
 	apiHandlerEngine := gin.New()
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.Default())
@@ -124,6 +118,7 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterCheckersRouter()
 	s.RegisterHotspotRouter()
 	s.RegisterRegionsRouter()
+	s.RegisterStoresRouter()
 	return s
 }
 
@@ -169,14 +164,25 @@ func (s *Service) RegisterOperatorsRouter() {
 	router := s.root.Group("operators")
 	router.GET("", getOperators)
 	router.POST("", createOperator)
+	router.DELETE("", deleteOperators)
 	router.GET("/:id", getOperatorByRegion)
 	router.DELETE("/:id", deleteOperatorByRegion)
 	router.GET("/records", getOperatorRecords)
 }
 
+// RegisterStoresRouter registers the router of the stores handler.
+func (s *Service) RegisterStoresRouter() {
+	router := s.root.Group("stores")
+	router.GET("", getAllStores)
+	router.GET("/:id", getStoreByID)
+}
+
 // RegisterRegionsRouter registers the router of the regions handler.
 func (s *Service) RegisterRegionsRouter() {
 	router := s.root.Group("regions")
+	router.GET("", getAllRegions)
+	router.GET("/:id", getRegionByID)
+	router.GET("/count", getRegionCount)
 	router.POST("/accelerate-schedule", accelerateRegionsScheduleInRange)
 	router.POST("/accelerate-schedule/batch", accelerateRegionsScheduleInRanges)
 	router.POST("/scatter", scatterRegions)
@@ -302,7 +308,7 @@ func deleteRegionCacheByID(c *gin.Context) {
 // @Success  200  {object}  operator.OpWithStatus
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators/{id} [GET]
+// @Router   /operators/{id} [get]
 func getOperatorByRegion(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 	id := c.Param("id")
@@ -329,7 +335,7 @@ func getOperatorByRegion(c *gin.Context) {
 // @Produce  json
 // @Success  200  {array}   operator.Operator
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /operators [GET]
+// @Router   /operators [get]
 func getOperators(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 	var (
@@ -358,6 +364,22 @@ func getOperators(c *gin.Context) {
 	} else {
 		c.IndentedJSON(http.StatusOK, results)
 	}
+}
+
+// @Tags     operators
+// @Summary  Delete operators.
+// @Produce  json
+// @Success  200  {string}  string  "All pending operator are canceled."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /operators [delete]
+func deleteOperators(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	if err := handler.RemoveOperators(); err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.String(http.StatusOK, "All pending operator are canceled.")
 }
 
 // @Tags     operator
@@ -421,7 +443,7 @@ func getOperatorRecords(c *gin.Context) {
 // @Router   /operators [post]
 func createOperator(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
-	var input map[string]interface{}
+	var input map[string]any
 	if err := c.BindJSON(&input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
@@ -517,7 +539,7 @@ func getSchedulers(c *gin.Context) {
 // @Tags     schedulers
 // @Summary  List all scheduler configs.
 // @Produce  json
-// @Success  200  {object}  map[string]interface{}
+// @Success  200  {object}  map[string]any
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers/config/ [get]
 func getSchedulerConfig(c *gin.Context) {
@@ -538,7 +560,7 @@ func getSchedulerConfig(c *gin.Context) {
 // @Tags     schedulers
 // @Summary  List scheduler config by name.
 // @Produce  json
-// @Success  200  {object}  map[string]interface{}
+// @Success  200  {object}  map[string]any
 // @Failure  404  {string}  string  scheduler not found
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers/config/{name}/list [get]
@@ -1158,7 +1180,7 @@ func getRegionLabelRuleByID(c *gin.Context) {
 func accelerateRegionsScheduleInRange(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 
-	var input map[string]interface{}
+	var input map[string]any
 	if err := c.BindJSON(&input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
@@ -1198,7 +1220,7 @@ func accelerateRegionsScheduleInRange(c *gin.Context) {
 func accelerateRegionsScheduleInRanges(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 
-	var input []map[string]interface{}
+	var input []map[string]any
 	if err := c.BindJSON(&input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
@@ -1249,7 +1271,7 @@ func accelerateRegionsScheduleInRanges(c *gin.Context) {
 func scatterRegions(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 
-	var input map[string]interface{}
+	var input map[string]any
 	if err := c.BindJSON(&input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
@@ -1292,7 +1314,7 @@ func scatterRegions(c *gin.Context) {
 func splitRegions(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 
-	var input map[string]interface{}
+	var input map[string]any
 	if err := c.BindJSON(&input); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
@@ -1302,7 +1324,7 @@ func splitRegions(c *gin.Context) {
 		c.String(http.StatusBadRequest, "split_keys should be provided.")
 		return
 	}
-	rawSplitKeys := s.([]interface{})
+	rawSplitKeys := s.([]any)
 	if len(rawSplitKeys) < 1 {
 		c.String(http.StatusBadRequest, "empty split keys.")
 		return
@@ -1342,4 +1364,116 @@ func checkRegionsReplicated(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, state)
+}
+
+// @Tags        store
+// @Summary     Get a store's information.
+// @Param       id path integer true "Store Id"
+// @Produce     json
+// @Success     200 {object} response.StoreInfo
+// @Failure     400 {string} string "The input is invalid."
+// @Failure     404 {string} string "The store does not exist."
+// @Failure     500 {string} string "PD server failed to proceed the request."
+// @Router      /stores/{id} [get]
+func getStoreByID(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	idStr := c.Param("id")
+	storeID, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	store := svr.GetBasicCluster().GetStore(storeID)
+	if store == nil {
+		c.String(http.StatusNotFound, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
+		return
+	}
+
+	storeInfo := response.BuildStoreInfo(&svr.GetConfig().Schedule, store)
+	c.IndentedJSON(http.StatusOK, storeInfo)
+}
+
+// @Tags        store
+// @Summary     Get all stores in the cluster.
+// @Produce     json
+// @Success     200 {object} response.StoresInfo
+// @Failure     500 {string} string "PD server failed to proceed the request."
+// @Router      /stores [get]
+func getAllStores(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	stores := svr.GetBasicCluster().GetMetaStores()
+	StoresInfo := &response.StoresInfo{
+		Stores: make([]*response.StoreInfo, 0, len(stores)),
+	}
+
+	for _, s := range stores {
+		storeID := s.GetId()
+		store := svr.GetBasicCluster().GetStore(storeID)
+		if store == nil {
+			c.String(http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
+			return
+		}
+		if store.GetMeta().State == metapb.StoreState_Tombstone {
+			continue
+		}
+		storeInfo := response.BuildStoreInfo(&svr.GetConfig().Schedule, store)
+		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
+	}
+	StoresInfo.Count = len(StoresInfo.Stores)
+	c.IndentedJSON(http.StatusOK, StoresInfo)
+}
+
+// @Tags     region
+// @Summary  List all regions in the cluster.
+// @Produce  json
+// @Success  200  {object}  response.RegionsInfo
+// @Router   /regions [get]
+func getAllRegions(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	regions := svr.GetBasicCluster().GetRegions()
+	b, err := response.MarshalRegionsInfoJSON(c.Request.Context(), regions)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.Data(http.StatusOK, "application/json", b)
+}
+
+// @Tags     region
+// @Summary  Get count of regions.
+// @Produce  json
+// @Success  200  {object}  response.RegionsInfo
+// @Router   /regions/count [get]
+func getRegionCount(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	count := svr.GetBasicCluster().GetTotalRegionCount()
+	c.IndentedJSON(http.StatusOK, &response.RegionsInfo{Count: count})
+}
+
+// @Tags     region
+// @Summary  Search for a region by region ID.
+// @Param    id  path  integer  true  "Region Id"
+// @Produce  json
+// @Success  200  {object}  response.RegionInfo
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/{id} [get]
+func getRegionByID(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	idStr := c.Param("id")
+	regionID, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	regionInfo := svr.GetBasicCluster().GetRegion(regionID)
+	if regionInfo == nil {
+		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())
+		return
+	}
+	b, err := response.MarshalRegionInfoJSON(c.Request.Context(), regionInfo)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.Data(http.StatusOK, "application/json", b)
 }

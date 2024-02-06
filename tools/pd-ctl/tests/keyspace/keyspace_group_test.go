@@ -41,6 +41,7 @@ func TestKeyspaceGroup(t *testing.T) {
 	defer cancel()
 	tc, err := pdTests.NewTestAPICluster(ctx, 1)
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
@@ -103,6 +104,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -157,6 +159,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -196,6 +199,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -299,6 +303,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -417,6 +422,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -507,6 +513,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -594,6 +601,7 @@ func TestInPDMode(t *testing.T) {
 	defer cancel()
 	tc, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()

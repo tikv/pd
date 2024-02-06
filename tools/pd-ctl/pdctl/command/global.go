@@ -16,6 +16,7 @@ package command
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -24,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -32,28 +34,10 @@ import (
 
 const (
 	pdControlCallerID = "pd-ctl"
-	pingPrefix        = "pd/api/v1/ping"
+	clusterPrefix     = "pd/api/v1/cluster"
 )
 
-// PDCli is a pd HTTP client
-var PDCli pd.Client
-
-// SetNewPDClient creates a PD HTTP client with the given PD addresses and options.
-func SetNewPDClient(addrs []string, opts ...pd.ClientOption) {
-	if PDCli != nil {
-		PDCli.Close()
-	}
-	withOpts := append(opts, pd.WithLoggerRedirection("fatal", ""))
-	PDCli = pd.NewClient(pdControlCallerID, addrs, withOpts...)
-}
-
-// TODO: replace dialClient with PDCli
-var dialClient = &http.Client{
-	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, pdControlCallerID),
-}
-
-// InitHTTPSClient creates https client with ca file
-func InitHTTPSClient(pdAddrs, caPath, certPath, keyPath string) error {
+func initTLSConfig(caPath, certPath, keyPath string) (*tls.Config, error) {
 	tlsInfo := transport.TLSInfo{
 		CertFile:      certPath,
 		KeyFile:       keyPath,
@@ -61,16 +45,116 @@ func InitHTTPSClient(pdAddrs, caPath, certPath, keyPath string) error {
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return errors.WithStack(err)
+		return nil, errors.WithStack(err)
 	}
+	return tlsConfig, nil
+}
 
+// PDCli is a pd HTTP client
+var PDCli pd.Client
+
+func requirePDClient(cmd *cobra.Command, _ []string) error {
+	var (
+		caPath string
+		err    error
+	)
+	caPath, err = cmd.Flags().GetString("cacert")
+	if err == nil && len(caPath) != 0 {
+		var certPath, keyPath string
+		certPath, err = cmd.Flags().GetString("cert")
+		if err != nil {
+			return err
+		}
+		keyPath, err = cmd.Flags().GetString("key")
+		if err != nil {
+			return err
+		}
+		return initNewPDClientWithTLS(cmd, caPath, certPath, keyPath)
+	}
+	return initNewPDClient(cmd)
+}
+
+// shouldInitPDClient checks whether we should create a new PD client according to the cluster information.
+func shouldInitPDClient(cmd *cobra.Command) (bool, error) {
+	// Get the cluster information the current command assigned to.
+	newClusterInfoJSON, err := doRequest(cmd, clusterPrefix, http.MethodGet, http.Header{})
+	if err != nil {
+		return false, err
+	}
+	newClusterInfo := &metapb.Cluster{}
+	err = json.Unmarshal([]byte(newClusterInfoJSON), newClusterInfo)
+	if err != nil {
+		return false, err
+	}
+	// If the PD client is nil and we get the cluster information successfully,
+	// we should initialize the PD client directly.
+	if PDCli == nil {
+		return true, nil
+	}
+	// Get current cluster information that the PD client connects to.
+	currentClusterInfo, err := PDCli.GetCluster(cmd.Context())
+	if err != nil {
+		return true, nil
+	}
+	// Compare the cluster ID to determine whether we should re-initialize the PD client.
+	return currentClusterInfo.GetId() == 0 || newClusterInfo.GetId() != currentClusterInfo.GetId(), nil
+}
+
+func initNewPDClient(cmd *cobra.Command, opts ...pd.ClientOption) error {
+	if should, err := shouldInitPDClient(cmd); !should || err != nil {
+		return err
+	}
+	if PDCli != nil {
+		PDCli.Close()
+	}
+	PDCli = pd.NewClient(pdControlCallerID, getEndpoints(cmd), opts...)
+	return nil
+}
+
+func initNewPDClientWithTLS(cmd *cobra.Command, caPath, certPath, keyPath string) error {
+	tlsConfig, err := initTLSConfig(caPath, certPath, keyPath)
+	if err != nil {
+		return err
+	}
+	initNewPDClient(cmd, pd.WithTLSConfig(tlsConfig))
+	return nil
+}
+
+// TODO: replace dialClient with the PD HTTP client completely.
+var dialClient = &http.Client{
+	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, pdControlCallerID),
+}
+
+// RequireHTTPSClient creates a HTTPS client if the related flags are set
+func RequireHTTPSClient(cmd *cobra.Command, args []string) error {
+	caPath, err := cmd.Flags().GetString("cacert")
+	if err == nil && len(caPath) != 0 {
+		certPath, err := cmd.Flags().GetString("cert")
+		if err != nil {
+			return err
+		}
+		keyPath, err := cmd.Flags().GetString("key")
+		if err != nil {
+			return err
+		}
+		err = initHTTPSClient(caPath, certPath, keyPath)
+		if err != nil {
+			cmd.Println(err)
+			return err
+		}
+	}
+	return nil
+}
+
+func initHTTPSClient(caPath, certPath, keyPath string) error {
+	tlsConfig, err := initTLSConfig(caPath, certPath, keyPath)
+	if err != nil {
+		return err
+	}
 	dialClient = &http.Client{
 		Transport: apiutil.NewCallerIDRoundTripper(
 			&http.Transport{TLSClientConfig: tlsConfig}, pdControlCallerID),
 	}
-
-	SetNewPDClient(strings.Split(pdAddrs, ","), pd.WithTLSConfig(tlsConfig))
-
 	return nil
 }
 
@@ -187,7 +271,7 @@ func getEndpoints(cmd *cobra.Command) []string {
 	return strings.Split(addrs, ",")
 }
 
-func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]interface{}) {
+func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]any) {
 	data, err := json.Marshal(input)
 	if err != nil {
 		cmd.Println(err)
@@ -232,11 +316,11 @@ func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]int
 	cmd.Printf("Success! %s\n", strings.Trim(string(msg), "\""))
 }
 
-func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+func postJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 	requestJSON(cmd, http.MethodPost, prefix, input)
 }
 
-func patchJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+func patchJSON(cmd *cobra.Command, prefix string, input map[string]any) {
 	requestJSON(cmd, http.MethodPatch, prefix, input)
 }
 

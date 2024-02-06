@@ -92,7 +92,9 @@ ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
 endif
 PD_SERVER_DEP += dashboard-ui
 
-pd-server: ${PD_SERVER_DEP}
+pre-build: ${PD_SERVER_DEP}
+
+pd-server: pre-build
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-failpoint:
@@ -103,7 +105,7 @@ pd-server-failpoint:
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
-.PHONY: build tools pd-server pd-server-basic
+.PHONY: pre-build build tools pd-server pd-server-basic
 
 # Tools
 
@@ -172,9 +174,9 @@ install-tools:
 
 #### Static checks ####
 
-check: install-tools tidy static generate-errdoc
+check: tidy static generate-errdoc
 
-static: install-tools
+static: install-tools pre-build
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
@@ -183,6 +185,11 @@ static: install-tools
 	@ revive -formatter friendly -config revive.toml $(PACKAGES)
 
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
+
+# Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
+fmt:
+	@ echo "gofmt ..."
+	@ gofmt -s -l -w -r 'interface{} -> any' -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 
 tidy:
 	@ go mod tidy
@@ -240,7 +247,7 @@ basic-test: install-tools
 
 ci-test-job: install-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
-	./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)
+	./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso

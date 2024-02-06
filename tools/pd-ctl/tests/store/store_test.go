@@ -17,6 +17,10 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,11 +28,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/statistics/utils"
-	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
+	"go.etcd.io/etcd/pkg/transport"
 )
 
 func TestStore(t *testing.T) {
@@ -37,15 +44,16 @@ func TestStore(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*api.StoreInfo{
+	stores := []*response.StoreInfo{
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            1,
 					State:         metapb.StoreState_Up,
@@ -56,7 +64,7 @@ func TestStore(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            3,
 					State:         metapb.StoreState_Up,
@@ -67,7 +75,7 @@ func TestStore(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            2,
 					State:         metapb.StoreState_Tombstone,
@@ -91,7 +99,7 @@ func TestStore(t *testing.T) {
 	args := []string{"-u", pdAddr, "store"}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storesInfo := new(api.StoresInfo)
+	storesInfo := new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
 	tests.CheckStoresInfo(re, storesInfo.Stores, stores[:2])
@@ -101,7 +109,7 @@ func TestStore(t *testing.T) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.NotContains(string(output), "\"state\":")
-	storesInfo = new(api.StoresInfo)
+	storesInfo = new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
 	tests.CheckStoresInfo(re, storesInfo.Stores, stores)
@@ -110,10 +118,10 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo := new(api.StoreInfo)
+	storeInfo := new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
-	tests.CheckStoresInfo(re, []*api.StoreInfo{storeInfo}, stores[:1])
+	tests.CheckStoresInfo(re, []*response.StoreInfo{storeInfo}, stores[:1])
 	re.Nil(storeInfo.Store.Labels)
 
 	// store <store_id> label command
@@ -162,7 +170,7 @@ func TestStore(t *testing.T) {
 				args = testcase.newArgs
 			}
 			cmd := ctl.GetRootCmd()
-			storeInfo := new(api.StoreInfo)
+			storeInfo := new(response.StoreInfo)
 			_, err = tests.ExecuteCommand(cmd, args...)
 			re.NoError(err)
 			args = []string{"-u", pdAddr, "store", "1"}
@@ -267,7 +275,7 @@ func TestStore(t *testing.T) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 
-	allAddPeerLimit := make(map[string]map[string]interface{})
+	allAddPeerLimit := make(map[string]map[string]any)
 	json.Unmarshal(output, &allAddPeerLimit)
 	re.Equal(float64(20), allAddPeerLimit["1"]["add-peer"].(float64))
 	re.Equal(float64(20), allAddPeerLimit["3"]["add-peer"].(float64))
@@ -278,7 +286,7 @@ func TestStore(t *testing.T) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 
-	allRemovePeerLimit := make(map[string]map[string]interface{})
+	allRemovePeerLimit := make(map[string]map[string]any)
 	json.Unmarshal(output, &allRemovePeerLimit)
 	re.Equal(float64(20), allRemovePeerLimit["1"]["remove-peer"].(float64))
 	re.Equal(float64(25), allRemovePeerLimit["3"]["remove-peer"].(float64))
@@ -305,7 +313,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo = new(api.StoreInfo)
+	storeInfo = new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
@@ -359,7 +367,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo = new(api.StoreInfo)
+	storeInfo = new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	re.Equal(metapb.StoreState_Up, storeInfo.Store.State)
@@ -375,7 +383,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "3"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo = new(api.StoreInfo)
+	storeInfo = new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
@@ -391,7 +399,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "3"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storeInfo = new(api.StoreInfo)
+	storeInfo = new(response.StoreInfo)
 	re.NoError(json.Unmarshal(output, &storeInfo))
 
 	re.Equal(metapb.StoreState_Up, storeInfo.Store.State)
@@ -402,7 +410,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "check", "Tombstone"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storesInfo = new(api.StoresInfo)
+	storesInfo = new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
 	re.Equal(1, storesInfo.Count)
@@ -412,7 +420,7 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "check", "Tombstone"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	storesInfo = new(api.StoresInfo)
+	storesInfo = new(response.StoresInfo)
 	re.NoError(json.Unmarshal(output, &storesInfo))
 
 	re.Equal(0, storesInfo.Count)
@@ -485,15 +493,16 @@ func TestTombstoneStore(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
-	stores := []*api.StoreInfo{
+	stores := []*response.StoreInfo{
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            2,
 					State:         metapb.StoreState_Tombstone,
@@ -504,7 +513,7 @@ func TestTombstoneStore(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            3,
 					State:         metapb.StoreState_Tombstone,
@@ -515,7 +524,7 @@ func TestTombstoneStore(t *testing.T) {
 			},
 		},
 		{
-			Store: &api.MetaStore{
+			Store: &response.MetaStore{
 				Store: &metapb.Store{
 					Id:            4,
 					State:         metapb.StoreState_Tombstone,
@@ -543,4 +552,97 @@ func TestTombstoneStore(t *testing.T) {
 	message := string(output)
 	re.Contains(message, "2")
 	re.Contains(message, "3")
+}
+
+func TestStoreTLS(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	certPath := "../cert"
+	certScript := "../cert_opt.sh"
+	// generate certs
+	if err := os.Mkdir(certPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.RemoveAll(certPath); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	tlsInfo := transport.TLSInfo{
+		KeyFile:       filepath.Join(certPath, "pd-server-key.pem"),
+		CertFile:      filepath.Join(certPath, "pd-server.pem"),
+		TrustedCAFile: filepath.Join(certPath, "ca.pem"),
+	}
+	cluster, err := pdTests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+		conf.Security.TLSConfig = grpcutil.TLSConfig{
+			KeyPath:  tlsInfo.KeyFile,
+			CertPath: tlsInfo.CertFile,
+			CAPath:   tlsInfo.TrustedCAFile,
+		}
+		conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
+		conf.ClientUrls = strings.ReplaceAll(conf.ClientUrls, "http", "https")
+		conf.AdvertisePeerUrls = strings.ReplaceAll(conf.AdvertisePeerUrls, "http", "https")
+		conf.PeerUrls = strings.ReplaceAll(conf.PeerUrls, "http", "https")
+		conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
+	})
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	cmd := ctl.GetRootCmd()
+
+	stores := []*response.StoreInfo{
+		{
+			Store: &response.MetaStore{
+				Store: &metapb.Store{
+					Id:            1,
+					State:         metapb.StoreState_Up,
+					NodeState:     metapb.NodeState_Serving,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Up.String(),
+			},
+		},
+		{
+			Store: &response.MetaStore{
+				Store: &metapb.Store{
+					Id:            2,
+					State:         metapb.StoreState_Up,
+					NodeState:     metapb.NodeState_Serving,
+					LastHeartbeat: time.Now().UnixNano(),
+				},
+				StateName: metapb.StoreState_Up.String(),
+			},
+		},
+	}
+
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+
+	for _, store := range stores {
+		pdTests.MustPutStore(re, cluster, store.Store.Store)
+	}
+	defer cluster.Destroy()
+
+	pdAddr := cluster.GetConfig().GetClientURL()
+	pdAddr = strings.ReplaceAll(pdAddr, "http", "https")
+	// store command
+	args := []string{"-u", pdAddr, "store",
+		"--cacert=../cert/ca.pem",
+		"--cert=../cert/client.pem",
+		"--key=../cert/client-key.pem"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	storesInfo := new(response.StoresInfo)
+	re.NoError(json.Unmarshal(output, &storesInfo))
+	tests.CheckStoresInfo(re, storesInfo.Stores, stores)
 }

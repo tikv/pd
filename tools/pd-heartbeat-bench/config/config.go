@@ -1,7 +1,6 @@
 package config
 
 import (
-	"math"
 	"sync/atomic"
 
 	"github.com/BurntSushi/toml"
@@ -15,13 +14,13 @@ import (
 const (
 	defaultStoreCount        = 50
 	defaultRegionCount       = 1000000
-	defaultKeyLength         = 56
+	defaultHotStoreCount     = 0
 	defaultReplica           = 3
 	defaultLeaderUpdateRatio = 0.06
-	defaultEpochUpdateRatio  = 0.04
-	defaultSpaceUpdateRatio  = 0.15
-	defaultFlowUpdateRatio   = 0.35
-	defaultNoUpdateRatio     = 0
+	defaultEpochUpdateRatio  = 0.0
+	defaultSpaceUpdateRatio  = 0.0
+	defaultFlowUpdateRatio   = 0.0
+	defaultReportRatio       = 1
 	defaultRound             = 0
 	defaultSample            = false
 
@@ -39,15 +38,17 @@ type Config struct {
 	Logger   *zap.Logger
 	LogProps *log.ZapProperties
 
+	Security configutil.SecurityConfig `toml:"security" json:"security"`
+
 	StoreCount        int     `toml:"store-count" json:"store-count"`
+	HotStoreCount     int     `toml:"hot-store-count" json:"hot-store-count"`
 	RegionCount       int     `toml:"region-count" json:"region-count"`
-	KeyLength         int     `toml:"key-length" json:"key-length"`
 	Replica           int     `toml:"replica" json:"replica"`
 	LeaderUpdateRatio float64 `toml:"leader-update-ratio" json:"leader-update-ratio"`
 	EpochUpdateRatio  float64 `toml:"epoch-update-ratio" json:"epoch-update-ratio"`
 	SpaceUpdateRatio  float64 `toml:"space-update-ratio" json:"space-update-ratio"`
 	FlowUpdateRatio   float64 `toml:"flow-update-ratio" json:"flow-update-ratio"`
-	NoUpdateRatio     float64 `toml:"no-update-ratio" json:"no-update-ratio"`
+	ReportRatio       float64 `toml:"report-ratio" json:"report-ratio"`
 	Sample            bool    `toml:"sample" json:"sample"`
 	Round             int     `toml:"round" json:"round"`
 }
@@ -62,6 +63,9 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.PDAddr, "pd-endpoints", "127.0.0.1:2379", "pd address")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.StringVar(&cfg.StatusAddr, "status-addr", "127.0.0.1:20180", "status address")
+	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "path of file that contains list of trusted TLS CAs")
+	fs.StringVar(&cfg.Security.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
+	fs.StringVar(&cfg.Security.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
 
 	return cfg
 }
@@ -113,10 +117,9 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 		configutil.AdjustInt(&c.RegionCount, defaultRegionCount)
 	}
 
-	if !meta.IsDefined("key-length") {
-		configutil.AdjustInt(&c.KeyLength, defaultKeyLength)
+	if !meta.IsDefined("hot-store-count") {
+		configutil.AdjustInt(&c.HotStoreCount, defaultHotStoreCount)
 	}
-
 	if !meta.IsDefined("replica") {
 		configutil.AdjustInt(&c.Replica, defaultReplica)
 	}
@@ -133,8 +136,8 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 	if !meta.IsDefined("flow-update-ratio") {
 		configutil.AdjustFloat64(&c.FlowUpdateRatio, defaultFlowUpdateRatio)
 	}
-	if !meta.IsDefined("no-update-ratio") {
-		configutil.AdjustFloat64(&c.NoUpdateRatio, defaultNoUpdateRatio)
+	if !meta.IsDefined("report-ratio") {
+		configutil.AdjustFloat64(&c.ReportRatio, defaultReportRatio)
 	}
 	if !meta.IsDefined("sample") {
 		c.Sample = defaultSample
@@ -143,24 +146,23 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 
 // Validate is used to validate configurations
 func (c *Config) Validate() error {
-	if c.LeaderUpdateRatio < 0 || c.LeaderUpdateRatio > 1 {
-		return errors.Errorf("leader-update-ratio must be in [0, 1]")
+	if c.HotStoreCount < 0 || c.HotStoreCount > c.StoreCount {
+		return errors.Errorf("hot-store-count must be in [0, store-count]")
 	}
-	if c.EpochUpdateRatio < 0 || c.EpochUpdateRatio > 1 {
-		return errors.Errorf("epoch-update-ratio must be in [0, 1]")
+	if c.ReportRatio < 0 || c.ReportRatio > 1 {
+		return errors.Errorf("report-ratio must be in [0, 1]")
 	}
-	if c.SpaceUpdateRatio < 0 || c.SpaceUpdateRatio > 1 {
-		return errors.Errorf("space-update-ratio must be in [0, 1]")
+	if c.LeaderUpdateRatio > c.ReportRatio || c.LeaderUpdateRatio < 0 {
+		return errors.Errorf("leader-update-ratio can not be negative or larger than report-ratio")
 	}
-	if c.FlowUpdateRatio < 0 || c.FlowUpdateRatio > 1 {
-		return errors.Errorf("flow-update-ratio must be in [0, 1]")
+	if c.EpochUpdateRatio > c.ReportRatio || c.EpochUpdateRatio < 0 {
+		return errors.Errorf("epoch-update-ratio can not be negative or larger than report-ratio")
 	}
-	if c.NoUpdateRatio < 0 || c.NoUpdateRatio > 1 {
-		return errors.Errorf("no-update-ratio must be in [0, 1]")
+	if c.SpaceUpdateRatio > c.ReportRatio || c.SpaceUpdateRatio < 0 {
+		return errors.Errorf("space-update-ratio can not be negative or larger than report-ratio")
 	}
-	max := math.Max(c.LeaderUpdateRatio, math.Max(c.EpochUpdateRatio, math.Max(c.SpaceUpdateRatio, c.FlowUpdateRatio)))
-	if max+c.NoUpdateRatio > 1 {
-		return errors.Errorf("sum of update-ratio must be in [0, 1]")
+	if c.FlowUpdateRatio > c.ReportRatio || c.FlowUpdateRatio < 0 {
+		return errors.Errorf("flow-update-ratio can not be negative or larger than report-ratio")
 	}
 	return nil
 }
@@ -174,22 +176,30 @@ func (c *Config) Clone() *Config {
 
 // Options is the option of the heartbeat-bench.
 type Options struct {
+	HotStoreCount atomic.Value
+	ReportRatio   atomic.Value
+
 	LeaderUpdateRatio atomic.Value
 	EpochUpdateRatio  atomic.Value
 	SpaceUpdateRatio  atomic.Value
 	FlowUpdateRatio   atomic.Value
-	NoUpdateRatio     atomic.Value
 }
 
 // NewOptions creates a new option.
 func NewOptions(cfg *Config) *Options {
 	o := &Options{}
+	o.HotStoreCount.Store(cfg.HotStoreCount)
 	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
 	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
 	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
 	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
-	o.NoUpdateRatio.Store(cfg.NoUpdateRatio)
+	o.ReportRatio.Store(cfg.ReportRatio)
 	return o
+}
+
+// GetHotStoreCount returns the hot store count.
+func (o *Options) GetHotStoreCount() int {
+	return o.HotStoreCount.Load().(int)
 }
 
 // GetLeaderUpdateRatio returns the leader update ratio.
@@ -212,16 +222,17 @@ func (o *Options) GetFlowUpdateRatio() float64 {
 	return o.FlowUpdateRatio.Load().(float64)
 }
 
-// GetNoUpdateRatio returns the no update ratio.
-func (o *Options) GetNoUpdateRatio() float64 {
-	return o.NoUpdateRatio.Load().(float64)
+// GetReportRatio returns the report ratio.
+func (o *Options) GetReportRatio() float64 {
+	return o.ReportRatio.Load().(float64)
 }
 
 // SetOptions sets the option.
 func (o *Options) SetOptions(cfg *Config) {
+	o.HotStoreCount.Store(cfg.HotStoreCount)
 	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
 	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
 	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
 	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
-	o.NoUpdateRatio.Store(cfg.NoUpdateRatio)
+	o.ReportRatio.Store(cfg.ReportRatio)
 }
