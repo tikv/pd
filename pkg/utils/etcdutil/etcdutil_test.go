@@ -335,7 +335,7 @@ func proxyWithDiscard(ctx context.Context, re *require.Assertions, server, proxy
 				return
 			}
 			go func(connect net.Conn) {
-				serverConnect, err := net.Dial("tcp", server)
+				serverConnect, err := net.DialTimeout("tcp", server, 3*time.Second)
 				re.NoError(err)
 				pipe(ctx, connect, serverConnect, enableDiscard)
 			}(a.conn)
