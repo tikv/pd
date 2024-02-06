@@ -194,7 +194,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-					_, saveKV, _, _ := regionGuide(region, origin)
+					saveKV, _, _ := regionGuide(region, origin)
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {

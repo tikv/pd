@@ -214,6 +214,8 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
 	suite.Equal(histKeys, r7)
 
+	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
+	r = r.Clone(core.SetApproximateKeys(0))
 	mustPutStore(re, suite.svr, 2, metapb.StoreState_Offline, metapb.NodeState_Removing, []*metapb.StoreLabel{})
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
