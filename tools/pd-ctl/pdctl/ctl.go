@@ -67,6 +67,7 @@ func GetRootCmd() *cobra.Command {
 		command.NewUnsafeCommand(),
 		command.NewKeyspaceGroupCommand(),
 		command.NewKeyspaceCommand(),
+		command.NewResourceManagerCommand(),
 	)
 
 	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true

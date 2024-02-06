@@ -88,6 +88,9 @@ type Config struct {
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
+
+	// EnableControllerTraceLog is to control whether resource control client enable trace.
+	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
 }
 
 // DefaultConfig returns the default resource manager controller configuration.
@@ -96,6 +99,7 @@ func DefaultConfig() *Config {
 		DegradedModeWaitDuration: NewDuration(defaultDegradedModeWaitDuration),
 		LTBMaxWaitDuration:       NewDuration(defaultMaxWaitDuration),
 		RequestUnit:              DefaultRequestUnitConfig(),
+		EnableControllerTraceLog: false,
 	}
 }
 

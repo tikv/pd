@@ -223,7 +223,7 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := atomic.LoadUint64(&handler.config.RecoveryDurationGap)
 	atomic.StoreUint64(&handler.config.RecoveryDurationGap, recoveryDurationGap)
 	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
 func (handler *evictSlowTrendHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
