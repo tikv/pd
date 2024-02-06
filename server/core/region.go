@@ -93,6 +93,12 @@ func (r *RegionInfo) LoadedFromStorage() bool {
 	return r.source == Storage
 }
 
+// LoadedFromSync means this region's meta info loaded from region syncer.
+// Only used for test.
+func (r *RegionInfo) LoadedFromSync() bool {
+	return r.source == Sync
+}
+
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
 func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCreateOption) *RegionInfo {
 	regionInfo := &RegionInfo{
@@ -626,7 +632,7 @@ func (r *RegionInfo) isRegionRecreated() bool {
 
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
+type RegionGuideFunc func(region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
@@ -639,13 +645,14 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
+	return func(region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
 		if origin == nil {
-			debug("insert new region",
-				zap.Uint64("region-id", region.GetID()),
-				logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
-			saveKV, saveCache, isNew = true, true, true
+			if log.GetLevel() <= zap.DebugLevel {
+				debug("insert new region",
+					zap.Uint64("region-id", region.GetID()),
+					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
+			}
+			saveKV, saveCache = true, true
 		} else {
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
@@ -668,9 +675,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
-				if origin.GetLeader().GetId() == 0 {
-					isNew = true
-				} else {
+				if origin.GetLeader().GetId() != 0 && log.GetLevel() <= zap.InfoLevel {
 					info("leader changed",
 						zap.Uint64("region-id", region.GetID()),
 						zap.Uint64("from", origin.GetLeader().GetStoreId()),
@@ -717,9 +722,6 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			// Saving kv may downgrade PD performance when there are many regions.
 			if region.IsFlashbackChanged(origin) {
 				saveCache = true
-			}
-			if origin.LoadedFromStorage() {
-				isNew = true
 			}
 		}
 		return

@@ -27,6 +27,8 @@ import (
 // RegionStatisticType represents the type of the region's status.
 type RegionStatisticType uint32
 
+const emptyStatistic = RegionStatisticType(0)
+
 // region status type
 const (
 	MissPeer RegionStatisticType = 1 << iota
@@ -140,12 +142,23 @@ func (r *RegionStatistics) deleteOfflineEntry(deleteIndex RegionStatisticType, r
 // due to some special state types.
 func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 	regionID := region.GetID()
+	if !r.isObserved(regionID) {
+		return true
+	}
 	if r.IsRegionStatsType(regionID, OversizedRegion) !=
 		region.IsOversized(int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxSize()), int64(r.storeConfigManager.GetStoreConfig().GetRegionMaxKeys())) {
 		return true
 	}
 	return r.IsRegionStatsType(regionID, UndersizedRegion) !=
 		region.NeedMerge(int64(r.opt.GetMaxMergeRegionSize()), int64(r.opt.GetMaxMergeRegionKeys()))
+}
+
+// isObserved returns whether the region is observed. And it also shows whether PD received heartbeat of this region.
+func (r *RegionStatistics) isObserved(id uint64) bool {
+	r.RLock()
+	defer r.RUnlock()
+	_, ok := r.index[id]
+	return ok
 }
 
 // Observe records the current regions' status.
@@ -251,10 +264,11 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	r.deleteOfflineEntry(deleteIndex, regionID)
 	r.offlineIndex[regionID] = offlinePeerTypeIndex
 
-	if oldIndex, ok := r.index[regionID]; ok {
-		deleteIndex = oldIndex &^ peerTypeIndex
+	// Remove the info if any of the conditions are not met any more.
+	if oldIndex, ok := r.index[regionID]; ok && oldIndex > emptyStatistic {
+		deleteIndex := oldIndex &^ peerTypeIndex
+		r.deleteEntry(deleteIndex, regionID)
 	}
-	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
 }
 
@@ -263,7 +277,10 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 	r.Lock()
 	defer r.Unlock()
 	if oldIndex, ok := r.index[regionID]; ok {
-		r.deleteEntry(oldIndex, regionID)
+		delete(r.index, regionID)
+		if oldIndex > emptyStatistic {
+			r.deleteEntry(oldIndex, regionID)
+		}
 	}
 	if oldIndex, ok := r.offlineIndex[regionID]; ok {
 		r.deleteOfflineEntry(oldIndex, regionID)
