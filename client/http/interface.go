@@ -92,6 +92,7 @@ type Client interface {
 	GetPDVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]string, error)
+	DeleteOperators(context.Context) error
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -878,4 +879,12 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 		WithMethod(http.MethodGet).
 		WithResp(&ver))
 	return ver.Version, err
+}
+
+// DeleteOperators deletes the running operators.
+func (c *client) DeleteOperators(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteOperators).
+		WithURI(operators).
+		WithMethod(http.MethodDelete))
 }
