@@ -1447,7 +1447,6 @@ func (c *RaftCluster) checkStores() {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
-						zap.Int("region-count", c.GetTotalRegionCount()),
 						errs.ZapError(err))
 				}
 			} else if c.IsPrepared() {

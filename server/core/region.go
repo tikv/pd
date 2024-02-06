@@ -36,14 +36,6 @@ import (
 	"go.uber.org/zap"
 )
 
-<<<<<<< HEAD:server/core/region.go
-=======
-const (
-	randomRegionMaxRetry = 10
-	scanRegionLimit      = 1000
-)
-
->>>>>>> d651c6b91 (core: batch get region size (#7252)):pkg/core/region.go
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 	return errors.Errorf("region is stale: region %v origin %v", region, origin)
@@ -1197,36 +1189,6 @@ func (r *RegionsInfo) ScanRange(startKey, endKey []byte, limit int) []*RegionInf
 // until iterator returns false.
 func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(region *RegionInfo) bool) {
 	r.tree.scanRange(startKey, iterator)
-}
-
-// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
-func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	var size int64
-	for {
-		r.t.RLock()
-		var cnt int
-		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-				return false
-			}
-			if cnt >= scanRegionLimit {
-				return false
-			}
-			cnt++
-			startKey = region.GetEndKey()
-			size += region.GetApproximateSize()
-			return true
-		})
-		r.t.RUnlock()
-		if cnt == 0 {
-			break
-		}
-		if len(startKey) == 0 {
-			break
-		}
-	}
-
-	return size
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region
