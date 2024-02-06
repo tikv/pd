@@ -50,15 +50,17 @@ func TestSchedulerTestSuite(t *testing.T) {
 func (suite *schedulerTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
-	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 	suite.defaultSchedulers = []string{
 		"balance-leader-scheduler",
 		"balance-region-scheduler",
 		"balance-hot-region-scheduler",
-		"balance-witness-scheduler",
-		"transfer-witness-leader-scheduler",
 		"evict-slow-store-scheduler",
 	}
+}
+
+func (suite *schedulerTestSuite) SetupTest() {
+	// use a new environment to avoid affecting other tests
+	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *schedulerTestSuite) TearDownSuite() {
@@ -93,6 +95,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 		}
 	}
 	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.Cleanup()
 }
 
 func (suite *schedulerTestSuite) TestScheduler() {
@@ -171,23 +174,19 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 
 	// scheduler show command
 	expected := map[string]bool{
-		"balance-region-scheduler":          true,
-		"balance-leader-scheduler":          true,
-		"balance-hot-region-scheduler":      true,
-		"transfer-witness-leader-scheduler": true,
-		"balance-witness-scheduler":         true,
-		"evict-slow-store-scheduler":        true,
+		"balance-region-scheduler":     true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"evict-slow-store-scheduler":   true,
 	}
 	checkSchedulerCommand(nil, expected)
 
 	// scheduler delete command
 	args := []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
 	expected = map[string]bool{
-		"balance-leader-scheduler":          true,
-		"balance-hot-region-scheduler":      true,
-		"transfer-witness-leader-scheduler": true,
-		"balance-witness-scheduler":         true,
-		"evict-slow-store-scheduler":        true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"evict-slow-store-scheduler":   true,
 	}
 	checkSchedulerCommand(args, expected)
 
@@ -228,12 +227,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		// scheduler add command
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "2"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
-			"evict-slow-store-scheduler":        true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
+			"evict-slow-store-scheduler":   true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -246,12 +243,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		// scheduler config update command
 		args = []string{"-u", pdAddr, "scheduler", "config", schedulers[idx], "add-store", "3"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
-			"evict-slow-store-scheduler":        true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
+			"evict-slow-store-scheduler":   true,
 		}
 
 		// check update success
@@ -263,11 +258,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		// scheduler delete command
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx]}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
-			"evict-slow-store-scheduler":        true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			"evict-slow-store-scheduler":   true,
 		}
 		checkSchedulerCommand(args, expected)
 		checkStorePause([]uint64{}, schedulers[idx])
@@ -275,12 +268,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		// scheduler add command
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "2"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
-			"evict-slow-store-scheduler":        true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
+			"evict-slow-store-scheduler":   true,
 		}
 		checkSchedulerCommand(args, expected)
 		checkStorePause([]uint64{2}, schedulers[idx])
@@ -288,12 +279,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		// scheduler add command twice
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "4"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
-			"evict-slow-store-scheduler":        true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
+			"evict-slow-store-scheduler":   true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -305,12 +294,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		// scheduler remove command [old]
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx] + "-4"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
-			"evict-slow-store-scheduler":        true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
+			"evict-slow-store-scheduler":   true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -322,11 +309,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		// scheduler remove command, when remove the last store, it should remove whole scheduler
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx] + "-2"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
-			"evict-slow-store-scheduler":        true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			"evict-slow-store-scheduler":   true,
 		}
 		checkSchedulerCommand(args, expected)
 		checkStorePause([]uint64{}, schedulers[idx])
@@ -334,12 +319,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 
 	// test shuffle region config
 	checkSchedulerCommand([]string{"-u", pdAddr, "scheduler", "add", "shuffle-region-scheduler"}, map[string]bool{
-		"balance-leader-scheduler":          true,
-		"balance-hot-region-scheduler":      true,
-		"shuffle-region-scheduler":          true,
-		"transfer-witness-leader-scheduler": true,
-		"balance-witness-scheduler":         true,
-		"evict-slow-store-scheduler":        true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"shuffle-region-scheduler":     true,
+		"evict-slow-store-scheduler":   true,
 	})
 	var roles []string
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
@@ -355,13 +338,11 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 
 	// test grant hot region scheduler config
 	checkSchedulerCommand([]string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, map[string]bool{
-		"balance-leader-scheduler":          true,
-		"balance-hot-region-scheduler":      true,
-		"shuffle-region-scheduler":          true,
-		"grant-hot-region-scheduler":        true,
-		"transfer-witness-leader-scheduler": true,
-		"balance-witness-scheduler":         true,
-		"evict-slow-store-scheduler":        true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"shuffle-region-scheduler":     true,
+		"grant-hot-region-scheduler":   true,
+		"evict-slow-store-scheduler":   true,
 	})
 	var conf3 map[string]any
 	expected3 := map[string]any{
@@ -504,7 +485,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		pdTests.MustPutStore(re, cluster, store)
 	}
 	re.Equal("5.2.0", leaderServer.GetClusterVersion().String())
-	// After upgrading, we should not use query.
+	// After upgrading, we can use query.
+	expected1["write-leader-priorities"] = []any{"query", "byte"}
 	checkHotSchedulerConfig(expected1)
 	// cannot set qps as write-peer-priorities
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "write-peer-priorities", "query,byte"}, nil)
@@ -598,6 +580,28 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 			var schedulers []string
 			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show", "--status", status}, &schedulers)
 			return reflect.DeepEqual(expected, schedulers)
+		})
+	}
+
+	// test scatter range scheduler
+	for _, name := range []string{
+		"test", "test#", "?test",
+		/* TODO: to handle case like "tes&t", we need to modify the server's JSON render to unescape the HTML characters */
+	} {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "scatter-range", "--format=raw", "a", "b", name}, nil)
+		re.Contains(echo, "Success!")
+		schedulerName := fmt.Sprintf("scatter-range-%s", name)
+		// test show scheduler
+		testutil.Eventually(re, func() bool {
+			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+			return strings.Contains(echo, schedulerName)
+		})
+		// test remove scheduler
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", schedulerName}, nil)
+		re.Contains(echo, "Success!")
+		testutil.Eventually(re, func() bool {
+			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+			return !strings.Contains(echo, schedulerName)
 		})
 	}
 

@@ -14,12 +14,12 @@ import (
 const (
 	defaultStoreCount        = 50
 	defaultRegionCount       = 1000000
-	defaultKeyLength         = 56
+	defaultHotStoreCount     = 0
 	defaultReplica           = 3
 	defaultLeaderUpdateRatio = 0.06
-	defaultEpochUpdateRatio  = 0.04
-	defaultSpaceUpdateRatio  = 0.15
-	defaultFlowUpdateRatio   = 0.35
+	defaultEpochUpdateRatio  = 0.0
+	defaultSpaceUpdateRatio  = 0.0
+	defaultFlowUpdateRatio   = 0.0
 	defaultReportRatio       = 1
 	defaultRound             = 0
 	defaultSample            = false
@@ -43,8 +43,8 @@ type Config struct {
 
 	InitEpochVer      uint64  `toml:"epoch-ver" json:"epoch-ver"`
 	StoreCount        int     `toml:"store-count" json:"store-count"`
+	HotStoreCount     int     `toml:"hot-store-count" json:"hot-store-count"`
 	RegionCount       int     `toml:"region-count" json:"region-count"`
-	KeyLength         int     `toml:"key-length" json:"key-length"`
 	Replica           int     `toml:"replica" json:"replica"`
 	LeaderUpdateRatio float64 `toml:"leader-update-ratio" json:"leader-update-ratio"`
 	EpochUpdateRatio  float64 `toml:"epoch-update-ratio" json:"epoch-update-ratio"`
@@ -120,10 +120,9 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 		configutil.AdjustInt(&c.RegionCount, defaultRegionCount)
 	}
 
-	if !meta.IsDefined("key-length") {
-		configutil.AdjustInt(&c.KeyLength, defaultKeyLength)
+	if !meta.IsDefined("hot-store-count") {
+		configutil.AdjustInt(&c.HotStoreCount, defaultHotStoreCount)
 	}
-
 	if !meta.IsDefined("replica") {
 		configutil.AdjustInt(&c.Replica, defaultReplica)
 	}
@@ -153,6 +152,9 @@ func (c *Config) Adjust(meta *toml.MetaData) {
 
 // Validate is used to validate configurations
 func (c *Config) Validate() error {
+	if c.HotStoreCount < 0 || c.HotStoreCount > c.StoreCount {
+		return errors.Errorf("hot-store-count must be in [0, store-count]")
+	}
 	if c.ReportRatio < 0 || c.ReportRatio > 1 {
 		return errors.Errorf("report-ratio must be in [0, 1]")
 	}
@@ -180,7 +182,8 @@ func (c *Config) Clone() *Config {
 
 // Options is the option of the heartbeat-bench.
 type Options struct {
-	ReportRatio atomic.Value
+	HotStoreCount atomic.Value
+	ReportRatio   atomic.Value
 
 	LeaderUpdateRatio atomic.Value
 	EpochUpdateRatio  atomic.Value
@@ -191,12 +194,18 @@ type Options struct {
 // NewOptions creates a new option.
 func NewOptions(cfg *Config) *Options {
 	o := &Options{}
+	o.HotStoreCount.Store(cfg.HotStoreCount)
 	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
 	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
 	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)
 	o.FlowUpdateRatio.Store(cfg.FlowUpdateRatio)
 	o.ReportRatio.Store(cfg.ReportRatio)
 	return o
+}
+
+// GetHotStoreCount returns the hot store count.
+func (o *Options) GetHotStoreCount() int {
+	return o.HotStoreCount.Load().(int)
 }
 
 // GetLeaderUpdateRatio returns the leader update ratio.
@@ -226,6 +235,7 @@ func (o *Options) GetReportRatio() float64 {
 
 // SetOptions sets the option.
 func (o *Options) SetOptions(cfg *Config) {
+	o.HotStoreCount.Store(cfg.HotStoreCount)
 	o.LeaderUpdateRatio.Store(cfg.LeaderUpdateRatio)
 	o.EpochUpdateRatio.Store(cfg.EpochUpdateRatio)
 	o.SpaceUpdateRatio.Store(cfg.SpaceUpdateRatio)

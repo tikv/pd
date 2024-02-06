@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
 
 // ExecuteCommand is used for test purpose.
@@ -31,8 +30,6 @@ func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err err
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
 	root.SetArgs(args)
-	command.SetNewPDClient([]string{args[1]})
-	defer command.PDCli.Close()
 	err = root.Execute()
 	return buf.Bytes(), err
 }
