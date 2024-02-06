@@ -171,7 +171,7 @@ func (bs *BaseServer) StartTimestamp() int64 {
 
 // CloseClientConns closes all client connections.
 func (bs *BaseServer) CloseClientConns() {
-	bs.clientConns.Range(func(key, value interface{}) bool {
+	bs.clientConns.Range(func(key, value any) bool {
 		conn := value.(*grpc.ClientConn)
 		if err := conn.Close(); err != nil {
 			log.Error("close client connection meet error")
