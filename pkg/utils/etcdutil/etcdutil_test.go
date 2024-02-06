@@ -358,7 +358,7 @@ func pipe(ctx context.Context, src net.Conn, dst net.Conn, enableDiscard *atomic
 	src.Close()
 }
 
-func ioCopy(ctx context.Context, dst io.Writer, src io.Reader, enableDiscard *atomic.Bool) (err error) {
+func ioCopy(ctx context.Context, dst io.Writer, src io.Reader, enableDiscard *atomic.Bool) error {
 	buffer := make([]byte, 32*1024)
 	for {
 		select {
@@ -379,7 +379,7 @@ func ioCopy(ctx context.Context, dst io.Writer, src io.Reader, enableDiscard *at
 				}
 			}
 			if errRead != nil {
-				return err
+				return errRead
 			}
 		}
 	}
