@@ -39,14 +39,14 @@ import (
 	"go.etcd.io/etcd/etcdserver/etcdserverpb"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.etcd.io/etcd/pkg/types"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }
 
 func TestMemberHelpers(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	servers, client1, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
@@ -81,6 +81,7 @@ func TestMemberHelpers(t *testing.T) {
 }
 
 func TestEtcdKVGet(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	_, client, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
@@ -119,6 +120,7 @@ func TestEtcdKVGet(t *testing.T) {
 }
 
 func TestEtcdKVPutWithTTL(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	_, client, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
@@ -147,6 +149,7 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 }
 
 func TestInitClusterID(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	_, client, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
@@ -166,6 +169,7 @@ func TestInitClusterID(t *testing.T) {
 }
 
 func TestEtcdClientSync(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 
@@ -204,6 +208,7 @@ func checkEtcdClientHealth(re *require.Assertions, client *clientv3.Client) {
 }
 
 func TestEtcdScaleInAndOut(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	// Start a etcd server.
 	servers, _, clean := NewTestEtcdCluster(t, 1)
@@ -230,6 +235,7 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 }
 
 func TestRandomKillEtcd(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Start a etcd server.
@@ -260,6 +266,7 @@ func TestRandomKillEtcd(t *testing.T) {
 }
 
 func TestEtcdWithHangLeaderEnableCheck(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	var err error
 	// Test with enable check.
@@ -397,6 +404,7 @@ type loopWatcherTestSuite struct {
 }
 
 func TestLoopWatcherTestSuite(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	suite.Run(t, new(loopWatcherTestSuite))
 }
 

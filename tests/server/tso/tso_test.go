@@ -32,6 +32,7 @@ import (
 )
 
 func TestLoadTimestamp(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -96,6 +97,7 @@ func requestLocalTSOs(re *require.Assertions, cluster *tests.TestCluster, dcLoca
 }
 
 func TestDisableLocalTSOAfterEnabling(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

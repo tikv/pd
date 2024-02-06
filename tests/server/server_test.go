@@ -23,14 +23,14 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }
 
 func TestUpdateAdvertiseUrls(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -72,6 +72,7 @@ func TestUpdateAdvertiseUrls(t *testing.T) {
 }
 
 func TestClusterID(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -108,6 +109,7 @@ func TestClusterID(t *testing.T) {
 }
 
 func TestLeader(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

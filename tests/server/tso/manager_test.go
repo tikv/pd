@@ -36,6 +36,7 @@ import (
 // TestClusterDCLocations will write different dc-locations to each server
 // and test whether we can get the whole dc-location config from each server.
 func TestClusterDCLocations(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -88,6 +89,7 @@ func TestClusterDCLocations(t *testing.T) {
 }
 
 func TestLocalTSOSuffix(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -142,6 +144,7 @@ func TestLocalTSOSuffix(t *testing.T) {
 }
 
 func TestNextLeaderKey(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

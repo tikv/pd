@@ -29,6 +29,7 @@ type testCase struct {
 
 func check(re *require.Assertions, testCases []*testCase) {
 	checker := &healthChecker{}
+	defer checker.close()
 	lastEps := []string{}
 	for idx, tc := range testCases {
 		// Send the health probes to the channel.

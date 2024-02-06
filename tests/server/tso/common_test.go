@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.uber.org/goleak"
 )
 
 const (
@@ -52,5 +51,5 @@ func testGetTimestamp(re *require.Assertions, ctx context.Context, pdCli pdpb.PD
 }
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }

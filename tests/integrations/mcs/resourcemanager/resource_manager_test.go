@@ -35,15 +35,13 @@ import (
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
-
 	// Register Service
 	_ "github.com/tikv/pd/pkg/mcs/registry"
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }
 
 type resourceManagerClientTestSuite struct {
@@ -56,6 +54,7 @@ type resourceManagerClientTestSuite struct {
 }
 
 func TestResourceManagerClientTestSuite(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	suite.Run(t, new(resourceManagerClientTestSuite))
 }
 

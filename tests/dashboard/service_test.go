@@ -30,11 +30,10 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }
 
 type dashboardTestSuite struct {
@@ -45,6 +44,7 @@ type dashboardTestSuite struct {
 }
 
 func TestDashboardTestSuite(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	suite.Run(t, new(dashboardTestSuite))
 }
 
@@ -58,6 +58,9 @@ func (suite *dashboardTestSuite) SetupSuite() {
 			// is not sent and the most recent response is returned with its body
 			// unclosed.
 			return http.ErrUseLastResponse
+		},
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
 		},
 	}
 }
@@ -139,7 +142,7 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	// auto select node
 	dashboardAddress1 := suite.checkServiceIsStarted(re, internalProxy, servers, leader)
 
-	// pd-ctl set another addr
+	// set another addr
 	var dashboardAddress2 string
 	for _, srv := range servers {
 		if srv.GetAddr() != dashboardAddress1 {
@@ -160,7 +163,7 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	suite.checkServiceIsStarted(re, internalProxy, servers, leader)
 	re.Equal(dashboardAddress2, leader.GetServer().GetPersistOptions().GetDashboardAddress())
 
-	// pd-ctl set stop
+	// set stop
 	input = map[string]any{
 		"dashboard-address": "none",
 	}

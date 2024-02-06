@@ -49,6 +49,7 @@ type tsoConsistencyTestSuite struct {
 }
 
 func TestTSOConsistencyTestSuite(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	suite.Run(t, new(tsoConsistencyTestSuite))
 }
 

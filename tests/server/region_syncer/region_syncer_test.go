@@ -26,14 +26,14 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }
 
 func TestRegionSyncer(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush", `return(true)`))
@@ -160,6 +160,7 @@ func TestRegionSyncer(t *testing.T) {
 }
 
 func TestFullSyncWithAddMember(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -203,6 +204,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 }
 
 func TestPrepareChecker(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -252,6 +254,7 @@ func TestPrepareChecker(t *testing.T) {
 
 // ref: https://github.com/tikv/pd/issues/6988
 func TestPrepareCheckerWithTransferLeader(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

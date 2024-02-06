@@ -35,14 +35,14 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }
 
 func TestMemberDelete(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -148,6 +148,7 @@ func checkMemberList(re *require.Assertions, httpClient http.Client, clientURL s
 }
 
 func TestLeaderPriority(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -204,6 +205,7 @@ func waitEtcdLeaderChange(re *require.Assertions, server *tests.TestServer, old 
 }
 
 func TestLeaderResign(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -227,6 +229,7 @@ func TestLeaderResign(t *testing.T) {
 }
 
 func TestLeaderResignWithBlock(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -249,6 +252,7 @@ func TestLeaderResignWithBlock(t *testing.T) {
 }
 
 func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -285,6 +289,7 @@ func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old st
 }
 
 func TestMoveLeader(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -324,6 +329,7 @@ func TestMoveLeader(t *testing.T) {
 }
 
 func TestCampaignLeaderFrequently(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -347,6 +353,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 }
 
 func TestGrantLeaseFailed(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -372,6 +379,7 @@ func TestGrantLeaseFailed(t *testing.T) {
 }
 
 func TestGetLeader(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
