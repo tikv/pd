@@ -53,4 +53,9 @@ func TestTSO(t *testing.T) {
 	re.NoError(err)
 	tsTime, err = strconv.ParseUint(ts, 10, 64)
 	re.NoError(err)
+	logicalTime = tsTime & logicalBits
+	physical = tsTime >> physicalShiftBits
+	physicalTime = time.Unix(int64(physical/1000), int64(physical%1000)*time.Millisecond.Nanoseconds())
+	str = fmt.Sprintln("system: ", physicalTime) + fmt.Sprintln("logic:  ", logicalTime)
+	re.Equal(string(output), str)
 }
