@@ -196,3 +196,8 @@ func PProfGoroutineWithDebugLevel(level int) string {
 func MicroServiceMembers(service string) string {
 	return fmt.Sprintf("%s/members/%s", microServicePrefix, service)
 }
+
+// MicroServicePrimary returns the path of PD HTTP API to get the primary of microservice.
+func MicroServicePrimary(service string) string {
+	return fmt.Sprintf("%s/primary/%s", microServicePrefix, service)
+}
