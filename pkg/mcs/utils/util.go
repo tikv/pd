@@ -123,7 +123,7 @@ func WaitAPIServiceReady(s server) error {
 	)
 	ticker := time.NewTicker(RetryIntervalWaitAPIService)
 	defer ticker.Stop()
-	for i := 0; i < MaxRetryTimesWaitAPIService; i++ {
+	for {
 		ready, err = isAPIServiceReady(s)
 		if err == nil && ready {
 			return nil
@@ -135,10 +135,6 @@ func WaitAPIServiceReady(s server) error {
 		case <-ticker.C:
 		}
 	}
-	if err != nil {
-		log.Warn("failed to check api server ready", errs.ZapError(err))
-	}
-	return errors.Errorf("failed to wait api server ready after retrying %d times", MaxRetryTimesWaitAPIService)
 }
 
 func isAPIServiceReady(s server) (bool, error) {
