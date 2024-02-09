@@ -16,9 +16,11 @@ package election
 
 import (
 	"context"
+	"testing"
 	"time"
 
 	. "github.com/pingcap/check"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
@@ -107,7 +109,7 @@ func (s *testLeaseSuite) TestLease(c *C) {
 
 func TestLeaseKeepAlive(t *testing.T) {
 	re := require.New(t)
-	cfg := etcdutil.NewTestSingleConfig(t)
+	cfg := etcdutil.NewTestSingleConfig()
 	etcd, err := embed.StartEtcd(cfg)
 	defer func() {
 		etcd.Close()
