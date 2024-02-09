@@ -102,6 +102,11 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 		panic("cached should be used")
 	})
 
+	// the placement rule is disabled
+	if fit == nil {
+		return
+	}
+
 	// If the fit is calculated by FitRegion, which means we get a new fit result, thus we should
 	// invalid the cache if it exists
 	c.ruleManager.InvalidCache(region.GetID())
