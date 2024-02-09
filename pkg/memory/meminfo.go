@@ -52,9 +52,13 @@ func MemTotalNormal() (uint64, error) {
 	if time.Since(t) < 60*time.Second {
 		return total, nil
 	}
+	return totalMem()
+}
+
+func totalMem() (uint64, error) {
 	v, err := mem.VirtualMemory()
 	if err != nil {
-		return v.Total, err
+		return 0, err
 	}
 	memLimit.set(v.Total, time.Now())
 	return v.Total, nil
@@ -177,6 +181,38 @@ func init() {
 		mu: &syncutil.RWMutex{},
 	}
 	_, err := MemTotal()
+	mustNil(err)
+	_, err = MemUsed()
+	mustNil(err)
+}
+
+// InitMemoryHook initializes the memory hook.
+// It is to solve the problem that tidb cannot read cgroup in the systemd.
+// so if we are not in the container, we compare the cgroup memory limit and the physical memory,
+// the cgroup memory limit is smaller, we use the cgroup memory hook.
+// ref https://github.com/pingcap/tidb/pull/48096/
+func InitMemoryHook() {
+	if cgroup.InContainer() {
+		log.Info("use cgroup memory hook because pd is in the container")
+		return
+	}
+	cgroupValue, err := cgroup.GetMemoryLimit()
+	if err != nil {
+		return
+	}
+	physicalValue, err := totalMem()
+	if err != nil {
+		return
+	}
+	if physicalValue > cgroupValue && cgroupValue != 0 {
+		MemTotal = MemTotalCGroup
+		MemUsed = MemUsedCGroup
+		sysutil.RegisterGetMemoryCapacity(MemTotalCGroup)
+		log.Info("use cgroup memory hook", zap.Int64("cgroupMemorySize", int64(cgroupValue)), zap.Int64("physicalMemorySize", int64(physicalValue)))
+	} else {
+		log.Info("use physical memory hook", zap.Int64("cgroupMemorySize", int64(cgroupValue)), zap.Int64("physicalMemorySize", int64(physicalValue)))
+	}
+	_, err = MemTotal()
 	mustNil(err)
 	_, err = MemUsed()
 	mustNil(err)

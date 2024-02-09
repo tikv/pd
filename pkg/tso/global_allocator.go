@@ -568,7 +568,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	log.Info("start to campaign the primary",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
-	if err := gta.am.member.CampaignLeader(gta.am.leaderLease); err != nil {
+	if err := gta.am.member.CampaignLeader(gta.ctx, gta.am.leaderLease); err != nil {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
