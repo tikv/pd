@@ -100,3 +100,14 @@ func (suite *memberTestSuite) TestMembers() {
 	re.NoError(err)
 	re.Len(members, 3)
 }
+
+func (suite *memberTestSuite) TestPrimary() {
+	re := suite.Require()
+	primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
+	re.NoError(err)
+	re.NotEmpty(primary)
+
+	primary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, "scheduling")
+	re.NoError(err)
+	re.NotEmpty(primary)
+}
