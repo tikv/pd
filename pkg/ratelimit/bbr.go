@@ -175,8 +175,8 @@ func (l *bbr) timespan(lastTime time.Time) int {
 	return l.cfg.Bucket
 }
 
-func (l *bbr) caclcRDP() (int64, int64) {
-	dur := l.getMinDuration()
+func (l *bbr) calcRDP() (rdp int64, dur int64) {
+	dur = l.getMinDuration()
 	return int64(math.Floor(float64(l.getMaxPass()*dur*l.bucketPerSecond)/1e6) + 0.5), dur
 }
 
@@ -313,7 +313,7 @@ func (l *bbr) checkFullStatus() {
 	}))
 
 	l.inCheck.Store(0)
-	rdp, dur := l.caclcRDP()
+	rdp, dur := l.calcRDP()
 	check1 := raises > 0 && positive > negative
 	check2 := rdp > 1
 	if check1 && check2 && l.bbrStatus.getRDP() == inf {

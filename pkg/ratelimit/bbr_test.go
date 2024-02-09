@@ -134,7 +134,7 @@ func TestRDP(t *testing.T) {
 	re := require.New(t)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
-	rdp, _ := bbr.caclcRDP()
+	rdp, _ := bbr.calcRDP()
 	re.Equal(int64(36000000), rdp)
 
 	for i := 0; i < 10; i++ {
@@ -147,7 +147,7 @@ func TestRDP(t *testing.T) {
 		}
 		time.Sleep(bucketDuration)
 		// due to extra time cost in `Sleep`.
-		rdp, _ := bbr.caclcRDP()
+		rdp, _ := bbr.calcRDP()
 		re.LessOrEqual(int64(10), rdp)
 		re.GreaterOrEqual(int64(14), rdp)
 	}
@@ -163,7 +163,7 @@ func TestRDP(t *testing.T) {
 		time.Sleep(bucketDuration)
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			rdp, _ := bbr.caclcRDP()
+			rdp, _ := bbr.calcRDP()
 			re.LessOrEqual(int64(15), rdp)
 			re.GreaterOrEqual(int64(22), rdp)
 		}
