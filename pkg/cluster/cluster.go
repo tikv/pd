@@ -59,7 +59,4 @@ func Collect(c Cluster, region *core.RegionInfo, stores []*core.StoreInfo, hasRe
 	if hasRegionStats {
 		c.GetRegionStats().Observe(region, stores)
 	}
-	if !isPrepared && isNew {
-		c.GetCoordinator().GetPrepareChecker().Collect(region)
-	}
 }
