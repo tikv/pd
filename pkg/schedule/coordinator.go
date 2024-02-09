@@ -705,7 +705,7 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 }
 
 // ResetHotSpotMetrics resets hot spot metrics.
-func (c *Coordinator) ResetHotSpotMetrics() {
+func ResetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
 	schedulers.HotPendingSum.Reset()
 }
