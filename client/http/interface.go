@@ -92,6 +92,7 @@ type Client interface {
 	GetPDVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]string, error)
+	GetMicroServicePrimary(context.Context, string) (string, error)
 	DeleteOperators(context.Context) error
 
 	/* Client-related methods */
@@ -866,6 +867,17 @@ func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]
 		return nil, err
 	}
 	return members, nil
+}
+
+// GetMicroServicePrimary gets the primary of the microservice.
+func (c *client) GetMicroServicePrimary(ctx context.Context, service string) (string, error) {
+	var primary string
+	err := c.request(ctx, newRequestInfo().
+		WithName(getMicroServicePrimaryName).
+		WithURI(MicroServicePrimary(service)).
+		WithMethod(http.MethodGet).
+		WithResp(&primary))
+	return primary, err
 }
 
 // GetPDVersion gets the release version of the PD binary.

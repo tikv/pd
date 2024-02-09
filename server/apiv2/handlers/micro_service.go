@@ -28,6 +28,7 @@ func RegisterMicroService(r *gin.RouterGroup) {
 	router := r.Group("ms")
 	router.Use(middlewares.BootstrapChecker())
 	router.GET("members/:service", GetMembers)
+	router.GET("primary/:service", GetPrimary)
 }
 
 // GetMembers gets all members of the cluster for the specified service.
@@ -50,6 +51,28 @@ func GetMembers(c *gin.Context) {
 			return
 		}
 		c.IndentedJSON(http.StatusOK, addrs)
+		return
+	}
+
+	c.AbortWithStatusJSON(http.StatusInternalServerError, "please specify service")
+}
+
+// GetPrimary gets the primary member of the specified service.
+// @Tags     primary
+// @Summary  Get the primary member of the specified service.
+// @Produce  json
+// @Success  200  {object}  string
+// @Router   /ms/primary/{service} [get]
+func GetPrimary(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	if !svr.IsAPIServiceMode() {
+		c.AbortWithStatusJSON(http.StatusServiceUnavailable, "not support micro service")
+		return
+	}
+
+	if service := c.Param("service"); len(service) > 0 {
+		addr, _ := svr.GetServicePrimaryAddr(c.Request.Context(), service)
+		c.IndentedJSON(http.StatusOK, addr)
 		return
 	}
 
