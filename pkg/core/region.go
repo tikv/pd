@@ -1340,11 +1340,23 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	return
 }
 
-// GetClusterNotFromStorageRegionsCnt gets the total count of regions that not loaded from storage anymore
+// GetClusterNotFromStorageRegionsCnt gets the `NotFromStorageRegionsCnt` count of regions that not loaded from storage anymore.
 func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.tree.notFromStorageRegionsCnt
+	return r.tree.notFromStorageRegionsCount()
+}
+
+// GetNotFromStorageRegionsCntByStore gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
+func (r *RegionsInfo) GetNotFromStorageRegionsCntByStore(storeID uint64) int {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.getNotFromStorageRegionsCntByStoreLocked(storeID)
+}
+
+// getNotFromStorageRegionsCntByStoreLocked gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
+func (r *RegionsInfo) getNotFromStorageRegionsCntByStoreLocked(storeID uint64) int {
+	return r.leaders[storeID].notFromStorageRegionsCount() + r.followers[storeID].notFromStorageRegionsCount() + r.learners[storeID].notFromStorageRegionsCount()
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
@@ -1380,7 +1392,7 @@ func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.getStoreRegionCountLocked(storeID)
 }
 
-// GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
+// getStoreRegionCountLocked gets the total count of a store's leader, follower and learner RegionInfo by storeID
 func (r *RegionsInfo) getStoreRegionCountLocked(storeID uint64) int {
 	return r.leaders[storeID].length() + r.followers[storeID].length() + r.learners[storeID].length()
 }

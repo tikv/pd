@@ -505,7 +505,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *tests.TestClu
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	// note: because pdqsort is a unstable sort algorithm, set ApproximateSize for this region.
+	// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
 	time.Sleep(3 * time.Second)
 
