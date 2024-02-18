@@ -35,7 +35,7 @@ func RegisterMicroService(r *gin.RouterGroup) {
 // @Tags     members
 // @Summary  Get all members of the cluster for the specified service.
 // @Produce  json
-// @Success  200  {object}  []string
+// @Success  200  {object}  []discovery.ServiceRegistryEntry
 // @Router   /ms/members/{service} [get]
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
@@ -45,12 +45,12 @@ func GetMembers(c *gin.Context) {
 	}
 
 	if service := c.Param("service"); len(service) > 0 {
-		addrs, err := discovery.GetMSMembers(service, svr.GetClient())
+		entries, err := discovery.GetMSMembers(service, svr.GetClient())
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
-		c.IndentedJSON(http.StatusOK, addrs)
+		c.IndentedJSON(http.StatusOK, entries)
 		return
 	}
 
