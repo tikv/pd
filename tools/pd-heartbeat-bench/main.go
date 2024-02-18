@@ -62,7 +62,10 @@ const (
 	capacity             = 4 * units.TiB
 )
 
-var clusterID uint64
+var (
+	clusterID  uint64
+	maxVersion uint64 = 1
+)
 
 func newClient(ctx context.Context, cfg *config.Config) (pdpb.PDClient, error) {
 	tlsConfig, err := cfg.Security.ToTLSConfig()
@@ -204,7 +207,7 @@ func (rs *Regions) init(cfg *config.Config, options *config.Options) {
 				Id:          id,
 				StartKey:    codec.GenerateTableKey(int64(i)),
 				EndKey:      codec.GenerateTableKey(int64(i + 1)),
-				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1},
+				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: maxVersion},
 			},
 			ApproximateSize: bytesUnit,
 			Interval: &pdpb.TimeInterval{
@@ -264,6 +267,9 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options) {
 	for _, i := range rs.updateEpoch {
 		region := rs.regions[i]
 		region.Region.RegionEpoch.Version += 1
+		if region.Region.RegionEpoch.Version > maxVersion {
+			maxVersion = region.Region.RegionEpoch.Version
+		}
 	}
 	// update space
 	for _, i := range rs.updateSpace {
@@ -476,6 +482,7 @@ func main() {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
+	maxVersion = cfg.InitEpochVer
 	options := config.NewOptions(cfg)
 	// let PD have enough time to start
 	time.Sleep(5 * time.Second)
@@ -549,6 +556,7 @@ func main() {
 				zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
 				zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
 				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
+				zap.Uint64("max-epoch-version", maxVersion),
 			)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 			regions.update(cfg, options)
