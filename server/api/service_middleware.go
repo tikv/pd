@@ -291,7 +291,7 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 	}
 }
 
-func getQPSSetting(input map[string]interface{}, cfg *ratelimit.DimensionConfig) bool {
+func getQPSSetting(input map[string]any, cfg *ratelimit.DimensionConfig) bool {
 	qps, ok := input["qps"].(float64)
 	if ok {
 		burst := 0
@@ -306,7 +306,7 @@ func getQPSSetting(input map[string]interface{}, cfg *ratelimit.DimensionConfig)
 	return ok
 }
 
-func getConcurrencySetting(input map[string]interface{}, cfg *ratelimit.DimensionConfig) bool {
+func getConcurrencySetting(input map[string]any, cfg *ratelimit.DimensionConfig) bool {
 	concurrencyFloat, ok := input["concurrency"].(float64)
 	if ok {
 		cfg.ConcurrencyLimit = uint64(concurrencyFloat)
@@ -314,7 +314,7 @@ func getConcurrencySetting(input map[string]interface{}, cfg *ratelimit.Dimensio
 	return ok
 }
 
-func getBBRSetting(input map[string]interface{}, cfg *ratelimit.DimensionConfig) bool {
+func getBBRSetting(input map[string]any, cfg *ratelimit.DimensionConfig) bool {
 	enableBBR, ok := input["bbr"].(bool)
 	if ok {
 		cfg.EnableBBR = enableBBR

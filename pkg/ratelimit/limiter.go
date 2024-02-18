@@ -70,32 +70,24 @@ func (l *limiter) getBBR() *bbr {
 	return l.bbr
 }
 
-func (l *limiter) deleteRateLimiter() bool {
+func (l *limiter) deleteRateLimiter() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.cfg.QPS = 0
 	l.cfg.QPSBurst = 0
 	l.rate = nil
-	return l.isEmpty()
 }
 
-func (l *limiter) deleteBBR() bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+func (l *limiter) deleteBBR() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.bbr = nil
 	l.cfg.EnableBBR = false
 	if l.cfg.ConcurrencyLimit > 0 {
 		if l.concurrency != nil {
 			l.concurrency.setLimit(l.cfg.ConcurrencyLimit)
 		}
-	} else {
-		l.concurrency = nil
 	}
-	return l.isEmpty()
-}
-
-func (l *limiter) isEmpty() bool {
-	return l.concurrency == nil && l.rate == nil
 }
 
 func (l *limiter) getQPSLimiterStatus() (limit rate.Limit, burst int) {

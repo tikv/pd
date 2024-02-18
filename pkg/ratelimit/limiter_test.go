@@ -191,9 +191,9 @@ func TestWithBBR(t *testing.T) {
 	}
 	limiter := newLimiter()
 	status := limiter.updateDimensionConfig(cfg, optsForTest...)
-	re.True(status&BBRChanged != 0)
-	re.True(status&QPSNoChange != 0)
-	re.True(status&ConcurrencyNoChange != 0)
+	re.NotEqual(0, status&BBRChanged)
+	re.NotEqual(0, status&QPSNoChange)
+	re.NotEqual(0, status&ConcurrencyNoChange)
 
 	re.NotNil(limiter.getBBR())
 	re.NotNil(limiter.getConcurrencyLimiter())
@@ -251,7 +251,7 @@ func TestWithBBR(t *testing.T) {
 	tricker.Stop()
 	re.True(exceeded.Load())
 	_, current := limiter.getConcurrencyLimiterStatus()
-	re.Equal(current, uint64(0))
+	re.Equal(uint64(0), current)
 
 	// test short RT
 	exceeded.Store(false)
@@ -283,7 +283,7 @@ func TestWithBBR(t *testing.T) {
 		EnableBBR: false,
 	}
 	status = limiter.updateDimensionConfig(cfg)
-	re.True(status&BBRDeleted != 0)
+	re.NotEqual(0, status&BBRDeleted)
 
 	re.Nil(limiter.getBBR())
 	re.Nil(limiter.getConcurrencyLimiter())
@@ -304,7 +304,7 @@ func TestWithBBR(t *testing.T) {
 	enable, maxConcurrency = limiter.getBBRStatus()
 	re.False(enable)
 	limit, _ = limiter.getConcurrencyLimiterStatus()
-	re.Equal(limit, uint64(0))
+	re.Equal(uint64(0), limit)
 
 	exceeded.Store(false)
 	for i := 0; i < 14; i++ {
@@ -397,11 +397,11 @@ func TestWithTwoLimitersAndBBRConfig(t *testing.T) {
 	re.LessOrEqual(limit, cfg.ConcurrencyLimit)
 	re.NotNil(limiter.getConcurrencyLimiter())
 
-	re.Equal(limiter.cfg.ConcurrencyLimit, uint64(100))
+	re.Equal(uint64(100), limiter.cfg.ConcurrencyLimit)
 	cfg.EnableBBR = false
 
 	status = limiter.updateDimensionConfig(cfg)
-	re.True(status&BBRDeleted != 0)
+	re.NotEqual(0, status&BBRDeleted)
 	re.NotNil(limiter.getConcurrencyLimiter())
 	limit, _ = limiter.getConcurrencyLimiterStatus()
 	re.Equal(limit, cfg.ConcurrencyLimit)

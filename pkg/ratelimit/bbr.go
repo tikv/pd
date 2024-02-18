@@ -243,7 +243,7 @@ func (l *bbr) getMinDuration() int64 {
 	if rawMinRT < 1 {
 		rawMinRT = infDuration
 	}
-	if rawMinRT == inf {
+	if rawMinRT == infDuration {
 		return rawMinRT
 	}
 	l.minDurationCache.Store(&cache{

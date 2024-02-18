@@ -250,23 +250,23 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.NoError(err)
 
 	// change bbr
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/health"
 	input["method"] = http.MethodGet
 	input["bbr"] = true
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "BBR option is enabled."))
-	suite.NoError(err)
+	re.NoError(err)
 	suite.True(suite.svr.GetRateLimitConfig().LimiterConfig["GetHealthStatus"].EnableBBR)
 	input["bbr"] = false
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "BBR option is deleted."))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// change both
 	input = make(map[string]any)
@@ -289,13 +289,13 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re.True(result.LimiterConfig["Profile"].EnableBBR)
 	re.NoError(err)
 
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/debug/pprof/profile"
 	input["qps"] = 200
 	input["concurrency"] = 200
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	result = rateLimitResult{}
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."),
@@ -303,11 +303,11 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 		tu.StringContain(re, "BBR option is not changed."),
 		tu.ExtractJSON(re, &result),
 	)
-	suite.NoError(err)
-	suite.Equal(200., result.LimiterConfig["Profile"].QPS)
-	suite.Equal(200, result.LimiterConfig["Profile"].QPSBurst)
-	suite.Equal(uint64(200), result.LimiterConfig["Profile"].ConcurrencyLimit)
-	suite.True(result.LimiterConfig["Profile"].EnableBBR)
+	re.NoError(err)
+	re.Equal(200., result.LimiterConfig["Profile"].QPS)
+	re.Equal(200, result.LimiterConfig["Profile"].QPSBurst)
+	re.Equal(uint64(200), result.LimiterConfig["Profile"].ConcurrencyLimit)
+	re.True(result.LimiterConfig["Profile"].EnableBBR)
 
 	limiter := suite.svr.GetServiceRateLimiter()
 	limiter.Update("SetRateLimitConfig", ratelimit.AddLabelAllowList())
@@ -398,22 +398,22 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
 	re.NoError(err)
 
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	input["bbr"] = true
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "BBR option is enabled."))
-	suite.NoError(err)
-	suite.True(suite.svr.GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].EnableBBR)
+	re.NoError(err)
+	re.True(suite.svr.GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].EnableBBR)
 
 	input["qps"] = -1
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// change both
 	input = make(map[string]any)

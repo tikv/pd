@@ -438,7 +438,7 @@ func TestControllerWithEnableBBR(t *testing.T) {
 					}, optsForTest...),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
-						re.True(status&BBRChanged != 0)
+						re.NotEqual(0, status&BBRChanged)
 					},
 					totalRequest:    200,
 					fail:            -1,
@@ -465,8 +465,8 @@ func TestControllerWithEnableBBR(t *testing.T) {
 					}, optsForTest...),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
-						re.True(status&BBRNoChange != 0)
-						re.True(status&ConcurrencyNoChange != 0)
+						re.NotEqual(0, status&BBRNoChange)
+						re.NotEqual(0, status&ConcurrencyNoChange)
 					},
 					totalRequest: 0,
 					fail:         0,
@@ -485,8 +485,8 @@ func TestControllerWithEnableBBR(t *testing.T) {
 					}, optsForTest...),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
-						re.True(status&BBRNoChange != 0)
-						re.True(status&ConcurrencyNoChange != 0)
+						re.NotEqual(0, status&BBRNoChange)
+						re.NotEqual(0, status&ConcurrencyNoChange)
 					},
 					totalRequest: 100,
 					fail:         80,
@@ -505,8 +505,8 @@ func TestControllerWithEnableBBR(t *testing.T) {
 					}, optsForTest...),
 					checkOptionStatus: func(label string, o Option) {
 						status := limiter.Update(label, o)
-						re.True(status&BBRDeleted != 0)
-						re.True(status&ConcurrencyNoChange != 0)
+						re.NotEqual(0, status&BBRDeleted)
+						re.NotEqual(0, status&ConcurrencyNoChange)
 					},
 					totalRequest: 300,
 					fail:         -1,
