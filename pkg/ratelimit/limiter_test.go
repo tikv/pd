@@ -52,7 +52,7 @@ func TestWithConcurrencyLimiter(t *testing.T) {
 
 	limiter := newLimiter()
 	status := limiter.updateConcurrencyConfig(10)
-	re.True(status&ConcurrencyChanged != 0)
+	re.NotZero(status & ConcurrencyChanged)
 	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
 	var wg sync.WaitGroup
@@ -75,10 +75,10 @@ func TestWithConcurrencyLimiter(t *testing.T) {
 	re.Equal(uint64(0), current)
 
 	status = limiter.updateConcurrencyConfig(10)
-	re.True(status&ConcurrencyNoChange != 0)
+	re.NotZero(status & ConcurrencyNoChange)
 
 	status = limiter.updateConcurrencyConfig(5)
-	re.True(status&ConcurrencyChanged != 0)
+	re.NotZero(status & ConcurrencyChanged)
 	failedCount = 0
 	successCount = 0
 	for i := 0; i < 15; i++ {
@@ -93,7 +93,7 @@ func TestWithConcurrencyLimiter(t *testing.T) {
 	}
 
 	status = limiter.updateConcurrencyConfig(0)
-	re.True(status&ConcurrencyDeleted != 0)
+	re.NotZero(status & ConcurrencyDeleted)
 	failedCount = 0
 	successCount = 0
 	for i := 0; i < 15; i++ {
@@ -106,7 +106,7 @@ func TestWithConcurrencyLimiter(t *testing.T) {
 
 	limit, current = limiter.getConcurrencyLimiterStatus()
 	re.Equal(uint64(0), limit)
-	re.Equal(uint64(0), current)
+	re.Equal(uint64(15), current)
 }
 
 func TestWithQPSLimiter(t *testing.T) {
@@ -114,7 +114,7 @@ func TestWithQPSLimiter(t *testing.T) {
 	re := require.New(t)
 	limiter := newLimiter()
 	status := limiter.updateQPSConfig(float64(rate.Every(time.Second)), 1)
-	re.True(status&QPSChanged != 0)
+	re.NotZero(status & QPSChanged)
 
 	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
@@ -133,10 +133,10 @@ func TestWithQPSLimiter(t *testing.T) {
 	re.Equal(1, burst)
 
 	status = limiter.updateQPSConfig(float64(rate.Every(time.Second)), 1)
-	re.True(status&QPSNoChange != 0)
+	re.NotZero(status & QPSNoChange)
 
 	status = limiter.updateQPSConfig(5, 5)
-	re.True(status&QPSChanged != 0)
+	re.NotZero(status & QPSChanged)
 	limit, burst = limiter.getQPSLimiterStatus()
 	re.Equal(rate.Limit(5), limit)
 	re.Equal(5, burst)
@@ -154,19 +154,19 @@ func TestWithQPSLimiter(t *testing.T) {
 	time.Sleep(time.Second)
 
 	status = limiter.updateQPSConfig(0, 0)
-	re.True(status&QPSDeleted != 0)
+	re.NotZero(status & QPSDeleted)
 	for i := 0; i < 10; i++ {
 		_, err := limiter.allow()
 		re.NoError(err)
 	}
 	qLimit, qCurrent := limiter.getQPSLimiterStatus()
 	re.Equal(rate.Limit(0), qLimit)
-	re.Equal(0, qCurrent)
+	re.Zero(qCurrent)
 
 	successCount = 0
 	failedCount = 0
 	status = limiter.updateQPSConfig(float64(rate.Every(3*time.Second)), 100)
-	re.True(status&QPSChanged != 0)
+	re.NotZero(status & QPSChanged)
 	wg.Add(200)
 	for i := 0; i < 200; i++ {
 		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
@@ -333,8 +333,8 @@ func TestWithTwoLimitersAndBBRConfig(t *testing.T) {
 	}
 	limiter := newLimiter()
 	status := limiter.updateDimensionConfig(cfg)
-	re.True(status&QPSChanged != 0)
-	re.True(status&ConcurrencyChanged != 0)
+	re.NotZero(status & QPSChanged)
+	re.NotZero(status & ConcurrencyChanged)
 
 	var lock syncutil.Mutex
 	successCount, failedCount := 0, 0
@@ -361,7 +361,7 @@ func TestWithTwoLimitersAndBBRConfig(t *testing.T) {
 		r.release()
 	}
 	status = limiter.updateQPSConfig(float64(rate.Every(10*time.Second)), 1)
-	re.True(status&QPSChanged != 0)
+	re.NotZero(status & QPSChanged)
 	wg.Add(100)
 	for i := 0; i < 100; i++ {
 		go countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
@@ -408,8 +408,8 @@ func TestWithTwoLimitersAndBBRConfig(t *testing.T) {
 
 	cfg = &DimensionConfig{}
 	status = limiter.updateDimensionConfig(cfg)
-	re.True(status&ConcurrencyDeleted != 0)
-	re.True(status&QPSDeleted != 0)
+	re.NotZero(status & ConcurrencyDeleted)
+	re.NotZero(status & QPSDeleted)
 }
 
 func countSingleLimiterHandleResult(limiter *limiter, successCount *int,

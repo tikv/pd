@@ -20,11 +20,9 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -35,36 +33,40 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-type idAllocator struct {
-	allocator *mockid.IDAllocator
-}
-
-func (i *idAllocator) alloc() uint64 {
-	v, _ := i.allocator.Alloc()
-	return v
-}
-
 func TestRegionSyncer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
 
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
-	defer cluster.Destroy()
+	defer func() {
+		cluster.Destroy()
+		cancel()
+	}()
 	re.NoError(err)
 
 	re.NoError(cluster.RunInitialServers())
 	cluster.WaitLeader()
 	leaderServer := cluster.GetLeaderServer()
+
 	re.NoError(leaderServer.BootstrapCluster())
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
+	followerServer := cluster.GetServer(cluster.GetFollower())
+
+	testutil.Eventually(re, func() bool {
+		return !followerServer.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/disableClientStreaming"))
 	re.True(cluster.WaitRegionSyncerClientsReady(2))
+	testutil.Eventually(re, func() bool {
+		return followerServer.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
+	})
 
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -119,7 +121,6 @@ func TestRegionSyncer(t *testing.T) {
 	time.Sleep(4 * time.Second)
 
 	// test All regions have been synchronized to the cache of followerServer
-	followerServer := cluster.GetServer(cluster.GetFollower())
 	re.NotNil(followerServer)
 	cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
 	re.Len(cacheRegions, regionLen)
@@ -141,6 +142,9 @@ func TestRegionSyncer(t *testing.T) {
 	re.NoError(err)
 	cluster.WaitLeader()
 	leaderServer = cluster.GetLeaderServer()
+	testutil.Eventually(re, func() bool {
+		return !leaderServer.GetServer().GetRaftCluster().GetRegionSyncer().IsRunning()
+	})
 	re.NotNil(leaderServer)
 	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
 	re.Len(loadRegions, regionLen)
@@ -171,7 +175,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -215,7 +219,7 @@ func TestPrepareChecker(t *testing.T) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -259,12 +263,12 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 100
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -290,37 +294,4 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re.Equal("pd1", cluster.WaitLeader())
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-}
-
-func initRegions(regionLen int) []*core.RegionInfo {
-	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
-	regions := make([]*core.RegionInfo, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
-		r := &metapb.Region{
-			Id: allocator.alloc(),
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
-			Peers: []*metapb.Peer{
-				{Id: allocator.alloc(), StoreId: uint64(1)},
-				{Id: allocator.alloc(), StoreId: uint64(2)},
-				{Id: allocator.alloc(), StoreId: uint64(3)},
-			},
-		}
-		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
-		// Here is used to simulate the upgrade process.
-		if i < regionLen/2 {
-			buckets := &metapb.Buckets{
-				RegionId: r.Id,
-				Keys:     [][]byte{r.StartKey, r.EndKey},
-				Version:  1,
-			}
-			region.UpdateBuckets(buckets, region.GetBuckets())
-		}
-		regions = append(regions, region)
-	}
-	return regions
 }

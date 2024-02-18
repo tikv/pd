@@ -46,21 +46,22 @@ func (suite *regionLabelTestSuite) SetupSuite() {
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/config/region-label/", addr, apiPrefix)
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	mustBootstrapCluster(re, suite.svr)
 }
 
 func (suite *regionLabelTestSuite) TearDownSuite() {
+	re := suite.Require()
 	suite.cleanup()
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func (suite *regionLabelTestSuite) TestGetSet() {
 	re := suite.Require()
 	var resp []*labeler.LabelRule
 	err := tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
-	suite.NoError(err)
-	suite.Empty(resp)
+	re.NoError(err)
+	re.Empty(resp)
 
 	rules := []*labeler.LabelRule{
 		{ID: "rule1", Labels: []labeler.RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: makeKeyRanges("1234", "5678")},
@@ -71,26 +72,26 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 	for _, rule := range rules {
 		data, _ := json.Marshal(rule)
 		err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"rule", data, tu.StatusOK(re))
-		suite.NoError(err)
+		re.NoError(err)
 	}
 	for i, id := range ruleIDs {
 		var rule labeler.LabelRule
 		err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rule/"+url.QueryEscape(id), &rule)
-		suite.NoError(err)
-		suite.Equal(rules[i], &rule)
+		re.NoError(err)
+		re.Equal(rules[i], &rule)
 	}
 
 	err = tu.ReadGetJSONWithBody(re, testDialClient, suite.urlPrefix+"rules/ids", []byte(`["rule1", "rule3"]`), &resp)
-	suite.NoError(err)
+	re.NoError(err)
 	expects := []*labeler.LabelRule{rules[0], rules[2]}
-	suite.Equal(expects, resp)
+	re.Equal(expects, resp)
 
 	err = tu.CheckDelete(testDialClient, suite.urlPrefix+"rule/"+url.QueryEscape("rule2/a/b"), tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
-	suite.NoError(err)
+	re.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
-	suite.Equal([]*labeler.LabelRule{rules[0], rules[2]}, resp)
+	re.Equal([]*labeler.LabelRule{rules[0], rules[2]}, resp)
 
 	patch := labeler.LabelRulePatch{
 		SetRules: []*labeler.LabelRule{
@@ -100,17 +101,17 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 	}
 	data, _ := json.Marshal(patch)
 	err = tu.CheckPatchJSON(testDialClient, suite.urlPrefix+"rules", data, tu.StatusOK(re))
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
-	suite.NoError(err)
+	re.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
-	suite.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)
+	re.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)
 }
 
-func makeKeyRanges(keys ...string) []interface{} {
-	var res []interface{}
+func makeKeyRanges(keys ...string) []any {
+	var res []any
 	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]interface{}{"start_key": keys[i], "end_key": keys[i+1]})
+		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res
 }

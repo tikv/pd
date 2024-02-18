@@ -77,7 +77,7 @@ func TestExpireRegionCache(t *testing.T) {
 
 	re.Equal(3, cache.Len())
 
-	re.Equal(sortIDs(cache.GetAllID()), []uint64{1, 2, 3})
+	re.Equal([]uint64{1, 2, 3}, sortIDs(cache.GetAllID()))
 
 	// after 20ms, the key 1 will be expired
 	time.Sleep(20 * time.Millisecond)
@@ -98,7 +98,7 @@ func TestExpireRegionCache(t *testing.T) {
 		// we can't ensure whether gc is executed, so we check the length of cache in a loop.
 		return cache.Len() == 2
 	}, testutil.WithWaitFor(50*time.Millisecond), testutil.WithTickInterval(time.Millisecond))
-	re.Equal(sortIDs(cache.GetAllID()), []uint64{2, 3})
+	re.Equal([]uint64{2, 3}, sortIDs(cache.GetAllID()))
 
 	cache.Remove(2)
 
@@ -111,7 +111,7 @@ func TestExpireRegionCache(t *testing.T) {
 	re.Equal(3.0, value)
 
 	re.Equal(1, cache.Len())
-	re.Equal(sortIDs(cache.GetAllID()), []uint64{3})
+	re.Equal([]uint64{3}, sortIDs(cache.GetAllID()))
 }
 
 func sortIDs(ids []uint64) []uint64 {
@@ -131,15 +131,15 @@ func TestLRUCache(t *testing.T) {
 
 	val, ok := cache.Get(3)
 	re.True(ok)
-	re.Equal(val, "3")
+	re.Equal("3", val)
 
 	val, ok = cache.Get(2)
 	re.True(ok)
-	re.Equal(val, "2")
+	re.Equal("2", val)
 
 	val, ok = cache.Get(1)
 	re.True(ok)
-	re.Equal(val, "1")
+	re.Equal("1", val)
 
 	re.Equal(3, cache.Len())
 
@@ -153,27 +153,27 @@ func TestLRUCache(t *testing.T) {
 
 	val, ok = cache.Get(1)
 	re.True(ok)
-	re.Equal(val, "1")
+	re.Equal("1", val)
 
 	val, ok = cache.Get(2)
 	re.True(ok)
-	re.Equal(val, "2")
+	re.Equal("2", val)
 
 	val, ok = cache.Get(4)
 	re.True(ok)
-	re.Equal(val, "4")
+	re.Equal("4", val)
 
 	re.Equal(3, cache.Len())
 
 	val, ok = cache.Peek(1)
 	re.True(ok)
-	re.Equal(val, "1")
+	re.Equal("1", val)
 
 	elems := cache.Elems()
 	re.Len(elems, 3)
-	re.Equal(elems[0].Value, "4")
-	re.Equal(elems[1].Value, "2")
-	re.Equal(elems[2].Value, "1")
+	re.Equal("4", elems[0].Value)
+	re.Equal("2", elems[1].Value)
+	re.Equal("1", elems[2].Value)
 
 	cache.Remove(1)
 	cache.Remove(2)
@@ -212,13 +212,13 @@ func TestFifoCache(t *testing.T) {
 
 	elems := cache.Elems()
 	re.Len(elems, 3)
-	re.Equal(elems[0].Value, "2")
-	re.Equal(elems[1].Value, "3")
-	re.Equal(elems[2].Value, "4")
+	re.Equal("2", elems[0].Value)
+	re.Equal("3", elems[1].Value)
+	re.Equal("4", elems[2].Value)
 
 	elems = cache.FromElems(3)
 	re.Len(elems, 1)
-	re.Equal(elems[0].Value, "4")
+	re.Equal("4", elems[0].Value)
 
 	cache.Remove()
 	cache.Remove()
@@ -238,7 +238,7 @@ func TestFifoFromLastSameElems(t *testing.T) {
 	cache.Put(1, &testStruct{value: "3"})
 	fun := func() []*Item {
 		return cache.FromLastSameElems(
-			func(i interface{}) (bool, string) {
+			func(i any) (bool, string) {
 				result, ok := i.(*testStruct)
 				if result == nil {
 					return ok, ""
@@ -247,15 +247,15 @@ func TestFifoFromLastSameElems(t *testing.T) {
 			})
 	}
 	items := fun()
-	re.Equal(1, len(items))
+	re.Len(items, 1)
 	cache.Put(1, &testStruct{value: "3"})
 	cache.Put(2, &testStruct{value: "3"})
 	items = fun()
-	re.Equal(3, len(items))
+	re.Len(items, 3)
 	re.Equal("3", items[0].Value.(*testStruct).value)
 	cache.Put(1, &testStruct{value: "2"})
 	items = fun()
-	re.Equal(1, len(items))
+	re.Len(items, 1)
 	re.Equal("2", items[0].Value.(*testStruct).value)
 }
 
@@ -269,15 +269,15 @@ func TestTwoQueueCache(t *testing.T) {
 
 	val, ok := cache.Get(3)
 	re.True(ok)
-	re.Equal(val, "3")
+	re.Equal("3", val)
 
 	val, ok = cache.Get(2)
 	re.True(ok)
-	re.Equal(val, "2")
+	re.Equal("2", val)
 
 	val, ok = cache.Get(1)
 	re.True(ok)
-	re.Equal(val, "1")
+	re.Equal("1", val)
 
 	re.Equal(3, cache.Len())
 
@@ -291,27 +291,27 @@ func TestTwoQueueCache(t *testing.T) {
 
 	val, ok = cache.Get(1)
 	re.True(ok)
-	re.Equal(val, "1")
+	re.Equal("1", val)
 
 	val, ok = cache.Get(2)
 	re.True(ok)
-	re.Equal(val, "2")
+	re.Equal("2", val)
 
 	val, ok = cache.Get(4)
 	re.True(ok)
-	re.Equal(val, "4")
+	re.Equal("4", val)
 
 	re.Equal(3, cache.Len())
 
 	val, ok = cache.Peek(1)
 	re.True(ok)
-	re.Equal(val, "1")
+	re.Equal("1", val)
 
 	elems := cache.Elems()
 	re.Len(elems, 3)
-	re.Equal(elems[0].Value, "4")
-	re.Equal(elems[1].Value, "2")
-	re.Equal(elems[2].Value, "1")
+	re.Equal("4", elems[0].Value)
+	re.Equal("2", elems[1].Value)
+	re.Equal("1", elems[2].Value)
 
 	cache.Remove(1)
 	cache.Remove(2)

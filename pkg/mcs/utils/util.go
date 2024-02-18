@@ -33,9 +33,11 @@ import (
 	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
@@ -45,8 +47,8 @@ import (
 const (
 	// maxRetryTimes is the max retry times for initializing the cluster ID.
 	maxRetryTimes = 5
-	// clusterIDPath is the path to store cluster id
-	clusterIDPath = "/pd/cluster_id"
+	// ClusterIDPath is the path to store cluster id
+	ClusterIDPath = "/pd/cluster_id"
 	// retryInterval is the interval to retry.
 	retryInterval = time.Second
 )
@@ -56,7 +58,7 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
-		if clusterID, err := etcdutil.GetClusterID(client, clusterIDPath); err == nil && clusterID != 0 {
+		if clusterID, err := etcdutil.GetClusterID(client, ClusterIDPath); err == nil && clusterID != 0 {
 			return clusterID, nil
 		}
 		select {
@@ -78,6 +80,19 @@ func PromHandler() gin.HandlerFunc {
 	}
 }
 
+// StatusHandler is a handler to get status info.
+func StatusHandler(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(server)
+	version := versioninfo.Status{
+		BuildTS:        versioninfo.PDBuildTS,
+		GitHash:        versioninfo.PDGitHash,
+		Version:        versioninfo.PDReleaseVersion,
+		StartTimestamp: svr.StartTimestamp(),
+	}
+
+	c.IndentedJSON(http.StatusOK, version)
+}
+
 type server interface {
 	GetBackendEndpoints() string
 	Context() context.Context
@@ -97,6 +112,7 @@ type server interface {
 	RegisterGRPCService(*grpc.Server)
 	SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup)
 	diagnosticspb.DiagnosticsServer
+	StartTimestamp() int64
 }
 
 // WaitAPIServiceReady waits for the api service ready.
@@ -161,12 +177,12 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	etcdClient, httpClient, err := etcdutil.CreateClients(tlsConfig, backendUrls)
+	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, "mcs-etcd-client")
 	if err != nil {
 		return err
 	}
 	s.SetETCDClient(etcdClient)
-	s.SetHTTPClient(httpClient)
+	s.SetHTTPClient(etcdutil.CreateHTTPClient(tlsConfig))
 	return nil
 }
 

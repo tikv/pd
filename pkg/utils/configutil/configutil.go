@@ -96,7 +96,7 @@ func PrintConfigCheckMsg(w io.Writer, warningMsgs []string) {
 }
 
 // ConfigFromFile loads config from file.
-func ConfigFromFile(c interface{}, path string) (*toml.MetaData, error) {
+func ConfigFromFile(c any, path string) (*toml.MetaData, error) {
 	meta, err := toml.DecodeFile(path, c)
 	return &meta, errors.WithStack(err)
 }

@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"net/http"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -29,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -47,6 +47,8 @@ const (
 var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
 
 type evictSlowStoreSchedulerConfig struct {
+	syncutil.RWMutex
+	cluster *core.BasicCluster
 	storage endpoint.ConfigStorage
 	// Last timestamp of the chosen slow store for eviction.
 	lastSlowStoreCaptureTS time.Time
@@ -65,13 +67,15 @@ func initEvictSlowStoreSchedulerConfig(storage endpoint.ConfigStorage) *evictSlo
 }
 
 func (conf *evictSlowStoreSchedulerConfig) Clone() *evictSlowStoreSchedulerConfig {
+	conf.RLock()
+	defer conf.RUnlock()
 	return &evictSlowStoreSchedulerConfig{
-		RecoveryDurationGap: atomic.LoadUint64(&conf.RecoveryDurationGap),
+		RecoveryDurationGap: conf.RecoveryDurationGap,
 	}
 }
 
-func (conf *evictSlowStoreSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
+func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
+	name := EvictSlowStoreName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
@@ -82,11 +86,9 @@ func (conf *evictSlowStoreSchedulerConfig) Persist() error {
 	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getSchedulerName() string {
-	return EvictSlowStoreName
-}
-
 func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
 	return conf.EvictedStores
 }
 
@@ -98,15 +100,17 @@ func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 }
 
 func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
-	if len(conf.EvictedStores) == 0 {
+	if len(conf.getStores()) == 0 {
 		return 0
 	}
-	return conf.EvictedStores[0]
+	return conf.getStores()[0]
 }
 
 // readyForRecovery checks whether the last cpatured candidate is ready for recovery.
 func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
-	recoveryDurationGap := atomic.LoadUint64(&conf.RecoveryDurationGap)
+	conf.RLock()
+	defer conf.RUnlock()
+	recoveryDurationGap := conf.RecoveryDurationGap
 	failpoint.Inject("transientRecoveryGap", func() {
 		recoveryDurationGap = 0
 	})
@@ -114,17 +118,21 @@ func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 }
 
 func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
+	conf.Lock()
+	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
-	return conf.Persist()
+	return conf.persistLocked()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
 	oldID = conf.evictStore()
+	conf.Lock()
+	defer conf.Unlock()
 	if oldID > 0 {
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
-		err = conf.Persist()
+		err = conf.persistLocked()
 	}
 	return
 }
@@ -146,7 +154,7 @@ func newEvictSlowStoreHandler(config *evictSlowStoreSchedulerConfig) http.Handle
 }
 
 func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -155,11 +163,18 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
-	recoveryDurationGap := (uint64)(recoveryDurationGapFloat)
-	prevRecoveryDurationGap := atomic.LoadUint64(&handler.config.RecoveryDurationGap)
-	atomic.StoreUint64(&handler.config.RecoveryDurationGap, recoveryDurationGap)
+	handler.config.Lock()
+	defer handler.config.Unlock()
+	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
+	recoveryDurationGap := uint64(recoveryDurationGapFloat)
+	handler.config.RecoveryDurationGap = recoveryDurationGap
+	if err := handler.config.persistLocked(); err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
+		return
+	}
 	log.Info("evict-slow-store-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
 func (handler *evictSlowStoreHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +204,35 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-func (s *evictSlowStoreScheduler) Prepare(cluster sche.SchedulerCluster) error {
+func (s *evictSlowStoreScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &evictSlowStoreSchedulerConfig{}
+	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	old := make(map[uint64]struct{})
+	for _, id := range s.conf.EvictedStores {
+		old[id] = struct{}{}
+	}
+	new := make(map[uint64]struct{})
+	for _, id := range newCfg.EvictedStores {
+		new[id] = struct{}{}
+	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, old, new)
+	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
+	s.conf.EvictedStores = newCfg.EvictedStores
+	return nil
+}
+
+func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
 		return cluster.SlowStoreEvicted(evictStore)
@@ -197,7 +240,7 @@ func (s *evictSlowStoreScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	return nil
 }
 
-func (s *evictSlowStoreScheduler) Cleanup(cluster sche.SchedulerCluster) {
+func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
 

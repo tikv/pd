@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,24 +37,24 @@ var (
 func createConcurrencyFeedback() (*concurrencyLimiter, func(s *bbrStatus)) {
 	cl := newConcurrencyLimiter(uint64(inf))
 	return cl, func(s *bbrStatus) {
-		cl.tryToSetLimit(uint64(s.getMaxInFlight()))
+		cl.tryToSetLimit(uint64(s.getRDP()))
 	}
 }
 
-func TestBBRMaxPass(t *testing.T) {
+func TestBBRMaxPassStat(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	// default max pass is equal to 1.
-	re.Equal(int64(1), bbr.getMaxPASS())
+	re.Equal(int64(1), bbr.getMaxPass())
 
 	for i := 1; i <= 2; i++ {
 		for j := 0; j < 5; j++ {
 			bbr.process()()
 		}
 		time.Sleep(bucketDuration)
-		re.Equal(int64(5), bbr.getMaxPASS())
+		re.Equal(int64(5), bbr.getMaxPass())
 	}
 
 	for i := 1; i <= 20; i++ {
@@ -62,7 +62,7 @@ func TestBBRMaxPass(t *testing.T) {
 			bbr.process()()
 		}
 		time.Sleep(bucketDuration)
-		re.Equal(int64(10), bbr.getMaxPASS())
+		re.Equal(int64(10), bbr.getMaxPass())
 	}
 
 	for i := 0; i < 10; i++ {
@@ -71,16 +71,16 @@ func TestBBRMaxPass(t *testing.T) {
 		}
 		time.Sleep(bucketDuration)
 	}
-	re.Equal(int64(2), bbr.getMaxPASS())
+	re.Equal(int64(2), bbr.getMaxPass())
 }
 
-func TestBBRMinRt(t *testing.T) {
+func TestBBRMinDuration(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
 	// default max min rt is equal to maxFloat64.
-	re.Equal(int64(3600000000000), bbr.getMinRT())
+	re.Equal(int64(3600000000000), bbr.getMinDuration())
 
 	for i := 0; i < 10; i++ {
 		var wg sync.WaitGroup
@@ -97,8 +97,8 @@ func TestBBRMinRt(t *testing.T) {
 		wg.Wait()
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.Less(int64(10000), bbr.getMinRT())
-			re.Greater(int64(12500), bbr.getMinRT())
+			re.Less(int64(10000), bbr.getMinDuration())
+			re.Greater(int64(12500), bbr.getMinDuration())
 		}
 	}
 
@@ -111,8 +111,8 @@ func TestBBRMinRt(t *testing.T) {
 		time.Sleep(bucketDuration)
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.Less(int64(5000), bbr.getMinRT())
-			re.Greater(int64(6500), bbr.getMinRT())
+			re.Less(int64(5000), bbr.getMinDuration())
+			re.Greater(int64(6500), bbr.getMinDuration())
 		}
 	}
 
@@ -125,16 +125,17 @@ func TestBBRMinRt(t *testing.T) {
 		time.Sleep(bucketDuration)
 	}
 	// due to extra time cost in `Sleep`.
-	re.Less(int64(20000), bbr.getMinRT())
-	re.Greater(int64(24000), bbr.getMinRT())
+	re.Less(int64(20000), bbr.getMinDuration())
+	re.Greater(int64(24000), bbr.getMinDuration())
 }
 
-func TestBDP(t *testing.T) {
+func TestRDP(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	_, feedback := createConcurrencyFeedback()
 	bbr := newBBR(cfg, feedback)
-	re.Equal(int64(36000000), bbr.getMaxInFlight())
+	rdp, _ := bbr.calcRDP()
+	re.Equal(int64(36000000), rdp)
 
 	for i := 0; i < 10; i++ {
 		for j := 0; j < 100; j++ {
@@ -146,8 +147,9 @@ func TestBDP(t *testing.T) {
 		}
 		time.Sleep(bucketDuration)
 		// due to extra time cost in `Sleep`.
-		re.LessOrEqual(int64(10), bbr.getMaxInFlight())
-		re.GreaterOrEqual(int64(14), bbr.getMaxInFlight())
+		rdp, _ := bbr.calcRDP()
+		re.LessOrEqual(int64(10), rdp)
+		re.GreaterOrEqual(int64(14), rdp)
 	}
 
 	for i := 0; i < 10; i++ {
@@ -161,8 +163,9 @@ func TestBDP(t *testing.T) {
 		time.Sleep(bucketDuration)
 		if i > 0 {
 			// due to extra time cost in `Sleep`.
-			re.LessOrEqual(int64(15), bbr.getMaxInFlight())
-			re.GreaterOrEqual(int64(22), bbr.getMaxInFlight())
+			rdp, _ := bbr.calcRDP()
+			re.LessOrEqual(int64(15), rdp)
+			re.GreaterOrEqual(int64(22), rdp)
 		}
 	}
 }
@@ -183,10 +186,10 @@ func TestFullStatus(t *testing.T) {
 		}
 		time.Sleep(bucketDuration)
 	}
-	maxInFlight := bbr.bbrStatus.getMaxInFlight()
+	maxInFlight := bbr.bbrStatus.getRDP()
 	re.LessOrEqual(int64(6), maxInFlight)
 	re.GreaterOrEqual(int64(10), maxInFlight)
 	re.Equal(cl.limit, uint64(maxInFlight))
-	re.LessOrEqual(int64(200000), bbr.bbrStatus.getMinRT())
-	re.GreaterOrEqual(int64(220000), bbr.bbrStatus.getMinRT())
+	re.LessOrEqual(int64(200000), bbr.bbrStatus.getMinDuration())
+	re.GreaterOrEqual(int64(220000), bbr.bbrStatus.getMinDuration())
 }

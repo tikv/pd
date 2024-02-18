@@ -48,11 +48,40 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 		},
 	}
 	tb.patch(tbSetting)
-
+	time.Sleep(10 * time.Millisecond)
 	time2 := time.Now()
 	tb.request(time2, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.FillRate)+1e7)
 	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
+
+	tbSetting = &rmpb.TokenBucket{
+		Tokens: 0,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: -1,
+		},
+	}
+	tb = NewGroupTokenBucket(tbSetting)
+	tb.request(time2, 0, 0, clientUniqueID)
+	re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
+	time3 := time.Now()
+	tb.request(time3, 0, 0, clientUniqueID)
+	re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
+
+	tbSetting = &rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: -1,
+		},
+	}
+	tb = NewGroupTokenBucket(tbSetting)
+	tb.request(time3, 0, 0, clientUniqueID)
+	re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
+	time.Sleep(10 * time.Millisecond)
+	time4 := time.Now()
+	tb.request(time4, 0, 0, clientUniqueID)
+	re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
 }
 
 func TestGroupTokenBucketRequest(t *testing.T) {
@@ -70,27 +99,27 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 	clientUniqueID := uint64(0)
 	tb, trickle := gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-190000), 1e-7)
-	re.Equal(trickle, int64(0))
+	re.Zero(trickle)
 	// need to lend token
 	tb, trickle = gtb.request(time1, 11000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-11000), 1e-7)
-	re.Equal(trickle, int64(time.Second)*11000./4000./int64(time.Millisecond))
+	re.Equal(int64(time.Second)*11000./4000./int64(time.Millisecond), trickle)
 	tb, trickle = gtb.request(time1, 35000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-35000), 1e-7)
-	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
+	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
 	tb, trickle = gtb.request(time1, 60000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-22000), 1e-7)
-	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
+	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
 	// Get reserved 10000 tokens = fillrate(2000) * 10 * defaultReserveRatio(0.5)
 	// Max loan tokens is 60000.
 	tb, trickle = gtb.request(time1, 3000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-3000), 1e-7)
-	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
+	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
 	tb, trickle = gtb.request(time1, 12000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-10000), 1e-7)
-	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
+	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
 	time2 := time1.Add(20 * time.Second)
 	tb, trickle = gtb.request(time2, 20000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-20000), 1e-7)
-	re.Equal(trickle, int64(time.Second)*10/int64(time.Millisecond))
+	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
 }

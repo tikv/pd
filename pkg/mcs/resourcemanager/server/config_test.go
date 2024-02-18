@@ -42,8 +42,8 @@ read-cpu-ms-cost =  5.0
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
-	re.Equal(cfg.Controller.DegradedModeWaitDuration.Duration, time.Second*2)
-	re.Equal(cfg.Controller.LTBMaxWaitDuration.Duration, time.Second*60)
+	re.Equal(time.Second*2, cfg.Controller.DegradedModeWaitDuration.Duration)
+	re.Equal(time.Second*60, cfg.Controller.LTBMaxWaitDuration.Duration)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.CPUMsCost-5), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteCostPerByte-4), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteBaseCost-3), 1e-7)

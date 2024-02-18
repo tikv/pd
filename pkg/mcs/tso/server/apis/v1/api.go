@@ -15,15 +15,14 @@
 package apis
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -43,7 +42,6 @@ const (
 )
 
 var (
-	once            sync.Once
 	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "tso",
 		Version:    "v1",
@@ -76,11 +74,6 @@ func createIndentRender() *render.Render {
 
 // NewService returns a new Service.
 func NewService(srv *tsoserver.Service) *Service {
-	once.Do(func() {
-		// These global modification will be effective only for the first invoke.
-		_ = godotenv.Load()
-		gin.SetMode(gin.ReleaseMode)
-	})
 	apiHandlerEngine := gin.New()
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.Default())
@@ -90,6 +83,7 @@ func NewService(srv *tsoserver.Service) *Service {
 		c.Next()
 	})
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
+	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	root.Use(multiservicesapi.ServiceRedirector())
@@ -101,6 +95,7 @@ func NewService(srv *tsoserver.Service) *Service {
 	}
 	s.RegisterAdminRouter()
 	s.RegisterKeyspaceGroupRouter()
+	s.RegisterHealth()
 	return s
 }
 
@@ -115,6 +110,12 @@ func (s *Service) RegisterAdminRouter() {
 func (s *Service) RegisterKeyspaceGroupRouter() {
 	router := s.root.Group("keyspace-groups")
 	router.GET("/members", GetKeyspaceGroupMembers)
+}
+
+// RegisterHealth registers the router of the health handler.
+func (s *Service) RegisterHealth() {
+	router := s.root.Group("health")
+	router.GET("", GetHealth)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -150,6 +151,7 @@ type ResetTSParams struct {
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  403  {string}  string  "Reset ts is forbidden."
 // @Failure  500  {string}  string  "TSO server failed to proceed the request."
+// @Failure  503  {string}  string  "It's a temporary failure, please retry."
 // @Router   /admin/reset-ts [post]
 // if force-use-larger=true:
 //
@@ -185,12 +187,34 @@ func ResetTS(c *gin.Context) {
 	if err = svr.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
 		if err == errs.ErrServerNotStarted {
 			c.String(http.StatusInternalServerError, err.Error())
+		} else if err == errs.ErrEtcdTxnConflict {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+			// Return 503 to let the client retry.
+			// Ref: https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4
+			c.String(http.StatusServiceUnavailable,
+				fmt.Sprintf("It's a temporary failure with error %s, please retry.", err.Error()))
 		} else {
 			c.String(http.StatusForbidden, err.Error())
 		}
 		return
 	}
 	c.String(http.StatusOK, "Reset ts successfully.")
+}
+
+// GetHealth returns the health status of the TSO service.
+func GetHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	am, err := svr.GetKeyspaceGroupManager().GetAllocatorManager(utils.DefaultKeyspaceGroupID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if am.GetMember().IsLeaderElected() {
+		c.IndentedJSON(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no leader elected")
 }
 
 // KeyspaceGroupMember contains the keyspace group and its member information.

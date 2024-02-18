@@ -15,43 +15,42 @@
 package endpoint
 
 import (
-	"strings"
+	"context"
 
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/storage/kv"
 )
 
 // RuleStorage defines the storage operations on the rule.
 type RuleStorage interface {
+	// Load in txn is unnecessary and may cause txn too large.
+	// because scheduling server will load rules from etcd rather than watching.
 	LoadRule(ruleKey string) (string, error)
 	LoadRules(f func(k, v string)) error
-	SaveRule(ruleKey string, rule interface{}) error
-	SaveRuleJSON(ruleKey, rule string) error
-	DeleteRule(ruleKey string) error
 	LoadRuleGroups(f func(k, v string)) error
-	SaveRuleGroup(groupID string, group interface{}) error
-	SaveRuleGroupJSON(groupID, group string) error
-	DeleteRuleGroup(groupID string) error
 	LoadRegionRules(f func(k, v string)) error
-	SaveRegionRule(ruleKey string, rule interface{}) error
-	SaveRegionRuleJSON(ruleKey, rule string) error
-	DeleteRegionRule(ruleKey string) error
+
+	// We need to use txn to avoid concurrent modification.
+	// And it is helpful for the scheduling server to watch the rule.
+	SaveRule(txn kv.Txn, ruleKey string, rule any) error
+	DeleteRule(txn kv.Txn, ruleKey string) error
+	SaveRuleGroup(txn kv.Txn, groupID string, group any) error
+	DeleteRuleGroup(txn kv.Txn, groupID string) error
+	SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error
+	DeleteRegionRule(txn kv.Txn, ruleKey string) error
+
+	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
 var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
-func (se *StorageEndpoint) SaveRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(ruleKeyPath(ruleKey), rule)
-}
-
-// SaveRuleJSON stores a rule cfg JSON to the rulesPath.
-func (se *StorageEndpoint) SaveRuleJSON(ruleKey, rule string) error {
-	return se.Save(ruleKeyPath(ruleKey), rule)
+func (se *StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule any) error {
+	return saveJSONInTxn(txn, ruleKeyPath(ruleKey), rule)
 }
 
 // DeleteRule removes a rule from storage.
-func (se *StorageEndpoint) DeleteRule(ruleKey string) error {
-	return se.Remove(ruleKeyPath(ruleKey))
+func (se *StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
+	return txn.Remove(ruleKeyPath(ruleKey))
 }
 
 // LoadRuleGroups loads all rule groups from storage.
@@ -60,18 +59,13 @@ func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
 }
 
 // SaveRuleGroup stores a rule group config to storage.
-func (se *StorageEndpoint) SaveRuleGroup(groupID string, group interface{}) error {
-	return se.saveJSON(ruleGroupIDPath(groupID), group)
-}
-
-// SaveRuleGroupJSON stores a rule group config JSON to storage.
-func (se *StorageEndpoint) SaveRuleGroupJSON(groupID, group string) error {
-	return se.Save(ruleGroupIDPath(groupID), group)
+func (se *StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group any) error {
+	return saveJSONInTxn(txn, ruleGroupIDPath(groupID), group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
-func (se *StorageEndpoint) DeleteRuleGroup(groupID string) error {
-	return se.Remove(ruleGroupIDPath(groupID))
+func (se *StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
+	return txn.Remove(ruleGroupIDPath(groupID))
 }
 
 // LoadRegionRules loads region rules from storage.
@@ -80,18 +74,13 @@ func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
 }
 
 // SaveRegionRule saves a region rule to the storage.
-func (se *StorageEndpoint) SaveRegionRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(regionLabelKeyPath(ruleKey), rule)
-}
-
-// SaveRegionRuleJSON saves a region rule JSON to the storage.
-func (se *StorageEndpoint) SaveRegionRuleJSON(ruleKey, rule string) error {
-	return se.Save(regionLabelKeyPath(ruleKey), rule)
+func (se *StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error {
+	return saveJSONInTxn(txn, regionLabelKeyPath(ruleKey), rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
-func (se *StorageEndpoint) DeleteRegionRule(ruleKey string) error {
-	return se.Remove(regionLabelKeyPath(ruleKey))
+func (se *StorageEndpoint) DeleteRegionRule(txn kv.Txn, ruleKey string) error {
+	return txn.Remove(regionLabelKeyPath(ruleKey))
 }
 
 // LoadRule load a placement rule from storage.
@@ -102,23 +91,4 @@ func (se *StorageEndpoint) LoadRule(ruleKey string) (string, error) {
 // LoadRules loads placement rules from storage.
 func (se *StorageEndpoint) LoadRules(f func(k, v string)) error {
 	return se.loadRangeByPrefix(rulesPath+"/", f)
-}
-
-// loadRangeByPrefix iterates all key-value pairs in the storage that has the prefix.
-func (se *StorageEndpoint) loadRangeByPrefix(prefix string, f func(k, v string)) error {
-	nextKey := prefix
-	endKey := clientv3.GetPrefixRangeEnd(prefix)
-	for {
-		keys, values, err := se.LoadRange(nextKey, endKey, MinKVRangeLimit)
-		if err != nil {
-			return err
-		}
-		for i := range keys {
-			f(strings.TrimPrefix(keys[i], prefix), values[i])
-		}
-		if len(keys) < MinKVRangeLimit {
-			return nil
-		}
-		nextKey = keys[len(keys)-1] + "\x00"
-	}
 }

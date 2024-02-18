@@ -28,8 +28,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -57,7 +55,7 @@ func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ConfigProvider is used to get tso config from the given
 // `bs.server` without modifying its interface.
-type ConfigProvider interface{}
+type ConfigProvider any
 
 // Service is the TSO grpc service.
 type Service struct {
@@ -88,47 +86,15 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 // Tso returns a stream of timestamps
 func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
-	var (
-		doneCh chan struct{}
-		errCh  chan error
-	)
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
-		// Prevent unnecessary performance overhead of the channel.
-		if errCh != nil {
-			select {
-			case err := <-errCh:
-				return errors.WithStack(err)
-			default:
-			}
-		}
 		request, err := stream.Recv()
 		if err == io.EOF {
 			return nil
 		}
 		if err != nil {
 			return errors.WithStack(err)
-		}
-
-		streamCtx := stream.Context()
-		forwardedHost := grpcutil.GetForwardedHost(streamCtx)
-		if !s.IsLocalRequest(forwardedHost) {
-			clientConn, err := s.GetDelegateClient(s.Context(), s.GetTLSConfig(), forwardedHost)
-			if err != nil {
-				return errors.WithStack(err)
-			}
-
-			if errCh == nil {
-				doneCh = make(chan struct{})
-				defer close(doneCh)
-				errCh = make(chan error)
-			}
-
-			tsoProtoFactory := s.tsoProtoFactory
-			tsoRequest := tsoutil.NewTSOProtoRequest(forwardedHost, clientConn, request, stream)
-			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh)
-			continue
 		}
 
 		start := time.Now()

@@ -15,6 +15,8 @@
 package ratelimit
 
 import (
+	"math"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"golang.org/x/time/rate"
@@ -44,7 +46,8 @@ type limiter struct {
 
 func newLimiter() *limiter {
 	lim := &limiter{
-		cfg: &DimensionConfig{},
+		cfg:         &DimensionConfig{},
+		concurrency: newConcurrencyLimiter(0),
 	}
 	return lim
 }
@@ -68,19 +71,11 @@ func (l *limiter) getBBR() *bbr {
 }
 
 func (l *limiter) deleteRateLimiter() bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.cfg.QPS = 0
 	l.cfg.QPSBurst = 0
 	l.rate = nil
-	return l.isEmpty()
-}
-
-func (l *limiter) deleteConcurrency() bool {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	l.concurrency = nil
-	l.cfg.ConcurrencyLimit = 0
 	return l.isEmpty()
 }
 
@@ -122,7 +117,7 @@ func (l *limiter) getConcurrencyLimiterStatus() (limit uint64, current uint64) {
 func (l *limiter) getBBRStatus() (enable bool, limit int64) {
 	baseLimiter := l.getBBR()
 	if baseLimiter != nil {
-		return true, baseLimiter.bbrStatus.getMaxInFlight()
+		return true, baseLimiter.bbrStatus.getRDP()
 	}
 	return false, 0
 }
@@ -143,11 +138,11 @@ func (l *limiter) updateBBRConfig(enable bool, o ...bbrOption) UpdateStatus {
 		l.concurrency = newConcurrencyLimiter(uint64(inf))
 	}
 	fb := func(s *bbrStatus) {
-		if s.getMinRT() == infRT {
+		if s.getMinDuration() == infDuration {
 			current := l.concurrency.getCurrent()
 			l.concurrency.tryToSetLimit(current)
 		} else {
-			l.concurrency.tryToSetLimit(uint64(s.getMaxInFlight()))
+			l.concurrency.tryToSetLimit(uint64(s.getRDP()))
 		}
 	}
 	l.bbr = newBBR(newConfig(o...), fb)
@@ -159,16 +154,16 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 	if oldConcurrencyLimit == limit {
 		return ConcurrencyNoChange
 	}
-	if limit < 1 {
-		l.deleteConcurrency()
-		return ConcurrencyDeleted
-	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.cfg.ConcurrencyLimit = limit
 	if l.concurrency != nil {
-		if bbr := l.bbr; bbr != nil && bbr.bbrStatus.getMaxInFlight() != inf {
+		if limit < 1 {
+			l.concurrency.setLimit(0)
+			return ConcurrencyDeleted
+		}
+		if bbr := l.bbr; bbr != nil && bbr.bbrStatus.getRDP() != inf {
 			if l.concurrency.tryToSetLimit(limit) {
 				return ConcurrencyChanged
 			}
@@ -183,8 +178,7 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 
 func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
 	oldQPSLimit, oldBurst := l.getQPSLimiterStatus()
-
-	if (float64(oldQPSLimit)-limit < eps && float64(oldQPSLimit)-limit > -eps) && oldBurst == burst {
+	if math.Abs(float64(oldQPSLimit)-limit) < eps && oldBurst == burst {
 		return QPSNoChange
 	}
 	if limit <= eps || burst < 1 {
@@ -216,6 +210,7 @@ func (l *limiter) allow() (DoneFunc, error) {
 	if concurrency != nil && !concurrency.allow() {
 		return nil, errs.ErrRateLimitExceeded
 	}
+
 	rate := l.getRateLimiter()
 	if rate != nil && !rate.Allow() {
 		if concurrency != nil {

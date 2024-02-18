@@ -62,7 +62,7 @@ func TestBalancerDuplicate(t *testing.T) {
 		NewRoundRobin[uint32](),
 	}
 	for _, balancer := range balancers {
-		re.Len(balancer.GetAll(), 0)
+		re.Empty(balancer.GetAll())
 		// test duplicate put
 		balancer.Put(1)
 		re.Len(balancer.GetAll(), 1)
@@ -70,9 +70,9 @@ func TestBalancerDuplicate(t *testing.T) {
 		re.Len(balancer.GetAll(), 1)
 		// test duplicate delete
 		balancer.Delete(1)
-		re.Len(balancer.GetAll(), 0)
+		re.Empty(balancer.GetAll())
 		balancer.Delete(1)
-		re.Len(balancer.GetAll(), 0)
+		re.Empty(balancer.GetAll())
 	}
 }
 

@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -34,6 +36,8 @@ import (
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -172,12 +176,19 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 	})
 	re.NoError(err)
 
+	ts := store.GetLastHeartbeat()
+	if ts == 0 {
+		ts = time.Now().UnixNano()
+	}
 	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
-	newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
-		Capacity:  uint64(10 * units.GiB),
-		UsedSize:  uint64(9 * units.GiB),
-		Available: uint64(1 * units.GiB),
-	}))
+	newStore := storeInfo.Clone(
+		core.SetStoreStats(&pdpb.StoreStats{
+			Capacity:  uint64(10 * units.GiB),
+			UsedSize:  uint64(9 * units.GiB),
+			Available: uint64(1 * units.GiB),
+		}),
+		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
+	)
 	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
@@ -197,6 +208,7 @@ func MustPutRegion(re *require.Assertions, cluster *TestCluster, regionID, store
 		Peers:       []*metapb.Peer{leader},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}
+	opts = append(opts, core.SetSource(core.Heartbeat))
 	r := core.NewRegionInfo(metaRegion, leader, opts...)
 	MustPutRegionInfo(re, cluster, r)
 	return r
@@ -237,18 +249,19 @@ const (
 
 // SchedulingTestEnvironment is used for test purpose.
 type SchedulingTestEnvironment struct {
-	t       *testing.T
-	ctx     context.Context
-	cancel  context.CancelFunc
-	cluster *TestCluster
-	opts    []ConfigOption
+	t        *testing.T
+	opts     []ConfigOption
+	clusters map[mode]*TestCluster
+	cancels  []context.CancelFunc
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
 func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *SchedulingTestEnvironment {
 	return &SchedulingTestEnvironment{
-		t:    t,
-		opts: opts,
+		t:        t,
+		opts:     opts,
+		clusters: make(map[mode]*TestCluster),
+		cancels:  make([]context.CancelFunc, 0),
 	}
 }
 
@@ -260,56 +273,139 @@ func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
 
 // RunTestInPDMode is to run test in pd mode.
 func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
-	s.t.Log("start to run test in pd mode")
-	s.startCluster(pdMode)
-	test(s.cluster)
-	s.cleanup()
-	s.t.Log("finish to run test in pd mode")
+	s.t.Logf("start test %s in pd mode", s.getTestName())
+	if _, ok := s.clusters[pdMode]; !ok {
+		s.startCluster(pdMode)
+	}
+	test(s.clusters[pdMode])
+}
+
+func (s *SchedulingTestEnvironment) getTestName() string {
+	pc, _, _, _ := runtime.Caller(2)
+	caller := runtime.FuncForPC(pc)
+	if caller == nil || strings.Contains(caller.Name(), "RunTestInTwoModes") {
+		pc, _, _, _ = runtime.Caller(3)
+		caller = runtime.FuncForPC(pc)
+	}
+	if caller != nil {
+		elements := strings.Split(caller.Name(), ".")
+		return elements[len(elements)-1]
+	}
+	return ""
 }
 
 // RunTestInAPIMode is to run test in api mode.
 func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
-	s.t.Log("start to run test in api mode")
 	re := require.New(s.t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	s.startCluster(apiMode)
-	test(s.cluster)
-	s.cleanup()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
-	s.t.Log("finish to run test in api mode")
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	}()
+	s.t.Logf("start test %s in api mode", s.getTestName())
+	if _, ok := s.clusters[apiMode]; !ok {
+		s.startCluster(apiMode)
+	}
+	test(s.clusters[apiMode])
 }
 
-func (s *SchedulingTestEnvironment) cleanup() {
-	s.cluster.Destroy()
-	s.cancel()
+// RunFuncInTwoModes is to run func in two modes.
+func (s *SchedulingTestEnvironment) RunFuncInTwoModes(f func(*TestCluster)) {
+	if c, ok := s.clusters[pdMode]; ok {
+		f(c)
+	}
+	if c, ok := s.clusters[apiMode]; ok {
+		f(c)
+	}
+}
+
+// Cleanup is to cleanup the environment.
+func (s *SchedulingTestEnvironment) Cleanup() {
+	for _, cluster := range s.clusters {
+		cluster.Destroy()
+	}
+	for _, cancel := range s.cancels {
+		cancel()
+	}
 }
 
 func (s *SchedulingTestEnvironment) startCluster(m mode) {
-	var err error
 	re := require.New(s.t)
-	s.ctx, s.cancel = context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancels = append(s.cancels, cancel)
 	switch m {
 	case pdMode:
-		s.cluster, err = NewTestCluster(s.ctx, 1, s.opts...)
+		cluster, err := NewTestCluster(ctx, 1, s.opts...)
 		re.NoError(err)
-		err = s.cluster.RunInitialServers()
+		err = cluster.RunInitialServers()
 		re.NoError(err)
-		re.NotEmpty(s.cluster.WaitLeader())
-		leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
+		re.NotEmpty(cluster.WaitLeader())
+		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
+		s.clusters[pdMode] = cluster
 	case apiMode:
-		s.cluster, err = NewTestAPICluster(s.ctx, 1, s.opts...)
+		cluster, err := NewTestAPICluster(ctx, 1, s.opts...)
 		re.NoError(err)
-		err = s.cluster.RunInitialServers()
+		err = cluster.RunInitialServers()
 		re.NoError(err)
-		re.NotEmpty(s.cluster.WaitLeader())
-		leaderServer := s.cluster.GetServer(s.cluster.GetLeader())
+		re.NotEmpty(cluster.WaitLeader())
+		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
+		leaderServer.GetRaftCluster().SetPrepared()
 		// start scheduling cluster
-		tc, err := NewTestSchedulingCluster(s.ctx, 1, leaderServer.GetAddr())
+		tc, err := NewTestSchedulingCluster(ctx, 1, leaderServer.GetAddr())
 		re.NoError(err)
 		tc.WaitForPrimaryServing(re)
-		s.cluster.SetSchedulingCluster(tc)
+		tc.GetPrimaryServer().GetCluster().SetPrepared()
+		cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
+		testutil.Eventually(re, func() bool {
+			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
+		})
+		s.clusters[apiMode] = cluster
 	}
+}
+
+type idAllocator struct {
+	allocator *mockid.IDAllocator
+}
+
+func (i *idAllocator) alloc() uint64 {
+	v, _ := i.allocator.Alloc()
+	return v
+}
+
+// InitRegions is used for test purpose.
+func InitRegions(regionLen int) []*core.RegionInfo {
+	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
+	regions := make([]*core.RegionInfo, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		r := &metapb.Region{
+			Id: allocator.alloc(),
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers: []*metapb.Peer{
+				{Id: allocator.alloc(), StoreId: uint64(1)},
+				{Id: allocator.alloc(), StoreId: uint64(2)},
+				{Id: allocator.alloc(), StoreId: uint64(3)},
+			},
+		}
+		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
+		// Here is used to simulate the upgrade process.
+		if i < regionLen/2 {
+			buckets := &metapb.Buckets{
+				RegionId: r.Id,
+				Keys:     [][]byte{r.StartKey, r.EndKey},
+				Version:  1,
+			}
+			region.UpdateBuckets(buckets, region.GetBuckets())
+		}
+		regions = append(regions, region)
+	}
+	return regions
 }

@@ -110,9 +110,9 @@ func TestGroupProperties(t *testing.T) {
 func TestBuildRuleList(t *testing.T) {
 	re := require.New(t)
 	defaultRule := &Rule{
-		GroupID:  "pd",
-		ID:       "default",
-		Role:     "voter",
+		GroupID:  DefaultGroupID,
+		ID:       DefaultRuleID,
+		Role:     Voter,
 		StartKey: []byte{},
 		EndKey:   []byte{},
 		Count:    3,
@@ -122,13 +122,13 @@ func TestBuildRuleList(t *testing.T) {
 	byteEnd, err := hex.DecodeString("a2")
 	re.NoError(err)
 	ruleMeta := &Rule{
-		GroupID:  "pd",
+		GroupID:  DefaultGroupID,
 		ID:       "meta",
 		Index:    1,
 		Override: true,
 		StartKey: byteStart,
 		EndKey:   byteEnd,
-		Role:     "voter",
+		Role:     Voter,
 		Count:    5,
 	}
 
@@ -140,7 +140,7 @@ func TestBuildRuleList(t *testing.T) {
 		{
 			name: "default rule",
 			rules: map[[2]string]*Rule{
-				{"pd", "default"}: defaultRule,
+				{DefaultGroupID, DefaultRuleID}: defaultRule,
 			},
 			expect: ruleList{
 				ranges: []rangeRules{
@@ -155,8 +155,8 @@ func TestBuildRuleList(t *testing.T) {
 		{
 			name: "metadata case",
 			rules: map[[2]string]*Rule{
-				{"pd", "default"}: defaultRule,
-				{"pd", "meta"}:    ruleMeta,
+				{DefaultGroupID, DefaultRuleID}: defaultRule,
+				{DefaultGroupID, "meta"}:        ruleMeta,
 			},
 			expect: ruleList{ranges: []rangeRules{
 				{

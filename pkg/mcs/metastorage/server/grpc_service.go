@@ -86,7 +86,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 	if err := s.checkServing(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(s.ctx)
+	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
 	options := []clientv3.OpOption{}
 	key := string(req.GetKey())
@@ -105,6 +105,8 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 	for {
 		select {
 		case <-ctx.Done():
+			return nil
+		case <-s.ctx.Done():
 			return nil
 		case res := <-watchChan:
 			if res.Err() != nil {

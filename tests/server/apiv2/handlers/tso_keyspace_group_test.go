@@ -39,14 +39,15 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceGroupTestSuite) SetupTest() {
+	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
 	suite.cluster = cluster
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
-	suite.NotEmpty(cluster.WaitLeader())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
 	suite.server = cluster.GetLeaderServer()
-	suite.NoError(suite.server.BootstrapCluster())
+	re.NoError(suite.server.BootstrapCluster())
 }
 
 func (suite *keyspaceGroupTestSuite) TearDownTest() {

@@ -16,6 +16,11 @@ error = '''
 redirect failed
 '''
 
+["PD:apiutil:ErrRedirectToNotLeader"]
+error = '''
+redirect to not leader
+'''
+
 ["PD:autoscaling:ErrEmptyMetricsResponse"]
 error = '''
 metrics response from Prometheus is empty
@@ -78,7 +83,7 @@ get min TSO failed, %v
 
 ["PD:client:ErrClientGetTSO"]
 error = '''
-get TSO failed, %v
+get TSO failed
 '''
 
 ["PD:client:ErrClientGetTSOTimeout"]
@@ -551,6 +556,11 @@ error = '''
 build rule list failed, %s
 '''
 
+["PD:placement:ErrKeyFormat"]
+error = '''
+key should be in hex format, %s
+'''
+
 ["PD:placement:ErrLoadRule"]
 error = '''
 load rule failed
@@ -561,9 +571,19 @@ error = '''
 load rule group failed
 '''
 
+["PD:placement:ErrPlacementDisabled"]
+error = '''
+placement rules feature is disabled
+'''
+
 ["PD:placement:ErrRuleContent"]
 error = '''
 invalid rule content, %s
+'''
+
+["PD:placement:ErrRuleNotFound"]
+error = '''
+rule not found
 '''
 
 ["PD:plugin:ErrLoadPlugin"]
@@ -614,6 +634,11 @@ failed to unmarshal proto
 ["PD:region:ErrRegionAbnormalPeer"]
 error = '''
 region %v has abnormal peer
+'''
+
+["PD:region:ErrRegionInvalidID"]
+error = '''
+invalid region id
 '''
 
 ["PD:region:ErrRegionNotAdjacent"]
@@ -739,6 +764,11 @@ client url empty
 ["PD:server:ErrConfiguration"]
 error = '''
 cannot set invalid configuration
+'''
+
+["PD:server:ErrLeaderFrequentlyChange"]
+error = '''
+leader %s frequently changed, leader-key is [%s]
 '''
 
 ["PD:server:ErrLeaderNil"]

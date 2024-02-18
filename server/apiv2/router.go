@@ -17,17 +17,13 @@ package apiv2
 import (
 	"context"
 	"net/http"
-	"sync"
 
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
-
-var once sync.Once
 
 var group = apiutil.APIServiceGroup{
 	Name:       "core",
@@ -49,12 +45,6 @@ const apiV2Prefix = "/pd/api/v2/"
 // @license.url    http://www.apache.org/licenses/LICENSE-2.0.html
 // @BasePath       /pd/api/v2
 func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
-	once.Do(func() {
-		// See https://github.com/pingcap/tidb-dashboard/blob/f8ecb64e3d63f4ed91c3dca7a04362418ade01d8/pkg/apiserver/apiserver.go#L84
-		// These global modification will be effective only for the first invoke.
-		_ = godotenv.Load()
-		gin.SetMode(gin.ReleaseMode)
-	})
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(middlewares.ServerContextKey, svr)
@@ -64,5 +54,6 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	root := router.Group(apiV2Prefix)
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
+	handlers.RegisterMicroService(root)
 	return router, group, nil
 }

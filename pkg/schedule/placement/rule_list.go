@@ -66,7 +66,7 @@ type ruleContainer interface {
 // rules indicates the map (rule's GroupID, ID) => rule
 func buildRuleList(rules ruleContainer) (ruleList, error) {
 	builder := rangelist.NewBuilder()
-	builder.SetCompareFunc(func(a, b interface{}) int {
+	builder.SetCompareFunc(func(a, b any) int {
 		return compareRule(a.(*Rule), b.(*Rule))
 	})
 	rules.iterateRules(func(r *Rule) {

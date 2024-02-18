@@ -17,28 +17,21 @@ package server
 import "github.com/prometheus/client_golang/prometheus"
 
 const (
-	namespace              = "resource_manager"
-	serverSubsystem        = "server"
-	ruSubsystem            = "resource_unit"
-	resourceSubsystem      = "resource"
-	resourceGroupNameLabel = "name"
-	typeLabel              = "type"
-	readTypeLabel          = "read"
-	writeTypeLabel         = "write"
-	backgroundTypeLabel    = "background"
-	tiflashTypeLabel       = "ap"
-	defaultTypeLabel       = "tp"
+	namespace                 = "resource_manager"
+	serverSubsystem           = "server"
+	ruSubsystem               = "resource_unit"
+	resourceSubsystem         = "resource"
+	resourceGroupNameLabel    = "name"
+	typeLabel                 = "type"
+	readTypeLabel             = "read"
+	writeTypeLabel            = "write"
+	backgroundTypeLabel       = "background"
+	tiflashTypeLabel          = "ap"
+	defaultTypeLabel          = "tp"
+	newResourceGroupNameLabel = "resource_group"
 )
 
 var (
-	// Meta & Server info.
-	serverInfo = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: namespace,
-			Subsystem: serverSubsystem,
-			Name:      "info",
-			Help:      "Indicate the resource manager server info, and the value is the start timestamp (s).",
-		}, []string{"version", "hash"})
 	// RU cost metrics.
 	// `sum` is added to the name to maintain compatibility with the previous use of histogram.
 	readRequestUnitCost = prometheus.NewCounterVec(
@@ -47,21 +40,21 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "read_request_unit_sum",
 			Help:      "Counter of the read request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 	writeRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 	sqlLayerRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "sql_layer_request_unit_sum",
 			Help:      "The number of the sql layer request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 
 	// Resource cost metrics.
 	readByteCost = prometheus.NewCounterVec(
@@ -70,35 +63,35 @@ var (
 			Subsystem: resourceSubsystem,
 			Name:      "read_byte_sum",
 			Help:      "Counter of the read byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 	writeByteCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "write_byte_sum",
 			Help:      "Counter of the write byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 	kvCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "kv_cpu_time_ms_sum",
 			Help:      "Counter of the KV CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 	sqlCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "sql_cpu_time_ms_sum",
 			Help:      "Counter of the SQL CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 	requestCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "request_count",
 			Help:      "The number of read/write requests for all resource groups.",
-		}, []string{resourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
 
 	availableRUCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -106,11 +99,10 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "available_ru",
 			Help:      "Counter of the available RU for all resource groups.",
-		}, []string{resourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 )
 
 func init() {
-	prometheus.MustRegister(serverInfo)
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
 	prometheus.MustRegister(sqlLayerRequestUnitCost)

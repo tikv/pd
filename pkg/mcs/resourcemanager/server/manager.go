@@ -63,7 +63,12 @@ type Manager struct {
 		isTiFlash    bool
 	}
 	// record update time of each resource group
-	consumptionRecord map[string]time.Time
+	consumptionRecord map[consumptionRecordKey]time.Time
+}
+
+type consumptionRecordKey struct {
+	name   string
+	ruType string
 }
 
 // ConfigProvider is used to get resource manager config from the given
@@ -84,7 +89,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 			isBackground bool
 			isTiFlash    bool
 		}, defaultConsumptionChanSize),
-		consumptionRecord: make(map[string]time.Time),
+		consumptionRecord: make(map[consumptionRecordKey]time.Time),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -179,13 +184,13 @@ func (m *Manager) Init(ctx context.Context) error {
 }
 
 // UpdateControllerConfigItem updates the controller config item.
-func (m *Manager) UpdateControllerConfigItem(key string, value interface{}) error {
+func (m *Manager) UpdateControllerConfigItem(key string, value any) error {
 	kp := strings.Split(key, ".")
 	if len(kp) == 0 {
 		return errors.Errorf("invalid key %s", key)
 	}
 	m.Lock()
-	var config interface{}
+	var config any
 	switch kp[0] {
 	case "request-unit":
 		config = &m.controllerConfig.RequestUnit
@@ -278,11 +283,11 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 }
 
 // GetResourceGroup returns a copy of a resource group.
-func (m *Manager) GetResourceGroup(name string) *ResourceGroup {
+func (m *Manager) GetResourceGroup(name string, withStats bool) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
 	if group, ok := m.groups[name]; ok {
-		return group.Copy()
+		return group.Clone(withStats)
 	}
 	return nil
 }
@@ -298,11 +303,11 @@ func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
 }
 
 // GetResourceGroupList returns copies of resource group list.
-func (m *Manager) GetResourceGroupList() []*ResourceGroup {
+func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
 	m.RLock()
 	res := make([]*ResourceGroup, 0, len(m.groups))
 	for _, group := range m.groups {
-		res = append(res, group.Copy())
+		res = append(res, group.Clone(withStats))
 	}
 	m.RUnlock()
 	sort.Slice(res, func(i, j int) bool {
@@ -338,12 +343,10 @@ func (m *Manager) persistResourceGroupRunningState() {
 	for idx := 0; idx < len(keys); idx++ {
 		m.RLock()
 		group, ok := m.groups[keys[idx]]
-		m.RUnlock()
 		if ok {
-			m.Lock()
 			group.persistStates(m.storage)
-			m.Unlock()
 		}
+		m.RUnlock()
 	}
 }
 
@@ -373,15 +376,15 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 
 			var (
 				name                     = consumptionInfo.resourceGroupName
-				rruMetrics               = readRequestUnitCost.WithLabelValues(name, ruLabelType)
-				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, ruLabelType)
-				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name)
-				readByteMetrics          = readByteCost.WithLabelValues(name, ruLabelType)
-				writeByteMetrics         = writeByteCost.WithLabelValues(name, ruLabelType)
-				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, ruLabelType)
-				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, ruLabelType)
-				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
-				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
+				rruMetrics               = readRequestUnitCost.WithLabelValues(name, name, ruLabelType)
+				wruMetrics               = writeRequestUnitCost.WithLabelValues(name, name, ruLabelType)
+				sqlLayerRuMetrics        = sqlLayerRequestUnitCost.WithLabelValues(name, name)
+				readByteMetrics          = readByteCost.WithLabelValues(name, name, ruLabelType)
+				writeByteMetrics         = writeByteCost.WithLabelValues(name, name, ruLabelType)
+				kvCPUMetrics             = kvCPUCost.WithLabelValues(name, name, ruLabelType)
+				sqlCPUMetrics            = sqlCPUCost.WithLabelValues(name, name, ruLabelType)
+				readRequestCountMetrics  = requestCount.WithLabelValues(name, name, readTypeLabel)
+				writeRequestCountMetrics = requestCount.WithLabelValues(name, name, writeTypeLabel)
 			)
 			// RU info.
 			if consumption.RRU > 0 {
@@ -413,23 +416,27 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				writeRequestCountMetrics.Add(consumption.KvWriteRpcCount)
 			}
 
-			m.consumptionRecord[name] = time.Now()
+			m.consumptionRecord[consumptionRecordKey{name: name, ruType: ruLabelType}] = time.Now()
 
+			// TODO: maybe we need to distinguish background ru.
+			if rg := m.GetMutableResourceGroup(name); rg != nil {
+				rg.UpdateRUConsumption(consumptionInfo.Consumption)
+			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for name, lastTime := range m.consumptionRecord {
+			for r, lastTime := range m.consumptionRecord {
 				if time.Since(lastTime) > metricsCleanupTimeout {
-					readRequestUnitCost.DeleteLabelValues(name)
-					writeRequestUnitCost.DeleteLabelValues(name)
-					sqlLayerRequestUnitCost.DeleteLabelValues(name)
-					readByteCost.DeleteLabelValues(name)
-					writeByteCost.DeleteLabelValues(name)
-					kvCPUCost.DeleteLabelValues(name)
-					sqlCPUCost.DeleteLabelValues(name)
-					requestCount.DeleteLabelValues(name, readTypeLabel)
-					requestCount.DeleteLabelValues(name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(name)
-					delete(m.consumptionRecord, name)
+					readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
+					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
+					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
+					availableRUCounter.DeleteLabelValues(r.name, r.name, r.ruType)
+					delete(m.consumptionRecord, r)
 				}
 			}
 		case <-availableRUTicker.C:
@@ -442,7 +449,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if ru < 0 {
 					ru = 0
 				}
-				availableRUCounter.WithLabelValues(name).Set(ru)
+				availableRUCounter.WithLabelValues(name, name).Set(ru)
 			}
 			m.RUnlock()
 		}
