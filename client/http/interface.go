@@ -91,7 +91,7 @@ type Client interface {
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
-	GetMicroServiceMembers(context.Context, string) ([]string, error)
+	GetMicroServiceMembers(context.Context, string) ([]MicroServiceMember, error)
 	GetMicroServicePrimary(context.Context, string) (string, error)
 	DeleteOperators(context.Context) error
 
@@ -856,8 +856,8 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 }
 
 // GetMicroServiceMembers gets the members of the microservice.
-func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]string, error) {
-	var members []string
+func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]MicroServiceMember, error) {
+	var members []MicroServiceMember
 	err := c.request(ctx, newRequestInfo().
 		WithName(getMicroServiceMembersName).
 		WithURI(MicroServiceMembers(service)).
