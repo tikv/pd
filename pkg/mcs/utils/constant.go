@@ -17,8 +17,6 @@ package utils
 import "time"
 
 const (
-	// MaxRetryTimesWaitAPIService is the max retry times for initializing the cluster ID.
-	MaxRetryTimesWaitAPIService = 360
 	// RetryIntervalWaitAPIService is the interval to retry.
 	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
 	RetryIntervalWaitAPIService = 500 * time.Millisecond

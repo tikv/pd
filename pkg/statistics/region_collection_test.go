@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"context"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -29,7 +30,7 @@ import (
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
-	manager := placement.NewRuleManager(store, nil, nil)
+	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
 	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
 	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
@@ -118,7 +119,7 @@ func TestRegionStatistics(t *testing.T) {
 func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
-	manager := placement.NewRuleManager(store, nil, nil)
+	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
 	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
 	re.NoError(err)
 	opt := mockconfig.NewTestOptions()

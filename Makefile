@@ -55,7 +55,12 @@ ifeq ($(ENABLE_FIPS), 1)
 	BUILD_TOOL_CGO_ENABLED := 1
 endif
 
-LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(shell git describe --tags --dirty --always)"
+RELEASE_VERSION ?= $(shell git describe --tags --dirty --always)
+ifeq ($(RUN_CI), 1)
+	RELEASE_VERSION := None
+endif
+
+LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=$(RELEASE_VERSION)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitBranch=$(shell git rev-parse --abbrev-ref HEAD)"
@@ -87,7 +92,9 @@ ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
 endif
 PD_SERVER_DEP += dashboard-ui
 
-pd-server: ${PD_SERVER_DEP}
+pre-build: ${PD_SERVER_DEP}
+
+pd-server: pre-build
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-failpoint:
@@ -98,28 +105,28 @@ pd-server-failpoint:
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
-.PHONY: build tools pd-server pd-server-basic
+.PHONY: pre-build build tools pd-server pd-server-basic
 
 # Tools
 
 pd-ctl:
-	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl tools/pd-ctl/main.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl pd-ctl/main.go
 pd-tso-bench:
-	cd tools/pd-tso-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench main.go
+	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench pd-tso-bench/main.go
 pd-api-bench:
-	cd tools/pd-api-bench && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench main.go
+	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench pd-api-bench/main.go
 pd-recover:
-	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover tools/pd-recover/main.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover pd-recover/main.go
 pd-analysis:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis tools/pd-analysis/main.go
+	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis pd-analysis/main.go
 pd-heartbeat-bench:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench tools/pd-heartbeat-bench/main.go
+	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench pd-heartbeat-bench/main.go
 simulator:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-simulator tools/pd-simulator/main.go
+	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-simulator pd-simulator/main.go
 regions-dump:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/regions-dump tools/regions-dump/main.go
+	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/regions-dump regions-dump/main.go
 stores-dump:
-	CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump tools/stores-dump/main.go
+	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
 
 .PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench
 
@@ -160,16 +167,16 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.51.2
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.55.2
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
 
 #### Static checks ####
 
-check: install-tools tidy static generate-errdoc check-test
+check: tidy static generate-errdoc
 
-static: install-tools
+static: install-tools pre-build
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
@@ -178,6 +185,11 @@ static: install-tools
 	@ revive -formatter friendly -config revive.toml $(PACKAGES)
 
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
+
+# Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
+fmt:
+	@ echo "gofmt ..."
+	@ gofmt -s -l -w -r 'interface{} -> any' -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 
 tidy:
 	@ go mod tidy
@@ -194,11 +206,7 @@ check-plugin:
 	@echo "checking plugin..."
 	cd ./plugin/scheduler_example && $(MAKE) evictLeaderPlugin.so && rm evictLeaderPlugin.so
 
-check-test:
-	@echo "checking test..."
-	./scripts/check-test.sh
-
-.PHONY: check static tidy generate-errdoc check-plugin check-test
+.PHONY: check static tidy generate-errdoc check-plugin
 
 #### Test utils ####
 
@@ -239,14 +247,16 @@ basic-test: install-tools
 
 ci-test-job: install-tools dashboard-ui
 	@$(FAILPOINT_ENABLE)
-	if [[ $(JOB_INDEX) -le 10 ]]; then \
-	CGO_ENABLED=1 go test -timeout=15m -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=./... $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)); \
-	else \
-	for mod in $(shell ./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)); do cd $$mod && $(MAKE) ci-test-job && cd $(ROOT_PATH) > /dev/null && cat $$mod/covprofile >> covprofile; done; \
-	fi
+	./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
+
+test-tso: install-tools
+	# testing TSO function & consistency...
+	@$(FAILPOINT_ENABLE)
+	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_full_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(FAILPOINT_DISABLE)
 
 test-tso-function: install-tools
 	# testing TSO function...
@@ -260,7 +270,13 @@ test-tso-consistency: install-tools
 	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-.PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency
+REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
+
+test-real-cluster:
+	# testing with the real cluster...
+	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
+
+.PHONY: test basic-test test-with-cover test-tso test-tso-function test-tso-consistency test-real-cluster
 
 #### Daily CI coverage analyze  ####
 
@@ -292,11 +308,13 @@ clean-test:
 	rm -rf /tmp/test_pd*
 	rm -rf /tmp/pd-tests*
 	rm -rf /tmp/test_etcd*
+	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
 
 clean-build:
 	# Cleaning building files...
 	rm -rf .dashboard_download_cache/
+	rm -rf .dashboard_build_temp/
 	rm -rf $(BUILD_BIN_PATH)
 	rm -rf $(GO_TOOLS_BIN_PATH)
 

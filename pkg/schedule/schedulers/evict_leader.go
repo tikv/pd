@@ -80,7 +80,7 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 
 	id, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
-		return errs.ErrStrconvParseUint.Wrap(err).FastGenWithCause()
+		return errs.ErrStrconvParseUint.Wrap(err)
 	}
 	ranges, err := getKeyRanges(args[1:])
 	if err != nil {
@@ -356,7 +356,7 @@ type evictLeaderHandler struct {
 }
 
 func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -392,7 +392,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
 func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
@@ -408,7 +408,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var resp interface{}
+	var resp any
 	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {

@@ -97,7 +97,7 @@ func TestConfigClone(t *testing.T) {
 	con3 := con2.Clone()
 	con3.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
 	re.Empty(emptyConf.getKeyRangesByID(1))
-	re.False(len(con3.getRanges(1)) == len(con2.getRanges(1)))
+	re.NotEqual(len(con3.getRanges(1)), len(con2.getRanges(1)))
 
 	con4 := con3.Clone()
 	re.True(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey))

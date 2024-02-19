@@ -108,7 +108,7 @@ type ElectionMember interface {
 	// MemberValue returns the member value.
 	MemberValue() string
 	// GetMember returns the current member
-	GetMember() interface{}
+	GetMember() any
 	// Client returns the etcd client.
 	Client() *clientv3.Client
 	// IsLeader returns whether the participant is the leader or not by checking its
@@ -323,6 +323,12 @@ func (am *AllocatorManager) close() {
 
 	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
+	}
+
+	for _, cc := range am.localAllocatorConn.clientConns {
+		if err := cc.Close(); err != nil {
+			log.Error("failed to close allocator manager grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+		}
 	}
 
 	am.cancel()

@@ -55,64 +55,56 @@ func (suite *auditMiddlewareTestSuite) TearDownSuite() {
 }
 
 func (suite *auditMiddlewareTestSuite) TestConfigAuditSwitch() {
+	re := suite.Require()
 	addr := fmt.Sprintf("%s/service-middleware/config", suite.urlPrefix)
 	sc := &config.ServiceMiddlewareConfig{}
-	re := suite.Require()
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.True(sc.EnableAudit)
+	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	re.True(sc.EnableAudit)
 
-	ms := map[string]interface{}{
-		"enable-audit":           "true",
-		"enable-rate-limit":      "true",
-		"enable-grpc-rate-limit": "true",
+	ms := map[string]any{
+		"audit.enable-audit": "false",
 	}
 	postData, err := json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.True(sc.EnableAudit)
-	suite.True(sc.RateLimitConfig.EnableRateLimit)
-	suite.True(sc.GRPCRateLimitConfig.EnableRateLimit)
-	ms = map[string]interface{}{
-		"audit.enable-audit":     "false",
-		"enable-rate-limit":      "false",
-		"enable-grpc-rate-limit": "false",
+	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	re.False(sc.EnableAudit)
+	ms = map[string]any{
+		"enable-audit": "true",
 	}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.EnableAudit)
-	suite.False(sc.RateLimitConfig.EnableRateLimit)
-	suite.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	re.True(sc.EnableAudit)
 
 	// test empty
-	ms = map[string]interface{}{}
+	ms = map[string]any{}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re), tu.StringContain(re, "The input is empty.")))
-	ms = map[string]interface{}{
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re), tu.StringContain(re, "The input is empty.")))
+	ms = map[string]any{
 		"audit": "false",
 	}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item audit not found")))
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
-	ms = map[string]interface{}{
-		"audit.enable-audit": "true",
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item audit not found")))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
+	ms = map[string]any{
+		"audit.enable-audit": "false",
 	}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest)))
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail"))
-	ms = map[string]interface{}{
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest)))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail"))
+	ms = map[string]any{
 		"audit.audit": "false",
 	}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item audit not found")))
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item audit not found")))
 }
 
 type rateLimitConfigTestSuite struct {
@@ -139,157 +131,157 @@ func (suite *rateLimitConfigTestSuite) TearDownSuite() {
 }
 
 func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
+	re := suite.Require()
 	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/rate-limit", suite.svr.GetAddr(), apiPrefix)
 
 	// test empty type
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["type"] = 123
 	jsonBody, err := json.Marshal(input)
-	suite.NoError(err)
-	re := suite.Require()
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The type is empty.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 	// test invalid type
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "url"
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The type is invalid.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// test empty label
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = ""
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The label is empty.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 	// test no label matched
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = "TestLabel"
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"There is no label matched.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// test empty path
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = ""
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The path is empty.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// test path but no label matched
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/test"
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"There is no label matched.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// no change
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = "GetHealthStatus"
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringEqual(re, "\"No changed.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// change concurrency
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/health"
 	input["method"] = http.MethodGet
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."))
-	suite.NoError(err)
+	re.NoError(err)
 	input["concurrency"] = 0
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is deleted."))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// change qps
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/health"
 	input["method"] = http.MethodGet
 	input["qps"] = 100
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
-	suite.NoError(err)
+	re.NoError(err)
 
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/health"
 	input["method"] = http.MethodGet
 	input["qps"] = 0.3
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
-	suite.NoError(err)
-	suite.Equal(1, suite.svr.GetRateLimitConfig().LimiterConfig["GetHealthStatus"].QPSBurst)
+	re.NoError(err)
+	re.Equal(1, suite.svr.GetRateLimitConfig().LimiterConfig["GetHealthStatus"].QPSBurst)
 
 	input["qps"] = -1
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// change both
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "path"
 	input["path"] = "/pd/api/v1/debug/pprof/profile"
 	input["qps"] = 100
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	result := rateLimitResult{}
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."),
 		tu.StringContain(re, "QPS rate limiter is changed."),
 		tu.ExtractJSON(re, &result),
 	)
-	suite.Equal(100., result.LimiterConfig["Profile"].QPS)
-	suite.Equal(100, result.LimiterConfig["Profile"].QPSBurst)
-	suite.Equal(uint64(100), result.LimiterConfig["Profile"].ConcurrencyLimit)
-	suite.NoError(err)
+	re.Equal(100., result.LimiterConfig["Profile"].QPS)
+	re.Equal(100, result.LimiterConfig["Profile"].QPSBurst)
+	re.Equal(uint64(100), result.LimiterConfig["Profile"].ConcurrencyLimit)
+	re.NoError(err)
 
 	limiter := suite.svr.GetServiceRateLimiter()
 	limiter.Update("SetRateLimitConfig", ratelimit.AddLabelAllowList())
 
 	// Allow list
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["type"] = "label"
 	input["label"] = "SetRateLimitConfig"
 	input["qps"] = 100
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusNotOK(re), tu.StringEqual(re, "\"This service is in allow list whose config can not be changed.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 }
 
 func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
@@ -297,167 +289,167 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	re := suite.Require()
 
 	// test empty label
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["label"] = ""
 	jsonBody, err := json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The label is empty.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 	// test no label matched
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "TestLabel"
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"There is no label matched.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// no change
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringEqual(re, "\"No changed.\"\n"))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// change concurrency
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."))
-	suite.NoError(err)
+	re.NoError(err)
 	input["concurrency"] = 0
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is deleted."))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// change qps
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	input["qps"] = 100
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
-	suite.NoError(err)
+	re.NoError(err)
 
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	input["qps"] = 0.3
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
-	suite.NoError(err)
-	suite.Equal(1, suite.svr.GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].QPSBurst)
+	re.NoError(err)
+	re.Equal(1, suite.svr.GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].QPSBurst)
 
 	input["qps"] = -1
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
-	suite.NoError(err)
+	re.NoError(err)
 
 	// change both
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["label"] = "GetStore"
 	input["qps"] = 100
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	result := rateLimitResult{}
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
 		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."),
 		tu.StringContain(re, "QPS rate limiter is changed."),
 		tu.ExtractJSON(re, &result),
 	)
-	suite.Equal(100., result.LimiterConfig["GetStore"].QPS)
-	suite.Equal(100, result.LimiterConfig["GetStore"].QPSBurst)
-	suite.Equal(uint64(100), result.LimiterConfig["GetStore"].ConcurrencyLimit)
-	suite.NoError(err)
+	re.Equal(100., result.LimiterConfig["GetStore"].QPS)
+	re.Equal(100, result.LimiterConfig["GetStore"].QPSBurst)
+	re.Equal(uint64(100), result.LimiterConfig["GetStore"].ConcurrencyLimit)
+	re.NoError(err)
 }
 
 func (suite *rateLimitConfigTestSuite) TestConfigRateLimitSwitch() {
 	addr := fmt.Sprintf("%s/service-middleware/config", suite.urlPrefix)
 	sc := &config.ServiceMiddlewareConfig{}
 	re := suite.Require()
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.RateLimitConfig.EnableRateLimit)
-	suite.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	re.True(sc.RateLimitConfig.EnableRateLimit)
+	re.True(sc.GRPCRateLimitConfig.EnableRateLimit)
 
-	ms := map[string]interface{}{
-		"enable-rate-limit":      "true",
-		"enable-grpc-rate-limit": "true",
-	}
-	postData, err := json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
-	sc = &config.ServiceMiddlewareConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.True(sc.RateLimitConfig.EnableRateLimit)
-	suite.True(sc.GRPCRateLimitConfig.EnableRateLimit)
-	ms = map[string]interface{}{
+	ms := map[string]any{
 		"enable-rate-limit":      "false",
 		"enable-grpc-rate-limit": "false",
 	}
-	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
+	postData, err := json.Marshal(ms)
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc = &config.ServiceMiddlewareConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.False(sc.RateLimitConfig.EnableRateLimit)
-	suite.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	re.False(sc.RateLimitConfig.EnableRateLimit)
+	re.False(sc.GRPCRateLimitConfig.EnableRateLimit)
+	ms = map[string]any{
+		"enable-rate-limit":      "true",
+		"enable-grpc-rate-limit": "true",
+	}
+	postData, err = json.Marshal(ms)
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
+	sc = &config.ServiceMiddlewareConfig{}
+	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	re.True(sc.RateLimitConfig.EnableRateLimit)
+	re.True(sc.GRPCRateLimitConfig.EnableRateLimit)
 
 	// test empty
-	ms = map[string]interface{}{}
+	ms = map[string]any{}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re), tu.StringContain(re, "The input is empty.")))
-	ms = map[string]interface{}{
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re), tu.StringContain(re, "The input is empty.")))
+	ms = map[string]any{
 		"rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
-	ms = map[string]interface{}{
-		"rate-limit.enable-rate-limit":           "true",
-		"grpc-rate-limit.enable-grpc-rate-limit": "true",
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail", "return(true)"))
+	ms = map[string]any{
+		"rate-limit.enable-rate-limit":           "false",
+		"grpc-rate-limit.enable-grpc-rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest)))
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail"))
-	ms = map[string]interface{}{
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest)))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistServiceMiddlewareFail"))
+	ms = map[string]any{
 		"rate-limit.rate-limit": "false",
 	}
 	postData, err = json.Marshal(ms)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "config item rate-limit not found")))
 }
 
 func (suite *rateLimitConfigTestSuite) TestConfigLimiterConfigByOriginAPI() {
+	re := suite.Require()
 	// this test case is used to test updating `limiter-config` by origin API simply
 	addr := fmt.Sprintf("%s/service-middleware/config", suite.urlPrefix)
 	dimensionConfig := ratelimit.DimensionConfig{QPS: 1}
-	limiterConfig := map[string]interface{}{
+	limiterConfig := map[string]any{
 		"CreateOperator": dimensionConfig,
 	}
-	ms := map[string]interface{}{
+	ms := map[string]any{
 		"limiter-config": limiterConfig,
 	}
 	postData, err := json.Marshal(ms)
-	suite.NoError(err)
-	re := suite.Require()
-	suite.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
 	sc := &config.ServiceMiddlewareConfig{}
-	suite.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
-	suite.Equal(1., sc.RateLimitConfig.LimiterConfig["CreateOperator"].QPS)
+	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, sc))
+	re.Equal(1., sc.RateLimitConfig.LimiterConfig["CreateOperator"].QPS)
 }

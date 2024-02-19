@@ -78,6 +78,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 				zap.String("event-kv-key", string(kv.Key)), zap.Error(err))
 			return err
 		}
+		log.Debug("update store meta", zap.Stringer("store", store))
 		origin := w.basicCluster.GetStore(store.GetId())
 		if origin == nil {
 			w.basicCluster.PutStore(core.NewStoreInfo(store))
@@ -101,18 +102,18 @@ func (w *Watcher) initializeStoreWatcher() error {
 		origin := w.basicCluster.GetStore(storeID)
 		if origin != nil {
 			w.basicCluster.DeleteStore(origin)
+			log.Info("delete store meta", zap.Uint64("store-id", storeID))
 		}
-		return nil
-	}
-	postEventFn := func() error {
 		return nil
 	}
 	w.storeWatcher = etcdutil.NewLoopWatcher(
 		w.ctx, &w.wg,
 		w.etcdClient,
 		"scheduling-store-watcher", w.storePathPrefix,
-		putFn, deleteFn, postEventFn,
-		clientv3.WithPrefix(),
+		func([]*clientv3.Event) error { return nil },
+		putFn, deleteFn,
+		func([]*clientv3.Event) error { return nil },
+		true, /* withPrefix */
 	)
 	w.storeWatcher.StartWatchLoop()
 	return w.storeWatcher.WaitLoad()

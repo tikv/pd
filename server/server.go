@@ -43,6 +43,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -156,8 +157,9 @@ type Server struct {
 	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
-	clusterID  uint64 // pd cluster id.
-	rootPath   string
+	// PD cluster ID.
+	clusterID atomic.Uint64
+	rootPath  string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -216,11 +218,11 @@ type Server struct {
 	// related data structures defined in the PD grpc service
 	pdProtoFactory *tsoutil.PDProtoFactory
 
-	serviceRateLimiter *ratelimit.Limiter
+	serviceRateLimiter *ratelimit.Controller
 	serviceLabels      map[string][]apiutil.AccessPath
 	apiServiceLabelMap map[apiutil.AccessPath]string
 
-	grpcServiceRateLimiter *ratelimit.Limiter
+	grpcServiceRateLimiter *ratelimit.Controller
 	grpcServiceLabels      map[string]struct{}
 	grpcServer             *grpc.Server
 
@@ -273,8 +275,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		audit.NewLocalLogBackend(true),
 		audit.NewPrometheusHistogramBackend(serviceAuditHistogram, false),
 	}
-	s.serviceRateLimiter = ratelimit.NewLimiter()
-	s.grpcServiceRateLimiter = ratelimit.NewLimiter()
+	s.serviceRateLimiter = ratelimit.NewController(s.ctx, "http", apiConcurrencyGauge)
+	s.grpcServiceRateLimiter = ratelimit.NewController(s.ctx, "grpc", apiConcurrencyGauge)
 	s.serviceAuditBackendLabels = make(map[string]*audit.BackendLabels)
 	s.serviceLabels = make(map[string][]apiutil.AccessPath)
 	s.grpcServiceLabels = make(map[string]struct{})
@@ -347,19 +349,57 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		return errs.ErrCancelStartEtcd.FastGenByArgs()
 	}
 
-	// start client
-	s.client, s.httpClient, err = s.startClient()
+	// Start the etcd and HTTP clients, then init the member.
+	err = s.startClient()
+	if err != nil {
+		return err
+	}
+	err = s.initMember(newCtx, etcd)
 	if err != nil {
 		return err
 	}
 
-	s.electionClient, err = s.startElectionClient()
+	s.initGRPCServiceLabels()
+	return nil
+}
+
+func (s *Server) initGRPCServiceLabels() {
+	for name, serviceInfo := range s.grpcServer.GetServiceInfo() {
+		if name == gRPCServiceName {
+			for _, methodInfo := range serviceInfo.Methods {
+				s.grpcServiceLabels[methodInfo.Name] = struct{}{}
+			}
+		}
+	}
+}
+
+func (s *Server) startClient() error {
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
 	if err != nil {
 		return err
 	}
+	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return err
+	}
+	/* Starting two different etcd clients here is to avoid the throttling. */
+	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
+	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls, "server-etcd-client")
+	if err != nil {
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls, "election-etcd-client")
+	if err != nil {
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	s.httpClient = etcdutil.CreateHTTPClient(tlsConfig)
+	return nil
+}
 
-	// update advertise peer urls.
-	etcdMembers, err := etcdutil.ListEtcdMembers(s.client)
+func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
+	// Update advertise peer URLs.
+	etcdMembers, err := etcdutil.ListEtcdMembers(ctx, s.client)
 	if err != nil {
 		return err
 	}
@@ -377,41 +417,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 		time.Sleep(1500 * time.Millisecond)
 	})
 	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
-	s.initGRPCServiceLabels()
 	return nil
-}
-
-func (s *Server) initGRPCServiceLabels() {
-	for _, serviceInfo := range s.grpcServer.GetServiceInfo() {
-		for _, methodInfo := range serviceInfo.Methods {
-			s.grpcServiceLabels[methodInfo.Name] = struct{}{}
-		}
-	}
-}
-
-func (s *Server) startClient() (*clientv3.Client, *http.Client, error) {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return nil, nil, err
-	}
-	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
-	if err != nil {
-		return nil, nil, err
-	}
-	return etcdutil.CreateClients(tlsConfig, etcdCfg.ACUrls)
-}
-
-func (s *Server) startElectionClient() (*clientv3.Client, error) {
-	tlsConfig, err := s.cfg.Security.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	return etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls)
 }
 
 // AddStartCallback adds a callback in the startServer phase.
@@ -420,17 +426,18 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 }
 
 func (s *Server) startServer(ctx context.Context) error {
-	var err error
-	if s.clusterID, err = etcdutil.InitClusterID(s.client, pdClusterIDPath); err != nil {
+	clusterID, err := etcdutil.InitClusterID(s.client, pdClusterIDPath)
+	if err != nil {
 		log.Error("failed to init cluster id", errs.ZapError(err))
 		return err
 	}
-	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
+	s.clusterID.Store(clusterID)
+	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
-	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
-	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = endpoint.PDRootPath(s.clusterID)
+	s.rootPath = endpoint.PDRootPath(clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
 	s.member.SetMemberDeployPath(s.member.ID())
 	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
@@ -473,7 +480,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -483,11 +490,11 @@ func (s *Server) startServer(ctx context.Context) error {
 		Step:      keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
-		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, s.clusterID)
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, clusterID)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
-	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, s.clusterID, "", s.cluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, clusterID, "", s.cluster)
 	// initial hot_region_storage in here.
 
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -502,9 +509,17 @@ func (s *Server) startServer(ctx context.Context) error {
 		cb()
 	}
 
+	// to init all rate limiter and metrics
+	for service := range s.serviceLabels {
+		s.serviceRateLimiter.Update(service, ratelimit.InitLimiter())
+	}
+	for service := range s.grpcServiceLabels {
+		s.grpcServiceRateLimiter.Update(service, ratelimit.InitLimiter())
+	}
+
 	// Server has started.
 	atomic.StoreInt64(&s.isRunning, 1)
-	serverMaxProcs.Set(float64(runtime.GOMAXPROCS(0)))
+	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 	return nil
 }
 
@@ -559,11 +574,21 @@ func (s *Server) Close() {
 		}
 	}
 
+	s.grpcServiceRateLimiter.Close()
+	s.serviceRateLimiter.Close()
 	// Run callbacks
 	log.Info("triggering the close callback functions")
 	for _, cb := range s.closeCallbacks {
 		cb()
 	}
+
+	s.clientConns.Range(func(key, value any) bool {
+		conn := value.(*grpc.ClientConn)
+		if err := conn.Close(); err != nil {
+			log.Error("close grpc client meet error", errs.ZapError(err))
+		}
+		return true
+	})
 
 	log.Info("close server")
 }
@@ -670,7 +695,7 @@ func (s *Server) collectEtcdStateMetrics() {
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
-	clusterID := s.clusterID
+	clusterID := s.ClusterID()
 
 	log.Info("try to bootstrap raft cluster",
 		zap.Uint64("cluster-id", clusterID),
@@ -901,7 +926,7 @@ func (s *Server) Name() string {
 
 // ClusterID returns the cluster ID of this server.
 func (s *Server) ClusterID() uint64 {
-	return s.clusterID
+	return s.clusterID.Load()
 }
 
 // StartTimestamp returns the start timestamp of this server
@@ -939,6 +964,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.Keyspace = *s.persistOptions.GetKeyspaceConfig().Clone()
+	cfg.MicroService = *s.persistOptions.GetMicroServiceConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
 	if s.storage == nil {
@@ -974,6 +1000,27 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 	}
 	s.keyspaceManager.UpdateConfig(&cfg)
 	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	return nil
+}
+
+// GetMicroServiceConfig gets the micro service config information.
+func (s *Server) GetMicroServiceConfig() *config.MicroServiceConfig {
+	return s.persistOptions.GetMicroServiceConfig().Clone()
+}
+
+// SetMicroServiceConfig sets the micro service config information.
+func (s *Server) SetMicroServiceConfig(cfg config.MicroServiceConfig) error {
+	old := s.persistOptions.GetMicroServiceConfig()
+	s.persistOptions.SetMicroServiceConfig(&cfg)
+	if err := s.persistOptions.Persist(s.storage); err != nil {
+		s.persistOptions.SetMicroServiceConfig(old)
+		log.Error("failed to update micro service config",
+			zap.Reflect("new", cfg),
+			zap.Reflect("old", old),
+			errs.ZapError(err))
+		return err
+	}
+	log.Info("micro service config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1137,7 +1184,7 @@ func (s *Server) UpdateRateLimitConfig(key, label string, value ratelimit.Dimens
 }
 
 // UpdateRateLimit is used to update rate-limit config which will overwrite limiter-config
-func (s *Server) UpdateRateLimit(cfg *config.RateLimitConfig, key string, value interface{}) error {
+func (s *Server) UpdateRateLimit(cfg *config.RateLimitConfig, key string, value any) error {
 	updated, found, err := jsonutil.AddKeyValue(cfg, key, value)
 	if err != nil {
 		return err
@@ -1186,7 +1233,7 @@ func (s *Server) UpdateGRPCRateLimitConfig(key, label string, value ratelimit.Di
 }
 
 // UpdateGRPCRateLimit is used to update gRPC rate-limit config which will overwrite limiter-config
-func (s *Server) UpdateGRPCRateLimit(cfg *config.GRPCRateLimitConfig, key string, value interface{}) error {
+func (s *Server) UpdateGRPCRateLimit(cfg *config.GRPCRateLimitConfig, key string, value any) error {
 	updated, found, err := jsonutil.AddKeyValue(cfg, key, value)
 	if err != nil {
 		return err
@@ -1372,7 +1419,7 @@ func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
 // GetCluster gets cluster.
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
-		Id:           s.clusterID,
+		Id:           s.ClusterID(),
 		MaxPeerCount: uint32(s.persistOptions.GetMaxReplicas()),
 	}
 }
@@ -1467,7 +1514,7 @@ func (s *Server) SetServiceAuditBackendLabels(serviceLabel string, labels []stri
 }
 
 // GetServiceRateLimiter is used to get rate limiter
-func (s *Server) GetServiceRateLimiter() *ratelimit.Limiter {
+func (s *Server) GetServiceRateLimiter() *ratelimit.Controller {
 	return s.serviceRateLimiter
 }
 
@@ -1482,7 +1529,7 @@ func (s *Server) UpdateServiceRateLimiter(serviceLabel string, opts ...ratelimit
 }
 
 // GetGRPCRateLimiter is used to get rate limiter
-func (s *Server) GetGRPCRateLimiter() *ratelimit.Limiter {
+func (s *Server) GetGRPCRateLimiter() *ratelimit.Controller {
 	return s.grpcServiceRateLimiter
 }
 
@@ -1885,7 +1932,7 @@ func (s *Server) PersistFile(name string, data []byte) error {
 }
 
 // SaveTTLConfig save ttl config
-func (s *Server) SaveTTLConfig(data map[string]interface{}, ttl time.Duration) error {
+func (s *Server) SaveTTLConfig(data map[string]any, ttl time.Duration) error {
 	for k := range data {
 		if !config.IsSupportedTTLConfig(k) {
 			return fmt.Errorf("unsupported ttl config %s", k)
@@ -1973,7 +2020,7 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := mcs.TSOServiceName
-	tsoRootPath := endpoint.TSOSvcRootPath(s.clusterID)
+	tsoRootPath := endpoint.TSOSvcRootPath(s.ClusterID())
 	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, mcs.DefaultKeyspaceGroupID)
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
 	s.tsoPrimaryWatcher.StartWatchLoop()
@@ -1981,7 +2028,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 
 func (s *Server) initSchedulingPrimaryWatcher() {
 	serviceName := mcs.SchedulingServiceName
-	primaryKey := endpoint.SchedulingPrimaryPath(s.clusterID)
+	primaryKey := endpoint.SchedulingPrimaryPath(s.ClusterID())
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
 }
@@ -2017,9 +2064,11 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		s.client,
 		name,
 		primaryKey,
+		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
-		func() error { return nil },
+		func([]*clientv3.Event) error { return nil },
+		false, /* withPrefix */
 	)
 }
 

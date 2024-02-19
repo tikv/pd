@@ -180,11 +180,11 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 				kind := hb.regionPendings[regionID].op.Kind()
 				switch typ {
 				case transferLeader:
-					re.True(kind&operator.OpLeader != 0)
-					re.True(kind&operator.OpRegion == 0)
+					re.NotZero(kind & operator.OpLeader)
+					re.Zero(kind & operator.OpRegion)
 				case movePeer:
-					re.True(kind&operator.OpLeader == 0)
-					re.True(kind&operator.OpRegion != 0)
+					re.Zero(kind & operator.OpLeader)
+					re.NotZero(kind & operator.OpRegion)
 				}
 			}
 		}
@@ -257,7 +257,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	re.Equal(expectOp.Kind(), ops[0].Kind())
 
 	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 0)
+	re.Empty(ops)
 
 	tc.UpdateStorageWrittenBytes(1, 6*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(2, 1*units.MiB*utils.StoreHeartBeatReportInterval)
@@ -276,7 +276,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	re.Equal(operator.OpSplit, ops[0].Kind())
 
 	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 0)
+	re.Empty(ops)
 }
 
 func TestSplitBucketsBySize(t *testing.T) {
@@ -319,10 +319,10 @@ func TestSplitBucketsBySize(t *testing.T) {
 		region.UpdateBuckets(b, region.GetBuckets())
 		ops := solve.createSplitOperator([]*core.RegionInfo{region}, bySize)
 		if data.splitKeys == nil {
-			re.Equal(0, len(ops))
+			re.Empty(ops)
 			continue
 		}
-		re.Equal(1, len(ops))
+		re.Len(ops, 1)
 		op := ops[0]
 		re.Equal(splitHotReadBuckets, op.Desc())
 
@@ -380,10 +380,10 @@ func TestSplitBucketsByLoad(t *testing.T) {
 		time.Sleep(time.Millisecond * 10)
 		ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
 		if data.splitKeys == nil {
-			re.Equal(0, len(ops))
+			re.Empty(ops)
 			continue
 		}
-		re.Equal(1, len(ops))
+		re.Len(ops, 1)
 		op := ops[0]
 		re.Equal(splitHotReadBuckets, op.Desc())
 
@@ -731,7 +731,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 			loadsEqual(
 				hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
 				[]float64{hotRegionBytesSum / allowLeaderTiKVCount, hotRegionKeysSum / allowLeaderTiKVCount, tikvQuerySum / allowLeaderTiKVCount}))
-		re.True(tikvQuerySum != hotRegionQuerySum)
+		re.NotEqual(tikvQuerySum, hotRegionQuerySum)
 		re.True(
 			loadsEqual(
 				hb.stLoadInfos[writePeer][1].LoadPred.Expect.Loads,
@@ -1574,7 +1574,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	// two dim are both enough uniform among three stores
 	tc.SetStoreEvictLeader(4, true)
 	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 0)
+	re.Empty(ops)
 	clearPendingInfluence(hb.(*hotScheduler))
 }
 
@@ -2442,7 +2442,7 @@ func TestCompatibilityConfig(t *testing.T) {
 	// from 4.0 or 5.0 or 5.1 cluster
 	var data []byte
 	storage := storage.NewStorageWithMemoryBackend()
-	data, err = EncodeConfig(map[string]interface{}{
+	data, err = EncodeConfig(map[string]any{
 		"min-hot-byte-rate":         100,
 		"min-hot-key-rate":          10,
 		"max-zombie-rounds":         3,

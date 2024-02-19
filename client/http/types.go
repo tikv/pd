@@ -21,7 +21,16 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
+
+// ClusterState saves some cluster state information.
+// NOTE: This type sync with https://github.com/tikv/pd/blob/5eae459c01a797cbd0c416054c6f0cad16b8740a/server/cluster/cluster.go#L173
+type ClusterState struct {
+	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
+	IsInitialized     bool      `json:"is_initialized"`
+	ReplicationStatus string    `json:"replication_status"`
+}
 
 // KeyRange defines a range of keys in bytes.
 type KeyRange struct {
@@ -566,11 +575,20 @@ type LabelRule struct {
 	Index    int           `json:"index"`
 	Labels   []RegionLabel `json:"labels"`
 	RuleType string        `json:"rule_type"`
-	Data     interface{}   `json:"data"`
+	Data     any           `json:"data"`
 }
 
 // LabelRulePatch is the patch to update the label rules.
 type LabelRulePatch struct {
 	SetRules    []*LabelRule `json:"sets"`
 	DeleteRules []string     `json:"deletes"`
+}
+
+// MembersInfo is PD members info returned from PD RESTful interface
+// type Members map[string][]*pdpb.Member
+type MembersInfo struct {
+	Header     *pdpb.ResponseHeader `json:"header,omitempty"`
+	Members    []*pdpb.Member       `json:"members,omitempty"`
+	Leader     *pdpb.Member         `json:"leader,omitempty"`
+	EtcdLeader *pdpb.Member         `json:"etcd_leader,omitempty"`
 }

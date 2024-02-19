@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -176,6 +177,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
+	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -359,7 +361,8 @@ func (s *Server) startServer() (err error) {
 	metaDataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	// The independent TSO service still reuses PD version info since PD and TSO are just
 	// different service modes provided by the same pd-server binary
-	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 
 	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())

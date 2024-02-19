@@ -169,7 +169,9 @@ type RaftCluster struct {
 }
 
 // Status saves some state information.
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+// NOTE:
+// - This type is exported by HTTP API. Please pay more attention when modifying it.
+// - Need to sync with client/http/types.go#ClusterStatus
 type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
@@ -269,7 +271,7 @@ func (c *RaftCluster) InitCluster(
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
-	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
+	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
 		if err != nil {
@@ -348,23 +350,19 @@ func (c *RaftCluster) Start(s Server) error {
 	return nil
 }
 
-var once sync.Once
-
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
-		if err != nil || len(servers) == 0 {
+		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.independentServices.Delete(mcsutils.SchedulingServiceName)
 		} else {
-			if c.stopSchedulingJobs() {
+			if c.stopSchedulingJobs() || c.coordinator == nil {
 				c.initCoordinator(c.ctx, c, c.hbstreams)
-			} else {
-				once.Do(func() {
-					c.initCoordinator(c.ctx, c, c.hbstreams)
-				})
 			}
-			c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			}
 		}
 	} else {
 		c.startSchedulingJobs(c, c.hbstreams)
@@ -1006,9 +1004,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
-	if !saveKV && !saveCache && !isNew {
+	saveKV, saveCache, needSync := regionGuide(region, origin)
+	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) && !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1038,12 +1035,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
-
-	isPrepared := true
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		isPrepared = c.IsPrepared()
+		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
 	}
-	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, isPrepared)
 
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
@@ -1848,7 +1842,7 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 			if slice.Contains(validLabels, label.Key) {
 				weight /= float64(len(topo))
 			}
-			topo = topo[label.Value].(map[string]interface{})
+			topo = topo[label.Value].(map[string]any)
 		} else {
 			break
 		}
@@ -1857,8 +1851,8 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 	return weight / sameLocationStoreNum
 }
 
-func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]interface{}, []string, float64, bool) {
-	topology := make(map[string]interface{})
+func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels []string, count int) (map[string]any, []string, float64, bool) {
+	topology := make(map[string]any)
 	sameLocationStoreNum := 1.0
 	totalLabelCount := make([]int, len(locationLabels))
 	for _, store := range stores {
@@ -1915,7 +1909,7 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 }
 
 // updateTopology records stores' topology in the `topology` variable.
-func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.StoreLabel) []int {
+func updateTopology(topology map[string]any, sortedLabels []*metapb.StoreLabel) []int {
 	labelCount := make([]int, len(sortedLabels))
 	if len(sortedLabels) == 0 {
 		return labelCount
@@ -1923,10 +1917,10 @@ func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.Stor
 	topo := topology
 	for i, l := range sortedLabels {
 		if _, exist := topo[l.Value]; !exist {
-			topo[l.Value] = make(map[string]interface{})
+			topo[l.Value] = make(map[string]any)
 			labelCount[i] += 1
 		}
-		topo = topo[l.Value].(map[string]interface{})
+		topo = topo[l.Value].(map[string]any)
 	}
 	return labelCount
 }
@@ -2504,7 +2498,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 
 // GetMembers return a slice of Members.
 func GetMembers(etcdClient *clientv3.Client) ([]*pdpb.Member, error) {
-	listResp, err := etcdutil.ListEtcdMembers(etcdClient)
+	listResp, err := etcdutil.ListEtcdMembers(etcdClient.Ctx(), etcdClient)
 	if err != nil {
 		return nil, err
 	}

@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -63,6 +64,7 @@ func (suite *tsoConsistencyTestSuite) TearDownSuite() {
 
 // TestSynchronizedGlobalTSO is used to test the synchronized way of global TSO generation.
 func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
+	re := suite.Require()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
@@ -74,14 +76,13 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	re := suite.Require()
 	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	suite.leaderServer = cluster.GetLeaderServer()
-	suite.NotNil(suite.leaderServer)
+	re.NotNil(suite.leaderServer)
 	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
@@ -95,14 +96,14 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 		// Get some local TSOs first
 		oldLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 		for _, dcLocation := range dcLocationConfig {
-			localTSO := suite.getTimestampByDC(ctx, cluster, dcLocation)
+			localTSO := suite.getTimestampByDC(ctx, re, cluster, dcLocation)
 			oldLocalTSOs = append(oldLocalTSOs, localTSO)
-			suite.Equal(-1, tsoutil.CompareTimestamp(maxGlobalTSO, localTSO))
+			re.Equal(-1, tsoutil.CompareTimestamp(maxGlobalTSO, localTSO))
 		}
 		// Get a global TSO then
-		globalTSO := suite.getTimestampByDC(ctx, cluster, tso.GlobalDCLocation)
+		globalTSO := suite.getTimestampByDC(ctx, re, cluster, tso.GlobalDCLocation)
 		for _, oldLocalTSO := range oldLocalTSOs {
-			suite.Equal(1, tsoutil.CompareTimestamp(globalTSO, oldLocalTSO))
+			re.Equal(1, tsoutil.CompareTimestamp(globalTSO, oldLocalTSO))
 		}
 		if tsoutil.CompareTimestamp(maxGlobalTSO, globalTSO) < 0 {
 			maxGlobalTSO = globalTSO
@@ -110,34 +111,40 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 		// Get some local TSOs again
 		newLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 		for _, dcLocation := range dcLocationConfig {
-			newLocalTSOs = append(newLocalTSOs, suite.getTimestampByDC(ctx, cluster, dcLocation))
+			newLocalTSOs = append(newLocalTSOs, suite.getTimestampByDC(ctx, re, cluster, dcLocation))
 		}
 		for _, newLocalTSO := range newLocalTSOs {
-			suite.Equal(-1, tsoutil.CompareTimestamp(maxGlobalTSO, newLocalTSO))
+			re.Equal(-1, tsoutil.CompareTimestamp(maxGlobalTSO, newLocalTSO))
 		}
 	}
 }
 
-func (suite *tsoConsistencyTestSuite) getTimestampByDC(ctx context.Context, cluster *tests.TestCluster, dcLocation string) *pdpb.Timestamp {
+func (suite *tsoConsistencyTestSuite) getTimestampByDC(
+	ctx context.Context,
+	re *require.Assertions,
+	cluster *tests.TestCluster,
+	dcLocation string,
+) *pdpb.Timestamp {
 	req := &pdpb.TsoRequest{
 		Header:     testutil.NewRequestHeader(suite.leaderServer.GetClusterID()),
 		Count:      tsoCount,
 		DcLocation: dcLocation,
 	}
 	pdClient, ok := suite.dcClientMap[dcLocation]
-	suite.True(ok)
+	re.True(ok)
 	forwardedHost := cluster.GetServer(suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()).GetAddr()
 	ctx = grpcutil.BuildForwardContext(ctx, forwardedHost)
 	tsoClient, err := pdClient.Tso(ctx)
-	suite.NoError(err)
+	re.NoError(err)
 	defer tsoClient.CloseSend()
-	suite.NoError(tsoClient.Send(req))
+	re.NoError(tsoClient.Send(req))
 	resp, err := tsoClient.Recv()
-	suite.NoError(err)
-	return checkAndReturnTimestampResponse(suite.Require(), req, resp)
+	re.NoError(err)
+	return checkAndReturnTimestampResponse(re, req, resp)
 }
 
 func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
+	re := suite.Require()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
@@ -149,14 +156,13 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	re := suite.Require()
 	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	suite.leaderServer = cluster.GetLeaderServer()
-	suite.NotNil(suite.leaderServer)
+	re.NotNil(suite.leaderServer)
 	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
@@ -165,13 +171,14 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSOOverflow() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/globalTSOOverflow", `return(true)`))
-	suite.getTimestampByDC(ctx, cluster, tso.GlobalDCLocation)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/globalTSOOverflow"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/globalTSOOverflow", `return(true)`))
+	suite.getTimestampByDC(ctx, re, cluster, tso.GlobalDCLocation)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/globalTSOOverflow"))
 }
 
 func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange", `return(true)`))
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange", `return(true)`))
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 	}
@@ -181,14 +188,13 @@ func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	re := suite.Require()
 	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	suite.leaderServer = cluster.GetLeaderServer()
-	suite.NotNil(suite.leaderServer)
+	re.NotNil(suite.leaderServer)
 	suite.dcClientMap[tso.GlobalDCLocation] = testutil.MustNewGrpcClient(re, suite.leaderServer.GetAddr())
 	for _, dcLocation := range dcLocationConfig {
 		pdName := suite.leaderServer.GetAllocatorLeader(dcLocation).GetName()
@@ -197,11 +203,12 @@ func (suite *tsoConsistencyTestSuite) TestLocalAllocatorLeaderChange() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	suite.getTimestampByDC(ctx, cluster, tso.GlobalDCLocation)
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange"))
+	suite.getTimestampByDC(ctx, re, cluster, tso.GlobalDCLocation)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/mockLocalAllocatorLeaderChange"))
 }
 
 func (suite *tsoConsistencyTestSuite) TestLocalTSO() {
+	re := suite.Require()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
@@ -213,10 +220,10 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSO() {
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	cluster.WaitAllLeaders(suite.Require(), dcLocationConfig)
+	cluster.WaitAllLeaders(re, dcLocationConfig)
 	suite.testTSO(cluster, dcLocationConfig, nil)
 }
 
@@ -232,6 +239,7 @@ func (suite *tsoConsistencyTestSuite) checkTSOUnique(tso *pdpb.Timestamp) bool {
 }
 
 func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
+	re := suite.Require()
 	dcLocationConfig := map[string]string{
 		"pd1": "dc-1",
 		"pd2": "dc-2",
@@ -243,10 +251,9 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
 	})
 	defer cluster.Destroy()
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
 
-	re := suite.Require()
 	cluster.WaitAllLeaders(re, dcLocationConfig)
 
 	leaderServer := cluster.GetLeaderServer()
@@ -265,15 +272,15 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	time.Sleep(time.Second * 5)
 
 	// Mock the situation that the system time of PD nodes in dc-4 is slower than others.
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/systemTimeSlow", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/systemTimeSlow", `return(true)`))
 
 	// Join a new dc-location
 	pd4, err := cluster.Join(suite.ctx, func(conf *config.Config, serverName string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
-	suite.NoError(err)
-	suite.NoError(pd4.Run())
+	re.NoError(err)
+	re.NoError(pd4.Run())
 	dcLocationConfig["pd4"] = "dc-4"
 	cluster.CheckClusterDCLocation()
 	re.NotEqual("", cluster.WaitAllocatorLeader(
@@ -282,7 +289,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	))
 	suite.testTSO(cluster, dcLocationConfig, previousTS)
 
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/systemTimeSlow"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/systemTimeSlow"))
 }
 
 func (suite *tsoConsistencyTestSuite) testTSO(cluster *tests.TestCluster, dcLocationConfig map[string]string, previousTS *pdpb.Timestamp) {
@@ -319,15 +326,15 @@ func (suite *tsoConsistencyTestSuite) testTSO(cluster *tests.TestCluster, dcLoca
 					cancel()
 					lastTS := lastList[dcLocation]
 					// Check whether the TSO fallbacks
-					suite.Equal(1, tsoutil.CompareTimestamp(ts, lastTS))
+					re.Equal(1, tsoutil.CompareTimestamp(ts, lastTS))
 					if previousTS != nil {
 						// Because we have a Global TSO synchronization, even though the system time
 						// of the PD nodes in dc-4 is slower, its TSO will still be big enough.
-						suite.Equal(1, tsoutil.CompareTimestamp(ts, previousTS))
+						re.Equal(1, tsoutil.CompareTimestamp(ts, previousTS))
 					}
 					lastList[dcLocation] = ts
 					// Check whether the TSO is not unique
-					suite.True(suite.checkTSOUnique(ts))
+					re.True(suite.checkTSOUnique(ts))
 				}
 				time.Sleep(10 * time.Millisecond)
 			}

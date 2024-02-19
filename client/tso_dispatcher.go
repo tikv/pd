@@ -121,7 +121,7 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 
 func (c *tsoClient) updateTSODispatcher() {
 	// Set up the new TSO dispatcher and batch controller.
-	c.GetTSOAllocators().Range(func(dcLocationKey, _ interface{}) bool {
+	c.GetTSOAllocators().Range(func(dcLocationKey, _ any) bool {
 		dcLocation := dcLocationKey.(string)
 		if !c.checkTSODispatcher(dcLocation) {
 			c.createTSODispatcher(dcLocation)
@@ -129,7 +129,7 @@ func (c *tsoClient) updateTSODispatcher() {
 		return true
 	})
 	// Clean up the unused TSO dispatcher
-	c.tsoDispatcher.Range(func(dcLocationKey, dispatcher interface{}) bool {
+	c.tsoDispatcher.Range(func(dcLocationKey, dispatcher any) bool {
 		dcLocation := dcLocationKey.(string)
 		// Skip the Global TSO Allocator
 		if dcLocation == globalDCLocation {
@@ -173,7 +173,7 @@ func (c *tsoClient) tsCancelLoop() {
 	defer ticker.Stop()
 	for {
 		// Watch every dc-location's tsDeadlineCh
-		c.GetTSOAllocators().Range(func(dcLocation, _ interface{}) bool {
+		c.GetTSOAllocators().Range(func(dcLocation, _ any) bool {
 			c.watchTSDeadline(tsCancelLoopCtx, dcLocation.(string))
 			return true
 		})
@@ -343,7 +343,7 @@ func (c *tsoClient) handleDispatcher(
 	defer func() {
 		log.Info("[tso] exit tso dispatcher", zap.String("dc-location", dc))
 		// Cancel all connections.
-		connectionCtxs.Range(func(_, cc interface{}) bool {
+		connectionCtxs.Range(func(_, cc any) bool {
 			cc.(*tsoConnectionContext).cancel()
 			return true
 		})
@@ -395,7 +395,7 @@ func (c *tsoClient) handleDispatcher(
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
 	defer streamLoopTimer.Stop()
-	bo := retry.InitialBackOffer(updateMemberBackOffBaseTime, updateMemberTimeout)
+	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberTimeout, updateMemberBackOffBaseTime)
 tsoBatchLoop:
 	for {
 		select {
@@ -412,7 +412,7 @@ tsoBatchLoop:
 			} else {
 				log.Error("[tso] fetch pending tso requests error",
 					zap.String("dc-location", dc),
-					errs.ZapError(errs.ErrClientGetTSO.FastGenByArgs("when fetch pending tso requests"), err))
+					errs.ZapError(errs.ErrClientGetTSO, err))
 			}
 			return
 		}
@@ -495,10 +495,10 @@ tsoBatchLoop:
 			default:
 			}
 			c.svcDiscovery.ScheduleCheckMemberChanged()
-			log.Error("[tso] getTS error",
+			log.Error("[tso] getTS error after processing requests",
 				zap.String("dc-location", dc),
 				zap.String("stream-addr", streamAddr),
-				errs.ZapError(errs.ErrClientGetTSO.FastGenByArgs("after processing requests"), err))
+				errs.ZapError(errs.ErrClientGetTSO, err))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
@@ -532,7 +532,7 @@ func (c *tsoClient) allowTSOFollowerProxy(dc string) bool {
 // connectionCtxs will only have only one stream to choose when the TSO Follower Proxy is off.
 func (c *tsoClient) chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext) {
 	idx := 0
-	connectionCtxs.Range(func(_, cc interface{}) bool {
+	connectionCtxs.Range(func(_, cc any) bool {
 		j := rand.Intn(idx + 1)
 		if j < 1 {
 			connectionCtx = cc.(*tsoConnectionContext)
@@ -587,7 +587,7 @@ func (c *tsoClient) tryConnectToTSO(
 			cc.(*tsoConnectionContext).cancel()
 			connectionCtxs.Store(newAddr, connectionCtx)
 		}
-		connectionCtxs.Range(func(addr, cc interface{}) bool {
+		connectionCtxs.Range(func(addr, cc any) bool {
 			if addr.(string) != newAddr {
 				cc.(*tsoConnectionContext).cancel()
 				connectionCtxs.Delete(addr)
@@ -700,7 +700,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		return errors.Errorf("cannot find the allocator leader in %s", dc)
 	}
 	// GC the stale one.
-	connectionCtxs.Range(func(addr, cc interface{}) bool {
+	connectionCtxs.Range(func(addr, cc any) bool {
 		if _, ok := tsoStreamBuilders[addr.(string)]; !ok {
 			cc.(*tsoConnectionContext).cancel()
 			connectionCtxs.Delete(addr)

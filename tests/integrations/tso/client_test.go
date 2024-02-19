@@ -183,9 +183,13 @@ func (suite *tsoClientTestSuite) TearDownSuite() {
 		suite.tsoCluster.Destroy()
 	}
 	suite.cluster.Destroy()
+	for _, client := range suite.clients {
+		client.Close()
+	}
 }
 
 func (suite *tsoClientTestSuite) TestGetTS() {
+	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -195,9 +199,9 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 				var lastTS uint64
 				for j := 0; j < tsoRequestRound; j++ {
 					physical, logical, err := client.GetTS(suite.ctx)
-					suite.NoError(err)
+					re.NoError(err)
 					ts := tsoutil.ComposeTS(physical, logical)
-					suite.Less(lastTS, ts)
+					re.Less(lastTS, ts)
 					lastTS = ts
 				}
 			}(client)
@@ -207,6 +211,7 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTSAsync() {
+	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -220,9 +225,9 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 				var lastTS uint64 = math.MaxUint64
 				for j := len(tsFutures) - 1; j >= 0; j-- {
 					physical, logical, err := tsFutures[j].Wait()
-					suite.NoError(err)
+					re.NoError(err)
 					ts := tsoutil.ComposeTS(physical, logical)
-					suite.Greater(lastTS, ts)
+					re.Greater(lastTS, ts)
 					lastTS = ts
 				}
 			}(client)
@@ -250,12 +255,13 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	defer cancel()
 	client := mcs.SetupClientWithKeyspaceID(
 		ctx, re, keyspaceID, strings.Split(suite.backendEndpoints, ","))
+	defer client.Close()
 	var lastTS uint64
 	for j := 0; j < tsoRequestRound; j++ {
 		physical, logical, err := client.GetTS(ctx)
-		suite.NoError(err)
+		re.NoError(err)
 		ts := tsoutil.ComposeTS(physical, logical)
-		suite.Less(lastTS, ts)
+		re.Less(lastTS, ts)
 		lastTS = ts
 	}
 }
@@ -489,6 +495,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	re.NoError(err)
+	defer pdClient.Close()
 
 	// Create a TSO cluster which has 2 servers
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)

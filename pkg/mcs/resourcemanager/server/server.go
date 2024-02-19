@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -216,6 +217,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
+	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -294,7 +296,8 @@ func (s *Server) startServer() (err error) {
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// The independent Resource Manager service still reuses PD version info since PD and Resource Manager are just
 	// different service modes provided by the same pd-server binary
-	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
@@ -321,13 +324,15 @@ func (s *Server) startServer() (err error) {
 	s.serverLoopWg.Add(1)
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	<-serverReadyChan
-	s.startServerLoop()
 
 	// Run callbacks
 	log.Info("triggering the start callback functions")
 	for _, cb := range s.GetStartCallbacks() {
 		cb()
 	}
+	// The start callback function will initialize storage, which will be used in service ready callback.
+	// We should make sure the calling sequence is right.
+	s.startServerLoop()
 
 	// Server has started.
 	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}

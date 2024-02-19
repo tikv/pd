@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"reflect"
 	"strings"
@@ -30,7 +31,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
-	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -149,7 +149,7 @@ type tsoServiceDiscovery struct {
 	wg                   sync.WaitGroup
 	printFallbackLogOnce sync.Once
 
-	tlsCfg *tlsutil.TLSConfig
+	tlsCfg *tls.Config
 
 	// Client option.
 	option *option
@@ -158,7 +158,7 @@ type tsoServiceDiscovery struct {
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(
 	ctx context.Context, metacli MetaStorageClient, apiSvcDiscovery ServiceDiscovery,
-	clusterID uint64, keyspaceID uint32, tlsCfg *tlsutil.TLSConfig, option *option,
+	clusterID uint64, keyspaceID uint32, tlsCfg *tls.Config, option *option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -231,7 +231,7 @@ func (c *tsoServiceDiscovery) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.clientConns.Range(func(key, cc interface{}) bool {
+	c.clientConns.Range(func(key, cc any) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
 			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
@@ -371,6 +371,16 @@ func (c *tsoServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGl
 		callback(addr)
 	}
 	c.globalAllocPrimariesUpdatedCb = callback
+}
+
+// GetServiceClient implements ServiceDiscovery
+func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
+	return c.apiSvcDiscovery.GetServiceClient()
+}
+
+// GetAllServiceClients implements ServiceDiscovery
+func (c *tsoServiceDiscovery) GetAllServiceClients() []ServiceClient {
+	return c.apiSvcDiscovery.GetAllServiceClients()
 }
 
 // getPrimaryAddr returns the primary address.

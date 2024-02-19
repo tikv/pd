@@ -57,7 +57,7 @@ type EmbeddedEtcdMember struct {
 	id       uint64       // etcd server id.
 	member   *pdpb.Member // current PD's info.
 	rootPath string
-	// memberValue is the serialized string of `member`. It will be save in
+	// memberValue is the serialized string of `member`. It will be saved in
 	// etcd leader key when the PD node is successfully elected as the PD leader
 	// of the cluster. Every write will use it to check PD leadership.
 	memberValue string
@@ -85,7 +85,7 @@ func (m *EmbeddedEtcdMember) Name() string {
 }
 
 // GetMember returns the member.
-func (m *EmbeddedEtcdMember) GetMember() interface{} {
+func (m *EmbeddedEtcdMember) GetMember() any {
 	return m.member
 }
 
@@ -185,12 +185,15 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 	failpoint.Inject("skipCampaignLeaderCheck", func() {
 		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
 	})
+
 	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
-		log.Warn("campaign times is too frequent, resign and campaign again",
-			zap.String("leader-name", m.Name()), zap.String("leader-key", m.GetLeaderPath()))
+		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
+			return err
+		}
 		m.leadership.ResetCampaignTimes()
-		return m.ResignEtcdLeader(ctx, m.Name(), "")
+		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
+
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
@@ -199,7 +202,7 @@ func (m *EmbeddedEtcdMember) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// PreCheckLeader does some pre-check before checking whether or not it's the leader.
+// PreCheckLeader does some pre-check before checking whether it's the leader.
 func (m *EmbeddedEtcdMember) PreCheckLeader() error {
 	if m.GetEtcdLeader() == 0 {
 		return errs.ErrEtcdLeaderNotFound
@@ -352,7 +355,7 @@ func (m *EmbeddedEtcdMember) ResignEtcdLeader(ctx context.Context, from string, 
 	log.Info("try to resign etcd leader to next pd-server", zap.String("from", from), zap.String("to", nextEtcdLeader))
 	// Determine next etcd leader candidates.
 	var etcdLeaderIDs []uint64
-	res, err := etcdutil.ListEtcdMembers(m.client)
+	res, err := etcdutil.ListEtcdMembers(ctx, m.client)
 	if err != nil {
 		return err
 	}

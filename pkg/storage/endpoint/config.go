@@ -25,8 +25,8 @@ import (
 // ConfigStorage defines the storage operations on the config.
 type ConfigStorage interface {
 	// Persisted config will be stored in the storage.
-	LoadConfig(cfg interface{}) (bool, error)
-	SaveConfig(cfg interface{}) error
+	LoadConfig(cfg any) (bool, error)
+	SaveConfig(cfg any) error
 	// Each scheduler has its own customized config, so we need to store them separately.
 	LoadAllSchedulerConfigs() ([]string, []string, error)
 	LoadSchedulerConfig(schedulerName string) (string, error)
@@ -37,7 +37,7 @@ type ConfigStorage interface {
 var _ ConfigStorage = (*StorageEndpoint)(nil)
 
 // LoadConfig loads config from configPath then unmarshal it to cfg.
-func (se *StorageEndpoint) LoadConfig(cfg interface{}) (bool, error) {
+func (se *StorageEndpoint) LoadConfig(cfg any) (bool, error) {
 	value, err := se.Load(configPath)
 	if err != nil || value == "" {
 		return false, err
@@ -50,18 +50,14 @@ func (se *StorageEndpoint) LoadConfig(cfg interface{}) (bool, error) {
 }
 
 // SaveConfig stores marshallable cfg to the configPath.
-func (se *StorageEndpoint) SaveConfig(cfg interface{}) error {
-	value, err := json.Marshal(cfg)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
-	}
-	return se.Save(configPath, string(value))
+func (se *StorageEndpoint) SaveConfig(cfg any) error {
+	return se.saveJSON(configPath, cfg)
 }
 
 // LoadAllSchedulerConfigs loads all schedulers' config.
 func (se *StorageEndpoint) LoadAllSchedulerConfigs() ([]string, []string, error) {
 	prefix := customSchedulerConfigPath + "/"
-	keys, values, err := se.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 1000)
+	keys, values, err := se.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), MinKVRangeLimit)
 	for i, key := range keys {
 		keys[i] = strings.TrimPrefix(key, prefix)
 	}

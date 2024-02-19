@@ -20,7 +20,3 @@ package versioninfo
 import (
 	_ "crypto/tls/fipsonly"
 )
-
-func init() {
-	PDReleaseVersion += "-fips"
-}

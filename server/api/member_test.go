@@ -67,17 +67,16 @@ func relaxEqualStings(re *require.Assertions, a, b []string) {
 	re.Equal(sortedStringB, sortedStringA)
 }
 
-func (suite *memberTestSuite) checkListResponse(body []byte, cfgs []*config.Config) {
+func (suite *memberTestSuite) checkListResponse(re *require.Assertions, body []byte, cfgs []*config.Config) {
 	got := make(map[string][]*pdpb.Member)
 	json.Unmarshal(body, &got)
-	suite.Len(cfgs, len(got["members"]))
-	re := suite.Require()
+	re.Len(cfgs, len(got["members"]))
 	for _, member := range got["members"] {
 		for _, cfg := range cfgs {
 			if member.GetName() != cfg.Name {
 				continue
 			}
-			suite.Equal("dc-1", member.DcLocation)
+			re.Equal("dc-1", member.DcLocation)
 			relaxEqualStings(re, member.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 			relaxEqualStings(re, member.PeerUrls, strings.Split(cfg.PeerUrls, ","))
 		}
@@ -85,43 +84,46 @@ func (suite *memberTestSuite) checkListResponse(body []byte, cfgs []*config.Conf
 }
 
 func (suite *memberTestSuite) TestMemberList() {
+	re := suite.Require()
 	for _, cfg := range suite.cfgs {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/members"
 		resp, err := testDialClient.Get(addr)
-		suite.NoError(err)
+		re.NoError(err)
 		buf, err := io.ReadAll(resp.Body)
-		suite.NoError(err)
+		re.NoError(err)
 		resp.Body.Close()
-		suite.checkListResponse(buf, suite.cfgs)
+		suite.checkListResponse(re, buf, suite.cfgs)
 	}
 }
 
 func (suite *memberTestSuite) TestMemberLeader() {
+	re := suite.Require()
 	leader := suite.servers[0].GetLeader()
 	addr := suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
 	resp, err := testDialClient.Get(addr)
-	suite.NoError(err)
+	re.NoError(err)
 	defer resp.Body.Close()
 	buf, err := io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 
 	var got pdpb.Member
-	suite.NoError(json.Unmarshal(buf, &got))
-	suite.Equal(leader.GetClientUrls(), got.GetClientUrls())
-	suite.Equal(leader.GetMemberId(), got.GetMemberId())
+	re.NoError(json.Unmarshal(buf, &got))
+	re.Equal(leader.GetClientUrls(), got.GetClientUrls())
+	re.Equal(leader.GetMemberId(), got.GetMemberId())
 }
 
 func (suite *memberTestSuite) TestChangeLeaderPeerUrls() {
+	re := suite.Require()
 	leader := suite.servers[0].GetLeader()
 	addr := suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
 	resp, err := testDialClient.Get(addr)
-	suite.NoError(err)
+	re.NoError(err)
 	defer resp.Body.Close()
 	buf, err := io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 
 	var got pdpb.Member
-	suite.NoError(json.Unmarshal(buf, &got))
+	re.NoError(json.Unmarshal(buf, &got))
 	id := got.GetMemberId()
 	peerUrls := got.GetPeerUrls()
 
@@ -129,29 +131,30 @@ func (suite *memberTestSuite) TestChangeLeaderPeerUrls() {
 	suite.changeLeaderPeerUrls(leader, id, newPeerUrls)
 	addr = suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
 	resp, err = testDialClient.Get(addr)
-	suite.NoError(err)
+	re.NoError(err)
 	buf, err = io.ReadAll(resp.Body)
-	suite.NoError(err)
+	re.NoError(err)
 	resp.Body.Close()
 	got1 := make(map[string]*pdpb.Member)
 	json.Unmarshal(buf, &got1)
-	suite.Equal(newPeerUrls, got1["leader"].GetPeerUrls())
-	suite.Equal(newPeerUrls, got1["etcd_leader"].GetPeerUrls())
+	re.Equal(newPeerUrls, got1["leader"].GetPeerUrls())
+	re.Equal(newPeerUrls, got1["etcd_leader"].GetPeerUrls())
 
 	// reset
 	suite.changeLeaderPeerUrls(leader, id, peerUrls)
 }
 
 func (suite *memberTestSuite) changeLeaderPeerUrls(leader *pdpb.Member, id uint64, urls []string) {
+	re := suite.Require()
 	data := map[string][]string{"peerURLs": urls}
 	postData, err := json.Marshal(data)
-	suite.NoError(err)
+	re.NoError(err)
 	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/v2/members/%s", leader.GetClientUrls()[0], fmt.Sprintf("%x", id)), bytes.NewBuffer(postData))
-	suite.NoError(err)
+	re.NoError(err)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := testDialClient.Do(req)
-	suite.NoError(err)
-	suite.Equal(204, resp.StatusCode)
+	re.NoError(err)
+	re.Equal(204, resp.StatusCode)
 	resp.Body.Close()
 }
 
@@ -175,10 +178,11 @@ func (suite *resignTestSuite) TearDownSuite() {
 }
 
 func (suite *resignTestSuite) TestResignMyself() {
+	re := suite.Require()
 	addr := suite.cfgs[0].ClientUrls + apiPrefix + "/api/v1/leader/resign"
 	resp, err := testDialClient.Post(addr, "", nil)
-	suite.NoError(err)
-	suite.Equal(http.StatusOK, resp.StatusCode)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
 	_, _ = io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 }

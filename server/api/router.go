@@ -71,7 +71,7 @@ func createIndentRender() *render.Render {
 	})
 }
 
-func getFunctionName(f interface{}) string {
+func getFunctionName(f any) string {
 	strs := strings.Split(runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), ".")
 	return strings.Split(strs[len(strs)-1], "-")[0]
 }
@@ -88,10 +88,10 @@ func getFunctionName(f interface{}) string {
 // @BasePath       /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddle := newServiceMiddlewareBuilder(svr)
-	registerPrefix := func(router *mux.Router, prefixPath string,
+	registerPrefix := func(router *mux.Router, prefixPath, name string,
 		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
 		routeCreateFunc(router.PathPrefix(prefixPath), serviceMiddle.createHandler(handleFunc),
-			getFunctionName(handleFunc), opts...)
+			name, opts...)
 	}
 	registerFunc := func(router *mux.Router, path string,
 		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
@@ -133,6 +133,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	operatorHandler := newOperatorHandler(handler, rd)
 	registerFunc(apiRouter, "/operators", operatorHandler.GetOperators, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators", operatorHandler.CreateOperator, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/operators", operatorHandler.DeleteOperators, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/operators/records", operatorHandler.GetOperatorRecords, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.GetOperatorsByRegion, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.DeleteOperatorByRegion, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
@@ -151,7 +152,8 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/schedulers/diagnostic/{name}", diagnosticHandler.GetDiagnosticResult, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	registerPrefix(apiRouter, "/scheduler-config", schedulerConfigHandler.GetSchedulerConfig, setAuditBackend(prometheus))
+	registerPrefix(apiRouter, "/scheduler-config", "HandleSchedulerConfig", schedulerConfigHandler.HandleSchedulerConfig, setMethods(http.MethodPost, http.MethodDelete, http.MethodPut, http.MethodPatch), setAuditBackend(localLog, prometheus))
+	registerPrefix(apiRouter, "/scheduler-config", "GetSchedulerConfig", schedulerConfigHandler.HandleSchedulerConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	clusterHandler := newClusterHandler(svr, rd)
 	registerFunc(apiRouter, "/cluster", clusterHandler.GetCluster, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -373,7 +375,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	// API to set or unset failpoints
 	if enableFailPointAPI {
-		registerPrefix(apiRouter, "/fail", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		registerPrefix(apiRouter, "/fail", "FailPoint", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)

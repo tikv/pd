@@ -83,7 +83,7 @@ get min TSO failed, %v
 
 ["PD:client:ErrClientGetTSO"]
 error = '''
-get TSO failed, %v
+get TSO failed
 '''
 
 ["PD:client:ErrClientGetTSOTimeout"]
@@ -764,6 +764,11 @@ client url empty
 ["PD:server:ErrConfiguration"]
 error = '''
 cannot set invalid configuration
+'''
+
+["PD:server:ErrLeaderFrequentlyChange"]
+error = '''
+leader %s frequently changed, leader-key is [%s]
 '''
 
 ["PD:server:ErrLeaderNil"]

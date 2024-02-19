@@ -363,7 +363,7 @@ func TestNeedSync(t *testing.T) {
 	for _, testCase := range testCases {
 		regionA := region.Clone(testCase.optionsA...)
 		regionB := region.Clone(testCase.optionsB...)
-		_, _, _, needSync := RegionGuide(regionA, regionB)
+		_, _, needSync := RegionGuide(regionA, regionB)
 		re.Equal(testCase.needSync, needSync)
 	}
 }

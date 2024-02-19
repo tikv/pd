@@ -18,13 +18,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -44,7 +42,6 @@ const (
 )
 
 var (
-	once            sync.Once
 	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "tso",
 		Version:    "v1",
@@ -77,11 +74,6 @@ func createIndentRender() *render.Render {
 
 // NewService returns a new Service.
 func NewService(srv *tsoserver.Service) *Service {
-	once.Do(func() {
-		// These global modification will be effective only for the first invoke.
-		_ = godotenv.Load()
-		gin.SetMode(gin.ReleaseMode)
-	})
 	apiHandlerEngine := gin.New()
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.Default())
@@ -91,6 +83,7 @@ func NewService(srv *tsoserver.Service) *Service {
 		c.Next()
 	})
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
+	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	root.Use(multiservicesapi.ServiceRedirector())
@@ -102,6 +95,7 @@ func NewService(srv *tsoserver.Service) *Service {
 	}
 	s.RegisterAdminRouter()
 	s.RegisterKeyspaceGroupRouter()
+	s.RegisterHealth()
 	return s
 }
 
@@ -116,6 +110,12 @@ func (s *Service) RegisterAdminRouter() {
 func (s *Service) RegisterKeyspaceGroupRouter() {
 	router := s.root.Group("keyspace-groups")
 	router.GET("/members", GetKeyspaceGroupMembers)
+}
+
+// RegisterHealth registers the router of the health handler.
+func (s *Service) RegisterHealth() {
+	router := s.root.Group("health")
+	router.GET("", GetHealth)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -199,6 +199,22 @@ func ResetTS(c *gin.Context) {
 		return
 	}
 	c.String(http.StatusOK, "Reset ts successfully.")
+}
+
+// GetHealth returns the health status of the TSO service.
+func GetHealth(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	am, err := svr.GetKeyspaceGroupManager().GetAllocatorManager(utils.DefaultKeyspaceGroupID)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if am.GetMember().IsLeaderElected() {
+		c.IndentedJSON(http.StatusOK, "ok")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "no leader elected")
 }
 
 // KeyspaceGroupMember contains the keyspace group and its member information.

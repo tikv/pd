@@ -484,7 +484,7 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		re.Nil(tc.SetRule(testCase.rule))
+		re.NoError(tc.SetRule(testCase.rule))
 		ops, _ := lb.Schedule(tc, false)
 		if testCase.schedule {
 			re.Len(ops, 1)

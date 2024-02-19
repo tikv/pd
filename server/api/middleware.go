@@ -69,7 +69,7 @@ func (rm *requestInfoMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		w.Header().Add("body-param", requestInfo.BodyParam)
 		w.Header().Add("url-param", requestInfo.URLParam)
 		w.Header().Add("method", requestInfo.Method)
-		w.Header().Add("component", requestInfo.Component)
+		w.Header().Add("caller-id", requestInfo.CallerID)
 		w.Header().Add("ip", requestInfo.IP)
 	})
 
@@ -177,8 +177,8 @@ func (s *rateLimitMiddleware) ServeHTTP(w http.ResponseWriter, r *http.Request, 
 
 	// There is no need to check whether rateLimiter is nil. CreateServer ensures that it is created
 	rateLimiter := s.svr.GetServiceRateLimiter()
-	if rateLimiter.Allow(requestInfo.ServiceLabel) {
-		defer rateLimiter.Release(requestInfo.ServiceLabel)
+	if done, err := rateLimiter.Allow(requestInfo.ServiceLabel); err == nil {
+		defer done()
 		next(w, r)
 	} else {
 		http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)

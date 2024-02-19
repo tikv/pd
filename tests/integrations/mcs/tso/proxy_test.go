@@ -66,7 +66,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	leaderName := s.apiCluster.WaitLeader()
 	s.apiLeader = s.apiCluster.GetServer(leaderName)
 	s.backendEndpoints = s.apiLeader.GetAddr()
-	s.NoError(s.apiLeader.BootstrapCluster())
+	re.NoError(s.apiLeader.BootstrapCluster())
 
 	// Create a TSO cluster with 2 servers
 	s.tsoCluster, err = tests.NewTestTSOCluster(s.ctx, 2, s.backendEndpoints)

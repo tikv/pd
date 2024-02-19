@@ -62,7 +62,7 @@ func newTwoQueueParams(size int, recentRatio, ghostRatio float64) *TwoQueue {
 }
 
 // Put puts an item into cache.
-func (c *TwoQueue) Put(key uint64, value interface{}) {
+func (c *TwoQueue) Put(key uint64, value any) {
 	// Check if value is in frequent list,
 	// then just update it
 	if c.frequent.contains(key) {
@@ -111,7 +111,7 @@ func (c *TwoQueue) ensureSpace(ghost bool) {
 }
 
 // Get retrieves an item from cache.
-func (c *TwoQueue) Get(key uint64) (interface{}, bool) {
+func (c *TwoQueue) Get(key uint64) (any, bool) {
 	// Check in frequent list
 	if val, ok := c.frequent.Get(key); ok {
 		return val, ok
@@ -128,7 +128,7 @@ func (c *TwoQueue) Get(key uint64) (interface{}, bool) {
 }
 
 // Peek reads an item from cache. The action is no considered 'Use'.
-func (c *TwoQueue) Peek(key uint64) (interface{}, bool) {
+func (c *TwoQueue) Peek(key uint64) (any, bool) {
 	if val, ok := c.frequent.Peek(key); ok {
 		return val, ok
 	}

@@ -10,8 +10,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/kms v1.20.8
 	github.com/aws/aws-sdk-go-v2/service/sts v1.18.7
 	github.com/axw/gocov v1.0.0
+	github.com/brianvoe/gofakeit/v6 v6.26.3
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
-	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.0
 	github.com/docker/go-units v0.4.0
 	github.com/elliotchance/pie/v2 v2.1.0
@@ -19,7 +19,6 @@ require (
 	github.com/gin-contrib/gzip v0.0.1
 	github.com/gin-contrib/pprof v1.4.0
 	github.com/gin-gonic/gin v1.9.1
-	github.com/go-echarts/go-echarts v1.0.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/btree v1.1.2
 	github.com/google/uuid v1.3.0
@@ -27,25 +26,24 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/joho/godotenv v1.4.0
 	github.com/mailru/easyjson v0.7.6
-	github.com/mattn/go-shellwords v1.0.12
 	github.com/mgechev/revive v1.0.2
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20231018065736-c0689aded40c
+	github.com/pingcap/kvproto v0.0.0-20231222062942-c0c73f41d0b2
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20231127105651-ce4097837c5e
-	github.com/prometheus/client_golang v1.11.1
-	github.com/prometheus/common v0.26.0
+	github.com/pingcap/tidb-dashboard v0.0.0-20240111062855-41f7c8011953
+	github.com/prometheus/client_golang v1.18.0
+	github.com/prometheus/common v0.46.0
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/smallnest/chanx v0.0.0-20221229104322-eb4c998d2072
 	github.com/soheilhy/cmux v0.1.4
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.8.3
+	github.com/stretchr/testify v1.8.4
 	github.com/swaggo/http-swagger v1.2.6
 	github.com/swaggo/swag v1.8.3
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
@@ -53,13 +51,12 @@ require (
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
 	go.uber.org/atomic v1.10.0
-	go.uber.org/goleak v1.1.12
-	go.uber.org/zap v1.24.0
-	golang.org/x/exp v0.0.0-20230108222341-4b8118a2686a
-	golang.org/x/text v0.13.0
-	golang.org/x/time v0.1.0
-	golang.org/x/tools v0.6.0
-	google.golang.org/grpc v1.54.0
+	go.uber.org/goleak v1.2.0
+	go.uber.org/zap v1.26.0
+	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
+	golang.org/x/time v0.3.0
+	golang.org/x/tools v0.14.0
+	google.golang.org/grpc v1.59.0
 	gotest.tools/gotestsum v1.7.0
 )
 
@@ -80,7 +77,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.12.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.14.6 // indirect
 	github.com/aws/smithy-go v1.13.5 // indirect
-	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bitly/go-simplejson v0.5.0 // indirect
 	github.com/breeswish/gin-jwt/v2 v2.6.4-jwt-patch // indirect
@@ -93,7 +89,7 @@ require (
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dnephin/pflag v1.0.7 // indirect
-	github.com/dustin/go-humanize v0.0.0-20171111073723-bb3d318650d4 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.10.0 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
@@ -139,7 +135,6 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.8 // indirect
 	github.com/mattn/go-sqlite3 v1.14.15 // indirect
-	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/mgechev/dots v0.0.0-20190921121421-c36f7dcfbb81 // indirect
 	github.com/minio/sio v0.3.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
@@ -154,8 +149,8 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20221212215047-62379fc7944b // indirect
-	github.com/prometheus/client_model v0.2.0 // indirect
-	github.com/prometheus/procfs v0.6.0 // indirect
+	github.com/prometheus/client_model v0.5.0 // indirect
+	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/russross/blackfriday/v2 v2.0.1 // indirect
 	github.com/samber/lo v1.37.0 // indirect
@@ -183,17 +178,20 @@ require (
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.3.0 // indirect
-	golang.org/x/crypto v0.14.0 // indirect
-	golang.org/x/image v0.5.0 // indirect
-	golang.org/x/mod v0.8.0 // indirect
-	golang.org/x/net v0.17.0 // indirect
-	golang.org/x/oauth2 v0.4.0 // indirect
-	golang.org/x/sync v0.1.0 // indirect
-	golang.org/x/sys v0.13.0 // indirect
-	golang.org/x/term v0.13.0 // indirect
+	golang.org/x/crypto v0.18.0 // indirect
+	golang.org/x/image v0.10.0 // indirect
+	golang.org/x/mod v0.13.0 // indirect
+	golang.org/x/net v0.20.0 // indirect
+	golang.org/x/oauth2 v0.16.0 // indirect
+	golang.org/x/sync v0.4.0 // indirect
+	golang.org/x/sys v0.16.0 // indirect
+	golang.org/x/term v0.16.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1 // indirect
-	google.golang.org/protobuf v1.30.0 // indirect
+	google.golang.org/genproto v0.0.0-20231030173426-d783a09b4405 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20231016165738-49dd2c1f3d0b // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
+	google.golang.org/protobuf v1.32.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
@@ -205,7 +203,7 @@ require (
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 
-replace google.golang.org/grpc v1.54.0 => google.golang.org/grpc v1.26.0
+replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.

@@ -38,6 +38,9 @@ const (
 	store                     = "/pd/api/v1/store"
 	Stores                    = "/pd/api/v1/stores"
 	StatsRegion               = "/pd/api/v1/stats/region"
+	membersPrefix             = "/pd/api/v1/members"
+	leaderPrefix              = "/pd/api/v1/leader"
+	transferLeader            = "/pd/api/v1/leader/transfer"
 	// Config
 	Config          = "/pd/api/v1/config"
 	ClusterVersion  = "/pd/api/v1/config/cluster-version"
@@ -70,8 +73,13 @@ const (
 	PProfGoroutine = "/pd/api/v1/debug/pprof/goroutine"
 	// Others
 	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
+	Cluster             = "/pd/api/v1/cluster"
+	ClusterStatus       = "/pd/api/v1/cluster/status"
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
+	operators           = "/pd/api/v1/operators"
+	// Micro Service
+	microServicePrefix = "/pd/api/v2/ms"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -124,6 +132,16 @@ func StoreLabelByID(id uint64) string {
 	return fmt.Sprintf("%s/%d/label", store, id)
 }
 
+// LabelByStoreID returns the path of PD HTTP API to set store label.
+func LabelByStoreID(storeID int64) string {
+	return fmt.Sprintf("%s/%d/label", store, storeID)
+}
+
+// TransferLeaderByID returns the path of PD HTTP API to transfer leader by ID.
+func TransferLeaderByID(leaderID string) string {
+	return fmt.Sprintf("%s/%s", transferLeader, leaderID)
+}
+
 // ConfigWithTTLSeconds returns the config API with the TTL seconds parameter.
 func ConfigWithTTLSeconds(ttlSeconds float64) string {
 	return fmt.Sprintf("%s?ttlSecond=%.0f", Config, ttlSeconds)
@@ -172,4 +190,14 @@ func PProfProfileAPIWithInterval(interval time.Duration) string {
 // PProfGoroutineWithDebugLevel returns the pprof goroutine API with debug level parameter.
 func PProfGoroutineWithDebugLevel(level int) string {
 	return fmt.Sprintf("%s?debug=%d", PProfGoroutine, level)
+}
+
+// MicroServiceMembers returns the path of PD HTTP API to get the members of microservice.
+func MicroServiceMembers(service string) string {
+	return fmt.Sprintf("%s/members/%s", microServicePrefix, service)
+}
+
+// MicroServicePrimary returns the path of PD HTTP API to get the primary of microservice.
+func MicroServicePrimary(service string) string {
+	return fmt.Sprintf("%s/primary/%s", microServicePrefix, service)
 }

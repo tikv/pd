@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/testutil"
-	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
@@ -95,7 +94,7 @@ func TestGRPCDialOption(t *testing.T) {
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,
-		tlsCfg:            &tlsutil.TLSConfig{},
+		tlsCfg:            nil,
 		option:            newOption(),
 	}
 	cli.urls.Store([]string{testClientURL})

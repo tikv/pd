@@ -128,7 +128,7 @@ func (h *memberHandler) DeleteMemberByName(w http.ResponseWriter, r *http.Reques
 	// Get etcd ID by name.
 	var id uint64
 	name := mux.Vars(r)["name"]
-	listResp, err := etcdutil.ListEtcdMembers(client)
+	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -238,7 +238,7 @@ func (h *memberHandler) SetMemberPropertyByName(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}

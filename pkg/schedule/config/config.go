@@ -267,7 +267,7 @@ type ScheduleConfig struct {
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
-	SchedulersPayload map[string]interface{} `toml:"schedulers-payload" json:"schedulers-payload"`
+	SchedulersPayload map[string]any `toml:"schedulers-payload" json:"schedulers-payload"`
 
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
@@ -553,12 +553,11 @@ type SchedulerConfig struct {
 var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
-	{Type: "balance-witness"},
 	{Type: "hot-region"},
-	{Type: "transfer-witness-leader"},
+	{Type: "evict-slow-store"},
 }
 
-// IsDefaultScheduler checks whether the scheduler is enable by default.
+// IsDefaultScheduler checks whether the scheduler is enabled by default.
 func IsDefaultScheduler(typ string) bool {
 	for _, c := range DefaultSchedulers {
 		if typ == c.Type {

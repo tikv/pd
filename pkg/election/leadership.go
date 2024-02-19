@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -156,6 +157,16 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 		lease:   clientv3.NewLease(ls.client),
 	}
 	ls.setLease(newLease)
+
+	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
+		var member pdpb.Member
+		member.Unmarshal([]byte(leaderData))
+		name, ok := val.(string)
+		if ok && member.Name == name {
+			failpoint.Return(errors.Errorf("failed to grant lease"))
+		}
+	})
+
 	if err := newLease.Grant(leaseTimeout); err != nil {
 		return err
 	}

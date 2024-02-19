@@ -72,7 +72,7 @@ func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWri
 		return
 	}
 
-	conf := make(map[string]interface{})
+	conf := make(map[string]any)
 	if err := json.Unmarshal(data, &conf); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -104,7 +104,7 @@ func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWri
 	h.rd.JSON(w, http.StatusOK, "The service-middleware config is updated.")
 }
 
-func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.ServiceMiddlewareConfig, key string, value interface{}) error {
+func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.ServiceMiddlewareConfig, key string, value any) error {
 	kp := strings.Split(key, ".")
 	switch kp[0] {
 	case "audit":
@@ -117,7 +117,7 @@ func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.Ser
 	return errors.Errorf("config prefix %s not found", kp[0])
 }
 
-func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareConfig, key string, value interface{}) error {
+func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareConfig, key string, value any) error {
 	updated, found, err := jsonutil.AddKeyValue(&config.AuditConfig, key, value)
 	if err != nil {
 		return err
@@ -140,9 +140,9 @@ func (h *serviceMiddlewareHandler) updateAudit(config *config.ServiceMiddlewareC
 // @Success  200  {string}  string
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "config item not found"
-// @Router   /service-middleware/config/rate-limit [POST]
+// @Router   /service-middleware/config/rate-limit [post]
 func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -236,9 +236,9 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 // @Success  200  {string}  string
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "config item not found"
-// @Router   /service-middleware/config/grpc-rate-limit [POST]
+// @Router   /service-middleware/config/grpc-rate-limit [post]
 func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}

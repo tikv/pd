@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -192,6 +193,10 @@ func (s *Server) updateAPIServerMemberLoop() {
 			continue
 		}
 		for _, ep := range members.Members {
+			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
+				log.Info("member is not started yet", zap.String("member-id", fmt.Sprintf("%x", ep.GetID())), errs.ZapError(err))
+				continue
+			}
 			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
 			if err != nil {
 				log.Info("failed to get status of member", zap.String("member-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
@@ -314,6 +319,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
+	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -405,8 +411,8 @@ func (s *Server) startServer() (err error) {
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// The independent Scheduling service still reuses PD version info since PD and Scheduling are just
 	// different service modes provided by the same pd-server binary
-	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
-
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)

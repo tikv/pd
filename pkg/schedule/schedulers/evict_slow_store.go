@@ -154,7 +154,7 @@ func newEvictSlowStoreHandler(config *evictSlowStoreSchedulerConfig) http.Handle
 }
 
 func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -174,7 +174,7 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 	log.Info("evict-slow-store-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
 func (handler *evictSlowStoreHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
