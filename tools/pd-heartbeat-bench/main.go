@@ -62,7 +62,10 @@ const (
 	capacity             = 4 * units.TiB
 )
 
-var clusterID uint64
+var (
+	clusterID  uint64
+	maxVersion uint64 = 1
+)
 
 func newClient(ctx context.Context, cfg *config.Config) (pdpb.PDClient, error) {
 	tlsConfig, err := cfg.Security.ToTLSConfig()
@@ -204,7 +207,7 @@ func (rs *Regions) init(cfg *config.Config, options *config.Options) {
 				Id:          id,
 				StartKey:    codec.GenerateTableKey(int64(i)),
 				EndKey:      codec.GenerateTableKey(int64(i + 1)),
-				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1},
+				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: maxVersion},
 			},
 			ApproximateSize: bytesUnit,
 			Interval: &pdpb.TimeInterval{
@@ -264,6 +267,9 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options) {
 	for _, i := range rs.updateEpoch {
 		region := rs.regions[i]
 		region.Region.RegionEpoch.Version += 1
+		if region.Region.RegionEpoch.Version > maxVersion {
+			maxVersion = region.Region.RegionEpoch.Version
+		}
 	}
 	// update space
 	for _, i := range rs.updateSpace {
@@ -316,7 +322,7 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options) {
 	rs.awakenRegions.Store(awakenRegions)
 }
 
-func createHeartbeatStream(ctx context.Context, cfg *config.Config) pdpb.PD_RegionHeartbeatClient {
+func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClient, pdpb.PD_RegionHeartbeatClient) {
 	cli, err := newClient(ctx, cfg)
 	if err != nil {
 		log.Fatal("create client error", zap.Error(err))
@@ -332,7 +338,7 @@ func createHeartbeatStream(ctx context.Context, cfg *config.Config) pdpb.PD_Regi
 			stream.Recv()
 		}
 	}()
-	return stream
+	return cli, stream
 }
 
 func (rs *Regions) handleRegionHeartbeat(wg *sync.WaitGroup, stream pdpb.PD_RegionHeartbeatClient, storeID uint64, rep report.Report) {
@@ -476,6 +482,7 @@ func main() {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
+	maxVersion = cfg.InitEpochVer
 	options := config.NewOptions(cfg)
 	// let PD have enough time to start
 	time.Sleep(5 * time.Second)
@@ -507,14 +514,20 @@ func main() {
 	bootstrap(ctx, cli)
 	putStores(ctx, cfg, cli, stores)
 	log.Info("finish put stores")
+	clis := make(map[uint64]pdpb.PDClient, cfg.StoreCount)
 	httpCli := pdHttp.NewClient("tools-heartbeat-bench", []string{cfg.PDAddr}, pdHttp.WithTLSConfig(loadTLSConfig(cfg)))
 	go deleteOperators(ctx, httpCli)
 	streams := make(map[uint64]pdpb.PD_RegionHeartbeatClient, cfg.StoreCount)
 	for i := 1; i <= cfg.StoreCount; i++ {
-		streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
+		clis[uint64(i)], streams[uint64(i)] = createHeartbeatStream(ctx, cfg)
+	}
+	header := &pdpb.RequestHeader{
+		ClusterId: clusterID,
 	}
 	var heartbeatTicker = time.NewTicker(regionReportInterval * time.Second)
 	defer heartbeatTicker.Stop()
+	var resolvedTSTicker = time.NewTicker(time.Second)
+	defer resolvedTSTicker.Stop()
 	for {
 		select {
 		case <-heartbeatTicker.C:
@@ -543,10 +556,31 @@ func main() {
 				zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
 				zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
 				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
+				zap.Uint64("max-epoch-version", maxVersion),
 			)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 			regions.update(cfg, options)
 			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
+		case <-resolvedTSTicker.C:
+			wg := &sync.WaitGroup{}
+			for i := 1; i <= cfg.StoreCount; i++ {
+				id := uint64(i)
+				wg.Add(1)
+				go func(wg *sync.WaitGroup, id uint64) {
+					defer wg.Done()
+					cli := clis[id]
+					_, err := cli.ReportMinResolvedTS(ctx, &pdpb.ReportMinResolvedTsRequest{
+						Header:        header,
+						StoreId:       id,
+						MinResolvedTs: uint64(time.Now().Unix()),
+					})
+					if err != nil {
+						log.Error("send resolved TS error", zap.Uint64("store-id", id), zap.Error(err))
+						return
+					}
+				}(wg, id)
+			}
+			wg.Wait()
 		case <-ctx.Done():
 			log.Info("got signal to exit")
 			switch sig {

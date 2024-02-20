@@ -70,7 +70,8 @@ func TestConfigTestSuite(t *testing.T) {
 	suite.Run(t, new(configTestSuite))
 }
 
-func (suite *configTestSuite) SetupSuite() {
+func (suite *configTestSuite) SetupTest() {
+	// use a new environment to avoid affecting other tests
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
 }
 
@@ -96,6 +97,7 @@ func (suite *configTestSuite) TearDownTest() {
 		re.NoError(err)
 	}
 	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.Cleanup()
 }
 
 func (suite *configTestSuite) TestConfig() {
@@ -877,6 +879,7 @@ func TestReplicationMode(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()

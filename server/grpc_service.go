@@ -1347,7 +1347,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				}
 				lastForwardedSchedulingHost = forwardedSchedulingHost
 				forwardErrCh = make(chan error, 1)
-				go forwardRegionHeartbeatToScheduling(forwardSchedulingStream, server, forwardErrCh)
+				go forwardRegionHeartbeatToScheduling(rc, forwardSchedulingStream, server, forwardErrCh)
 			}
 			schedulingpbReq := &schedulingpb.RegionHeartbeatRequest{
 				Header: &schedulingpb.RequestHeader{

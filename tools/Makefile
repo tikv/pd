@@ -32,3 +32,13 @@ tidy:
 	@ go mod tidy
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
+
+ci-test-job: failpoint-enable
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
+
+failpoint-enable:
+	cd $(ROOT_PATH) && $(MAKE) failpoint-enable
+
+failpoint-disable:
+	cd $(ROOT_PATH) && $(MAKE) failpoint-disable

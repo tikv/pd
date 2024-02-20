@@ -83,7 +83,8 @@ func TestMemberDelete(t *testing.T) {
 		{path: fmt.Sprintf("id/%d", members[1].GetServerID()), members: []*config.Config{leader.GetConfig()}},
 	}
 
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
+	defer httpClient.CloseIdleConnections()
 	for _, table := range tables {
 		t.Log(time.Now(), "try to delete:", table.path)
 		testutil.Eventually(re, func() bool {
@@ -103,7 +104,7 @@ func TestMemberDelete(t *testing.T) {
 			}
 			// Check by member list.
 			cluster.WaitLeader()
-			if err = checkMemberList(re, leader.GetConfig().ClientUrls, table.members); err != nil {
+			if err = checkMemberList(re, *httpClient, leader.GetConfig().ClientUrls, table.members); err != nil {
 				t.Logf("check member fail: %v", err)
 				time.Sleep(time.Second)
 				return false
@@ -120,8 +121,7 @@ func TestMemberDelete(t *testing.T) {
 	}
 }
 
-func checkMemberList(re *require.Assertions, clientURL string, configs []*config.Config) error {
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+func checkMemberList(re *require.Assertions, httpClient http.Client, clientURL string, configs []*config.Config) error {
 	addr := clientURL + "/pd/api/v1/members"
 	res, err := httpClient.Get(addr)
 	re.NoError(err)
