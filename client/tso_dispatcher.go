@@ -372,6 +372,9 @@ func (c *tsoClient) handleDispatcher(
 					return
 				case <-c.option.enableTSOFollowerProxyCh:
 					enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
+					log.Info("[tso] tso follower proxy status changed",
+						zap.String("dc-location", dc),
+						zap.Bool("enable", enableTSOFollowerProxy))
 					if enableTSOFollowerProxy && updateTicker.C == nil {
 						// Because the TSO Follower Proxy is enabled,
 						// the periodic check needs to be performed.
@@ -701,7 +704,11 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 	}
 	// GC the stale one.
 	connectionCtxs.Range(func(addr, cc any) bool {
-		if _, ok := tsoStreamBuilders[addr.(string)]; !ok {
+		addrStr := addr.(string)
+		if _, ok := tsoStreamBuilders[addrStr]; !ok {
+			log.Info("[tso] remove the stale tso stream",
+				zap.String("dc", dc),
+				zap.String("addr", addrStr))
 			cc.(*tsoConnectionContext).cancel()
 			connectionCtxs.Delete(addr)
 		}
@@ -712,6 +719,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		if _, ok = connectionCtxs.Load(addr); ok {
 			continue
 		}
+		log.Info("[tso] try to create tso stream",
+			zap.String("dc", dc), zap.String("addr", addr))
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		// Do not proxy the leader client.
 		if addr != leaderAddr {
