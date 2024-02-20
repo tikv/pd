@@ -306,8 +306,9 @@ func TestFullStatus(t *testing.T) {
 		time.Sleep(bucketDuration)
 	}
 	maxInFlight := bbr.bbrStatus.getRDP()
-	re.LessOrEqual(int64(6), maxInFlight)
-	re.GreaterOrEqual(int64(12), maxInFlight)
+	// local test result is 12, soften conditions in the CI environment
+	re.LessOrEqual(int64(10), maxInFlight)
+	re.GreaterOrEqual(int64(14), maxInFlight)
 	re.Equal(cl.limit, uint64(maxInFlight))
 	re.LessOrEqual(int64(200000), bbr.bbrStatus.getMinDuration())
 	re.GreaterOrEqual(int64(220000), bbr.bbrStatus.getMinDuration())
