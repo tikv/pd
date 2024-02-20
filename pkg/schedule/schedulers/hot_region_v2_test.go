@@ -309,7 +309,7 @@ func TestSkipUniformStore(t *testing.T) {
 	// when there is uniform store filter, not schedule
 	stddevThreshold = 0.1
 	ops, _ = hb.Schedule(tc, false)
-	re.Len(ops, 0)
+	re.Empty(ops)
 	clearPendingInfluence(hb.(*hotScheduler))
 
 	// Case2: the first dim is enough uniform, we should schedule the second dim
@@ -380,7 +380,7 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
 	re.Len(ops, 1)
 	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, lowLoad, highLoad, emptyFunc)
-	re.Len(ops, 0)
+	re.Empty(ops)
 
 	// Case3: If there is larger hot region, we will schedule it.
 	hotRegionID := uint64(100)
@@ -418,7 +418,7 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 		tc.AddRegionWithReadInfo(hotRegionID+1, 2, bigHotRegionByte, 0, bigHotRegionQuery, utils.StoreHeartBeatReportInterval, []uint64{1, 3})
 		tc.AddRegionWithReadInfo(hotRegionID+1, 1, bigHotRegionByte, 0, bigHotRegionQuery, utils.StoreHeartBeatReportInterval, []uint64{2, 3})
 	})
-	re.Len(ops, 0)
+	re.Empty(ops)
 	topnPosition = origin
 
 	// Case7: If there are more than topnPosition hot regions, but them are pending,
@@ -430,7 +430,7 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 		tc.AddRegionWithReadInfo(hotRegionID+1, 1, bigHotRegionByte, 0, bigHotRegionQuery, utils.StoreHeartBeatReportInterval, []uint64{2, 3})
 		hb.regionPendings[hotRegionID+1] = &pendingInfluence{}
 	})
-	re.Len(ops, 0)
+	re.Empty(ops)
 	topnPosition = origin
 }
 

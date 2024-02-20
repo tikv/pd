@@ -40,9 +40,9 @@ var dialClient = &http.Client{
 // MustAddScheduler adds a scheduler with HTTP API.
 func MustAddScheduler(
 	re *require.Assertions, serverAddr string,
-	schedulerName string, args map[string]interface{},
+	schedulerName string, args map[string]any,
 ) {
-	request := map[string]interface{}{
+	request := map[string]any{
 		"name": schedulerName,
 	}
 	for arg, val := range args {
@@ -63,7 +63,7 @@ func MustAddScheduler(
 
 // MustDeleteScheduler deletes a scheduler with HTTP API.
 func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName string) {
-	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), nil)
+	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), http.NoBody)
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
@@ -77,7 +77,7 @@ func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName strin
 func MustCallSchedulerConfigAPI(
 	re *require.Assertions,
 	method, serverAddr, schedulerName string, args []string,
-	input map[string]interface{},
+	input map[string]any,
 ) {
 	data, err := json.Marshal(input)
 	re.NoError(err)

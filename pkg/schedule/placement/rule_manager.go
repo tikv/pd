@@ -16,6 +16,7 @@ package placement
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,14 +33,25 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 )
 
+const (
+	// DefaultGroupID is the default rule group ID.
+	DefaultGroupID = "pd"
+	// DefaultRuleID is the default rule ID.
+	DefaultRuleID = "default"
+	// defaultWitnessRuleID is the default witness rule ID.
+	defaultWitnessRuleID = "witness"
+)
+
 // RuleManager is responsible for the lifecycle of all placement Rules.
 // It is thread safe.
 type RuleManager struct {
+	ctx     context.Context
 	storage endpoint.RuleStorage
 	syncutil.RWMutex
 	initialized bool
@@ -54,8 +66,9 @@ type RuleManager struct {
 }
 
 // NewRuleManager creates a RuleManager instance.
-func NewRuleManager(storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider) *RuleManager {
+func NewRuleManager(ctx context.Context, storage endpoint.RuleStorage, storeSetInformer core.StoreSetInformer, conf config.SharedConfigProvider) *RuleManager {
 	return &RuleManager{
+		ctx:              ctx,
 		storage:          storage,
 		storeSetInformer: storeSetInformer,
 		conf:             conf,
@@ -88,16 +101,16 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 			defaultRules = append(defaultRules,
 				[]*Rule{
 					{
-						GroupID:        "pd",
-						ID:             "default",
+						GroupID:        DefaultGroupID,
+						ID:             DefaultRuleID,
 						Role:           Voter,
 						Count:          maxReplica - witnessCount,
 						LocationLabels: locationLabels,
 						IsolationLevel: isolationLevel,
 					},
 					{
-						GroupID:        "pd",
-						ID:             "witness",
+						GroupID:        DefaultGroupID,
+						ID:             defaultWitnessRuleID,
 						Role:           Voter,
 						Count:          witnessCount,
 						IsWitness:      true,
@@ -108,20 +121,25 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 			)
 		} else {
 			defaultRules = append(defaultRules, &Rule{
-				GroupID:        "pd",
-				ID:             "default",
+				GroupID:        DefaultGroupID,
+				ID:             DefaultRuleID,
 				Role:           Voter,
 				Count:          maxReplica,
 				LocationLabels: locationLabels,
 				IsolationLevel: isolationLevel,
 			})
 		}
-		for _, defaultRule := range defaultRules {
-			if err := m.storage.SaveRule(defaultRule.StoreKey(), defaultRule); err != nil {
-				// TODO: Need to delete the previously successfully saved Rules?
-				return err
+		if err := m.storage.RunInTxn(m.ctx, func(txn kv.Txn) (err error) {
+			for _, defaultRule := range defaultRules {
+				if err := m.storage.SaveRule(txn, defaultRule.StoreKey(), defaultRule); err != nil {
+					// TODO: Need to delete the previously successfully saved Rules?
+					return err
+				}
+				m.ruleConfig.setRule(defaultRule)
 			}
-			m.ruleConfig.setRule(defaultRule)
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 	m.ruleConfig.adjust()
@@ -139,6 +157,7 @@ func (m *RuleManager) loadRules() error {
 		toSave   []*Rule
 		toDelete []string
 	)
+	// load rules from storage
 	err := m.storage.LoadRules(func(k, v string) {
 		r, err := NewRuleFromJSON([]byte(v))
 		if err != nil {
@@ -146,7 +165,7 @@ func (m *RuleManager) loadRules() error {
 			toDelete = append(toDelete, k)
 			return
 		}
-		err = m.adjustRule(r, "")
+		err = m.AdjustRule(r, "")
 		if err != nil {
 			log.Error("rule is in bad format", zap.String("rule-key", k), zap.String("rule-value", v), errs.ZapError(errs.ErrLoadRule, err))
 			toDelete = append(toDelete, k)
@@ -168,17 +187,21 @@ func (m *RuleManager) loadRules() error {
 	if err != nil {
 		return err
 	}
+	// save the rules with mismatch data key or bad format
+	var batch []func(kv.Txn) error
 	for _, s := range toSave {
-		if err = m.storage.SaveRule(s.StoreKey(), s); err != nil {
-			return err
-		}
+		localRule := s
+		batch = append(batch, func(txn kv.Txn) error {
+			return m.storage.SaveRule(txn, localRule.StoreKey(), localRule)
+		})
 	}
 	for _, d := range toDelete {
-		if err = m.storage.DeleteRule(d); err != nil {
-			return err
-		}
+		localKey := d
+		batch = append(batch, func(txn kv.Txn) error {
+			return m.storage.DeleteRule(txn, localKey)
+		})
 	}
-	return nil
+	return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 }
 
 func (m *RuleManager) loadGroups() error {
@@ -192,8 +215,8 @@ func (m *RuleManager) loadGroups() error {
 	})
 }
 
-// check and adjust rule from client or storage.
-func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
+// AdjustRule check and adjust rule from client or storage.
+func (m *RuleManager) AdjustRule(r *Rule, groupID string) (err error) {
 	r.StartKey, err = hex.DecodeString(r.StartKeyHex)
 	if err != nil {
 		return errs.ErrHexDecodingString.FastGenByArgs(r.StartKeyHex)
@@ -267,6 +290,11 @@ func (m *RuleManager) adjustRule(r *Rule, groupID string) (err error) {
 func (m *RuleManager) GetRule(group, id string) *Rule {
 	m.RLock()
 	defer m.RUnlock()
+	return m.GetRuleLocked(group, id)
+}
+
+// GetRuleLocked returns the Rule with the same (group, id).
+func (m *RuleManager) GetRuleLocked(group, id string) *Rule {
 	if r := m.ruleConfig.getRule([2]string{group, id}); r != nil {
 		return r.Clone()
 	}
@@ -275,14 +303,14 @@ func (m *RuleManager) GetRule(group, id string) *Rule {
 
 // SetRule inserts or updates a Rule.
 func (m *RuleManager) SetRule(rule *Rule) error {
-	if err := m.adjustRule(rule, ""); err != nil {
+	if err := m.AdjustRule(rule, ""); err != nil {
 		return err
 	}
 	m.Lock()
 	defer m.Unlock()
-	p := m.beginPatch()
-	p.setRule(rule)
-	if err := m.tryCommitPatch(p); err != nil {
+	p := m.BeginPatch()
+	p.SetRule(rule)
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("placement rule updated", zap.String("rule", fmt.Sprint(rule)))
@@ -293,9 +321,9 @@ func (m *RuleManager) SetRule(rule *Rule) error {
 func (m *RuleManager) DeleteRule(group, id string) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.beginPatch()
-	p.deleteRule(group, id)
-	if err := m.tryCommitPatch(p); err != nil {
+	p := m.BeginPatch()
+	p.DeleteRule(group, id)
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("placement rule is removed", zap.String("group", group), zap.String("id", id))
@@ -339,6 +367,11 @@ func (m *RuleManager) GetGroupsCount() int {
 func (m *RuleManager) GetRulesByGroup(group string) []*Rule {
 	m.RLock()
 	defer m.RUnlock()
+	return m.GetRulesByGroupLocked(group)
+}
+
+// GetRulesByGroupLocked returns sorted rules of a group.
+func (m *RuleManager) GetRulesByGroupLocked(group string) []*Rule {
 	var rules []*Rule
 	for _, r := range m.ruleConfig.rules {
 		if r.GroupID == group {
@@ -430,11 +463,13 @@ func (m *RuleManager) CheckIsCachedDirectly(regionID uint64) bool {
 	return ok
 }
 
-func (m *RuleManager) beginPatch() *ruleConfigPatch {
+// BeginPatch returns a patch for multiple changes.
+func (m *RuleManager) BeginPatch() *RuleConfigPatch {
 	return m.ruleConfig.beginPatch()
 }
 
-func (m *RuleManager) tryCommitPatch(patch *ruleConfigPatch) error {
+// TryCommitPatchLocked tries to commit a patch.
+func (m *RuleManager) TryCommitPatchLocked(patch *RuleConfigPatch) error {
 	patch.adjust()
 
 	ruleList, err := buildRuleList(patch)
@@ -457,49 +492,49 @@ func (m *RuleManager) tryCommitPatch(patch *ruleConfigPatch) error {
 }
 
 func (m *RuleManager) savePatch(p *ruleConfig) error {
-	// TODO: it is not completely safe
-	// 1. in case that half of rules applied, error.. we have to cancel persisted rules
-	// but that may fail too, causing memory/disk inconsistency
-	// either rely a transaction API, or clients to request again until success
-	// 2. in case that PD is suddenly down in the loop, inconsistency again
-	// now we can only rely clients to request again
-	var err error
+	var batch []func(kv.Txn) error
+	// add rules to batch
 	for key, r := range p.rules {
+		localKey, localRule := key, r
 		if r == nil {
-			r = &Rule{GroupID: key[0], ID: key[1]}
-			err = m.storage.DeleteRule(r.StoreKey())
+			rule := &Rule{GroupID: localKey[0], ID: localKey[1]}
+			batch = append(batch, func(txn kv.Txn) error {
+				return m.storage.DeleteRule(txn, rule.StoreKey())
+			})
 		} else {
-			err = m.storage.SaveRule(r.StoreKey(), r)
-		}
-		if err != nil {
-			return err
+			batch = append(batch, func(txn kv.Txn) error {
+				return m.storage.SaveRule(txn, localRule.StoreKey(), localRule)
+			})
 		}
 	}
+	// add groups to batch
 	for id, g := range p.groups {
+		localID, localGroup := id, g
 		if g.isDefault() {
-			err = m.storage.DeleteRuleGroup(id)
+			batch = append(batch, func(txn kv.Txn) error {
+				return m.storage.DeleteRuleGroup(txn, localID)
+			})
 		} else {
-			err = m.storage.SaveRuleGroup(id, g)
-		}
-		if err != nil {
-			return err
+			batch = append(batch, func(txn kv.Txn) error {
+				return m.storage.SaveRuleGroup(txn, localID, localGroup)
+			})
 		}
 	}
-	return nil
+	return endpoint.RunBatchOpInTxn(m.ctx, m.storage, batch)
 }
 
 // SetRules inserts or updates lots of Rules at once.
 func (m *RuleManager) SetRules(rules []*Rule) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.beginPatch()
+	p := m.BeginPatch()
 	for _, r := range rules {
-		if err := m.adjustRule(r, ""); err != nil {
+		if err := m.AdjustRule(r, ""); err != nil {
 			return err
 		}
-		p.setRule(r)
+		p.SetRule(r)
 	}
-	if err := m.tryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 
@@ -534,7 +569,7 @@ func (r RuleOp) String() string {
 func (m *RuleManager) Batch(todo []RuleOp) error {
 	for _, t := range todo {
 		if t.Action == RuleOpAdd {
-			err := m.adjustRule(t.Rule, "")
+			err := m.AdjustRule(t.Rule, "")
 			if err != nil {
 				return err
 			}
@@ -544,25 +579,25 @@ func (m *RuleManager) Batch(todo []RuleOp) error {
 	m.Lock()
 	defer m.Unlock()
 
-	patch := m.beginPatch()
+	patch := m.BeginPatch()
 	for _, t := range todo {
 		switch t.Action {
 		case RuleOpAdd:
-			patch.setRule(t.Rule)
+			patch.SetRule(t.Rule)
 		case RuleOpDel:
 			if !t.DeleteByIDPrefix {
-				patch.deleteRule(t.GroupID, t.ID)
+				patch.DeleteRule(t.GroupID, t.ID)
 			} else {
 				m.ruleConfig.iterateRules(func(r *Rule) {
 					if r.GroupID == t.GroupID && strings.HasPrefix(r.ID, t.ID) {
-						patch.deleteRule(r.GroupID, r.ID)
+						patch.DeleteRule(r.GroupID, r.ID)
 					}
 				})
 			}
 		}
 	}
 
-	if err := m.tryCommitPatch(patch); err != nil {
+	if err := m.TryCommitPatchLocked(patch); err != nil {
 		return err
 	}
 
@@ -596,9 +631,9 @@ func (m *RuleManager) GetRuleGroups() []*RuleGroup {
 func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.beginPatch()
-	p.setGroup(group)
-	if err := m.tryCommitPatch(p); err != nil {
+	p := m.BeginPatch()
+	p.SetGroup(group)
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("group config updated", zap.String("group", fmt.Sprint(group)))
@@ -609,9 +644,9 @@ func (m *RuleManager) SetRuleGroup(group *RuleGroup) error {
 func (m *RuleManager) DeleteRuleGroup(id string) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.beginPatch()
-	p.deleteGroup(id)
-	if err := m.tryCommitPatch(p); err != nil {
+	p := m.BeginPatch()
+	p.DeleteGroup(id)
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("group config reset", zap.String("group", id))
@@ -669,7 +704,7 @@ func (m *RuleManager) GetGroupBundle(id string) (b GroupBundle) {
 func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.beginPatch()
+	p := m.BeginPatch()
 	matchID := func(a string) bool {
 		for _, g := range groups {
 			if g.ID == a {
@@ -680,28 +715,28 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) er
 	}
 	for k := range m.ruleConfig.rules {
 		if override || matchID(k[0]) {
-			p.deleteRule(k[0], k[1])
+			p.DeleteRule(k[0], k[1])
 		}
 	}
 	for id := range m.ruleConfig.groups {
 		if override || matchID(id) {
-			p.deleteGroup(id)
+			p.DeleteGroup(id)
 		}
 	}
 	for _, g := range groups {
-		p.setGroup(&RuleGroup{
+		p.SetGroup(&RuleGroup{
 			ID:       g.ID,
 			Index:    g.Index,
 			Override: g.Override,
 		})
 		for _, r := range g.Rules {
-			if err := m.adjustRule(r, g.ID); err != nil {
+			if err := m.AdjustRule(r, g.ID); err != nil {
 				return err
 			}
-			p.setRule(r)
+			p.SetRule(r)
 		}
 	}
-	if err := m.tryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("full config reset", zap.String("config", fmt.Sprint(groups)))
@@ -713,26 +748,26 @@ func (m *RuleManager) SetAllGroupBundles(groups []GroupBundle, override bool) er
 func (m *RuleManager) SetGroupBundle(group GroupBundle) error {
 	m.Lock()
 	defer m.Unlock()
-	p := m.beginPatch()
+	p := m.BeginPatch()
 	if _, ok := m.ruleConfig.groups[group.ID]; ok {
 		for k := range m.ruleConfig.rules {
 			if k[0] == group.ID {
-				p.deleteRule(k[0], k[1])
+				p.DeleteRule(k[0], k[1])
 			}
 		}
 	}
-	p.setGroup(&RuleGroup{
+	p.SetGroup(&RuleGroup{
 		ID:       group.ID,
 		Index:    group.Index,
 		Override: group.Override,
 	})
 	for _, r := range group.Rules {
-		if err := m.adjustRule(r, group.ID); err != nil {
+		if err := m.AdjustRule(r, group.ID); err != nil {
 			return err
 		}
-		p.setRule(r)
+		p.SetRule(r)
 	}
-	if err := m.tryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("group is reset", zap.String("group", fmt.Sprint(group)))
@@ -753,18 +788,18 @@ func (m *RuleManager) DeleteGroupBundle(id string, regex bool) error {
 		matchID = r.MatchString
 	}
 
-	p := m.beginPatch()
+	p := m.BeginPatch()
 	for k := range m.ruleConfig.rules {
 		if matchID(k[0]) {
-			p.deleteRule(k[0], k[1])
+			p.DeleteRule(k[0], k[1])
 		}
 	}
 	for _, g := range m.ruleConfig.groups {
 		if matchID(g.ID) {
-			p.deleteGroup(g.ID)
+			p.DeleteGroup(g.ID)
 		}
 	}
-	if err := m.tryCommitPatch(p); err != nil {
+	if err := m.TryCommitPatchLocked(p); err != nil {
 		return err
 	}
 	log.Info("groups are removed", zap.String("id", id), zap.Bool("regexp", regex))

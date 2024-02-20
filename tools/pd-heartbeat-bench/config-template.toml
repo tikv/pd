@@ -3,12 +3,12 @@ round = 0
 store-count = 100
 region-count = 2000000
 
-key-length = 56
 replica = 3
 
 leader-update-ratio = 0.06
-epoch-update-ratio = 0.04
-space-update-ratio = 0.15
-flow-update-ratio = 0.35
+epoch-update-ratio = 0.0
+space-update-ratio = 0.0
+flow-update-ratio = 0.0
+no-update-ratio = 0.0
 
 sample = false

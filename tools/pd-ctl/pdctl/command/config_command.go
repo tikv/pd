@@ -27,11 +27,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server/config"
 )
 
-var (
+const (
 	configPrefix          = "pd/api/v1/config"
 	schedulePrefix        = "pd/api/v1/config/schedule"
 	replicatePrefix       = "pd/api/v1/config/replicate"
@@ -45,6 +46,8 @@ var (
 	replicationModePrefix = "pd/api/v1/config/replication-mode"
 	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
 	pdServerPrefix        = "pd/api/v1/config/pd-server"
+	// flagFromAPIServer has no influence for pd mode, but it is useful for us to debug in api mode.
+	flagFromAPIServer = "from_api_server"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -74,6 +77,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowClusterVersionCommand())
 	sc.AddCommand(newShowReplicationModeCommand())
 	sc.AddCommand(NewShowServerConfigCommand())
+	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	return sc
 }
 
@@ -84,6 +88,7 @@ func NewShowAllConfigCommand() *cobra.Command {
 		Short: "show all config of PD",
 		Run:   showAllConfigCommandFunc,
 	}
+	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	return sc
 }
 
@@ -94,6 +99,7 @@ func NewShowScheduleConfigCommand() *cobra.Command {
 		Short: "show schedule config of PD",
 		Run:   showScheduleConfigCommandFunc,
 	}
+	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	return sc
 }
 
@@ -104,6 +110,7 @@ func NewShowReplicationConfigCommand() *cobra.Command {
 		Short: "show replication config of PD",
 		Run:   showReplicationConfigCommandFunc,
 	}
+	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	return sc
 }
 
@@ -206,21 +213,22 @@ func NewDeleteLabelPropertyConfigCommand() *cobra.Command {
 }
 
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
-	allR, err := doRequest(cmd, configPrefix, http.MethodGet, http.Header{})
+	header := buildHeader(cmd)
+	allR, err := doRequest(cmd, configPrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	allData := make(map[string]interface{})
+	allData := make(map[string]any)
 	err = json.Unmarshal([]byte(allR), &allData)
 	if err != nil {
 		cmd.Printf("Failed to unmarshal config: %s\n", err)
 		return
 	}
 
-	data := make(map[string]interface{})
+	data := make(map[string]any)
 	data["replication"] = allData["replication"]
-	scheduleConfig := make(map[string]interface{})
+	scheduleConfig := make(map[string]any)
 	scheduleConfigData, err := json.Marshal(allData["schedule"])
 	if err != nil {
 		cmd.Printf("Failed to marshal schedule config: %s\n", err)
@@ -261,7 +269,8 @@ var hideConfig = []string{
 }
 
 func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, schedulePrefix, http.MethodGet, http.Header{})
+	header := buildHeader(cmd)
+	r, err := doRequest(cmd, schedulePrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
@@ -270,7 +279,8 @@ func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, http.Header{})
+	header := buildHeader(cmd)
+	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
@@ -288,7 +298,8 @@ func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, configPrefix, http.MethodGet, http.Header{})
+	header := buildHeader(cmd)
+	r, err := doRequest(cmd, configPrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
@@ -324,8 +335,8 @@ func showServerCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
-	var val interface{}
-	data := make(map[string]interface{})
+	var val any
+	data := make(map[string]any)
 	val, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		val = value
@@ -370,7 +381,7 @@ func postLabelProperty(cmd *cobra.Command, action string, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	input := map[string]interface{}{
+	input := map[string]any{
 		"type":        args[0],
 		"action":      action,
 		"label-key":   args[1],
@@ -385,7 +396,7 @@ func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	input := map[string]interface{}{
+	input := map[string]any{
 		"cluster-version": args[0],
 	}
 	postJSON(cmd, clusterVersionPrefix, input)
@@ -393,7 +404,7 @@ func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 
 func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
-		postJSON(cmd, replicationModePrefix, map[string]interface{}{"replication-mode": args[0]})
+		postJSON(cmd, replicationModePrefix, map[string]any{"replication-mode": args[0]})
 	} else if len(args) == 3 {
 		t := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
 		if t != nil && t.Kind() == reflect.Int {
@@ -403,10 +414,10 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 				cmd.Printf("value %v cannot covert to number: %v", args[2], err)
 				return
 			}
-			postJSON(cmd, replicationModePrefix, map[string]interface{}{args[0]: map[string]interface{}{args[1]: arg2}})
+			postJSON(cmd, replicationModePrefix, map[string]any{args[0]: map[string]any{args[1]: arg2}})
 			return
 		}
-		postJSON(cmd, replicationModePrefix, map[string]interface{}{args[0]: map[string]string{args[1]: args[2]}})
+		postJSON(cmd, replicationModePrefix, map[string]any{args[0]: map[string]string{args[1]: args[2]}})
 	} else {
 		cmd.Println(cmd.UsageString())
 	}
@@ -437,6 +448,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
 	show.Flags().Bool("detail", false, "detailed match info for region")
+	show.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -446,6 +458,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	load.Flags().String("id", "", "rule id")
 	load.Flags().String("region", "", "region id")
 	load.Flags().String("out", "rules.json", "the filename contains rules")
+	load.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	save := &cobra.Command{
 		Use:   "save",
 		Short: "save rules from file",
@@ -461,6 +474,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
+	ruleGroupShow.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	ruleGroupSet := &cobra.Command{
 		Use:   "set <id> <index> <override>",
 		Short: "update rule group configuration",
@@ -483,6 +497,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   getRuleBundle,
 	}
 	ruleBundleGet.Flags().String("out", "", "the output file")
+	ruleBundleGet.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	ruleBundleSet := &cobra.Command{
 		Use:   "set",
 		Short: "set rule group config and its rules from file",
@@ -501,6 +516,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   loadRuleBundle,
 	}
 	ruleBundleLoad.Flags().String("out", "rules.json", "the output file")
+	ruleBundleLoad.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
 	ruleBundleSave := &cobra.Command{
 		Use:   "save",
 		Short: "save all group configs and rules from file",
@@ -561,7 +577,8 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(`"region" should not be specified with "group" or "id" at the same time`)
 		return
 	}
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	header := buildHeader(cmd)
+	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -629,8 +646,8 @@ func showRuleGroupFunc(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		reqPath = path.Join(ruleGroupPrefix, args[0])
 	}
-
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	header := buildHeader(cmd)
+	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -657,7 +674,7 @@ func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("override %s should be a boolean\n", args[2])
 		return
 	}
-	postJSON(cmd, ruleGroupPrefix, map[string]interface{}{
+	postJSON(cmd, ruleGroupPrefix, map[string]any{
 		"id":       args[0],
 		"index":    index,
 		"override": override,
@@ -671,8 +688,8 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 	}
 
 	reqPath := path.Join(ruleBundlePrefix, args[0])
-
-	res, err := doRequest(cmd, reqPath, http.MethodGet, http.Header{})
+	header := buildHeader(cmd)
+	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -747,7 +764,8 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 }
 
 func loadRuleBundle(cmd *cobra.Command, args []string) {
-	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet, http.Header{})
+	header := buildHeader(cmd)
+	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet, header)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -793,4 +811,13 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 	}
 
 	cmd.Println(res)
+}
+
+func buildHeader(cmd *cobra.Command) http.Header {
+	header := http.Header{}
+	forbiddenRedirectToMicroService, err := cmd.Flags().GetBool(flagFromAPIServer)
+	if err == nil && forbiddenRedirectToMicroService {
+		header.Add(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
+	}
+	return header
 }

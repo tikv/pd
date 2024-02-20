@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -84,7 +85,7 @@ func (suite *configTestSuite) TestConfigWatch() {
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		suite.cluster.GetCluster().GetId(),
-		config.NewPersistConfig(config.NewConfig()),
+		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
 		endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil),
 	)
 	re.NoError(err)
@@ -93,6 +94,9 @@ func (suite *configTestSuite) TestConfigWatch() {
 	re.Equal(sc.DefaultSplitMergeInterval, watcher.GetScheduleConfig().SplitMergeInterval.Duration)
 	re.Equal("0.0.0", watcher.GetClusterVersion().String())
 	// Update the config and check if the scheduling config watcher can get the latest value.
+	testutil.Eventually(re, func() bool {
+		return watcher.GetReplicationConfig().MaxReplicas == 3
+	})
 	persistOpts := suite.pdLeaderServer.GetPersistOptions()
 	persistOpts.SetMaxReplicas(5)
 	persistConfig(re, suite.pdLeaderServer)
@@ -133,7 +137,6 @@ func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
 
 func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	re := suite.Require()
-
 	// Make sure the config is persisted before the watcher is created.
 	persistConfig(re, suite.pdLeaderServer)
 	// Create a config watcher.
@@ -142,13 +145,14 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
 		suite.cluster.GetCluster().GetId(),
-		config.NewPersistConfig(config.NewConfig()),
+		config.NewPersistConfig(config.NewConfig(), cache.NewStringTTL(suite.ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
 		storage,
 	)
 	re.NoError(err)
 	// Get all default scheduler names.
-	var namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
+	var namesFromAPIServer []string
 	testutil.Eventually(re, func() bool {
+		namesFromAPIServer, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
 		return len(namesFromAPIServer) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.
@@ -160,7 +164,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	re.Equal(namesFromAPIServer, namesFromSchedulingServer)
 	// Add a new scheduler.
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
 		"store_id": 1,
 	})
 	// Check the new scheduler's config.
@@ -182,7 +186,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		},
 	)
 	re.NoError(err)
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
 		"store_id": 2,
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1, 2})

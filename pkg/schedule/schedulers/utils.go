@@ -218,11 +218,11 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 	for len(args) > 1 {
 		startKey, err := url.QueryUnescape(args[0])
 		if err != nil {
-			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
+			return nil, errs.ErrQueryUnescape.Wrap(err)
 		}
 		endKey, err := url.QueryUnescape(args[1])
 		if err != nil {
-			return nil, errs.ErrQueryUnescape.Wrap(err).FastGenWithCause()
+			return nil, errs.ErrQueryUnescape.Wrap(err)
 		}
 		args = args[2:]
 		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
@@ -388,5 +388,21 @@ func (q *retryQuota) GC(keepStores []*core.StoreInfo) {
 		if _, ok := set[id]; !ok {
 			delete(q.limits, id)
 		}
+	}
+}
+
+// pauseAndResumeLeaderTransfer checks the old and new store IDs, and pause or resume the leader transfer.
+func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, old, new map[uint64]T) {
+	for id := range old {
+		if _, ok := new[id]; ok {
+			continue
+		}
+		cluster.ResumeLeaderTransfer(id)
+	}
+	for id := range new {
+		if _, ok := old[id]; ok {
+			continue
+		}
+		cluster.PauseLeaderTransfer(id)
 	}
 }

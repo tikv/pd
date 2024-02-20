@@ -101,14 +101,14 @@ func (info *DCLocationInfo) clone() DCLocationInfo {
 type ElectionMember interface {
 	// ID returns the unique ID in the election group. For example, it can be unique
 	// server id of a cluster or the unique keyspace group replica id of the election
-	// group comprised of the replicas of a keyspace group.
+	// group composed of the replicas of a keyspace group.
 	ID() uint64
-	// ID returns the unique name in the election group.
+	// Name returns the unique name in the election group.
 	Name() string
 	// MemberValue returns the member value.
 	MemberValue() string
-	// GetMember() returns the current member
-	GetMember() interface{}
+	// GetMember returns the current member
+	GetMember() any
 	// Client returns the etcd client.
 	Client() *clientv3.Client
 	// IsLeader returns whether the participant is the leader or not by checking its
@@ -124,7 +124,7 @@ type ElectionMember interface {
 	// KeepLeader is used to keep the leader's leadership.
 	KeepLeader(ctx context.Context)
 	// CampaignLeader is used to campaign the leadership and make it become a leader in an election group.
-	CampaignLeader(leaseTimeout int64) error
+	CampaignLeader(ctx context.Context, leaseTimeout int64) error
 	// ResetLeader is used to reset the member's current leadership.
 	// Basically it will reset the leader lease and unset leader info.
 	ResetLeader()
@@ -323,6 +323,12 @@ func (am *AllocatorManager) close() {
 
 	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
 		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
+	}
+
+	for _, cc := range am.localAllocatorConn.clientConns {
+		if err := cc.Close(); err != nil {
+			log.Error("failed to close allocator manager grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
+		}
 	}
 
 	am.cancel()

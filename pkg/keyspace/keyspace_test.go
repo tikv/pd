@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -75,13 +76,14 @@ func (m *mockConfig) GetCheckRegionSplitInterval() time.Duration {
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
+	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
 	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
-	suite.NoError(kgm.Bootstrap(suite.ctx))
-	suite.NoError(suite.manager.Bootstrap())
+	re.NoError(kgm.Bootstrap(suite.ctx))
+	re.NoError(suite.manager.Bootstrap())
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
@@ -89,11 +91,13 @@ func (suite *keyspaceTestSuite) TearDownTest() {
 }
 
 func (suite *keyspaceTestSuite) SetupSuite() {
-	suite.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 }
 
 func (suite *keyspaceTestSuite) TearDownSuite() {
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
@@ -205,20 +209,20 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		// Disabling an ENABLED keyspace is allowed. Should update StateChangedAt.
 		updated, err := manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, oldTime)
 		re.NoError(err)
-		re.Equal(updated.State, keyspacepb.KeyspaceState_DISABLED)
-		re.Equal(updated.StateChangedAt, oldTime)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
+		re.Equal(oldTime, updated.StateChangedAt)
 
 		newTime := time.Now().Unix()
 		// Disabling an DISABLED keyspace is allowed. Should NOT update StateChangedAt.
 		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.NoError(err)
-		re.Equal(updated.State, keyspacepb.KeyspaceState_DISABLED)
-		re.Equal(updated.StateChangedAt, oldTime)
+		re.Equal(keyspacepb.KeyspaceState_DISABLED, updated.State)
+		re.Equal(oldTime, updated.StateChangedAt)
 		// Archiving a DISABLED keyspace is allowed. Should update StateChangeAt.
 		updated, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ARCHIVED, newTime)
 		re.NoError(err)
-		re.Equal(updated.State, keyspacepb.KeyspaceState_ARCHIVED)
-		re.Equal(updated.StateChangedAt, newTime)
+		re.Equal(keyspacepb.KeyspaceState_ARCHIVED, updated.State)
+		re.Equal(newTime, updated.StateChangedAt)
 		// Changing state of an ARCHIVED keyspace is not allowed.
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
@@ -244,7 +248,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	// Load all keyspaces including the default keyspace.
 	keyspaces, err := manager.LoadRangeKeyspace(0, 0)
 	re.NoError(err)
-	re.Equal(total+1, len(keyspaces))
+	re.Len(keyspaces, total+1)
 	for i := range keyspaces {
 		re.Equal(uint32(i), keyspaces[i].Id)
 		if i != 0 {
@@ -256,7 +260,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	// Result should be keyspaces with id 0 - 49.
 	keyspaces, err = manager.LoadRangeKeyspace(0, 50)
 	re.NoError(err)
-	re.Equal(50, len(keyspaces))
+	re.Len(keyspaces, 50)
 	for i := range keyspaces {
 		re.Equal(uint32(i), keyspaces[i].Id)
 		if i != 0 {
@@ -269,7 +273,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	loadStart := 33
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 20)
 	re.NoError(err)
-	re.Equal(20, len(keyspaces))
+	re.Len(keyspaces, 20)
 	for i := range keyspaces {
 		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
 		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
@@ -280,7 +284,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	loadStart = 90
 	keyspaces, err = manager.LoadRangeKeyspace(uint32(loadStart), 30)
 	re.NoError(err)
-	re.Equal(11, len(keyspaces))
+	re.Len(keyspaces, 11)
 	for i := range keyspaces {
 		re.Equal(uint32(loadStart+i), keyspaces[i].Id)
 		checkCreateRequest(re, requests[i+loadStart-1], keyspaces[i])
@@ -405,7 +409,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	re := suite.Require()
 	// Create some keyspaces without any keyspace group.
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
@@ -420,7 +424,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 	// Patrol the keyspace assignment.
@@ -430,7 +434,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
 }
@@ -438,7 +442,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	re := suite.Require()
 	// Create some keyspaces without any keyspace group.
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		now := time.Now().Unix()
 		err := suite.manager.saveNewKeyspace(&keyspacepb.KeyspaceMeta{
 			Id:             uint32(i),
@@ -453,14 +457,14 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(i))
 	}
-	// Patrol the keyspace assignment with range [MaxEtcdTxnOps/2, MaxEtcdTxnOps/2+MaxEtcdTxnOps+1]
+	// Patrol the keyspace assignment with range [ etcdutil.MaxEtcdTxnOps/2,  etcdutil.MaxEtcdTxnOps/2+ etcdutil.MaxEtcdTxnOps+1]
 	// to make sure the range crossing the boundary of etcd transaction operation limit.
 	var (
-		startKeyspaceID = uint32(MaxEtcdTxnOps / 2)
-		endKeyspaceID   = startKeyspaceID + MaxEtcdTxnOps + 1
+		startKeyspaceID = uint32(etcdutil.MaxEtcdTxnOps / 2)
+		endKeyspaceID   = startKeyspaceID + etcdutil.MaxEtcdTxnOps + 1
 	)
 	err = suite.manager.PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID)
 	re.NoError(err)
@@ -468,7 +472,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
-	for i := 1; i < MaxEtcdTxnOps*2+1; i++ {
+	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
 		keyspaceID := uint32(i)
 		if keyspaceID >= startKeyspaceID && keyspaceID <= endKeyspaceID {
 			re.Contains(defaultKeyspaceGroup.Keyspaces, keyspaceID)

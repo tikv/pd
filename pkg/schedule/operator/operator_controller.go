@@ -536,6 +536,41 @@ func (oc *Controller) ack(op *Operator) {
 	}
 }
 
+// RemoveOperators removes all operators from the running operators.
+func (oc *Controller) RemoveOperators(reasons ...CancelReasonType) {
+	oc.Lock()
+	removed := oc.removeOperatorsLocked()
+	oc.Unlock()
+	var cancelReason CancelReasonType
+	if len(reasons) > 0 {
+		cancelReason = reasons[0]
+	}
+	for _, op := range removed {
+		if op.Cancel(cancelReason) {
+			log.Info("operator removed",
+				zap.Uint64("region-id", op.RegionID()),
+				zap.Duration("takes", op.RunningTime()),
+				zap.Reflect("operator", op))
+		}
+		oc.buryOperator(op)
+	}
+}
+
+func (oc *Controller) removeOperatorsLocked() []*Operator {
+	var removed []*Operator
+	for regionID, op := range oc.operators {
+		delete(oc.operators, regionID)
+		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
+		oc.ack(op)
+		if op.Kind()&OpMerge != 0 {
+			oc.removeRelatedMergeOperator(op)
+		}
+		removed = append(removed, op)
+	}
+	oc.updateCounts(oc.operators)
+	return removed
+}
+
 // RemoveOperator removes an operator from the running operators.
 func (oc *Controller) RemoveOperator(op *Operator, reasons ...CancelReasonType) bool {
 	oc.Lock()
@@ -797,6 +832,12 @@ func (oc *Controller) GetFastOpInfluence(cluster *core.BasicCluster, influence O
 		}
 		AddOpInfluence(op, influence, cluster)
 	}
+}
+
+// CleanAllOpRecords removes all operators' records.
+// It is used in tests only.
+func (oc *Controller) CleanAllOpRecords() {
+	oc.records.ttl.Clear()
 }
 
 // AddOpInfluence add operator influence for cluster

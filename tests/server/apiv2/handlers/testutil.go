@@ -42,7 +42,7 @@ var dialClient = &http.Client{
 
 func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, token, limit string) *handlers.LoadAllKeyspacesResponse {
 	// Construct load range request.
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspacesPrefix, nil)
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspacesPrefix, http.NoBody)
 	re.NoError(err)
 	query := httpReq.URL.Query()
 	query.Add("page_token", token)
@@ -135,7 +135,7 @@ func mustLoadKeyspaces(re *require.Assertions, server *tests.TestServer, name st
 // MustLoadKeyspaceGroups loads all keyspace groups from the server.
 func MustLoadKeyspaceGroups(re *require.Assertions, server *tests.TestServer, token, limit string) []*endpoint.KeyspaceGroup {
 	// Construct load range request.
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix, nil)
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix, http.NoBody)
 	re.NoError(err)
 	query := httpReq.URL.Query()
 	query.Add("page_token", token)
@@ -175,7 +175,7 @@ func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer,
 
 // TryLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
 func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, int) {
-	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), nil)
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
@@ -205,7 +205,7 @@ func FailCreateKeyspaceGroupWithCode(re *require.Assertions, server *tests.TestS
 
 // MustDeleteKeyspaceGroup deletes a keyspace group with HTTP API.
 func MustDeleteKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32) {
-	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), nil)
+	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	re.NoError(err)
 	resp, err := dialClient.Do(httpReq)
 	re.NoError(err)
@@ -232,7 +232,7 @@ func MustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id
 
 // MustFinishSplitKeyspaceGroup finishes a keyspace group split with HTTP API.
 func MustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32) {
-	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), nil)
+	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), http.NoBody)
 	re.NoError(err)
 	// Send request.
 	resp, err := dialClient.Do(httpReq)

@@ -22,14 +22,14 @@ import (
 
 // ReplicationStatusStorage defines the storage operations on the replication status.
 type ReplicationStatusStorage interface {
-	LoadReplicationStatus(mode string, status interface{}) (bool, error)
-	SaveReplicationStatus(mode string, status interface{}) error
+	LoadReplicationStatus(mode string, status any) (bool, error)
+	SaveReplicationStatus(mode string, status any) error
 }
 
 var _ ReplicationStatusStorage = (*StorageEndpoint)(nil)
 
 // LoadReplicationStatus loads replication status by mode.
-func (se *StorageEndpoint) LoadReplicationStatus(mode string, status interface{}) (bool, error) {
+func (se *StorageEndpoint) LoadReplicationStatus(mode string, status any) (bool, error) {
 	v, err := se.Load(replicationModePath(mode))
 	if err != nil || v == "" {
 		return false, err
@@ -42,10 +42,6 @@ func (se *StorageEndpoint) LoadReplicationStatus(mode string, status interface{}
 }
 
 // SaveReplicationStatus stores replication status by mode.
-func (se *StorageEndpoint) SaveReplicationStatus(mode string, status interface{}) error {
-	value, err := json.Marshal(status)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return se.Save(replicationModePath(mode), string(value))
+func (se *StorageEndpoint) SaveReplicationStatus(mode string, status any) error {
+	return se.saveJSON(replicationModePath(mode), status)
 }

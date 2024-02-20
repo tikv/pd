@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,7 @@ import (
 	"github.com/pingcap/sysutil"
 	"github.com/spf13/cobra"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -46,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/schedule"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -190,6 +193,10 @@ func (s *Server) updateAPIServerMemberLoop() {
 			continue
 		}
 		for _, ep := range members.Members {
+			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
+				log.Info("member is not started yet", zap.String("member-id", fmt.Sprintf("%x", ep.GetID())), errs.ZapError(err))
+				continue
+			}
 			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
 			if err != nil {
 				log.Info("failed to get status of member", zap.String("member-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
@@ -241,7 +248,7 @@ func (s *Server) primaryElectionLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.cfg.LeaderLease); err != nil {
+	if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
 			log.Info("campaign scheduling primary meets error due to txn conflict, another server may campaign successfully",
 				zap.String("campaign-scheduling-primary-name", s.participant.Name()))
@@ -312,6 +319,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
+	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -403,23 +411,24 @@ func (s *Server) startServer() (err error) {
 	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// The independent Scheduling service still reuses PD version info since PD and Scheduling are just
 	// different service modes provided by the same pd-server binary
-	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
-
-	uniqueName := s.cfg.ListenAddr
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
+	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
+	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
 	s.participant = member.NewParticipant(s.GetClient(), utils.SchedulingServiceName)
 	p := &schedulingpb.Participant{
 		Name:       uniqueName,
 		Id:         uniqueID, // id is unique among all participants
-		ListenUrls: []string{s.cfg.AdvertiseListenAddr},
+		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
 	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
 	s.AddServiceExitCallback(s.stopCluster)
-	if err := s.InitListener(s.GetTLSConfig(), s.cfg.ListenAddr); err != nil {
+	if err := s.InitListener(s.GetTLSConfig(), s.cfg.GetListenAddr()); err != nil {
 		return err
 	}
 
@@ -443,7 +452,7 @@ func (s *Server) startServer() (err error) {
 		return err
 	}
 	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
-		utils.SchedulingServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
+		utils.SchedulingServiceName, s.cfg.GetAdvertiseListenAddr(), serializedEntry, discovery.DefaultLeaseInSeconds)
 	if err := s.serviceRegister.Register(); err != nil {
 		log.Error("failed to register the service", zap.String("service-name", utils.SchedulingServiceName), errs.ZapError(err))
 		return err
@@ -533,7 +542,7 @@ func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 		BaseServer:        server.NewBaseServer(ctx),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		cfg:               cfg,
-		persistConfig:     config.NewPersistConfig(cfg),
+		persistConfig:     config.NewPersistConfig(cfg, cache.NewStringTTL(ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
 		checkMembershipCh: make(chan struct{}, 1),
 	}
 	return svr

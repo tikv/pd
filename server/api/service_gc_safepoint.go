@@ -16,6 +16,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -38,8 +39,9 @@ func newServiceGCSafepointHandler(svr *server.Server, rd *render.Render) *servic
 // ListServiceGCSafepoint is the response for list service GC safepoint.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ListServiceGCSafepoint struct {
-	ServiceGCSafepoints []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
-	GCSafePoint         uint64                       `json:"gc_safe_point"`
+	ServiceGCSafepoints   []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
+	MinServiceGcSafepoint uint64                       `json:"min_service_gc_safe_point,omitempty"`
+	GCSafePoint           uint64                       `json:"gc_safe_point"`
 }
 
 // @Tags     service_gc_safepoint
@@ -60,9 +62,21 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *htt
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	var minSSp *endpoint.ServiceSafePoint
+	for _, ssp := range ssps {
+		if (minSSp == nil || minSSp.SafePoint > ssp.SafePoint) &&
+			ssp.ExpiredAt > time.Now().Unix() {
+			minSSp = ssp
+		}
+	}
+	minServiceGcSafepoint := uint64(0)
+	if minSSp != nil {
+		minServiceGcSafepoint = minSSp.SafePoint
+	}
 	list := ListServiceGCSafepoint{
-		GCSafePoint:         gcSafepoint,
-		ServiceGCSafepoints: ssps,
+		GCSafePoint:           gcSafepoint,
+		ServiceGCSafepoints:   ssps,
+		MinServiceGcSafepoint: minServiceGcSafepoint,
 	}
 	h.rd.JSON(w, http.StatusOK, list)
 }

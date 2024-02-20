@@ -165,6 +165,8 @@ type Config struct {
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 
+	MicroService MicroServiceConfig `toml:"micro-service" json:"micro-service"`
+
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
 }
 
@@ -249,6 +251,8 @@ const (
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
+
+	defaultEnableSchedulingFallback = true
 )
 
 // Special keys for Labels
@@ -460,6 +464,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
 	c.Keyspace.adjust(configMetaData.Child("keyspace"))
+
+	c.MicroService.adjust(configMetaData.Child("micro-service"))
 
 	c.Security.Encryption.Adjust()
 
@@ -831,19 +837,42 @@ func NormalizeReplicationMode(m string) string {
 
 // DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
 type DRAutoSyncReplicationConfig struct {
-	LabelKey         string            `toml:"label-key" json:"label-key"`
-	Primary          string            `toml:"primary" json:"primary"`
-	DR               string            `toml:"dr" json:"dr"`
-	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
-	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
-	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
-	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
+	LabelKey           string            `toml:"label-key" json:"label-key"`
+	Primary            string            `toml:"primary" json:"primary"`
+	DR                 string            `toml:"dr" json:"dr"`
+	PrimaryReplicas    int               `toml:"primary-replicas" json:"primary-replicas"`
+	DRReplicas         int               `toml:"dr-replicas" json:"dr-replicas"`
+	WaitStoreTimeout   typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	WaitRecoverTimeout typeutil.Duration `toml:"wait-recover-timeout" json:"wait-recover-timeout"`
+	PauseRegionSplit   bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("wait-store-timeout") {
 		c.WaitStoreTimeout = typeutil.NewDuration(defaultDRWaitStoreTimeout)
 	}
+}
+
+// MicroServiceConfig is the configuration for micro service.
+type MicroServiceConfig struct {
+	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+}
+
+func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
+	if !meta.IsDefined("enable-scheduling-fallback") {
+		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
+	}
+}
+
+// Clone returns a copy of micro service config.
+func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
+	cfg := *c
+	return &cfg
+}
+
+// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to api service.
+func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
+	return c.EnableSchedulingFallback
 }
 
 // KeyspaceConfig is the configuration for keyspace management.

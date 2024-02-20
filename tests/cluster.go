@@ -155,6 +155,13 @@ func (s *TestServer) Destroy() error {
 	return nil
 }
 
+// ResetPDLeader resigns the leader of the server.
+func (s *TestServer) ResetPDLeader() {
+	s.Lock()
+	defer s.Unlock()
+	s.server.GetMember().ResetLeader()
+}
+
 // ResignLeader resigns the leader of the server.
 func (s *TestServer) ResignLeader() error {
 	s.Lock()
@@ -544,7 +551,7 @@ func restartTestCluster(
 	}
 	wg.Wait()
 
-	errorMap.Range(func(key, value interface{}) bool {
+	errorMap.Range(func(key, value any) bool {
 		if value != nil {
 			err = value.(error)
 			return false

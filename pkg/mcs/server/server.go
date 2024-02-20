@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"go.etcd.io/etcd/clientv3"
@@ -161,4 +162,20 @@ func (bs *BaseServer) GetListener() net.Listener {
 // IsSecure checks if the server enable TLS.
 func (bs *BaseServer) IsSecure() bool {
 	return bs.secure
+}
+
+// StartTimestamp returns the start timestamp of this server
+func (bs *BaseServer) StartTimestamp() int64 {
+	return bs.startTimestamp
+}
+
+// CloseClientConns closes all client connections.
+func (bs *BaseServer) CloseClientConns() {
+	bs.clientConns.Range(func(key, value any) bool {
+		conn := value.(*grpc.ClientConn)
+		if err := conn.Close(); err != nil {
+			log.Error("close client connection meet error")
+		}
+		return true
+	})
 }

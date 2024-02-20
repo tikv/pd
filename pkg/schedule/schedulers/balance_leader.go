@@ -67,33 +67,33 @@ var (
 )
 
 type balanceLeaderSchedulerConfig struct {
-	mu      syncutil.RWMutex
+	syncutil.RWMutex
 	storage endpoint.ConfigStorage
 	Ranges  []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
 
-func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{}) {
-	conf.mu.Lock()
-	defer conf.mu.Unlock()
+func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, any) {
+	conf.Lock()
+	defer conf.Unlock()
 
-	oldc, _ := json.Marshal(conf)
+	oldConfig, _ := json.Marshal(conf)
 
 	if err := json.Unmarshal(data, conf); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
-	newc, _ := json.Marshal(conf)
-	if !bytes.Equal(oldc, newc) {
-		if !conf.validate() {
-			json.Unmarshal(oldc, conf)
+	newConfig, _ := json.Marshal(conf)
+	if !bytes.Equal(oldConfig, newConfig) {
+		if !conf.validateLocked() {
+			json.Unmarshal(oldConfig, conf)
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
 		conf.persistLocked()
-		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
+		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
 		return http.StatusOK, "Config is updated."
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
@@ -104,13 +104,13 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 	return http.StatusBadRequest, "Config item is not found."
 }
 
-func (conf *balanceLeaderSchedulerConfig) validate() bool {
+func (conf *balanceLeaderSchedulerConfig) validateLocked() bool {
 	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
 func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+	conf.RLock()
+	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceLeaderSchedulerConfig{
@@ -125,6 +125,20 @@ func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
 		return err
 	}
 	return conf.storage.SaveSchedulerConfig(BalanceLeaderName, data)
+}
+
+func (conf *balanceLeaderSchedulerConfig) getBatch() int {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.Batch
+}
+
+func (conf *balanceLeaderSchedulerConfig) getRanges() []core.KeyRange {
+	conf.RLock()
+	defer conf.RUnlock()
+	ranges := make([]core.KeyRange, len(conf.Ranges))
+	copy(ranges, conf.Ranges)
+	return ranges
 }
 
 type balanceLeaderHandler struct {
@@ -210,14 +224,14 @@ func (l *balanceLeaderScheduler) GetType() string {
 }
 
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
-	l.conf.mu.RLock()
-	defer l.conf.mu.RUnlock()
+	l.conf.RLock()
+	defer l.conf.RUnlock()
 	return EncodeConfig(l.conf)
 }
 
 func (l *balanceLeaderScheduler) ReloadConfig() error {
-	l.conf.mu.Lock()
-	defer l.conf.mu.Unlock()
+	l.conf.Lock()
+	defer l.conf.Unlock()
 	cfgData, err := l.conf.storage.LoadSchedulerConfig(l.GetName())
 	if err != nil {
 		return err
@@ -335,14 +349,12 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 }
 
 func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	l.conf.mu.RLock()
-	defer l.conf.mu.RUnlock()
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
 	}
-	batch := l.conf.Batch
+	batch := l.conf.getBatch()
 	balanceLeaderScheduleCounter.Inc()
 
 	leaderSchedulePolicy := cluster.GetSchedulerConfig().GetLeaderSchedulePolicy()
@@ -441,7 +453,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 // It randomly selects a health region from the source store, then picks
 // the best follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.SourceStoreID(), l.conf.Ranges),
+	solver.Region = filter.SelectOneRegion(solver.RandLeaderRegions(solver.SourceStoreID(), l.conf.getRanges()),
 		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.Region == nil {
 		log.Debug("store has no leader", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", solver.SourceStoreID()))
@@ -485,7 +497,7 @@ func (l *balanceLeaderScheduler) transferLeaderOut(solver *solver, collector *pl
 // It randomly selects a health region from the target store, then picks
 // the worst follower peer and transfers the leader.
 func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *plan.Collector) *operator.Operator {
-	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.TargetStoreID(), l.conf.Ranges),
+	solver.Region = filter.SelectOneRegion(solver.RandFollowerRegions(solver.TargetStoreID(), l.conf.getRanges()),
 		nil, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.Region == nil {
 		log.Debug("store has no follower", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", solver.TargetStoreID()))

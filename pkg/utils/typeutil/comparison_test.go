@@ -53,3 +53,21 @@ func TestEqualFloat(t *testing.T) {
 	re.True(Float64Equal(f1, f1*1.000))
 	re.True(Float64Equal(f1, f1/1.000))
 }
+
+func TestAreStringSlicesEquivalent(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	re.True(AreStringSlicesEquivalent(nil, nil))
+	re.True(AreStringSlicesEquivalent([]string{}, nil))
+	re.True(AreStringSlicesEquivalent(nil, []string{}))
+	re.True(AreStringSlicesEquivalent([]string{}, []string{}))
+	re.True(AreStringSlicesEquivalent([]string{"a", "b"}, []string{"b", "a"}))
+	re.False(AreStringSlicesEquivalent([]string{"a", "b"}, []string{"a", "b", "c"}))
+	re.False(AreStringSlicesEquivalent([]string{"a", "b", "c"}, []string{"a", "b"}))
+	re.False(AreStringSlicesEquivalent([]string{"a", "b"}, []string{"a", "c"}))
+	re.False(AreStringSlicesEquivalent([]string{"a", "b"}, []string{"c", "d"}))
+	re.False(AreStringSlicesEquivalent(nil, []string{"a", "b"}))
+	re.False(AreStringSlicesEquivalent([]string{"a", "b"}, nil))
+	re.False(AreStringSlicesEquivalent([]string{}, []string{"a", "b"}))
+	re.False(AreStringSlicesEquivalent([]string{"a", "b"}, []string{}))
+}

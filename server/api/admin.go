@@ -61,7 +61,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	rc.DropCacheRegion(regionID)
-	if h.svr.IsAPIServiceMode() {
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer(regionID)
 	}
 	msg := "The region is removed from server cache."
@@ -101,7 +101,7 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	}
 	// Remove region from cache.
 	rc.DropCacheRegion(regionID)
-	if h.svr.IsAPIServiceMode() {
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer(regionID)
 	}
 	msg := "The region is removed from server cache and region meta storage."
@@ -117,7 +117,7 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 	var err error
 	rc := getCluster(r)
 	rc.DropCacheAllRegion()
-	if h.svr.IsAPIServiceMode() {
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer()
 	}
 	msg := "All regions are removed from server cache."
@@ -179,7 +179,7 @@ func (h *adminHandler) UnmarkSnapshotRecovering(w http.ResponseWriter, r *http.R
 // RecoverAllocID recover base alloc id
 // body should be in {"id": "123"} format
 func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -225,7 +225,7 @@ func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
 		idStr = strconv.FormatUint(id[0], 10)
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/admin/cache/regions/%s", addr, idStr)
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,7 @@ func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
 }
 
 func (h *adminHandler) buildMsg(msg string, err error) string {
-	if h.svr.IsAPIServiceMode() && err != nil {
+	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) && err != nil {
 		return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
 	}
 	return msg

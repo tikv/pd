@@ -26,9 +26,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func GetRollingPolicy() *RollingPolicy {
-	w := NewWindow(Options{Size: 3})
-	return NewRollingPolicy(w, RollingPolicyOpts{BucketDuration: 100 * time.Millisecond})
+const defaultBucketDuration = 100 * time.Millisecond
+const defaultSize = 3
+
+func getRollingPolicy() *RollingPolicy {
+	w := NewWindow(Options{Size: defaultSize})
+	return NewRollingPolicy(w, RollingPolicyOpts{BucketDuration: defaultBucketDuration})
 }
 
 func TestRollingPolicy_Add(t *testing.T) {
@@ -45,6 +48,7 @@ func TestRollingPolicy_Add(t *testing.T) {
 			points:    []float64{1, 1},
 		},
 		{
+			// In CI, the actual sleep time may be more than 100 (timeSleep = 94).
 			timeSleep: []int{94, 250},
 			offset:    []int{0, 0},
 			points:    []float64{1, 1},
@@ -60,14 +64,25 @@ func TestRollingPolicy_Add(t *testing.T) {
 		t.Run("test policy add", func(t *testing.T) {
 			var totalTS, lastOffset int
 			timeSleep := test.timeSleep
-			policy := GetRollingPolicy()
+			beginTime := time.Now()
+			policy := getRollingPolicy()
+			points := make([]float64, defaultSize)
+			asExpected := true
 			for i, n := range timeSleep {
 				totalTS += n
 				time.Sleep(time.Duration(n) * time.Millisecond)
-				offset, point := test.offset[i], test.points[i]
+				point := test.points[i]
+				offset := int(time.Since(beginTime)/defaultBucketDuration) % defaultSize
+				points[i] += point
 				policy.Add(point)
-
-				re.Less(math.Abs(point-policy.window.buckets[offset].Points[0]), 1e-6,
+				if offset != test.offset[i] {
+					asExpected = false
+				}
+				if asExpected {
+					re.Less(math.Abs(point-policy.window.buckets[offset].Points[0]), 1e-6,
+						fmt.Sprintf("error, time since last append: %vms, last offset: %v", totalTS, lastOffset))
+				}
+				re.Less(math.Abs(points[i]-policy.window.buckets[offset].Points[0]), 1e-6,
 					fmt.Sprintf("error, time since last append: %vms, last offset: %v", totalTS, lastOffset))
 				lastOffset = offset
 			}
@@ -78,7 +93,7 @@ func TestRollingPolicy_Add(t *testing.T) {
 func TestRollingPolicy_AddWithTimespan(t *testing.T) {
 	re := require.New(t)
 	t.Run("timespan < bucket number", func(t *testing.T) {
-		policy := GetRollingPolicy()
+		policy := getRollingPolicy()
 		// bucket 0
 		policy.Add(0)
 		// bucket 1
@@ -96,13 +111,13 @@ func TestRollingPolicy_AddWithTimespan(t *testing.T) {
 			t.Logf("%+v", bkt)
 		}
 
-		re.Equal(0, len(policy.window.buckets[0].Points))
+		re.Empty(policy.window.buckets[0].Points)
 		re.Equal(4, int(policy.window.buckets[1].Points[0]))
 		re.Equal(2, int(policy.window.buckets[2].Points[0]))
 	})
 
 	t.Run("timespan > bucket number", func(t *testing.T) {
-		policy := GetRollingPolicy()
+		policy := getRollingPolicy()
 
 		// bucket 0
 		policy.Add(0)
@@ -122,8 +137,8 @@ func TestRollingPolicy_AddWithTimespan(t *testing.T) {
 			t.Logf("%+v", bkt)
 		}
 
-		re.Equal(0, len(policy.window.buckets[0].Points))
+		re.Zero(len(policy.window.buckets[0].Points))
 		re.Equal(4, int(policy.window.buckets[1].Points[0]))
-		re.Equal(0, len(policy.window.buckets[2].Points))
+		re.Zero(len(policy.window.buckets[2].Points))
 	})
 }

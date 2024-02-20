@@ -55,11 +55,8 @@ func HandleOverlaps(c Cluster, overlaps []*core.RegionInfo) {
 }
 
 // Collect collects the cluster information.
-func Collect(c Cluster, region *core.RegionInfo, stores []*core.StoreInfo, hasRegionStats, isNew, isPrepared bool) {
+func Collect(c Cluster, region *core.RegionInfo, stores []*core.StoreInfo, hasRegionStats bool) {
 	if hasRegionStats {
 		c.GetRegionStats().Observe(region, stores)
-	}
-	if !isPrepared && isNew {
-		c.GetCoordinator().GetPrepareChecker().Collect(region)
 	}
 }

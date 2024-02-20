@@ -102,6 +102,9 @@ type ControllerConfig struct {
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
+
+	// EnableControllerTraceLog is to control whether resource control client enable trace.
+	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
@@ -248,6 +251,26 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
+}
+
+// GetName returns the Name
+func (c *Config) GetName() string {
+	return c.Name
+}
+
+// GeBackendEndpoints returns the BackendEndpoints
+func (c *Config) GeBackendEndpoints() string {
+	return c.BackendEndpoints
+}
+
+// GetListenAddr returns the ListenAddr
+func (c *Config) GetListenAddr() string {
+	return c.ListenAddr
+}
+
+// GetAdvertiseListenAddr returns the AdvertiseListenAddr
+func (c *Config) GetAdvertiseListenAddr() string {
+	return c.AdvertiseListenAddr
 }
 
 // GetTLSConfig returns the TLS config.

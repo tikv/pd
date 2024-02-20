@@ -40,17 +40,18 @@ type balanceWitnessSchedulerTestSuite struct {
 }
 
 func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
+	re := suite.Require()
 	suite.cancel, suite.conf, suite.tc, suite.oc = prepareSchedulersTest()
 	suite.tc.RuleManager.SetRules([]*placement.Rule{
 		{
-			GroupID: "pd",
-			ID:      "default",
+			GroupID: placement.DefaultGroupID,
+			ID:      placement.DefaultRuleID,
 			Role:    placement.Voter,
 			Count:   4,
 		},
 	})
 	lb, err := CreateScheduler(BalanceWitnessType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceWitnessType, []string{"", ""}), nil)
-	suite.NoError(err)
+	re.NoError(err)
 	suite.lb = lb
 }
 
@@ -64,6 +65,7 @@ func (suite *balanceWitnessSchedulerTestSuite) schedule() []*operator.Operator {
 }
 
 func (suite *balanceWitnessSchedulerTestSuite) TestScheduleWithOpInfluence() {
+	re := suite.Require()
 	suite.tc.SetTolerantSizeRatio(2.5)
 	// Stores:     1    2    3    4
 	// Witnesses:  7    8    9    14
@@ -74,12 +76,12 @@ func (suite *balanceWitnessSchedulerTestSuite) TestScheduleWithOpInfluence() {
 	suite.tc.AddWitnessStore(4, 14)
 	suite.tc.AddLeaderRegionWithWitness(1, 3, []uint64{1, 2, 4}, 4)
 	op := suite.schedule()[0]
-	suite.NotNil(op)
+	re.NotNil(op)
 	suite.oc.SetOperator(op)
 	// After considering the scheduled operator, witnesses of store1 and store2 are 8
 	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
 	// returns false when witness difference is not greater than 5.
-	suite.NotEmpty(suite.schedule())
+	re.NotEmpty(suite.schedule())
 
 	// Stores:     1    2    3    4
 	// Witness:    8    8    9    13
@@ -89,10 +91,11 @@ func (suite *balanceWitnessSchedulerTestSuite) TestScheduleWithOpInfluence() {
 	suite.tc.UpdateWitnessCount(3, 9)
 	suite.tc.UpdateWitnessCount(4, 13)
 	suite.tc.AddLeaderRegionWithWitness(1, 3, []uint64{1, 2, 4}, 4)
-	suite.Empty(suite.schedule())
+	re.Empty(suite.schedule())
 }
 
 func (suite *balanceWitnessSchedulerTestSuite) TestTransferWitnessOut() {
+	re := suite.Require()
 	// Stores:     1    2    3    4
 	// Witnesses:  7    8    9   12
 	suite.tc.AddWitnessStore(1, 7)
@@ -120,13 +123,13 @@ func (suite *balanceWitnessSchedulerTestSuite) TestTransferWitnessOut() {
 				regions[op.RegionID()] = struct{}{}
 				from := op.Step(0).(operator.ChangePeerV2Enter).DemoteVoters[0].ToStore
 				to := op.Step(1).(operator.BatchSwitchWitness).ToWitnesses[0].StoreID
-				suite.Equal(from, uint64(4))
+				re.Equal(uint64(4), from)
 				targets[to]--
 			}
 		}
 	}
-	suite.Equal(3, len(regions))
+	re.Len(regions, 3)
 	for _, count := range targets {
-		suite.Zero(count)
+		re.Zero(count)
 	}
 }

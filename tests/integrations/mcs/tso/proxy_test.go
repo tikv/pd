@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -66,7 +66,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	leaderName := s.apiCluster.WaitLeader()
 	s.apiLeader = s.apiCluster.GetServer(leaderName)
 	s.backendEndpoints = s.apiLeader.GetAddr()
-	s.NoError(s.apiLeader.BootstrapCluster())
+	re.NoError(s.apiLeader.BootstrapCluster())
 
 	// Create a TSO cluster with 2 servers
 	s.tsoCluster, err = tests.NewTestTSOCluster(s.ctx, 2, s.backendEndpoints)

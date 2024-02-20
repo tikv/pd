@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
@@ -55,6 +56,7 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
+	collectWaitTime       = time.Minute
 )
 
 // NewCluster creates a new cluster.
@@ -65,7 +67,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		cancel()
 		return nil, err
 	}
-	ruleManager := placement.NewRuleManager(storage, basicCluster, persistConfig)
+	ruleManager := placement.NewRuleManager(ctx, storage, basicCluster, persistConfig)
 	c := &Cluster{
 		ctx:               ctx,
 		cancel:            cancel,
@@ -452,7 +454,12 @@ func (c *Cluster) runUpdateStoreStats() {
 func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	c.coordinator.RunUntilStop()
+	// force wait for 1 minute to make prepare checker won't be directly skipped
+	runCollectWaitTime := collectWaitTime
+	failpoint.Inject("changeRunCollectWaitTime", func() {
+		runCollectWaitTime = 1 * time.Second
+	})
+	c.coordinator.RunUntilStop(runCollectWaitTime)
 }
 
 func (c *Cluster) runMetricsCollectionJob() {
@@ -486,10 +493,6 @@ func (c *Cluster) collectMetrics() {
 
 	c.coordinator.GetSchedulersController().CollectSchedulerMetrics()
 	c.coordinator.CollectHotSpotMetrics()
-	c.collectClusterMetrics()
-}
-
-func (c *Cluster) collectClusterMetrics() {
 	if c.regionStats == nil {
 		return
 	}
@@ -501,20 +504,8 @@ func (c *Cluster) collectClusterMetrics() {
 
 func (c *Cluster) resetMetrics() {
 	statistics.Reset()
-
-	c.coordinator.GetSchedulersController().ResetSchedulerMetrics()
-	c.coordinator.ResetHotSpotMetrics()
-	c.resetClusterMetrics()
-}
-
-func (c *Cluster) resetClusterMetrics() {
-	if c.regionStats == nil {
-		return
-	}
-	c.regionStats.Reset()
-	c.labelStats.Reset()
-	// reset hot cache metrics
-	c.hotStat.ResetMetrics()
+	schedulers.ResetSchedulerMetrics()
+	schedule.ResetHotSpotMetrics()
 }
 
 // StartBackgroundJobs starts background jobs.
@@ -536,6 +527,11 @@ func (c *Cluster) StopBackgroundJobs() {
 	c.coordinator.Stop()
 	c.cancel()
 	c.wg.Wait()
+}
+
+// IsBackgroundJobsRunning returns whether the background jobs are running. Only for test purpose.
+func (c *Cluster) IsBackgroundJobsRunning() bool {
+	return c.running.Load()
 }
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
@@ -561,9 +557,8 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	isNew, _, saveCache, _ := core.GenerateRegionGuideFunc(true)(region, origin)
-	if !saveCache && !isNew {
+	_, saveCache, _ := core.GenerateRegionGuideFunc(true)(region, origin)
+	if !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
@@ -585,13 +580,18 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		cluster.HandleOverlaps(c, overlaps)
 	}
 
-	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats, isNew, c.IsPrepared())
+	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
 	return nil
 }
 
 // IsPrepared return true if the prepare checker is ready.
 func (c *Cluster) IsPrepared() bool {
 	return c.coordinator.GetPrepareChecker().IsPrepared()
+}
+
+// SetPrepared set the prepare check to prepared. Only for test purpose.
+func (c *Cluster) SetPrepared() {
+	c.coordinator.GetPrepareChecker().SetPrepared()
 }
 
 // DropCacheAllRegion removes all cached regions.

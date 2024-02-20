@@ -41,7 +41,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const randomRegionMaxRetry = 10
+const (
+	randomRegionMaxRetry = 10
+	scanRegionLimit      = 1000
+)
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
@@ -93,6 +96,12 @@ const (
 // LoadedFromStorage means this region's meta info loaded from storage.
 func (r *RegionInfo) LoadedFromStorage() bool {
 	return r.source == Storage
+}
+
+// LoadedFromSync means this region's meta info loaded from region syncer.
+// Only used for test.
+func (r *RegionInfo) LoadedFromSync() bool {
+	return r.source == Sync
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -702,7 +711,7 @@ func (r *RegionInfo) isRegionRecreated() bool {
 
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
+type RegionGuideFunc func(region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
@@ -715,19 +724,15 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
+	return func(region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
 		if origin == nil {
 			if log.GetLevel() <= zap.DebugLevel {
 				debug("insert new region",
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			}
-			saveKV, saveCache, isNew = true, true, true
+			saveKV, saveCache = true, true
 		} else {
-			if origin.LoadedFromStorage() {
-				isNew = true
-			}
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
 			if r.GetVersion() > o.GetVersion() {
@@ -753,9 +758,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
-				if origin.GetLeader().GetId() == 0 {
-					isNew = true
-				} else if log.GetLevel() <= zap.InfoLevel {
+				if origin.GetLeader().GetId() != 0 && log.GetLevel() <= zap.InfoLevel {
 					info("leader changed",
 						zap.Uint64("region-id", region.GetID()),
 						zap.Uint64("from", origin.GetLeader().GetStoreId()),
@@ -1337,11 +1340,23 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	return
 }
 
-// GetClusterNotFromStorageRegionsCnt gets the total count of regions that not loaded from storage anymore
+// GetClusterNotFromStorageRegionsCnt gets the `NotFromStorageRegionsCnt` count of regions that not loaded from storage anymore.
 func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	return r.tree.notFromStorageRegionsCnt
+	return r.tree.notFromStorageRegionsCount()
+}
+
+// GetNotFromStorageRegionsCntByStore gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
+func (r *RegionsInfo) GetNotFromStorageRegionsCntByStore(storeID uint64) int {
+	r.st.RLock()
+	defer r.st.RUnlock()
+	return r.getNotFromStorageRegionsCntByStoreLocked(storeID)
+}
+
+// getNotFromStorageRegionsCntByStoreLocked gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
+func (r *RegionsInfo) getNotFromStorageRegionsCntByStoreLocked(storeID uint64) int {
+	return r.leaders[storeID].notFromStorageRegionsCount() + r.followers[storeID].notFromStorageRegionsCount() + r.learners[storeID].notFromStorageRegionsCount()
 }
 
 // GetMetaRegions gets a set of metapb.Region from regionMap
@@ -1377,7 +1392,7 @@ func (r *RegionsInfo) GetStoreRegionCount(storeID uint64) int {
 	return r.getStoreRegionCountLocked(storeID)
 }
 
-// GetStoreRegionCount gets the total count of a store's leader, follower and learner RegionInfo by storeID
+// getStoreRegionCountLocked gets the total count of a store's leader, follower and learner RegionInfo by storeID
 func (r *RegionsInfo) getStoreRegionCountLocked(storeID uint64) int {
 	return r.leaders[storeID].length() + r.followers[storeID].length() + r.learners[storeID].length()
 }
@@ -1610,16 +1625,31 @@ func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(regi
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	r.t.RLock()
-	defer r.t.RUnlock()
 	var size int64
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-			return false
+	for {
+		r.t.RLock()
+		var cnt int
+		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+				return false
+			}
+			if cnt >= scanRegionLimit {
+				return false
+			}
+			cnt++
+			startKey = region.GetEndKey()
+			size += region.GetApproximateSize()
+			return true
+		})
+		r.t.RUnlock()
+		if cnt == 0 {
+			break
 		}
-		size += region.GetApproximateSize()
-		return true
-	})
+		if len(startKey) == 0 {
+			break
+		}
+	}
+
 	return size
 }
 

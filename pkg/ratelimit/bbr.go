@@ -1,7 +1,7 @@
 // The MIT License (MIT)
 // Copyright (c) 2022 go-kratos Project Authors.
 //
-// Copyright 2023 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,13 +26,16 @@ import (
 )
 
 const (
-	inf   = int64(^uint64(0) >> 1)
-	infRT = int64(time.Hour)
+	inf         = int64(^uint64(0) >> 1)
+	infDuration = int64(time.Hour)
 
 	defaultWindowSize = time.Second * 10
 	defaultBucketSize = 100
 )
 
+// cache stores some statistics information up to the most recent complete bucket cycle,
+// such as the maximum processed request count and
+// the shortest processing duration in a certain period of time.
 type cache struct {
 	val  int64
 	time time.Time
@@ -73,37 +76,63 @@ func WithBucket(b int) bbrOption {
 }
 
 type bbrStatus struct {
-	maxInFlight atomic.Int64
-	minRT       atomic.Int64
+	// RDP(Rate-Delay Product) refers to the product of pass request count and processing duration.
+	// RDP is a performance metric used to measure the maximum capacity of request on process in the system.
+	// It represents the maximum amount of unacknowledged request count that can exist in the system simultaneously.
+	// This indicator is clearly closely related to goroutine numbers.
+	// And for the BBR status, during normal operation, the RDP is not set and its value is "inf" (infinity).
+	//  However, when the BBR's rate throttling conditions are triggered, the RDP will be set accordingly.
+	RDP atomic.Int64
+	// minimum duration is used to record the shortest processing duration.
+	// Currently, this state value is only used in testing. In future implementations,
+	// if it is observed that the minimum duration continues to increase
+	// even after setting the RDP (Rate-Delay Product), it indicates that the system is
+	// still in a deteriorating state, and the RDP needs to be lowered further.
+	minDuration atomic.Int64
 }
 
-func (f *bbrStatus) storeMaxInFlight(m int64) {
-	f.maxInFlight.Store(m)
+func (f *bbrStatus) storeRDP(m int64) {
+	f.RDP.Store(m)
 }
 
-func (f *bbrStatus) getMaxInFlight() int64 {
-	return f.maxInFlight.Load()
+func (f *bbrStatus) getRDP() int64 {
+	return f.RDP.Load()
 }
 
-func (f *bbrStatus) storeMinRT(m int64) {
-	f.minRT.Store(m)
+func (f *bbrStatus) storeMinDuration(m int64) {
+	f.minDuration.Store(m)
 }
 
-func (f *bbrStatus) getMinRT() int64 {
-	return f.minRT.Load()
+func (f *bbrStatus) getMinDuration() int64 {
+	return f.minDuration.Load()
 }
 
 type feedbackOpt func(*bbrStatus)
 
+// bbr is used to implment the maximum concurrency detection algorithm
+// which borrows from TCP BBR algorithm for an API.
+// If the amount of concurrency keeps increasing within a specific time window,
+// it indicates that the bottleneck has been reached.
+//  1. Divide the time window into multiple time buckets of equal duration.
+//     Initialize a counter for each time bucket to keep track of the concurrency change.
+//  2. Monitor the concurrency of requests. When request comes, increment the counter of arrival time bucket.
+//     When processed request, decrease the counter of pass time bucket.
+//  3. Monitor the amount of pass requests. When processed request, increment the counter.
+//  4. Record the processing duration.
+//  5. Periodically, check the counters in each time bucket to analyze the concurrency change.
+//     If the value of any counter increases continuously over a certain threshold
+//     for a consecutive number of time buckets, it indicates the API is reaching its maximum concurrency.
+//  6. According the maxinum pass request and minimum duration, calculate RDP and use it as conccurency limit.
 type bbr struct {
-	cfg             *bbrConfig
-	bucketPerSecond int64
-	bucketDuration  time.Duration
+	cfg                 *bbrConfig
+	bucketPerSecond     int64
+	bucketDuration      time.Duration
+	windowMicroDuration int64
 
 	// statistics
-	passStat     window.RollingCounter
-	rtStat       window.RollingCounter
-	inFlightStat window.RollingCounter
+	passStat         window.RollingCounter
+	durationStat     window.RollingCounter
+	onProcessingStat window.RollingCounter
 
 	// full status
 	lastUpdateTime atomic.Value
@@ -112,27 +141,28 @@ type bbr struct {
 
 	feedbacks []feedbackOpt
 
-	maxPASSCache atomic.Value
-	minRtCache   atomic.Value
+	maxPassCache     atomic.Value
+	minDurationCache atomic.Value
 }
 
 func newBBR(cfg *bbrConfig, feedbacks ...feedbackOpt) *bbr {
 	bucketDuration := cfg.Window / time.Duration(cfg.Bucket)
 	passStat := window.NewRollingCounter(window.RollingCounterOpts{Size: cfg.Bucket, BucketDuration: bucketDuration})
-	rtStat := window.NewRollingCounter(window.RollingCounterOpts{Size: cfg.Bucket, BucketDuration: bucketDuration})
-	inFlightStat := window.NewRollingCounter(window.RollingCounterOpts{Size: cfg.Bucket, BucketDuration: bucketDuration})
+	durationStat := window.NewRollingCounter(window.RollingCounterOpts{Size: cfg.Bucket, BucketDuration: bucketDuration})
+	onProcessingStat := window.NewRollingCounter(window.RollingCounterOpts{Size: cfg.Bucket, BucketDuration: bucketDuration})
 
 	limiter := &bbr{
-		cfg:             cfg,
-		feedbacks:       feedbacks,
-		bucketDuration:  bucketDuration,
-		bucketPerSecond: int64(time.Second / bucketDuration),
-		passStat:        passStat,
-		rtStat:          rtStat,
-		inFlightStat:    inFlightStat,
-		bbrStatus:       &bbrStatus{},
+		cfg:                 cfg,
+		feedbacks:           feedbacks,
+		bucketDuration:      bucketDuration,
+		windowMicroDuration: int64(cfg.Window / time.Microsecond),
+		bucketPerSecond:     int64(time.Second / bucketDuration),
+		passStat:            passStat,
+		durationStat:        durationStat,
+		onProcessingStat:    onProcessingStat,
+		bbrStatus:           &bbrStatus{},
 	}
-	limiter.bbrStatus.storeMaxInFlight(inf)
+	limiter.bbrStatus.storeRDP(inf)
 	return limiter
 }
 
@@ -147,16 +177,13 @@ func (l *bbr) timespan(lastTime time.Time) int {
 	return l.cfg.Bucket
 }
 
-func (l *bbr) getBDP() float64 {
-	return float64(l.getMaxPASS()*l.getMinRT()*l.bucketPerSecond) / 1e6
+func (l *bbr) calcRDP() (rdp int64, dur int64) {
+	dur = l.getMinDuration()
+	return int64(math.Floor(float64(l.getMaxPass()*dur*l.bucketPerSecond)/1e6) + 0.5), dur
 }
 
-func (l *bbr) getMaxInFlight() int64 {
-	return int64(math.Floor(l.getBDP()) + 0.5)
-}
-
-func (l *bbr) getMaxPASS() int64 {
-	passCache := l.maxPASSCache.Load()
+func (l *bbr) getMaxPass() int64 {
+	passCache := l.maxPassCache.Load()
 	if passCache != nil {
 		ps := passCache.(*cache)
 		if l.timespan(ps.time) < 1 {
@@ -165,7 +192,7 @@ func (l *bbr) getMaxPASS() int64 {
 	}
 	rawMaxPass := int64(l.passStat.Reduce(func(iterator window.Iterator) float64 {
 		var result = 0.0
-		for i := 1; iterator.Next() && i < l.cfg.Bucket; i++ {
+		for i := 0; iterator.Next() && i < l.cfg.Bucket; i++ {
 			bucket := iterator.Bucket()
 			count := 0.0
 			for _, p := range bucket.Points {
@@ -182,24 +209,24 @@ func (l *bbr) getMaxPASS() int64 {
 	if rawMaxPass == 1 {
 		return rawMaxPass
 	}
-	l.maxPASSCache.Store(&cache{
+	l.maxPassCache.Store(&cache{
 		val:  rawMaxPass,
 		time: time.Now(),
 	})
 	return rawMaxPass
 }
 
-func (l *bbr) getMinRT() int64 {
-	rtCache := l.minRtCache.Load()
+func (l *bbr) getMinDuration() int64 {
+	rtCache := l.minDurationCache.Load()
 	if rtCache != nil {
 		rc := rtCache.(*cache)
 		if l.timespan(rc.time) < 1 {
 			return rc.val
 		}
 	}
-	rawMinRT := int64(math.Ceil(l.rtStat.Reduce(func(iterator window.Iterator) float64 {
-		var result = float64(infRT)
-		for i := 1; iterator.Next() && i < l.cfg.Bucket; i++ {
+	rawMinRT := int64(math.Ceil(l.durationStat.Reduce(func(iterator window.Iterator) float64 {
+		var result = float64(infDuration)
+		for i := 0; iterator.Next() && i < l.cfg.Bucket; i++ {
 			bucket := iterator.Bucket()
 			if len(bucket.Points) == 0 {
 				continue
@@ -214,20 +241,25 @@ func (l *bbr) getMinRT() int64 {
 		}
 		return result
 	})))
-	// if rtStat is empty, rawMinRT will be zero.
 	if rawMinRT < 1 {
-		rawMinRT = infRT
+		rawMinRT = infDuration
 	}
-	if rawMinRT == inf {
+	// If rtStat is empty, rawMinRT will be infDuration and we don't need to save cache.
+	if rawMinRT == infDuration {
 		return rawMinRT
 	}
-	l.minRtCache.Store(&cache{
+	l.minDurationCache.Store(&cache{
 		val:  rawMinRT,
 		time: time.Now(),
 	})
 	return rawMinRT
 }
 
+// The implementation of the detection algorithm is as follows:
+//  1. All buckets are divided into two parts.
+//  2. The sum of the concurrent change values in each part of the bucket
+//     is required to be greater than 0.
+//  3. The number of buckets greater than 0 is greater than that of buckets less than 0.
 func (l *bbr) checkFullStatus() {
 	temp := l.lastUpdateTime.Load()
 	if temp != nil {
@@ -241,7 +273,7 @@ func (l *bbr) checkFullStatus() {
 	}
 	positive := 0
 	negative := 0
-	raises := math.Ceil(l.inFlightStat.Reduce(func(iterator window.Iterator) float64 {
+	raises := math.Ceil(l.onProcessingStat.Reduce(func(iterator window.Iterator) float64 {
 		var result = 0.
 		i := 1
 		for ; iterator.Next() && i < l.cfg.Bucket/2; i++ {
@@ -283,13 +315,19 @@ func (l *bbr) checkFullStatus() {
 	}))
 
 	l.inCheck.Store(0)
-
+	rdp, dur := l.calcRDP()
 	check1 := raises > 0 && positive > negative
-	check2 := l.getBDP() > 1.0
-	if check1 && check2 && l.bbrStatus.getMaxInFlight() == inf {
-		maxInFlight := l.getMaxInFlight()
-		l.bbrStatus.storeMaxInFlight(maxInFlight)
-		l.bbrStatus.storeMinRT(l.getMinRT())
+	check2 := rdp > 1
+	if check1 && check2 && l.bbrStatus.getRDP() == inf {
+		l.bbrStatus.storeRDP(rdp)
+		l.bbrStatus.storeMinDuration(dur)
+		for _, fd := range l.feedbacks {
+			fd(l.bbrStatus)
+		}
+	} else if dur != infDuration && dur >= l.windowMicroDuration {
+		rdp = int64(math.Floor(float64(1*dur*l.bucketPerSecond)/1e6) + 0.5)
+		l.bbrStatus.storeRDP(rdp)
+		l.bbrStatus.storeMinDuration(dur)
 		for _, fd := range l.feedbacks {
 			fd(l.bbrStatus)
 		}
@@ -298,14 +336,25 @@ func (l *bbr) checkFullStatus() {
 }
 
 func (l *bbr) process() DoneFunc {
-	l.inFlightStat.Add(1)
+	l.onProcessingStat.Add(1)
 	start := time.Now().UnixMicro()
 	l.checkFullStatus()
 	return func() {
 		if rt := time.Now().UnixMicro() - start; rt > 0 {
-			l.rtStat.Add(rt)
+			l.durationStat.Add(rt)
 		}
-		l.inFlightStat.Add(-1)
+		l.onProcessingStat.Add(-1)
 		l.passStat.Add(1)
+	}
+}
+
+func bbrConcurrencyFeedBackFn(concurrency *concurrencyLimiter) func(s *bbrStatus) {
+	return func(s *bbrStatus) {
+		if s.getMinDuration() == infDuration {
+			current := concurrency.getCurrent()
+			concurrency.tryToSetLimit(current)
+		} else {
+			concurrency.tryToSetLimit(uint64(s.getRDP()))
+		}
 	}
 }

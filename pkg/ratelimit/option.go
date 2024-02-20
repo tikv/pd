@@ -53,7 +53,8 @@ func AddLabelAllowList() Option {
 	}
 }
 
-func updateConcurrencyLimiter(limit uint64) Option {
+// UpdateConcurrencyLimiter creates a concurrency limiter for a given label if it doesn't exist.
+func UpdateConcurrencyLimiter(limit uint64) Option {
 	return func(label string, l *Controller) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
@@ -63,7 +64,8 @@ func updateConcurrencyLimiter(limit uint64) Option {
 	}
 }
 
-func updateQPSLimiter(limit float64, burst int) Option {
+// UpdateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
+func UpdateQPSLimiter(limit float64, burst int) Option {
 	return func(label string, l *Controller) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
@@ -81,5 +83,28 @@ func UpdateDimensionConfig(cfg *DimensionConfig, opt ...bbrOption) Option {
 		}
 		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
 		return lim.(*limiter).updateDimensionConfig(cfg)
+	}
+}
+
+// UpdateDimensionConfigForTest creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
+// only used in test.
+func UpdateDimensionConfigForTest(cfg *DimensionConfig, opt ...bbrOption) Option {
+	return func(label string, l *Controller) UpdateStatus {
+		if _, allow := l.labelAllowList[label]; allow {
+			return InAllowList
+		}
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		return lim.(*limiter).updateDimensionConfig(cfg, opt...)
+	}
+}
+
+// InitLimiter creates empty concurrency limiter for a given label by config if it doesn't exist.
+func InitLimiter() Option {
+	return func(label string, l *Controller) UpdateStatus {
+		if _, allow := l.labelAllowList[label]; allow {
+			return InAllowList
+		}
+		l.limiters.LoadOrStore(label, newLimiter())
+		return ConcurrencyChanged
 	}
 }

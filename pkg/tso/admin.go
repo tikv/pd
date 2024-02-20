@@ -15,6 +15,7 @@
 package tso
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -53,6 +54,7 @@ func NewAdminHandler(handler Handler, rd *render.Render) *AdminHandler {
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  403  {string}  string  "Reset ts is forbidden."
 // @Failure  500  {string}  string  "TSO server failed to proceed the request."
+// @Failure  503  {string}  string  "It's a temporary failure, please retry."
 // @Router   /admin/reset-ts [post]
 // if force-use-larger=true:
 //
@@ -65,7 +67,7 @@ func NewAdminHandler(handler Handler, rd *render.Render) *AdminHandler {
 // during EBS based restore, we call this to make sure ts of pd >= resolved_ts in backup.
 func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	handler := h.handler
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -96,6 +98,12 @@ func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	if err = handler.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
 		if err == errs.ErrServerNotStarted {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		} else if err == errs.ErrEtcdTxnConflict {
+			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
+			// Return 503 to let the client retry.
+			// Ref: https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4
+			h.rd.JSON(w, http.StatusServiceUnavailable,
+				fmt.Sprintf("It's a temporary failure with error %s, please retry.", err.Error()))
 		} else {
 			h.rd.JSON(w, http.StatusForbidden, err.Error())
 		}

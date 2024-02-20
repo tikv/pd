@@ -215,7 +215,7 @@ func TestIsolationScore(t *testing.T) {
 	as := assert.New(t)
 	stores := makeStores()
 	testCases := []struct {
-		checker func(interface{}, interface{}, ...interface{}) bool
+		checker func(any, any, ...any) bool
 		peers1  []uint64
 		peers2  []uint64
 	}{

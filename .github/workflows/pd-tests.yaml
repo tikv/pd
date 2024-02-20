@@ -45,7 +45,7 @@ jobs:
         env:
           WORKER_ID: ${{ matrix.worker_id }}
           WORKER_COUNT: 13
-          JOB_COUNT: 10 # 11, 12 13 are for other integrations jobs
+          JOB_COUNT: 9 # 10 is tools test, 11, 12, 13 are for other integrations jobs
         run: |
           make ci-test-job JOB_COUNT=$(($JOB_COUNT)) JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID

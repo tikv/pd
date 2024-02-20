@@ -16,7 +16,6 @@ package cluster_test
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"testing"
 	"time"
@@ -110,12 +109,12 @@ func TestAskSplit(t *testing.T) {
 		SplitCount: 10,
 	}
 
-	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]interface{}{"schedule.enable-tikv-split-region": 0}, time.Minute))
+	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]any{"schedule.enable-tikv-split-region": 0}, time.Minute))
 	_, err = rc.HandleAskSplit(req)
-	re.True(errors.Is(err, errs.ErrSchedulerTiKVSplitDisabled))
+	re.ErrorIs(err, errs.ErrSchedulerTiKVSplitDisabled)
 	_, err = rc.HandleAskBatchSplit(req1)
-	re.True(errors.Is(err, errs.ErrSchedulerTiKVSplitDisabled))
-	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]interface{}{"schedule.enable-tikv-split-region": 0}, 0))
+	re.ErrorIs(err, errs.ErrSchedulerTiKVSplitDisabled)
+	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]any{"schedule.enable-tikv-split-region": 0}, 0))
 	// wait ttl config takes effect
 	time.Sleep(time.Second)
 

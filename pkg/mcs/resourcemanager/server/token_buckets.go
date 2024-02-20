@@ -20,6 +20,8 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 const (
@@ -31,6 +33,7 @@ const (
 	defaultReserveRatio    = 0.5
 	defaultLoanCoefficient = 2
 	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
+	slotExpireTimeout      = 10 * time.Minute
 )
 
 // GroupTokenBucket is a token bucket for a resource group.
@@ -44,6 +47,22 @@ type GroupTokenBucket struct {
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
 	GroupTokenBucketState `json:"state,omitempty"`
+}
+
+// Clone returns the deep copy of GroupTokenBucket
+func (gtb *GroupTokenBucket) Clone() *GroupTokenBucket {
+	if gtb == nil {
+		return nil
+	}
+	var settings *rmpb.TokenLimitSettings
+	if gtb.Settings != nil {
+		settings = proto.Clone(gtb.Settings).(*rmpb.TokenLimitSettings)
+	}
+	stateClone := *gtb.GroupTokenBucketState.Clone()
+	return &GroupTokenBucket{
+		Settings:              settings,
+		GroupTokenBucketState: stateClone,
+	}
 }
 
 func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
@@ -62,6 +81,7 @@ type TokenSlot struct {
 	// tokenCapacity is the number of tokens in the slot.
 	tokenCapacity     float64
 	lastTokenCapacity float64
+	lastReqTime       time.Time
 }
 
 // GroupTokenBucketState is the running state of TokenBucket.
@@ -75,15 +95,20 @@ type GroupTokenBucketState struct {
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
 	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
-	settingChanged bool
+	settingChanged      bool
+	lastCheckExpireSlot time.Time
 }
 
 // Clone returns the copy of GroupTokenBucketState
 func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
-	tokenSlots := make(map[uint64]*TokenSlot)
-	for id, tokens := range gts.tokenSlots {
-		tokenSlots[id] = tokens
+	var tokenSlots map[uint64]*TokenSlot
+	if gts.tokenSlots != nil {
+		tokenSlots = make(map[uint64]*TokenSlot)
+		for id, tokens := range gts.tokenSlots {
+			tokenSlots[id] = tokens
+		}
 	}
+
 	var lastUpdate *time.Time
 	if gts.LastUpdate != nil {
 		newLastUpdate := *gts.LastUpdate
@@ -95,6 +120,7 @@ func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 		Initialized:                gts.Initialized,
 		tokenSlots:                 tokenSlots,
 		clientConsumptionTokensSum: gts.clientConsumptionTokensSum,
+		lastCheckExpireSlot:        gts.lastCheckExpireSlot,
 	}
 }
 
@@ -119,16 +145,18 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 	clientUniqueID uint64,
 	settings *rmpb.TokenLimitSettings,
 	requiredToken, elapseTokens float64) {
+	now := time.Now()
 	slot, exist := gts.tokenSlots[clientUniqueID]
 	if !exist {
 		// Only slots that require a positive number will be considered alive,
 		// but still need to allocate the elapsed tokens as well.
 		if requiredToken != 0 {
-			slot = &TokenSlot{}
+			slot = &TokenSlot{lastReqTime: now}
 			gts.tokenSlots[clientUniqueID] = slot
 			gts.clientConsumptionTokensSum = 0
 		}
 	} else {
+		slot.lastReqTime = now
 		if gts.clientConsumptionTokensSum >= maxAssignTokens {
 			gts.clientConsumptionTokensSum = 0
 		}
@@ -139,6 +167,16 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		}
 	}
 
+	if time.Since(gts.lastCheckExpireSlot) >= slotExpireTimeout {
+		gts.lastCheckExpireSlot = now
+		for clientUniqueID, slot := range gts.tokenSlots {
+			if time.Since(slot.lastReqTime) >= slotExpireTimeout {
+				delete(gts.tokenSlots, clientUniqueID)
+				log.Info("delete resource group slot because expire", zap.Time("last-req-time", slot.lastReqTime),
+					zap.Any("expire timeout", slotExpireTimeout), zap.Any("del client id", clientUniqueID), zap.Any("len", len(gts.tokenSlots)))
+			}
+		}
+	}
 	if len(gts.tokenSlots) == 0 {
 		return
 	}
@@ -254,7 +292,7 @@ func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
 	if gtb.Settings.FillRate == 0 {
 		gtb.Settings.FillRate = defaultRefillRate
 	}
-	if gtb.Tokens < defaultInitialTokens {
+	if gtb.Tokens < defaultInitialTokens && gtb.Settings.BurstLimit > 0 {
 		gtb.Tokens = defaultInitialTokens
 	}
 	// init slot
@@ -264,6 +302,7 @@ func (gtb *GroupTokenBucket) init(now time.Time, clientID uint64) {
 		lastTokenCapacity: gtb.Tokens,
 	}
 	gtb.LastUpdate = &now
+	gtb.lastCheckExpireSlot = now
 	gtb.Initialized = true
 }
 
@@ -272,20 +311,22 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 	var elapseTokens float64
 	if !gtb.Initialized {
 		gtb.init(now, clientUniqueID)
-	} else if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
-		elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens
-		gtb.lastBurstTokens = 0
-		gtb.Tokens += elapseTokens
-		gtb.LastUpdate = &now
+	} else if burst := float64(burstLimit); burst > 0 {
+		if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
+			elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens
+			gtb.lastBurstTokens = 0
+			gtb.Tokens += elapseTokens
+		}
+		if gtb.Tokens > burst {
+			elapseTokens -= gtb.Tokens - burst
+			gtb.Tokens = burst
+		}
 	}
+	gtb.LastUpdate = &now
 	// Reloan when setting changed
 	if gtb.settingChanged && gtb.Tokens <= 0 {
 		elapseTokens = 0
 		gtb.resetLoan()
-	}
-	if burst := float64(burstLimit); burst > 0 && gtb.Tokens > burst {
-		elapseTokens -= gtb.Tokens - burst
-		gtb.Tokens = burst
 	}
 	// Balance each slots.
 	gtb.balanceSlotTokens(clientUniqueID, gtb.Settings, requiredToken, elapseTokens)

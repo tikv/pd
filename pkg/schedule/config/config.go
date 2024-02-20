@@ -79,6 +79,34 @@ var (
 	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
 )
 
+// The following consts are used to identify the config item that needs to set TTL.
+const (
+	// TTLConfigPrefix is the prefix of the config item that needs to set TTL.
+	TTLConfigPrefix = "/config/ttl"
+
+	MaxSnapshotCountKey            = "schedule.max-snapshot-count"
+	MaxMergeRegionSizeKey          = "schedule.max-merge-region-size"
+	MaxPendingPeerCountKey         = "schedule.max-pending-peer-count"
+	MaxMergeRegionKeysKey          = "schedule.max-merge-region-keys"
+	LeaderScheduleLimitKey         = "schedule.leader-schedule-limit"
+	RegionScheduleLimitKey         = "schedule.region-schedule-limit"
+	WitnessScheduleLimitKey        = "schedule.witness-schedule-limit"
+	ReplicaRescheduleLimitKey      = "schedule.replica-schedule-limit"
+	MergeScheduleLimitKey          = "schedule.merge-schedule-limit"
+	HotRegionScheduleLimitKey      = "schedule.hot-region-schedule-limit"
+	SchedulerMaxWaitingOperatorKey = "schedule.scheduler-max-waiting-operator"
+	EnableLocationReplacement      = "schedule.enable-location-replacement"
+	DefaultAddPeer                 = "default-add-peer"
+	DefaultRemovePeer              = "default-remove-peer"
+
+	// EnableTiKVSplitRegion is the option to enable tikv split region.
+	// it's related to schedule, but it's not an explicit config
+	EnableTiKVSplitRegion = "schedule.enable-tikv-split-region"
+
+	DefaultGCInterval = 5 * time.Second
+	DefaultTTL        = 5 * time.Minute
+)
+
 // StoreLimit is the default limit of adding peer and removing peer when putting stores.
 type StoreLimit struct {
 	mu syncutil.RWMutex
@@ -239,7 +267,7 @@ type ScheduleConfig struct {
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
-	SchedulersPayload map[string]interface{} `toml:"schedulers-payload" json:"schedulers-payload"`
+	SchedulersPayload map[string]any `toml:"schedulers-payload" json:"schedulers-payload"`
 
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
@@ -525,12 +553,11 @@ type SchedulerConfig struct {
 var DefaultSchedulers = SchedulerConfigs{
 	{Type: "balance-region"},
 	{Type: "balance-leader"},
-	{Type: "balance-witness"},
 	{Type: "hot-region"},
-	{Type: "transfer-witness-leader"},
+	{Type: "evict-slow-store"},
 }
 
-// IsDefaultScheduler checks whether the scheduler is enable by default.
+// IsDefaultScheduler checks whether the scheduler is enabled by default.
 func IsDefaultScheduler(typ string) bool {
 	for _, c := range DefaultSchedulers {
 		if typ == c.Type {

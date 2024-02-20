@@ -21,9 +21,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -34,6 +35,8 @@ const (
 	dialTimeout = 3 * time.Second
 	// ForwardMetadataKey is used to record the forwarded host of PD.
 	ForwardMetadataKey = "pd-forwarded-host"
+	// FollowerHandleMetadataKey is used to mark the permit of follower handle.
+	FollowerHandleMetadataKey = "pd-allow-follower-handle"
 )
 
 // GetClientConn returns a gRPC client connection.
@@ -73,21 +76,56 @@ func BuildForwardContext(ctx context.Context, addr string) context.Context {
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
+// GetForwardedHost returns the forwarded host in metadata.
+// Only used for test.
+func GetForwardedHost(ctx context.Context, f func(context.Context) (metadata.MD, bool)) string {
+	v, _ := getValueFromMetadata(ctx, ForwardMetadataKey, f)
+	return v
+}
+
+// BuildFollowerHandleContext creates a context with follower handle metadata information.
+// It is used in client side.
+func BuildFollowerHandleContext(ctx context.Context) context.Context {
+	md := metadata.Pairs(FollowerHandleMetadataKey, "")
+	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// IsFollowerHandleEnabled returns the forwarded host in metadata.
+// Only used for test.
+func IsFollowerHandleEnabled(ctx context.Context, f func(context.Context) (metadata.MD, bool)) bool {
+	_, ok := getValueFromMetadata(ctx, FollowerHandleMetadataKey, f)
+	return ok
+}
+
+func getValueFromMetadata(ctx context.Context, key string, f func(context.Context) (metadata.MD, bool)) (string, bool) {
+	md, ok := f(ctx)
+	if !ok {
+		return "", false
+	}
+	vs, ok := md[key]
+	if !ok {
+		return "", false
+	}
+	return vs[0], true
+}
+
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.
 // Returns the old one if's already existed in the clientConns; otherwise creates a new one and returns it.
-func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tlsutil.TLSConfig, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
+func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tls.Config, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
 	conn, ok := clientConns.Load(addr)
 	if ok {
 		// TODO: check the connection state.
 		return conn.(*grpc.ClientConn), nil
 	}
-	tlsConfig, err := tlsCfg.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
 	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	cc, err := GetClientConn(dCtx, addr, tlsConfig, opt...)
+	cc, err := GetClientConn(dCtx, addr, tlsCfg, opt...)
+	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
+		if val, ok := val.(string); ok && val == addr {
+			cc = nil
+			err = errors.Errorf("unreachable network")
+		}
+	})
 	if err != nil {
 		return nil, err
 	}

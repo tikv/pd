@@ -82,7 +82,7 @@ func allrev[T Item[T]](t *BTreeG[T]) (out []T) {
 	return
 }
 
-func assertEq(t *testing.T, desc string, got, need interface{}) {
+func assertEq(t *testing.T, desc string, got, need any) {
 	if !reflect.DeepEqual(need, got) {
 		t.Fatalf("%s failed: need %T %v, but got %T %v", desc, need, need, got, got)
 	}
