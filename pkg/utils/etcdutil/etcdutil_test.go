@@ -285,9 +285,11 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	// Create a proxy to etcd1.
 	proxyAddr := tempurl.Alloc()
 	var enableDiscard atomic.Bool
-	go proxyWithDiscard(re, cfg1.LCUrls[0].String(), proxyAddr, &enableDiscard)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go proxyWithDiscard(ctx, re, cfg1.LCUrls[0].String(), proxyAddr, &enableDiscard)
 
-	// Create a etcd client with etcd1 as endpoint.
+	// Create an etcd client with etcd1 as endpoint.
 	urls, err := types.NewURLs([]string{proxyAddr})
 	re.NoError(err)
 	client1, err := CreateEtcdClient(nil, urls)
@@ -307,30 +309,48 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	return err
 }
 
-func proxyWithDiscard(re *require.Assertions, server, proxy string, enableDiscard *atomic.Bool) {
+func proxyWithDiscard(ctx context.Context, re *require.Assertions, server, proxy string, enableDiscard *atomic.Bool) {
 	server = strings.TrimPrefix(server, "http://")
 	proxy = strings.TrimPrefix(proxy, "http://")
 	l, err := net.Listen("tcp", proxy)
 	re.NoError(err)
+	defer l.Close()
 	for {
-		connect, err := l.Accept()
-		re.NoError(err)
-		go func(connect net.Conn) {
-			serverConnect, err := net.Dial("tcp", server)
-			re.NoError(err)
-			pipe(connect, serverConnect, enableDiscard)
-		}(connect)
+		type accepted struct {
+			conn net.Conn
+			err  error
+		}
+		accept := make(chan accepted, 1)
+		go func() {
+			// closed by `l.Close()`
+			conn, err := l.Accept()
+			accept <- accepted{conn, err}
+		}()
+
+		select {
+		case <-ctx.Done():
+			return
+		case a := <-accept:
+			if a.err != nil {
+				return
+			}
+			go func(connect net.Conn) {
+				serverConnect, err := net.DialTimeout("tcp", server, 3*time.Second)
+				re.NoError(err)
+				pipe(ctx, connect, serverConnect, enableDiscard)
+			}(a.conn)
+		}
 	}
 }
 
-func pipe(src net.Conn, dst net.Conn, enableDiscard *atomic.Bool) {
+func pipe(ctx context.Context, src net.Conn, dst net.Conn, enableDiscard *atomic.Bool) {
 	errChan := make(chan error, 1)
 	go func() {
-		err := ioCopy(src, dst, enableDiscard)
+		err := ioCopy(ctx, src, dst, enableDiscard)
 		errChan <- err
 	}()
 	go func() {
-		err := ioCopy(dst, src, enableDiscard)
+		err := ioCopy(ctx, dst, src, enableDiscard)
 		errChan <- err
 	}()
 	<-errChan
@@ -338,28 +358,31 @@ func pipe(src net.Conn, dst net.Conn, enableDiscard *atomic.Bool) {
 	src.Close()
 }
 
-func ioCopy(dst io.Writer, src io.Reader, enableDiscard *atomic.Bool) (err error) {
+func ioCopy(ctx context.Context, dst io.Writer, src io.Reader, enableDiscard *atomic.Bool) error {
 	buffer := make([]byte, 32*1024)
 	for {
-		if enableDiscard.Load() {
-			io.Copy(io.Discard, src)
-		}
-		readNum, errRead := src.Read(buffer)
-		if readNum > 0 {
-			writeNum, errWrite := dst.Write(buffer[:readNum])
-			if errWrite != nil {
-				return errWrite
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+			if enableDiscard.Load() {
+				io.Copy(io.Discard, src)
 			}
-			if readNum != writeNum {
-				return io.ErrShortWrite
+			readNum, errRead := src.Read(buffer)
+			if readNum > 0 {
+				writeNum, errWrite := dst.Write(buffer[:readNum])
+				if errWrite != nil {
+					return errWrite
+				}
+				if readNum != writeNum {
+					return io.ErrShortWrite
+				}
 			}
-		}
-		if errRead != nil {
-			err = errRead
-			break
+			if errRead != nil {
+				return errRead
+			}
 		}
 	}
-	return err
 }
 
 type loopWatcherTestSuite struct {

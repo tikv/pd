@@ -33,6 +33,7 @@ func TestHealth(t *testing.T) {
 	defer cancel()
 	tc, err := pdTests.NewTestCluster(ctx, 3)
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
@@ -40,7 +41,6 @@ func TestHealth(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 	pdAddr := tc.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
-	defer tc.Destroy()
 
 	client := tc.GetEtcdClient()
 	members, err := cluster.GetMembers(client)

@@ -70,6 +70,7 @@ const (
 	accelerateScheduleInBatchName           = "AccelerateScheduleInBatch"
 	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
+	getMicroServicePrimaryName              = "GetMicroServicePrimary"
 	getPDVersionName                        = "GetPDVersion"
 	resetTSName                             = "ResetTS"
 	resetBaseAllocIDName                    = "ResetBaseAllocID"

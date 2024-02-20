@@ -36,9 +36,7 @@ var (
 
 func createConcurrencyFeedback() (*concurrencyLimiter, func(s *bbrStatus)) {
 	cl := newConcurrencyLimiter(uint64(inf))
-	return cl, func(s *bbrStatus) {
-		cl.tryToSetLimit(uint64(s.getRDP()))
-	}
+	return cl, bbrConcurrencyFeedBackFn(cl)
 }
 
 func TestBBRMaxPassStat(t *testing.T) {
@@ -129,6 +127,127 @@ func TestBBRMinDuration(t *testing.T) {
 	re.Greater(int64(24000), bbr.getMinDuration())
 }
 
+func TestDurationGreaterThanWindowSize1(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	cl, feedback := createConcurrencyFeedback()
+	bbr := newBBR(cfg, feedback)
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(2)
+		for j := 0; j < 2; j++ {
+			go func() {
+				defer wg.Done()
+				if !cl.allow() {
+					return
+				}
+				done := bbr.process()
+				time.Sleep(windowSizeTest * 2)
+				done()
+				cl.release()
+			}()
+		}
+		time.Sleep(bucketDuration)
+	}
+	re.Equal(infDuration, bbr.getMinDuration())
+	re.Equal(infDuration/100000, bbr.bbrStatus.getRDP())
+	re.Equal(infDuration, bbr.bbrStatus.getMinDuration())
+	// (1 + 5 + 1) * 2
+	re.GreaterOrEqual(14, int(cl.getLimit()))
+	wg.Wait()
+	re.GreaterOrEqual(14, int(cl.getLimit()))
+}
+
+func TestDurationGreaterThanWindowSize2(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	cl, feedback := createConcurrencyFeedback()
+	bbr := newBBR(cfg, feedback)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if !cl.allow() {
+			return
+		}
+		done := bbr.process()
+		time.Sleep(windowSizeTest/2 + bucketDuration)
+		done()
+		cl.release()
+	}()
+	wg.Wait()
+	cl.allow()
+	done := bbr.process()
+	done()
+	cl.release()
+	re.LessOrEqual(int64((windowSizeTest/2+bucketDuration)/time.Microsecond), bbr.getMinDuration())
+	re.Greater(infDuration, bbr.getMinDuration())
+	re.Equal(int64(6), bbr.bbrStatus.getRDP())
+	re.LessOrEqual(int64((windowSizeTest/2+bucketDuration)/time.Microsecond), bbr.bbrStatus.getMinDuration())
+	re.Greater(infDuration, bbr.bbrStatus.getMinDuration())
+	re.Equal(uint64(6), cl.getLimit())
+}
+
+// TestDurationGreaterThanWindowSize3 is used to test this case:
+// Handle duration is longer than window size and query interval is also longer than window size.
+func TestDurationGreaterThanWindowSize3(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	cl, feedback := createConcurrencyFeedback()
+	opts := []bbrOption{
+		WithWindow(time.Second / 10),
+		WithBucket(bucketNumTest),
+	}
+	cfg := newConfig(opts...)
+	bbr := newBBR(cfg, feedback)
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if !cl.allow() {
+				return
+			}
+			done := bbr.process()
+			time.Sleep(time.Second / 100 * 15)
+			done()
+			cl.release()
+		}()
+		time.Sleep(time.Second / 100 * 11)
+	}
+	re.LessOrEqual(int64((time.Second/100*15)/time.Microsecond), bbr.getMinDuration())
+	re.Greater(infDuration, bbr.getMinDuration())
+	re.Equal(int64(15), bbr.bbrStatus.getRDP())
+	re.LessOrEqual(int64((time.Second/100*15)/time.Microsecond), bbr.bbrStatus.getMinDuration())
+	re.Greater(infDuration, bbr.bbrStatus.getMinDuration())
+}
+
+func TestDurationGreaterThanWindowSize4(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	cl, feedback := createConcurrencyFeedback()
+	opts := []bbrOption{
+		WithWindow(time.Second / 10),
+		WithBucket(bucketNumTest),
+	}
+	cfg := newConfig(opts...)
+	bbr := newBBR(cfg, feedback)
+	for i := 0; i < 10; i++ {
+		if !cl.allow() {
+			continue
+		}
+		done := bbr.process()
+		time.Sleep(time.Second / 100 * 12)
+		done()
+		cl.release()
+	}
+	re.LessOrEqual(int64((time.Second/100*12)/time.Microsecond), bbr.getMinDuration())
+	re.Greater(infDuration, bbr.getMinDuration())
+	re.Equal(int64(12), bbr.bbrStatus.getRDP())
+	re.LessOrEqual(int64((time.Second/100*12)/time.Microsecond), bbr.bbrStatus.getMinDuration())
+	re.Greater(infDuration, bbr.bbrStatus.getMinDuration())
+}
+
 func TestRDP(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
@@ -187,8 +306,9 @@ func TestFullStatus(t *testing.T) {
 		time.Sleep(bucketDuration)
 	}
 	maxInFlight := bbr.bbrStatus.getRDP()
-	re.LessOrEqual(int64(6), maxInFlight)
-	re.GreaterOrEqual(int64(10), maxInFlight)
+	// local test result is 12, soften conditions in the CI environment
+	re.LessOrEqual(int64(10), maxInFlight)
+	re.GreaterOrEqual(int64(14), maxInFlight)
 	re.Equal(cl.limit, uint64(maxInFlight))
 	re.LessOrEqual(int64(200000), bbr.bbrStatus.getMinDuration())
 	re.GreaterOrEqual(int64(220000), bbr.bbrStatus.getMinDuration())

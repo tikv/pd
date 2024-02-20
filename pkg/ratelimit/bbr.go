@@ -124,9 +124,10 @@ type feedbackOpt func(*bbrStatus)
 //     for a consecutive number of time buckets, it indicates the API is reaching its maximum concurrency.
 //  6. According the maxinum pass request and minimum duration, calculate RDP and use it as conccurency limit.
 type bbr struct {
-	cfg             *bbrConfig
-	bucketPerSecond int64
-	bucketDuration  time.Duration
+	cfg                 *bbrConfig
+	bucketPerSecond     int64
+	bucketDuration      time.Duration
+	windowMicroDuration int64
 
 	// statistics
 	passStat         window.RollingCounter
@@ -151,14 +152,15 @@ func newBBR(cfg *bbrConfig, feedbacks ...feedbackOpt) *bbr {
 	onProcessingStat := window.NewRollingCounter(window.RollingCounterOpts{Size: cfg.Bucket, BucketDuration: bucketDuration})
 
 	limiter := &bbr{
-		cfg:              cfg,
-		feedbacks:        feedbacks,
-		bucketDuration:   bucketDuration,
-		bucketPerSecond:  int64(time.Second / bucketDuration),
-		passStat:         passStat,
-		durationStat:     durationStat,
-		onProcessingStat: onProcessingStat,
-		bbrStatus:        &bbrStatus{},
+		cfg:                 cfg,
+		feedbacks:           feedbacks,
+		bucketDuration:      bucketDuration,
+		windowMicroDuration: int64(cfg.Window / time.Microsecond),
+		bucketPerSecond:     int64(time.Second / bucketDuration),
+		passStat:            passStat,
+		durationStat:        durationStat,
+		onProcessingStat:    onProcessingStat,
+		bbrStatus:           &bbrStatus{},
 	}
 	limiter.bbrStatus.storeRDP(inf)
 	return limiter
@@ -190,7 +192,7 @@ func (l *bbr) getMaxPass() int64 {
 	}
 	rawMaxPass := int64(l.passStat.Reduce(func(iterator window.Iterator) float64 {
 		var result = 0.0
-		for i := 1; iterator.Next() && i < l.cfg.Bucket; i++ {
+		for i := 0; iterator.Next() && i < l.cfg.Bucket; i++ {
 			bucket := iterator.Bucket()
 			count := 0.0
 			for _, p := range bucket.Points {
@@ -224,7 +226,7 @@ func (l *bbr) getMinDuration() int64 {
 	}
 	rawMinRT := int64(math.Ceil(l.durationStat.Reduce(func(iterator window.Iterator) float64 {
 		var result = float64(infDuration)
-		for i := 1; iterator.Next() && i < l.cfg.Bucket; i++ {
+		for i := 0; iterator.Next() && i < l.cfg.Bucket; i++ {
 			bucket := iterator.Bucket()
 			if len(bucket.Points) == 0 {
 				continue
@@ -239,10 +241,10 @@ func (l *bbr) getMinDuration() int64 {
 		}
 		return result
 	})))
-	// if rtStat is empty, rawMinRT will be zero.
 	if rawMinRT < 1 {
 		rawMinRT = infDuration
 	}
+	// If rtStat is empty, rawMinRT will be infDuration and we don't need to save cache.
 	if rawMinRT == infDuration {
 		return rawMinRT
 	}
@@ -322,6 +324,13 @@ func (l *bbr) checkFullStatus() {
 		for _, fd := range l.feedbacks {
 			fd(l.bbrStatus)
 		}
+	} else if dur != infDuration && dur >= l.windowMicroDuration {
+		rdp = int64(math.Floor(float64(1*dur*l.bucketPerSecond)/1e6) + 0.5)
+		l.bbrStatus.storeRDP(rdp)
+		l.bbrStatus.storeMinDuration(dur)
+		for _, fd := range l.feedbacks {
+			fd(l.bbrStatus)
+		}
 	}
 	l.lastUpdateTime.Store(time.Now())
 }
@@ -336,5 +345,16 @@ func (l *bbr) process() DoneFunc {
 		}
 		l.onProcessingStat.Add(-1)
 		l.passStat.Add(1)
+	}
+}
+
+func bbrConcurrencyFeedBackFn(concurrency *concurrencyLimiter) func(s *bbrStatus) {
+	return func(s *bbrStatus) {
+		if s.getMinDuration() == infDuration {
+			current := concurrency.getCurrent()
+			concurrency.tryToSetLimit(current)
+		} else {
+			concurrency.tryToSetLimit(uint64(s.getRDP()))
+		}
 	}
 }
