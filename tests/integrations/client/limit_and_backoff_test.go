@@ -187,7 +187,7 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 		time.Sleep(250 * time.Millisecond)
 		wg.Add(1)
 		go func() {
-			res, err = suite.rawClient.StoreHeartbeat(suite.ctx, in)
+			res, err := suite.rawClient.StoreHeartbeat(suite.ctx, in)
 			if err == nil && res.Header.Error != nil {
 				atomic.AddInt32(&fail, 1)
 			} else {
@@ -206,7 +206,7 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 		time.Sleep(250 * time.Millisecond)
 		wg.Add(1)
 		go func() {
-			res, err = suite.rawClient.StoreHeartbeat(suite.ctx, in)
+			res, err := suite.rawClient.StoreHeartbeat(suite.ctx, in)
 			if err == nil && res.Header.Error != nil {
 				breakFlag.Store(true)
 			}
@@ -220,7 +220,7 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
 		go func() {
-			res, err = suite.rawClient.StoreHeartbeat(suite.ctx, in)
+			res, err := suite.rawClient.StoreHeartbeat(suite.ctx, in)
 			if err == nil && res.Header.Error != nil {
 				atomic.AddInt32(&fail, 1)
 			} else {
