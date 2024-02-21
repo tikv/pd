@@ -286,7 +286,8 @@ func TestWithBBR(t *testing.T) {
 	re.NotEqual(0, status&BBRDeleted)
 
 	re.Nil(limiter.getBBR())
-	re.Nil(limiter.getConcurrencyLimiter())
+	// for metrics, concurrency limiter will not be deleted.
+	re.NotNil(limiter.getConcurrencyLimiter())
 
 	// make BBR full.
 	for i := 0; i < 14; i++ {
