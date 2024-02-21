@@ -129,14 +129,7 @@ func (l *limiter) updateBBRConfig(enable bool, o ...bbrOption) UpdateStatus {
 	if l.concurrency == nil {
 		l.concurrency = newConcurrencyLimiter(uint64(inf))
 	}
-	fb := func(s *bbrStatus) {
-		if s.getMinDuration() == infDuration {
-			current := l.concurrency.getCurrent()
-			l.concurrency.tryToSetLimit(current)
-		} else {
-			l.concurrency.tryToSetLimit(uint64(s.getRDP()))
-		}
-	}
+	fb := bbrConcurrencyFeedBackFn(l.concurrency)
 	l.bbr = newBBR(newConfig(o...), fb)
 	return BBRChanged
 }

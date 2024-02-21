@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,8 +29,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
@@ -60,10 +62,10 @@ func TestLimitTestSuite(t *testing.T) {
 func (suite *limitTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.ctx, suite.cleanup = context.WithCancel(context.Background())
-	cluster, err := tests.NewTestCluster(suite.ctx, 3)
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
-	suite.NotEmpty(cluster.WaitLeader())
+	cluster, err := tests.NewTestCluster(suite.ctx, 1)
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
 	suite.cluster = cluster
 
 	leader := suite.cluster.GetLeaderServer()
@@ -73,10 +75,10 @@ func (suite *limitTestSuite) SetupSuite() {
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	suite.client = setupCli(re, suite.ctx, leader.GetServer().GetEndpoints())
 
-	suite.bootstrapServer(newHeader(leader.GetServer()), grpcPDClient)
+	suite.bootstrapServer(re, newHeader(leader.GetServer()), grpcPDClient)
 }
 
-func (suite *limitTestSuite) bootstrapServer(header *pdpb.RequestHeader, client pdpb.PDClient) {
+func (suite *limitTestSuite) bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client pdpb.PDClient) {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
@@ -92,8 +94,8 @@ func (suite *limitTestSuite) bootstrapServer(header *pdpb.RequestHeader, client 
 		Region: region,
 	}
 	resp, err := client.Bootstrap(context.Background(), req)
-	suite.NoError(err)
-	suite.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	re.NoError(err)
+	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
 	regionID = regionIDAllocator.alloc()
 	region = &metapb.Region{
@@ -110,12 +112,12 @@ func (suite *limitTestSuite) bootstrapServer(header *pdpb.RequestHeader, client 
 		Leader: peers[0],
 	}
 	regionHeartbeat, err := client.RegionHeartbeat(suite.ctx)
-	suite.NoError(err)
+	re.NoError(err)
 	err = regionHeartbeat.Send(regionReq)
-	suite.NoError(err)
-	testutil.Eventually(suite.Require(), func() bool {
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"))
-		suite.NoError(err)
+		re.NoError(err)
 		if r == nil {
 			return false
 		}
@@ -140,29 +142,33 @@ func (suite *limitTestSuite) getHeader() *pdpb.RequestHeader {
 
 func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 	re := suite.Require()
-	input := map[string]interface{}{
+	input := map[string]any{
 		"enable-grpc-rate-limit": "true",
 	}
 	data, err := json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	httpReq, _ := http.NewRequest(http.MethodPost, suite.getLeader().GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
 	resp, err := dialClient.Do(httpReq)
-	suite.NoError(err)
+	re.NoError(err)
 	resp.Body.Close()
-	suite.Equal(suite.getLeader().GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled(), true)
-	input = make(map[string]interface{})
+	re.True(suite.getLeader().GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled())
+	input = make(map[string]any)
 	input["label"] = "StoreHeartbeat"
 	input["bbr"] = true
 	jsonBody, err := json.Marshal(input)
-	suite.NoError(err)
+	re.NoError(err)
 	httpReq, _ = http.NewRequest(http.MethodPost, suite.getLeader().GetAddr()+"/pd/api/v1/service-middleware/config/grpc-rate-limit", bytes.NewBuffer(jsonBody))
 	resp, err = dialClient.Do(httpReq)
-	suite.NoError(err)
-	_, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode)
+	content, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	suite.NoError(err)
-	suite.Equal(resp.StatusCode, http.StatusOK)
-	suite.True(suite.getLeader().GetServiceMiddlewarePersistOptions().GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].EnableBBR)
+	re.NoError(err)
+	r := &rateLimitResult{}
+	err = json.Unmarshal(content, r)
+	re.NoError(err)
+	re.Equal("BBR option is enabled.", r.BBRUpdateFlag)
+	re.True(suite.getLeader().GetServiceMiddlewarePersistOptions().GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].EnableBBR)
 
 	in := &pdpb.StoreHeartbeatRequest{
 		Header: suite.getHeader(),
@@ -191,7 +197,7 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 		}()
 	}
 	wg.Wait()
-	re.Equal(success, int32(50))
+	re.Equal(int32(50), success)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/slowHeartbeat", `return()`))
 	var breakFlag atomic.Bool
@@ -212,7 +218,6 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 	success = int32(0)
 	fail = int32(0)
 	for i := 0; i < 20; i++ {
-		time.Sleep(250 * time.Millisecond)
 		wg.Add(1)
 		go func() {
 			res, err = suite.rawClient.StoreHeartbeat(suite.ctx, in)
@@ -229,5 +234,12 @@ func (suite *limitTestSuite) TestLimitStoreHeartbeart() {
 	re.Greater(success, int32(5))
 	re.Less(fail, int32(15))
 	re.Greater(fail, int32(5))
-	suite.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/slowHeartbeat"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/slowHeartbeat"))
+}
+
+type rateLimitResult struct {
+	ConcurrencyUpdatedFlag string                               `json:"concurrency"`
+	QPSRateUpdatedFlag     string                               `json:"qps"`
+	BBRUpdateFlag          string                               `json:"BBR"`
+	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"limiter-config"`
 }

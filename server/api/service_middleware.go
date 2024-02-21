@@ -312,11 +312,11 @@ func getBBRSetting(input map[string]any, cfg *ratelimit.DimensionConfig) bool {
 	return ok
 }
 
-func getDimensionConfig(input map[string]interface{}, cfg *ratelimit.DimensionConfig) (bool, bool, bool) {
-	okc := getConcurrencySetting(input, cfg)
-	okq := getQPSSetting(input, cfg)
-	okb := getBBRSetting(input, cfg)
-	return okc, okq, okb
+func getDimensionConfig(input map[string]any, cfg *ratelimit.DimensionConfig) (okc, okq, okb bool) {
+	okc = getConcurrencySetting(input, cfg)
+	okq = getQPSSetting(input, cfg)
+	okb = getBBRSetting(input, cfg)
+	return
 }
 
 type rateLimitResult struct {
