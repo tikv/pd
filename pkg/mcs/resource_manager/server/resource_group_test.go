@@ -29,7 +29,7 @@ func TestPatchResourceGroup(t *testing.T) {
 		re.NoError(err)
 		err = rg.PatchSettings(patch)
 		re.NoError(err)
-		res, err := json.Marshal(rg.Copy())
+		res, err := json.Marshal(rg.Clone())
 		re.NoError(err)
 		re.Equal(ca.expectJSONString, string(res))
 	}

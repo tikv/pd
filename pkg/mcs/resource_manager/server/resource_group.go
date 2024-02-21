@@ -42,6 +42,20 @@ type RequestUnitSettings struct {
 	RU *GroupTokenBucket `json:"r_u,omitempty"`
 }
 
+// Clone returns a deep copy of the RequestUnitSettings.
+func (rus *RequestUnitSettings) Clone() *RequestUnitSettings {
+	if rus == nil {
+		return nil
+	}
+	var ru *GroupTokenBucket
+	if rus.RU != nil {
+		ru = rus.RU.Clone()
+	}
+	return &RequestUnitSettings{
+		RU: ru,
+	}
+}
+
 // NewRequestUnitSettings creates a new RequestUnitSettings with the given token bucket.
 func NewRequestUnitSettings(tokenBucket *rmpb.TokenBucket) *RequestUnitSettings {
 	return &RequestUnitSettings{
@@ -58,21 +72,17 @@ func (rg *ResourceGroup) String() string {
 	return string(res)
 }
 
-// Copy copies the resource group.
-func (rg *ResourceGroup) Copy() *ResourceGroup {
-	// TODO: use a better way to copy
+// Clone copies the resource group.
+func (rg *ResourceGroup) Clone() *ResourceGroup {
 	rg.RLock()
 	defer rg.RUnlock()
-	res, err := json.Marshal(rg)
-	if err != nil {
-		panic(err)
+	newRG := &ResourceGroup{
+		Name:       rg.Name,
+		Mode:       rg.Mode,
+		Priority:   rg.Priority,
+		RUSettings: rg.RUSettings.Clone(),
 	}
-	var newRG ResourceGroup
-	err = json.Unmarshal(res, &newRG)
-	if err != nil {
-		panic(err)
-	}
-	return &newRG
+	return newRG
 }
 
 func (rg *ResourceGroup) getRUToken() float64 {
