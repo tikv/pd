@@ -17,14 +17,17 @@ package region_test
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -268,4 +271,49 @@ func TestRegionNoLeader(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 	_, err = tests.ExecuteCommand(cmd, "-u", url, "region", "100")
 	re.NoError(err)
+}
+
+type regionTestSuite struct {
+	suite.Suite
+	env *pdTests.SchedulingTestEnvironment
+}
+
+func TestRegionTestSuite(t *testing.T) {
+	suite.Run(t, new(regionTestSuite))
+}
+
+func (suite *regionTestSuite) SetupSuite() {
+	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *regionTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *regionTestSuite) TestRegionRules() {
+	suite.env.RunTestInTwoModes(suite.checkRegionRules)
+}
+
+func (suite *regionTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	cmd := ctl.GetRootCmd()
+
+	storeID, regionID := uint64(1), uint64(2)
+	store := &metapb.Store{
+		Id:    storeID,
+		State: metapb.StoreState_Up,
+	}
+	pdTests.MustPutStore(re, cluster, store)
+	pdTests.MustPutRegion(re, cluster, regionID, storeID, []byte{}, []byte{})
+
+	args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--region=" + strconv.Itoa(int(regionID)), "--detail"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	fit := &placement.RegionFit{}
+	re.NoError(json.Unmarshal(output, fit))
+	re.Len(fit.RuleFits, 1)
+	re.Equal(placement.DefaultGroupID, fit.RuleFits[0].Rule.GroupID)
+	re.Equal(placement.DefaultRuleID, fit.RuleFits[0].Rule.ID)
 }
