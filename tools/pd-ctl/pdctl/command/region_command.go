@@ -37,6 +37,8 @@ var (
 	regionsCheckPrefix      = "pd/api/v1/regions/check"
 	regionsWriteFlowPrefix  = "pd/api/v1/regions/writeflow"
 	regionsReadFlowPrefix   = "pd/api/v1/regions/readflow"
+	regionsWriteQueryPrefix = "pd/api/v1/regions/writequery"
+	regionsReadQueryPrefix  = "pd/api/v1/regions/readquery"
 	regionsConfVerPrefix    = "pd/api/v1/regions/confver"
 	regionsVersionPrefix    = "pd/api/v1/regions/version"
 	regionsSizePrefix       = "pd/api/v1/regions/size"
@@ -65,21 +67,37 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionsByKeysCommand())
 	r.AddCommand(NewRangesWithRangeHolesCommand())
 
-	topRead := &cobra.Command{
-		Use:   `topread <limit> [--jq="<query string>"]`,
+	topReadFlow := &cobra.Command{
+		Use:   `topread byte <limit> [--jq="<query string>"]`,
 		Short: "show regions with top read flow",
 		Run:   showRegionsTopCommand(regionsReadFlowPrefix),
 	}
-	topRead.Flags().String("jq", "", "jq query")
-	r.AddCommand(topRead)
+	topReadFlow.Flags().String("jq", "", "jq query")
+	r.AddCommand(topReadFlow)
 
-	topWrite := &cobra.Command{
-		Use:   `topwrite <limit> [--jq="<query string>"]`,
+	topWriteFlow := &cobra.Command{
+		Use:   `topwrite byte <limit> [--jq="<query string>"]`,
 		Short: "show regions with top write flow",
 		Run:   showRegionsTopCommand(regionsWriteFlowPrefix),
 	}
-	topWrite.Flags().String("jq", "", "jq query")
-	r.AddCommand(topWrite)
+	topWriteFlow.Flags().String("jq", "", "jq query")
+	r.AddCommand(topWriteFlow)
+
+	topReadQuery := &cobra.Command{
+		Use:   `topread query <limit> [--jq="<query string>"]`,
+		Short: "show regions with top read flow",
+		Run:   showRegionsTopCommand(regionsReadQueryPrefix),
+	}
+	topReadQuery.Flags().String("jq", "", "jq query")
+	r.AddCommand(topReadQuery)
+
+	topWriteQuery := &cobra.Command{
+		Use:   `topwrite query <limit> [--jq="<query string>"]`,
+		Short: "show regions with top write flow",
+		Run:   showRegionsTopCommand(regionsWriteQueryPrefix),
+	}
+	topWriteQuery.Flags().String("jq", "", "jq query")
+	r.AddCommand(topWriteQuery)
 
 	topConfVer := &cobra.Command{
 		Use:   `topconfver <limit> [--jq="<query string>"]`,
