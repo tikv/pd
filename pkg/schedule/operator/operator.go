@@ -99,6 +99,10 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 	for _, v := range steps {
 		maxDuration += v.Timeout(approximateSize).Seconds()
 	}
+	if desc == "scatter-region" {
+		// set an hour
+		maxDuration = 3600
+	}
 	return &Operator{
 		desc:            desc,
 		brief:           brief,
