@@ -15,12 +15,12 @@
 package cluster
 
 import (
-	"go.uber.org/zap"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
 type prepareChecker struct {
