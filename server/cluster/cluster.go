@@ -1069,10 +1069,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 	}
 
-	if !c.IsPrepared() && isNew {
-		c.coordinator.prepareChecker.collect(region)
-	}
-
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
