@@ -1811,6 +1811,10 @@ func (s *Server) campaignLeader() {
 			})
 
 			etcdLeader := s.member.GetEtcdLeader()
+			// `GetEtcdLeader` may still remain the same even after the etcd leader has changed,
+			// lease keepalive goroutine will make sure under this circumstance, the PD leader
+			// still steps down as soon as possible. See `lease.keepAliveWorker` for more details.
+			// Ref: https://github.com/tikv/pd/issues/7780
 			if etcdLeader != s.member.ID() {
 				log.Info("etcd leader changed, resigns pd leadership", zap.String("old-pd-leader-name", s.Name()))
 				return
