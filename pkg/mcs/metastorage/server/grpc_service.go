@@ -187,8 +187,9 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 		Count:  res.Count,
 		More:   res.More,
 	}
-	for _, kv := range res.Kvs {
-		resp.Kvs = append(resp.Kvs, &meta_storagepb.KeyValue{Key: kv.Key, Value: kv.Value})
+	resp.Kvs = make([]*meta_storagepb.KeyValue, len(res.Kvs))
+	for i, kv := range res.Kvs {
+		resp.Kvs[i] = &meta_storagepb.KeyValue{Key: kv.Key, Value: kv.Value}
 	}
 
 	return resp, nil
@@ -230,7 +231,7 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 	return resp, nil
 }
 
-// Delete deletes the key-value pair into meta storage.
+// Delete deletes the key-value pair from meta storage.
 func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest) (*meta_storagepb.DeleteResponse, error) {
 	if err := s.checkServing(); err != nil {
 		return nil, err
@@ -256,11 +257,9 @@ func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest)
 	resp := &meta_storagepb.DeleteResponse{
 		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: revision},
 	}
-	if res.PrevKvs != nil {
-		resp.PrevKvs = make([]*meta_storagepb.KeyValue, len(res.PrevKvs))
-		for i, kv := range res.PrevKvs {
-			resp.PrevKvs[i] = &meta_storagepb.KeyValue{Key: kv.Key, Value: kv.Value}
-		}
+	resp.PrevKvs = make([]*meta_storagepb.KeyValue, len(res.PrevKvs))
+	for i, kv := range res.PrevKvs {
+		resp.PrevKvs[i] = &meta_storagepb.KeyValue{Key: kv.Key, Value: kv.Value}
 	}
 	return resp, nil
 }
