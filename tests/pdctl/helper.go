@@ -125,6 +125,7 @@ func MustPutRegion(re *require.Assertions, cluster *tests.TestCluster, regionID,
 		Peers:       []*metapb.Peer{leader},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}
+	opts = append(opts, core.SetSource(core.Heartbeat))
 	r := core.NewRegionInfo(metaRegion, leader, opts...)
 	err := cluster.HandleRegionHeartbeat(r)
 	re.NoError(err)
