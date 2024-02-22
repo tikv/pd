@@ -42,8 +42,9 @@ const (
 	httpsScheme          = "https"
 	networkErrorStatus   = "network error"
 
-	defaultMembersInfoUpdateInterval = time.Minute
-	defaultTimeout                   = 30 * time.Second
+	// The value of defaultTimeout is the maximum value.
+	// If you want to shorten timeout, declare it when creating the client
+	defaultTimeout = 300 * time.Second
 )
 
 // respHandleFunc is the function to handle the HTTP response.
@@ -77,7 +78,7 @@ func newClientInner(ctx context.Context, cancel context.CancelFunc, source strin
 func (ci *clientInner) init(sd pd.ServiceDiscovery) {
 	// Init the HTTP client if it's not configured.
 	if ci.cli == nil {
-		ci.cli = &http.Client{Timeout: defaultTimeout}
+		ci.cli = &http.Client{}
 		if ci.tlsConf != nil {
 			transport := http.DefaultTransport.(*http.Transport).Clone()
 			transport.TLSClientConfig = ci.tlsConf
@@ -172,6 +173,7 @@ func (ci *clientInner) doRequest(
 		body        = reqInfo.body
 		res         = reqInfo.res
 		respHandler = reqInfo.respHandler
+		cancel      context.CancelFunc
 	)
 	logFields := []zap.Field{
 		zap.String("source", source),
@@ -181,6 +183,8 @@ func (ci *clientInner) doRequest(
 		zap.String("caller-id", callerID),
 	}
 	log.Debug("[pd] request the http url", logFields...)
+	ctx, cancel = context.WithTimeout(ctx, reqInfo.timeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(body))
 	if err != nil {
 		log.Error("[pd] create http request failed", append(logFields, zap.Error(err))...)
@@ -244,6 +248,7 @@ type client struct {
 	callerID    string
 	respHandler respHandleFunc
 	bo          *retry.Backoffer
+	timeout     time.Duration
 }
 
 // ClientOption configures the HTTP client.
@@ -253,6 +258,13 @@ type ClientOption func(c *client)
 func WithHTTPClient(cli *http.Client) ClientOption {
 	return func(c *client) {
 		c.inner.cli = cli
+	}
+}
+
+// WithTimeout configures the client with the given timeout config.
+func WithTimeout(dur time.Duration) ClientOption {
+	return func(c *client) {
+		c.timeout = dur
 	}
 }
 
@@ -362,7 +374,8 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 	return c.inner.requestWithRetry(ctx, reqInfo.
 		WithCallerID(c.callerID).
 		WithRespHandler(c.respHandler).
-		WithBackoffer(c.bo),
+		WithBackoffer(c.bo).
+		WithTimeout(c.timeout),
 		headerOpts...)
 }
 

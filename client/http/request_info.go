@@ -16,6 +16,7 @@ package http
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/tikv/pd/client/retry"
 )
@@ -88,11 +89,14 @@ type requestInfo struct {
 	res         any
 	respHandler respHandleFunc
 	bo          *retry.Backoffer
+	timeout     time.Duration
 }
 
 // newRequestInfo creates a new request info.
 func newRequestInfo() *requestInfo {
-	return &requestInfo{}
+	return &requestInfo{
+		timeout: defaultTimeout,
+	}
 }
 
 // WithCallerID sets the caller ID of the request.
@@ -140,6 +144,14 @@ func (ri *requestInfo) WithRespHandler(respHandler respHandleFunc) *requestInfo 
 // WithBackoffer sets the backoffer of the request.
 func (ri *requestInfo) WithBackoffer(bo *retry.Backoffer) *requestInfo {
 	ri.bo = bo
+	return ri
+}
+
+// WithTimeout sets the timeout of the request.
+func (ri *requestInfo) WithTimeout(dur time.Duration) *requestInfo {
+	if dur > 0 {
+		ri.timeout = dur
+	}
 	return ri
 }
 
