@@ -486,6 +486,7 @@ func (oc *Controller) addOperatorLocked(op *Operator) bool {
 		return false
 	}
 	oc.operators[regionID] = op
+	oc.counts[op.SchedulerKind()]++
 	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
 	operatorSizeHist.WithLabelValues(op.Desc()).Observe(float64(op.ApproximateSize))
 	opInfluence := NewTotalOpInfluence([]*Operator{op}, oc.cluster)
@@ -505,7 +506,6 @@ func (oc *Controller) addOperatorLocked(op *Operator) bool {
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
-	oc.updateCounts(oc.operators)
 
 	var step OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
@@ -602,7 +602,7 @@ func (oc *Controller) removeOperatorLocked(op *Operator) bool {
 	regionID := op.RegionID()
 	if cur := oc.operators[regionID]; cur == op {
 		delete(oc.operators, regionID)
-		oc.updateCounts(oc.operators)
+		oc.counts[op.SchedulerKind()]--
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
 		if op.Kind()&OpMerge != 0 {
@@ -862,7 +862,7 @@ func (oc *Controller) SetOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
-	oc.updateCounts(oc.operators)
+	oc.counts[op.SchedulerKind()]++
 }
 
 // OpWithStatus records the operator and its status.
