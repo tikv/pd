@@ -354,6 +354,13 @@ func (c *client) WithBackoffer(bo *retry.Backoffer) Client {
 	return &newClient
 }
 
+// WithTimeout sets and returns a new client with the given timeout config.
+func (c *client) WithTimeout(dur time.Duration) Client {
+	newClient := *c
+	newClient.timeout = dur
+	return &newClient
+}
+
 // Header key definition constants.
 const (
 	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"

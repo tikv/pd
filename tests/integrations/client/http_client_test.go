@@ -16,6 +16,7 @@ package client_test
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"net/url"
@@ -25,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
@@ -118,7 +120,7 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 }
 
 // RunTestInTwoModes is to run test in two modes.
-func (suite *httpClientTestSuite) RunTestInTwoModes(test func(mode mode, client pd.Client)) {
+func (suite *httpClientTestSuite) RunTestInTwoModes(test func(mode mode, client pd.Client), opts ...pd.ClientOption) {
 	// Run test with specific service discovery.
 	cli := setupCli(suite.Require(), suite.env[specificServiceDiscovery].ctx, suite.env[specificServiceDiscovery].endpoints)
 	sd := cli.GetServiceDiscovery()
@@ -678,6 +680,35 @@ func (suite *httpClientTestSuite) checkWithBackoffer(mode mode, client pd.Client
 		GetPlacementRule(env.ctx, "non-exist-group", "non-exist-rule")
 	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
 	re.Nil(rule)
+}
+
+func (suite *httpClientTestSuite) TestWithTimeout() {
+	suite.RunTestInTwoModes(suite.checkWithTimeout, pd.WithTimeout(1*time.Second))
+}
+
+func (suite *httpClientTestSuite) checkWithTimeout(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/slowGetVersion", fmt.Sprintf("return(%d)", 700)))
+	ctx, cancel := context.WithTimeout(env.ctx, 500*time.Millisecond)
+	_, err := client.GetPDVersion(ctx)
+	re.ErrorIs(err, context.DeadlineExceeded)
+	cancel()
+
+	newClient := client.WithTimeout(500 * time.Millisecond)
+	_, err = newClient.GetPDVersion(env.ctx)
+	re.ErrorIs(err, context.DeadlineExceeded)
+
+	version, err := client.GetPDVersion(env.ctx)
+	re.NoError(err)
+	re.Equal("None", version)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowGetVersion"))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/slowGetVersion", fmt.Sprintf("return(%d)", 1200)))
+	_, err = client.GetPDVersion(ctx)
+	re.ErrorIs(err, context.DeadlineExceeded)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowGetVersion"))
 }
 
 func (suite *httpClientTestSuite) TestRedirectWithMetrics() {

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -105,6 +106,8 @@ type Client interface {
 	WithRespHandler(func(resp *http.Response, res any) error) Client
 	// WithBackoffer sets and returns a new client with the given backoffer.
 	WithBackoffer(*retry.Backoffer) Client
+	// WithTimeout sets and returns a new client with the timeout config.
+	WithTimeout(time.Duration) Client
 	// Close gracefully closes the HTTP client.
 	Close()
 }

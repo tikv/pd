@@ -16,7 +16,9 @@ package api
 
 import (
 	"net/http"
+	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/unrolled/render"
 )
@@ -47,5 +49,9 @@ func (h *versionHandler) GetVersion(w http.ResponseWriter, r *http.Request) {
 	version := &version{
 		Version: versioninfo.PDReleaseVersion,
 	}
+	failpoint.Inject("slowGetVersion", func(val failpoint.Value) {
+		//nolint:durationcheck
+		time.Sleep(time.Millisecond * time.Duration(val.(int)))
+	})
 	h.rd.JSON(w, http.StatusOK, version)
 }
