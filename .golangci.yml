@@ -42,10 +42,13 @@ linters-settings:
       - require-error
       - suite-dont-use-pkg
       - suite-extra-assert-call
+    disable:
+      - float-compare
+      - go-require
   gofmt:
     # https://golangci-lint.run/usage/linters/#gofmt
     # disable for faster check
     simplify: false
     rewrite-rules:
-      - pattern: 'interface{}'
-        replacement: 'any'
+      - pattern: "interface{}"
+        replacement: "any"
