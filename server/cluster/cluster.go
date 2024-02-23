@@ -1027,9 +1027,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	isNew, saveKV, saveCache, needSync := regionGuide(region, origin)
-	if !saveKV && !saveCache && !isNew {
+	saveKV, saveCache, needSync := regionGuide(region, origin)
+	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
