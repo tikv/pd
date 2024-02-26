@@ -63,6 +63,8 @@ import (
 var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 	DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
+
+	denySchedulersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
