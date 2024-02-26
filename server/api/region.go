@@ -578,7 +578,7 @@ func (h *regionsHandler) GetTopReadFlowRegions(w http.ResponseWriter, r *http.Re
 // @Router   /regions/readquery [get]
 func (h *regionsHandler) GetTopReadQueryRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
-		return a.GetReadQueryNum() < b.GetWriteQueryNum()
+		return a.GetReadQueryNum() < b.GetReadQueryNum()
 	})
 }
 

@@ -1144,6 +1144,34 @@ func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestClust
 	re.False(svr.GetMicroServiceConfig().EnableSchedulingFallback)
 }
 
+func (suite *configTestSuite) TestRegionRules() {
+	suite.env.RunTestInTwoModes(suite.checkRegionRules)
+}
+
+func (suite *configTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	cmd := ctl.GetRootCmd()
+
+	storeID, regionID := uint64(1), uint64(2)
+	store := &metapb.Store{
+		Id:    storeID,
+		State: metapb.StoreState_Up,
+	}
+	pdTests.MustPutStore(re, cluster, store)
+	pdTests.MustPutRegion(re, cluster, regionID, storeID, []byte{}, []byte{})
+
+	args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--region=" + strconv.Itoa(int(regionID)), "--detail"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	fit := &placement.RegionFit{}
+	re.NoError(json.Unmarshal(output, fit))
+	re.Len(fit.RuleFits, 1)
+	re.Equal(placement.DefaultGroupID, fit.RuleFits[0].Rule.GroupID)
+	re.Equal(placement.DefaultRuleID, fit.RuleFits[0].Rule.ID)
+}
+
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {
 	re.Len(b, len(a))
 	for i := 0; i < len(a); i++ {

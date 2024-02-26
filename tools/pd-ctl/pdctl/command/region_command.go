@@ -67,37 +67,21 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRegionsByKeysCommand())
 	r.AddCommand(NewRangesWithRangeHolesCommand())
 
-	topReadFlow := &cobra.Command{
-		Use:   `topread byte <limit> [--jq="<query string>"]`,
-		Short: "show regions with top read flow",
-		Run:   showRegionsTopCommand(regionsReadFlowPrefix),
+	topRead := &cobra.Command{
+		Use:   `topread <dimension> <limit> [--jq="<query string>"]`,
+		Short: "show regions with top read flow or query",
+		Run:   showTopReadRegions,
 	}
-	topReadFlow.Flags().String("jq", "", "jq query")
-	r.AddCommand(topReadFlow)
+	topRead.Flags().String("jq", "", "jq query")
+	r.AddCommand(topRead)
 
-	topWriteFlow := &cobra.Command{
-		Use:   `topwrite byte <limit> [--jq="<query string>"]`,
-		Short: "show regions with top write flow",
-		Run:   showRegionsTopCommand(regionsWriteFlowPrefix),
+	topWrite := &cobra.Command{
+		Use:   `topwrite <dimension> <limit> [--jq="<query string>"]`,
+		Short: "show regions with top write flow or query",
+		Run:   showTopWriteRegions,
 	}
-	topWriteFlow.Flags().String("jq", "", "jq query")
-	r.AddCommand(topWriteFlow)
-
-	topReadQuery := &cobra.Command{
-		Use:   `topread query <limit> [--jq="<query string>"]`,
-		Short: "show regions with top read flow",
-		Run:   showRegionsTopCommand(regionsReadQueryPrefix),
-	}
-	topReadQuery.Flags().String("jq", "", "jq query")
-	r.AddCommand(topReadQuery)
-
-	topWriteQuery := &cobra.Command{
-		Use:   `topwrite query <limit> [--jq="<query string>"]`,
-		Short: "show regions with top write flow",
-		Run:   showRegionsTopCommand(regionsWriteQueryPrefix),
-	}
-	topWriteQuery.Flags().String("jq", "", "jq query")
-	r.AddCommand(topWriteQuery)
+	topWrite.Flags().String("jq", "", "jq query")
+	r.AddCommand(topWrite)
 
 	topConfVer := &cobra.Command{
 		Use:   `topconfver <limit> [--jq="<query string>"]`,
@@ -241,6 +225,32 @@ func showRegionsTopCommand(prefix string) run {
 			return
 		}
 		cmd.Println(r)
+	}
+}
+
+func showTopReadRegions(cmd *cobra.Command, args []string) {
+	if len(args) < 1 && args[0] != "query" && args[0] != "byte" {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	switch args[0] {
+	case "query":
+		showRegionsTopCommand(regionsReadQueryPrefix)(cmd, args[1:])
+	default: // byte
+		showRegionsTopCommand(regionsReadFlowPrefix)(cmd, args[1:])
+	}
+}
+
+func showTopWriteRegions(cmd *cobra.Command, args []string) {
+	if len(args) < 1 && args[0] != "query" && args[0] != "byte" {
+		cmd.Println(cmd.UsageString())
+		return
+	}
+	switch args[0] {
+	case "query":
+		showRegionsTopCommand(regionsWriteQueryPrefix)(cmd, args[1:])
+	default: // byte
+		showRegionsTopCommand(regionsWriteFlowPrefix)(cmd, args[1:])
 	}
 }
 
