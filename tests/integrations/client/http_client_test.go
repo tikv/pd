@@ -124,12 +124,12 @@ func (suite *httpClientTestSuite) RunTestInTwoModes(test func(mode mode, client 
 	// Run test with specific service discovery.
 	cli := setupCli(suite.Require(), suite.env[specificServiceDiscovery].ctx, suite.env[specificServiceDiscovery].endpoints)
 	sd := cli.GetServiceDiscovery()
-	client := pd.NewClientWithServiceDiscovery("pd-http-client-it-grpc", sd)
+	client := pd.NewClientWithServiceDiscovery("pd-http-client-it-grpc", sd, opts...)
 	test(specificServiceDiscovery, client)
 	client.Close()
 
 	// Run test with default service discovery.
-	client = pd.NewClient("pd-http-client-it-http", suite.env[defaultServiceDiscovery].endpoints)
+	client = pd.NewClient("pd-http-client-it-http", suite.env[defaultServiceDiscovery].endpoints, opts...)
 	test(defaultServiceDiscovery, client)
 	client.Close()
 }
@@ -698,7 +698,7 @@ func (suite *httpClientTestSuite) checkWithTimeout(mode mode, client pd.Client) 
 
 	newClient := client.WithTimeout(500 * time.Millisecond)
 	_, err = newClient.GetPDVersion(env.ctx)
-	re.ErrorIs(err, context.DeadlineExceeded)
+	re.ErrorContains(err, context.DeadlineExceeded.Error())
 
 	version, err := client.GetPDVersion(env.ctx)
 	re.NoError(err)
@@ -707,7 +707,7 @@ func (suite *httpClientTestSuite) checkWithTimeout(mode mode, client pd.Client) 
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/slowGetVersion", fmt.Sprintf("return(%d)", 1200)))
 	_, err = client.GetPDVersion(ctx)
-	re.ErrorIs(err, context.DeadlineExceeded)
+	re.ErrorContains(err, context.DeadlineExceeded.Error())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowGetVersion"))
 }
 
