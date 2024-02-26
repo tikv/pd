@@ -68,7 +68,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRangesWithRangeHolesCommand())
 
 	topRead := &cobra.Command{
-		Use:   `topread <dimension> <limit> [--jq="<query string>"]`,
+		Use:   `topread [byte|query] <limit> [--jq="<query string>"]`,
 		Short: "show regions with top read flow or query",
 		Run:   showTopReadRegions,
 	}
@@ -76,7 +76,7 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(topRead)
 
 	topWrite := &cobra.Command{
-		Use:   `topwrite <dimension> <limit> [--jq="<query string>"]`,
+		Use:   `topwrite [byte|query] <limit> [--jq="<query string>"]`,
 		Short: "show regions with top write flow or query",
 		Run:   showTopWriteRegions,
 	}
