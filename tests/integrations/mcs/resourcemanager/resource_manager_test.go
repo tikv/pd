@@ -679,7 +679,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
 	re.NoError(err)
 	re.Equal(60.0, penalty.WriteBytes)
-	re.InEpsilon(penalty.TotalCpuTimeMs, 10.0/1000.0/1000.0, 1e-6)
+	re.InEpsilon(10.0/1000.0/1000.0, penalty.TotalCpuTimeMs, 1e-6)
 	_, err = c.OnResponse(resourceGroupName, req2, resp2)
 	re.NoError(err)
 
