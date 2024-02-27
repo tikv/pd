@@ -214,6 +214,9 @@ func showRegionsTopCommand(prefix string) run {
 				return
 			}
 			prefix += "?limit=" + args[0]
+		} else if len(args) > 1 {
+			cmd.Println(cmd.UsageString())
+			return
 		}
 		r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 		if err != nil {
@@ -229,29 +232,43 @@ func showRegionsTopCommand(prefix string) run {
 }
 
 func showTopReadRegions(cmd *cobra.Command, args []string) {
-	if len(args) < 1 && args[0] != "query" && args[0] != "byte" {
-		cmd.Println(cmd.UsageString())
+	// default to show top read flow
+	if len(args) == 0 {
+		showRegionsTopCommand(regionsReadFlowPrefix)(cmd, args)
 		return
 	}
-	switch args[0] {
-	case "query":
-		showRegionsTopCommand(regionsReadQueryPrefix)(cmd, args[1:])
-	default: // byte
-		showRegionsTopCommand(regionsReadFlowPrefix)(cmd, args[1:])
+	// show top read flow or query
+	if args[0] == "query" || args[0] == "byte" {
+		switch args[0] {
+		case "query":
+			showRegionsTopCommand(regionsReadQueryPrefix)(cmd, args[1:])
+		default: // byte
+			showRegionsTopCommand(regionsReadFlowPrefix)(cmd, args[1:])
+		}
+		return
 	}
+	// default to show top read flow with limit
+	showRegionsTopCommand(regionsReadFlowPrefix)(cmd, args)
 }
 
 func showTopWriteRegions(cmd *cobra.Command, args []string) {
-	if len(args) < 1 && args[0] != "query" && args[0] != "byte" {
-		cmd.Println(cmd.UsageString())
+	// default to show top write flow
+	if len(args) == 0 {
+		showRegionsTopCommand(regionsWriteFlowPrefix)(cmd, args)
 		return
 	}
-	switch args[0] {
-	case "query":
-		showRegionsTopCommand(regionsWriteQueryPrefix)(cmd, args[1:])
-	default: // byte
-		showRegionsTopCommand(regionsWriteFlowPrefix)(cmd, args[1:])
+	// show top write flow or query
+	if args[0] == "query" || args[0] == "byte" {
+		switch args[0] {
+		case "query":
+			showRegionsTopCommand(regionsWriteQueryPrefix)(cmd, args[1:])
+		default: // byte
+			showRegionsTopCommand(regionsWriteFlowPrefix)(cmd, args[1:])
+		}
+		return
 	}
+	// default to show top write flow with limit
+	showRegionsTopCommand(regionsWriteFlowPrefix)(cmd, args)
 }
 
 // NewRegionWithKeyCommand return a region with key subcommand of regionCmd
