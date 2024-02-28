@@ -65,7 +65,7 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	}
 	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{
 		Backoff: backoff.Config{
-			BaseDelay:  100 * time.Millisecond,
+			BaseDelay:  time.Second,
 			Multiplier: 1.6,
 			Jitter:     0.2,
 			MaxDelay:   3 * time.Second,
