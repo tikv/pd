@@ -21,10 +21,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/server/id"
 )
@@ -660,6 +662,117 @@ func BenchmarkRandomRegion(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		regions.RandLeaderRegion(1, nil)
 	}
+}
+
+func BenchmarkRandomSetRegion(b *testing.B) {
+	cluster := NewBasicCluster()
+	var items []*RegionInfo
+	for i := 0; i < 1000000; i++ {
+		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer},
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+		}, peer)
+		cluster.Regions.SetRegion(region)
+		items = append(items, region)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		item := items[i%len(items)]
+		item.approximateKeys = int64(200000)
+		item.approximateSize = int64(20)
+		cluster.Regions.SetRegion(item)
+	}
+}
+
+func TestGetRegionSizeByRange(t *testing.T) {
+	cluster := NewBasicCluster()
+	nums := 1000010
+	for i := 0; i < nums; i++ {
+		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+		endKey := []byte(fmt.Sprintf("%20d", i+1))
+		if i == nums-1 {
+			endKey = []byte("")
+		}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer},
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   endKey,
+		}, peer, SetApproximateSize(10))
+		cluster.Regions.SetRegion(region)
+	}
+	totalSize := cluster.GetRegionSizeByRange([]byte(""), []byte(""))
+	require.Equal(t, int64(nums*10), totalSize)
+	for i := 1; i < 10; i++ {
+		verifyNum := nums / i
+		endKey := fmt.Sprintf("%20d", verifyNum)
+		totalSize := cluster.GetRegionSizeByRange([]byte(""), []byte(endKey))
+		require.Equal(t, int64(verifyNum*10), totalSize)
+	}
+}
+
+func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
+	cluster := NewBasicCluster()
+	var items []*RegionInfo
+	for i := 0; i < 1000000; i++ {
+		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer},
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+		}, peer, SetApproximateSize(10))
+		cluster.Regions.SetRegion(region)
+		items = append(items, region)
+	}
+	b.ResetTimer()
+	go func() {
+		for {
+			cluster.GetRegionSizeByRange([]byte(""), []byte(""))
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	for i := 0; i < b.N; i++ {
+		item := items[i%len(items)]
+		item.approximateKeys = int64(200000)
+		cluster.Regions.SetRegion(item)
+	}
+}
+
+func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
+	cluster := NewBasicCluster()
+	var items []*RegionInfo
+	for i := 0; i < 1000000; i++ {
+		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+		region := NewRegionInfo(&metapb.Region{
+			Id:       uint64(i + 1),
+			Peers:    []*metapb.Peer{peer},
+			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+		}, peer)
+		cluster.Regions.SetRegion(region)
+		items = append(items, region)
+	}
+	b.ResetTimer()
+	go func() {
+		for {
+			cluster.GetRegionSizeByRange([]byte(""), []byte(""))
+			time.Sleep(time.Millisecond)
+		}
+	}()
+
+	b.RunParallel(
+		func(pb *testing.PB) {
+			for pb.Next() {
+				item := items[rand.Intn(len(items))]
+				n := item.Clone(SetApproximateSize(20))
+				cluster.Regions.SetRegion(n)
+			}
+		},
+	)
 }
 
 const keyLength = 100
