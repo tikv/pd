@@ -209,6 +209,57 @@ func TestLoadMinServiceGCSafePoint(t *testing.T) {
 	re.Equal(uint64(2), ssp.SafePoint)
 }
 
+func TestTryGetLocalRegionStorage(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Memory backend integrated into core storage.
+	defaultStorage := NewStorageWithMemoryBackend()
+	var regionStorage endpoint.RegionStorage = NewStorageWithMemoryBackend()
+	coreStorage := NewCoreStorage(defaultStorage, regionStorage)
+	storage := RetrieveRegionStorage(coreStorage)
+	re.NotNil(storage)
+	re.Equal(regionStorage, storage)
+	// RegionStorage with LevelDB backend integrated into core storage.
+	defaultStorage = NewStorageWithMemoryBackend()
+	regionStorage, err := NewRegionStorageWithLevelDBBackend(ctx, t.TempDir(), nil)
+	re.NoError(err)
+	coreStorage = NewCoreStorage(defaultStorage, regionStorage)
+	storage = RetrieveRegionStorage(coreStorage)
+	re.NotNil(storage)
+	re.Equal(regionStorage, storage)
+	// Raw LevelDB backend integrated into core storage.
+	defaultStorage = NewStorageWithMemoryBackend()
+	regionStorage, err = newLevelDBBackend[*item](ctx, t.TempDir(), nil)
+	re.NoError(err)
+	coreStorage = NewCoreStorage(defaultStorage, regionStorage)
+	storage = RetrieveRegionStorage(coreStorage)
+	re.NotNil(storage)
+	re.Equal(regionStorage, storage)
+	defaultStorage = NewStorageWithMemoryBackend()
+	regionStorage, err = newLevelDBBackend[*regionKV](ctx, t.TempDir(), nil)
+	re.NoError(err)
+	coreStorage = NewCoreStorage(defaultStorage, regionStorage)
+	storage = RetrieveRegionStorage(coreStorage)
+	re.NotNil(storage)
+	re.Equal(regionStorage, storage)
+	// Without core storage.
+	defaultStorage = NewStorageWithMemoryBackend()
+	storage = RetrieveRegionStorage(defaultStorage)
+	re.NotNil(storage)
+	re.Equal(defaultStorage, storage)
+	defaultStorage, err = newLevelDBBackend[*regionKV](ctx, t.TempDir(), nil)
+	re.NoError(err)
+	storage = RetrieveRegionStorage(defaultStorage)
+	re.NotNil(storage)
+	re.Equal(defaultStorage, storage)
+	defaultStorage, err = newLevelDBBackend[*item](ctx, t.TempDir(), nil)
+	re.NoError(err)
+	storage = RetrieveRegionStorage(defaultStorage)
+	re.NotNil(storage)
+	re.Equal(defaultStorage, storage)
+}
+
 func TestLoadRegions(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()

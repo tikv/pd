@@ -93,16 +93,14 @@ func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage
 	}
 }
 
-// TryGetLocalRegionStorage gets the local region storage and returns nil if not present.
-// It's used to retrieve the real region storage implementation from the given `Storage“.
-func TryGetLocalRegionStorage(s Storage) endpoint.RegionStorage {
+// RetrieveRegionStorage retrieve the region storage from the given storage.
+// If it's a `coreStorage`, it will return the regionStorage inside, otherwise it will return the original storage.
+func RetrieveRegionStorage(s Storage) endpoint.RegionStorage {
 	switch ps := s.(type) {
 	case *coreStorage:
 		return ps.regionStorage
-	case *levelDBBackend[*regionKV], *memoryStorage:
-		return ps
 	default:
-		return nil
+		return ps
 	}
 }
 
