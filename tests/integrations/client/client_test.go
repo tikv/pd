@@ -474,7 +474,6 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	recorder := basictracer.NewInMemoryRecorder()
 	tracer := basictracer.New(recorder)
 	span := tracer.StartSpan("trace")
-	opentracing.SetGlobalTracer(tracer)
 	ctx = opentracing.ContextWithSpan(ctx, span)
 	future := cli.GetLocalTSAsync(ctx, "error-dc")
 	spans := recorder.GetSpans()

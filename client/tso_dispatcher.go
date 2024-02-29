@@ -338,7 +338,6 @@ func (c *tsoClient) handleDispatcher(
 		cancel     context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
-		opts           []opentracing.StartSpanOption
 	)
 	defer func() {
 		log.Info("[tso] exit tso dispatcher", zap.String("dc-location", dc))
@@ -487,8 +486,7 @@ tsoBatchLoop:
 			return
 		case tsDeadlineCh.(chan *deadline) <- dl:
 		}
-		opts = extractSpanReference(tbc, opts[:0])
-		err = c.processRequests(stream, dc, tbc, opts)
+		err = c.processRequests(stream, dc, tbc)
 		close(done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err != nil {
@@ -746,26 +744,16 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 	return nil
 }
 
-func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
-	for _, req := range tbc.getCollectedRequests() {
-		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
-			opts = append(opts, opentracing.ChildOf(span.Context()))
-		}
-	}
-	return opts
-}
-
 func (c *tsoClient) processRequests(
-	stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption,
+	stream tsoStream, dcLocation string, tbc *tsoBatchController,
 ) error {
-	if len(opts) > 0 {
-		span := opentracing.StartSpan("pdclient.processRequests", opts...)
-		defer span.Finish()
-	}
-
 	requests := tbc.getCollectedRequests()
 	for _, req := range requests {
 		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqSend").End()
+		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
+			span = span.Tracer().StartSpan("pdclient.processRequests", opentracing.ChildOf(span.Context()))
+			defer span.Finish()
+		}
 	}
 	count := int64(len(requests))
 	reqKeyspaceGroupID := c.svcDiscovery.GetKeyspaceGroupID()
