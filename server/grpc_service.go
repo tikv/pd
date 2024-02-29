@@ -1293,7 +1293,6 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			continue
 		}
 		start := time.Now()
-
 		err = rc.HandleRegionHeartbeat(region)
 		if err != nil {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
@@ -1301,7 +1300,6 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
-
 		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 
