@@ -858,6 +858,51 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
 }
 
+func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/shortDispatcherChannel", "return(true)"))
+
+	cli := setupCli(re, ctx, suite.endpoints)
+
+	ctxs := make([]context.Context, 20)
+	cancels := make([]context.CancelFunc, 20)
+	for i := 0; i < 20; i++ {
+		ctxs[i], cancels[i] = context.WithCancel(ctx)
+	}
+	start := time.Now()
+	wg1 := sync.WaitGroup{}
+	wg2 := sync.WaitGroup{}
+	wg3 := sync.WaitGroup{}
+	wg1.Add(1)
+	go func() {
+		<-time.After(time.Second)
+		for i := 0; i < 20; i++ {
+			cancels[i]()
+		}
+		wg1.Done()
+	}()
+	wg2.Add(1)
+	go func() {
+		cli.Close()
+		wg2.Done()
+	}()
+	wg3.Add(1)
+	go func() {
+		for i := 0; i < 20; i++ {
+			cli.GetTSAsync(ctxs[i])
+		}
+		wg3.Done()
+	}()
+	wg1.Wait()
+	wg2.Wait()
+	wg3.Wait()
+	re.Less(time.Since(start), time.Second*2)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/shortDispatcherChannel"))
+}
+
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {
 	for i := 0; i < tsoRequestRound; i++ {
 		physical, logical, err := cli.GetTS(context.TODO())

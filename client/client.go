@@ -791,10 +791,10 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 		return req
 	}
 
-	if err := tsoClient.dispatchRequest(dcLocation, req); err != nil {
+	if err := tsoClient.dispatchRequest(ctx, dcLocation, req); err != nil {
 		// Wait for a while and try again
 		time.Sleep(50 * time.Millisecond)
-		if err = tsoClient.dispatchRequest(dcLocation, req); err != nil {
+		if err = tsoClient.dispatchRequest(ctx, dcLocation, req); err != nil {
 			req.done <- err
 		}
 	}
