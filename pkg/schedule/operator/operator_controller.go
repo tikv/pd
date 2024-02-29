@@ -560,6 +560,7 @@ func (oc *Controller) removeOperatorsLocked() []*Operator {
 	var removed []*Operator
 	for regionID, op := range oc.operators {
 		delete(oc.operators, regionID)
+		oc.counts[op.SchedulerKind()]--
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
 		if op.Kind()&OpMerge != 0 {
@@ -567,7 +568,6 @@ func (oc *Controller) removeOperatorsLocked() []*Operator {
 		}
 		removed = append(removed, op)
 	}
-	oc.updateCounts(oc.operators)
 	return removed
 }
 
@@ -781,16 +781,6 @@ func (oc *Controller) GetHistory(start time.Time) []OpHistory {
 		history = append(history, op.History()...)
 	}
 	return history
-}
-
-// updateCounts updates resource counts using current pending operators.
-func (oc *Controller) updateCounts(operators map[uint64]*Operator) {
-	for k := range oc.counts {
-		delete(oc.counts, k)
-	}
-	for _, op := range operators {
-		oc.counts[op.SchedulerKind()]++
-	}
 }
 
 // OperatorCount gets the count of operators filtered by kind.
