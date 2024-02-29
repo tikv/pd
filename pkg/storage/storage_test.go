@@ -367,7 +367,7 @@ func randomMerge(regions []*metapb.Region, n int, ratio int) {
 	}
 }
 
-func saveRegions(lb *levelDBBackend, n int, ratio int) error {
+func saveRegions(storage endpoint.RegionStorage, n int, ratio int) error {
 	keys := generateKeys(n)
 	regions := make([]*metapb.Region, 0, n)
 	for i := uint64(0); i < uint64(n); i++ {
@@ -398,36 +398,36 @@ func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 	}
 
 	for _, region := range regions {
-		err := lb.SaveRegion(region)
+		err := storage.SaveRegion(region)
 		if err != nil {
 			return err
 		}
 	}
-	return lb.Flush()
+	return storage.Flush()
 }
 
 func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
 	re := require.New(b)
 	ctx := context.Background()
 	dir := b.TempDir()
-	lb, err := newLevelDBBackend(ctx, dir, nil)
+	regionStorage, err := NewRegionStorageWithLevelDBBackend(ctx, dir, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
 	cluster := core.NewBasicCluster()
-	err = saveRegions(lb, n, ratio)
+	err = saveRegions(regionStorage, n, ratio)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer func() {
-		err = lb.Close()
+		err = regionStorage.Close()
 		if err != nil {
 			b.Fatal(err)
 		}
 	}()
 
 	b.ResetTimer()
-	err = lb.LoadRegions(context.Background(), cluster.CheckAndPutRegion)
+	err = regionStorage.LoadRegions(ctx, cluster.CheckAndPutRegion)
 	re.NoError(err)
 }
 
