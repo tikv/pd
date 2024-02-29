@@ -777,7 +777,6 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetLocalTSAsync", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
-		ctx = opentracing.ContextWithSpan(ctx, span)
 	}
 
 	req := tsoReqPool.Get().(*tsoRequest)
