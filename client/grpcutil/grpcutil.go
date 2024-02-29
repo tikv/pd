@@ -63,6 +63,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	if err != nil {
 		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 	}
+	// Here we use a shorter MaxDelay to make the connection recover faster.
+	// The default MaxDelay is 120s, which is too long for us.
 	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{
 		Backoff: backoff.Config{
 			BaseDelay:  time.Second,
