@@ -82,7 +82,7 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 		return err
 	}
 
-	defer trace.StartRegion(request.requestCtx, "tsoReqEnqueue").End()
+	defer trace.StartRegion(request.requestCtx, "pdclient.tsoReqEnqueue").End()
 	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
 	return nil
 }
@@ -100,7 +100,7 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err = <-req.done:
-		defer trace.StartRegion(req.requestCtx, "tsoReqDone").End()
+		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
 		err = errors.WithStack(err)
 		defer tsoReqPool.Put(req)
 		if err != nil {
@@ -765,7 +765,7 @@ func (c *tsoClient) processRequests(
 
 	requests := tbc.getCollectedRequests()
 	for _, req := range requests {
-		defer trace.StartRegion(req.requestCtx, "tsoReqSend").End()
+		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqSend").End()
 	}
 	count := int64(len(requests))
 	reqKeyspaceGroupID := c.svcDiscovery.GetKeyspaceGroupID()
@@ -841,7 +841,7 @@ func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical
 			span.Finish()
 		}
 		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
-		defer trace.StartRegion(requests[i].requestCtx, "tsoReqDequeue").End()
+		defer trace.StartRegion(requests[i].requestCtx, "pdclient.tsoReqDequeue").End()
 		requests[i].done <- err
 	}
 }
