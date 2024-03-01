@@ -316,9 +316,9 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 		rule.LabelConstraints = append(rule.LabelConstraints, labelConstraint)
 		rules = append(rules, rule)
 	}
-	// create stores, with each stores has 101 normal labels(1 exclusive label).
+	// create stores, with each store has 101 normal labels(1 exclusive label).
 	lists := make([]*core.StoreInfo, 0)
-	var labels []*metapb.StoreLabel
+	labels := make([]*metapb.StoreLabel, 0, 101)
 	for labID := 0; labID < 100; labID++ {
 		label := &metapb.StoreLabel{Key: fmt.Sprintf("store_%08d", labID), Value: fmt.Sprintf("value_%08d", labID)}
 		labels = append(labels, label)

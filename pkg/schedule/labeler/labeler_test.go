@@ -422,7 +422,7 @@ func TestGC(t *testing.T) {
 	// the region has no label rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))
 
-	var labels []RegionLabel
+	labels := make([]RegionLabel, 0, len(ttls))
 	for id, ttl := range ttls {
 		labels = append(labels, RegionLabel{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id), TTL: ttl})
 		rule := &LabelRule{
