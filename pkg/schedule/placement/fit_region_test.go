@@ -299,26 +299,26 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 		values := []string{}
 		for id := 1; id < 100; id++ {
 			values = append(values, fmt.Sprintf("value_%08d", id))
-			labelContaint := LabelConstraint{
+			labelConstraint := LabelConstraint{
 				Key:    fmt.Sprintf("key_%08d", id),
 				Op:     NotIn,
 				Values: values,
 			}
-			rule.LabelConstraints = append(rule.LabelConstraints, labelContaint)
+			rule.LabelConstraints = append(rule.LabelConstraints, labelConstraint)
 		}
-		// add an exclusive containt.
+		// add an exclusive constraint.
 		values = append(values, "exclusive")
-		labelContaint := LabelConstraint{
+		labelConstraint := LabelConstraint{
 			Key:    "exclusive",
 			Op:     In,
 			Values: values,
 		}
-		rule.LabelConstraints = append(rule.LabelConstraints, labelContaint)
+		rule.LabelConstraints = append(rule.LabelConstraints, labelConstraint)
 		rules = append(rules, rule)
 	}
 	// create stores, with each stores has 101 normal labels(1 exclusive label).
 	lists := make([]*core.StoreInfo, 0)
-	labels := []*metapb.StoreLabel{}
+	var labels []*metapb.StoreLabel
 	for labID := 0; labID < 100; labID++ {
 		label := &metapb.StoreLabel{Key: fmt.Sprintf("store_%08d", labID), Value: fmt.Sprintf("value_%08d", labID)}
 		labels = append(labels, label)
@@ -349,7 +349,7 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 
 func BenchmarkFitRegionWithLocationLabels(b *testing.B) {
 	region := mockRegion(5, 5)
-	rules := []*Rule{}
+	var rules []*Rule
 	rule := &Rule{
 		GroupID:          DefaultGroupID,
 		ID:               "followers",

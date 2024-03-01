@@ -1018,20 +1018,20 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 					op = suite.rc.Check(suite.cluster.GetRegion(1))
 					re.NotNil(op)
 					re.Contains(op.Desc(), "orphan")
-					var removedPeerStroeID uint64
+					var removedPeerStoreID uint64
 					newLeaderStoreID := r1.GetLeader().GetStoreId()
 					for i := 0; i < op.Len(); i++ {
 						if s, ok := op.Step(i).(operator.RemovePeer); ok {
-							removedPeerStroeID = s.FromStore
+							removedPeerStoreID = s.FromStore
 						}
 						if s, ok := op.Step(i).(operator.TransferLeader); ok {
 							newLeaderStoreID = s.ToStore
 						}
 					}
-					re.NotZero(removedPeerStroeID)
+					re.NotZero(removedPeerStoreID)
 					r1 = r1.Clone(
 						core.WithLeader(r1.GetStorePeer(newLeaderStoreID)),
-						core.WithRemoveStorePeer(removedPeerStroeID))
+						core.WithRemoveStorePeer(removedPeerStoreID))
 					suite.cluster.PutRegion(r1)
 					r1 = suite.cluster.GetRegion(1)
 					re.Len(r1.GetPeers(), 6-j)
@@ -1571,7 +1571,7 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeer() {
 	re.Nil(suite.rc.Check(region))
 }
 
-func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvaliableWitness() {
+func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvailableWitness() {
 	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})

@@ -369,7 +369,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 	start, _ := hex.DecodeString("1234")
 	end, _ := hex.DecodeString("5678")
 	region := core.NewTestRegionInfo(1, 1, start, end)
-	// the region has no lable rule at the beginning.
+	// the region has no label rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))
 
 	// set rules for the region.
@@ -386,11 +386,11 @@ func TestLabelerRuleTTL(t *testing.T) {
 	re.Len(labels, 2)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute"))
-	// rule2 should be exist since `GetRegionLabels` won't clear it physically.
-	checkRuleInMemoryAndStoage(re, labeler, "rule2", true)
+	// rule2 should be existed since `GetRegionLabels` won't clear it physically.
+	checkRuleInMemoryAndStorage(re, labeler, "rule2", true)
 	re.Nil(labeler.GetLabelRule("rule2"))
 	// rule2 should be physically clear.
-	checkRuleInMemoryAndStoage(re, labeler, "rule2", false)
+	checkRuleInMemoryAndStorage(re, labeler, "rule2", false)
 
 	re.Equal("", labeler.GetRegionLabel(region, "k2"))
 
@@ -398,7 +398,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 	re.NotNil(labeler.GetLabelRule("rule1"))
 }
 
-func checkRuleInMemoryAndStoage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
+func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
 	re.Equal(exist, labeler.labelRules[ruleID] != nil)
 	existInStorage := false
 	labeler.storage.LoadRegionRules(func(k, v string) {
@@ -419,10 +419,10 @@ func TestGC(t *testing.T) {
 	start, _ := hex.DecodeString("1234")
 	end, _ := hex.DecodeString("5678")
 	region := core.NewTestRegionInfo(1, 1, start, end)
-	// the region has no lable rule at the beginning.
+	// the region has no label rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))
 
-	labels := []RegionLabel{}
+	var labels []RegionLabel
 	for id, ttl := range ttls {
 		labels = append(labels, RegionLabel{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id), TTL: ttl})
 		rule := &LabelRule{
@@ -436,7 +436,7 @@ func TestGC(t *testing.T) {
 
 	re.Len(labeler.labelRules, len(ttls))
 
-	// check all rules unitl some rule expired.
+	// check all rules until some rule expired.
 	for {
 		time.Sleep(time.Millisecond * 5)
 		labels := labeler.GetRegionLabels(region)

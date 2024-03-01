@@ -313,7 +313,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 		}
 	}
 
-	// No reason catched
+	// No reason caught
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
 	testCases := []testCase{
 		{2, "store-state-ok-filter", "store-state-ok-filter"},

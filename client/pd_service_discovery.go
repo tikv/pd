@@ -784,7 +784,7 @@ func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 	return leaderClient
 }
 
-// GetAllServiceClients implments ServiceDiscovery
+// GetAllServiceClients implements ServiceDiscovery
 func (c *pdServiceDiscovery) GetAllServiceClients() []ServiceClient {
 	all := c.all.Load()
 	if all == nil {

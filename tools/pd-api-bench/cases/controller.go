@@ -196,7 +196,7 @@ type httpController struct {
 	wg     sync.WaitGroup
 }
 
-func newHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCraeteFn) *httpController {
+func newHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCreateFn) *httpController {
 	c := &httpController{
 		pctx:     ctx,
 		clients:  clis,
@@ -228,7 +228,7 @@ func (c *httpController) run() {
 					for i := int64(0); i < burst; i++ {
 						err := c.Do(c.ctx, hCli)
 						if err != nil {
-							log.Error("meet erorr when doing HTTP request", zap.String("case", c.Name()), zap.Error(err))
+							log.Error("meet error when doing HTTP request", zap.String("case", c.Name()), zap.Error(err))
 						}
 					}
 				case <-c.ctx.Done():
@@ -261,7 +261,7 @@ type gRPCController struct {
 	wg sync.WaitGroup
 }
 
-func newGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCraeteFn) *gRPCController {
+func newGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCreateFn) *gRPCController {
 	c := &gRPCController{
 		pctx:     ctx,
 		clients:  clis,
@@ -293,7 +293,7 @@ func (c *gRPCController) run() {
 					for i := int64(0); i < burst; i++ {
 						err := c.Unary(c.ctx, cli)
 						if err != nil {
-							log.Error("meet erorr when doing gRPC request", zap.String("case", c.Name()), zap.Error(err))
+							log.Error("meet error when doing gRPC request", zap.String("case", c.Name()), zap.Error(err))
 						}
 					}
 				case <-c.ctx.Done():
@@ -326,7 +326,7 @@ type etcdController struct {
 	wg sync.WaitGroup
 }
 
-func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn ETCDCraeteFn) *etcdController {
+func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn ETCDCreateFn) *etcdController {
 	c := &etcdController{
 		pctx:     ctx,
 		clients:  clis,
@@ -363,7 +363,7 @@ func (c *etcdController) run() {
 					for i := int64(0); i < burst; i++ {
 						err := c.Unary(c.ctx, cli)
 						if err != nil {
-							log.Error("meet erorr when doing etcd request", zap.String("case", c.Name()), zap.Error(err))
+							log.Error("meet error when doing etcd request", zap.String("case", c.Name()), zap.Error(err))
 						}
 					}
 				case <-c.ctx.Done():

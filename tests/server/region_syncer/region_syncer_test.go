@@ -73,7 +73,7 @@ func TestRegionSyncer(t *testing.T) {
 	}
 	// merge case
 	// region2 -> region1 -> region0
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region0 version is max(1, max(1, 1)+1)+1=3
 	regions[0] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[0])
@@ -81,7 +81,7 @@ func TestRegionSyncer(t *testing.T) {
 
 	// merge case
 	// region3 -> region4
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region4 version is max(1, 1)+1=2
 	regions[4] = regions[3].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[4])
@@ -89,7 +89,7 @@ func TestRegionSyncer(t *testing.T) {
 
 	// merge case
 	// region0 -> region4
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region4 version is max(3, 2)+1=4
 	regions[4] = regions[0].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[4])

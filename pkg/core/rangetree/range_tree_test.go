@@ -73,11 +73,11 @@ func bucketDebrisFactory(startKey, endKey []byte, item RangeItem) []RangeItem {
 	if bytes.Compare(left, right) >= 0 {
 		return nil
 	}
-	// the left has oen intersection like |010 - 100| and |020 - 100|.
+	// the left has one intersection like |010 - 100| and |020 - 100|.
 	if !bytes.Equal(item.GetStartKey(), left) {
 		res = append(res, newSimpleBucketItem(item.GetStartKey(), left))
 	}
-	// the right has oen intersection like |010 - 100| and |010 - 099|.
+	// the right has one intersection like |010 - 100| and |010 - 099|.
 	if !bytes.Equal(right, item.GetEndKey()) {
 		res = append(res, newSimpleBucketItem(right, item.GetEndKey()))
 	}
