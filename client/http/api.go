@@ -95,7 +95,7 @@ func RegionByKey(key []byte) string {
 // RegionsByKeyRange returns the path of PD HTTP API to scan regions with given start key, end key and limit parameters.
 func RegionsByKeyRange(keyRange *KeyRange, limit int) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
-	return fmt.Sprintf("%s?start_key=%s&end_key=%s&limit=%d",
+	return fmt.Sprintf("%s?key=%s&end_key=%s&limit=%d",
 		regionsByKey, startKeyStr, endKeyStr, limit)
 }
 
