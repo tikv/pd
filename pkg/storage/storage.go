@@ -64,7 +64,7 @@ func NewRegionStorageWithLevelDBBackend(
 	filePath string,
 	ekm *encryption.Manager,
 ) (*RegionStorage, error) {
-	levelDBBackend, err := newLevelDBBackend[*regionKV](ctx, filePath, ekm)
+	levelDBBackend, err := newLevelDBBackend(ctx, filePath, ekm)
 	if err != nil {
 		return nil, err
 	}

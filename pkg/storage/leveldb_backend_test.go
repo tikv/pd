@@ -19,84 +19,64 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/encryption"
 )
-
-type item struct {
-	key   string
-	value string
-}
-
-var _ levelDBKV = (*item)(nil)
-
-func (i *item) Key() string {
-	return i.key
-}
-
-func (i *item) Value() ([]byte, error) {
-	return []byte(i.value), nil
-}
-
-func (i *item) Encrypt(*encryption.Manager) (levelDBKV, error) {
-	return i, nil
-}
 
 func TestLevelDBBackend(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	backend, err := newLevelDBBackend[*item](ctx, t.TempDir(), nil)
+	backend, err := newLevelDBBackend(ctx, t.TempDir(), nil)
 	re.NoError(err)
 	re.NotNil(backend)
-	itemKV := &item{key: "k1", value: "v1"}
+	key, value := "k1", "v1"
 	// Save without flush.
-	err = backend.SaveKV(itemKV)
+	err = backend.SaveInBatch(key, []byte(value))
 	re.NoError(err)
-	value, err := backend.Load(itemKV.key)
+	val, err := backend.Load(key)
 	re.NoError(err)
-	re.Empty(value)
+	re.Empty(val)
 	// Flush and load.
 	err = backend.Flush()
 	re.NoError(err)
-	value, err = backend.Load(itemKV.key)
+	val, err = backend.Load(key)
 	re.NoError(err)
-	re.Equal(itemKV.value, value)
+	re.Equal(value, val)
 	// Delete and load.
-	err = backend.DeleteKV(itemKV)
+	err = backend.Remove(key)
 	re.NoError(err)
-	value, err = backend.Load(itemKV.key)
+	val, err = backend.Load(key)
 	re.NoError(err)
-	re.Empty(value)
+	re.Empty(val)
 	// Save twice without flush.
-	err = backend.SaveKV(itemKV)
+	err = backend.SaveInBatch(key, []byte(value))
 	re.NoError(err)
-	value, err = backend.Load(itemKV.key)
+	val, err = backend.Load(key)
 	re.NoError(err)
-	re.Empty(value)
-	itemKV.value = "v2"
-	err = backend.SaveKV(itemKV)
+	re.Empty(val)
+	value = "v2"
+	err = backend.SaveInBatch(key, []byte(value))
 	re.NoError(err)
-	value, err = backend.Load(itemKV.key)
+	val, err = backend.Load(key)
 	re.NoError(err)
-	re.Empty(value)
+	re.Empty(val)
 	// Delete before flush.
-	err = backend.DeleteKV(itemKV)
+	err = backend.Remove(key)
 	re.NoError(err)
-	value, err = backend.Load(itemKV.key)
+	val, err = backend.Load(key)
 	re.NoError(err)
-	re.Empty(value)
+	re.Empty(val)
 	// Flush and load.
 	err = backend.Flush()
 	re.NoError(err)
-	value, err = backend.Load(itemKV.key)
+	val, err = backend.Load(key)
 	re.NoError(err)
-	re.Equal(itemKV.value, value)
+	re.Equal(value, val)
 	// Delete and load.
-	err = backend.DeleteKV(itemKV)
+	err = backend.Remove(key)
 	re.NoError(err)
-	value, err = backend.Load(itemKV.key)
+	val, err = backend.Load(key)
 	re.NoError(err)
-	re.Empty(value)
+	re.Empty(val)
 	// Close the backend.
 	err = backend.Close()
 	re.NoError(err)

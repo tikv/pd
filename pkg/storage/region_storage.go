@@ -26,46 +26,16 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 )
 
-// regionKV is a wrapper for `*metapb.Region` to implement the `levelDBKV` interface.
-type regionKV struct {
-	*metapb.Region
-}
-
-var _ levelDBKV = (*regionKV)(nil)
-
-// Key returns the key of the Region meta to store.
-func (r *regionKV) Key() string {
-	return endpoint.RegionPath(r.GetId())
-}
-
-// Value returns the bytes of the Region meta to store.
-func (r *regionKV) Value() ([]byte, error) {
-	value, err := proto.Marshal(r.Region)
-	if err != nil {
-		return nil, errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
-	}
-	return value, nil
-}
-
-// Encrypt returns the encrypted Region meta.
-func (r *regionKV) Encrypt(ekm *encryption.Manager) (levelDBKV, error) {
-	encryptedRegion, err := encryption.EncryptRegion(r.Region, ekm)
-	if err != nil {
-		return nil, err
-	}
-	return &regionKV{encryptedRegion}, nil
-}
-
-// RegionStorage is a storage for the PD Region meta information based on LevelDB,
+// RegionStorage is a storage for the PD region meta information based on LevelDB,
 // which will override the default implementation of the `endpoint.RegionStorage`.
 type RegionStorage struct {
 	kv.Base
-	backend *levelDBBackend[*regionKV]
+	backend *levelDBBackend
 }
 
 var _ endpoint.RegionStorage = (*RegionStorage)(nil)
 
-func newRegionStorage(backend *levelDBBackend[*regionKV]) *RegionStorage {
+func newRegionStorage(backend *levelDBBackend) *RegionStorage {
 	return &RegionStorage{Base: backend.Base, backend: backend}
 }
 
@@ -80,13 +50,22 @@ func (s *RegionStorage) LoadRegions(ctx context.Context, f func(region *core.Reg
 }
 
 // SaveRegion implements the `endpoint.RegionStorage` interface.
+// Instead of saving the region directly, it will encrypt the region and then save it in batch.
 func (s *RegionStorage) SaveRegion(region *metapb.Region) error {
-	return s.backend.SaveKV(&regionKV{region})
+	encryptedRegion, err := encryption.EncryptRegion(region, s.backend.ekm)
+	if err != nil {
+		return err
+	}
+	value, err := proto.Marshal(encryptedRegion)
+	if err != nil {
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return s.backend.SaveInBatch(endpoint.RegionPath(region.GetId()), value)
 }
 
 // DeleteRegion implements the `endpoint.RegionStorage` interface.
 func (s *RegionStorage) DeleteRegion(region *metapb.Region) error {
-	return s.backend.DeleteKV(&regionKV{region})
+	return s.backend.Remove((endpoint.RegionPath(region.GetId())))
 }
 
 // Flush implements the `endpoint.RegionStorage` interface.
