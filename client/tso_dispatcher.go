@@ -73,7 +73,18 @@ func (c *tsoClient) scheduleUpdateTSOConnectionCtxs() {
 	}
 }
 
-func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) error {
+func (c *tsoClient) dispatchRequestWithFastRetry(ctx context.Context, dcLocation string, request *tsoRequest) error {
+	if err := c.dispatchRequest(ctx, dcLocation, request); err != nil {
+		// Wait for a while and try again
+		time.Sleep(50 * time.Millisecond)
+		if err = c.dispatchRequest(ctx, dcLocation, request); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *tsoClient) dispatchRequest(ctx context.Context, dcLocation string, request *tsoRequest) error {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
@@ -83,7 +94,11 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 	}
 
 	defer trace.StartRegion(request.requestCtx, "tsoReqEnqueue").End()
-	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request:
+	}
 	return nil
 }
 
@@ -764,9 +779,6 @@ func (c *tsoClient) processRequests(
 	}
 
 	requests := tbc.getCollectedRequests()
-	for _, req := range requests {
-		defer trace.StartRegion(req.requestCtx, "tsoReqSend").End()
-	}
 	count := int64(len(requests))
 	reqKeyspaceGroupID := c.svcDiscovery.GetKeyspaceGroupID()
 	respKeyspaceGroupID, physical, logical, suffixBits, err := stream.processRequests(
@@ -840,8 +852,17 @@ func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical
 		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
 			span.Finish()
 		}
+		req := requests[i]
 		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
-		defer trace.StartRegion(requests[i].requestCtx, "tsoReqDequeue").End()
+		if err != nil && req.bo != nil {
+			if req.bo.WaitAndExecWithoutReset(req.requestCtx, func() error {
+				return c.dispatchRequestWithFastRetry(req.requestCtx, req.dcLocation, req)
+			}) {
+				continue
+			}
+		}
+		tr := trace.StartRegion(requests[i].requestCtx, "tsoReqDequeue")
 		requests[i].done <- err
+		tr.End()
 	}
 }

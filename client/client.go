@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
@@ -69,16 +70,10 @@ type GlobalConfigItem struct {
 	PayLoad   []byte
 }
 
-// Client is a PD (Placement Driver) RPC client.
-// It should not be used after calling Close().
-type Client interface {
-	// GetClusterID gets the cluster ID from PD.
-	GetClusterID(ctx context.Context) uint64
+// RPCClient is a PD (Placement Driver) RPC client which can only call RPC.
+type RPCClient interface {
 	// GetAllMembers gets the members Info from PD
 	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
-	// GetLeaderAddr returns current leader's address. It returns "" before
-	// syncing leader from server.
-	GetLeaderAddr() string
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -133,16 +128,11 @@ type Client interface {
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
 	// WatchGlobalConfig returns a stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error)
-	// UpdateOption updates the client option.
-	UpdateOption(option DynamicOption, value any) error
 
 	// GetExternalTimestamp returns external timestamp
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
-
-	// GetServiceDiscovery returns ServiceDiscovery
-	GetServiceDiscovery() ServiceDiscovery
 
 	// TSOClient is the TSO client.
 	TSOClient
@@ -154,6 +144,25 @@ type Client interface {
 	GCClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
+}
+
+// Client is a PD (Placement Driver) RPC client.
+// It should not be used after calling Close().
+type Client interface {
+	RPCClient
+	BackoffRPCClient(bos ...*retry.Backoffer) RPCClient
+
+	// GetClusterID gets the cluster ID from PD.
+	GetClusterID(ctx context.Context) uint64
+	// GetLeaderAddr returns current leader's address. It returns "" before
+	// syncing leader from server.
+	GetLeaderAddr() string
+	// GetServiceDiscovery returns ServiceDiscovery
+	GetServiceDiscovery() ServiceDiscovery
+
+	// UpdateOption updates the client option.
+	UpdateOption(option DynamicOption, value any) error
+
 	// Close closes the client.
 	Close()
 }
@@ -273,6 +282,13 @@ func WithInitMetricsOption(initMetrics bool) ClientOption {
 	}
 }
 
+// WithBackoffer configures the client with backoffer.
+func WithBackoffer(bo *retry.Backoffer) ClientOption {
+	return func(c *client) {
+		c.bo = bo
+	}
+}
+
 var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
@@ -311,6 +327,7 @@ type client struct {
 
 	// For internal usage.
 	updateTokenConnectionCh chan struct{}
+	bo                      *retry.Backoffer
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -377,6 +394,8 @@ func createClientWithKeyspace(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
+		bo: retry.InitialBackoffer(
+			defaultRPCBaseBackoffInterval, defaultRPCMaxBackoffInterval, defaultRPCBackoffTotalDuration),
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
@@ -497,6 +516,8 @@ func newClientWithKeyspaceName(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
+		bo: retry.InitialBackoffer(
+			defaultRPCBaseBackoffInterval, defaultRPCMaxBackoffInterval, defaultRPCBackoffTotalDuration),
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
@@ -675,6 +696,13 @@ func (c *client) scheduleUpdateTokenConnection() {
 	}
 }
 
+func (c *client) BackoffRPCClient(bos ...*retry.Backoffer) RPCClient {
+	if len(bos) == 0 {
+		return &backoffClient{c, c.bo}
+	}
+	return &backoffClient{c, bos[0]}
+}
+
 // GetClusterID returns the ClusterID.
 func (c *client) GetClusterID(context.Context) uint64 {
 	return c.pdSvcDiscovery.GetClusterID()
@@ -773,6 +801,10 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 }
 
 func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
+	return c.getLocalTSAsyncWithRetry(ctx, dcLocation, nil)
+}
+
+func (c *client) getLocalTSAsyncWithRetry(ctx context.Context, dcLocation string, bo *retry.Backoffer) TSFuture {
 	defer trace.StartRegion(ctx, "GetLocalTSAsync").End()
 	if span := opentracing.SpanFromContext(ctx); span != nil {
 		span = opentracing.StartSpan("GetLocalTSAsync", opentracing.ChildOf(span.Context()))
@@ -782,23 +814,47 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
-	tsoClient := c.getTSOClient()
 	req.start = time.Now()
 	req.dcLocation = dcLocation
+	req.bo = bo
 
+	var tsoClient *tsoClient
+	if req.bo != nil {
+		if err := req.bo.ExecWithoutReset(ctx, func() error {
+			tsoClient = c.getTSOClient()
+			if tsoClient == nil {
+				return errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
+			}
+			return tsoClient.dispatchRequestWithFastRetry(ctx, dcLocation, req)
+		}); err != nil {
+			req.done <- err
+		}
+		return req
+	}
+
+	tsoClient = c.getTSOClient()
 	if tsoClient == nil {
 		req.done <- errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
 		return req
 	}
-
-	if err := tsoClient.dispatchRequest(dcLocation, req); err != nil {
-		// Wait for a while and try again
-		time.Sleep(50 * time.Millisecond)
-		if err = tsoClient.dispatchRequest(dcLocation, req); err != nil {
-			req.done <- err
-		}
+	if err := tsoClient.dispatchRequestWithFastRetry(ctx, dcLocation, req); err != nil {
+		req.done <- err
 	}
 	return req
+}
+
+func (c *client) getLocalTSWithRetry(ctx context.Context, dcLocation string, bo *retry.Backoffer) (physical int64, logical int64, err error) {
+	resp := c.getLocalTSAsyncWithRetry(ctx, dcLocation, bo)
+	return resp.Wait()
+}
+
+func (c *client) getTSAsyncWithRetry(ctx context.Context, bo *retry.Backoffer) TSFuture {
+	return c.getLocalTSAsyncWithRetry(ctx, globalDCLocation, bo)
+}
+
+func (c *client) getTSWithRetry(ctx context.Context, bo *retry.Backoffer) (physical int64, logical int64, err error) {
+	resp := c.getTSAsyncWithRetry(ctx, bo)
+	return resp.Wait()
 }
 
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {

@@ -103,6 +103,23 @@ func TestBackoffer(t *testing.T) {
 	re.True(isBackofferReset(bo))
 }
 
+func TestBackofferOnce(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	base := time.Second
+	max := time.Second
+	total := time.Second * 5
+	// Test initial backoffer.
+	bo := InitialBackoffer(base, max, total)
+	start := time.Now()
+	bo.Exec(ctx, func() error {
+		return nil
+	})
+	re.Less(time.Since(start), 100*time.Millisecond)
+}
+
 func isBackofferReset(bo *Backoffer) bool {
 	return bo.next == bo.base && bo.currentTotal == 0
 }

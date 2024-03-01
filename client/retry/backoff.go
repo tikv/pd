@@ -18,7 +18,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 )
 
@@ -44,6 +43,14 @@ func (bo *Backoffer) Exec(
 	fn func() error,
 ) error {
 	defer bo.resetBackoff()
+	return bo.ExecWithoutReset(ctx, fn)
+}
+
+// ExecWithoutReset is a helper function to exec backoff and not reset backoffer.
+func (bo *Backoffer) ExecWithoutReset(
+	ctx context.Context,
+	fn func() error,
+) error {
 	var (
 		err   error
 		after *time.Timer
@@ -53,31 +60,62 @@ func (bo *Backoffer) Exec(
 		if !bo.isRetryable(err) {
 			break
 		}
-		currentInterval := bo.nextInterval()
-		if after == nil {
-			after = time.NewTimer(currentInterval)
-		} else {
-			after.Reset(currentInterval)
-		}
-		select {
-		case <-ctx.Done():
-			after.Stop()
-			return errors.Trace(ctx.Err())
-		case <-after.C:
-			failpoint.Inject("backOffExecute", func() {
-				testBackOffExecuteFlag = true
-			})
-		}
-		after.Stop()
-		// If the current total time exceeds the maximum total time, return the last error.
-		if bo.total > 0 {
-			bo.currentTotal += currentInterval
-			if bo.currentTotal >= bo.total {
-				break
-			}
+		if bo.wait(ctx, after) {
+			break
 		}
 	}
 	return err
+}
+
+func (bo *Backoffer) WaitAndExecWithoutReset(
+	ctx context.Context,
+	fn func() error,
+) bool {
+	var (
+		err   error
+		after *time.Timer
+	)
+	for {
+		if bo.wait(ctx, after) {
+			return false
+		}
+		err = fn()
+		if !bo.isRetryable(err) {
+			break
+		}
+	}
+	return err == nil
+}
+
+func (bo *Backoffer) wait(
+	ctx context.Context,
+	after *time.Timer,
+) bool {
+	currentInterval := bo.nextInterval()
+	if after == nil {
+		after = time.NewTimer(currentInterval)
+	} else {
+		after.Reset(currentInterval)
+	}
+
+	select {
+	case <-ctx.Done():
+		after.Stop()
+		return true
+	case <-after.C:
+		failpoint.Inject("backOffExecute", func() {
+			testBackOffExecuteFlag = true
+		})
+	}
+	after.Stop()
+	// If the current total time exceeds the maximum total time, return the last error.
+	if bo.total > 0 {
+		bo.currentTotal += currentInterval
+		if bo.currentTotal >= bo.total {
+			return true
+		}
+	}
+	return false
 }
 
 // InitialBackoffer make the initial state for retrying.
@@ -141,6 +179,16 @@ func (bo *Backoffer) exponentialInterval() time.Duration {
 func (bo *Backoffer) resetBackoff() {
 	bo.next = bo.base
 	bo.currentTotal = 0
+}
+
+// Clone clones the backoff for `base`, `max`, `total` and `retryableChecker`.
+func (bo *Backoffer) Clone() *Backoffer {
+	return &Backoffer{
+		base:             bo.base,
+		max:              bo.max,
+		total:            bo.total,
+		retryableChecker: bo.retryableChecker,
+	}
 }
 
 // Only used for test.

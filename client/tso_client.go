@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/retry"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -52,6 +53,7 @@ type tsoRequest struct {
 	physical   int64
 	logical    int64
 	dcLocation string
+	bo         *retry.Backoffer
 }
 
 var tsoReqPool = sync.Pool{
