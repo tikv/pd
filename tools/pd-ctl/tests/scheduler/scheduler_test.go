@@ -406,6 +406,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		"enable-for-tiflash":         "true",
 		"rank-formula-version":       "v2",
 		"split-thresholds":           0.2,
+		"history-sample-duration":    "5m0s",
+		"history-sample-interval":    "30s",
 	}
 	checkHotSchedulerConfig := func(expect map[string]any) {
 		testutil.Eventually(re, func() bool {
@@ -473,6 +475,16 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 
 	expected1["forbid-rw-type"] = "read"
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "forbid-rw-type", "read"}, nil)
+	re.Contains(echo, "Success!")
+	checkHotSchedulerConfig(expected1)
+
+	expected1["history-sample-duration"] = "1m0s"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-duration", "1m"}, nil)
+	re.Contains(echo, "Success!")
+	checkHotSchedulerConfig(expected1)
+
+	expected1["history-sample-interval"] = "1s"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-interval", "1s"}, nil)
 	re.Contains(echo, "Success!")
 	checkHotSchedulerConfig(expected1)
 
