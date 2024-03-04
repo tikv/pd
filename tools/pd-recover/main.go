@@ -62,7 +62,7 @@ func main() {
 	fs.BoolVar(&v, "V", false, "print version information")
 	fs.BoolVar(&fromOldMember, "from-old-member", false, "recover from a member of an existing cluster")
 	fs.StringVar(&endpoints, "endpoints", "http://127.0.0.1:2379", "endpoints urls")
-	fs.Uint64Var(&allocID, "alloc-id", 0, "please make sure alloced ID is safe")
+	fs.Uint64Var(&allocID, "alloc-id", 0, "please make sure allocated ID is safe")
 	fs.Uint64Var(&clusterID, "cluster-id", 0, "please make cluster ID match with tikv")
 	fs.StringVar(&caPath, "cacert", "", "path of file that contains list of trusted SSL CAs")
 	fs.StringVar(&certPath, "cert", "", "path of file that contains list of trusted SSL CAs")

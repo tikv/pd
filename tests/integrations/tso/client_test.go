@@ -269,10 +269,6 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 // TestGetMinTS tests the correctness of GetMinTS.
 func (suite *tsoClientTestSuite) TestGetMinTS() {
 	re := suite.Require()
-	if !suite.legacy {
-		suite.waitForAllKeyspaceGroupsInServing(re)
-	}
-
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {

@@ -592,3 +592,12 @@ type MembersInfo struct {
 	Leader     *pdpb.Member         `json:"leader,omitempty"`
 	EtcdLeader *pdpb.Member         `json:"etcd_leader,omitempty"`
 }
+
+// MicroServiceMember is the member info of a micro service.
+type MicroServiceMember struct {
+	ServiceAddr    string `json:"service-addr"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git-hash"`
+	DeployPath     string `json:"deploy-path"`
+	StartTimestamp int64  `json:"start-timestamp"`
+}

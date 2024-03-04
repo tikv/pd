@@ -1786,16 +1786,16 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 // ValidRegion is used to decide if the region is valid.
 func (r *RegionsInfo) ValidRegion(region *metapb.Region) error {
 	startKey := region.GetStartKey()
-	currnetRegion := r.GetRegionByKey(startKey)
-	if currnetRegion == nil {
+	currentRegion := r.GetRegionByKey(startKey)
+	if currentRegion == nil {
 		return errors.Errorf("region not found, request region: %v", logutil.RedactStringer(RegionToHexMeta(region)))
 	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	regionEpoch := region.GetRegionEpoch()
-	currnetEpoch := currnetRegion.GetMeta().GetRegionEpoch()
-	if regionEpoch.GetVersion() < currnetEpoch.GetVersion() ||
-		regionEpoch.GetConfVer() < currnetEpoch.GetConfVer() {
-		return errors.Errorf("invalid region epoch, request: %v, current: %v", regionEpoch, currnetEpoch)
+	currentEpoch := currentRegion.GetMeta().GetRegionEpoch()
+	if regionEpoch.GetVersion() < currentEpoch.GetVersion() ||
+		regionEpoch.GetConfVer() < currentEpoch.GetConfVer() {
+		return errors.Errorf("invalid region epoch, request: %v, current: %v", regionEpoch, currentEpoch)
 	}
 	return nil
 }
@@ -1884,19 +1884,19 @@ func EncodeToString(src []byte) []byte {
 	return dst
 }
 
-// HexRegionKey converts region key to hex format. Used for formating region in
+// HexRegionKey converts region key to hex format. Used for formatting region in
 // logs.
 func HexRegionKey(key []byte) []byte {
 	return ToUpperASCIIInplace(EncodeToString(key))
 }
 
-// HexRegionKeyStr converts region key to hex format. Used for formating region in
+// HexRegionKeyStr converts region key to hex format. Used for formatting region in
 // logs.
 func HexRegionKeyStr(key []byte) string {
 	return String(HexRegionKey(key))
 }
 
-// RegionToHexMeta converts a region meta's keys to hex format. Used for formating
+// RegionToHexMeta converts a region meta's keys to hex format. Used for formatting
 // region in logs.
 func RegionToHexMeta(meta *metapb.Region) HexRegionMeta {
 	if meta == nil {
@@ -1905,7 +1905,7 @@ func RegionToHexMeta(meta *metapb.Region) HexRegionMeta {
 	return HexRegionMeta{meta}
 }
 
-// HexRegionMeta is a region meta in the hex format. Used for formating region in logs.
+// HexRegionMeta is a region meta in the hex format. Used for formatting region in logs.
 type HexRegionMeta struct {
 	*metapb.Region
 }
@@ -1917,7 +1917,7 @@ func (h HexRegionMeta) String() string {
 	return strings.TrimSpace(proto.CompactTextString(meta))
 }
 
-// RegionsToHexMeta converts regions' meta keys to hex format. Used for formating
+// RegionsToHexMeta converts regions' meta keys to hex format. Used for formatting
 // region in logs.
 func RegionsToHexMeta(regions []*metapb.Region) HexRegionsMeta {
 	hexRegionMetas := make([]*metapb.Region, len(regions))
@@ -1925,7 +1925,7 @@ func RegionsToHexMeta(regions []*metapb.Region) HexRegionsMeta {
 	return hexRegionMetas
 }
 
-// HexRegionsMeta is a slice of regions' meta in the hex format. Used for formating
+// HexRegionsMeta is a slice of regions' meta in the hex format. Used for formatting
 // region in logs.
 type HexRegionsMeta []*metapb.Region
 

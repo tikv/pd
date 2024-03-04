@@ -73,7 +73,7 @@ func (c *tsoClient) scheduleUpdateTSOConnectionCtxs() {
 	}
 }
 
-func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) error {
+func (c *tsoClient) dispatchRequest(ctx context.Context, dcLocation string, request *tsoRequest) error {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
@@ -83,7 +83,11 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 	}
 
 	defer trace.StartRegion(request.requestCtx, "tsoReqEnqueue").End()
-	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request:
+	}
 	return nil
 }
 
@@ -311,6 +315,14 @@ func (c *tsoClient) createTSODispatcher(dcLocation string) {
 			make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
 			defaultMaxTSOBatchSize),
 	}
+	failpoint.Inject("shortDispatcherChannel", func() {
+		dispatcher = &tsoDispatcher{
+			dispatcherCancel: dispatcherCancel,
+			tsoBatchController: newTSOBatchController(
+				make(chan *tsoRequest, 1),
+				defaultMaxTSOBatchSize),
+		}
+	})
 
 	if _, ok := c.tsoDispatcher.LoadOrStore(dcLocation, dispatcher); !ok {
 		// Successfully stored the value. Start the following goroutine.
@@ -372,6 +384,9 @@ func (c *tsoClient) handleDispatcher(
 					return
 				case <-c.option.enableTSOFollowerProxyCh:
 					enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
+					log.Info("[tso] tso follower proxy status changed",
+						zap.String("dc-location", dc),
+						zap.Bool("enable", enableTSOFollowerProxy))
 					if enableTSOFollowerProxy && updateTicker.C == nil {
 						// Because the TSO Follower Proxy is enabled,
 						// the periodic check needs to be performed.
@@ -412,7 +427,7 @@ tsoBatchLoop:
 			} else {
 				log.Error("[tso] fetch pending tso requests error",
 					zap.String("dc-location", dc),
-					errs.ZapError(errs.ErrClientGetTSO, err))
+					zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
 			}
 			return
 		}
@@ -498,7 +513,7 @@ tsoBatchLoop:
 			log.Error("[tso] getTS error after processing requests",
 				zap.String("dc-location", dc),
 				zap.String("stream-addr", streamAddr),
-				errs.ZapError(errs.ErrClientGetTSO, err))
+				zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
@@ -701,7 +716,11 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 	}
 	// GC the stale one.
 	connectionCtxs.Range(func(addr, cc any) bool {
-		if _, ok := tsoStreamBuilders[addr.(string)]; !ok {
+		addrStr := addr.(string)
+		if _, ok := tsoStreamBuilders[addrStr]; !ok {
+			log.Info("[tso] remove the stale tso stream",
+				zap.String("dc", dc),
+				zap.String("addr", addrStr))
 			cc.(*tsoConnectionContext).cancel()
 			connectionCtxs.Delete(addr)
 		}
@@ -712,6 +731,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		if _, ok = connectionCtxs.Load(addr); ok {
 			continue
 		}
+		log.Info("[tso] try to create tso stream",
+			zap.String("dc", dc), zap.String("addr", addr))
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		// Do not proxy the leader client.
 		if addr != leaderAddr {

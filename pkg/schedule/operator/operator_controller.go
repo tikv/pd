@@ -486,6 +486,7 @@ func (oc *Controller) addOperatorLocked(op *Operator) bool {
 		return false
 	}
 	oc.operators[regionID] = op
+	oc.counts[op.SchedulerKind()]++
 	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
 	operatorSizeHist.WithLabelValues(op.Desc()).Observe(float64(op.ApproximateSize))
 	opInfluence := NewTotalOpInfluence([]*Operator{op}, oc.cluster)
@@ -505,7 +506,6 @@ func (oc *Controller) addOperatorLocked(op *Operator) bool {
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
-	oc.updateCounts(oc.operators)
 
 	var step OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
@@ -560,6 +560,7 @@ func (oc *Controller) removeOperatorsLocked() []*Operator {
 	var removed []*Operator
 	for regionID, op := range oc.operators {
 		delete(oc.operators, regionID)
+		oc.counts[op.SchedulerKind()]--
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
 		if op.Kind()&OpMerge != 0 {
@@ -567,7 +568,6 @@ func (oc *Controller) removeOperatorsLocked() []*Operator {
 		}
 		removed = append(removed, op)
 	}
-	oc.updateCounts(oc.operators)
 	return removed
 }
 
@@ -602,7 +602,7 @@ func (oc *Controller) removeOperatorLocked(op *Operator) bool {
 	regionID := op.RegionID()
 	if cur := oc.operators[regionID]; cur == op {
 		delete(oc.operators, regionID)
-		oc.updateCounts(oc.operators)
+		oc.counts[op.SchedulerKind()]--
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
 		if op.Kind()&OpMerge != 0 {
@@ -783,16 +783,6 @@ func (oc *Controller) GetHistory(start time.Time) []OpHistory {
 	return history
 }
 
-// updateCounts updates resource counts using current pending operators.
-func (oc *Controller) updateCounts(operators map[uint64]*Operator) {
-	for k := range oc.counts {
-		delete(oc.counts, k)
-	}
-	for _, op := range operators {
-		oc.counts[op.SchedulerKind()]++
-	}
-}
-
 // OperatorCount gets the count of operators filtered by kind.
 // kind only has one OpKind.
 func (oc *Controller) OperatorCount(kind OpKind) uint64 {
@@ -862,7 +852,7 @@ func (oc *Controller) SetOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
-	oc.updateCounts(oc.operators)
+	oc.counts[op.SchedulerKind()]++
 }
 
 // OpWithStatus records the operator and its status.

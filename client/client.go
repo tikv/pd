@@ -519,7 +519,7 @@ func newClientWithKeyspaceName(
 		return nil
 	}
 
-	// Create a PD service discovery with null keyspace id, then query the real id wth the keyspace name,
+	// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
 	// finally update the keyspace id to the PD service discovery for the following interactions.
 	c.pdSvcDiscovery = newPDServiceDiscovery(
 		clientCtx, clientCancel, &c.wg, c.setServiceMode, updateKeyspaceIDCb, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
@@ -702,6 +702,9 @@ func (c *client) UpdateOption(option DynamicOption, value any) error {
 			return err
 		}
 	case EnableTSOFollowerProxy:
+		if c.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
+			return errors.New("[pd] tso follower proxy is only supported in PD service mode")
+		}
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
@@ -788,10 +791,10 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 		return req
 	}
 
-	if err := tsoClient.dispatchRequest(dcLocation, req); err != nil {
+	if err := tsoClient.dispatchRequest(ctx, dcLocation, req); err != nil {
 		// Wait for a while and try again
 		time.Sleep(50 * time.Millisecond)
-		if err = tsoClient.dispatchRequest(dcLocation, req); err != nil {
+		if err = tsoClient.dispatchRequest(ctx, dcLocation, req); err != nil {
 			req.done <- err
 		}
 	}

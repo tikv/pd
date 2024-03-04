@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,6 +40,7 @@ import (
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/tso"
@@ -49,6 +51,7 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"github.com/tikv/pd/tests/integrations/mcs"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 )
@@ -317,6 +320,30 @@ func TestTSOFollowerProxy(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestTSOFollowerProxyWithTSOService(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := cluster.WaitLeader()
+	pdLeaderServer := cluster.GetServer(leaderName)
+	re.NoError(pdLeaderServer.BootstrapCluster())
+	backendEndpoints := pdLeaderServer.GetAddr()
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
+	re.NoError(err)
+	defer tsoCluster.Destroy()
+	cli := mcs.SetupClientWithKeyspaceID(ctx, re, utils.DefaultKeyspaceID, strings.Split(backendEndpoints, ","))
+	re.NotNil(cli)
+	defer cli.Close()
+	// TSO service does not support the follower proxy, so enabling it should fail.
+	err = cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	re.Error(err)
 }
 
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
@@ -829,6 +856,51 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.Equal(100, cnt)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
+}
+
+func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/shortDispatcherChannel", "return(true)"))
+
+	cli := setupCli(re, ctx, suite.endpoints)
+
+	ctxs := make([]context.Context, 20)
+	cancels := make([]context.CancelFunc, 20)
+	for i := 0; i < 20; i++ {
+		ctxs[i], cancels[i] = context.WithCancel(ctx)
+	}
+	start := time.Now()
+	wg1 := sync.WaitGroup{}
+	wg2 := sync.WaitGroup{}
+	wg3 := sync.WaitGroup{}
+	wg1.Add(1)
+	go func() {
+		<-time.After(time.Second)
+		for i := 0; i < 20; i++ {
+			cancels[i]()
+		}
+		wg1.Done()
+	}()
+	wg2.Add(1)
+	go func() {
+		cli.Close()
+		wg2.Done()
+	}()
+	wg3.Add(1)
+	go func() {
+		for i := 0; i < 20; i++ {
+			cli.GetTSAsync(ctxs[i])
+		}
+		wg3.Done()
+	}()
+	wg1.Wait()
+	wg2.Wait()
+	wg3.Wait()
+	re.Less(time.Since(start), time.Second*2)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/shortDispatcherChannel"))
 }
 
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {

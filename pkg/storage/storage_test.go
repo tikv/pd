@@ -209,6 +209,57 @@ func TestLoadMinServiceGCSafePoint(t *testing.T) {
 	re.Equal(uint64(2), ssp.SafePoint)
 }
 
+func TestTryGetLocalRegionStorage(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Memory backend integrated into core storage.
+	defaultStorage := NewStorageWithMemoryBackend()
+	var regionStorage endpoint.RegionStorage = NewStorageWithMemoryBackend()
+	coreStorage := NewCoreStorage(defaultStorage, regionStorage)
+	storage := RetrieveRegionStorage(coreStorage)
+	re.NotNil(storage)
+	re.Equal(regionStorage, storage)
+	// RegionStorage with LevelDB backend integrated into core storage.
+	defaultStorage = NewStorageWithMemoryBackend()
+	regionStorage, err := NewRegionStorageWithLevelDBBackend(ctx, t.TempDir(), nil)
+	re.NoError(err)
+	coreStorage = NewCoreStorage(defaultStorage, regionStorage)
+	storage = RetrieveRegionStorage(coreStorage)
+	re.NotNil(storage)
+	re.Equal(regionStorage, storage)
+	// Raw LevelDB backend integrated into core storage.
+	defaultStorage = NewStorageWithMemoryBackend()
+	regionStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
+	re.NoError(err)
+	coreStorage = NewCoreStorage(defaultStorage, regionStorage)
+	storage = RetrieveRegionStorage(coreStorage)
+	re.NotNil(storage)
+	re.Equal(regionStorage, storage)
+	defaultStorage = NewStorageWithMemoryBackend()
+	regionStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
+	re.NoError(err)
+	coreStorage = NewCoreStorage(defaultStorage, regionStorage)
+	storage = RetrieveRegionStorage(coreStorage)
+	re.NotNil(storage)
+	re.Equal(regionStorage, storage)
+	// Without core storage.
+	defaultStorage = NewStorageWithMemoryBackend()
+	storage = RetrieveRegionStorage(defaultStorage)
+	re.NotNil(storage)
+	re.Equal(defaultStorage, storage)
+	defaultStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
+	re.NoError(err)
+	storage = RetrieveRegionStorage(defaultStorage)
+	re.NotNil(storage)
+	re.Equal(defaultStorage, storage)
+	defaultStorage, err = newLevelDBBackend(ctx, t.TempDir(), nil)
+	re.NoError(err)
+	storage = RetrieveRegionStorage(defaultStorage)
+	re.NotNil(storage)
+	re.Equal(defaultStorage, storage)
+}
+
 func TestLoadRegions(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
@@ -367,7 +418,7 @@ func randomMerge(regions []*metapb.Region, n int, ratio int) {
 	}
 }
 
-func saveRegions(lb *levelDBBackend, n int, ratio int) error {
+func saveRegions(storage endpoint.RegionStorage, n int, ratio int) error {
 	keys := generateKeys(n)
 	regions := make([]*metapb.Region, 0, n)
 	for i := uint64(0); i < uint64(n); i++ {
@@ -398,36 +449,36 @@ func saveRegions(lb *levelDBBackend, n int, ratio int) error {
 	}
 
 	for _, region := range regions {
-		err := lb.SaveRegion(region)
+		err := storage.SaveRegion(region)
 		if err != nil {
 			return err
 		}
 	}
-	return lb.Flush()
+	return storage.Flush()
 }
 
 func benchmarkLoadRegions(b *testing.B, n int, ratio int) {
 	re := require.New(b)
 	ctx := context.Background()
 	dir := b.TempDir()
-	lb, err := newLevelDBBackend(ctx, dir, nil)
+	regionStorage, err := NewRegionStorageWithLevelDBBackend(ctx, dir, nil)
 	if err != nil {
 		b.Fatal(err)
 	}
 	cluster := core.NewBasicCluster()
-	err = saveRegions(lb, n, ratio)
+	err = saveRegions(regionStorage, n, ratio)
 	if err != nil {
 		b.Fatal(err)
 	}
 	defer func() {
-		err = lb.Close()
+		err = regionStorage.Close()
 		if err != nil {
 			b.Fatal(err)
 		}
 	}()
 
 	b.ResetTimer()
-	err = lb.LoadRegions(context.Background(), cluster.CheckAndPutRegion)
+	err = regionStorage.LoadRegions(ctx, cluster.CheckAndPutRegion)
 	re.NoError(err)
 }
 
