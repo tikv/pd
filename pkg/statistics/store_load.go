@@ -300,6 +300,7 @@ func (s *StoreHistoryLoads) Get(storeID uint64, rwTp utils.RWType, kind constant
 	return load.get()
 }
 
+// UpdateConfig updates the sample duration and interval.
 func (s *StoreHistoryLoads) UpdateConfig(sampleDuration time.Duration, sampleInterval time.Duration) *StoreHistoryLoads {
 	if s.sampleDuration == sampleDuration && s.sampleInterval == sampleInterval {
 		return s
