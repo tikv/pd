@@ -519,7 +519,7 @@ func newClientWithKeyspaceName(
 		return nil
 	}
 
-	// Create a PD service discovery with null keyspace id, then query the real id wth the keyspace name,
+	// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
 	// finally update the keyspace id to the PD service discovery for the following interactions.
 	c.pdSvcDiscovery = newPDServiceDiscovery(
 		clientCtx, clientCancel, &c.wg, c.setServiceMode, updateKeyspaceIDCb, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)

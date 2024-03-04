@@ -49,7 +49,7 @@ const (
 const (
 	// StatusStoreRejectLeader represents the store is restricted by the special configuration. e.g. reject label setting, evict leader/slow store scheduler.
 	StatusStoreRejectLeader = iota + 300
-	// StatusNotMatchIsolation represents the isolation cannot satisfy the requirement.
+	// StatusStoreNotMatchIsolation represents the isolation cannot satisfy the requirement.
 	StatusStoreNotMatchIsolation
 )
 
@@ -189,7 +189,7 @@ func (s *Status) String() string {
 	return StatusText(s.StatusCode)
 }
 
-// IsNormal returns true if the status is noraml.
+// IsNormal returns true if the status is normal.
 func (s *Status) IsNormal() bool {
 	return int(s.StatusCode)/10 == 10
 }

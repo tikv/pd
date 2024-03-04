@@ -90,7 +90,7 @@ func newMasterKeyFromKMS(
 		}
 		if len(output.Plaintext) != masterKeyLength {
 			return nil, errs.ErrEncryptionKMS.GenWithStack(
-				"unexpected data key length generated from AWS KMS, expectd %d vs actual %d",
+				"unexpected data key length generated from AWS KMS, expected %d vs actual %d",
 				masterKeyLength, len(output.Plaintext))
 		}
 		masterKey = &MasterKey{

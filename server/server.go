@@ -449,11 +449,16 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
 	})
-	regionStorage, err := storage.NewStorageWithLevelDBBackend(ctx, filepath.Join(s.cfg.DataDir, "region-meta"), s.encryptionKeyManager)
+	// Initialize an etcd storage as the default storage.
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(
+		ctx,
+		filepath.Join(s.cfg.DataDir, "region-meta"),
+		s.encryptionKeyManager)
 	if err != nil {
 		return err
 	}
-	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}

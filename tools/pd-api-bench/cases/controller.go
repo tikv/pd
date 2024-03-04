@@ -196,7 +196,7 @@ type httpController struct {
 	wg     sync.WaitGroup
 }
 
-func newHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCraeteFn) *httpController {
+func newHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCreateFn) *httpController {
 	c := &httpController{
 		pctx:     ctx,
 		clients:  clis,
@@ -265,7 +265,7 @@ type gRPCController struct {
 	wg sync.WaitGroup
 }
 
-func newGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCraeteFn) *gRPCController {
+func newGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCreateFn) *gRPCController {
 	c := &gRPCController{
 		pctx:     ctx,
 		clients:  clis,
@@ -334,7 +334,7 @@ type etcdController struct {
 	wg sync.WaitGroup
 }
 
-func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn ETCDCraeteFn) *etcdController {
+func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn ETCDCreateFn) *etcdController {
 	c := &etcdController{
 		pctx:     ctx,
 		clients:  clis,

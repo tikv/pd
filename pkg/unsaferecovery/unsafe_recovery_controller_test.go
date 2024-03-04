@@ -1755,7 +1755,7 @@ func TestRunning(t *testing.T) {
 	re.True(recoveryController.IsRunning())
 }
 
-func TestEpochComparsion(t *testing.T) {
+func TestEpochComparison(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

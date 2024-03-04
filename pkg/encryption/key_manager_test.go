@@ -509,7 +509,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	}
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
-	// Config with different encrption method.
+	// Config with different encryption method.
 	config := &Config{
 		DataEncryptionMethod: "aes256-ctr",
 		MasterKey: MasterKeyConfig{
@@ -579,7 +579,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	}
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
-	// Config with different encrption method.
+	// Config with different encryption method.
 	config := &Config{
 		DataEncryptionMethod: "aes128-ctr",
 		MasterKey: MasterKeyConfig{
