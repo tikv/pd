@@ -16,7 +16,9 @@ package storage
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -30,7 +32,7 @@ func TestLevelDBBackend(t *testing.T) {
 	re.NotNil(backend)
 	key, value := "k1", "v1"
 	// Save without flush.
-	err = backend.SaveInBatch(key, []byte(value))
+	err = backend.SaveIntoBatch(key, []byte(value))
 	re.NoError(err)
 	val, err := backend.Load(key)
 	re.NoError(err)
@@ -48,13 +50,13 @@ func TestLevelDBBackend(t *testing.T) {
 	re.NoError(err)
 	re.Empty(val)
 	// Save twice without flush.
-	err = backend.SaveInBatch(key, []byte(value))
+	err = backend.SaveIntoBatch(key, []byte(value))
 	re.NoError(err)
 	val, err = backend.Load(key)
 	re.NoError(err)
 	re.Empty(val)
 	value = "v2"
-	err = backend.SaveInBatch(key, []byte(value))
+	err = backend.SaveIntoBatch(key, []byte(value))
 	re.NoError(err)
 	val, err = backend.Load(key)
 	re.NoError(err)
@@ -77,6 +79,42 @@ func TestLevelDBBackend(t *testing.T) {
 	val, err = backend.Load(key)
 	re.NoError(err)
 	re.Empty(val)
+	// Test the background flush.
+	backend.flushRate = defaultDirtyFlushTick
+	err = backend.SaveIntoBatch(key, []byte(value))
+	re.NoError(err)
+	val, err = backend.Load(key)
+	re.NoError(err)
+	re.Empty(val)
+	time.Sleep(defaultDirtyFlushTick * 2)
+	val, err = backend.Load(key)
+	re.NoError(err)
+	re.Equal(value, val)
+	err = backend.Remove(key)
+	re.NoError(err)
+	val, err = backend.Load(key)
+	re.NoError(err)
+	re.Empty(val)
+	backend.flushRate = defaultFlushRate
+	// Test the flush when the cache is full.
+	backend.flushRate = time.Minute
+	for i := 0; i < backend.batchSize; i++ {
+		key, value = fmt.Sprintf("k%d", i), fmt.Sprintf("v%d", i)
+		err = backend.SaveIntoBatch(key, []byte(value))
+		re.NoError(err)
+		if i < backend.batchSize-1 {
+			// The cache is not full yet.
+			val, err = backend.Load(key)
+			re.NoError(err)
+			re.Empty(val)
+		} else {
+			// The cache is full, and the flush is triggered.
+			val, err = backend.Load(key)
+			re.NoError(err)
+			re.Equal(value, val)
+		}
+	}
+	backend.flushRate = defaultFlushRate
 	// Close the backend.
 	err = backend.Close()
 	re.NoError(err)

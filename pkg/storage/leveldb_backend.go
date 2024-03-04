@@ -106,10 +106,10 @@ func (lb *levelDBBackend) backgroundFlush() {
 	}
 }
 
-// SaveInBatch saves the key-value pair in the batch cache, and it will
+// SaveIntoBatch saves the key-value pair into the batch cache, and it will
 // only be saved to the underlying storage when the `Flush` method is
 // called or the cache is full.
-func (lb *levelDBBackend) SaveInBatch(key string, value []byte) error {
+func (lb *levelDBBackend) SaveIntoBatch(key string, value []byte) error {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 	if lb.cacheSize < lb.batchSize-1 {

@@ -60,7 +60,7 @@ func (s *RegionStorage) SaveRegion(region *metapb.Region) error {
 	if err != nil {
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
 	}
-	return s.backend.SaveInBatch(endpoint.RegionPath(region.GetId()), value)
+	return s.backend.SaveIntoBatch(endpoint.RegionPath(region.GetId()), value)
 }
 
 // DeleteRegion implements the `endpoint.RegionStorage` interface.
