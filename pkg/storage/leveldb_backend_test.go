@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestLevelDBBackend(t *testing.T) {
@@ -86,10 +87,13 @@ func TestLevelDBBackend(t *testing.T) {
 	val, err = backend.Load(key)
 	re.NoError(err)
 	re.Empty(val)
-	time.Sleep(defaultDirtyFlushTick * 2)
-	val, err = backend.Load(key)
-	re.NoError(err)
-	re.Equal(value, val)
+	testutil.Eventually(re, func() bool {
+		// we can't ensure whether gc is executed, so we check the length of cache in a loop.
+		time.Sleep(defaultDirtyFlushTick * 2)
+		val, err = backend.Load(key)
+		re.NoError(err)
+		return value == val
+	}, testutil.WithWaitFor(defaultDirtyFlushTick*5), testutil.WithTickInterval(defaultDirtyFlushTick/2))
 	err = backend.Remove(key)
 	re.NoError(err)
 	val, err = backend.Load(key)
