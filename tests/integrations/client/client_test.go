@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/opentracing/basictracer-go"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -468,6 +470,22 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	_, _, err = cli.GetTS(ctx)
 	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"))
+
+	recorder := basictracer.NewInMemoryRecorder()
+	tracer := basictracer.New(recorder)
+	span := tracer.StartSpan("trace")
+	ctx = opentracing.ContextWithSpan(ctx, span)
+	future := cli.GetLocalTSAsync(ctx, "error-dc")
+	spans := recorder.GetSpans()
+	re.Len(spans, 1)
+	_, _, err = future.Wait()
+	re.Error(err)
+	spans = recorder.GetSpans()
+	re.Len(spans, 1)
+	_, _, err = cli.GetTS(ctx)
+	re.NoError(err)
+	spans = recorder.GetSpans()
+	re.Len(spans, 3)
 
 	// Test the TSO follower proxy while enabling the Local TSO.
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
