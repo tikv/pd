@@ -204,12 +204,14 @@ func (suite *httpClientTestSuite) checkMeta(mode mode, client pd.Client) {
 	version, err := client.GetClusterVersion(env.ctx)
 	re.NoError(err)
 	re.Equal("0.0.0", version)
-	rgs,_:=client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	rgs, _ := client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
 	re.Equal(int64(0), rgs.Count)
-	rgs,_=client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	rgs, _ = client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
 	re.Equal(int64(2), rgs.Count)
-	rgs,_=client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
+	rgs, _ = client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
 	re.Equal(int64(1), rgs.Count)
+	rgs, _ = client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	re.Equal(int64(2), rgs.Count)
 }
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
