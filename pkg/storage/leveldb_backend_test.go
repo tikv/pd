@@ -88,7 +88,6 @@ func TestLevelDBBackend(t *testing.T) {
 	re.NoError(err)
 	re.Empty(val)
 	testutil.Eventually(re, func() bool {
-		// we can't ensure whether gc is executed, so we check the length of cache in a loop.
 		time.Sleep(defaultDirtyFlushTick * 2)
 		val, err = backend.Load(key)
 		re.NoError(err)
