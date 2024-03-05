@@ -1008,6 +1008,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
+		// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
+		// region stats needs to be collected in API mode.
+		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 		}
@@ -1036,6 +1039,9 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		regionUpdateCacheEventCounter.Inc()
 	}
 
+	// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
+	// region stats needs to be collected in API mode.
+	// We need to think of a better way to reduce this part of the cost in the future.
 	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
 
 	if c.storage != nil {
