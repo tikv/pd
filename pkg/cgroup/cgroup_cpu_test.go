@@ -46,7 +46,7 @@ func checkKernelVersionNewerThan(re *require.Assertions, t *testing.T, major, mi
 	re.Len(kernelVersion, 1, fmt.Sprintf("release str is %s", releaseStr))
 	kernelVersionPartRE := regexp.MustCompile(`[0-9]+`)
 	kernelVersionParts := kernelVersionPartRE.FindAllString(kernelVersion[0], -1)
-	re.Len(kernelVersionParts, 3, fmt.Sprintf("kernel verion str is %s", kernelVersion[0]))
+	re.Len(kernelVersionParts, 3, fmt.Sprintf("kernel version str is %s", kernelVersion[0]))
 	t.Logf("parsed kernel version parts: major %s, minor %s, patch %s",
 		kernelVersionParts[0], kernelVersionParts[1], kernelVersionParts[2])
 	mustConvInt := func(s string) int {

@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 )
 
-func TestFilterUnhealtyStore(t *testing.T) {
+func TestFilterUnhealthyStore(t *testing.T) {
 	re := require.New(t)
 	stats := NewStoresStats()
 	cluster := core.NewBasicCluster()

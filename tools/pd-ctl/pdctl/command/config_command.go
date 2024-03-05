@@ -408,7 +408,7 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	} else if len(args) == 3 {
 		t := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
 		if t != nil && t.Kind() == reflect.Int {
-			// convert to number for numberic fields.
+			// convert to number for numeric fields.
 			arg2, err := strconv.ParseInt(args[2], 10, 64)
 			if err != nil {
 				cmd.Printf("value %v cannot covert to number: %v", args[2], err)

@@ -82,7 +82,7 @@ func newIV(ivLength int) ([]byte, error) {
 	}
 	if n != ivLength {
 		return nil, errs.ErrEncryptionGenerateIV.GenWithStack(
-			"iv length exepcted %d vs actual %d", ivLength, n)
+			"iv length expected %d vs actual %d", ivLength, n)
 	}
 	return iv, nil
 }

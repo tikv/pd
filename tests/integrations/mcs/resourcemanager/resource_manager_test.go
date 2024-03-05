@@ -1108,7 +1108,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	re.NoError(err)
 	re.Equal(g.RUStats, testConsumption)
 
-	// update resoruce group, ru stats not change
+	// update resource group, ru stats not change
 	g.RUSettings.RU.Settings.FillRate = 12345
 	_, err = cli.ModifyResourceGroup(suite.ctx, g)
 	re.NoError(err)

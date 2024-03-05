@@ -89,7 +89,7 @@ func (c *FIFO) FromElems(key uint64) []*Item {
 	return elems
 }
 
-// FromLastSameElems returns continuous items that have the same comparable attribute with the the lastest one.
+// FromLastSameElems returns continuous items that have the same comparable attribute with the last one.
 func (c *FIFO) FromLastSameElems(checkFunc func(any) (bool, string)) []*Item {
 	c.RLock()
 	defer c.RUnlock()

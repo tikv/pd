@@ -73,7 +73,7 @@ func (c *tsoClient) scheduleUpdateTSOConnectionCtxs() {
 	}
 }
 
-func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) error {
+func (c *tsoClient) dispatchRequest(ctx context.Context, dcLocation string, request *tsoRequest) error {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
@@ -83,7 +83,11 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 	}
 
 	defer trace.StartRegion(request.requestCtx, "tsoReqEnqueue").End()
-	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request:
+	}
 	return nil
 }
 
@@ -311,6 +315,14 @@ func (c *tsoClient) createTSODispatcher(dcLocation string) {
 			make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
 			defaultMaxTSOBatchSize),
 	}
+	failpoint.Inject("shortDispatcherChannel", func() {
+		dispatcher = &tsoDispatcher{
+			dispatcherCancel: dispatcherCancel,
+			tsoBatchController: newTSOBatchController(
+				make(chan *tsoRequest, 1),
+				defaultMaxTSOBatchSize),
+		}
+	})
 
 	if _, ok := c.tsoDispatcher.LoadOrStore(dcLocation, dispatcher); !ok {
 		// Successfully stored the value. Start the following goroutine.
@@ -415,7 +427,7 @@ tsoBatchLoop:
 			} else {
 				log.Error("[tso] fetch pending tso requests error",
 					zap.String("dc-location", dc),
-					errs.ZapError(errs.ErrClientGetTSO, err))
+					zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
 			}
 			return
 		}
@@ -501,7 +513,7 @@ tsoBatchLoop:
 			log.Error("[tso] getTS error after processing requests",
 				zap.String("dc-location", dc),
 				zap.String("stream-addr", streamAddr),
-				errs.ZapError(errs.ErrClientGetTSO, err))
+				zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
