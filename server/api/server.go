@@ -41,6 +41,8 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	r := createRouter(apiPrefix, svr)
 	router := mux.NewRouter()
 
+	// TODO: we should support forward "regions/check/xxx" to scheduling server.
+
 	// Following requests are redirected:
 	// 	"/admin/reset-ts", http.MethodPost
 	//	"/operators", http.MethodGet
