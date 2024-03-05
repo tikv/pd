@@ -96,7 +96,7 @@ type Client interface {
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
-	UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersion) error
+	UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -904,8 +904,8 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-// PatchKeyspaceConfig patches the keyspace config.
-func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersion) error {
+// UpdateKeyspaceSafePointVersion patches the keyspace config.
+func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error {
 	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceSafePointVersion)
 	url := fmt.Sprintf(KeyspaceConfig, keyspaceName)
 
