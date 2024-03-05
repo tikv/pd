@@ -77,6 +77,7 @@ const (
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
 	deleteOperators                         = "DeleteOperators"
+	UpdateKeyspaceSafePointVersionName      = "UpdateKeyspaceSafePointVersion"
 )
 
 type requestInfo struct {

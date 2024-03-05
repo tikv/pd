@@ -80,6 +80,8 @@ const (
 	operators           = "/pd/api/v1/operators"
 	// Micro Service
 	microServicePrefix = "/pd/api/v2/ms"
+	// Keyspace
+	KeyspaceConfig = "/pd/api/v2/keyspaces/%s/config"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.

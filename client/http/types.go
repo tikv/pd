@@ -601,3 +601,12 @@ type MicroServiceMember struct {
 	DeployPath     string `json:"deploy-path"`
 	StartTimestamp int64  `json:"start-timestamp"`
 }
+
+type KeyspaceSafePointConfig struct {
+	SafePointVersion string `json:"safe_point_version,omitempty"`
+}
+
+// KeyspaceSavePointVersion represents parameters needed to modify target keyspace's configs.
+type KeyspaceSafePointVersion struct {
+	Config KeyspaceSafePointConfig `json:"config"`
+}
