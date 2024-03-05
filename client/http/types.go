@@ -602,12 +602,12 @@ type MicroServiceMember struct {
 	StartTimestamp int64  `json:"start-timestamp"`
 }
 
-// MicroServiceMember is the member info of a micro service.
+// KeyspaceSafePointVersion represents parameters needed to modify the safe point version.
 type KeyspaceSafePointVersion struct {
 	SafePointVersion string `json:"safe_point_version,omitempty"`
 }
 
-// KeyspaceSavePointVersion represents parameters needed to modify target keyspace's configs.
+// KeyspaceSafePointVersionConfig represents parameters needed to modify target keyspace's configs.
 type KeyspaceSafePointVersionConfig struct {
 	Config KeyspaceSafePointVersion `json:"config"`
 }
