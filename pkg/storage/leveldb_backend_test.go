@@ -88,7 +88,6 @@ func TestLevelDBBackend(t *testing.T) {
 	re.NoError(err)
 	re.Empty(val)
 	testutil.Eventually(re, func() bool {
-		time.Sleep(defaultDirtyFlushTick * 2)
 		val, err = backend.Load(key)
 		re.NoError(err)
 		return value == val
