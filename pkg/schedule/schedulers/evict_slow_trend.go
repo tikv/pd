@@ -597,7 +597,7 @@ func checkStoreSlowerThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 		}
 		slowTrend := store.GetSlowTrend()
 		// Use `SlowTrend.ResultValue` at first, but not good, `CauseValue` is better
-		// Greater `CuaseValue` means slower
+		// Greater `CauseValue` means slower
 		if slowTrend != nil && (targetSlowTrend.CauseValue-slowTrend.CauseValue) > alterEpsilon && slowTrend.CauseValue > alterEpsilon {
 			slowerThanStoresNum += 1
 		}

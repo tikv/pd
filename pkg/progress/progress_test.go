@@ -49,7 +49,7 @@ func TestProgress(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		m.UpdateProgress(n, 30, 30, false)
 	}
-	re.Equal(61, m.progesses[n].history.Len())
+	re.Equal(61, m.progresses[n].history.Len())
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.7, p)

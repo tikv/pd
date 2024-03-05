@@ -784,7 +784,7 @@ func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 	return leaderClient
 }
 
-// GetAllServiceClients implments ServiceDiscovery
+// GetAllServiceClients implements ServiceDiscovery
 func (c *pdServiceDiscovery) GetAllServiceClients() []ServiceClient {
 	all := c.all.Load()
 	if all == nil {
@@ -893,7 +893,9 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 			// If the method is not supported, we set it to pd mode.
 			// TODO: it's a hack way to solve the compatibility issue.
 			// we need to remove this after all maintained version supports the method.
-			c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+			if c.serviceModeUpdateCb != nil {
+				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+			}
 			return nil
 		}
 		return err

@@ -40,7 +40,7 @@ const (
 	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderType is evict leader scheduler type.
 	EvictLeaderType = "evict-leader"
-	// EvictLeaderBatchSize is the number of operators to to transfer
+	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
 	EvictLeaderBatchSize = 3
 	lastStoreDeleteInfo  = "The last store has been deleted"

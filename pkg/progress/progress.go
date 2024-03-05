@@ -30,13 +30,13 @@ const speedStatisticalWindow = 10 * time.Minute
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
 	syncutil.RWMutex
-	progesses map[string]*progressIndicator
+	progresses map[string]*progressIndicator
 }
 
 // NewManager creates a new Manager.
 func NewManager() *Manager {
 	return &Manager{
-		progesses: make(map[string]*progressIndicator),
+		progresses: make(map[string]*progressIndicator),
 	}
 }
 
@@ -59,7 +59,7 @@ func (m *Manager) Reset() {
 	m.Lock()
 	defer m.Unlock()
 
-	m.progesses = make(map[string]*progressIndicator)
+	m.progresses = make(map[string]*progressIndicator)
 }
 
 // AddProgress adds a progress into manager if it doesn't exist.
@@ -69,8 +69,8 @@ func (m *Manager) AddProgress(progress string, current, total float64, updateInt
 
 	history := list.New()
 	history.PushBack(current)
-	if _, exist = m.progesses[progress]; !exist {
-		m.progesses[progress] = &progressIndicator{
+	if _, exist = m.progresses[progress]; !exist {
+		m.progresses[progress] = &progressIndicator{
 			total:             total,
 			remaining:         total,
 			history:           history,
@@ -86,7 +86,7 @@ func (m *Manager) UpdateProgress(progress string, current, remaining float64, is
 	m.Lock()
 	defer m.Unlock()
 
-	if p, exist := m.progesses[progress]; exist {
+	if p, exist := m.progresses[progress]; exist {
 		p.remaining = remaining
 		if p.total < remaining {
 			p.total = remaining
@@ -120,7 +120,7 @@ func (m *Manager) UpdateProgressTotal(progress string, total float64) {
 	m.Lock()
 	defer m.Unlock()
 
-	if p, exist := m.progesses[progress]; exist {
+	if p, exist := m.progresses[progress]; exist {
 		p.total = total
 	}
 }
@@ -130,8 +130,8 @@ func (m *Manager) RemoveProgress(progress string) (exist bool) {
 	m.Lock()
 	defer m.Unlock()
 
-	if _, exist = m.progesses[progress]; exist {
-		delete(m.progesses, progress)
+	if _, exist = m.progresses[progress]; exist {
+		delete(m.progresses, progress)
 		return
 	}
 	return
@@ -143,7 +143,7 @@ func (m *Manager) GetProgresses(filter func(p string) bool) []string {
 	defer m.RUnlock()
 
 	processes := []string{}
-	for p := range m.progesses {
+	for p := range m.progresses {
 		if filter(p) {
 			processes = append(processes, p)
 		}
@@ -156,7 +156,7 @@ func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed fl
 	m.RLock()
 	defer m.RUnlock()
 
-	if p, exist := m.progesses[progress]; exist {
+	if p, exist := m.progresses[progress]; exist {
 		process = 1 - p.remaining/p.total
 		if process < 0 {
 			process = 0
