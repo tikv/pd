@@ -17,10 +17,12 @@ package http
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -610,4 +612,29 @@ type KeyspaceSafePointVersion struct {
 // KeyspaceSafePointVersionConfig represents parameters needed to modify target keyspace's configs.
 type KeyspaceSafePointVersionConfig struct {
 	Config KeyspaceSafePointVersion `json:"config"`
+}
+
+// tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
+type tempKeyspaceMeta struct {
+	ID             uint32            `json:"id"`
+	Name           string            `json:"name"`
+	State          string            `json:"state"`
+	CreatedAt      int64             `json:"created_at"`
+	StateChangedAt int64             `json:"state_changed_at"`
+	Config         map[string]string `json:"config"`
+}
+
+func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
+	switch str {
+	case "ENABLED":
+		return keyspacepb.KeyspaceState_ENABLED, nil
+	case "DISABLED":
+		return keyspacepb.KeyspaceState_DISABLED, nil
+	case "ARCHIVED":
+		return keyspacepb.KeyspaceState_ARCHIVED, nil
+	case "TOMBSTONE":
+		return keyspacepb.KeyspaceState_TOMBSTONE, nil
+	default:
+		return keyspacepb.KeyspaceState(0), fmt.Errorf("invalid KeyspaceState string: %s", str)
+	}
 }

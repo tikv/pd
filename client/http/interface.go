@@ -907,17 +907,13 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-func (c *client) getUpdateKeyspaceConfigURL(keyspaceName string) string {
-	return fmt.Sprintf(KeyspaceConfig, keyspaceName)
-}
-
 // UpdateKeyspaceSafePointVersion patches the keyspace config.
 func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error {
 	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceSafePointVersion)
 	if err != nil {
 		return errors.Trace(err)
 	}
-	url := c.getUpdateKeyspaceConfigURL(keyspaceName)
+	url := GetUpdateKeyspaceConfigURL(keyspaceName)
 	return c.request(ctx, newRequestInfo().
 		WithName(UpdateKeyspaceSafePointVersionName).
 		WithURI(url).
@@ -938,40 +934,11 @@ func (c *client) CreateKeyspace(ctx context.Context, keyspaceMeta *keyspacepb.Ke
 		WithBody(keyspaceMetaJSON))
 }
 
-func (c *client) getKeyspaceMetaByNameURL(keyspaceName string) string {
-	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
-}
-
-// tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
-type tempKeyspaceMeta struct {
-	ID             uint32            `json:"id"`
-	Name           string            `json:"name"`
-	State          string            `json:"state"`
-	CreatedAt      int64             `json:"created_at"`
-	StateChangedAt int64             `json:"state_changed_at"`
-	Config         map[string]string `json:"config"`
-}
-
-func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
-	switch str {
-	case "ENABLED":
-		return keyspacepb.KeyspaceState_ENABLED, nil
-	case "DISABLED":
-		return keyspacepb.KeyspaceState_DISABLED, nil
-	case "ARCHIVED":
-		return keyspacepb.KeyspaceState_ARCHIVED, nil
-	case "TOMBSTONE":
-		return keyspacepb.KeyspaceState_TOMBSTONE, nil
-	default:
-		return keyspacepb.KeyspaceState(0), fmt.Errorf("invalid KeyspaceState string: %s", str)
-	}
-}
-
 // GetKeyspaceMetaByName get the given keyspace meta.
 func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error) {
 	var tempKeyspaceMeta tempKeyspaceMeta
 	var keyspaceMetaPB keyspacepb.KeyspaceMeta
-	uri := c.getKeyspaceMetaByNameURL(keyspaceName)
+	uri := GetKeyspaceMetaByNameURL(keyspaceName)
 	err := c.request(ctx, newRequestInfo().
 		WithName(GetKeyspaceMetaByNameName).
 		WithURI(uri).

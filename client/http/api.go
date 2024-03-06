@@ -205,3 +205,13 @@ func MicroServiceMembers(service string) string {
 func MicroServicePrimary(service string) string {
 	return fmt.Sprintf("%s/primary/%s", microServicePrefix, service)
 }
+
+// GetUpdateKeyspaceConfigURL returns the path of PD HTTP API to update keyspace config.
+func GetUpdateKeyspaceConfigURL(keyspaceName string) string {
+	return fmt.Sprintf(KeyspaceConfig, keyspaceName)
+}
+
+// GetKeyspaceMetaByNameURL returns the path of PD HTTP API to get keyspace meta by keyspace name.
+func GetKeyspaceMetaByNameURL(keyspaceName string) string {
+	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
+}
