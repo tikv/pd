@@ -904,7 +904,7 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-func (c *client) getUpdateKeyspaceConfigUrl(keyspaceName string) string {
+func (c *client) getUpdateKeyspaceConfigURL(keyspaceName string) string {
 	return fmt.Sprintf(KeyspaceConfig, keyspaceName)
 }
 
@@ -914,7 +914,7 @@ func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceNam
 	if err != nil {
 		return errors.Trace(err)
 	}
-	url := c.getUpdateKeyspaceConfigUrl(keyspaceName)
+	url := c.getUpdateKeyspaceConfigURL(keyspaceName)
 	return c.request(ctx, newRequestInfo().
 		WithName(UpdateKeyspaceSafePointVersionName).
 		WithURI(url).

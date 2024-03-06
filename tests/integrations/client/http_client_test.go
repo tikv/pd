@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
@@ -39,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
+	"go.uber.org/zap"
 )
 
 type mode int
@@ -750,4 +752,30 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	failureCnt.Write(&out)
 	re.Equal(float64(3), out.Counter.GetValue())
 	c.Close()
+}
+
+func (suite *httpClientTestSuite) TestUpdateKeyspaceSafePointVersion() {
+	suite.RunTestInHttp(suite.checkUpdateKeyspaceSafePointVersion)
+}
+
+// RunTestInTwoModes is to run test in two modes.
+func (suite *httpClientTestSuite) RunTestInHttp(test func(mode mode, client pd.Client)) {
+	// Run test with default service discovery.
+	client := pd.NewClient("pd-http-client-it-http", suite.env[defaultServiceDiscovery].endpoints)
+	test(defaultServiceDiscovery, client)
+	client.Close()
+}
+
+func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	keyspaceSafePointVersionConfig := pd.KeyspaceSafePointVersionConfig{
+		Config: pd.KeyspaceSafePointVersion{
+			SafePointVersion: "v2",
+		},
+	}
+	err := client.UpdateKeyspaceSafePointVersion(env.ctx, "test-keyspace", &keyspaceSafePointVersionConfig)
+	log.Info("[test-yjy]TestUpdateKeyspaceSafePointVersion", zap.Error(err))
+	re.ErrorContains(err, http.StatusText(http.StatusNotFound))
 }
