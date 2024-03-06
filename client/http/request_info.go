@@ -78,6 +78,8 @@ const (
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
 	deleteOperators                         = "DeleteOperators"
 	UpdateKeyspaceSafePointVersionName      = "UpdateKeyspaceSafePointVersion"
+	CreateKeyspaceName                      = "CreateKeyspace"
+	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
 )
 
 type requestInfo struct {

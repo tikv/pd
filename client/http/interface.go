@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/client/retry"
@@ -97,6 +98,8 @@ type Client interface {
 
 	/* Keyspace interface */
 	UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error
+	CreateKeyspace(ctx context.Context, keyspaceMeta *keyspacepb.KeyspaceMeta) error
+	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -920,4 +923,76 @@ func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceNam
 		WithURI(url).
 		WithMethod(http.MethodPatch).
 		WithBody(keyspaceConfigPatchJSON))
+}
+
+// CreateKeyspace create the given keyspace.
+func (c *client) CreateKeyspace(ctx context.Context, keyspaceMeta *keyspacepb.KeyspaceMeta) error {
+	keyspaceMetaJSON, err := json.Marshal(keyspaceMeta)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(CreateKeyspaceName).
+		WithURI(CreateKeyspace).
+		WithMethod(http.MethodPost).
+		WithBody(keyspaceMetaJSON))
+}
+
+func (c *client) getKeyspaceMetaByNameURL(keyspaceName string) string {
+	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
+}
+
+type tempKeyspaceMeta struct {
+	ID             uint32            `json:"id"`
+	Name           string            `json:"name"`
+	State          string            `json:"state"`
+	CreatedAt      int64             `json:"created_at"`
+	StateChangedAt int64             `json:"state_changed_at"`
+	Config         map[string]string `json:"config"`
+}
+
+func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
+	switch str {
+	case "ENABLED":
+		return keyspacepb.KeyspaceState_ENABLED, nil
+	case "DISABLED":
+		return keyspacepb.KeyspaceState_DISABLED, nil
+	case "ARCHIVED":
+		return keyspacepb.KeyspaceState_ARCHIVED, nil
+	case "TOMBSTONE":
+		return keyspacepb.KeyspaceState_TOMBSTONE, nil
+	default:
+		return keyspacepb.KeyspaceState(0), fmt.Errorf("invalid KeyspaceState string: %s", str)
+	}
+}
+
+// GetKeyspaceMetaByName get the given keyspace meta.
+func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error) {
+	var tempKeyspaceMeta tempKeyspaceMeta
+	var keyspaceMetaPB keyspacepb.KeyspaceMeta
+	uri := c.getKeyspaceMetaByNameURL(keyspaceName)
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetKeyspaceMetaByNameName).
+		WithURI(uri).
+		WithMethod(http.MethodGet).
+		WithResp(&tempKeyspaceMeta))
+
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
+		Name:           tempKeyspaceMeta.Name,
+		Id:             tempKeyspaceMeta.ID,
+		Config:         tempKeyspaceMeta.Config,
+		CreatedAt:      tempKeyspaceMeta.CreatedAt,
+		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
+		State:          keyspaceState,
+	}
+	return &keyspaceMetaPB, nil
 }

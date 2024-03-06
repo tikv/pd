@@ -81,7 +81,9 @@ const (
 	// Micro Service
 	microServicePrefix = "/pd/api/v2/ms"
 	// Keyspace
-	KeyspaceConfig = "/pd/api/v2/keyspaces/%s/config"
+	KeyspaceConfig        = "/pd/api/v2/keyspaces/%s/config"
+	CreateKeyspace        = "/pd/api/v2/keyspaces"
+	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
