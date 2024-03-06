@@ -50,5 +50,13 @@ func TestHistoryLoads(t *testing.T) {
 
 	historyLoads = NewStoreHistoryLoads(utils.DimLen, time.Millisecond, time.Second)
 	historyLoads.Add(1, rwTp, kind, loads)
-	re.Len(historyLoads.Get(1, rwTp, kind)[0], 1)
+	re.Len(historyLoads.Get(1, rwTp, kind)[0], 0)
+
+	historyLoads = NewStoreHistoryLoads(utils.DimLen, 0, time.Second)
+	historyLoads.Add(1, rwTp, kind, loads)
+	re.Len(historyLoads.Get(1, rwTp, kind)[0], 0)
+
+	historyLoads = NewStoreHistoryLoads(utils.DimLen, 0, 0)
+	historyLoads.Add(1, rwTp, kind, loads)
+	re.Len(historyLoads.Get(1, rwTp, kind)[0], 0)
 }
