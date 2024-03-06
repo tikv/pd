@@ -98,7 +98,6 @@ type Client interface {
 
 	/* Keyspace interface */
 	UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error
-	CreateKeyspace(ctx context.Context, keyspaceMeta *keyspacepb.KeyspaceMeta) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 
 	/* Client-related methods */
@@ -918,19 +917,6 @@ func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceNam
 		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
 		WithMethod(http.MethodPatch).
 		WithBody(keyspaceConfigPatchJSON))
-}
-
-// CreateKeyspace create the given keyspace.
-func (c *client) CreateKeyspace(ctx context.Context, keyspaceMeta *keyspacepb.KeyspaceMeta) error {
-	keyspaceMetaJSON, err := json.Marshal(keyspaceMeta)
-	if err != nil {
-		return errors.Trace(err)
-	}
-	return c.request(ctx, newRequestInfo().
-		WithName(CreateKeyspaceName).
-		WithURI(CreateKeyspace).
-		WithMethod(http.MethodPost).
-		WithBody(keyspaceMetaJSON))
 }
 
 // GetKeyspaceMetaByName get the given keyspace meta.

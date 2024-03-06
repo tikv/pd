@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
@@ -85,6 +84,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 		leader := cluster.WaitLeader()
 		re.NotEmpty(leader)
 		leaderServer := cluster.GetLeaderServer()
+
 		err = leaderServer.BootstrapCluster()
 		re.NoError(err)
 		for _, region := range []*core.RegionInfo{
@@ -761,20 +761,15 @@ func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode,
 	re := suite.Require()
 	env := suite.env[mode]
 
-	keyspaceName := "test-keyspace-name"
+	keyspaceName := "DEFAULT"
 	safePointVersion := "v2"
 
-	// Create keyspace
-	keyspaceMeta := keyspacepb.KeyspaceMeta{Name: keyspaceName}
-	err := client.CreateKeyspace(env.ctx, &keyspaceMeta)
-	re.NoError(err)
-	// Update keyspace safe point version
 	keyspaceSafePointVersionConfig := pd.KeyspaceSafePointVersionConfig{
 		Config: pd.KeyspaceSafePointVersion{
 			SafePointVersion: safePointVersion,
 		},
 	}
-	err = client.UpdateKeyspaceSafePointVersion(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	err := client.UpdateKeyspaceSafePointVersion(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
 	re.NoError(err)
 
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(env.ctx, keyspaceName)
