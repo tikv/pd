@@ -904,14 +904,17 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
+func (c *client) getUpdateKeyspaceConfigUrl(keyspaceName string) string {
+	return fmt.Sprintf(KeyspaceConfig, keyspaceName)
+}
+
 // UpdateKeyspaceSafePointVersion patches the keyspace config.
 func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error {
 	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceSafePointVersion)
-	url := fmt.Sprintf(KeyspaceConfig, keyspaceName)
-
 	if err != nil {
 		return errors.Trace(err)
 	}
+	url := c.getUpdateKeyspaceConfigUrl(keyspaceName)
 	return c.request(ctx, newRequestInfo().
 		WithName(UpdateKeyspaceSafePointVersionName).
 		WithURI(url).
