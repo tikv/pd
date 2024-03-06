@@ -1809,7 +1809,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "irate(process_cpu_seconds_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}[30s])",
+              "expr": "irate(process_cpu_seconds_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}[30s])",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -1819,7 +1819,7 @@
             },
             {
               "exemplar": true,
-              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "{{job}}-{{instance}}-limit",
@@ -1917,7 +1917,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "process_resident_memory_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "format": "time_series",
               "hide": false,
               "interval": "",
@@ -1927,42 +1927,42 @@
               "step": 4
             },
             {
-              "expr": "go_memstats_heap_sys_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_sys_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapSys-{{job}}-{{instance}}",
               "refId": "B"
             },
             {
-              "expr": "go_memstats_heap_inuse_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_inuse_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "HeapInuse-{{job}}-{{instance}}",
               "refId": "C"
             },
             {
-              "expr": "go_memstats_heap_alloc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_alloc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapAlloc-{{job}}-{{instance}}",
               "refId": "D"
             },
             {
-              "expr": "go_memstats_heap_idle_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_idle_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapIdle-{{job}}-{{instance}}",
               "refId": "E"
             },
             {
-              "expr": "go_memstats_heap_released_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "go_memstats_heap_released_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "HeapReleased-{{job}}-{{instance}}",
               "refId": "F"
             },
             {
-              "expr": "go_memstats_next_gc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "go_memstats_next_gc_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": true,
               "interval": "",
               "legendFormat": "GCTrigger-{{job}}-{{instance}}",
@@ -2059,7 +2059,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "(time() - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"})",
+              "expr": "(time() - process_start_time_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"})",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
@@ -2158,7 +2158,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "go_goroutines{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "go_goroutines{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "format": "time_series",
               "interval": "",
               "intervalFactor": 2,
