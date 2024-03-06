@@ -942,6 +942,7 @@ func (c *client) getKeyspaceMetaByNameURL(keyspaceName string) string {
 	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
 }
 
+// tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
 type tempKeyspaceMeta struct {
 	ID             uint32            `json:"id"`
 	Name           string            `json:"name"`
