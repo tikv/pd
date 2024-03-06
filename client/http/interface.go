@@ -913,10 +913,9 @@ func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceNam
 	if err != nil {
 		return errors.Trace(err)
 	}
-	url := GetUpdateKeyspaceConfigURL(keyspaceName)
 	return c.request(ctx, newRequestInfo().
 		WithName(UpdateKeyspaceSafePointVersionName).
-		WithURI(url).
+		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
 		WithMethod(http.MethodPatch).
 		WithBody(keyspaceConfigPatchJSON))
 }
@@ -936,8 +935,10 @@ func (c *client) CreateKeyspace(ctx context.Context, keyspaceMeta *keyspacepb.Ke
 
 // GetKeyspaceMetaByName get the given keyspace meta.
 func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error) {
-	var tempKeyspaceMeta tempKeyspaceMeta
-	var keyspaceMetaPB keyspacepb.KeyspaceMeta
+	var (
+		tempKeyspaceMeta tempKeyspaceMeta
+		keyspaceMetaPB   keyspacepb.KeyspaceMeta
+	)
 	uri := GetKeyspaceMetaByNameURL(keyspaceName)
 	err := c.request(ctx, newRequestInfo().
 		WithName(GetKeyspaceMetaByNameName).
