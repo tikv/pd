@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -333,6 +334,7 @@ type Rule struct {
 	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
 	Version          uint64            `json:"version,omitempty"`           // only set at runtime, add 1 each time rules updated, begin from 0.
 	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`  // only set at runtime, recorded rule create timestamp
+	group            *RuleGroup        // only set at runtime, no need to {,un}marshal or persist.
 }
 
 // String returns the string representation of this rule.
@@ -369,6 +371,9 @@ type rule struct {
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`
 	LocationLabels   []string          `json:"location_labels,omitempty"`
 	IsolationLevel   string            `json:"isolation_level,omitempty"`
+	Version          uint64            `json:"version,omitempty"`          // only set at runtime, add 1 each time rules updated, begin from 0.
+	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"` // only set at runtime, recorded rule create timestamp
+	group            *RuleGroup        // only set at runtime, no need to {,un}marshal or persist.
 }
 
 // MarshalJSON implements `json.Marshaler` interface to make sure we could set the correct start/end key.
@@ -386,6 +391,9 @@ func (r *Rule) MarshalJSON() ([]byte, error) {
 		LabelConstraints: r.LabelConstraints,
 		LocationLabels:   r.LocationLabels,
 		IsolationLevel:   r.IsolationLevel,
+		Version:          r.Version,
+		CreateTimestamp:  r.CreateTimestamp,
+		group:            r.group,
 	}
 	// Converts the start/end key to hex format if the corresponding hex field is empty.
 	if len(r.StartKey) > 0 && len(r.StartKeyHex) == 0 {
@@ -417,6 +425,9 @@ func (r *Rule) UnmarshalJSON(bytes []byte) error {
 		LabelConstraints: tempRule.LabelConstraints,
 		LocationLabels:   tempRule.LocationLabels,
 		IsolationLevel:   tempRule.IsolationLevel,
+		Version:          tempRule.Version,
+		CreateTimestamp:  tempRule.CreateTimestamp,
+		group:            tempRule.group,
 	}
 	newRule.StartKey, err = keyHexStrToRawKey(newRule.StartKeyHex)
 	if err != nil {
@@ -428,6 +439,29 @@ func (r *Rule) UnmarshalJSON(bytes []byte) error {
 	}
 	*r = newRule
 	return nil
+}
+
+// RegionFit is the result of fitting a region's peers to rule list.
+// All peers are divided into corresponding rules according to the matching
+// rules, and the remaining Peers are placed in the OrphanPeers list.
+type RegionFit struct {
+	RuleFits    []*RuleFit     `json:"rule-fits"`
+	OrphanPeers []*metapb.Peer `json:"orphan-peers"`
+}
+
+// RuleFit is the result of fitting status of a Rule.
+type RuleFit struct {
+	Rule *Rule `json:"rule"`
+	// Peers of the Region that are divided to this Rule.
+	Peers []*metapb.Peer `json:"peers"`
+	// PeersWithDifferentRole is subset of `Peers`. It contains all Peers that have
+	// different Role from configuration (the Role can be migrated to target role
+	// by scheduling).
+	PeersWithDifferentRole []*metapb.Peer `json:"peers-different-role"`
+	// IsolationScore indicates at which level of labeling these Peers are
+	// isolated. A larger value is better.
+	IsolationScore float64 `json:"isolation-score"`
+	WitnessScore   int     `json:"witness-score"`
 }
 
 // RuleOpType indicates the operation type
@@ -472,6 +506,9 @@ type ruleOp struct {
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`
 	LocationLabels   []string          `json:"location_labels,omitempty"`
 	IsolationLevel   string            `json:"isolation_level,omitempty"`
+	Version          uint64            `json:"version,omitempty"`          // only set at runtime, add 1 each time rules updated, begin from 0.
+	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"` // only set at runtime, recorded rule create timestamp
+	group            *RuleGroup        // only set at runtime, no need to {,un}marshal or persist.
 	Action           RuleOpType        `json:"action"`
 	DeleteByIDPrefix bool              `json:"delete_by_id_prefix"`
 }
@@ -491,6 +528,9 @@ func (r *RuleOp) MarshalJSON() ([]byte, error) {
 		LabelConstraints: r.LabelConstraints,
 		LocationLabels:   r.LocationLabels,
 		IsolationLevel:   r.IsolationLevel,
+		Version:          r.Version,
+		CreateTimestamp:  r.CreateTimestamp,
+		group:            r.group,
 		Action:           r.Action,
 		DeleteByIDPrefix: r.DeleteByIDPrefix,
 	}
@@ -525,6 +565,9 @@ func (r *RuleOp) UnmarshalJSON(bytes []byte) error {
 			LabelConstraints: tempRuleOp.LabelConstraints,
 			LocationLabels:   tempRuleOp.LocationLabels,
 			IsolationLevel:   tempRuleOp.IsolationLevel,
+			Version:          tempRuleOp.Version,
+			CreateTimestamp:  tempRuleOp.CreateTimestamp,
+			group:            tempRuleOp.group,
 		},
 		Action:           tempRuleOp.Action,
 		DeleteByIDPrefix: tempRuleOp.DeleteByIDPrefix,

@@ -361,6 +361,8 @@ func (suite *httpClientTestSuite) checkRuleResult(
 		// skip comparison of the generated field
 		got.StartKeyHex = rule.StartKeyHex
 		got.EndKeyHex = rule.EndKeyHex
+		got.Version = rule.Version
+		got.CreateTimestamp = rule.CreateTimestamp
 		re.Equal(rule, got)
 	} else {
 		_, err := client.GetPlacementRule(env.ctx, rule.GroupID, rule.ID)

@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -187,7 +188,9 @@ func (ci *clientInner) doRequest(
 		return -1, errors.Trace(err)
 	}
 	for _, opt := range headerOpts {
-		opt(req.Header)
+		if err = opt(req.Header); err != nil {
+			return -1, errors.Trace(err)
+		}
 	}
 	req.Header.Set(xCallerIDKey, callerID)
 
@@ -217,14 +220,18 @@ func (ci *clientInner) doRequest(
 		logFields = append(logFields, zap.String("status", resp.Status))
 
 		bs, readErr := io.ReadAll(resp.Body)
+		var bodyStr string
 		if readErr != nil {
+			bodyStr = fmt.Sprintf("read body failed: %s", readErr.Error())
 			logFields = append(logFields, zap.NamedError("read-body-error", err))
 		} else {
+			// need to remove the last newline character
+			bodyStr = string(bytes.TrimRight(bs, "\n"))
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
 
 		log.Error("[pd] request failed with a non-200 status", logFields...)
-		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s'", resp.Status)
+		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s', body: '%s'", resp.Status, bodyStr)
 	}
 
 	if res == nil {
@@ -346,15 +353,31 @@ func (c *client) WithBackoffer(bo *retry.Backoffer) Client {
 const (
 	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
 	xCallerIDKey             = "X-Caller-ID"
+	// XForbiddenForwardToMicroServiceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
+	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
+	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
+	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
 )
 
 // HeaderOption configures the HTTP header.
-type HeaderOption func(header http.Header)
+type HeaderOption func(header http.Header) error
 
 // WithAllowFollowerHandle sets the header field to allow a PD follower to handle this request.
 func WithAllowFollowerHandle() HeaderOption {
-	return func(header http.Header) {
+	return func(header http.Header) error {
 		header.Set(pdAllowFollowerHandleKey, "true")
+		return nil
+	}
+}
+
+// WithForbiddenForwardToMicroServiceHeader sets the header field to indicate that forwarding the request to a microservice is explicitly disallowed.
+func WithForbiddenForwardToMicroServiceHeader() HeaderOption {
+	return func(header http.Header) error {
+		if header.Get(XForwardedToMicroServiceHeader) == "true" {
+			return errors.New("the request is forwarded to micro service unexpectedly")
+		}
+		header.Add(XForbiddenForwardToMicroServiceHeader, "true")
+		return nil
 	}
 }
 

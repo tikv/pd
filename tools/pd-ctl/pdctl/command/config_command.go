@@ -15,46 +15,28 @@
 package command
 
 import (
-	"bytes"
 	"encoding/json"
-	"net/http"
 	"net/url"
 	"os"
-	"path"
 	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/utils/apiutil"
+	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server/config"
 )
 
-const (
-	configPrefix          = "pd/api/v1/config"
-	schedulePrefix        = "pd/api/v1/config/schedule"
-	replicatePrefix       = "pd/api/v1/config/replicate"
-	labelPropertyPrefix   = "pd/api/v1/config/label-property"
-	clusterVersionPrefix  = "pd/api/v1/config/cluster-version"
-	rulesPrefix           = "pd/api/v1/config/rules"
-	rulesBatchPrefix      = "pd/api/v1/config/rules/batch"
-	rulePrefix            = "pd/api/v1/config/rule"
-	ruleGroupPrefix       = "pd/api/v1/config/rule_group"
-	ruleGroupsPrefix      = "pd/api/v1/config/rule_groups"
-	replicationModePrefix = "pd/api/v1/config/replication-mode"
-	ruleBundlePrefix      = "pd/api/v1/config/placement-rule"
-	pdServerPrefix        = "pd/api/v1/config/pd-server"
-	// flagFromAPIServer has no influence for pd mode, but it is useful for us to debug in api mode.
-	flagFromAPIServer = "from_api_server"
-)
+// flagFromAPIServer has no influence for pd mode, but it is useful for us to debug in api mode.
+const flagFromAPIServer = "from_api_server"
 
 // NewConfigCommand return a config subcommand of rootCmd
 func NewConfigCommand() *cobra.Command {
 	conf := &cobra.Command{
-		Use:   "config <subcommand>",
-		Short: "tune pd configs",
+		Use:               "config <subcommand>",
+		Short:             "tune pd configs",
+		PersistentPreRunE: requirePDClient,
 	}
 	conf.AddCommand(NewShowConfigCommand())
 	conf.AddCommand(NewSetConfigCommand())
@@ -77,7 +59,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(NewShowClusterVersionCommand())
 	sc.AddCommand(newShowReplicationModeCommand())
 	sc.AddCommand(NewShowServerConfigCommand())
-	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	return sc
 }
 
@@ -88,7 +70,7 @@ func NewShowAllConfigCommand() *cobra.Command {
 		Short: "show all config of PD",
 		Run:   showAllConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	return sc
 }
 
@@ -99,7 +81,7 @@ func NewShowScheduleConfigCommand() *cobra.Command {
 		Short: "show schedule config of PD",
 		Run:   showScheduleConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	return sc
 }
 
@@ -110,7 +92,7 @@ func NewShowReplicationConfigCommand() *cobra.Command {
 		Short: "show replication config of PD",
 		Run:   showReplicationConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	return sc
 }
 
@@ -213,16 +195,9 @@ func NewDeleteLabelPropertyConfigCommand() *cobra.Command {
 }
 
 func showConfigCommandFunc(cmd *cobra.Command, args []string) {
-	header := buildHeader(cmd)
-	allR, err := doRequest(cmd, configPrefix, http.MethodGet, header)
+	allData, err := PDCli.GetConfig(cmd.Context(), withForbiddenForwardToMicroServiceHeader(cmd)...)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
-		return
-	}
-	allData := make(map[string]any)
-	err = json.Unmarshal([]byte(allR), &allData)
-	if err != nil {
-		cmd.Printf("Failed to unmarshal config: %s\n", err)
 		return
 	}
 
@@ -245,12 +220,7 @@ func showConfigCommandFunc(cmd *cobra.Command, args []string) {
 	}
 
 	data["schedule"] = scheduleConfig
-	r, err := json.MarshalIndent(data, "", "  ")
-	if err != nil {
-		cmd.Printf("Failed to marshal config: %s\n", err)
-		return
-	}
-	cmd.Println(string(r))
+	jsonPrint(cmd, data)
 }
 
 var hideConfig = []string{
@@ -268,90 +238,67 @@ var hideConfig = []string{
 	"scheduler-max-waiting-operator",
 }
 
-func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
-	header := buildHeader(cmd)
-	r, err := doRequest(cmd, schedulePrefix, http.MethodGet, header)
+func showScheduleConfigCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := PDCli.GetScheduleConfig(cmd.Context(), withForbiddenForwardToMicroServiceHeader(cmd)...)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	jsonPrint(cmd, r)
 }
 
-func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
-	header := buildHeader(cmd)
-	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, header)
+func showReplicationConfigCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := PDCli.GetReplicateConfig(cmd.Context(), withForbiddenForwardToMicroServiceHeader(cmd)...)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	jsonPrint(cmd, r)
 }
 
-func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, labelPropertyPrefix, http.MethodGet, http.Header{})
+func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := PDCli.GetLabelPropertyConfig(cmd.Context())
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	jsonPrint(cmd, r)
 }
 
-func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
-	header := buildHeader(cmd)
-	r, err := doRequest(cmd, configPrefix, http.MethodGet, header)
+func showAllConfigCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := PDCli.GetConfig(cmd.Context(), withForbiddenForwardToMicroServiceHeader(cmd)...)
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	jsonPrint(cmd, r)
 }
 
-func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, clusterVersionPrefix, http.MethodGet, http.Header{})
+func showClusterVersionCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := PDCli.GetClusterVersion(cmd.Context())
 	if err != nil {
 		cmd.Printf("Failed to get cluster version: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	cmd.Println(`"` + r + `"`)
 }
 
-func showReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, replicationModePrefix, http.MethodGet, http.Header{})
+func showReplicationModeCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := PDCli.GetReplicationModeConfig(cmd.Context())
 	if err != nil {
 		cmd.Printf("Failed to get replication mode config: %s\n", err)
 		return
 	}
-	cmd.Println(r)
+	jsonPrint(cmd, r)
 }
 
-func showServerCommandFunc(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, pdServerPrefix, http.MethodGet, http.Header{})
+func showServerCommandFunc(cmd *cobra.Command, _ []string) {
+	r, err := PDCli.GetPDServerConfig(cmd.Context())
 	if err != nil {
 		cmd.Printf("Failed to get server config: %s\n", err)
 		return
 	}
-	cmd.Println(r)
-}
-
-func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
-	var val any
-	data := make(map[string]any)
-	val, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		val = value
-	}
-	data[key] = val
-	reqData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	_, err = doRequest(cmd, path, http.MethodPost,
-		http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(reqData)))
-	if err != nil {
-		return err
-	}
-	return nil
+	jsonPrint(cmd, r)
 }
 
 func setConfigCommandFunc(cmd *cobra.Command, args []string) {
@@ -359,8 +306,15 @@ func setConfigCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println(cmd.UsageString())
 		return
 	}
-	opt, val := args[0], args[1]
-	err := postConfigDataWithPath(cmd, opt, val, configPrefix)
+	var val any
+	val, err := strconv.ParseFloat(args[1], 64)
+	if err != nil {
+		val = args[1]
+	}
+	newConfig := map[string]any{
+		args[0]: val,
+	}
+	err = PDCli.SetConfig(cmd.Context(), newConfig)
 	if err != nil {
 		cmd.Printf("Failed to set config: %s\n", err)
 		return
@@ -387,8 +341,11 @@ func postLabelProperty(cmd *cobra.Command, action string, args []string) {
 		"label-key":   args[1],
 		"label-value": args[2],
 	}
-	prefix := path.Join(labelPropertyPrefix)
-	postJSON(cmd, prefix, input)
+	err := PDCli.SetLabelPropertyConfig(cmd.Context(), input)
+	if err != nil {
+		cmd.Printf("Failed to set label property config: %s\n", err)
+		return
+	}
 }
 
 func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
@@ -399,12 +356,14 @@ func setClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 	input := map[string]any{
 		"cluster-version": args[0],
 	}
-	postJSON(cmd, clusterVersionPrefix, input)
+	if err := PDCli.SetClusterVersion(cmd.Context(), input); err != nil {
+		cmd.Printf("Failed to set cluster version: %s\n", err)
+	}
 }
 
 func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) == 1 {
-		postJSON(cmd, replicationModePrefix, map[string]any{"replication-mode": args[0]})
+		PDCli.SetReplicationModeConfig(cmd.Context(), map[string]any{"replication-mode": args[0]})
 	} else if len(args) == 3 {
 		t := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
 		if t != nil && t.Kind() == reflect.Int {
@@ -414,10 +373,10 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 				cmd.Printf("value %v cannot covert to number: %v", args[2], err)
 				return
 			}
-			postJSON(cmd, replicationModePrefix, map[string]any{args[0]: map[string]any{args[1]: arg2}})
+			PDCli.SetReplicationModeConfig(cmd.Context(), map[string]any{args[0]: map[string]any{args[1]: arg2}})
 			return
 		}
-		postJSON(cmd, replicationModePrefix, map[string]any{args[0]: map[string]string{args[1]: args[2]}})
+		PDCli.SetReplicationModeConfig(cmd.Context(), map[string]any{args[0]: map[string]any{args[1]: args[2]}})
 	} else {
 		cmd.Println(cmd.UsageString())
 	}
@@ -448,7 +407,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
 	show.Flags().Bool("detail", false, "detailed match info for region")
-	show.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	show.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -458,7 +417,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	load.Flags().String("id", "", "rule id")
 	load.Flags().String("region", "", "region id")
 	load.Flags().String("out", "rules.json", "the filename contains rules")
-	load.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	load.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	save := &cobra.Command{
 		Use:   "save",
 		Short: "save rules from file",
@@ -474,7 +433,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
-	ruleGroupShow.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	ruleGroupShow.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	ruleGroupSet := &cobra.Command{
 		Use:   "set <id> <index> <override>",
 		Short: "update rule group configuration",
@@ -497,7 +456,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   getRuleBundle,
 	}
 	ruleBundleGet.Flags().String("out", "", "the output file")
-	ruleBundleGet.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	ruleBundleGet.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	ruleBundleSet := &cobra.Command{
 		Use:   "set",
 		Short: "set rule group config and its rules from file",
@@ -516,7 +475,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   loadRuleBundle,
 	}
 	ruleBundleLoad.Flags().String("out", "rules.json", "the output file")
-	ruleBundleLoad.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micor service")
+	ruleBundleLoad.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
 	ruleBundleSave := &cobra.Command{
 		Use:   "save",
 		Short: "save all group configs and rules from file",
@@ -530,7 +489,9 @@ func NewPlacementRulesCommand() *cobra.Command {
 }
 
 func enablePlacementRulesFunc(cmd *cobra.Command, args []string) {
-	err := postConfigDataWithPath(cmd, "enable-placement-rules", "true", configPrefix)
+	err := PDCli.SetConfig(cmd.Context(), map[string]any{
+		"enable-placement-rules": "true",
+	})
 	if err != nil {
 		cmd.Printf("Failed to set config: %s\n", err)
 		return
@@ -539,7 +500,9 @@ func enablePlacementRulesFunc(cmd *cobra.Command, args []string) {
 }
 
 func disablePlacementRulesFunc(cmd *cobra.Command, args []string) {
-	err := postConfigDataWithPath(cmd, "enable-placement-rules", "false", configPrefix)
+	err := PDCli.SetConfig(cmd.Context(), map[string]any{
+		"enable-placement-rules": "false",
+	})
 	if err != nil {
 		cmd.Printf("Failed to set config: %s\n", err)
 		return
@@ -556,49 +519,38 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	}
 
 	group, id, region, file := getFlag("group"), getFlag("id"), getFlag("region"), getFlag("out")
-	var reqPath string
-	respIsList := true
+
+	var rules any
+	var err error
 	switch {
 	case region == "" && group == "" && id == "": // all rules
-		reqPath = rulesPrefix
+		rules, err = PDCli.GetAllPlacementRules(cmd.Context(), withForbiddenForwardToMicroServiceHeader(cmd)...)
 	case region == "" && group == "" && id != "":
 		cmd.Println(`"id" should be specified along with "group"`)
 		return
 	case region == "" && group != "" && id == "": // all rules in a group
-		reqPath = path.Join(rulesPrefix, "group", group)
+		rules, err = PDCli.GetPlacementRulesByGroup(cmd.Context(), group, withForbiddenForwardToMicroServiceHeader(cmd)...)
 	case region == "" && group != "" && id != "": // single rule
-		reqPath, respIsList = path.Join(rulePrefix, group, id), false
+		rules, err = PDCli.GetPlacementRule(cmd.Context(), group, id, withForbiddenForwardToMicroServiceHeader(cmd)...)
 	case region != "" && group == "" && id == "": // rules matches a region
-		reqPath = path.Join(rulesPrefix, "region", region)
+		var detail bool
 		if ok, _ := cmd.Flags().GetBool("detail"); ok {
-			reqPath = path.Join(reqPath, "detail")
+			detail = true
 		}
+		rules, err = PDCli.GetPlacementRulesByRegion(cmd.Context(), region, detail, withForbiddenForwardToMicroServiceHeader(cmd)...)
 	default:
 		cmd.Println(`"region" should not be specified with "group" or "id" at the same time`)
 		return
 	}
-	header := buildHeader(cmd)
-	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
+
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
-	if file == "" {
-		cmd.Println(res)
-		return
-	}
-	if !respIsList {
-		res = "[\n" + res + "]\n"
-	}
-	err = os.WriteFile(file, []byte(res), 0644) // #nosec
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	cmd.Println("rules saved to file " + file)
+	jsonWriteFile(cmd, file, rules)
 }
 
-func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
+func putPlacementRulesFunc(cmd *cobra.Command, _ []string) {
 	var file string
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
@@ -609,7 +561,7 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	var opts []*placement.RuleOp
+	var opts []*pd.RuleOp
 	if err = json.Unmarshal(content, &opts); err != nil {
 		cmd.Println(err)
 		return
@@ -618,18 +570,17 @@ func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	validOpts := opts[:0]
 	for _, op := range opts {
 		if op.Count > 0 {
-			op.Action = placement.RuleOpAdd
+			op.Action = pd.RuleOpAdd
 			validOpts = append(validOpts, op)
 		} else if op.Count == 0 {
-			op.Action = placement.RuleOpDel
+			op.Action = pd.RuleOpDel
 			validOpts = append(validOpts, op)
 		}
 	}
 
-	b, _ := json.Marshal(validOpts)
-	_, err = doRequest(cmd, rulesBatchPrefix, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewBuffer(b)))
+	err = PDCli.SetPlacementRuleInBatch(cmd.Context(), opts)
 	if err != nil {
-		cmd.Printf("failed to save rules %s: %s\n", b, err)
+		cmd.Printf("failed to save rules %s\n", err)
 		return
 	}
 
@@ -642,17 +593,19 @@ func showRuleGroupFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	reqPath := ruleGroupsPrefix
+	var res any
+	var err error
 	if len(args) > 0 {
-		reqPath = path.Join(ruleGroupPrefix, args[0])
+		res, err = PDCli.GetPlacementRuleGroupByID(cmd.Context(), args[0], withForbiddenForwardToMicroServiceHeader(cmd)...)
+	} else {
+		res, err = PDCli.GetAllPlacementRuleGroups(cmd.Context(), withForbiddenForwardToMicroServiceHeader(cmd)...)
 	}
-	header := buildHeader(cmd)
-	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
+
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
-	cmd.Println(res)
+	jsonPrint(cmd, res)
 }
 
 func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
@@ -674,11 +627,17 @@ func updateRuleGroupFunc(cmd *cobra.Command, args []string) {
 		cmd.Printf("override %s should be a boolean\n", args[2])
 		return
 	}
-	postJSON(cmd, ruleGroupPrefix, map[string]any{
-		"id":       args[0],
-		"index":    index,
-		"override": override,
+
+	err = PDCli.SetPlacementRuleGroup(cmd.Context(), &pd.RuleGroup{
+		ID:       args[0],
+		Index:    int(index),
+		Override: override,
 	})
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	cmd.Println("Success!")
 }
 
 func getRuleBundle(cmd *cobra.Command, args []string) {
@@ -687,9 +646,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	reqPath := path.Join(ruleBundlePrefix, args[0])
-	header := buildHeader(cmd)
-	res, err := doRequest(cmd, reqPath, http.MethodGet, header)
+	res, err := PDCli.GetPlacementRuleBundleByGroup(cmd.Context(), args[0], withForbiddenForwardToMicroServiceHeader(cmd)...)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -699,17 +656,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("out"); f != nil {
 		file = f.Value.String()
 	}
-	if file == "" {
-		cmd.Println(res)
-		return
-	}
-
-	err = os.WriteFile(file, []byte(res), 0644) // #nosec
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	cmd.Printf("rule group saved to file %s\n", file)
+	jsonWriteFile(cmd, file, res)
 }
 
 func setRuleBundle(cmd *cobra.Command, args []string) {
@@ -731,15 +678,18 @@ func setRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	reqPath := path.Join(ruleBundlePrefix, id.GroupID)
-
-	res, err := doRequest(cmd, reqPath, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewReader(content)))
+	var ruleBundle *pd.GroupBundle
+	if err = json.Unmarshal(content, &ruleBundle); err != nil {
+		cmd.Println(err)
+		return
+	}
+	err = PDCli.SetPlacementRuleBundleByGroup(cmd.Context(), id.GroupID, ruleBundle)
 	if err != nil {
 		cmd.Printf("failed to save rule bundle %s: %s\n", content, err)
 		return
 	}
 
-	cmd.Println(res)
+	cmd.Println("Success!")
 }
 
 func delRuleBundle(cmd *cobra.Command, args []string) {
@@ -748,24 +698,22 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	reqPath := path.Join(ruleBundlePrefix, url.PathEscape(args[0]))
-
+	var regexp bool
 	if ok, _ := cmd.Flags().GetBool("regexp"); ok {
-		reqPath += "?regexp"
+		regexp = true
 	}
 
-	res, err := doRequest(cmd, reqPath, http.MethodDelete, http.Header{})
+	err := PDCli.DeletePlacementRuleBundleByGroup(cmd.Context(), url.PathEscape(args[0]), regexp)
 	if err != nil {
 		cmd.Println(err)
 		return
 	}
 
-	cmd.Println(res)
+	cmd.Println("Delete group and rules successfully.")
 }
 
 func loadRuleBundle(cmd *cobra.Command, args []string) {
-	header := buildHeader(cmd)
-	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet, header)
+	res, err := PDCli.GetAllPlacementRuleBundles(cmd.Context(), withForbiddenForwardToMicroServiceHeader(cmd)...)
 	if err != nil {
 		cmd.Println(err)
 		return
@@ -775,17 +723,7 @@ func loadRuleBundle(cmd *cobra.Command, args []string) {
 	if f := cmd.Flag("out"); f != nil {
 		file = f.Value.String()
 	}
-	if file == "" {
-		cmd.Println(res)
-		return
-	}
-
-	err = os.WriteFile(file, []byte(res), 0644) // #nosec
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	cmd.Printf("rule group saved to file %s\n", file)
+	jsonWriteFile(cmd, file, res)
 }
 
 func saveRuleBundle(cmd *cobra.Command, args []string) {
@@ -799,25 +737,31 @@ func saveRuleBundle(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	path := ruleBundlePrefix
-	if ok, _ := cmd.Flags().GetBool("partial"); ok {
-		path += "?partial=true"
+	allData := make([]*pd.GroupBundle, 0)
+	err = json.Unmarshal(content, &allData)
+	if err != nil {
+		cmd.Printf("Failed to unmarshal config: %s\n", err)
+		return
 	}
 
-	res, err := doRequest(cmd, path, http.MethodPost, http.Header{"Content-Type": {"application/json"}}, WithBody(bytes.NewReader(content)))
+	var partial bool
+	if ok, _ := cmd.Flags().GetBool("partial"); ok {
+		partial = true
+	}
+
+	err = PDCli.SetPlacementRuleBundles(cmd.Context(), allData, partial)
 	if err != nil {
 		cmd.Printf("failed to save rule bundles %s: %s\n", content, err)
 		return
 	}
 
-	cmd.Println(res)
+	cmd.Println(allData)
 }
 
-func buildHeader(cmd *cobra.Command) http.Header {
-	header := http.Header{}
+func withForbiddenForwardToMicroServiceHeader(cmd *cobra.Command) []pd.HeaderOption {
 	forbiddenRedirectToMicroService, err := cmd.Flags().GetBool(flagFromAPIServer)
 	if err == nil && forbiddenRedirectToMicroService {
-		header.Add(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
+		return []pd.HeaderOption{pd.WithForbiddenForwardToMicroServiceHeader()}
 	}
-	return header
+	return nil
 }

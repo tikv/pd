@@ -370,6 +370,26 @@ func checkURL(endpoint string) (string, error) {
 	return u.String(), nil
 }
 
+func jsonWriteFile(cmd *cobra.Command, file string, val any) {
+	if file == "" {
+		jsonPrint(cmd, val)
+		return
+	}
+
+	jsonBytes, err := json.MarshalIndent(val, "", "  ")
+	if err != nil {
+		cmd.Printf("Failed to marshal the data to json: %s\n", err)
+		return
+	}
+
+	err = os.WriteFile(file, jsonBytes, 0644) // #nosec
+	if err != nil {
+		cmd.Printf("Failed to write the data to file: %s\n", err)
+		return
+	}
+	cmd.Printf("Success! Write the data to file %s\n", file)
+}
+
 func jsonPrint(cmd *cobra.Command, val any) {
 	jsonBytes, err := json.MarshalIndent(val, "", "  ")
 	if err != nil {

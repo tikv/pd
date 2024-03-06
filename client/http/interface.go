@@ -50,29 +50,39 @@ type Client interface {
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	SetStoreLabels(context.Context, int64, map[string]string) error
 	/* Config-related interfaces */
-	GetConfig(context.Context) (map[string]any, error)
+	GetConfig(context.Context, ...HeaderOption) (map[string]any, error)
 	SetConfig(context.Context, map[string]any, ...float64) error
-	GetScheduleConfig(context.Context) (map[string]any, error)
+	GetPDServerConfig(context.Context) (map[string]any, error)
+	GetScheduleConfig(context.Context, ...HeaderOption) (map[string]any, error)
 	SetScheduleConfig(context.Context, map[string]any) error
 	GetClusterVersion(context.Context) (string, error)
+	SetClusterVersion(context.Context, map[string]any) error
 	GetCluster(context.Context) (*metapb.Cluster, error)
 	GetClusterStatus(context.Context) (*ClusterState, error)
-	GetReplicateConfig(context.Context) (map[string]any, error)
+	GetReplicateConfig(context.Context, ...HeaderOption) (map[string]any, error)
+	GetLabelPropertyConfig(context.Context) (map[string]any, error)
+	SetLabelPropertyConfig(context.Context, map[string]any) error
+	GetReplicationModeConfig(context.Context) (map[string]any, error)
+	SetReplicationModeConfig(context.Context, map[string]any) error
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
 	SetSchedulerDelay(context.Context, string, int64) error
 	/* Rule-related interfaces */
-	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
-	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
-	GetPlacementRulesByGroup(context.Context, string) ([]*Rule, error)
-	GetPlacementRule(context.Context, string, string) (*Rule, error)
-	SetPlacementRule(context.Context, *Rule) error
+	GetAllPlacementRules(context.Context, ...HeaderOption) ([]*Rule, error)
 	SetPlacementRuleInBatch(context.Context, []*RuleOp) error
-	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
+	GetPlacementRulesByGroup(context.Context, string, ...HeaderOption) ([]*Rule, error)
+	GetPlacementRulesByRegion(context.Context, string, bool, ...HeaderOption) (*RegionFit, error)
+	GetPlacementRule(context.Context, string, string, ...HeaderOption) (*Rule, error)
+	SetPlacementRule(context.Context, *Rule) error
 	DeletePlacementRule(context.Context, string, string) error
-	GetAllPlacementRuleGroups(context.Context) ([]*RuleGroup, error)
-	GetPlacementRuleGroupByID(context.Context, string) (*RuleGroup, error)
+	GetAllPlacementRuleBundles(context.Context, ...HeaderOption) ([]*GroupBundle, error)
+	GetPlacementRuleBundleByGroup(context.Context, string, ...HeaderOption) (*GroupBundle, error)
+	SetPlacementRuleBundles(context.Context, []*GroupBundle, bool) error
+	SetPlacementRuleBundleByGroup(context.Context, string, *GroupBundle) error
+	DeletePlacementRuleBundleByGroup(context.Context, string, bool) error
+	GetAllPlacementRuleGroups(context.Context, ...HeaderOption) ([]*RuleGroup, error)
+	GetPlacementRuleGroupByID(context.Context, string, ...HeaderOption) (*RuleGroup, error)
 	SetPlacementRuleGroup(context.Context, *RuleGroup) error
 	DeletePlacementRuleGroupByID(context.Context, string) error
 	GetAllRegionLabelRules(context.Context) ([]*LabelRule, error)
@@ -325,13 +335,14 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 }
 
 // GetConfig gets the configurations.
-func (c *client) GetConfig(ctx context.Context) (map[string]any, error) {
+func (c *client) GetConfig(ctx context.Context, opts ...HeaderOption) (map[string]any, error) {
 	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getConfigName).
 		WithURI(Config).
 		WithMethod(http.MethodGet).
-		WithResp(&config))
+		WithResp(&config),
+		opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -357,14 +368,29 @@ func (c *client) SetConfig(ctx context.Context, config map[string]any, ttlSecond
 		WithBody(configJSON))
 }
 
+// GetPDServerConfig gets the PD server configurations.
+func (c *client) GetPDServerConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
+	err := c.request(ctx, newRequestInfo().
+		WithName(getPDServerConfigName).
+		WithURI(PDServerConfig).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
 // GetScheduleConfig gets the schedule configurations.
-func (c *client) GetScheduleConfig(ctx context.Context) (map[string]any, error) {
+func (c *client) GetScheduleConfig(ctx context.Context, opts ...HeaderOption) (map[string]any, error) {
 	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getScheduleConfigName).
 		WithURI(ScheduleConfig).
 		WithMethod(http.MethodGet).
-		WithResp(&config))
+		WithResp(&config),
+		opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -426,6 +452,19 @@ func (c *client) GetClusterVersion(ctx context.Context) (string, error) {
 	return version, nil
 }
 
+func (c *client) SetClusterVersion(ctx context.Context, config map[string]any) error {
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return c.request(ctx, newRequestInfo().
+		WithName(setConfigName).
+		WithURI(ClusterVersion).
+		WithMethod(http.MethodPost).
+		WithBody(configJSON))
+}
+
 // GetCluster gets the cluster meta information.
 func (c *client) GetCluster(ctx context.Context) (*metapb.Cluster, error) {
 	var clusterInfo *metapb.Cluster
@@ -455,11 +494,26 @@ func (c *client) GetClusterStatus(ctx context.Context) (*ClusterState, error) {
 }
 
 // GetReplicateConfig gets the replication configurations.
-func (c *client) GetReplicateConfig(ctx context.Context) (map[string]any, error) {
+func (c *client) GetReplicateConfig(ctx context.Context, opts ...HeaderOption) (map[string]any, error) {
 	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getReplicateConfigName).
 		WithURI(ReplicateConfig).
+		WithMethod(http.MethodGet).
+		WithResp(&config),
+		opts...)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// GetLabelPropertyConfig gets the label property configurations.
+func (c *client) GetLabelPropertyConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
+	err := c.request(ctx, newRequestInfo().
+		WithName(getLabelPropertyConfigName).
+		WithURI(LabelPropertyConfig).
 		WithMethod(http.MethodGet).
 		WithResp(&config))
 	if err != nil {
@@ -468,42 +522,100 @@ func (c *client) GetReplicateConfig(ctx context.Context) (map[string]any, error)
 	return config, nil
 }
 
-// GetAllPlacementRuleBundles gets all placement rules bundles.
-func (c *client) GetAllPlacementRuleBundles(ctx context.Context) ([]*GroupBundle, error) {
-	var bundles []*GroupBundle
-	err := c.request(ctx, newRequestInfo().
-		WithName(getAllPlacementRuleBundlesName).
-		WithURI(PlacementRuleBundle).
-		WithMethod(http.MethodGet).
-		WithResp(&bundles))
+func (c *client) SetLabelPropertyConfig(ctx context.Context, config map[string]any) error {
+	configJSON, err := json.Marshal(config)
 	if err != nil {
-		return nil, err
+		return errors.Trace(err)
 	}
-	return bundles, nil
+
+	return c.request(ctx, newRequestInfo().
+		WithName(setLabelPropertyConfigName).
+		WithURI(LabelPropertyConfig).
+		WithMethod(http.MethodPost).
+		WithBody(configJSON))
 }
 
-// GetPlacementRuleBundleByGroup gets the placement rules bundle by group.
-func (c *client) GetPlacementRuleBundleByGroup(ctx context.Context, group string) (*GroupBundle, error) {
-	var bundle GroupBundle
+// GetReplicationModeConfig gets the replication mode configurations.
+func (c *client) GetReplicationModeConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
-		WithName(getPlacementRuleBundleByGroupName).
-		WithURI(PlacementRuleBundleByGroup(group)).
+		WithName(getReplicationModeName).
+		WithURI(ReplicationModeConfig).
 		WithMethod(http.MethodGet).
-		WithResp(&bundle))
+		WithResp(&config))
 	if err != nil {
 		return nil, err
 	}
-	return &bundle, nil
+	return config, nil
+}
+
+func (c *client) SetReplicationModeConfig(ctx context.Context, config map[string]any) error {
+	configJSON, err := json.Marshal(config)
+	if err != nil {
+		return errors.Trace(err)
+	}
+
+	return c.request(ctx, newRequestInfo().
+		WithName(setReplicationModeName).
+		WithURI(ReplicationModeConfig).
+		WithMethod(http.MethodPost).
+		WithBody(configJSON))
+}
+
+// GetAllPlacementRules gets all placement rules.
+func (c *client) GetAllPlacementRules(ctx context.Context, opts ...HeaderOption) ([]*Rule, error) {
+	var rules []*Rule
+	println("GetAllPlacementRules!!!")
+	err := c.request(ctx, newRequestInfo().
+		WithName(getAllPlacementRulesName).
+		WithURI(PlacementRules).
+		WithMethod(http.MethodGet).
+		WithResp(&rules),
+		opts...)
+	if err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+// SetPlacementRuleInBatch sets the placement rules in batch.
+func (c *client) SetPlacementRuleInBatch(ctx context.Context, ruleOps []*RuleOp) error {
+	ruleOpsJSON, err := json.Marshal(ruleOps)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(setPlacementRuleInBatchName).
+		WithURI(PlacementRulesInBatch).
+		WithMethod(http.MethodPost).
+		WithBody(ruleOpsJSON))
 }
 
 // GetPlacementRulesByGroup gets the placement rules by group.
-func (c *client) GetPlacementRulesByGroup(ctx context.Context, group string) ([]*Rule, error) {
+func (c *client) GetPlacementRulesByGroup(ctx context.Context, group string, opts ...HeaderOption) ([]*Rule, error) {
 	var rules []*Rule
 	err := c.request(ctx, newRequestInfo().
 		WithName(getPlacementRulesByGroupName).
 		WithURI(PlacementRulesByGroup(group)).
 		WithMethod(http.MethodGet).
-		WithResp(&rules))
+		WithResp(&rules),
+		opts...)
+
+	if err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+// GetPlacementRulesByRegion gets the placement rules by region.
+func (c *client) GetPlacementRulesByRegion(ctx context.Context, region string, detail bool, opts ...HeaderOption) (*RegionFit, error) {
+	var rules *RegionFit
+	err := c.request(ctx, newRequestInfo().
+		WithName(getPlacementRulesByRegionName).
+		WithURI(PlacementRulesByRegion(region, detail)).
+		WithMethod(http.MethodGet).
+		WithResp(&rules),
+		opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -511,13 +623,14 @@ func (c *client) GetPlacementRulesByGroup(ctx context.Context, group string) ([]
 }
 
 // GetPlacementRule gets the placement rule by group and ID.
-func (c *client) GetPlacementRule(ctx context.Context, group, id string) (*Rule, error) {
+func (c *client) GetPlacementRule(ctx context.Context, group, id string, opts ...HeaderOption) (*Rule, error) {
 	var rule Rule
 	err := c.request(ctx, newRequestInfo().
 		WithName(getPlacementRuleName).
 		WithURI(PlacementRuleByGroupAndID(group, id)).
 		WithMethod(http.MethodGet).
-		WithResp(&rule))
+		WithResp(&rule),
+		opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -537,17 +650,42 @@ func (c *client) SetPlacementRule(ctx context.Context, rule *Rule) error {
 		WithBody(ruleJSON))
 }
 
-// SetPlacementRuleInBatch sets the placement rules in batch.
-func (c *client) SetPlacementRuleInBatch(ctx context.Context, ruleOps []*RuleOp) error {
-	ruleOpsJSON, err := json.Marshal(ruleOps)
-	if err != nil {
-		return errors.Trace(err)
-	}
+// DeletePlacementRule deletes the placement rule.
+func (c *client) DeletePlacementRule(ctx context.Context, group, id string) error {
 	return c.request(ctx, newRequestInfo().
-		WithName(setPlacementRuleInBatchName).
-		WithURI(PlacementRulesInBatch).
-		WithMethod(http.MethodPost).
-		WithBody(ruleOpsJSON))
+		WithName(deletePlacementRuleName).
+		WithURI(PlacementRuleByGroupAndID(group, id)).
+		WithMethod(http.MethodDelete))
+}
+
+// GetAllPlacementRuleBundles gets all placement rules bundles.
+func (c *client) GetAllPlacementRuleBundles(ctx context.Context, opts ...HeaderOption) ([]*GroupBundle, error) {
+	var bundles []*GroupBundle
+	err := c.request(ctx, newRequestInfo().
+		WithName(getAllPlacementRuleBundlesName).
+		WithURI(PlacementRuleBundle).
+		WithMethod(http.MethodGet).
+		WithResp(&bundles),
+		opts...)
+	if err != nil {
+		return nil, err
+	}
+	return bundles, nil
+}
+
+// GetPlacementRuleBundleByGroup gets the placement rules bundle by group.
+func (c *client) GetPlacementRuleBundleByGroup(ctx context.Context, group string, opts ...HeaderOption) (*GroupBundle, error) {
+	var bundle GroupBundle
+	err := c.request(ctx, newRequestInfo().
+		WithName(getPlacementRuleBundleByGroupName).
+		WithURI(PlacementRuleBundleByGroup(group)).
+		WithMethod(http.MethodGet).
+		WithResp(&bundle),
+		opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &bundle, nil
 }
 
 // SetPlacementRuleBundles sets the placement rule bundles.
@@ -564,22 +702,36 @@ func (c *client) SetPlacementRuleBundles(ctx context.Context, bundles []*GroupBu
 		WithBody(bundlesJSON))
 }
 
-// DeletePlacementRule deletes the placement rule.
-func (c *client) DeletePlacementRule(ctx context.Context, group, id string) error {
+// SetPlacementRuleBundleByGroup deletes the placement rule.
+func (c *client) SetPlacementRuleBundleByGroup(ctx context.Context, group string, groupBundles *GroupBundle) error {
+	rulesJSON, err := json.Marshal(groupBundles)
+	if err != nil {
+		return errors.Trace(err)
+	}
 	return c.request(ctx, newRequestInfo().
-		WithName(deletePlacementRuleName).
-		WithURI(PlacementRuleByGroupAndID(group, id)).
+		WithName(setPlacementRuleBundleByGroup).
+		WithURI(PlacementRuleBundleByGroupWithRegexpParameter(group, false)).
+		WithMethod(http.MethodPost).
+		WithBody(rulesJSON))
+}
+
+// DeletePlacementRuleBundleByGroup deletes the placement rule.
+func (c *client) DeletePlacementRuleBundleByGroup(ctx context.Context, group string, regexp bool) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deletePlacementRuleBundleByGroup).
+		WithURI(PlacementRuleBundleByGroupWithRegexpParameter(group, regexp)).
 		WithMethod(http.MethodDelete))
 }
 
 // GetAllPlacementRuleGroups gets all placement rule groups.
-func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, error) {
+func (c *client) GetAllPlacementRuleGroups(ctx context.Context, opts ...HeaderOption) ([]*RuleGroup, error) {
 	var ruleGroups []*RuleGroup
 	err := c.request(ctx, newRequestInfo().
 		WithName(getAllPlacementRuleGroupsName).
 		WithURI(placementRuleGroups).
 		WithMethod(http.MethodGet).
-		WithResp(&ruleGroups))
+		WithResp(&ruleGroups),
+		opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -587,13 +739,14 @@ func (c *client) GetAllPlacementRuleGroups(ctx context.Context) ([]*RuleGroup, e
 }
 
 // GetPlacementRuleGroupByID gets the placement rule group by ID.
-func (c *client) GetPlacementRuleGroupByID(ctx context.Context, id string) (*RuleGroup, error) {
+func (c *client) GetPlacementRuleGroupByID(ctx context.Context, id string, opts ...HeaderOption) (*RuleGroup, error) {
 	var ruleGroup RuleGroup
 	err := c.request(ctx, newRequestInfo().
 		WithName(getPlacementRuleGroupByIDName).
 		WithURI(PlacementRuleGroupByID(id)).
 		WithMethod(http.MethodGet).
-		WithResp(&ruleGroup))
+		WithResp(&ruleGroup),
+		opts...)
 	if err != nil {
 		return nil, err
 	}

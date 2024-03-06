@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
@@ -220,9 +219,9 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	args1 := []string{"-u", pdAddr, "config", "show", "cluster-version"}
 	output, err = tests.ExecuteCommand(cmd, args1...)
 	re.NoError(err)
-	clusterVersion := semver.Version{}
+	var clusterVersion string
 	re.NoError(json.Unmarshal(output, &clusterVersion))
-	re.Equal(svr.GetClusterVersion(), clusterVersion)
+	re.Equal(svr.GetClusterVersion().String(), clusterVersion)
 
 	// config set cluster-version <value>
 	args2 := []string{"-u", pdAddr, "config", "set", "cluster-version", "2.1.0-rc.5"}
@@ -231,9 +230,9 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	re.NotEqual(svr.GetClusterVersion(), clusterVersion)
 	output, err = tests.ExecuteCommand(cmd, args1...)
 	re.NoError(err)
-	clusterVersion = semver.Version{}
+	clusterVersion = ""
 	re.NoError(json.Unmarshal(output, &clusterVersion))
-	re.Equal(svr.GetClusterVersion(), clusterVersion)
+	re.Equal(svr.GetClusterVersion().String(), clusterVersion)
 
 	// config show label-property
 	args1 = []string{"-u", pdAddr, "config", "show", "label-property"}
