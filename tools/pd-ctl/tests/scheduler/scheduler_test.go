@@ -488,6 +488,16 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	re.Contains(echo, "Success!")
 	checkHotSchedulerConfig(expected1)
 
+	expected1["history-sample-duration"] = "0s"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-duration", "0s"}, nil)
+	re.Contains(echo, "Success!")
+	checkHotSchedulerConfig(expected1)
+
+	expected1["history-sample-interval"] = "0s"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-interval", "0s"}, nil)
+	re.Contains(echo, "Success!")
+	checkHotSchedulerConfig(expected1)
+
 	// test compatibility
 	re.Equal("2.0.0", leaderServer.GetClusterVersion().String())
 	for _, store := range stores {

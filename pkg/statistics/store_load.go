@@ -284,7 +284,7 @@ func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant
 		if s.sampleInterval != 0 {
 			size = int(s.sampleDuration / s.sampleInterval)
 		}
-		load = newStoreHistoryLoad(size, s.dim, s.sampleInterval)
+		load = newStoreHistoryLoad(max(size, 1), s.dim, s.sampleInterval)
 		s.loads[rwTp][kind][storeID] = load
 	}
 	load.add(pointLoad)

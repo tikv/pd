@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -42,4 +43,12 @@ func TestHistoryLoads(t *testing.T) {
 		expectLoads[utils.QueryDim][i] = 3.0
 	}
 	re.EqualValues(expectLoads, historyLoads.Get(1, rwTp, kind))
+
+	historyLoads = NewStoreHistoryLoads(utils.DimLen, time.Millisecond, time.Millisecond)
+	historyLoads.Add(1, rwTp, kind, loads)
+	re.Len(historyLoads.Get(1, rwTp, kind)[0], 1)
+
+	historyLoads = NewStoreHistoryLoads(utils.DimLen, time.Millisecond, time.Second)
+	historyLoads.Add(1, rwTp, kind, loads)
+	re.Len(historyLoads.Get(1, rwTp, kind)[0], 1)
 }
