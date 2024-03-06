@@ -35,6 +35,7 @@ import (
 )
 
 func TestAllocatorLeader(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -109,6 +110,7 @@ func TestAllocatorLeader(t *testing.T) {
 }
 
 func TestPriorityAndDifferentLocalTSO(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

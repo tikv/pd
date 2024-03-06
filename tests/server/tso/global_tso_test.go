@@ -43,6 +43,7 @@ import (
 //    leaders.
 
 func TestRequestFollower(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -87,6 +88,7 @@ func TestRequestFollower(t *testing.T) {
 // In some cases, when a TSO request arrives, the SyncTimestamp may not finish yet.
 // This test is used to simulate this situation and verify that the retry mechanism.
 func TestDelaySyncTimestamp(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -132,6 +134,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 }
 
 func TestLogicalOverflow(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	re := require.New(t)
 
 	runCase := func(updateInterval time.Duration) {

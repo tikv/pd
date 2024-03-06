@@ -191,3 +191,5 @@ require (
 	gorm.io/driver/sqlite v1.4.3 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
+
+replace github.com/pingcap/tidb-dashboard => github.com/HuSharp/tidb-dashboard v0.0.0-20240130065036-5d37687b904c

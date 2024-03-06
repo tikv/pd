@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
-	"go.uber.org/goleak"
 )
 
 var (
@@ -33,7 +32,7 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }
 
 type backupTestSuite struct {
@@ -126,6 +125,9 @@ func (s *backupTestSuite) BeforeTest(suiteName, testName string) {
 
 func (s *backupTestSuite) AfterTest(suiteName, testName string) {
 	s.etcd.Close()
+	s.etcdClient.Close()
+	s.server.Close()
+	testutil.RegisterLeakDetection(s.T())
 }
 
 func (s *backupTestSuite) TestGetBackupInfo() {

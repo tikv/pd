@@ -32,11 +32,10 @@ import (
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/embed"
 	"go.etcd.io/etcd/pkg/types"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+	testutil.MustTestMainWithLeakDetection(m)
 }
 
 type leaderServerTestSuite struct {
@@ -46,9 +45,12 @@ type leaderServerTestSuite struct {
 	cancel     context.CancelFunc
 	svrs       map[string]*Server
 	leaderPath string
+
+	httpClient *http.Client
 }
 
 func TestLeaderServerTestSuite(t *testing.T) {
+	testutil.RegisterLeakDetection(t)
 	suite.Run(t, new(leaderServerTestSuite))
 }
 
@@ -78,6 +80,11 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 		suite.svrs[svr.GetAddr()] = svr
 		suite.leaderPath = svr.GetMember().GetLeaderPath()
 	}
+	suite.httpClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
 }
 
 func (suite *leaderServerTestSuite) TearDownSuite() {
@@ -86,6 +93,7 @@ func (suite *leaderServerTestSuite) TearDownSuite() {
 		svr.Close()
 		testutil.CleanServer(svr.cfg.DataDir)
 	}
+	suite.httpClient.CloseIdleConnections()
 }
 
 func (suite *leaderServerTestSuite) newTestServersWithCfgs(
@@ -159,9 +167,13 @@ func (suite *leaderServerTestSuite) TestCheckClusterID() {
 		svr.Close()
 	}
 
-	// Start another cluster.
-	_, cleanB := suite.newTestServersWithCfgs(ctx, []*config.Config{cfgB}, re)
-	defer cleanB()
+	servers, cleanB := suite.newTestServersWithCfgs(ctx, []*config.Config{cfgB}, re)
+	defer func() {
+		cleanB()
+		for _, svr := range servers {
+			svr.Close()
+		}
+	}()
 
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
@@ -229,7 +241,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), http.NoBody)
 	re.NoError(err)
 	req.Header.Add(apiutil.XForwardedForHeader, "127.0.0.2")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := suite.httpClient.Do(req)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
@@ -260,7 +272,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/apis/mock/v1/hello", svr.GetAddr()), http.NoBody)
 	re.NoError(err)
 	req.Header.Add(apiutil.XRealIPHeader, "127.0.0.2")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := suite.httpClient.Do(req)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()
@@ -292,7 +304,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	re.NoError(err)
 	req.Header.Add(apiutil.XForwardedForHeader, "127.0.0.2")
 	req.Header.Add(apiutil.XRealIPHeader, "127.0.0.3")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := suite.httpClient.Do(req)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
 	defer resp.Body.Close()

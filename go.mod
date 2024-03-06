@@ -209,3 +209,4 @@ replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
+replace github.com/pingcap/tidb-dashboard => github.com/HuSharp/tidb-dashboard v0.0.0-20240206072929-cce4e52a51f8
