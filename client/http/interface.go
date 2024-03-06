@@ -939,10 +939,9 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 		tempKeyspaceMeta tempKeyspaceMeta
 		keyspaceMetaPB   keyspacepb.KeyspaceMeta
 	)
-	uri := GetKeyspaceMetaByNameURL(keyspaceName)
 	err := c.request(ctx, newRequestInfo().
 		WithName(GetKeyspaceMetaByNameName).
-		WithURI(uri).
+		WithURI(GetKeyspaceMetaByNameURL(keyspaceName)).
 		WithMethod(http.MethodGet).
 		WithResp(&tempKeyspaceMeta))
 
