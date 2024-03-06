@@ -766,15 +766,15 @@ func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode,
 
 	// Create keyspace
 	keyspaceMeta := keyspacepb.KeyspaceMeta{Name: keyspaceName}
-	client.CreateKeyspace(env.ctx, &keyspaceMeta)
-
+	err := client.CreateKeyspace(env.ctx, &keyspaceMeta)
+	re.NoError(err)
 	// Update keyspace safe point version
 	keyspaceSafePointVersionConfig := pd.KeyspaceSafePointVersionConfig{
 		Config: pd.KeyspaceSafePointVersion{
 			SafePointVersion: safePointVersion,
 		},
 	}
-	err := client.UpdateKeyspaceSafePointVersion(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	err = client.UpdateKeyspaceSafePointVersion(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
 	re.NoError(err)
 
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(env.ctx, keyspaceName)
