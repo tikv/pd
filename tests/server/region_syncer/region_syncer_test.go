@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 func TestRegionSyncer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
 
@@ -156,7 +156,7 @@ func TestRegionSyncer(t *testing.T) {
 		re.Equal(region.GetBuckets(), r.GetBuckets())
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/noFastExitSync"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))
 }
 
 func TestFullSyncWithAddMember(t *testing.T) {
