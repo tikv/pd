@@ -127,13 +127,13 @@ type baseHotScheduler struct {
 	updateWriteTime time.Time
 }
 
-func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
+func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.Duration, sampleInterval time.Duration) *baseHotScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
 		types:          []utils.RWType{utils.Write, utils.Read},
 		regionPendings: make(map[uint64]*pendingInfluence),
-		stHistoryLoads: statistics.NewStoreHistoryLoads(utils.DimLen),
+		stHistoryLoads: statistics.NewStoreHistoryLoads(utils.DimLen, sampleDuration, sampleInterval),
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -178,6 +178,10 @@ func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.Sched
 			h.updateWriteTime = time.Now()
 		}
 	}
+}
+
+func (h *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterval time.Duration) {
+	h.stHistoryLoads = h.stHistoryLoads.UpdateConfig(sampleDuration, sampleInterval)
 }
 
 // summaryPendingInfluence calculate the summary of pending Influence for each store
@@ -233,7 +237,8 @@ type hotScheduler struct {
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
-	base := newBaseHotScheduler(opController)
+	base := newBaseHotScheduler(opController,
+		conf.GetHistorySampleDuration(), conf.GetHistorySampleInterval())
 	ret := &hotScheduler{
 		name:             HotRegionName,
 		baseHotScheduler: base,
@@ -257,6 +262,49 @@ func (h *hotScheduler) EncodeConfig() ([]byte, error) {
 	return h.conf.EncodeConfig()
 }
 
+<<<<<<< HEAD
+=======
+func (h *hotScheduler) ReloadConfig() error {
+	h.conf.Lock()
+	defer h.conf.Unlock()
+	cfgData, err := h.conf.storage.LoadSchedulerConfig(h.GetName())
+	if err != nil {
+		return err
+	}
+	if len(cfgData) == 0 {
+		return nil
+	}
+	newCfg := &hotRegionSchedulerConfig{}
+	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+		return err
+	}
+	h.conf.MinHotByteRate = newCfg.MinHotByteRate
+	h.conf.MinHotKeyRate = newCfg.MinHotKeyRate
+	h.conf.MinHotQueryRate = newCfg.MinHotQueryRate
+	h.conf.MaxZombieRounds = newCfg.MaxZombieRounds
+	h.conf.MaxPeerNum = newCfg.MaxPeerNum
+	h.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
+	h.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
+	h.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
+	h.conf.CountRankStepRatio = newCfg.CountRankStepRatio
+	h.conf.GreatDecRatio = newCfg.GreatDecRatio
+	h.conf.MinorDecRatio = newCfg.MinorDecRatio
+	h.conf.SrcToleranceRatio = newCfg.SrcToleranceRatio
+	h.conf.DstToleranceRatio = newCfg.DstToleranceRatio
+	h.conf.WriteLeaderPriorities = newCfg.WriteLeaderPriorities
+	h.conf.WritePeerPriorities = newCfg.WritePeerPriorities
+	h.conf.ReadPriorities = newCfg.ReadPriorities
+	h.conf.StrictPickingStore = newCfg.StrictPickingStore
+	h.conf.EnableForTiFlash = newCfg.EnableForTiFlash
+	h.conf.RankFormulaVersion = newCfg.RankFormulaVersion
+	h.conf.ForbidRWType = newCfg.ForbidRWType
+	h.conf.SplitThresholds = newCfg.SplitThresholds
+	h.conf.HistorySampleDuration = newCfg.HistorySampleDuration
+	h.conf.HistorySampleInterval = newCfg.HistorySampleInterval
+	return nil
+}
+
+>>>>>>> bbd3bdb56 (scheduler: make history-sample-interval and history-sample-duration configurable (#7878))
 func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
 }
@@ -286,6 +334,7 @@ func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*
 func (h *hotScheduler) dispatch(typ utils.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
+	h.updateHistoryLoadConfig(h.conf.GetHistorySampleDuration(), h.conf.GetHistorySampleInterval())
 	h.prepareForBalance(typ, cluster)
 	// it can not move earlier to support to use api and metrics.
 	if h.conf.IsForbidRWType(typ) {
