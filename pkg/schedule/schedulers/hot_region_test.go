@@ -450,7 +450,7 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
 	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
@@ -508,18 +508,15 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 		case 1:
 			// balance by leader selected
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
-		case 4:
-			// balance by peer selected
-			re.Equal(uint64(2), op.RegionID())
-			re.Equal("move-hot-write-peer", op.Desc())
-			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
 		case 5:
 			// balance by peer selected
-			re.NotEqual(uint64(2), op.RegionID())
-			re.Equal("move-hot-write-leader", op.Desc())
-			// peer in store 1 of the region 1,3 can only transfer to store 6
-			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
+			if op.RegionID() == 2 {
+				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
+			} else {
+				// peer in store 1 of the region 1,3 can only transfer to store 6
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
+			}
 		default:
 			re.FailNow("wrong op: " + op.String())
 		}
@@ -535,14 +532,11 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
 		clearPendingInfluence(hb.(*hotScheduler))
+		re.Equal(5, op.Len())
 		if op.RegionID() == 2 {
-			re.Equal("move-hot-write-peer", op.Desc())
-			re.Equal(4, op.Len())
 			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
 		} else {
-			re.Equal("move-hot-write-leader", op.Desc())
-			re.Equal(5, op.Len())
 			// peer in store 1 of the region 1,3 can only transfer to store 6
 			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
 		}
@@ -639,7 +633,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	statistics.HistorySampleDuration = 0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
 	tc.SetHotRegionCacheHitsThreshold(0)
 	re.NoError(tc.RuleManager.SetRules([]*placement.Rule{
 		{
@@ -826,18 +820,15 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		case 1:
 			// balance by leader selected
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
-		case 4:
-			// balance by peer selected
-			re.Equal("move-hot-write-peer", op.Desc())
-			re.Equal(uint64(2), op.RegionID())
-			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
 		case 5:
 			// balance by peer selected
-			re.Equal("move-hot-write-leader", op.Desc())
-			re.NotEqual(uint64(2), op.RegionID())
-			// peer in store 1 of the region 1,3 can only transfer to store 6
-			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
+			if op.RegionID() == 2 {
+				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
+			} else {
+				// peer in store 1 of the region 1,3 can only transfer to store 6
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
+			}
 		default:
 			re.FailNow("wrong op: " + op.String())
 		}
