@@ -22,12 +22,12 @@ import (
 	"path"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -152,15 +152,16 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	re := suite.Require()
 
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
-	guid := uuid.New().String()
-	tsoServiceKey := discovery.ServicePath(guid, "tso")
-	legacySvcRootPath := path.Join("/pd", guid)
-	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, guid, "tso")
-	electionNamePrefix := "tso-server-" + guid
+	clusterID := rand.Uint64()
+	clusterIDStr := strconv.FormatUint(clusterID, 10)
+
+	legacySvcRootPath := path.Join("/pd", clusterIDStr)
+	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, clusterIDStr, "tso")
+	electionNamePrefix := "tso-server-" + clusterIDStr
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		tsoServiceKey, legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+		clusterID, legacySvcRootPath, tsoSvcRootPath, suite.cfg)
 	defer kgm.Close()
 	err := kgm.Initialize()
 	re.NoError(err)
@@ -757,7 +758,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 				if assignToMe {
 					svcAddrs = append(svcAddrs, mgr.tsoServiceID.ServiceAddr)
 				} else {
-					svcAddrs = append(svcAddrs, uuid.NewString())
+					svcAddrs = append(svcAddrs, fmt.Sprintf("test-%d", rand.Uint64()))
 				}
 				addKeyspaceGroupAssignment(
 					suite.ctx, suite.etcdClient, uint32(j), mgr.legacySvcRootPath,
@@ -787,23 +788,23 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 func (suite *keyspaceGroupManagerTestSuite) newUniqueKeyspaceGroupManager(
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
 ) *KeyspaceGroupManager {
-	return suite.newKeyspaceGroupManager(loadKeyspaceGroupsBatchSize, uuid.New().String(), suite.cfg)
+	return suite.newKeyspaceGroupManager(loadKeyspaceGroupsBatchSize, rand.Uint64(), suite.cfg)
 }
 
 func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
-	uniqueStr string,
+	clusterID uint64,
 	cfg *TestServiceConfig,
 ) *KeyspaceGroupManager {
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr()}
-	tsoServiceKey := discovery.ServicePath(uniqueStr, "tso")
-	legacySvcRootPath := path.Join("/pd", uniqueStr)
-	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, uniqueStr, "tso")
+	clusterIDStr := strconv.FormatUint(clusterID, 10)
+	legacySvcRootPath := path.Join("/pd", clusterIDStr)
+	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, clusterIDStr, "tso")
 	electionNamePrefix := "kgm-test-" + cfg.GetAdvertiseListenAddr()
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		tsoServiceKey, legacySvcRootPath, tsoSvcRootPath, cfg)
+		clusterID, legacySvcRootPath, tsoSvcRootPath, cfg)
 	if loadKeyspaceGroupsBatchSize != 0 {
 		kgm.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
 	}
@@ -1043,18 +1044,20 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	var err error
 	defaultPriority := mcsutils.DefaultKeyspaceGroupReplicaPriority
-	uniqueStr := uuid.New().String()
-	rootPath := path.Join("/pd", uniqueStr)
+	clusterID := rand.Uint64()
+	clusterIDStr := strconv.FormatUint(clusterID, 10)
+
+	rootPath := path.Join("/pd", clusterIDStr)
 	cfg1 := suite.createConfig()
 	cfg2 := suite.createConfig()
 	svcAddr1 := cfg1.GetAdvertiseListenAddr()
 	svcAddr2 := cfg2.GetAdvertiseListenAddr()
 
 	// Register TSO server 1
-	err = suite.registerTSOServer(re, uniqueStr, svcAddr1, cfg1)
+	err = suite.registerTSOServer(re, clusterIDStr, svcAddr1, cfg1)
 	re.NoError(err)
 	defer func() {
-		re.NoError(suite.deregisterTSOServer(uniqueStr, svcAddr1))
+		re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr1))
 	}()
 
 	// Create three keyspace groups on two TSO servers with default replica priority.
@@ -1067,7 +1070,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	// Create the first TSO server which loads all three keyspace groups created above.
 	// All primaries should be on the first TSO server.
-	mgr1 := suite.newKeyspaceGroupManager(1, uniqueStr, cfg1)
+	mgr1 := suite.newKeyspaceGroupManager(1, clusterID, cfg1)
 	re.NotNil(mgr1)
 	defer mgr1.Close()
 	err = mgr1.Initialize()
@@ -1099,9 +1102,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	checkTSO(ctx, re, &wg, mgr1, ids)
 
 	// Create the Second TSO server.
-	err = suite.registerTSOServer(re, uniqueStr, svcAddr2, cfg2)
+	err = suite.registerTSOServer(re, clusterIDStr, svcAddr2, cfg2)
 	re.NoError(err)
-	mgr2 := suite.newKeyspaceGroupManager(1, uniqueStr, cfg2)
+	mgr2 := suite.newKeyspaceGroupManager(1, clusterID, cfg2)
 	re.NotNil(mgr2)
 	err = mgr2.Initialize()
 	re.NoError(err)
@@ -1110,17 +1113,17 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	// Shutdown the second TSO server.
 	mgr2.Close()
-	re.NoError(suite.deregisterTSOServer(uniqueStr, svcAddr2))
+	re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr2))
 	// The primaries should move back to the first TSO server.
 	waitForPrimariesServing(re, []*KeyspaceGroupManager{mgr1, mgr1, mgr1}, ids)
 
 	// Restart the Second TSO server.
-	err = suite.registerTSOServer(re, uniqueStr, svcAddr2, cfg2)
+	err = suite.registerTSOServer(re, clusterIDStr, svcAddr2, cfg2)
 	re.NoError(err)
 	defer func() {
-		re.NoError(suite.deregisterTSOServer(uniqueStr, svcAddr2))
+		re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr2))
 	}()
-	mgr2 = suite.newKeyspaceGroupManager(1, uniqueStr, cfg2)
+	mgr2 = suite.newKeyspaceGroupManager(1, clusterID, cfg2)
 	re.NotNil(mgr2)
 	defer mgr2.Close()
 	err = mgr2.Initialize()
