@@ -260,7 +260,7 @@ func TestStateSwitch(t *testing.T) {
 	rep.tickUpdateState()
 	re.Equal(drStateSync, rep.drGetState())
 
-	// once zone2 down, swith to async state.
+	// once zone2 down, switch to async state.
 	setStoreState(cluster, "up", "up", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	re.Equal(drStateAsyncWait, rep.drGetState())

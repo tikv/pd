@@ -2568,7 +2568,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 
 // SplitAndScatterRegions split regions by the given split keys, and scatter regions.
 // Only regions which split successfully will be scattered.
-// scatterFinishedPercentage indicates the percentage of successfully splited regions that are scattered.
+// scatterFinishedPercentage indicates the percentage of successfully split regions that are scattered.
 func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()

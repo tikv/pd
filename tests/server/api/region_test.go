@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/statistics"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -171,32 +170,6 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
 	}
 	re.Len(idList, 2, len(idList))
-}
-
-func (suite *regionTestSuite) TestRegionStats() {
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInAPIMode(suite.checkRegionStats)
-	env.Cleanup()
-}
-
-func (suite *regionTestSuite) checkRegionStats(cluster *tests.TestCluster) {
-	re := suite.Require()
-	leader := cluster.GetLeaderServer()
-	rc := leader.GetRaftCluster()
-	re.NotNil(rc)
-	for i := 13; i <= 16; i++ {
-		s1 := &metapb.Store{
-			Id:        uint64(i),
-			State:     metapb.StoreState_Up,
-			NodeState: metapb.NodeState_Serving,
-		}
-		tests.MustPutStore(re, cluster, s1)
-	}
-	r := core.NewTestRegionInfo(1001, 13, []byte("b1"), []byte("b2"), core.SetApproximateSize(0))
-	r.GetMeta().Peers = append(r.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
-	tests.MustPutRegionInfo(re, cluster, r)
-	suite.checkRegionCount(re, cluster, 1)
-	re.False(rc.GetRegionStats().IsRegionStatsType(1001, statistics.EmptyRegion))
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {

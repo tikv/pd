@@ -314,8 +314,8 @@ func pickPeersFromBinaryInt(candidates []*fitPeer, binaryNumber uint) []*fitPeer
 	return selected
 }
 
-func unSelectPeers(seleted []*fitPeer) {
-	for _, p := range seleted {
+func unSelectPeers(selected []*fitPeer) {
+	for _, p := range selected {
 		p.selected = false
 	}
 }

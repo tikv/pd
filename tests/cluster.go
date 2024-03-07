@@ -852,8 +852,8 @@ func (c *TestCluster) CheckClusterDCLocation() {
 	wg := sync.WaitGroup{}
 	for _, server := range c.GetServers() {
 		wg.Add(1)
-		go func(ser *TestServer) {
-			ser.GetTSOAllocatorManager().ClusterDCLocationChecker()
+		go func(s *TestServer) {
+			s.GetTSOAllocatorManager().ClusterDCLocationChecker()
 			wg.Done()
 		}(server)
 	}
