@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Client is a PD (Placement Driver) client.
@@ -124,7 +125,7 @@ func (c *client) getMembers(ctx context.Context) (*pdpb.GetMembersResponse, erro
 }
 
 func (c *client) createConn() (*grpc.ClientConn, error) {
-	cc, err := grpc.Dial(strings.TrimPrefix(c.url, "http://"), grpc.WithInsecure())
+	cc, err := grpc.Dial(strings.TrimPrefix(c.url, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

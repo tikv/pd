@@ -27,7 +27,11 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*ccResolverWrapper).watcher"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).createTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
+<<<<<<< HEAD:pkg/testutil/leak.go
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*Server).handleRawConn"),
+=======
+	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/grpcsync.(*CallbackSerializer).run"),
+>>>>>>> 57cd60348 (*: upgrade etcd to v3.4.30 (#7884)):pkg/utils/testutil/leak.go
 	goleak.IgnoreTopFunction("go.etcd.io/etcd/pkg/logutil.(*MergeLogger).outputLoop"),
 	goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
 	// TODO: remove the below options once we fixed the http connection leak problems
