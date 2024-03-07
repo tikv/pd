@@ -69,8 +69,10 @@ func (bo *Backoffer) Exec(
 	for {
 		err = fn()
 		bo.attempt++
-		if bo.logTimes > 0 && bo.attempt%bo.logTimes == 0 {
-			log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
+		if err != nil {
+			if bo.logTimes > 0 && bo.attempt%bo.logTimes == 0 {
+				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
+			}
 		}
 		if !bo.isRetryable(err) {
 			break
