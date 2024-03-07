@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"path"
 	"regexp"
 	"sort"
 	"sync"
@@ -321,6 +322,7 @@ type KeyspaceGroupManager struct {
 
 	// tsoServiceID is the service ID of the TSO service, registered in the service discovery
 	tsoServiceID *discovery.ServiceRegistryEntry
+	clusterID    uint64
 	etcdClient   *clientv3.Client
 	httpClient   *http.Client
 	// electionNamePrefix is the name prefix to generate the unique name of a participant,
@@ -415,6 +417,7 @@ func NewKeyspaceGroupManager(
 		ctx:                          ctx,
 		cancel:                       cancel,
 		tsoServiceID:                 tsoServiceID,
+		clusterID:                    clusterID,
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
@@ -789,7 +792,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		storage = kgm.tsoSvcStorage
 	}
 	// Initialize all kinds of maps.
-	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg)
+	am := NewAllocatorManager(kgm.ctx, kgm.etcdClient, group.ID, participant, tsRootPath, storage, kgm.cfg, path.Join(keypath.GlobalTSOAllocatorsPrefix(), "tso"))
 	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
 		zap.Uint32("keyspace-group-id", group.ID),
