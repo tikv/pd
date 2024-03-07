@@ -171,6 +171,8 @@ type AllocatorManager struct {
 
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	etcdClient *clientv3.Client
 	// kgID is the keyspace group ID
 	kgID uint32
 	// member is for election use
@@ -184,9 +186,11 @@ type AllocatorManager struct {
 	// leaderLease defines the time within which a TSO primary/leader must update its TTL
 	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
 	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
-	leaderLease    int64
-	maxResetTSGap  func() time.Duration
-	securityConfig *grpcutil.TLSConfig
+	leaderLease        int64
+	maxResetTSGap      func() time.Duration
+	securityConfig     *grpcutil.TLSConfig
+	allocatorKeyPrefix string
+	allocatorKey       string
 	// for gRPC use
 	localAllocatorConn struct {
 		syncutil.RWMutex
@@ -197,17 +201,20 @@ type AllocatorManager struct {
 // NewAllocatorManager creates a new TSO Allocator Manager.
 func NewAllocatorManager(
 	ctx context.Context,
+	etcdClient *clientv3.Client,
 	keyspaceGroupID uint32,
 	member ElectionMember,
 	rootPath string,
 	storage endpoint.TSOStorage,
 	cfg Config,
 	startGlobalLeaderLoop bool,
+	allocatorKeyPrefix string,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
 	am := &AllocatorManager{
 		ctx:                    ctx,
 		cancel:                 cancel,
+		etcdClient:             etcdClient,
 		kgID:                   keyspaceGroupID,
 		member:                 member,
 		rootPath:               rootPath,
@@ -218,6 +225,8 @@ func NewAllocatorManager(
 		leaderLease:            cfg.GetLeaderLease(),
 		maxResetTSGap:          cfg.GetMaxResetTSGap,
 		securityConfig:         cfg.GetTLSConfig(),
+		allocatorKey:           path.Join(allocatorKeyPrefix, fmt.Sprintf("keyspace_group_%d", keyspaceGroupID)),
+		allocatorKeyPrefix:     allocatorKeyPrefix,
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
