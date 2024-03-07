@@ -305,7 +305,8 @@ func NewClient(
 	}
 	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
 	if err := sd.Init(); err != nil {
-		log.Error("[pd] init service discovery failed", zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
+		log.Error("[pd] init service discovery failed",
+			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
 		return nil
 	}
 	c.inner.init(sd)
@@ -382,9 +383,8 @@ func NewHTTPClientWithRequestChecker(checker requestChecker) *http.Client {
 	}
 }
 
-// newClientWithoutInitServiceDiscovery creates a PD HTTP client
-// with the given PD addresses and TLS config without init service discovery.
-func newClientWithoutInitServiceDiscovery(
+// newClientWithMockServiceDiscovery creates a new PD HTTP client with a mock PD service discovery.
+func newClientWithMockServiceDiscovery(
 	source string,
 	pdAddrs []string,
 	opts ...ClientOption,
@@ -395,7 +395,12 @@ func newClientWithoutInitServiceDiscovery(
 	for _, opt := range opts {
 		opt(c)
 	}
-	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
+	sd := pd.NewMockPDServiceDiscovery(pdAddrs, c.inner.tlsConf)
+	if err := sd.Init(); err != nil {
+		log.Error("[pd] init mock service discovery failed",
+			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
+		return nil
+	}
 	c.inner.init(sd)
 	return c
 }

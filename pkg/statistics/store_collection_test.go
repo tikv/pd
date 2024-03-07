@@ -98,7 +98,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	rw := utils.Read
 	kind := constant.LeaderKind
 	collector := newTikvCollector()
-	storeHistoryLoad := NewStoreHistoryLoads(utils.DimLen)
+	storeHistoryLoad := NewStoreHistoryLoads(utils.DimLen, DefaultHistorySampleDuration, DefaultHistorySampleInterval)
 	storeInfos := make(map[uint64]*StoreSummaryInfo)
 	storeLoads := make(map[uint64][]float64)
 	for _, storeID := range []int{1, 3} {
@@ -130,7 +130,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	}
 
 	// case 2: put many elements into history load
-	historySampleInterval = 0
+	storeHistoryLoad.sampleDuration = 0
 	for i := 1; i < 10; i++ {
 		details = summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
 		expect := []float64{2, 4, 10}

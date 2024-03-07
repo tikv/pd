@@ -30,6 +30,8 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/opentracing/basictracer-go"
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -469,6 +471,22 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"))
 
+	recorder := basictracer.NewInMemoryRecorder()
+	tracer := basictracer.New(recorder)
+	span := tracer.StartSpan("trace")
+	ctx = opentracing.ContextWithSpan(ctx, span)
+	future := cli.GetLocalTSAsync(ctx, "error-dc")
+	spans := recorder.GetSpans()
+	re.Len(spans, 1)
+	_, _, err = future.Wait()
+	re.Error(err)
+	spans = recorder.GetSpans()
+	re.Len(spans, 1)
+	_, _, err = cli.GetTS(ctx)
+	re.NoError(err)
+	spans = recorder.GetSpans()
+	re.Len(spans, 3)
+
 	// Test the TSO follower proxy while enabling the Local TSO.
 	cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
 	// Sleep a while here to prevent from canceling the ongoing TSO request.
@@ -856,6 +874,51 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.Equal(100, cnt)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
+}
+
+func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/shortDispatcherChannel", "return(true)"))
+
+	cli := setupCli(re, ctx, suite.endpoints)
+
+	ctxs := make([]context.Context, 20)
+	cancels := make([]context.CancelFunc, 20)
+	for i := 0; i < 20; i++ {
+		ctxs[i], cancels[i] = context.WithCancel(ctx)
+	}
+	start := time.Now()
+	wg1 := sync.WaitGroup{}
+	wg2 := sync.WaitGroup{}
+	wg3 := sync.WaitGroup{}
+	wg1.Add(1)
+	go func() {
+		<-time.After(time.Second)
+		for i := 0; i < 20; i++ {
+			cancels[i]()
+		}
+		wg1.Done()
+	}()
+	wg2.Add(1)
+	go func() {
+		cli.Close()
+		wg2.Done()
+	}()
+	wg3.Add(1)
+	go func() {
+		for i := 0; i < 20; i++ {
+			cli.GetTSAsync(ctxs[i])
+		}
+		wg3.Done()
+	}()
+	wg1.Wait()
+	wg2.Wait()
+	wg3.Wait()
+	re.Less(time.Since(start), time.Second*2)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/shortDispatcherChannel"))
 }
 
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {

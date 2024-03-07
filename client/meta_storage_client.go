@@ -110,8 +110,8 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 		opt(options)
 	}
 
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.Put", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.Put", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -148,8 +148,8 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 		options.rangeEnd = getPrefix(key)
 	}
 
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.Get", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.Get", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()

@@ -73,7 +73,7 @@ func (c *tsoClient) scheduleUpdateTSOConnectionCtxs() {
 	}
 }
 
-func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) error {
+func (c *tsoClient) dispatchRequest(ctx context.Context, dcLocation string, request *tsoRequest) error {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
@@ -82,8 +82,12 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 		return err
 	}
 
-	defer trace.StartRegion(request.requestCtx, "tsoReqEnqueue").End()
-	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+	defer trace.StartRegion(request.requestCtx, "pdclient.tsoReqEnqueue").End()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request:
+	}
 	return nil
 }
 
@@ -100,7 +104,7 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err = <-req.done:
-		defer trace.StartRegion(req.requestCtx, "tsoReqDone").End()
+		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
 		err = errors.WithStack(err)
 		defer tsoReqPool.Put(req)
 		if err != nil {
@@ -311,6 +315,14 @@ func (c *tsoClient) createTSODispatcher(dcLocation string) {
 			make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
 			defaultMaxTSOBatchSize),
 	}
+	failpoint.Inject("shortDispatcherChannel", func() {
+		dispatcher = &tsoDispatcher{
+			dispatcherCancel: dispatcherCancel,
+			tsoBatchController: newTSOBatchController(
+				make(chan *tsoRequest, 1),
+				defaultMaxTSOBatchSize),
+		}
+	})
 
 	if _, ok := c.tsoDispatcher.LoadOrStore(dcLocation, dispatcher); !ok {
 		// Successfully stored the value. Start the following goroutine.
@@ -338,7 +350,6 @@ func (c *tsoClient) handleDispatcher(
 		cancel     context.CancelFunc
 		// addr -> connectionContext
 		connectionCtxs sync.Map
-		opts           []opentracing.StartSpanOption
 	)
 	defer func() {
 		log.Info("[tso] exit tso dispatcher", zap.String("dc-location", dc))
@@ -415,7 +426,7 @@ tsoBatchLoop:
 			} else {
 				log.Error("[tso] fetch pending tso requests error",
 					zap.String("dc-location", dc),
-					errs.ZapError(errs.ErrClientGetTSO, err))
+					zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
 			}
 			return
 		}
@@ -487,8 +498,7 @@ tsoBatchLoop:
 			return
 		case tsDeadlineCh.(chan *deadline) <- dl:
 		}
-		opts = extractSpanReference(tbc, opts[:0])
-		err = c.processRequests(stream, dc, tbc, opts)
+		err = c.processRequests(stream, dc, tbc)
 		close(done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err != nil {
@@ -501,7 +511,7 @@ tsoBatchLoop:
 			log.Error("[tso] getTS error after processing requests",
 				zap.String("dc-location", dc),
 				zap.String("stream-addr", streamAddr),
-				errs.ZapError(errs.ErrClientGetTSO, err))
+				zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamAddr)
 			cancel()
@@ -746,26 +756,16 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 	return nil
 }
 
-func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanOption) []opentracing.StartSpanOption {
-	for _, req := range tbc.getCollectedRequests() {
-		if span := opentracing.SpanFromContext(req.requestCtx); span != nil {
-			opts = append(opts, opentracing.ChildOf(span.Context()))
-		}
-	}
-	return opts
-}
-
 func (c *tsoClient) processRequests(
-	stream tsoStream, dcLocation string, tbc *tsoBatchController, opts []opentracing.StartSpanOption,
+	stream tsoStream, dcLocation string, tbc *tsoBatchController,
 ) error {
-	if len(opts) > 0 {
-		span := opentracing.StartSpan("pdclient.processRequests", opts...)
-		defer span.Finish()
-	}
-
 	requests := tbc.getCollectedRequests()
 	for _, req := range requests {
-		defer trace.StartRegion(req.requestCtx, "tsoReqSend").End()
+		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqSend").End()
+		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
+			span = span.Tracer().StartSpan("pdclient.processRequests", opentracing.ChildOf(span.Context()))
+			defer span.Finish()
+		}
 	}
 	count := int64(len(requests))
 	reqKeyspaceGroupID := c.svcDiscovery.GetKeyspaceGroupID()
@@ -837,11 +837,8 @@ func (c *tsoClient) compareAndSwapTS(
 
 func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < len(requests); i++ {
-		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
-			span.Finish()
-		}
 		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
-		defer trace.StartRegion(requests[i].requestCtx, "tsoReqDequeue").End()
+		defer trace.StartRegion(requests[i].requestCtx, "pdclient.tsoReqDequeue").End()
 		requests[i].done <- err
 	}
 }
