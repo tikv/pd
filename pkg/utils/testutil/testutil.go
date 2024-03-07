@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -77,7 +78,7 @@ func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 
 // MustNewGrpcClient must create a new PD grpc client.
 func MustNewGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	return pdpb.NewPDClient(conn)
 }

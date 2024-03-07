@@ -211,10 +211,10 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	etcd1, cfg1 := servers[0], servers[0].Config()
 
 	// Create two etcd clients with etcd1 as endpoint.
-	client1, err := CreateEtcdClient(nil, cfg1.LCUrls) // execute member change operation with this client
+	client1, err := CreateEtcdClient(nil, cfg1.ListenClientUrls) // execute member change operation with this client
 	re.NoError(err)
 	defer client1.Close()
-	client2, err := CreateEtcdClient(nil, cfg1.LCUrls) // check member change with this client
+	client2, err := CreateEtcdClient(nil, cfg1.ListenClientUrls) // check member change with this client
 	re.NoError(err)
 	defer client2.Close()
 
@@ -285,7 +285,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	// Create a proxy to etcd1.
 	proxyAddr := tempurl.Alloc()
 	var enableDiscard atomic.Bool
-	go proxyWithDiscard(re, cfg1.LCUrls[0].String(), proxyAddr, &enableDiscard)
+	go proxyWithDiscard(re, cfg1.ListenClientUrls[0].String(), proxyAddr, &enableDiscard)
 
 	// Create a etcd client with etcd1 as endpoint.
 	urls, err := types.NewURLs([]string{proxyAddr})
@@ -385,7 +385,7 @@ func (suite *loopWatcherTestSuite) SetupSuite() {
 	// Start a etcd server and create a client with etcd1 as endpoint.
 	suite.config = newTestSingleConfig(t)
 	suite.startEtcd()
-	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls)
 	suite.NoError(err)
 	suite.cleans = append(suite.cleans, func() {
 		suite.client.Close()
@@ -587,7 +587,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case2: close the etcd client and put a new value after watcher restarts
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls)
 	suite.NoError(err)
 	watcher.updateClientCh <- suite.client
 	suite.put("TestWatcherBreak", "2")
@@ -595,7 +595,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case3: close the etcd client and put a new value before watcher restarts
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls)
 	suite.NoError(err)
 	suite.put("TestWatcherBreak", "3")
 	watcher.updateClientCh <- suite.client
@@ -603,7 +603,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 
 	// Case4: close the etcd client and put a new value with compact
 	suite.client.Close()
-	suite.client, err = CreateEtcdClient(nil, suite.config.LCUrls)
+	suite.client, err = CreateEtcdClient(nil, suite.config.ListenClientUrls)
 	suite.NoError(err)
 	suite.put("TestWatcherBreak", "4")
 	resp, err := EtcdKVGet(suite.client, "TestWatcherBreak")
