@@ -27,6 +27,7 @@ import (
 	"go.uber.org/zap"
 )
 
+// Option is used to customize the backoffer.
 type Option func(*Backoffer)
 
 // WithLogTimes sets the number of retries required to print a log.
