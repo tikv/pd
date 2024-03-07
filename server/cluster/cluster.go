@@ -990,9 +990,9 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
-func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, trace core.RegionHeartbeatProcessTracer) error {
-	origin, _, err := c.core.PreCheckPutRegion(region, trace)
-	trace.OnPreCheckFinished()
+func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, tracer core.RegionHeartbeatProcessTracer) error {
+	origin, _, err := c.core.PreCheckPutRegion(region, tracer)
+	tracer.OnPreCheckFinished()
 	if err != nil {
 		return err
 	}
@@ -1002,12 +1002,12 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, trace core
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		cluster.HandleStatsAsync(c, region)
 	}
-	trace.OnAsyncHotStatsFinished()
+	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	saveKV, saveCache, needSync := regionGuide(region, origin)
-	trace.OnRegionGuideFinished()
+	tracer.OnRegionGuideFinished()
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
@@ -1022,7 +1022,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, trace core
 	failpoint.Inject("concurrentRegionHeartbeat", func() {
 		time.Sleep(500 * time.Millisecond)
 	})
-	trace.OnSaveCacheBegin()
+	tracer.OnSaveCacheBegin()
 	var overlaps []*core.RegionInfo
 	if saveCache {
 		failpoint.Inject("decEpoch", func() {
@@ -1032,8 +1032,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, trace core
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.core.AtomicCheckAndPutRegion(region, trace); err != nil {
-			trace.OnSaveCacheFinished()
+		if overlaps, err = c.core.AtomicCheckAndPutRegion(region, tracer); err != nil {
+			tracer.OnSaveCacheFinished()
 			return err
 		}
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
@@ -1041,19 +1041,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, trace core
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
-<<<<<<< HEAD
-	trace.OnSaveCacheFinished()
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
-	}
-=======
 
+	tracer.OnSaveCacheFinished()
 	// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
 	// region stats needs to be collected in API mode.
 	// We need to think of a better way to reduce this part of the cost in the future.
 	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
->>>>>>> origin/master
-
+	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.

@@ -592,6 +592,7 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo, tracer core.Re
 	}
 	tracer.OnSaveCacheFinished()
 	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
+	tracer.OnCollectRegionStatsFinished()
 	return nil
 }
 

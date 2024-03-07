@@ -77,6 +77,8 @@ var (
 	setRegionCount            = HeartbeatBreakdownHandleCount.WithLabelValues("SaveCache_SetRegion")
 	updateSubTreeDurationSum  = HeartbeatBreakdownHandleDurationSum.WithLabelValues("SaveCache_UpdateSubTree")
 	updateSubTreeCount        = HeartbeatBreakdownHandleCount.WithLabelValues("SaveCache_UpdateSubTree")
+	regionCollectDurationSum  = HeartbeatBreakdownHandleDurationSum.WithLabelValues("CollectRegionStats")
+	regionCollectCount        = HeartbeatBreakdownHandleCount.WithLabelValues("CollectRegionStats")
 	otherDurationSum          = HeartbeatBreakdownHandleDurationSum.WithLabelValues("Other")
 	otherCount                = HeartbeatBreakdownHandleCount.WithLabelValues("Other")
 )
@@ -109,6 +111,7 @@ type RegionHeartbeatProcessTracer interface {
 	OnValidateRegionFinished()
 	OnSetRegionFinished()
 	OnUpdateSubTreeFinished()
+	OnCollectRegionStatsFinished()
 	OnAllStageFinished()
 	LogFields() []zap.Field
 }
@@ -120,17 +123,18 @@ func NewNoopHeartbeatProcessTracer() RegionHeartbeatProcessTracer {
 	return &noopHeartbeatProcessTracer{}
 }
 
-func (n *noopHeartbeatProcessTracer) Begin()                    {}
-func (n *noopHeartbeatProcessTracer) OnPreCheckFinished()       {}
-func (n *noopHeartbeatProcessTracer) OnAsyncHotStatsFinished()  {}
-func (n *noopHeartbeatProcessTracer) OnRegionGuideFinished()    {}
-func (n *noopHeartbeatProcessTracer) OnSaveCacheBegin()         {}
-func (n *noopHeartbeatProcessTracer) OnSaveCacheFinished()      {}
-func (n *noopHeartbeatProcessTracer) OnCheckOverlapsFinished()  {}
-func (n *noopHeartbeatProcessTracer) OnValidateRegionFinished() {}
-func (n *noopHeartbeatProcessTracer) OnSetRegionFinished()      {}
-func (n *noopHeartbeatProcessTracer) OnUpdateSubTreeFinished()  {}
-func (n *noopHeartbeatProcessTracer) OnAllStageFinished()       {}
+func (n *noopHeartbeatProcessTracer) Begin()                        {}
+func (n *noopHeartbeatProcessTracer) OnPreCheckFinished()           {}
+func (n *noopHeartbeatProcessTracer) OnAsyncHotStatsFinished()      {}
+func (n *noopHeartbeatProcessTracer) OnRegionGuideFinished()        {}
+func (n *noopHeartbeatProcessTracer) OnSaveCacheBegin()             {}
+func (n *noopHeartbeatProcessTracer) OnSaveCacheFinished()          {}
+func (n *noopHeartbeatProcessTracer) OnCheckOverlapsFinished()      {}
+func (n *noopHeartbeatProcessTracer) OnValidateRegionFinished()     {}
+func (n *noopHeartbeatProcessTracer) OnSetRegionFinished()          {}
+func (n *noopHeartbeatProcessTracer) OnUpdateSubTreeFinished()      {}
+func (n *noopHeartbeatProcessTracer) OnCollectRegionStatsFinished() {}
+func (n *noopHeartbeatProcessTracer) OnAllStageFinished()           {}
 func (n *noopHeartbeatProcessTracer) LogFields() []zap.Field {
 	return nil
 }
@@ -190,6 +194,13 @@ func (h *regionHeartbeatProcessTracer) OnSaveCacheBegin() {
 func (h *regionHeartbeatProcessTracer) OnSaveCacheFinished() {
 	// update the outer checkpoint time
 	h.lastCheckTime = time.Now()
+}
+
+func (h *regionHeartbeatProcessTracer) OnCollectRegionStatsFinished() {
+	now := time.Now()
+	regionCollectDurationSum.Add(now.Sub(h.lastCheckTime).Seconds())
+	regionCollectCount.Inc()
+	h.lastCheckTime = now
 }
 
 func (h *regionHeartbeatProcessTracer) OnCheckOverlapsFinished() {
