@@ -58,8 +58,34 @@ func (t *testClientSuite) TestLoadRegion(c *C) {
 	rc.StartSyncWithLeader("")
 	time.Sleep(time.Second)
 	rc.StopSyncWithLeader()
+<<<<<<< HEAD:server/region_syncer/client_test.go
 	c.Assert(time.Since(start), Greater, time.Second) // make sure failpoint is injected
 	c.Assert(time.Since(start), Less, time.Second*2)
+=======
+	re.Greater(time.Since(start), time.Second) // make sure failpoint is injected
+	re.Less(time.Since(start), time.Second*2)
+}
+
+func TestErrorCode(t *testing.T) {
+	re := require.New(t)
+	tempDir := t.TempDir()
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+	server := &mockServer{
+		ctx:     context.Background(),
+		storage: storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+		bc:      core.NewBasicCluster(),
+	}
+	ctx, cancel := context.WithCancel(context.TODO())
+	rc := NewRegionSyncer(server)
+	conn, err := grpcutil.GetClientConn(ctx, "http://127.0.0.1", nil)
+	re.NoError(err)
+	cancel()
+	_, err = rc.syncRegion(ctx, conn)
+	ev, ok := status.FromError(err)
+	re.True(ok)
+	re.Equal(codes.Canceled, ev.Code())
+>>>>>>> 57cd60348 (*: upgrade etcd to v3.4.30 (#7884)):pkg/syncer/client_test.go
 }
 
 type mockServer struct {

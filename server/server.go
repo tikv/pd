@@ -325,6 +325,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	endpoints := []string{s.etcdCfg.ACUrls[0].String()}
 	log.Info("create etcd v3 client", zap.Strings("endpoints", endpoints), zap.Reflect("cert", s.cfg.Security))
 
+<<<<<<< HEAD
 	lgc := zap.NewProductionConfig()
 	lgc.Encoding = log.ZapEncodingName
 	client, err := clientv3.New(clientv3.Config{
@@ -336,6 +337,45 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
+=======
+	s.initGRPCServiceLabels()
+	return nil
+}
+
+func (s *Server) initGRPCServiceLabels() {
+	for name, serviceInfo := range s.grpcServer.GetServiceInfo() {
+		if name == gRPCServiceName {
+			for _, methodInfo := range serviceInfo.Methods {
+				s.grpcServiceLabels[methodInfo.Name] = struct{}{}
+			}
+		}
+	}
+}
+
+func (s *Server) startClient() error {
+	tlsConfig, err := s.cfg.Security.ToTLSConfig()
+	if err != nil {
+		return err
+	}
+	etcdCfg, err := s.cfg.GenEmbedEtcdConfig()
+	if err != nil {
+		return err
+	}
+	/* Starting two different etcd clients here is to avoid the throttling. */
+	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
+	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "server-etcd-client")
+	if err != nil {
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	// This etcd client will only be used to read and write the election-related data, such as leader key.
+	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "election-etcd-client")
+	if err != nil {
+		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
+	}
+	s.httpClient = etcdutil.CreateHTTPClient(tlsConfig)
+	return nil
+}
+>>>>>>> 57cd60348 (*: upgrade etcd to v3.4.30 (#7884))
 
 	etcdServerID := uint64(etcd.Server.ID())
 
