@@ -27,7 +27,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "core",
-			Name:      "heartbeat_breakdown_handle_duration_seconds_sum",
+			Name:      "region_heartbeat_breakdown_handle_duration_seconds_sum",
 			Help:      "Bucketed histogram of processing time (s) of handle the heartbeat stage.",
 		}, []string{"name"})
 
@@ -36,7 +36,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "core",
-			Name:      "heartbeat_breakdown_handle_duration_seconds_count",
+			Name:      "region_heartbeat_breakdown_handle_duration_seconds_count",
 			Help:      "Bucketed histogram of processing count of handle the heartbeat stage.",
 		}, []string{"name"})
 	// AcquireRegionsLockWaitDurationSum is the summary of the processing time of waiting for acquiring regions lock.
