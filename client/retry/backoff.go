@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"go.uber.org/multierr"
 )
 
 // Backoffer is a backoff policy for retrying operations.
@@ -45,11 +46,14 @@ func (bo *Backoffer) Exec(
 ) error {
 	defer bo.resetBackoff()
 	var (
-		err   error
-		after *time.Timer
+		allErrors error
+		after     *time.Timer
 	)
 	for {
-		err = fn()
+		err := fn()
+		if err != nil {
+			allErrors = multierr.Append(allErrors, err)
+		}
 		if !bo.isRetryable(err) {
 			break
 		}
@@ -77,7 +81,7 @@ func (bo *Backoffer) Exec(
 			}
 		}
 	}
-	return err
+	return allErrors
 }
 
 // InitialBackoffer make the initial state for retrying.
