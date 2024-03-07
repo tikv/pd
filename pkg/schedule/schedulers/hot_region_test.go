@@ -394,64 +394,6 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
-=======
-func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := prepareSchedulersTest()
-	defer cancel()
-	tc.SetEnableUseJointConsensus(true)
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
-	tc.SetEnablePlacementRules(enablePlacementRules)
-	labels := []string{"zone", "host"}
-	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
-	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
-	tc.SetHotRegionCacheHitsThreshold(0)
-
-	tc.AddLabelsStore(1, 2, map[string]string{"zone": "z1", "host": "h1"})
-	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z1", "host": "h2"})
-	tc.AddLabelsStore(3, 2, map[string]string{"zone": "z2", "host": "h3"})
-	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z2", "host": "h4"})
-	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z2", "host": "h5"})
-	tc.AddLabelsStore(6, 2, map[string]string{"zone": "z2", "host": "h6"})
-	tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd", ID: "leader", Role: placement.Leader, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z1"}}},
-	})
-	tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd", ID: "voter", Role: placement.Follower, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
-	})
-	tc.RuleManager.DeleteRule("pd", "default")
-
-	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(2, 0)
-	tc.UpdateStorageWrittenBytes(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 3*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(5, 3*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(6, 6*units.MiB*utils.StoreHeartBeatReportInterval)
-
-	// Region 1, 2 and 3 are hot regions.
-	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 3, 5}, 512 * units.KiB, 0, 0},
-		{2, []uint64{1, 4, 6}, 512 * units.KiB, 0, 0},
-		{3, []uint64{1, 3, 6}, 512 * units.KiB, 0, 0},
-	})
-	ops, _ := hb.Schedule(tc, false)
-	re.NotEmpty(ops)
-	re.NotContains(ops[0].Step(1).String(), "transfer leader")
-	clearPendingInfluence(hb.(*hotScheduler))
-
-	tc.RuleManager.SetRule(&placement.Rule{
-		GroupID: "pd", ID: "voter", Role: placement.Voter, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
-	})
-	tc.RuleManager.DeleteRule("pd", "follower")
-	ops, _ = hb.Schedule(tc, false)
-	re.NotEmpty(ops)
-	// TODO: fix the test
-	// re.NotContains(ops[0].Step(1).String(), "transfer leader")
-}
-
->>>>>>> bbd3bdb56 (scheduler: make history-sample-interval and history-sample-duration configurable (#7878))
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
 	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()

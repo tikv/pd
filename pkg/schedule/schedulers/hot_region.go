@@ -262,8 +262,6 @@ func (h *hotScheduler) EncodeConfig() ([]byte, error) {
 	return h.conf.EncodeConfig()
 }
 
-<<<<<<< HEAD
-=======
 func (h *hotScheduler) ReloadConfig() error {
 	h.conf.Lock()
 	defer h.conf.Unlock()
@@ -304,7 +302,6 @@ func (h *hotScheduler) ReloadConfig() error {
 	return nil
 }
 
->>>>>>> bbd3bdb56 (scheduler: make history-sample-interval and history-sample-duration configurable (#7878))
 func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
 }
