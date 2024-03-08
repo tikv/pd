@@ -1131,8 +1131,7 @@ func addrsToUrls(addrs []string, tlsCfg *tls.Config) []string {
 	// Add default schema "http://" to addrs.
 	urls := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
-		addr = addrToUrl(addr, tlsCfg)
-		urls = append(urls, addr)
+		urls = append(urls, addrToUrl(addr, tlsCfg))
 	}
 	return urls
 }
@@ -1140,15 +1139,13 @@ func addrsToUrls(addrs []string, tlsCfg *tls.Config) []string {
 func addrToUrl(addr string, tlsCfg *tls.Config) string {
 	if tlsCfg == nil {
 		if strings.HasPrefix(addr, httpsScheme) {
-			addr = strings.TrimPrefix(addr, httpsScheme)
-			addr = fmt.Sprintf("%s%s", httpScheme, addr)
+			addr = fmt.Sprintf("%s%s", httpScheme, strings.TrimPrefix(addr, httpsScheme))
 		} else if !strings.HasPrefix(addr, httpScheme) {
 			addr = fmt.Sprintf("%s%s", httpScheme, addr)
 		}
 	} else {
 		if strings.HasPrefix(addr, httpScheme) {
-			addr = strings.TrimPrefix(addr, httpScheme)
-			addr = fmt.Sprintf("%s%s", httpsScheme, addr)
+			addr = fmt.Sprintf("%s%s", httpsScheme, strings.TrimPrefix(addr, httpScheme))
 		} else if !strings.HasPrefix(addr, httpsScheme) {
 			addr = fmt.Sprintf("%s%s", httpsScheme, addr)
 		}
