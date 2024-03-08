@@ -739,7 +739,7 @@ func (gta *GlobalTSOAllocator) deregisterAllocator() error {
 }
 
 func (gta *GlobalTSOAllocator) tryRegister() <-chan *clientv3.LeaseKeepAliveResponse {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 outerLoop:
 	for {
