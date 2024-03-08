@@ -46,8 +46,8 @@ const (
 	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
 	updateMemberBackOffBaseTime = 100 * time.Millisecond
 
-	httpScheme  = "http"
-	httpsScheme = "https"
+	httpScheme  = "http://"
+	httpsScheme = "https://"
 )
 
 // MemberHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -124,10 +124,8 @@ type ServiceDiscovery interface {
 
 // ServiceClient is an interface that defines a set of operations for a raw PD gRPC client to specific PD server.
 type ServiceClient interface {
-	// GetAddress returns the address information of the PD server.
+	// GetAddress returns the address with HTTP scheme of the PD server.
 	GetAddress() string
-	// GetHTTPAddress returns the address with HTTP scheme of the PD server.
-	GetHTTPAddress() string
 	// GetClientConn returns the gRPC connection of the service client
 	GetClientConn() *grpc.ClientConn
 	// BuildGRPCTargetContext builds a context object with a gRPC context.
@@ -158,34 +156,15 @@ type pdServiceClient struct {
 	networkFailure atomic.Bool
 }
 
-func newPDServiceClient(addr, leaderAddr string, tlsCfg *tls.Config, conn *grpc.ClientConn, isLeader bool) ServiceClient {
-	var httpAddress string
-	if tlsCfg == nil {
-		if strings.HasPrefix(addr, httpsScheme) {
-			addr = strings.TrimPrefix(addr, httpsScheme)
-			httpAddress = fmt.Sprintf("%s%s", httpScheme, addr)
-		} else if strings.HasPrefix(addr, httpScheme) {
-			httpAddress = addr
-		} else {
-			httpAddress = fmt.Sprintf("%s://%s", httpScheme, addr)
-		}
-	} else {
-		if strings.HasPrefix(addr, httpsScheme) {
-			httpAddress = addr
-		} else if strings.HasPrefix(addr, httpScheme) {
-			addr = strings.TrimPrefix(addr, httpScheme)
-			httpAddress = fmt.Sprintf("%s%s", httpsScheme, addr)
-		} else {
-			httpAddress = fmt.Sprintf("%s://%s", httpsScheme, addr)
-		}
-	}
-
+// NOTE: In the current implementation, the address passed in is bound to have an http scheme,
+// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member is its own.
+// When testing, the address is also bound to have an http scheme.
+func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
 	cli := &pdServiceClient{
-		addr:        addr,
-		httpAddress: httpAddress,
-		conn:        conn,
-		isLeader:    isLeader,
-		leaderAddr:  leaderAddr,
+		addr:       addr,
+		conn:       conn,
+		isLeader:   isLeader,
+		leaderAddr: leaderAddr,
 	}
 	if conn == nil {
 		cli.networkFailure.Store(true)
@@ -504,7 +483,7 @@ func newPDServiceDiscovery(
 		tlsCfg:              tlsCfg,
 		option:              option,
 	}
-	urls = addrsToUrls(urls)
+	urls = addrsToUrls(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
 }
@@ -1030,7 +1009,7 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) (bool, error) {
 	// If gRPC connect is created successfully or leader is new, still saves.
 	if addr != oldLeader.GetAddress() || newConn != nil {
 		// Set PD leader and Global TSO Allocator (which is also the PD leader)
-		leaderClient := newPDServiceClient(addr, addr, c.tlsCfg, newConn, true)
+		leaderClient := newPDServiceClient(addr, addr, newConn, true)
 		c.leader.Store(leaderClient)
 	}
 	// Run callbacks
@@ -1067,7 +1046,7 @@ func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leader *pdp
 							log.Warn("[pd] failed to connect follower", zap.String("follower", addr), errs.ZapError(err))
 							continue
 						}
-						follower := newPDServiceClient(addr, leader.GetClientUrls()[0], c.tlsCfg, conn, false)
+						follower := newPDServiceClient(addr, leader.GetClientUrls()[0], conn, false)
 						c.followers.Store(addr, follower)
 						changed = true
 					}
@@ -1075,7 +1054,7 @@ func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leader *pdp
 				} else {
 					changed = true
 					conn, err := c.GetOrCreateGRPCConn(addr)
-					follower := newPDServiceClient(addr, leader.GetClientUrls()[0], c.tlsCfg, conn, false)
+					follower := newPDServiceClient(addr, leader.GetClientUrls()[0], conn, false)
 					if err != nil || conn == nil {
 						log.Warn("[pd] failed to connect follower", zap.String("follower", addr), errs.ZapError(err))
 					}
@@ -1148,15 +1127,31 @@ func (c *pdServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn,
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
-func addrsToUrls(addrs []string) []string {
+func addrsToUrls(addrs []string, tlsCfg *tls.Config) []string {
 	// Add default schema "http://" to addrs.
 	urls := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
-		if strings.Contains(addr, "://") {
-			urls = append(urls, addr)
-		} else {
-			urls = append(urls, "http://"+addr)
-		}
+		addr = addrToUrl(addr, tlsCfg)
+		urls = append(urls, addr)
 	}
 	return urls
+}
+
+func addrToUrl(addr string, tlsCfg *tls.Config) string {
+	if tlsCfg == nil {
+		if strings.HasPrefix(addr, httpsScheme) {
+			addr = strings.TrimPrefix(addr, httpsScheme)
+			addr = fmt.Sprintf("%s%s", httpScheme, addr)
+		} else if !strings.HasPrefix(addr, httpScheme) {
+			addr = fmt.Sprintf("%s%s", httpScheme, addr)
+		}
+	} else {
+		if strings.HasPrefix(addr, httpScheme) {
+			addr = strings.TrimPrefix(addr, httpScheme)
+			addr = fmt.Sprintf("%s%s", httpsScheme, addr)
+		} else if !strings.HasPrefix(addr, httpsScheme) {
+			addr = fmt.Sprintf("%s%s", httpsScheme, addr)
+		}
+	}
+	return addr
 }

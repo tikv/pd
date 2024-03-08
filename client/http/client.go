@@ -130,7 +130,7 @@ func (ci *clientInner) requestWithRetry(
 			return errs.ErrClientNoAvailableMember
 		}
 		for _, cli := range clients {
-			addr := cli.GetHTTPAddress()
+			addr := cli.GetAddress()
 			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
 			if err == nil || noNeedRetry(statusCode) {
 				return err

@@ -109,7 +109,12 @@ func TestClientLeaderChange(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
+	endpointsWithWrongURL := append([]string{}, endpoints...)
+	// inject wrong http scheme
+	for i := range endpointsWithWrongURL {
+		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
+	}
+	cli := setupCli(re, ctx, endpointsWithWrongURL)
 	defer cli.Close()
 	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	re.True(ok)
@@ -127,14 +132,14 @@ func TestClientLeaderChange(t *testing.T) {
 	re.True(cluster.CheckTSOUnique(ts1))
 
 	leader := cluster.GetLeader()
-	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader))
 
 	err = cluster.GetServer(leader).Stop()
 	re.NoError(err)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
 
-	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader))
 
 	// Check TS won't fall back after leader changed.
 	testutil.Eventually(re, func() bool {
@@ -955,10 +960,10 @@ func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, o
 	return cli
 }
 
-func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader string) {
+func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader *tests.TestServer) {
 	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckMemberChanged()
-		return cli.GetServingAddr() == leader
+		return cli.GetServingAddr() == leader.GetConfig().ClientUrls && leader.GetAddr() == cli.GetServingAddr()
 	})
 }
 
@@ -1853,7 +1858,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.True(ok)
 
 	leader := cluster.GetLeader()
-	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader))
 	memberID := cluster.GetServer(leader).GetLeader().GetMemberId()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
