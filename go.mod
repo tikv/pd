@@ -2,6 +2,11 @@ module github.com/tikv/pd
 
 go 1.21
 
+// When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
+// kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
+// After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
+// replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
+
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1
@@ -21,7 +26,6 @@ require (
 	github.com/gin-gonic/gin v1.9.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/google/btree v1.1.2
-	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.7.4
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/joho/godotenv v1.4.0
@@ -40,7 +44,7 @@ require (
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/smallnest/chanx v0.0.0-20221229104322-eb4c998d2072
-	github.com/soheilhy/cmux v0.1.4
+	github.com/soheilhy/cmux v0.1.5
 	github.com/spf13/cobra v1.0.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.4
@@ -49,7 +53,7 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20190318030020-c3a204f8e965
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
-	go.etcd.io/etcd v0.5.0-alpha.5.0.20220915004622-85b640cee793
+	go.etcd.io/etcd v0.5.0-alpha.5.0.20240131130919-ff2304879e1b
 	go.uber.org/atomic v1.10.0
 	go.uber.org/goleak v1.2.0
 	go.uber.org/zap v1.26.0
@@ -115,6 +119,7 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/pprof v0.0.0-20211122183932-1daafda22083 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
+	github.com/google/uuid v1.3.1 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.1-0.20190118093823-f849b5445de4 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect
@@ -173,7 +178,7 @@ require (
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	// Fix panic in unit test with go >= 1.14, ref: etcd-io/bbolt#201 https://github.com/etcd-io/bbolt/pull/201
-	go.etcd.io/bbolt v1.3.6 // indirect
+	go.etcd.io/bbolt v1.3.8 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -202,10 +207,3 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
-
-replace google.golang.org/grpc v1.59.0 => google.golang.org/grpc v1.26.0
-
-// When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
-// kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
-// After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
-// replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
