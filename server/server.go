@@ -622,7 +622,7 @@ func (s *Server) Run() error {
 		return err
 	}
 
-	s.cgmon.startCgroupMonitor()
+	s.cgmon.startCgroupMonitor(s.ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {
 		time.Sleep(2 * time.Second)

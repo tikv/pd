@@ -44,14 +44,14 @@ type cgroupMonitor struct {
 
 // StartCgroupMonitor uses to start the cgroup monitoring.
 // WARN: this function is not thread-safe.
-func (cgmon *cgroupMonitor) startCgroupMonitor() {
+func (cgmon *cgroupMonitor) startCgroupMonitor(ctx context.Context) {
 	if cgmon.started {
 		return
 	}
 	cgmon.started = true
 	// Get configured maxprocs.
 	cgmon.cfgMaxProcs = runtime.GOMAXPROCS(0)
-	cgmon.ctx, cgmon.cancel = context.WithCancel(context.Background())
+	cgmon.ctx, cgmon.cancel = context.WithCancel(ctx)
 	cgmon.wg.Add(1)
 	go cgmon.refreshCgroupLoop()
 	log.Info("cgroup monitor started")
