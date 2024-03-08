@@ -403,8 +403,10 @@ type tsoAllocatorEventSource interface {
 	SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc)
 }
 
-var _ ServiceDiscovery = (*pdServiceDiscovery)(nil)
-var _ tsoAllocatorEventSource = (*pdServiceDiscovery)(nil)
+var (
+	_ ServiceDiscovery        = (*pdServiceDiscovery)(nil)
+	_ tsoAllocatorEventSource = (*pdServiceDiscovery)(nil)
+)
 
 // pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
 type pdServiceDiscovery struct {

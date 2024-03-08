@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/testutil"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -136,8 +137,8 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 	go suite.leaderServer.run()
 	go suite.followerServer.run()
 	for i := 0; i < 10; i++ {
-		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithInsecure())     //nolint
-		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithInsecure()) //nolint
+		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err1 == nil && err2 == nil {
 			suite.followerClient = newPDServiceClient(
 				addrToUrl(suite.followerServer.addr, nil),
