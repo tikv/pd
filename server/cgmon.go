@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"runtime"
 	"sync"
@@ -117,11 +116,11 @@ func (cgmon *cgroupMonitor) refreshCgroupCPU() {
 
 	if quota != cgmon.lastMaxProcs && quota < cgmon.cfgMaxProcs {
 		runtime.GOMAXPROCS(quota)
-		log.Info(fmt.Sprintf("maxprocs set to %v", quota))
+		log.Info("set the maxprocs", zap.Int("quota", quota))
 		bs.ServerMaxProcsGauge.Set(float64(quota))
 		cgmon.lastMaxProcs = quota
 	} else if cgmon.lastMaxProcs == 0 {
-		log.Info(fmt.Sprintf("maxprocs set to %v", cgmon.cfgMaxProcs))
+		log.Info("set the maxprocs", zap.Int("cfgMaxProcs", cgmon.cfgMaxProcs))
 		bs.ServerMaxProcsGauge.Set(float64(cgmon.cfgMaxProcs))
 		cgmon.lastMaxProcs = cgmon.cfgMaxProcs
 	}
@@ -142,7 +141,7 @@ func (cgmon *cgroupMonitor) refreshCgroupMemory() {
 		memLimit = vmem.Total
 	}
 	if memLimit != cgmon.lastMemoryLimit {
-		log.Info(fmt.Sprintf("memory limit set to %v", memLimit))
+		log.Info("set the memory limit", zap.Uint64("memLimit", memLimit))
 		bs.ServerMemoryLimit.Set(float64(memLimit))
 		cgmon.lastMemoryLimit = memLimit
 	}
