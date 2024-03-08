@@ -180,14 +180,6 @@ func (c *pdServiceClient) GetAddress() string {
 	return c.addr
 }
 
-// GetHTTPAddress implements ServiceClient.
-func (c *pdServiceClient) GetHTTPAddress() string {
-	if c == nil {
-		return ""
-	}
-	return c.httpAddress
-}
-
 // BuildGRPCTargetContext implements ServiceClient.
 func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader bool) context.Context {
 	if c == nil || c.isLeader {
