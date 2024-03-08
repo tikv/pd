@@ -124,7 +124,7 @@ type ServiceDiscovery interface {
 
 // ServiceClient is an interface that defines a set of operations for a raw PD gRPC client to specific PD server.
 type ServiceClient interface {
-	// GetAddress returns the address with HTTP scheme of the PD server.
+	// GetAddress returns the address with scheme of the PD server.
 	GetAddress() string
 	// GetClientConn returns the gRPC connection of the service client
 	GetClientConn() *grpc.ClientConn
@@ -147,18 +147,17 @@ var (
 )
 
 type pdServiceClient struct {
-	addr        string
-	httpAddress string
-	conn        *grpc.ClientConn
-	isLeader    bool
-	leaderAddr  string
+	addr       string
+	conn       *grpc.ClientConn
+	isLeader   bool
+	leaderAddr string
 
 	networkFailure atomic.Bool
 }
 
-// NOTE: In the current implementation, the address passed in is bound to have an http scheme,
-// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member is its own.
-// When testing, the address is also bound to have an http scheme.
+// NOTE: In the current implementation, the address passed in is bound to have a scheme,
+// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member owns the sheme.
+// When testing, the address is also bound to have a scheme.
 func newPDServiceClient(addr, leaderAddr string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
 	cli := &pdServiceClient{
 		addr:       addr,
@@ -1125,12 +1124,12 @@ func addrsToUrls(addrs []string, tlsCfg *tls.Config) []string {
 	// Add default schema "http://" to addrs.
 	urls := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
-		urls = append(urls, addrToUrl(addr, tlsCfg))
+		urls = append(urls, addrToURL(addr, tlsCfg))
 	}
 	return urls
 }
 
-func addrToUrl(addr string, tlsCfg *tls.Config) string {
+func addrToURL(addr string, tlsCfg *tls.Config) string {
 	if tlsCfg == nil {
 		if strings.HasPrefix(addr, httpsScheme) {
 			addr = fmt.Sprintf("%s%s", httpScheme, strings.TrimPrefix(addr, httpsScheme))
