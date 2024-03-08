@@ -321,7 +321,7 @@ func (s *Server) SetExternalTS(externalTS uint64) error {
 
 // ResetTS resets the TSO with the specified one.
 func (s *Server) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, keyspaceGroupID uint32) error {
-	log.Info("reset-ts",
+	log.Info("reset ts",
 		zap.Uint64("new-ts", ts),
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck),
