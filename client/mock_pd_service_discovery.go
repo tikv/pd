@@ -62,13 +62,13 @@ func (m *mockPDServiceDiscovery) GetKeyspaceGroupID() uint32                    
 func (m *mockPDServiceDiscovery) GetServiceURLs() []string                       { return nil }
 func (m *mockPDServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn { return nil }
 func (m *mockPDServiceDiscovery) GetClientConns() *sync.Map                      { return nil }
-func (m *mockPDServiceDiscovery) GetServingAddr() string                         { return "" }
-func (m *mockPDServiceDiscovery) GetBackupAddrs() []string                       { return nil }
+func (m *mockPDServiceDiscovery) GetServingURL() string                          { return "" }
+func (m *mockPDServiceDiscovery) GetBackupURLs() []string                        { return nil }
 func (m *mockPDServiceDiscovery) GetServiceClient() ServiceClient                { return nil }
-func (m *mockPDServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
+func (m *mockPDServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return nil, nil
 }
-func (m *mockPDServiceDiscovery) ScheduleCheckMemberChanged()                         {}
-func (m *mockPDServiceDiscovery) CheckMemberChanged() error                           { return nil }
-func (m *mockPDServiceDiscovery) AddServingAddrSwitchedCallback(callbacks ...func())  {}
-func (m *mockPDServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {}
+func (m *mockPDServiceDiscovery) ScheduleCheckMemberChanged()                        {}
+func (m *mockPDServiceDiscovery) CheckMemberChanged() error                          { return nil }
+func (m *mockPDServiceDiscovery) AddServingURLSwitchedCallback(callbacks ...func())  {}
+func (m *mockPDServiceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {}

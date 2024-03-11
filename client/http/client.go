@@ -130,13 +130,13 @@ func (ci *clientInner) requestWithRetry(
 			return errs.ErrClientNoAvailableMember
 		}
 		for _, cli := range clients {
-			addr := cli.GetAddress()
-			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+			url := cli.GetURL()
+			statusCode, err = ci.doRequest(ctx, url, reqInfo, headerOpts...)
 			if err == nil || noNeedRetry(statusCode) {
 				return err
 			}
-			log.Debug("[pd] request addr failed",
-				zap.String("source", ci.source), zap.Bool("is-leader", cli.IsConnectedToLeader()), zap.String("addr", addr), zap.Error(err))
+			log.Debug("[pd] request url failed",
+				zap.String("source", ci.source), zap.Bool("is-leader", cli.IsConnectedToLeader()), zap.String("url", url), zap.Error(err))
 		}
 		return err
 	}
@@ -160,19 +160,19 @@ func noNeedRetry(statusCode int) bool {
 
 func (ci *clientInner) doRequest(
 	ctx context.Context,
-	addr string, reqInfo *requestInfo,
+	url string, reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
 ) (int, error) {
 	var (
 		source      = ci.source
 		callerID    = reqInfo.callerID
 		name        = reqInfo.name
-		url         = reqInfo.getURL(addr)
 		method      = reqInfo.method
 		body        = reqInfo.body
 		res         = reqInfo.res
 		respHandler = reqInfo.respHandler
 	)
+	url = reqInfo.getURL(url)
 	logFields := []zap.Field{
 		zap.String("source", source),
 		zap.String("name", name),

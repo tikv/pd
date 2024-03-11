@@ -717,7 +717,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	re.Equal(float64(2), out.Counter.GetValue())
 	c.Close()
 
-	leader := sd.GetServingAddr()
+	leader := sd.GetServingURL()
 	httpClient = pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
 		// mock leader success.
 		if !strings.Contains(leader, req.Host) {

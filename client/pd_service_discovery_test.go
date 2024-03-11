@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"net/url"
@@ -150,7 +149,7 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 				addrToURL(suite.leaderServer.addr, nil),
 				leaderConn, true)
 			suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
-			suite.followerServer.server.leaderAddr = suite.leaderClient.GetAddress()
+			suite.followerServer.server.leaderAddr = suite.leaderClient.GetURL()
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -179,8 +178,8 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	follower := suite.followerClient
 	leader := suite.leaderClient
 
-	re.Equal(follower.GetAddress(), followerAddress)
-	re.Equal(leader.GetAddress(), leaderAddress)
+	re.Equal(follower.GetURL(), followerAddress)
+	re.Equal(leader.GetURL(), leaderAddress)
 
 	re.True(follower.Available())
 	re.True(leader.Available())
@@ -306,24 +305,18 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re.Equal(int32(5), suite.followerServer.server.getForwardCount())
 }
 
-func TestHTTPScheme(t *testing.T) {
+func TestScheme(t *testing.T) {
 	re := require.New(t)
 	cli := newPDServiceClient(addrToURL("127.0.0.1:2379", nil), addrToURL("127.0.0.1:2379", nil), nil, false)
-	re.Equal("http://127.0.0.1:2379", cli.GetAddress())
+	re.Equal("http://127.0.0.1:2379", cli.GetURL())
 	cli = newPDServiceClient(addrToURL("https://127.0.0.1:2379", nil), addrToURL("127.0.0.1:2379", nil), nil, false)
-	re.Equal("http://127.0.0.1:2379", cli.GetAddress())
+	re.Equal("http://127.0.0.1:2379", cli.GetURL())
 	cli = newPDServiceClient(addrToURL("http://127.0.0.1:2379", nil), addrToURL("127.0.0.1:2379", nil), nil, false)
-	re.Equal("http://127.0.0.1:2379", cli.GetAddress())
+	re.Equal("http://127.0.0.1:2379", cli.GetURL())
 	cli = newPDServiceClient(addrToURL("127.0.0.1:2379", &tls.Config{}), addrToURL("127.0.0.1:2379", &tls.Config{}), nil, false)
-	re.Equal("https://127.0.0.1:2379", cli.GetAddress())
+	re.Equal("https://127.0.0.1:2379", cli.GetURL())
 	cli = newPDServiceClient(addrToURL("https://127.0.0.1:2379", &tls.Config{}), addrToURL("127.0.0.1:2379", &tls.Config{}), nil, false)
-	re.Equal("https://127.0.0.1:2379", cli.GetAddress())
+	re.Equal("https://127.0.0.1:2379", cli.GetURL())
 	cli = newPDServiceClient(addrToURL("http://127.0.0.1:2379", &tls.Config{}), addrToURL("127.0.0.1:2379", &tls.Config{}), nil, false)
-	re.Equal("https://127.0.0.1:2379", cli.GetAddress())
-}
-
-func TestHTTP222e(t *testing.T) {
-	_, err := url.Parse("sts://127.0.0.1:2379")
-	fmt.Println(err)
-	require.NoError(t, err)
+	re.Equal("https://127.0.0.1:2379", cli.GetURL())
 }

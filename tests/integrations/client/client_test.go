@@ -963,7 +963,7 @@ func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, o
 func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader *tests.TestServer) {
 	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckMemberChanged()
-		return cli.GetServingAddr() == leader.GetConfig().ClientUrls && leader.GetAddr() == cli.GetServingAddr()
+		return cli.GetServingURL() == leader.GetConfig().ClientUrls && leader.GetAddr() == cli.GetServingURL()
 	})
 }
 

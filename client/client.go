@@ -76,9 +76,9 @@ type Client interface {
 	GetClusterID(ctx context.Context) uint64
 	// GetAllMembers gets the members Info from PD
 	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
-	// GetLeaderAddr returns current leader's address. It returns "" before
+	// GetLeaderURL returns current leader's URL. It returns "" before
 	// syncing leader from server.
-	GetLeaderAddr() string
+	GetLeaderURL() string
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -575,7 +575,7 @@ func (c *client) setup() error {
 	}
 
 	// Register callbacks
-	c.pdSvcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.pdSvcDiscovery.AddServingURLSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
@@ -680,9 +680,9 @@ func (c *client) GetClusterID(context.Context) uint64 {
 	return c.pdSvcDiscovery.GetClusterID()
 }
 
-// GetLeaderAddr returns the leader address.
-func (c *client) GetLeaderAddr() string {
-	return c.pdSvcDiscovery.GetServingAddr()
+// GetLeaderURL returns the leader URL.
+func (c *client) GetLeaderURL() string {
+	return c.pdSvcDiscovery.GetServingURL()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
@@ -1403,8 +1403,8 @@ func IsLeaderChange(err error) bool {
 }
 
 func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
+	str = strings.TrimPrefix(str, httpScheme)
+	str = strings.TrimPrefix(str, httpsScheme)
 	return str
 }
 
