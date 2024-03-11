@@ -23,6 +23,8 @@ import (
 	"go.uber.org/multierr"
 )
 
+const maxRecordErrorCount = 20 - 1
+
 // Backoffer is a backoff policy for retrying operations.
 type Backoffer struct {
 	// base defines the initial time interval to wait before each retry.
@@ -35,6 +37,7 @@ type Backoffer struct {
 	// By default, all errors are retryable.
 	retryableChecker func(err error) bool
 
+	attempt      int
 	next         time.Duration
 	currentTotal time.Duration
 }
@@ -51,7 +54,9 @@ func (bo *Backoffer) Exec(
 	)
 	for {
 		err := fn()
-		if err != nil {
+		bo.attempt++
+		if bo.attempt < maxRecordErrorCount {
+			// multierr.Append will ignore nil error.
 			allErrors = multierr.Append(allErrors, err)
 		}
 		if !bo.isRetryable(err) {
@@ -66,7 +71,7 @@ func (bo *Backoffer) Exec(
 		select {
 		case <-ctx.Done():
 			after.Stop()
-			return errors.Trace(ctx.Err())
+			return multierr.Append(allErrors, errors.Trace(ctx.Err()))
 		case <-after.C:
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
@@ -106,6 +111,7 @@ func InitialBackoffer(base, max, total time.Duration) *Backoffer {
 		},
 		next:         base,
 		currentTotal: 0,
+		attempt:      0,
 	}
 }
 
@@ -145,6 +151,7 @@ func (bo *Backoffer) exponentialInterval() time.Duration {
 func (bo *Backoffer) resetBackoff() {
 	bo.next = bo.base
 	bo.currentTotal = 0
+	bo.attempt = 0
 }
 
 // Only used for test.
