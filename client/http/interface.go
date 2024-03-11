@@ -58,6 +58,7 @@ type Client interface {
 	GetClusterVersion(context.Context) (string, error)
 	GetCluster(context.Context) (*metapb.Cluster, error)
 	GetClusterStatus(context.Context) (*ClusterState, error)
+	GetStatus(context.Context) (*State, error)
 	GetReplicateConfig(context.Context) (map[string]any, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
@@ -457,6 +458,20 @@ func (c *client) GetClusterStatus(ctx context.Context) (*ClusterState, error) {
 		return nil, err
 	}
 	return clusterStatus, nil
+}
+
+// GetStatus gets the status of PD.
+func (c *client) GetStatus(ctx context.Context) (*State, error) {
+	var status *State
+	err := c.request(ctx, newRequestInfo().
+		WithName(getStatusName).
+		WithURI(Status).
+		WithMethod(http.MethodGet).
+		WithResp(&status))
+	if err != nil {
+		return nil, err
+	}
+	return status, nil
 }
 
 // GetReplicateConfig gets the replication configurations.

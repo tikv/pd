@@ -34,6 +34,15 @@ type ClusterState struct {
 	ReplicationStatus string    `json:"replication_status"`
 }
 
+// State is the status of PD server.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type State struct {
+	BuildTS        string `json:"build_ts"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git_hash"`
+	StartTimestamp int64  `json:"start_timestamp"`
+}
+
 // KeyRange defines a range of keys in bytes.
 type KeyRange struct {
 	startKey []byte
