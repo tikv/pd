@@ -30,7 +30,7 @@ var (
 	ServerMemoryLimit = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
-			Subsystem: "server",
+			Subsystem: "service",
 			Name:      "memory_quota_bytes",
 			Help:      "The value of memory quota bytes.",
 		})

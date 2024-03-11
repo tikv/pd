@@ -1969,7 +1969,7 @@
               "refId": "G"
             },
             {
-              "expr": "pd_server_memory_quota_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
+              "expr": "pd_service_memory_quota_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*pd.*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "quota-{{job}}-{{instance}}",
