@@ -739,38 +739,48 @@ func (gta *GlobalTSOAllocator) deregisterAllocator() error {
 }
 
 func (gta *GlobalTSOAllocator) tryRegister() <-chan *clientv3.LeaseKeepAliveResponse {
+	// register immediately
+	kresp, needRetry := gta.register()
+	if !needRetry {
+		return kresp
+	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
-outerLoop:
 	for {
 		select {
 		case <-gta.ctx.Done():
 			return nil
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(gta.ctx, time.Duration(3)*time.Second)
-			resp, err := gta.am.etcdClient.Get(ctx, gta.am.allocatorKeyPrefix, clientv3.WithPrefix())
-			cancel()
-			if err != nil {
-				continue
+			if kresp, needRetry := gta.register(); !needRetry {
+				return kresp
 			}
-			// wait for the previous allocator with different mode to be deregistered
-			if len(resp.Kvs) > 0 {
-				for _, kv := range resp.Kvs {
-					key := string(kv.Key)
-					if !strings.Contains(key, gta.am.allocatorKeyPrefix) {
-						continue outerLoop
-					}
-				}
-			}
-			id, err := gta.txnWithTTL(gta.am.allocatorKey, "")
-			if err != nil {
-				continue
-			}
-			kresp, err := gta.am.etcdClient.KeepAlive(gta.ctx, id)
-			if err != nil {
-				continue
-			}
-			return kresp
 		}
 	}
+}
+
+func (gta *GlobalTSOAllocator) register() (<-chan *clientv3.LeaseKeepAliveResponse, bool) {
+	ctx, cancel := context.WithTimeout(gta.ctx, time.Duration(3)*time.Second)
+	resp, err := gta.am.etcdClient.Get(ctx, gta.am.allocatorKeyPrefix, clientv3.WithPrefix())
+	cancel()
+	if err != nil {
+		return nil, true
+	}
+	// wait for the previous allocator with different mode to be deregistered
+	if len(resp.Kvs) > 0 {
+		for _, kv := range resp.Kvs {
+			key := string(kv.Key)
+			if !strings.Contains(key, gta.am.allocatorKeyPrefix) {
+				return nil, true
+			}
+		}
+	}
+	id, err := gta.txnWithTTL(gta.am.allocatorKey, "")
+	if err != nil {
+		return nil, true
+	}
+	kresp, err := gta.am.etcdClient.KeepAlive(gta.ctx, id)
+	if err != nil {
+		return nil, true
+	}
+	return kresp, false
 }
