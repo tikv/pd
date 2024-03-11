@@ -476,7 +476,7 @@ func newPDServiceDiscovery(
 		tlsCfg:              tlsCfg,
 		option:              option,
 	}
-	urls = addrsToUrls(urls, tlsCfg)
+	urls = addrsToURLs(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
 }
