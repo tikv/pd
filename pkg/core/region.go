@@ -1696,7 +1696,7 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 }
 
 // metrics default poll interval
-const magicCount = 15 * time.Second
+const defaultPollInterval = 15 * time.Second
 
 // CollectWaitLockMetrics collects the metrics of waiting time for lock
 func (r *RegionsInfo) CollectWaitLockMetrics() {
@@ -1720,8 +1720,8 @@ func (r *RegionsInfo) CollectWaitLockMetrics() {
 
 	// skip invalid situation like initial status
 	if lastRegionsLockTotalWaitTime == 0 || lastsRegionsLockCount == 0 || lastSubRegionsLockTotalWaitTime == 0 || lastSubRegionsLockCount == 0 ||
-		regionsLockTotalWaitTime-lastRegionsLockTotalWaitTime < 0 || regionsLockTotalWaitTime-lastRegionsLockTotalWaitTime > int64(magicCount) ||
-		subRegionsLockTotalWaitTime-lastSubRegionsLockTotalWaitTime < 0 || subRegionsLockTotalWaitTime-lastSubRegionsLockTotalWaitTime > int64(magicCount) {
+		regionsLockTotalWaitTime-lastRegionsLockTotalWaitTime < 0 || regionsLockTotalWaitTime-lastRegionsLockTotalWaitTime > int64(defaultPollInterval) ||
+		subRegionsLockTotalWaitTime-lastSubRegionsLockTotalWaitTime < 0 || subRegionsLockTotalWaitTime-lastSubRegionsLockTotalWaitTime > int64(defaultPollInterval) {
 		return
 	}
 
