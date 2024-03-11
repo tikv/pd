@@ -147,7 +147,6 @@ var (
 )
 
 type pdServiceClient struct {
-	addr      string
 	url       string
 	conn      *grpc.ClientConn
 	isLeader  bool
@@ -160,10 +159,8 @@ type pdServiceClient struct {
 // because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member owns the sheme.
 // When testing, the URL is also bound to have a scheme.
 func newPDServiceClient(url, leaderURL string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
-	addr := trimHTTPPrefix(url)
 	cli := &pdServiceClient{
 		url:       url,
-		addr:      addr,
 		conn:      conn,
 		isLeader:  isLeader,
 		leaderURL: leaderURL,
