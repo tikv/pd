@@ -305,7 +305,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re.Equal(int32(5), suite.followerServer.server.getForwardCount())
 }
 
-func TestScheme(t *testing.T) {
+func TestServiceClientScheme(t *testing.T) {
 	re := require.New(t)
 	cli := newPDServiceClient(addrToURL("127.0.0.1:2379", nil), addrToURL("127.0.0.1:2379", nil), nil, false)
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
@@ -319,4 +319,34 @@ func TestScheme(t *testing.T) {
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
 	cli = newPDServiceClient(addrToURL("http://127.0.0.1:2379", &tls.Config{}), addrToURL("127.0.0.1:2379", &tls.Config{}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
+}
+
+func TestSchemeFunction(t *testing.T) {
+	re := require.New(t)
+	tlsCfg := &tls.Config{}
+	re.Equal("https://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", tlsCfg))
+	re.Equal("https://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", tlsCfg))
+	re.Equal("https://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", tlsCfg))
+	re.Equal("http://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", nil))
+	re.Equal("http://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", nil))
+	re.Equal("http://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", nil))
+
+	urls := []string{
+		"http://127.0.0.1:2379",
+		"https://127.0.0.1:2379",
+	}
+	re.Equal("https://127.0.0.1:2379", pickMatchedURL(urls, tlsCfg))
+	urls = []string{
+		"http://127.0.0.1:2379",
+	}
+	re.Equal("https://127.0.0.1:2379", pickMatchedURL(urls, tlsCfg))
+	urls = []string{
+		"http://127.0.0.1:2379",
+		"https://127.0.0.1:2379",
+	}
+	re.Equal("http://127.0.0.1:2379", pickMatchedURL(urls, nil))
+	urls = []string{
+		"https://127.0.0.1:2379",
+	}
+	re.Equal("http://127.0.0.1:2379", pickMatchedURL(urls, nil))
 }

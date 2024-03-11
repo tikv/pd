@@ -1147,6 +1147,23 @@ func addrToURL(addr string, tlsCfg *tls.Config) string {
 	return addr
 }
 
+func modifyURLScheme(url string, tlsCfg *tls.Config) string {
+	if tlsCfg == nil {
+		if strings.HasPrefix(url, httpsScheme) {
+			url = fmt.Sprintf("%s%s", httpScheme, strings.TrimPrefix(url, httpsScheme))
+		} else if !strings.HasPrefix(url, httpScheme) {
+			url = fmt.Sprintf("%s%s", httpScheme, url)
+		}
+	} else {
+		if strings.HasPrefix(url, httpScheme) {
+			url = fmt.Sprintf("%s%s", httpsScheme, strings.TrimPrefix(url, httpScheme))
+		} else if !strings.HasPrefix(url, httpsScheme) {
+			url = fmt.Sprintf("%s%s", httpsScheme, url)
+		}
+	}
+	return url
+}
+
 // pickMatchedURL picks the matched URL based on the TLS config.
 func pickMatchedURL(urls []string, tlsCfg *tls.Config) string {
 	for _, url := range urls {
@@ -1157,6 +1174,9 @@ func pickMatchedURL(urls []string, tlsCfg *tls.Config) string {
 			return url
 		}
 	}
-	log.Warn("[pd] no matched url found", zap.Strings("urls", urls), zap.Bool("tls-enabled", tlsCfg != nil))
-	return urls[0]
+	ret := modifyURLScheme(urls[0], tlsCfg)
+	log.Warn("[pd] no matched url found", zap.Strings("urls", urls),
+		zap.Bool("tls-enabled", tlsCfg != nil),
+		zap.String("attempted-url", ret))
+	return ret
 }
