@@ -1819,7 +1819,7 @@
             },
             {
               "exemplar": true,
-              "expr": "pd_server_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
+              "expr": "pd_service_maxprocs{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\",job=~\".*(pd|tso|scheduling).*\"}",
               "hide": false,
               "interval": "",
               "legendFormat": "quota-{{job}}-{{instance}}",

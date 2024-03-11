@@ -197,12 +197,12 @@ groups:
       summary: PD_cluster_slow_tikv_nums
 
   - alert: PD_cpu_quota
-    expr:  irate(process_cpu_seconds_total{job="pd"}[30s]) / pd_server_maxprocs > 0.8
+    expr:  irate(process_cpu_seconds_total{job="pd"}[30s]) / pd_service_maxprocs > 0.8
     for: 45s
     labels:
       env: ENV_LABELS_ENV
       level: warning
-      expr: irate(process_cpu_seconds_total{job="pd"}[30s]) / pd_server_maxprocs > 0.8
+      expr: irate(process_cpu_seconds_total{job="pd"}[30s]) / pd_service_maxprocs > 0.8
     annotations:
       description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
       value: '{{ $value }}'

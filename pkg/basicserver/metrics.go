@@ -21,7 +21,7 @@ var (
 	ServerMaxProcsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
-			Subsystem: "server",
+			Subsystem: "service",
 			Name:      "maxprocs",
 			Help:      "The value of GOMAXPROCS.",
 		})
