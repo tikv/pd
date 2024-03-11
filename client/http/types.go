@@ -35,7 +35,7 @@ type ClusterState struct {
 }
 
 // State is the status of PD server.
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+// NOTE: This type sync with https://github.com/tikv/pd/blob/1d77b25656bc18e1f5aa82337d4ab62a34b10087/pkg/versioninfo/versioninfo.go#L29
 type State struct {
 	BuildTS        string `json:"build_ts"`
 	Version        string `json:"version"`
