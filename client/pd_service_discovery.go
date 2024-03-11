@@ -1121,7 +1121,7 @@ func (c *pdServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, 
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
-func addrsToUrls(addrs []string, tlsCfg *tls.Config) []string {
+func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
 	// Add default schema "http://" to addrs.
 	urls := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
