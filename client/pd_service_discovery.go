@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"net/url"
 	"reflect"
 	"sort"
 	"strings"
@@ -46,8 +47,8 @@ const (
 	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
 	updateMemberBackOffBaseTime = 100 * time.Millisecond
 
-	httpScheme  = "http://"
-	httpsScheme = "https://"
+	httpScheme  = "http"
+	httpsScheme = "https"
 )
 
 // MemberHealthCheckInterval might be changed in the unit to shorten the testing time.
@@ -1132,46 +1133,47 @@ func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
 
 func addrToURL(addr string, tlsCfg *tls.Config) string {
 	if tlsCfg == nil {
-		if strings.HasPrefix(addr, httpsScheme) {
-			addr = fmt.Sprintf("%s%s", httpScheme, strings.TrimPrefix(addr, httpsScheme))
-		} else if !strings.HasPrefix(addr, httpScheme) {
-			addr = fmt.Sprintf("%s%s", httpScheme, addr)
+		if strings.HasPrefix(addr, httpsSchemePrefix) {
+			addr = fmt.Sprintf("%s%s", httpSchemePrefix, strings.TrimPrefix(addr, httpsSchemePrefix))
+		} else if !strings.HasPrefix(addr, httpSchemePrefix) {
+			addr = fmt.Sprintf("%s%s", httpSchemePrefix, addr)
 		}
 	} else {
-		if strings.HasPrefix(addr, httpScheme) {
-			addr = fmt.Sprintf("%s%s", httpsScheme, strings.TrimPrefix(addr, httpScheme))
-		} else if !strings.HasPrefix(addr, httpsScheme) {
-			addr = fmt.Sprintf("%s%s", httpsScheme, addr)
+		if strings.HasPrefix(addr, httpSchemePrefix) {
+			addr = fmt.Sprintf("%s%s", httpsSchemePrefix, strings.TrimPrefix(addr, httpSchemePrefix))
+		} else if !strings.HasPrefix(addr, httpsSchemePrefix) {
+			addr = fmt.Sprintf("%s%s", httpsSchemePrefix, addr)
 		}
 	}
 	return addr
 }
 
-func modifyURLScheme(url string, tlsCfg *tls.Config) string {
-	if tlsCfg == nil {
-		if strings.HasPrefix(url, httpsScheme) {
-			url = fmt.Sprintf("%s%s", httpScheme, strings.TrimPrefix(url, httpsScheme))
-		} else if !strings.HasPrefix(url, httpScheme) {
-			url = fmt.Sprintf("%s%s", httpScheme, url)
-		}
-	} else {
-		if strings.HasPrefix(url, httpScheme) {
-			url = fmt.Sprintf("%s%s", httpsScheme, strings.TrimPrefix(url, httpScheme))
-		} else if !strings.HasPrefix(url, httpsScheme) {
-			url = fmt.Sprintf("%s%s", httpsScheme, url)
-		}
+func modifyURLScheme(uStr string, tlsCfg *tls.Config) string {
+	u, err := url.Parse(uStr)
+	if err != nil {
+		return uStr
 	}
-	return url
+	if tlsCfg != nil {
+		u.Scheme = httpsScheme
+	} else {
+		u.Scheme = httpScheme
+	}
+	return u.String()
 }
 
 // pickMatchedURL picks the matched URL based on the TLS config.
+// Note: please make sure the URLs are valid.
 func pickMatchedURL(urls []string, tlsCfg *tls.Config) string {
-	for _, url := range urls {
-		if tlsCfg != nil && strings.HasPrefix(url, httpsScheme) {
-			return url
+	for _, uStr := range urls {
+		u, err := url.Parse(uStr)
+		if err != nil {
+			continue
 		}
-		if tlsCfg == nil && strings.HasPrefix(url, httpScheme) {
-			return url
+		if tlsCfg != nil && u.Scheme == httpsScheme {
+			return uStr
+		}
+		if tlsCfg == nil && u.Scheme == httpScheme {
+			return uStr
 		}
 	}
 	ret := modifyURLScheme(urls[0], tlsCfg)

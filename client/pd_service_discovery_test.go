@@ -326,10 +326,8 @@ func TestSchemeFunction(t *testing.T) {
 	tlsCfg := &tls.Config{}
 	re.Equal("https://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", tlsCfg))
 	re.Equal("https://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", tlsCfg))
-	re.Equal("https://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", tlsCfg))
 	re.Equal("http://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", nil))
 	re.Equal("http://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", nil))
-	re.Equal("http://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", nil))
 
 	urls := []string{
 		"http://127.0.0.1:2379",

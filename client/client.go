@@ -1402,9 +1402,14 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, errs.NotServedErr)
 }
 
+const (
+	httpSchemePrefix  = "http://"
+	httpsSchemePrefix = "https://"
+)
+
 func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, httpScheme)
-	str = strings.TrimPrefix(str, httpsScheme)
+	str = strings.TrimPrefix(str, httpSchemePrefix)
+	str = strings.TrimPrefix(str, httpsSchemePrefix)
 	return str
 }
 
