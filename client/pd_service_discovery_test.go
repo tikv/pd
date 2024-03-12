@@ -141,12 +141,12 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err1 == nil && err2 == nil {
 			suite.followerClient = newPDServiceClient(
-				addrToURL(suite.followerServer.addr, nil),
-				addrToURL(suite.leaderServer.addr, nil),
+				modifyURLScheme(suite.followerServer.addr, nil),
+				modifyURLScheme(suite.leaderServer.addr, nil),
 				followerConn, false)
 			suite.leaderClient = newPDServiceClient(
-				addrToURL(suite.leaderServer.addr, nil),
-				addrToURL(suite.leaderServer.addr, nil),
+				modifyURLScheme(suite.leaderServer.addr, nil),
+				modifyURLScheme(suite.leaderServer.addr, nil),
 				leaderConn, true)
 			suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
 			suite.followerServer.server.leaderAddr = suite.leaderClient.GetURL()
@@ -172,8 +172,8 @@ func (suite *serviceClientTestSuite) TearDownSuite() {
 
 func (suite *serviceClientTestSuite) TestServiceClient() {
 	re := suite.Require()
-	leaderAddress := addrToURL(suite.leaderServer.addr, nil)
-	followerAddress := addrToURL(suite.followerServer.addr, nil)
+	leaderAddress := modifyURLScheme(suite.leaderServer.addr, nil)
+	followerAddress := modifyURLScheme(suite.followerServer.addr, nil)
 
 	follower := suite.followerClient
 	leader := suite.leaderClient
@@ -307,17 +307,17 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 
 func TestServiceClientScheme(t *testing.T) {
 	re := require.New(t)
-	cli := newPDServiceClient(addrToURL("127.0.0.1:2379", nil), addrToURL("127.0.0.1:2379", nil), nil, false)
+	cli := newPDServiceClient(modifyURLScheme("127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(addrToURL("https://127.0.0.1:2379", nil), addrToURL("127.0.0.1:2379", nil), nil, false)
+	cli = newPDServiceClient(modifyURLScheme("https://127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(addrToURL("http://127.0.0.1:2379", nil), addrToURL("127.0.0.1:2379", nil), nil, false)
+	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(addrToURL("127.0.0.1:2379", &tls.Config{}), addrToURL("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(modifyURLScheme("127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(addrToURL("https://127.0.0.1:2379", &tls.Config{}), addrToURL("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(modifyURLScheme("https://127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(addrToURL("http://127.0.0.1:2379", &tls.Config{}), addrToURL("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
 }
 
@@ -326,8 +326,10 @@ func TestSchemeFunction(t *testing.T) {
 	tlsCfg := &tls.Config{}
 	re.Equal("https://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", tlsCfg))
 	re.Equal("https://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", tlsCfg))
+	re.Equal("https://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", tlsCfg))
 	re.Equal("http://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", nil))
 	re.Equal("http://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", nil))
+	re.Equal("http://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", nil))
 
 	urls := []string{
 		"http://127.0.0.1:2379",

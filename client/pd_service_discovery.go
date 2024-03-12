@@ -17,7 +17,6 @@ package pd
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net/url"
 	"reflect"
 	"sort"
@@ -1126,36 +1125,19 @@ func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
 	// Add default schema "http://" to addrs.
 	urls := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
-		urls = append(urls, addrToURL(addr, tlsCfg))
+		urls = append(urls, modifyURLScheme(addr, tlsCfg))
 	}
 	return urls
-}
-
-func addrToURL(addr string, tlsCfg *tls.Config) string {
-	if tlsCfg == nil {
-		u, err := url.Parse(addr)
-		if err == nil {
-			u.Scheme = httpScheme
-			addr = u.String()
-		} else if !strings.HasPrefix(addr, httpSchemePrefix) {
-			addr = fmt.Sprintf("%s%s", httpSchemePrefix, addr)
-		}
-	} else {
-		u, err := url.Parse(addr)
-		if err == nil {
-			u.Scheme = httpsScheme
-			addr = u.String()
-		} else if !strings.HasPrefix(addr, httpsSchemePrefix) {
-			addr = fmt.Sprintf("%s%s", httpsSchemePrefix, addr)
-		}
-	}
-	return addr
 }
 
 func modifyURLScheme(uStr string, tlsCfg *tls.Config) string {
 	u, err := url.Parse(uStr)
 	if err != nil {
-		return uStr
+		if tlsCfg != nil {
+			return httpsSchemePrefix + uStr
+		} else {
+			return httpSchemePrefix + uStr
+		}
 	}
 	if tlsCfg != nil {
 		u.Scheme = httpsScheme
