@@ -471,7 +471,8 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, s.client, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, path.Join(keypath.GlobalTSOAllocatorsPrefix(), "pd"))
+	allocatorKeyPrefix := keypath.GlobalTSOAllocatorsPrefix()
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, s.client, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, allocatorKeyPrefix, path.Join(allocatorKeyPrefix, "pd"))
 	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 	if !s.cfg.EnableLocalTSO {
 		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {

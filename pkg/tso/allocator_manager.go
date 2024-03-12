@@ -208,6 +208,7 @@ func NewAllocatorManager(
 	storage endpoint.TSOStorage,
 	cfg Config,
 	allocatorKeyPrefix string,
+	allocatorKey string,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
 	am := &AllocatorManager{
@@ -224,8 +225,8 @@ func NewAllocatorManager(
 		leaderLease:            cfg.GetLeaderLease(),
 		maxResetTSGap:          cfg.GetMaxResetTSGap,
 		securityConfig:         cfg.GetTLSConfig(),
-		allocatorKey:           path.Join(allocatorKeyPrefix, fmt.Sprintf("keyspace_group_%d", keyspaceGroupID)),
 		allocatorKeyPrefix:     allocatorKeyPrefix,
+		allocatorKey:           allocatorKey,
 	}
 	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
 	am.mu.clusterDCLocations = make(map[string]*DCLocationInfo)
