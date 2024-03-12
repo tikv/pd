@@ -34,7 +34,7 @@ func TestDiscover(t *testing.T) {
 	}()
 	re.NoError(err)
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	re.NoError(err)
 
 	client, err := clientv3.NewFromURL(ep)
@@ -71,7 +71,7 @@ func TestServiceRegistryEntry(t *testing.T) {
 	}()
 	re.NoError(err)
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	re.NoError(err)
 
 	client, err := clientv3.NewFromURL(ep)

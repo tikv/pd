@@ -34,7 +34,7 @@ func TestSaveLoadTimestamp(t *testing.T) {
 	re.NoError(err)
 	defer etcd.Close()
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})
@@ -59,7 +59,7 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 	re.NoError(err)
 	defer etcd.Close()
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})
@@ -100,7 +100,7 @@ func TestTimestampTxn(t *testing.T) {
 	re.NoError(err)
 	defer etcd.Close()
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})

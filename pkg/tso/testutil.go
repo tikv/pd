@@ -100,7 +100,7 @@ func startEmbeddedEtcd(t *testing.T) (backendEndpoint string, etcdClient *client
 		etcd.Close()
 	}
 
-	backendEndpoint = cfg.LCUrls[0].String()
+	backendEndpoint = cfg.ListenClientUrls[0].String()
 	re.NoError(err)
 
 	etcdClient, err = clientv3.NewFromURL(backendEndpoint)

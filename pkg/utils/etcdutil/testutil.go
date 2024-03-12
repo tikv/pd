@@ -35,14 +35,14 @@ func NewTestSingleConfig(t *testing.T) *embed.Config {
 	cfg.LogOutputs = []string{"stdout"}
 
 	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
+	cfg.ListenPeerUrls = []url.URL{*pu}
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
 	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
+	cfg.ListenClientUrls = []url.URL{*cu}
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
 
 	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.ListenPeerUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
 }

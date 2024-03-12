@@ -43,6 +43,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestMain(m *testing.M) {
@@ -100,7 +101,7 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithInsecure())
+	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	cc.Close()
 	url := s.GetAddr() + tsoapi.APIPathPrefix
