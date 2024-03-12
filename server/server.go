@@ -235,6 +235,9 @@ type Server struct {
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+
+	// Cgroup Monitor
+	cgmon cgroupMonitor
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -542,6 +545,8 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
+	s.cgmon.stopCgroupMonitor()
+
 	s.stopServerLoop()
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager.Close()
@@ -616,6 +621,8 @@ func (s *Server) Run() error {
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
+
+	s.cgmon.startCgroupMonitor(s.ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {
 		time.Sleep(2 * time.Second)

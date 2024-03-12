@@ -84,8 +84,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 
 // BuildForwardContext creates a context with receiver metadata information.
 // It is used in client side.
-func BuildForwardContext(ctx context.Context, addr string) context.Context {
-	md := metadata.Pairs(ForwardMetadataKey, addr)
+func BuildForwardContext(ctx context.Context, url string) context.Context {
+	md := metadata.Pairs(ForwardMetadataKey, url)
 	return metadata.NewOutgoingContext(ctx, md)
 }
 

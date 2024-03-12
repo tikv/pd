@@ -41,7 +41,7 @@ func NewMockPDServiceDiscovery(urls []string, tlsCfg *tls.Config) *mockPDService
 func (m *mockPDServiceDiscovery) Init() error {
 	m.clients = make([]ServiceClient, 0, len(m.urls))
 	for _, url := range m.urls {
-		m.clients = append(m.clients, newPDServiceClient(url, url, m.tlsCfg, nil, false))
+		m.clients = append(m.clients, newPDServiceClient(url, url, nil, false))
 	}
 	return nil
 }
@@ -62,13 +62,13 @@ func (m *mockPDServiceDiscovery) GetKeyspaceGroupID() uint32                    
 func (m *mockPDServiceDiscovery) GetServiceURLs() []string                       { return nil }
 func (m *mockPDServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn { return nil }
 func (m *mockPDServiceDiscovery) GetClientConns() *sync.Map                      { return nil }
-func (m *mockPDServiceDiscovery) GetServingAddr() string                         { return "" }
-func (m *mockPDServiceDiscovery) GetBackupAddrs() []string                       { return nil }
+func (m *mockPDServiceDiscovery) GetServingURL() string                          { return "" }
+func (m *mockPDServiceDiscovery) GetBackupURLs() []string                        { return nil }
 func (m *mockPDServiceDiscovery) GetServiceClient() ServiceClient                { return nil }
-func (m *mockPDServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
+func (m *mockPDServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return nil, nil
 }
-func (m *mockPDServiceDiscovery) ScheduleCheckMemberChanged()                         {}
-func (m *mockPDServiceDiscovery) CheckMemberChanged() error                           { return nil }
-func (m *mockPDServiceDiscovery) AddServingAddrSwitchedCallback(callbacks ...func())  {}
-func (m *mockPDServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {}
+func (m *mockPDServiceDiscovery) ScheduleCheckMemberChanged()                        {}
+func (m *mockPDServiceDiscovery) CheckMemberChanged() error                          { return nil }
+func (m *mockPDServiceDiscovery) AddServingURLSwitchedCallback(callbacks ...func())  {}
+func (m *mockPDServiceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {}
