@@ -465,8 +465,9 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	if !s.IsAPIServiceMode() {
+		allocatorKeyPrefix := endpoint.GlobalTSOAllocatorsPrefix(s.clusterID.Load())
 		s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, s.client, mcs.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false,
-			path.Join(endpoint.GlobalTSOAllocatorsPrefix(s.clusterID.Load()), "pd"))
+			allocatorKeyPrefix, path.Join(allocatorKeyPrefix, "pd"))
 		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 		if !s.cfg.EnableLocalTSO {
 			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {

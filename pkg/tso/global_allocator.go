@@ -43,6 +43,8 @@ import (
 	"google.golang.org/grpc"
 )
 
+const ttlSeconds = 3
+
 // Allocator is a Timestamp Oracle allocator.
 type Allocator interface {
 	// Initialize is used to initialize a TSO allocator.
@@ -696,7 +698,7 @@ func (gta *GlobalTSOAllocator) registerAllocator() error {
 }
 
 func (gta *GlobalTSOAllocator) renewKeepalive() <-chan *clientv3.LeaseKeepAliveResponse {
-	t := time.NewTicker(time.Duration(3) * time.Second / 2)
+	t := time.NewTicker(time.Duration(ttlSeconds) * time.Second / 2)
 	defer t.Stop()
 	for {
 		select {
@@ -712,7 +714,7 @@ func (gta *GlobalTSOAllocator) renewKeepalive() <-chan *clientv3.LeaseKeepAliveR
 func (gta *GlobalTSOAllocator) txnWithTTL(key, value string) (clientv3.LeaseID, error) {
 	ctx, cancel := context.WithTimeout(gta.ctx, etcdutil.DefaultRequestTimeout)
 	defer cancel()
-	grantResp, err := gta.am.etcdClient.Grant(ctx, 3)
+	grantResp, err := gta.am.etcdClient.Grant(ctx, ttlSeconds)
 	if err != nil {
 		return 0, err
 	}
