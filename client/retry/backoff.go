@@ -23,7 +23,7 @@ import (
 	"go.uber.org/multierr"
 )
 
-const maxRecordErrorCount = 20 - 1
+const maxRecordErrorCount = 20
 
 // Backoffer is a backoff policy for retrying operations.
 type Backoffer struct {
