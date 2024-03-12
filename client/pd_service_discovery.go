@@ -1135,9 +1135,8 @@ func modifyURLScheme(uStr string, tlsCfg *tls.Config) string {
 	if err != nil {
 		if tlsCfg != nil {
 			return httpsSchemePrefix + uStr
-		} else {
-			return httpSchemePrefix + uStr
 		}
+		return httpSchemePrefix + uStr
 	}
 	if tlsCfg != nil {
 		u.Scheme = httpsScheme
