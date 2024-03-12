@@ -30,10 +30,10 @@ import (
 // Option is used to customize the backoffer.
 type Option func(*Backoffer)
 
-// WithLogTimes sets the number of retries required to print a log.
-func WithLogTimes(logTimes int) Option {
+// withMinLogInterval sets the mininum log interval for retrying.
+func withMinLogInterval(interval time.Duration) Option {
 	return func(bo *Backoffer) {
-		bo.logTimes = logTimes
+		bo.logInterval = interval
 	}
 }
 
@@ -48,8 +48,10 @@ type Backoffer struct {
 	// retryableChecker is used to check if the error is retryable.
 	// By default, all errors are retryable.
 	retryableChecker func(err error) bool
-	// logTimes defines the number of retries required to print a log
-	logTimes int
+	// logInterval defines the log interval for retrying.
+	logInterval time.Duration
+	// nextLogTime is used to record the next log time.
+	nextLogTime time.Duration
 
 	attempt      int
 	next         time.Duration
@@ -71,7 +73,8 @@ func (bo *Backoffer) Exec(
 		err = fn()
 		bo.attempt++
 		if err != nil {
-			if bo.logTimes > 0 && bo.attempt%bo.logTimes == 0 {
+			if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
+				bo.nextLogTime %= bo.logInterval
 				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
 			}
 		}
@@ -79,6 +82,7 @@ func (bo *Backoffer) Exec(
 			break
 		}
 		currentInterval := bo.nextInterval()
+		bo.nextLogTime += currentInterval
 		if after == nil {
 			after = time.NewTimer(currentInterval)
 		} else {
@@ -171,6 +175,8 @@ func (bo *Backoffer) exponentialInterval() time.Duration {
 func (bo *Backoffer) resetBackoff() {
 	bo.next = bo.base
 	bo.currentTotal = 0
+	bo.attempt = 0
+	bo.nextLogTime = 0
 }
 
 // Only used for test.

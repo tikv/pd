@@ -119,13 +119,28 @@ func TestBackofferWithLog(t *testing.T) {
 	lg := newZapTestLogger(conf)
 	log.ReplaceGlobals(lg.Logger, nil)
 
-	bo := InitialBackoffer(time.Millisecond*10, time.Millisecond*100, time.Millisecond*1000, WithLogTimes(10))
+	bo := InitialBackoffer(time.Millisecond*10, time.Millisecond*100, time.Millisecond*1000, withMinLogInterval(time.Millisecond*100))
 	err := bo.Exec(ctx, testFn)
 	re.ErrorIs(err, errTest)
 
-	m1 := lg.Message()
-	rfc := `["call PD API failed and retrying"] [api=testFn] [retry-time=10] [error=test]`
-	re.Contains(m1, rfc)
+	ms := lg.Messages()
+	len1 := len(ms)
+	re.Len(ms, 9)
+	rfc := `["call PD API failed and retrying"] [api=testFn] [retry-time=13] [error=test]`
+	re.Contains(ms[len(ms)-1], rfc)
+	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=5] [error=test]`
+	re.Contains(ms[0], rfc)
+
+	bo.resetBackoff()
+	err = bo.Exec(ctx, testFn)
+	re.ErrorIs(err, errTest)
+
+	ms = lg.Messages()
+	re.Len(ms, 18)
+	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=13] [error=test]`
+	re.Contains(ms[len(ms)-1], rfc)
+	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=5] [error=test]`
+	re.Contains(ms[len1], rfc)
 }
 
 var errTest = errors.New("test")
@@ -163,6 +178,13 @@ func (logger *verifyLogger) Message() string {
 		return ""
 	}
 	return logger.w.messages[len(logger.w.messages)-1]
+}
+
+func (logger *verifyLogger) Messages() []string {
+	if logger.w.messages == nil {
+		return nil
+	}
+	return logger.w.messages
 }
 
 func newZapTestLogger(cfg *log.Config, opts ...zap.Option) verifyLogger {
