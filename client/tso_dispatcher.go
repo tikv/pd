@@ -603,7 +603,7 @@ func (c *tsoClient) tryConnectToTSO(
 		connectionCtxs.Range(func(url, cc any) bool {
 			if url.(string) != newURL {
 				cc.(*tsoConnectionContext).cancel()
-				connectionCtxs.Delete(newURL)
+				connectionCtxs.Delete(url)
 			}
 			return true
 		})
@@ -664,11 +664,11 @@ func (c *tsoClient) tryConnectToTSO(
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.timeout)
 			if err == nil {
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
-				addr := trimHTTPPrefix(url)
+				addr := trimHTTPPrefix(backupURL)
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
-				updateAndClear(url, &tsoConnectionContext{url, stream, cctx, cancel})
+				updateAndClear(backupURL, &tsoConnectionContext{backupURL, stream, cctx, cancel})
 				return nil
 			}
 			cancel()
