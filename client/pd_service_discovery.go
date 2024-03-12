@@ -1045,15 +1045,17 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) (change bool, err erro
 	} else {
 		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
 	}
-	// Set PD leader and Global TSO Allocator (which is also the PD leader)
-	leaderClient := newPDServiceClient(addr, addr, c.tlsCfg, newConn, true)
-	c.leader.Store(leaderClient)
-	// Run callbacks
-	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
-		err = multierr.Append(err, c.tsoGlobalAllocLeaderUpdatedCb(addr))
-	}
-	for _, cb := range c.leaderSwitchedCbs {
-		cb()
+	if change {
+		// Set PD leader and Global TSO Allocator (which is also the PD leader)
+		leaderClient := newPDServiceClient(addr, addr, c.tlsCfg, newConn, true)
+		c.leader.Store(leaderClient)
+		// Run callbacks
+		if c.tsoGlobalAllocLeaderUpdatedCb != nil {
+			err = multierr.Append(err, c.tsoGlobalAllocLeaderUpdatedCb(addr))
+		}
+		for _, cb := range c.leaderSwitchedCbs {
+			cb()
+		}
 	}
 	return
 }
