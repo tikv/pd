@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/retry"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -1020,7 +1021,10 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
-func (c *pdServiceDiscovery) switchLeader(addrs []string) (bool, error) {
+// switchLeader switches the leader of the PD cluster.
+// Note: For current implementation, when initializing the client, the connection to leader should be established.
+// Otherwise, the initialization will fail.
+func (c *pdServiceDiscovery) switchLeader(addrs []string) (change bool, err error) {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
 	addr := addrs[0]
 	oldLeader := c.getLeaderServiceClient()
@@ -1028,24 +1032,30 @@ func (c *pdServiceDiscovery) switchLeader(addrs []string) (bool, error) {
 		return false, nil
 	}
 
-	newConn, err := c.GetOrCreateGRPCConn(addr)
+	var newConn *grpc.ClientConn
+	newConn, err = c.GetOrCreateGRPCConn(addr)
 	// If gRPC connect is created successfully or leader is new, still saves.
-	if addr != oldLeader.GetAddress() || newConn != nil {
-		// Set PD leader and Global TSO Allocator (which is also the PD leader)
-		leaderClient := newPDServiceClient(addr, addr, c.tlsCfg, newConn, true)
-		c.leader.Store(leaderClient)
+	if addr != oldLeader.GetAddress() {
+		change = true
+		log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader.GetAddress()))
 	}
+	if err == nil {
+		change = true
+		log.Info("[pd] successfully connected to leader", zap.String("leader", addr))
+	} else {
+		log.Warn("[pd] failed to connect leader", zap.String("leader", addr), errs.ZapError(err))
+	}
+	// Set PD leader and Global TSO Allocator (which is also the PD leader)
+	leaderClient := newPDServiceClient(addr, addr, c.tlsCfg, newConn, true)
+	c.leader.Store(leaderClient)
 	// Run callbacks
 	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
-		if err := c.tsoGlobalAllocLeaderUpdatedCb(addr); err != nil {
-			return true, err
-		}
+		err = multierr.Append(err, c.tsoGlobalAllocLeaderUpdatedCb(addr))
 	}
 	for _, cb := range c.leaderSwitchedCbs {
 		cb()
 	}
-	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader.GetAddress()))
-	return true, err
+	return
 }
 
 func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leader *pdpb.Member) (changed bool) {
