@@ -69,7 +69,7 @@ func setupEtcd(t *testing.T) (*embed.Etcd, *clientv3.Client, error) {
 		return nil, nil, err
 	}
 
-	ep := etcdCfg.LCUrls[0].String()
+	ep := etcdCfg.ListenClientUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})

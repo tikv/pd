@@ -34,7 +34,7 @@ func TestRegister(t *testing.T) {
 	}()
 	re.NoError(err)
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	client, err := clientv3.NewFromURL(ep)
 	re.NoError(err)
 
