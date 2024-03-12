@@ -650,9 +650,9 @@ func (c *tsoClient) tryConnectToTSO(
 
 	if networkErrNum == maxRetryTimes {
 		// encounter the network error
-		backupClientConn, url := c.backupClientConn()
+		backupClientConn, backupURL := c.backupClientConn()
 		if backupClientConn != nil {
-			log.Info("[tso] fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("url", url))
+			log.Info("[tso] fall back to use follower to forward tso stream", zap.String("dc", dc), zap.String("follower-url", backupURL))
 			forwardedHost, ok := c.GetTSOAllocatorServingURLByDCLocation(dc)
 			if !ok {
 				return errors.Errorf("cannot find the allocator leader in %s", dc)
