@@ -1133,14 +1133,18 @@ func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
 
 func addrToURL(addr string, tlsCfg *tls.Config) string {
 	if tlsCfg == nil {
-		if strings.HasPrefix(addr, httpsSchemePrefix) {
-			addr = fmt.Sprintf("%s%s", httpSchemePrefix, strings.TrimPrefix(addr, httpsSchemePrefix))
+		u, err := url.Parse(addr)
+		if err == nil {
+			u.Scheme = httpScheme
+			addr = u.String()
 		} else if !strings.HasPrefix(addr, httpSchemePrefix) {
 			addr = fmt.Sprintf("%s%s", httpSchemePrefix, addr)
 		}
 	} else {
-		if strings.HasPrefix(addr, httpSchemePrefix) {
-			addr = fmt.Sprintf("%s%s", httpsSchemePrefix, strings.TrimPrefix(addr, httpSchemePrefix))
+		u, err := url.Parse(addr)
+		if err == nil {
+			u.Scheme = httpsScheme
+			addr = u.String()
 		} else if !strings.HasPrefix(addr, httpsSchemePrefix) {
 			addr = fmt.Sprintf("%s%s", httpsSchemePrefix, addr)
 		}
