@@ -46,6 +46,7 @@ const (
 	getClusterVersionName                   = "GetClusterVersion"
 	getClusterName                          = "GetCluster"
 	getClusterStatusName                    = "GetClusterStatus"
+	getStatusName                           = "GetStatus"
 	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"

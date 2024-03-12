@@ -651,6 +651,22 @@ func (suite *httpClientTestSuite) checkVersion(mode mode, client pd.Client) {
 	re.Equal(versioninfo.PDReleaseVersion, ver)
 }
 
+func (suite *httpClientTestSuite) TestStatus() {
+	suite.RunTestInTwoModes(suite.checkStatus)
+}
+
+func (suite *httpClientTestSuite) checkStatus(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	status, err := client.GetStatus(env.ctx)
+	re.NoError(err)
+	re.Equal(versioninfo.PDReleaseVersion, status.Version)
+	re.Equal(versioninfo.PDGitHash, status.GitHash)
+	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
+	re.GreaterOrEqual(time.Now().Unix(), status.StartTimestamp)
+}
+
 func (suite *httpClientTestSuite) TestAdmin() {
 	suite.RunTestInTwoModes(suite.checkAdmin)
 }
