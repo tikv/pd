@@ -34,6 +34,15 @@ type ClusterState struct {
 	ReplicationStatus string    `json:"replication_status"`
 }
 
+// State is the status of PD server.
+// NOTE: This type sync with https://github.com/tikv/pd/blob/1d77b25656bc18e1f5aa82337d4ab62a34b10087/pkg/versioninfo/versioninfo.go#L29
+type State struct {
+	BuildTS        string `json:"build_ts"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git_hash"`
+	StartTimestamp int64  `json:"start_timestamp"`
+}
+
 // KeyRange defines a range of keys in bytes.
 type KeyRange struct {
 	startKey []byte

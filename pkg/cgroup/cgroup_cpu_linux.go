@@ -44,6 +44,11 @@ func CPUQuotaToGOMAXPROCS(minValue int) (int, CPUQuotaStatus, error) {
 	return maxProcs, CPUQuotaUsed, nil
 }
 
+// GetCPUPeriodAndQuota returns CPU period and quota time of cgroup.
+func GetCPUPeriodAndQuota() (period int64, quota int64, err error) {
+	return getCgroupCPUPeriodAndQuota("/")
+}
+
 // InContainer returns true if the process is running in a container.
 func InContainer() bool {
 	v, err := os.ReadFile(procPathCGroup)
