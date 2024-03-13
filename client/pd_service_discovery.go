@@ -1022,7 +1022,9 @@ func (c *pdServiceDiscovery) switchLeader(url string) (change bool, err error) {
 		c.leader.Store(leaderClient)
 		// Run callbacks
 		if c.tsoGlobalAllocLeaderUpdatedCb != nil {
-			return change, c.tsoGlobalAllocLeaderUpdatedCb(url)
+			if err := c.tsoGlobalAllocLeaderUpdatedCb(url); err != nil {
+				return change, err
+			}
 		}
 		for _, cb := range c.leaderSwitchedCbs {
 			cb()
