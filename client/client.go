@@ -932,7 +932,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 		NeedBuckets: options.needBuckets,
 	}
 	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
-	if serviceClient == nil || serviceClient.GetClientConn() == nil {
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
