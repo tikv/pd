@@ -194,6 +194,8 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	sc.labelStats.Collect()
 	// collect hot cache metrics
 	sc.hotStat.CollectMetrics()
+	// collect the lock metrics
+	sc.RegionsInfo.CollectWaitLockMetrics()
 }
 
 func (sc *schedulingController) removeStoreStatistics(storeID uint64) {
