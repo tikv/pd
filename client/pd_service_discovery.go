@@ -126,7 +126,8 @@ type ServiceDiscovery interface {
 type ServiceClient interface {
 	// GetURL returns the client url of the PD/etcd server.
 	GetURL() string
-	// GetClientConn returns the gRPC connection of the service client
+	// GetClientConn returns the gRPC connection of the service client.
+	// It returns nil if the connection is not available.
 	GetClientConn() *grpc.ClientConn
 	// BuildGRPCTargetContext builds a context object with a gRPC context.
 	// ctx: the original context object.

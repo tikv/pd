@@ -787,6 +787,45 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	})
 }
 
+func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetworkErr() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cluster := suite.cluster
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+
+	cli := setupCli(re, ctx, suite.endpoints)
+	defer cli.Close()
+
+	cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
+	re.NotEmpty(cluster.WaitLeader())
+
+	// here is just for trigger the leader change.
+	cli.GetRegion(context.Background(), []byte("a"))
+
+	testutil.Eventually(re, func() bool {
+		return cli.GetLeaderURL() == follower.GetAddr()
+	})
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
+	re.Error(err)
+	re.Nil(r)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2"))
+	cli.GetServiceDiscovery().CheckMemberChanged()
+	testutil.Eventually(re, func() bool {
+		r, err = cli.GetRegion(context.Background(), []byte("a"))
+		if err == nil && r != nil {
+			return true
+		}
+		return false
+	})
+}
+
 func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
