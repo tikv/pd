@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/retry"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -1023,7 +1022,7 @@ func (c *pdServiceDiscovery) switchLeader(url string) (change bool, err error) {
 		c.leader.Store(leaderClient)
 		// Run callbacks
 		if c.tsoGlobalAllocLeaderUpdatedCb != nil {
-			err = multierr.Append(err, c.tsoGlobalAllocLeaderUpdatedCb(url))
+			return change, c.tsoGlobalAllocLeaderUpdatedCb(url)
 		}
 		for _, cb := range c.leaderSwitchedCbs {
 			cb()
