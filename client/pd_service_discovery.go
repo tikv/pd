@@ -1015,6 +1015,9 @@ func (c *pdServiceDiscovery) switchLeader(url string) (change bool, err error) {
 	}
 	if change {
 		// Set PD leader and Global TSO Allocator (which is also the PD leader)
+		// Note: Even if the connection is not established, the leader is still updated.
+		// The reason is that the leader has transferred to another PD server, and the client should
+		// update the member information. Meanwhile, the client must know the newest leader for follower proxy.
 		leaderClient := newPDServiceClient(url, url, newConn, true)
 		c.leader.Store(leaderClient)
 		// Run callbacks
