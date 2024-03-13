@@ -745,7 +745,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 // follower pd client and the context which holds forward information.
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
 	serviceClient := c.pdSvcDiscovery.GetServiceClient()
-	if serviceClient == nil {
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
 	return pdpb.NewPDClient(serviceClient.GetClientConn()), serviceClient.BuildGRPCTargetContext(ctx, true)
@@ -762,7 +762,7 @@ func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower
 		}
 	}
 	serviceClient = c.pdSvcDiscovery.GetServiceClient()
-	if serviceClient == nil {
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
 	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
@@ -932,7 +932,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 		NeedBuckets: options.needBuckets,
 	}
 	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
-	if serviceClient == nil {
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
