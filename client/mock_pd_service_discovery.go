@@ -41,7 +41,7 @@ func NewMockPDServiceDiscovery(urls []string, tlsCfg *tls.Config) *mockPDService
 func (m *mockPDServiceDiscovery) Init() error {
 	m.clients = make([]ServiceClient, 0, len(m.urls))
 	for _, url := range m.urls {
-		m.clients = append(m.clients, newPDServiceClient(url, url, nil, false))
+		m.clients = append(m.clients, newPDServiceClient(url, m.urls[0], nil, false))
 	}
 	return nil
 }
@@ -56,6 +56,7 @@ func (m *mockPDServiceDiscovery) GetAllServiceClients() []ServiceClient {
 	return m.clients
 }
 
+func (m *mockPDServiceDiscovery) GetURL() string                                 { return "" }
 func (m *mockPDServiceDiscovery) GetClusterID() uint64                           { return 0 }
 func (m *mockPDServiceDiscovery) GetKeyspaceID() uint32                          { return 0 }
 func (m *mockPDServiceDiscovery) GetKeyspaceGroupID() uint32                     { return 0 }

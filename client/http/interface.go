@@ -111,6 +111,8 @@ type Client interface {
 	WithRespHandler(func(resp *http.Response, res any) error) Client
 	// WithBackoffer sets and returns a new client with the given backoffer.
 	WithBackoffer(*retry.Backoffer) Client
+	// WithTargetURL sets and returns a new client with the given target URL.
+	WithTargetURL(string) Client
 	// Close gracefully closes the HTTP client.
 	Close()
 }
@@ -467,7 +469,8 @@ func (c *client) GetStatus(ctx context.Context) (*State, error) {
 		WithName(getStatusName).
 		WithURI(Status).
 		WithMethod(http.MethodGet).
-		WithResp(&status))
+		WithResp(&status),
+		WithAllowFollowerHandle())
 	if err != nil {
 		return nil, err
 	}

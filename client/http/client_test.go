@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 	"go.uber.org/atomic"
 )
@@ -42,14 +43,14 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 		checked++
 		return nil
 	})
-	c := newClientWithMockServiceDiscovery("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := newClientWithMockServiceDiscovery("test-header", []string{"http://127.0.0.1:2379"}, WithHTTPClient(httpClient))
 	defer c.Close()
 	c.GetRegions(context.Background())
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
 	re.Equal(2, checked)
 }
 
-func TestCallerID(t *testing.T) {
+func TestWithCallerID(t *testing.T) {
 	re := require.New(t)
 	checked := 0
 	expectedVal := atomic.NewString(defaultCallerID)
@@ -63,7 +64,7 @@ func TestCallerID(t *testing.T) {
 		checked++
 		return nil
 	})
-	c := newClientWithMockServiceDiscovery("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := newClientWithMockServiceDiscovery("test-caller-id", []string{"http://127.0.0.1:2379"}, WithHTTPClient(httpClient))
 	defer c.Close()
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
@@ -75,7 +76,7 @@ func TestWithBackoffer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := newClientWithMockServiceDiscovery("test-with-backoffer", []string{"http://127.0.0.1"})
+	c := newClientWithMockServiceDiscovery("test-with-backoffer", []string{"http://127.0.0.1:2379"})
 	defer c.Close()
 
 	base := 100 * time.Millisecond
@@ -95,4 +96,15 @@ func TestWithBackoffer(t *testing.T) {
 	_, err = c.WithBackoffer(bo).GetPDVersion(timeoutCtx)
 	re.InDelta(3*time.Second, time.Since(start), float64(250*time.Millisecond))
 	re.ErrorIs(err, context.DeadlineExceeded)
+}
+
+func TestWithTargetURL(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := newClientWithMockServiceDiscovery("test-with-target-url", []string{"http://127.0.0.1:2379", "http://127.0.0.2:2379", "http://127.0.0.3:2379"})
+	defer c.Close()
+
+	_, err := c.WithTargetURL("http://127.0.0.4:2379").GetStatus(ctx)
+	re.ErrorIs(err, errs.ErrClientNoTargetMember)
 }
