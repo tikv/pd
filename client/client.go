@@ -154,9 +154,9 @@ type Client interface {
 
 	// GetClusterID gets the cluster ID from PD.
 	GetClusterID(ctx context.Context) uint64
-	// GetLeaderAddr returns current leader's address. It returns "" before
+	// GetLeaderURL returns current leader's URL. It returns "" before
 	// syncing leader from server.
-	GetLeaderAddr() string
+	GetLeaderURL() string
 	// GetServiceDiscovery returns ServiceDiscovery
 	GetServiceDiscovery() ServiceDiscovery
 
@@ -596,7 +596,7 @@ func (c *client) setup() error {
 	}
 
 	// Register callbacks
-	c.pdSvcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.pdSvcDiscovery.AddServingURLSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
@@ -708,9 +708,9 @@ func (c *client) GetClusterID(context.Context) uint64 {
 	return c.pdSvcDiscovery.GetClusterID()
 }
 
-// GetLeaderAddr returns the leader address.
-func (c *client) GetLeaderAddr() string {
-	return c.pdSvcDiscovery.GetServingAddr()
+// GetLeaderURL returns the leader URL.
+func (c *client) GetLeaderURL() string {
+	return c.pdSvcDiscovery.GetServingURL()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
@@ -773,7 +773,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 // follower pd client and the context which holds forward information.
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
 	serviceClient := c.pdSvcDiscovery.GetServiceClient()
-	if serviceClient == nil {
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
 	return pdpb.NewPDClient(serviceClient.GetClientConn()), serviceClient.BuildGRPCTargetContext(ctx, true)
@@ -790,7 +790,7 @@ func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower
 		}
 	}
 	serviceClient = c.pdSvcDiscovery.GetServiceClient()
-	if serviceClient == nil {
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
 	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
@@ -1458,9 +1458,14 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, errs.NotServedErr)
 }
 
+const (
+	httpSchemePrefix  = "http://"
+	httpsSchemePrefix = "https://"
+)
+
 func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
+	str = strings.TrimPrefix(str, httpSchemePrefix)
+	str = strings.TrimPrefix(str, httpsSchemePrefix)
 	return str
 }
 

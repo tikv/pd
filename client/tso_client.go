@@ -76,9 +76,9 @@ type tsoClient struct {
 	tsoStreamBuilderFactory
 	// tsoAllocators defines the mapping {dc-location -> TSO allocator leader URL}
 	tsoAllocators sync.Map // Store as map[string]string
-	// tsoAllocServingAddrSwitchedCallback will be called when any global/local
+	// tsoAllocServingURLSwitchedCallback will be called when any global/local
 	// tso allocator leader is switched.
-	tsoAllocServingAddrSwitchedCallback []func()
+	tsoAllocServingURLSwitchedCallback []func()
 
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
@@ -111,9 +111,9 @@ func newTSOClient(
 	}
 
 	eventSrc := svcDiscovery.(tsoAllocatorEventSource)
-	eventSrc.SetTSOLocalServAddrsUpdatedCallback(c.updateTSOLocalServAddrs)
-	eventSrc.SetTSOGlobalServAddrUpdatedCallback(c.updateTSOGlobalServAddr)
-	c.svcDiscovery.AddServiceAddrsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
+	eventSrc.SetTSOLocalServURLsUpdatedCallback(c.updateTSOLocalServURLs)
+	eventSrc.SetTSOGlobalServURLUpdatedCallback(c.updateTSOGlobalServURL)
+	c.svcDiscovery.AddServiceURLsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
 
 	return c
 }
@@ -157,8 +157,8 @@ func (c *tsoClient) GetTSOAllocators() *sync.Map {
 	return &c.tsoAllocators
 }
 
-// GetTSOAllocatorServingAddrByDCLocation returns the tso allocator of the given dcLocation
-func (c *tsoClient) GetTSOAllocatorServingAddrByDCLocation(dcLocation string) (string, bool) {
+// GetTSOAllocatorServingURLByDCLocation returns the tso allocator of the given dcLocation
+func (c *tsoClient) GetTSOAllocatorServingURLByDCLocation(dcLocation string) (string, bool) {
 	url, exist := c.tsoAllocators.Load(dcLocation)
 	if !exist {
 		return "", false
@@ -181,13 +181,13 @@ func (c *tsoClient) GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*g
 	return cc.(*grpc.ClientConn), url.(string)
 }
 
-// AddTSOAllocatorServingAddrSwitchedCallback adds callbacks which will be called
+// AddTSOAllocatorServingURLSwitchedCallback adds callbacks which will be called
 // when any global/local tso allocator service endpoint is switched.
-func (c *tsoClient) AddTSOAllocatorServingAddrSwitchedCallback(callbacks ...func()) {
-	c.tsoAllocServingAddrSwitchedCallback = append(c.tsoAllocServingAddrSwitchedCallback, callbacks...)
+func (c *tsoClient) AddTSOAllocatorServingURLSwitchedCallback(callbacks ...func()) {
+	c.tsoAllocServingURLSwitchedCallback = append(c.tsoAllocServingURLSwitchedCallback, callbacks...)
 }
 
-func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) error {
+func (c *tsoClient) updateTSOLocalServURLs(allocatorMap map[string]string) error {
 	if len(allocatorMap) == 0 {
 		return nil
 	}
@@ -195,31 +195,31 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 	updated := false
 
 	// Switch to the new one
-	for dcLocation, addr := range allocatorMap {
-		if len(addr) == 0 {
+	for dcLocation, url := range allocatorMap {
+		if len(url) == 0 {
 			continue
 		}
-		oldAddr, exist := c.GetTSOAllocatorServingAddrByDCLocation(dcLocation)
-		if exist && addr == oldAddr {
+		oldURL, exist := c.GetTSOAllocatorServingURLByDCLocation(dcLocation)
+		if exist && url == oldURL {
 			continue
 		}
 		updated = true
-		if _, err := c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
-			log.Warn("[tso] failed to connect dc tso allocator serving address",
+		if _, err := c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
+			log.Warn("[tso] failed to connect dc tso allocator serving url",
 				zap.String("dc-location", dcLocation),
-				zap.String("serving-address", addr),
+				zap.String("serving-url", url),
 				errs.ZapError(err))
 			return err
 		}
-		c.tsoAllocators.Store(dcLocation, addr)
-		log.Info("[tso] switch dc tso local allocator serving address",
+		c.tsoAllocators.Store(dcLocation, url)
+		log.Info("[tso] switch dc tso local allocator serving url",
 			zap.String("dc-location", dcLocation),
-			zap.String("new-address", addr),
-			zap.String("old-address", oldAddr))
+			zap.String("new-url", url),
+			zap.String("old-url", oldURL))
 	}
 
 	// Garbage collection of the old TSO allocator primaries
-	c.gcAllocatorServingAddr(allocatorMap)
+	c.gcAllocatorServingURL(allocatorMap)
 
 	if updated {
 		c.scheduleCheckTSODispatcher()
@@ -228,16 +228,16 @@ func (c *tsoClient) updateTSOLocalServAddrs(allocatorMap map[string]string) erro
 	return nil
 }
 
-func (c *tsoClient) updateTSOGlobalServAddr(addr string) error {
-	c.tsoAllocators.Store(globalDCLocation, addr)
-	log.Info("[tso] switch dc tso global allocator serving address",
+func (c *tsoClient) updateTSOGlobalServURL(url string) error {
+	c.tsoAllocators.Store(globalDCLocation, url)
+	log.Info("[tso] switch dc tso global allocator serving url",
 		zap.String("dc-location", globalDCLocation),
-		zap.String("new-address", addr))
+		zap.String("new-url", url))
 	c.scheduleCheckTSODispatcher()
 	return nil
 }
 
-func (c *tsoClient) gcAllocatorServingAddr(curAllocatorMap map[string]string) {
+func (c *tsoClient) gcAllocatorServingURL(curAllocatorMap map[string]string) {
 	// Clean up the old TSO allocators
 	c.tsoAllocators.Range(func(dcLocationKey, _ any) bool {
 		dcLocation := dcLocationKey.(string)
@@ -257,24 +257,24 @@ func (c *tsoClient) gcAllocatorServingAddr(curAllocatorMap map[string]string) {
 // backup service endpoints randomly. Backup service endpoints are followers in a
 // quorum-based cluster or secondaries in a primary/secondary configured cluster.
 func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
-	addrs := c.svcDiscovery.GetBackupAddrs()
-	if len(addrs) < 1 {
+	urls := c.svcDiscovery.GetBackupURLs()
+	if len(urls) < 1 {
 		return nil, ""
 	}
 	var (
 		cc  *grpc.ClientConn
 		err error
 	)
-	for i := 0; i < len(addrs); i++ {
-		addr := addrs[rand.Intn(len(addrs))]
-		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
+	for i := 0; i < len(urls); i++ {
+		url := urls[rand.Intn(len(urls))]
+		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
 			continue
 		}
 		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			return cc, addr
+			return cc, url
 		}
 	}
 	return nil, ""

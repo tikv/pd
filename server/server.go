@@ -235,6 +235,9 @@ type Server struct {
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+
+	// Cgroup Monitor
+	cgmon cgroupMonitor
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -384,12 +387,12 @@ func (s *Server) startClient() error {
 	}
 	/* Starting two different etcd clients here is to avoid the throttling. */
 	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
-	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls, "server-etcd-client")
+	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "server-etcd-client")
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
-	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls, "election-etcd-client")
+	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "election-etcd-client")
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
@@ -542,6 +545,8 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
+	s.cgmon.stopCgroupMonitor()
+
 	s.stopServerLoop()
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager.Close()
@@ -616,6 +621,8 @@ func (s *Server) Run() error {
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
+
+	s.cgmon.startCgroupMonitor(s.ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {
 		time.Sleep(2 * time.Second)

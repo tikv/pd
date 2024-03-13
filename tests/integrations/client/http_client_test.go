@@ -84,6 +84,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 		leader := cluster.WaitLeader()
 		re.NotEmpty(leader)
 		leaderServer := cluster.GetLeaderServer()
+
 		err = leaderServer.BootstrapCluster()
 		re.NoError(err)
 		for _, region := range []*core.RegionInfo{
@@ -650,6 +651,22 @@ func (suite *httpClientTestSuite) checkVersion(mode mode, client pd.Client) {
 	re.Equal(versioninfo.PDReleaseVersion, ver)
 }
 
+func (suite *httpClientTestSuite) TestStatus() {
+	suite.RunTestInTwoModes(suite.checkStatus)
+}
+
+func (suite *httpClientTestSuite) checkStatus(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	status, err := client.GetStatus(env.ctx)
+	re.NoError(err)
+	re.Equal(versioninfo.PDReleaseVersion, status.Version)
+	re.Equal(versioninfo.PDGitHash, status.GitHash)
+	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
+	re.GreaterOrEqual(time.Now().Unix(), status.StartTimestamp)
+}
+
 func (suite *httpClientTestSuite) TestAdmin() {
 	suite.RunTestInTwoModes(suite.checkAdmin)
 }
@@ -716,7 +733,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	re.Equal(float64(2), out.Counter.GetValue())
 	c.Close()
 
-	leader := sd.GetServingAddr()
+	leader := sd.GetServingURL()
 	httpClient = pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
 		// mock leader success.
 		if !strings.Contains(leader, req.Host) {
@@ -750,4 +767,30 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	failureCnt.Write(&out)
 	re.Equal(float64(3), out.Counter.GetValue())
 	c.Close()
+}
+
+func (suite *httpClientTestSuite) TestUpdateKeyspaceSafePointVersion() {
+	suite.RunTestInTwoModes(suite.checkUpdateKeyspaceSafePointVersion)
+}
+
+func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	keyspaceName := "DEFAULT"
+	safePointVersion := "v2"
+
+	keyspaceSafePointVersionConfig := pd.KeyspaceSafePointVersionConfig{
+		Config: pd.KeyspaceSafePointVersion{
+			SafePointVersion: safePointVersion,
+		},
+	}
+	err := client.UpdateKeyspaceSafePointVersion(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	re.NoError(err)
+
+	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(env.ctx, keyspaceName)
+	re.NoError(err)
+	val, ok := keyspaceMetaRes.Config["safe_point_version"]
+	re.True(ok)
+	re.Equal(safePointVersion, val)
 }
