@@ -17,7 +17,6 @@ package pd
 import (
 	"context"
 	"io"
-	"runtime/trace"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -125,9 +124,6 @@ func (s *pdTSOStream) processRequests(
 ) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
 	start := time.Now()
 	count := int64(len(requests))
-	for _, req := range requests {
-		defer trace.StartRegion(req.requestCtx, "tsoReqSend").End()
-	}
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
@@ -183,9 +179,6 @@ func (s *tsoTSOStream) processRequests(
 ) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
 	start := time.Now()
 	count := int64(len(requests))
-	for _, req := range requests {
-		defer trace.StartRegion(req.requestCtx, "tsoReqSend").End()
-	}
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,

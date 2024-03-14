@@ -848,9 +848,6 @@ func (c *tsoClient) compareAndSwapTS(
 
 func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < len(requests); i++ {
-		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
-			span.Finish()
-		}
 		req := requests[i]
 		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
 		if err != nil && req.bo != nil {

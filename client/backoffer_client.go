@@ -45,17 +45,19 @@ type backoffClient struct {
 
 func (c *backoffClient) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
 	bo := c.bo.Clone()
-	return c.cli.getTSWithRetry(ctx, bo)
+	resp := c.cli.getLocalTSAsyncWithRetry(ctx, globalDCLocation, bo)
+	return resp.Wait()
 }
 
 func (c *backoffClient) GetTSAsync(ctx context.Context) TSFuture {
 	bo := c.bo.Clone()
-	return c.cli.getTSAsyncWithRetry(ctx, bo)
+	return c.cli.getLocalTSAsyncWithRetry(ctx, globalDCLocation, bo)
 }
 
 func (c *backoffClient) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
 	bo := c.bo.Clone()
-	return c.cli.getLocalTSWithRetry(ctx, dcLocation, bo)
+	resp := c.cli.getLocalTSAsyncWithRetry(ctx, dcLocation, bo)
+	return resp.Wait()
 }
 
 func (c *backoffClient) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {

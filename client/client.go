@@ -843,20 +843,6 @@ func (c *client) getLocalTSAsyncWithRetry(ctx context.Context, dcLocation string
 	return req
 }
 
-func (c *client) getLocalTSWithRetry(ctx context.Context, dcLocation string, bo *retry.Backoffer) (physical int64, logical int64, err error) {
-	resp := c.getLocalTSAsyncWithRetry(ctx, dcLocation, bo)
-	return resp.Wait()
-}
-
-func (c *client) getTSAsyncWithRetry(ctx context.Context, bo *retry.Backoffer) TSFuture {
-	return c.getLocalTSAsyncWithRetry(ctx, globalDCLocation, bo)
-}
-
-func (c *client) getTSWithRetry(ctx context.Context, bo *retry.Backoffer) (physical int64, logical int64, err error) {
-	resp := c.getTSAsyncWithRetry(ctx, bo)
-	return resp.Wait()
-}
-
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
 	resp := c.GetTSAsync(ctx)
 	return resp.Wait()
