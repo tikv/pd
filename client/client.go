@@ -698,9 +698,9 @@ func (c *client) scheduleUpdateTokenConnection() {
 
 func (c *client) BackoffRPCClient(bos ...*retry.Backoffer) RPCClient {
 	if len(bos) == 0 {
-		return &backoffClient{c, c.bo}
+		return NewBackofferClient(c, c.bo)
 	}
-	return &backoffClient{c, bos[0]}
+	return NewBackofferClient(c, bos[0])
 }
 
 // GetClusterID returns the ClusterID.

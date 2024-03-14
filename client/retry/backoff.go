@@ -23,16 +23,20 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/errs"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
 
+const maxRecordErrorCount = 20
+
+// Option is used to customize the backoffer.
 type Option func(*Backoffer)
 
-// WithLogTimes sets the number of retries required to print a log.
-func WithLogTimes(logTimes int) Option {
+// WithMinLogInterval sets the mininum log interval for retrying.
+func WithMinLogInterval(interval time.Duration) Option {
 	return func(bo *Backoffer) {
-		bo.logTimes = logTimes
+		bo.logInterval = interval
 	}
 }
 
@@ -47,10 +51,12 @@ type Backoffer struct {
 	// retryableChecker is used to check if the error is retryable.
 	// By default, all errors are retryable.
 	retryableChecker func(err error) bool
-	// logTimes defines the number of retries required to print a log
-	logTimes int
+	// logInterval defines the log interval for retrying.
+	logInterval time.Duration
+	// nextLogTime is used to record the next log time.
+	nextLogTime time.Duration
 
-	times        int
+	attempt      int
 	next         time.Duration
 	currentTotal time.Duration
 }
@@ -62,11 +68,6 @@ func (bo *Backoffer) Exec(
 ) error {
 	defer bo.resetBackoff()
 	return bo.ExecWithoutReset(ctx, fn)
-}
-
-func getFunctionName(f any) string {
-	strs := strings.Split(runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), ".")
-	return strings.Split(strs[len(strs)-1], "-")[0]
 }
 
 // ExecWithoutReset is a helper function to exec backoff and not reset backoffer.
@@ -81,26 +82,34 @@ func (bo *Backoffer) ExecWithoutReset(
 	fnName := getFunctionName(fn)
 	for {
 		err := fn()
-		bo.times++
+		bo.attempt++
+		if bo.attempt < maxRecordErrorCount {
+			// multierr.Append will ignore nil error.
+			allErrors = multierr.Append(allErrors, err)
+		}
+		if err != nil {
+			if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
+				bo.nextLogTime %= bo.logInterval
+				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
+			}
+		}
 		if !bo.isRetryable(err) {
 			break
 		}
-		allErrors = multierr.Append(allErrors, err)
-		if bo.logTimes > 0 && bo.times%bo.logTimes == 0 {
-			log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.times), zap.Error(err))
-		}
-		if bo.wait(ctx, after) {
+		if err := bo.wait(ctx, after); err != nil {
+			allErrors = multierr.Append(allErrors, err)
 			break
 		}
 	}
 	return allErrors
 }
 
+// WaitAndExecWithoutReset waits for the backoff time first and then executes the function.
 func (bo *Backoffer) WaitAndExecWithoutReset(
 	ctx context.Context,
 	fn func() error,
 ) bool {
-	if bo.wait(ctx, nil) {
+	if err := bo.wait(ctx, nil); err != nil {
 		return false
 	}
 	return bo.ExecWithoutReset(ctx, fn) == nil
@@ -109,8 +118,9 @@ func (bo *Backoffer) WaitAndExecWithoutReset(
 func (bo *Backoffer) wait(
 	ctx context.Context,
 	after *time.Timer,
-) bool {
+) error {
 	currentInterval := bo.nextInterval()
+	bo.nextLogTime += currentInterval
 	if after == nil {
 		after = time.NewTimer(currentInterval)
 	} else {
@@ -120,7 +130,7 @@ func (bo *Backoffer) wait(
 	select {
 	case <-ctx.Done():
 		after.Stop()
-		return true
+		return ctx.Err()
 	case <-after.C:
 		failpoint.Inject("backOffExecute", func() {
 			testBackOffExecuteFlag = true
@@ -131,10 +141,10 @@ func (bo *Backoffer) wait(
 	if bo.total > 0 {
 		bo.currentTotal += currentInterval
 		if bo.currentTotal >= bo.total {
-			return true
+			return errs.ErrClientBackoffExceedMax
 		}
 	}
-	return false
+	return nil
 }
 
 // InitialBackoffer make the initial state for retrying.
@@ -159,7 +169,7 @@ func InitialBackoffer(base, max, total time.Duration, opts ...Option) *Backoffer
 		},
 		next:         base,
 		currentTotal: 0,
-		times:        0,
+		attempt:      0,
 	}
 	for _, opt := range opts {
 		opt(bo)
@@ -203,7 +213,8 @@ func (bo *Backoffer) exponentialInterval() time.Duration {
 func (bo *Backoffer) resetBackoff() {
 	bo.next = bo.base
 	bo.currentTotal = 0
-	bo.times = 0
+	bo.attempt = 0
+	bo.nextLogTime = 0
 }
 
 // Clone clones the backoff for `base`, `max`, `total` and `retryableChecker`.
@@ -222,4 +233,9 @@ var testBackOffExecuteFlag = false
 // TestBackOffExecute Only used for test.
 func TestBackOffExecute() bool {
 	return testBackOffExecuteFlag
+}
+
+func getFunctionName(f any) string {
+	strs := strings.Split(runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), ".")
+	return strings.Split(strs[len(strs)-1], "-")[0]
 }

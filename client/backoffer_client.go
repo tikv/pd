@@ -34,192 +34,16 @@ const (
 
 var _ RPCClient = (*backoffClient)(nil)
 
+// backoffClient is a RPCClient that retries requests using the given backoffer.
+// The TSFuture returned by GetTSAsync and GetLocalTSAsync also supports backoff,
+// because the backoff is done in the `client` layer.
 type backoffClient struct {
+	*baseBackoffClient
 	cli *client
 	bo  *retry.Backoffer
 }
 
-func (c *backoffClient) GetAllMembers(ctx context.Context) (ret []*pdpb.Member, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetAllMembers(ctx)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (ret *Region, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetRegion(ctx, key, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, opts ...GetRegionOption) (ret *Region, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetRegionFromMember(ctx, key, memberURLs, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (ret *Region, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetPrevRegion(ctx, key, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (ret *Region, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetRegionByID(ctx, regionID, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...GetRegionOption) (ret []*Region, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.ScanRegions(ctx, key, endKey, limit, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetStore(ctx context.Context, storeID uint64) (ret *metapb.Store, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetStore(ctx, storeID)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetAllStores(ctx context.Context, opts ...GetStoreOption) (ret []*metapb.Store, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetAllStores(ctx, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (ret uint64, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.UpdateGCSafePoint(ctx, safePoint)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (ret uint64, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.UpdateServiceGCSafePoint(ctx, serviceID, ttl, safePoint)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) ScatterRegion(ctx context.Context, regionID uint64) (err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		err = c.cli.ScatterRegion(ctx, regionID)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (ret *pdpb.ScatterRegionResponse, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.ScatterRegions(ctx, regionsID, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (ret *pdpb.SplitRegionsResponse, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.SplitRegions(ctx, splitKeys, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (ret *pdpb.SplitAndScatterRegionsResponse, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.SplitAndScatterRegions(ctx, splitKeys, opts...)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetOperator(ctx context.Context, regionID uint64) (ret *pdpb.GetOperatorResponse, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetOperator(ctx, regionID)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) LoadGlobalConfig(ctx context.Context, names []string, configPath string) (config []GlobalConfigItem, revision int64, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		config, revision, err = c.cli.LoadGlobalConfig(ctx, names, configPath)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) (err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		err = c.cli.StoreGlobalConfig(ctx, configPath, items)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (configChan chan []GlobalConfigItem, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		configChan, err = c.cli.WatchGlobalConfig(ctx, configPath, revision)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetExternalTimestamp(ctx context.Context) (ret uint64, err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		ret, err = c.cli.GetExternalTimestamp(ctx)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) SetExternalTimestamp(ctx context.Context, timestamp uint64) (err error) {
-	bo := c.bo.Clone()
-	bo.Exec(ctx, func() error {
-		err = c.cli.SetExternalTimestamp(ctx, timestamp)
-		return err
-	})
-	return
-}
-
-func (c *backoffClient) GetTS(ctx context.Context) (int64, int64, error) {
+func (c *backoffClient) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
 	bo := c.bo.Clone()
 	return c.cli.getTSWithRetry(ctx, bo)
 }
@@ -229,7 +53,7 @@ func (c *backoffClient) GetTSAsync(ctx context.Context) TSFuture {
 	return c.cli.getTSAsyncWithRetry(ctx, bo)
 }
 
-func (c *backoffClient) GetLocalTS(ctx context.Context, dcLocation string) (int64, int64, error) {
+func (c *backoffClient) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
 	bo := c.bo.Clone()
 	return c.cli.getLocalTSWithRetry(ctx, dcLocation, bo)
 }
@@ -239,7 +63,212 @@ func (c *backoffClient) GetLocalTSAsync(ctx context.Context, dcLocation string) 
 	return c.cli.getLocalTSAsyncWithRetry(ctx, dcLocation, bo)
 }
 
-func (c *backoffClient) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
+// baseBackoffClient is a base RPCClient that retries requests using the given backoffer.
+// It does not support backoff for GetTSAsync and GetLocalTSAsync.
+// baseBackoffClient is mostly used for mock PD client.
+type baseBackoffClient struct {
+	cli Client
+	bo  *retry.Backoffer
+}
+
+// NewBackofferClient creates a new RPCClient that retries requests using the given backoffer.
+func NewBackofferClient(cli Client, bo *retry.Backoffer) RPCClient {
+	base := &baseBackoffClient{
+		cli: cli,
+		bo:  bo,
+	}
+	c, ok := cli.(*client)
+	if ok {
+		return &backoffClient{
+			baseBackoffClient: base,
+			cli:               c,
+			bo:                bo,
+		}
+	}
+	return base
+}
+
+func (c *baseBackoffClient) GetAllMembers(ctx context.Context) (ret []*pdpb.Member, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetAllMembers(ctx)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (ret *Region, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetRegion(ctx, key, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, opts ...GetRegionOption) (ret *Region, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetRegionFromMember(ctx, key, memberURLs, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (ret *Region, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetPrevRegion(ctx, key, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (ret *Region, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetRegionByID(ctx, regionID, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...GetRegionOption) (ret []*Region, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.ScanRegions(ctx, key, endKey, limit, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetStore(ctx context.Context, storeID uint64) (ret *metapb.Store, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetStore(ctx, storeID)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetAllStores(ctx context.Context, opts ...GetStoreOption) (ret []*metapb.Store, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetAllStores(ctx, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (ret uint64, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.UpdateGCSafePoint(ctx, safePoint)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (ret uint64, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.UpdateServiceGCSafePoint(ctx, serviceID, ttl, safePoint)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) ScatterRegion(ctx context.Context, regionID uint64) (err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		err = c.cli.ScatterRegion(ctx, regionID)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (ret *pdpb.ScatterRegionResponse, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.ScatterRegions(ctx, regionsID, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (ret *pdpb.SplitRegionsResponse, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.SplitRegions(ctx, splitKeys, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (ret *pdpb.SplitAndScatterRegionsResponse, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.SplitAndScatterRegions(ctx, splitKeys, opts...)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetOperator(ctx context.Context, regionID uint64) (ret *pdpb.GetOperatorResponse, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetOperator(ctx, regionID)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) LoadGlobalConfig(ctx context.Context, names []string, configPath string) (config []GlobalConfigItem, revision int64, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		config, revision, err = c.cli.LoadGlobalConfig(ctx, names, configPath)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) (err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		err = c.cli.StoreGlobalConfig(ctx, configPath, items)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (configChan chan []GlobalConfigItem, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		configChan, err = c.cli.WatchGlobalConfig(ctx, configPath, revision)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetExternalTimestamp(ctx context.Context) (ret uint64, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		ret, err = c.cli.GetExternalTimestamp(ctx)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) SetExternalTimestamp(ctx context.Context, timestamp uint64) (err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		err = c.cli.SetExternalTimestamp(ctx, timestamp)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		physical, logical, err = c.cli.GetMinTS(ctx)
@@ -248,7 +277,7 @@ func (c *backoffClient) GetMinTS(ctx context.Context) (physical int64, logical i
 	return
 }
 
-func (c *backoffClient) Watch(ctx context.Context, key []byte, opts ...OpOption) (ret chan []*meta_storagepb.Event, err error) {
+func (c *baseBackoffClient) Watch(ctx context.Context, key []byte, opts ...OpOption) (ret chan []*meta_storagepb.Event, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.Watch(ctx, key, opts...)
@@ -257,7 +286,7 @@ func (c *backoffClient) Watch(ctx context.Context, key []byte, opts ...OpOption)
 	return
 }
 
-func (c *backoffClient) Get(ctx context.Context, key []byte, opts ...OpOption) (ret *meta_storagepb.GetResponse, err error) {
+func (c *baseBackoffClient) Get(ctx context.Context, key []byte, opts ...OpOption) (ret *meta_storagepb.GetResponse, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.Get(ctx, key, opts...)
@@ -266,7 +295,7 @@ func (c *backoffClient) Get(ctx context.Context, key []byte, opts ...OpOption) (
 	return
 }
 
-func (c *backoffClient) Put(ctx context.Context, key []byte, value []byte, opts ...OpOption) (ret *meta_storagepb.PutResponse, err error) {
+func (c *baseBackoffClient) Put(ctx context.Context, key []byte, value []byte, opts ...OpOption) (ret *meta_storagepb.PutResponse, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.Put(ctx, key, value, opts...)
@@ -275,7 +304,7 @@ func (c *backoffClient) Put(ctx context.Context, key []byte, value []byte, opts 
 	return
 }
 
-func (c *backoffClient) LoadKeyspace(ctx context.Context, name string) (ret *keyspacepb.KeyspaceMeta, err error) {
+func (c *baseBackoffClient) LoadKeyspace(ctx context.Context, name string) (ret *keyspacepb.KeyspaceMeta, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.LoadKeyspace(ctx, name)
@@ -284,7 +313,7 @@ func (c *backoffClient) LoadKeyspace(ctx context.Context, name string) (ret *key
 	return
 }
 
-func (c *backoffClient) UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (ret *keyspacepb.KeyspaceMeta, err error) {
+func (c *baseBackoffClient) UpdateKeyspaceState(ctx context.Context, id uint32, state keyspacepb.KeyspaceState) (ret *keyspacepb.KeyspaceMeta, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.UpdateKeyspaceState(ctx, id, state)
@@ -293,7 +322,7 @@ func (c *backoffClient) UpdateKeyspaceState(ctx context.Context, id uint32, stat
 	return
 }
 
-func (c *backoffClient) WatchKeyspaces(ctx context.Context) (ret chan []*keyspacepb.KeyspaceMeta, err error) {
+func (c *baseBackoffClient) WatchKeyspaces(ctx context.Context) (ret chan []*keyspacepb.KeyspaceMeta, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.WatchKeyspaces(ctx)
@@ -302,7 +331,7 @@ func (c *backoffClient) WatchKeyspaces(ctx context.Context) (ret chan []*keyspac
 	return
 }
 
-func (c *backoffClient) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint32) (ret []*keyspacepb.KeyspaceMeta, err error) {
+func (c *baseBackoffClient) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint32) (ret []*keyspacepb.KeyspaceMeta, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.GetAllKeyspaces(ctx, startID, limit)
@@ -311,7 +340,7 @@ func (c *backoffClient) GetAllKeyspaces(ctx context.Context, startID uint32, lim
 	return
 }
 
-func (c *backoffClient) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (ret uint64, err error) {
+func (c *baseBackoffClient) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (ret uint64, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.UpdateGCSafePointV2(ctx, keyspaceID, safePoint)
@@ -320,7 +349,7 @@ func (c *backoffClient) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint
 	return
 }
 
-func (c *backoffClient) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (ret uint64, err error) {
+func (c *baseBackoffClient) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (ret uint64, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.UpdateServiceSafePointV2(ctx, keyspaceID, serviceID, ttl, safePoint)
@@ -329,7 +358,7 @@ func (c *backoffClient) UpdateServiceSafePointV2(ctx context.Context, keyspaceID
 	return
 }
 
-func (c *backoffClient) WatchGCSafePointV2(ctx context.Context, revision int64) (ret chan []*pdpb.SafePointEvent, err error) {
+func (c *baseBackoffClient) WatchGCSafePointV2(ctx context.Context, revision int64) (ret chan []*pdpb.SafePointEvent, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.WatchGCSafePointV2(ctx, revision)
@@ -338,7 +367,7 @@ func (c *backoffClient) WatchGCSafePointV2(ctx context.Context, revision int64) 
 	return
 }
 
-func (c *backoffClient) ListResourceGroups(ctx context.Context, opts ...GetResourceGroupOption) (ret []*rmpb.ResourceGroup, err error) {
+func (c *baseBackoffClient) ListResourceGroups(ctx context.Context, opts ...GetResourceGroupOption) (ret []*rmpb.ResourceGroup, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.ListResourceGroups(ctx, opts...)
@@ -347,7 +376,7 @@ func (c *backoffClient) ListResourceGroups(ctx context.Context, opts ...GetResou
 	return
 }
 
-func (c *backoffClient) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...GetResourceGroupOption) (ret *rmpb.ResourceGroup, err error) {
+func (c *baseBackoffClient) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...GetResourceGroupOption) (ret *rmpb.ResourceGroup, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.GetResourceGroup(ctx, resourceGroupName, opts...)
@@ -356,7 +385,7 @@ func (c *backoffClient) GetResourceGroup(ctx context.Context, resourceGroupName 
 	return
 }
 
-func (c *backoffClient) AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (ret string, err error) {
+func (c *baseBackoffClient) AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (ret string, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.AddResourceGroup(ctx, metaGroup)
@@ -365,7 +394,7 @@ func (c *backoffClient) AddResourceGroup(ctx context.Context, metaGroup *rmpb.Re
 	return
 }
 
-func (c *backoffClient) ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (ret string, err error) {
+func (c *baseBackoffClient) ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (ret string, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.ModifyResourceGroup(ctx, metaGroup)
@@ -374,7 +403,7 @@ func (c *backoffClient) ModifyResourceGroup(ctx context.Context, metaGroup *rmpb
 	return
 }
 
-func (c *backoffClient) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (ret string, err error) {
+func (c *baseBackoffClient) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (ret string, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.DeleteResourceGroup(ctx, resourceGroupName)
@@ -383,7 +412,7 @@ func (c *backoffClient) DeleteResourceGroup(ctx context.Context, resourceGroupNa
 	return
 }
 
-func (c *backoffClient) LoadResourceGroups(ctx context.Context) (rgs []*rmpb.ResourceGroup, revision int64, err error) {
+func (c *baseBackoffClient) LoadResourceGroups(ctx context.Context) (rgs []*rmpb.ResourceGroup, revision int64, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		rgs, revision, err = c.cli.LoadResourceGroups(ctx)
@@ -392,11 +421,36 @@ func (c *backoffClient) LoadResourceGroups(ctx context.Context) (rgs []*rmpb.Res
 	return
 }
 
-func (c *backoffClient) AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) (ret []*rmpb.TokenBucketResponse, err error) {
+func (c *baseBackoffClient) AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) (ret []*rmpb.TokenBucketResponse, err error) {
 	bo := c.bo.Clone()
 	bo.Exec(ctx, func() error {
 		ret, err = c.cli.AcquireTokenBuckets(ctx, request)
 		return err
 	})
 	return
+}
+func (c *baseBackoffClient) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		physical, logical, err = c.cli.GetTS(ctx)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetTSAsync(ctx context.Context) (ret TSFuture) {
+	return c.cli.GetTSAsync(ctx)
+}
+
+func (c *baseBackoffClient) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
+	bo := c.bo.Clone()
+	bo.Exec(ctx, func() error {
+		physical, logical, err = c.cli.GetLocalTS(ctx, dcLocation)
+		return err
+	})
+	return
+}
+
+func (c *baseBackoffClient) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
+	return c.cli.GetLocalTSAsync(ctx, dcLocation)
 }
