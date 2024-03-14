@@ -25,9 +25,9 @@ import (
 
 // GetCgroupCPU returns the CPU usage and quota for the current cgroup.
 func GetCgroupCPU() (CPUUsage, error) {
-	cpuusage, err := getCgroupCPUHelper("/")
-	cpuusage.NumCPU = runtime.NumCPU()
-	return cpuusage, err
+	cpuUsage, err := getCgroupCPUHelper("/")
+	cpuUsage.NumCPU = runtime.NumCPU()
+	return cpuUsage, err
 }
 
 // CPUQuotaToGOMAXPROCS converts the CPU quota applied to the calling process
