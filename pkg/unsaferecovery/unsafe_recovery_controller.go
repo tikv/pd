@@ -34,6 +34,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -779,6 +780,12 @@ func (r *regionItem) IsRaftStale(origin *regionItem, u *Controller) bool {
 	cmps := []func(a, b *regionItem) int{
 		func(a, b *regionItem) int {
 			return int(a.report.GetRaftState().GetHardState().GetTerm()) - int(b.report.GetRaftState().GetHardState().GetTerm())
+		},
+		// choose the peer has maximum applied_index or last index.
+		func(a, b *regionItem) int {
+			maxIdxA := typeutil.MaxUint64(a.report.GetRaftState().GetLastIndex(), a.report.AppliedIndex)
+			maxIdxB := typeutil.MaxUint64(b.report.GetRaftState().GetLastIndex(), b.report.AppliedIndex)
+			return int(maxIdxA - maxIdxB)
 		},
 		func(a, b *regionItem) int {
 			return int(a.report.GetRaftState().GetLastIndex()) - int(b.report.GetRaftState().GetLastIndex())
