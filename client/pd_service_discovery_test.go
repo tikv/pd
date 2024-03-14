@@ -140,10 +140,16 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err1 == nil && err2 == nil {
-			suite.followerClient = newPDServiceClient(suite.followerServer.addr, suite.leaderServer.addr, nil, followerConn, false)
-			suite.leaderClient = newPDServiceClient(suite.leaderServer.addr, suite.leaderServer.addr, nil, leaderConn, true)
+			suite.followerClient = newPDServiceClient(
+				modifyURLScheme(suite.followerServer.addr, nil),
+				modifyURLScheme(suite.leaderServer.addr, nil),
+				followerConn, false)
+			suite.leaderClient = newPDServiceClient(
+				modifyURLScheme(suite.leaderServer.addr, nil),
+				modifyURLScheme(suite.leaderServer.addr, nil),
+				leaderConn, true)
 			suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
-			suite.followerServer.server.leaderAddr = suite.leaderClient.GetAddress()
+			suite.followerServer.server.leaderAddr = suite.leaderClient.GetURL()
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -166,16 +172,14 @@ func (suite *serviceClientTestSuite) TearDownSuite() {
 
 func (suite *serviceClientTestSuite) TestServiceClient() {
 	re := suite.Require()
-	leaderAddress := suite.leaderServer.addr
-	followerAddress := suite.followerServer.addr
+	leaderAddress := modifyURLScheme(suite.leaderServer.addr, nil)
+	followerAddress := modifyURLScheme(suite.followerServer.addr, nil)
 
 	follower := suite.followerClient
 	leader := suite.leaderClient
 
-	re.Equal(follower.GetAddress(), followerAddress)
-	re.Equal(leader.GetAddress(), leaderAddress)
-	re.Equal(follower.GetHTTPAddress(), "http://"+followerAddress)
-	re.Equal(leader.GetHTTPAddress(), "http://"+leaderAddress)
+	re.Equal(follower.GetURL(), followerAddress)
+	re.Equal(leader.GetURL(), leaderAddress)
 
 	re.True(follower.Available())
 	re.True(leader.Available())
@@ -301,18 +305,78 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re.Equal(int32(5), suite.followerServer.server.getForwardCount())
 }
 
-func TestHTTPScheme(t *testing.T) {
+func TestServiceClientScheme(t *testing.T) {
 	re := require.New(t)
-	cli := newPDServiceClient("127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
-	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
-	cli = newPDServiceClient("https://127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
-	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
-	cli = newPDServiceClient("http://127.0.0.1:2379", "127.0.0.1:2379", nil, nil, false)
-	re.Equal("http://127.0.0.1:2379", cli.GetHTTPAddress())
-	cli = newPDServiceClient("127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
-	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
-	cli = newPDServiceClient("https://127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
-	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
-	cli = newPDServiceClient("http://127.0.0.1:2379", "127.0.0.1:2379", &tls.Config{}, nil, false)
-	re.Equal("https://127.0.0.1:2379", cli.GetHTTPAddress())
+	cli := newPDServiceClient(modifyURLScheme("127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetURL())
+	cli = newPDServiceClient(modifyURLScheme("https://127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetURL())
+	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
+	re.Equal("http://127.0.0.1:2379", cli.GetURL())
+	cli = newPDServiceClient(modifyURLScheme("127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetURL())
+	cli = newPDServiceClient(modifyURLScheme("https://127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetURL())
+	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	re.Equal("https://127.0.0.1:2379", cli.GetURL())
+}
+
+func TestSchemeFunction(t *testing.T) {
+	re := require.New(t)
+	tlsCfg := &tls.Config{}
+
+	endpoints1 := []string{
+		"http://tc-pd:2379",
+		"tc-pd:2379",
+		"https://tc-pd:2379",
+	}
+	endpoints2 := []string{
+		"127.0.0.1:2379",
+		"http://127.0.0.1:2379",
+		"https://127.0.0.1:2379",
+	}
+	urls := addrsToURLs(endpoints1, tlsCfg)
+	for _, u := range urls {
+		re.Equal("https://tc-pd:2379", u)
+	}
+	urls = addrsToURLs(endpoints2, tlsCfg)
+	for _, u := range urls {
+		re.Equal("https://127.0.0.1:2379", u)
+	}
+	urls = addrsToURLs(endpoints1, nil)
+	for _, u := range urls {
+		re.Equal("http://tc-pd:2379", u)
+	}
+	urls = addrsToURLs(endpoints2, nil)
+	for _, u := range urls {
+		re.Equal("http://127.0.0.1:2379", u)
+	}
+
+	re.Equal("https://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", tlsCfg))
+	re.Equal("https://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", tlsCfg))
+	re.Equal("https://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", tlsCfg))
+	re.Equal("https://tc-pd:2379", modifyURLScheme("tc-pd:2379", tlsCfg))
+	re.Equal("http://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", nil))
+	re.Equal("http://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", nil))
+	re.Equal("http://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", nil))
+	re.Equal("http://tc-pd:2379", modifyURLScheme("tc-pd:2379", nil))
+
+	urls = []string{
+		"http://127.0.0.1:2379",
+		"https://127.0.0.1:2379",
+	}
+	re.Equal("https://127.0.0.1:2379", pickMatchedURL(urls, tlsCfg))
+	urls = []string{
+		"http://127.0.0.1:2379",
+	}
+	re.Equal("https://127.0.0.1:2379", pickMatchedURL(urls, tlsCfg))
+	urls = []string{
+		"http://127.0.0.1:2379",
+		"https://127.0.0.1:2379",
+	}
+	re.Equal("http://127.0.0.1:2379", pickMatchedURL(urls, nil))
+	urls = []string{
+		"https://127.0.0.1:2379",
+	}
+	re.Equal("http://127.0.0.1:2379", pickMatchedURL(urls, nil))
 }
