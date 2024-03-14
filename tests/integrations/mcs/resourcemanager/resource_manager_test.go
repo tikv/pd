@@ -140,7 +140,7 @@ func (suite *resourceManagerClientTestSuite) waitLeader(re *require.Assertions, 
 	re.NotNil(innerCli)
 	testutil.Eventually(re, func() bool {
 		innerCli.GetServiceDiscovery().ScheduleCheckMemberChanged()
-		return innerCli.GetServiceDiscovery().GetServingAddr() == leaderAddr
+		return innerCli.GetServiceDiscovery().GetServingURL() == leaderAddr
 	})
 }
 
