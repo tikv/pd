@@ -56,7 +56,6 @@ func (m *mockPDServiceDiscovery) GetAllServiceClients() []ServiceClient {
 	return m.clients
 }
 
-func (m *mockPDServiceDiscovery) GetURL() string                                 { return "" }
 func (m *mockPDServiceDiscovery) GetClusterID() uint64                           { return 0 }
 func (m *mockPDServiceDiscovery) GetKeyspaceID() uint32                          { return 0 }
 func (m *mockPDServiceDiscovery) GetKeyspaceGroupID() uint32                     { return 0 }

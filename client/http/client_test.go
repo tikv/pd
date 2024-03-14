@@ -43,7 +43,7 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 		checked++
 		return nil
 	})
-	c := newClientWithMockServiceDiscovery("test-header", []string{"http://127.0.0.1:2379"}, WithHTTPClient(httpClient))
+	c := newClientWithMockServiceDiscovery("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	defer c.Close()
 	c.GetRegions(context.Background())
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
@@ -64,7 +64,7 @@ func TestWithCallerID(t *testing.T) {
 		checked++
 		return nil
 	})
-	c := newClientWithMockServiceDiscovery("test-caller-id", []string{"http://127.0.0.1:2379"}, WithHTTPClient(httpClient))
+	c := newClientWithMockServiceDiscovery("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
 	defer c.Close()
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
@@ -76,7 +76,7 @@ func TestWithBackoffer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := newClientWithMockServiceDiscovery("test-with-backoffer", []string{"http://127.0.0.1:2379"})
+	c := newClientWithMockServiceDiscovery("test-with-backoffer", []string{"http://127.0.0.1"})
 	defer c.Close()
 
 	base := 100 * time.Millisecond
@@ -102,9 +102,11 @@ func TestWithTargetURL(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := newClientWithMockServiceDiscovery("test-with-target-url", []string{"http://127.0.0.1:2379", "http://127.0.0.2:2379", "http://127.0.0.3:2379"})
+	c := newClientWithMockServiceDiscovery("test-with-target-url", []string{"http://127.0.0.1", "http://127.0.0.2", "http://127.0.0.3"})
 	defer c.Close()
 
-	_, err := c.WithTargetURL("http://127.0.0.4:2379").GetStatus(ctx)
+	_, err := c.WithTargetURL("http://127.0.0.4").GetStatus(ctx)
 	re.ErrorIs(err, errs.ErrClientNoTargetMember)
+	_, err = c.WithTargetURL("http://127.0.0.2").GetStatus(ctx)
+	re.ErrorContains(err, "connect: connection refused")
 }
