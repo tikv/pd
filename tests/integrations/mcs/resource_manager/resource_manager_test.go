@@ -439,9 +439,15 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
 				startTime := time.Now()
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 				_, _, err := controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
 				re.NoError(err)
 				_, _, err = controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
+=======
+				_, _, _, _, err := controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
+				re.NoError(err)
+				_, _, _, _, err = controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 				re.NoError(err)
 				sum += time.Since(startTime)
 				controller.OnResponse(cas.resourceGroupName, rreq, rres)
@@ -458,7 +464,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate", "return(true)"))
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 900000000, times: 1, waitDuration: 0}
 	wreq := tcs.makeWriteRequest()
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, _, err = controller.OnRequestWait(suite.ctx, rg.Name, wreq)
+=======
+	_, _, _, _, err = controller.OnRequestWait(suite.ctx, rg.Name, wreq)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.Error(err)
 	time.Sleep(time.Millisecond * 200)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate"))
@@ -513,9 +523,15 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 		wreq := tcs.makeWriteRequest()
 		rres := tcs.makeReadResponse()
 		wres := tcs.makeWriteResponse()
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 		_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
 		re.NoError(err)
 		_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+=======
+		_, _, _, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+		re.NoError(err)
+		_, _, _, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 		re.NoError(err)
 		controller.OnResponse(resourceGroupName, rreq, rres)
 		controller.OnResponse(resourceGroupName, wreq, wres)
@@ -552,9 +568,15 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
 				startTime := time.Now()
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 				_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
 				re.NoError(err)
 				_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+=======
+				_, _, _, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName, rreq)
+				re.NoError(err)
+				_, _, _, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName, wreq)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 				re.NoError(err)
 				sum += time.Since(startTime)
 				controller.OnResponse(resourceGroupName, rreq, rres)
@@ -572,14 +594,22 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	resourceGroupName2 := suite.initGroups[2].Name
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 100000, times: 1, waitDuration: 0}
 	wreq := tcs.makeWriteRequest()
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName2, wreq)
+=======
+	_, _, _, _, err := controller.OnRequestWait(suite.ctx, resourceGroupName2, wreq)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend", "return(true)"))
 	resourceGroupName3 := suite.initGroups[3].Name
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 1000, times: 1, waitDuration: 0}
 	wreq = tcs.makeWriteRequest()
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+=======
+	_, _, _, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 	time.Sleep(110 * time.Millisecond)
 	tcs = tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 10, times: 1010, waitDuration: 0}
@@ -587,7 +617,11 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 	for i := 0; i < tcs.times; i++ {
 		wreq = tcs.makeWriteRequest()
 		startTime := time.Now()
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 		_, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+=======
+		_, _, _, _, err = controller.OnRequestWait(suite.ctx, resourceGroupName3, wreq)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 		duration += time.Since(startTime)
 		re.NoError(err)
 	}
@@ -636,7 +670,11 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	// init
 	req := controller.NewTestRequestInfo(false, 0, 2 /* store2 */)
 	resp := controller.NewTestResponseInfo(0, time.Duration(30), true)
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, penalty, err := c.OnRequestWait(suite.ctx, resourceGroupName, req)
+=======
+	_, penalty, _, _, err := c.OnRequestWait(suite.ctx, resourceGroupName, req)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 	re.Equal(penalty.WriteBytes, float64(0))
 	re.Equal(penalty.TotalCpuTimeMs, 0.0)
@@ -645,7 +683,11 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 
 	req = controller.NewTestRequestInfo(true, 60, 1 /* store1 */)
 	resp = controller.NewTestResponseInfo(0, time.Duration(10), true)
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
+=======
+	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 	re.Equal(penalty.WriteBytes, float64(0))
 	re.Equal(penalty.TotalCpuTimeMs, 0.0)
@@ -655,7 +697,11 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	// failed request, shouldn't be counted in penalty
 	req = controller.NewTestRequestInfo(true, 20, 1 /* store1 */)
 	resp = controller.NewTestResponseInfo(0, time.Duration(0), false)
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
+=======
+	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 	re.Equal(penalty.WriteBytes, float64(0))
 	re.Equal(penalty.TotalCpuTimeMs, 0.0)
@@ -665,7 +711,11 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	// from same store, should be zero
 	req1 := controller.NewTestRequestInfo(false, 0, 1 /* store1 */)
 	resp1 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req1)
+=======
+	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req1)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 	re.Equal(penalty.WriteBytes, float64(0))
 	_, err = c.OnResponse(resourceGroupName, req1, resp1)
@@ -674,7 +724,11 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	// from different store, should be non-zero
 	req2 := controller.NewTestRequestInfo(true, 50, 2 /* store2 */)
 	resp2 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
+=======
+	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 	re.Equal(penalty.WriteBytes, float64(60))
 	re.InEpsilon(penalty.TotalCpuTimeMs, 10.0/1000.0/1000.0, 1e-6)
@@ -684,7 +738,11 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	// from new store, should be zero
 	req3 := controller.NewTestRequestInfo(true, 0, 3 /* store3 */)
 	resp3 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req3)
+=======
+	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req3)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 	re.Equal(penalty.WriteBytes, float64(0))
 	_, err = c.OnResponse(resourceGroupName, req3, resp3)
@@ -694,7 +752,11 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	resourceGroupName = groupNames[1]
 	req4 := controller.NewTestRequestInfo(true, 50, 1 /* store2 */)
 	resp4 := controller.NewTestResponseInfo(0, time.Duration(10), true)
+<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
 	_, penalty, err = c.OnRequestWait(suite.ctx, resourceGroupName, req4)
+=======
+	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req4)
+>>>>>>> 259435d93 (client: return total wait duration in resource interceptor OnRequestWait call (#7488)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	re.NoError(err)
 	re.Equal(penalty.WriteBytes, float64(0))
 	_, err = c.OnResponse(resourceGroupName, req4, resp4)
