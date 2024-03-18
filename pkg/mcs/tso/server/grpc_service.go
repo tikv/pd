@@ -100,7 +100,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
 		if s.IsClosed() {
-			return status.Errorf(codes.Unknown, "server not started")
+			return ErrNotStarted
 		}
 		header := request.GetHeader()
 		clusterID := header.GetClusterId()

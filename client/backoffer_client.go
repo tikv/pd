@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
@@ -23,14 +24,41 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 )
 
 const (
 	defaultRPCBaseBackoffInterval  = 100 * time.Millisecond
 	defaultRPCMaxBackoffInterval   = 1 * time.Second
-	defaultRPCBackoffTotalDuration = 120 * time.Second
+	defaultRPCBackoffTotalDuration = 0
 )
+
+// IsLeaderChange will determine whether there is a leader change.
+func IsLeaderChange(err error) bool {
+	if err == errs.ErrClientTSOStreamClosed {
+		return true
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, errs.NotLeaderErr) ||
+		strings.Contains(errMsg, errs.MismatchLeaderErr) ||
+		strings.Contains(errMsg, errs.NotServedErr)
+}
+
+// createDefaultBackoffer returns a default backoffer.
+// It will unlimitedly retry on leader change error.
+// It will not retry on other errors.
+func createDefaultBackoffer() *retry.Backoffer {
+	bo := retry.InitialBackoffer(
+		defaultRPCBaseBackoffInterval,
+		defaultRPCMaxBackoffInterval,
+		defaultRPCBackoffTotalDuration,
+	)
+	bo.SetRetryableChecker(func(err error) bool {
+		return err != nil && IsLeaderChange(err)
+	})
+	return bo
+}
 
 var _ RPCClient = (*backoffClient)(nil)
 

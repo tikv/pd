@@ -28,7 +28,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const maxRecordErrorCount = 20
+const (
+	maxRecordErrorCount                        = 20
+	defaultEnablelimitedRetryForTolerableError = false
+)
 
 // Option is used to customize the backoffer.
 type Option func(*Backoffer)
@@ -39,6 +42,9 @@ func WithMinLogInterval(interval time.Duration) Option {
 		bo.logInterval = interval
 	}
 }
+
+// RetryableChecker is used to check if the error is retryable.
+type RetryableChecker func(err error) bool
 
 // Backoffer is a backoff policy for retrying operations.
 type Backoffer struct {
@@ -178,7 +184,7 @@ func InitialBackoffer(base, max, total time.Duration, opts ...Option) *Backoffer
 }
 
 // SetRetryableChecker sets the retryable checker.
-func (bo *Backoffer) SetRetryableChecker(checker func(err error) bool) {
+func (bo *Backoffer) SetRetryableChecker(checker RetryableChecker) {
 	bo.retryableChecker = checker
 }
 

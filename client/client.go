@@ -394,8 +394,7 @@ func createClientWithKeyspace(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		bo: retry.InitialBackoffer(
-			defaultRPCBaseBackoffInterval, defaultRPCMaxBackoffInterval, defaultRPCBackoffTotalDuration),
+		bo:                      createDefaultBackoffer(),
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
@@ -516,8 +515,7 @@ func newClientWithKeyspaceName(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		bo: retry.InitialBackoffer(
-			defaultRPCBaseBackoffInterval, defaultRPCMaxBackoffInterval, defaultRPCBackoffTotalDuration),
+		bo:                      createDefaultBackoffer(),
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
@@ -696,6 +694,11 @@ func (c *client) scheduleUpdateTokenConnection() {
 	}
 }
 
+// BackoffRPCClient creates a RPC client with backoff strategy.
+// If no backoff is specified, the default backoffer is used.
+// The default backoffer will retry from 100ms interval to 1s interval,
+// and unlimited retry for leader change error. Moreover, it will return error
+// right away for other errors.
 func (c *client) BackoffRPCClient(bos ...*retry.Backoffer) RPCClient {
 	if len(bos) == 0 {
 		return NewBackofferClient(c, c.bo)
@@ -1431,17 +1434,6 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.GetHeader().GetError().String())
 	}
 	return resp, nil
-}
-
-// IsLeaderChange will determine whether there is a leader change.
-func IsLeaderChange(err error) bool {
-	if err == errs.ErrClientTSOStreamClosed {
-		return true
-	}
-	errMsg := err.Error()
-	return strings.Contains(errMsg, errs.NotLeaderErr) ||
-		strings.Contains(errMsg, errs.MismatchLeaderErr) ||
-		strings.Contains(errMsg, errs.NotServedErr)
 }
 
 const (
