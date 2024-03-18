@@ -61,7 +61,8 @@ func (h *pprofHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
 		debug  int
 		second int
 	}{
-		{name: "goroutine", debug: 2},
+		// debug=2 causes STW when collecting the stacks. See https://github.com/pingcap/tidb/issues/48695.
+		{name: "goroutine", debug: 1},
 		{name: "heap", gc: 1},
 		{name: "mutex"},
 		{name: "allocs"},
