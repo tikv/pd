@@ -810,7 +810,7 @@ func (c *client) dispatchTSORequestWithRetry(req *tsoRequest) error {
 		}
 		retryable, err = tsoClient.dispatchRequest(req)
 		if !retryable {
-			return nil
+			break
 		}
 		time.Sleep(dispatchRetryDelay)
 	}
