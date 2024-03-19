@@ -450,6 +450,7 @@ func NewLoopWatcher(
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
 		loadBatchSize:            maxLoadBatchSize,
 		watchChangeRetryInterval: defaultEtcdRetryInterval,
+		watchChTimeoutDuration:   WatchChTimeoutDuration,
 	}
 }
 
