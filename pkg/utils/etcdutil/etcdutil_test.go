@@ -584,7 +584,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	// crate data
+	// create data
 	var wg sync.WaitGroup
 	tasks := make(chan int, count)
 	for w := 0; w < 16; w++ {

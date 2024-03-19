@@ -796,7 +796,3 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
 }
-
-func (lw *LoopWatcher) SetWatchChTimeoutDuration(v time.Duration) {
-	lw.watchChTimeoutDuration = v
-}
