@@ -418,6 +418,8 @@ type LoopWatcher struct {
 	// updateClientCh is used to update the etcd client.
 	// It's only used for testing.
 	updateClientCh chan *clientv3.Client
+	// watchChTimeoutDuration is the timeout duration for a watchChan.
+	watchChTimeoutDuration time.Duration
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
@@ -597,7 +599,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			cancel()
 			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
 			// create a new one and need not to reset lastReceivedResponseTime.
-			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
+			if time.Since(lastReceivedResponseTime) >= lw.watchChTimeoutDuration {
 				log.Warn("watch channel is blocked for a long time, recreating a new one in watch loop",
 					zap.Duration("timeout", time.Since(lastReceivedResponseTime)),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))
@@ -793,4 +795,8 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+func (lw *LoopWatcher) SetWatchChTimeoutDuration(v time.Duration) {
+	lw.watchChTimeoutDuration = v
 }

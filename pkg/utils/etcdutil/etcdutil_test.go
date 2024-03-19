@@ -583,9 +583,25 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 	count := 65536
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	for i := 0; i < count; i++ {
-		suite.put(re, fmt.Sprintf("TestWatcherLoadLargeKey/test-%d", i), "")
+
+	// crate data
+	var wg sync.WaitGroup
+	tasks := make(chan int, count)
+	for w := 0; w < 16; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range tasks {
+				suite.put(re, fmt.Sprintf("TestWatcherLoadLargeKey/test-%d", i), "")
+			}
+		}()
 	}
+	for i := 0; i < count; i++ {
+		tasks <- i
+	}
+	close(tasks)
+	wg.Wait()
+
 	cache := make([]string, 0)
 	watcher := NewLoopWatcher(
 		ctx,
@@ -724,6 +740,7 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			func([]*clientv3.Event) error { return nil },
 			false, /* withPrefix */
 		)
+		watcher.watchChTimeoutDuration = 2 * RequestProgressInterval
 
 		suite.wg.Add(1)
 		go func() {
