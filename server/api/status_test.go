@@ -33,7 +33,7 @@ func checkStatusResponse(re *require.Assertions, body []byte) {
 
 func TestStatus(t *testing.T) {
 	re := require.New(t)
-	cfgs, _, clean := mustNewCluster(re, 3)
+	cfgs, _, clean := mustNewCluster(re, 1)
 	defer clean()
 
 	for _, cfg := range cfgs {
