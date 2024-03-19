@@ -130,6 +130,7 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
+// revokePendingRequest is only used in `Close` scene now, no need retry.
 func (tbc *tsoBatchController) revokePendingRequest(err error) {
 	for i := 0; i < len(tbc.tsoRequestCh); i++ {
 		req := <-tbc.tsoRequestCh

@@ -73,6 +73,17 @@ func (c *tsoClient) scheduleUpdateTSOConnectionCtxs() {
 	}
 }
 
+func (c *tsoClient) dispatchRequestWithFastRetry(ctx context.Context, dcLocation string, request *tsoRequest) error {
+	if err := c.dispatchRequest(ctx, dcLocation, request); err != nil {
+		// Wait for a while and try again
+		time.Sleep(50 * time.Millisecond)
+		if err = c.dispatchRequest(ctx, dcLocation, request); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *tsoClient) dispatchRequest(ctx context.Context, dcLocation string, request *tsoRequest) error {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
 	if !ok {
@@ -837,8 +848,20 @@ func (c *tsoClient) compareAndSwapTS(
 
 func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < len(requests); i++ {
+		if span := opentracing.SpanFromContext(requests[i].requestCtx); span != nil {
+			span.Finish()
+		}
+		req := requests[i]
 		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
-		defer trace.StartRegion(requests[i].requestCtx, "pdclient.tsoReqDequeue").End()
+		if err != nil && req.bo != nil {
+			if req.bo.WaitAndExecWithoutReset(req.requestCtx, func() error {
+				return c.dispatchRequestWithFastRetry(req.requestCtx, req.dcLocation, req)
+			}) {
+				continue
+			}
+		}
+		tr := trace.StartRegion(requests[i].requestCtx, "pdclient.tsoReqDequeue")
 		requests[i].done <- err
+		tr.End()
 	}
 }

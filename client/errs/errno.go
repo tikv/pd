@@ -93,6 +93,11 @@ var (
 	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
 )
 
+// backoff errors
+var (
+	ErrClientBackoffExceedMax = errors.Normalize("backoff exceed max", errors.RFCCodeText("PD:client:ErrClientBackoffExceedMax"))
+)
+
 // ErrClientGetResourceGroup is the error type for getting resource group.
 type ErrClientGetResourceGroup struct {
 	ResourceGroupName string
