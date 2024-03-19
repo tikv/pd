@@ -53,7 +53,7 @@ func (suite *profTestSuite) TearDownSuite() {
 
 func (suite *profTestSuite) TestGetZip() {
 	re := suite.Require()
-	rsp, err := testDialClient.Get(suite.urlPrefix + "/pprof/zip?" + "seconds=5s")
+	rsp, err := testDialClient.Get(suite.urlPrefix + "/pprof/zip?" + "seconds=5")
 	re.NoError(err)
 	defer rsp.Body.Close()
 	body, err := io.ReadAll(rsp.Body)
