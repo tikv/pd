@@ -80,7 +80,7 @@ type tsoClient struct {
 
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
-	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
+	tsoDispatcher sync.Map // Same as map[string]*tsoDispatcher
 	// dc-location -> deadline
 	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> *tsoInfo while the tsoInfo is the last TSO info
