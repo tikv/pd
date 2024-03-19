@@ -802,7 +802,11 @@ func (c *client) dispatchTSORequestWithRetry(req *tsoRequest) error {
 		err       error
 	)
 	for i := 0; i < dispatchRetryCount; i++ {
-		// Get the tsoClient for each retry, as it may be initialized or switched during the process.
+		// Do not delay for the first time.
+		if i > 0 {
+			time.Sleep(dispatchRetryDelay)
+		}
+		// Get the tsoClient each time, as it may be initialized or switched during the process.
 		tsoClient := c.getTSOClient()
 		if tsoClient == nil {
 			err = errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
@@ -812,7 +816,6 @@ func (c *client) dispatchTSORequestWithRetry(req *tsoRequest) error {
 		if !retryable {
 			break
 		}
-		time.Sleep(dispatchRetryDelay)
 	}
 	return err
 }
