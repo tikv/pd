@@ -73,18 +73,42 @@ func (c *tsoClient) scheduleUpdateTSOConnectionCtxs() {
 	}
 }
 
+<<<<<<< HEAD
 func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) error {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
+=======
+func (c *tsoClient) dispatchRequest(request *tsoRequest) (bool, error) {
+	dispatcher, ok := c.tsoDispatcher.Load(request.dcLocation)
+>>>>>>> d3b94c97c (client/tso: fix the bug that TSO may hang when switching mode (#7937))
 	if !ok {
-		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", dcLocation))
-		log.Error("[tso] dispatch tso request error", zap.String("dc-location", dcLocation), errs.ZapError(err))
+		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", request.dcLocation))
+		log.Error("[tso] dispatch tso request error", zap.String("dc-location", request.dcLocation), errs.ZapError(err))
 		c.svcDiscovery.ScheduleCheckMemberChanged()
-		return err
+		// New dispatcher could be created in the meantime, which is retryable.
+		return true, err
 	}
 
+<<<<<<< HEAD
 	defer trace.StartRegion(request.requestCtx, "tsoReqEnqueue").End()
 	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
 	return nil
+=======
+	defer trace.StartRegion(request.requestCtx, "pdclient.tsoReqEnqueue").End()
+	select {
+	case <-request.requestCtx.Done():
+		// Caller cancelled the request, no need to retry.
+		return false, request.requestCtx.Err()
+	case <-request.clientCtx.Done():
+		// Client is closed, no need to retry.
+		return false, request.clientCtx.Err()
+	case <-c.ctx.Done():
+		// tsoClient is closed due to the PD service mode switch, which is retryable.
+		return true, c.ctx.Err()
+	default:
+		dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+	}
+	return false, nil
+>>>>>>> d3b94c97c (client/tso: fix the bug that TSO may hang when switching mode (#7937))
 }
 
 // TSFuture is a future which promises to return a TSO.

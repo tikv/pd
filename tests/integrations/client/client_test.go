@@ -801,9 +801,23 @@ func TestCloseClient(t *testing.T) {
 	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints)
-	cli.GetTSAsync(context.TODO())
+	ts := cli.GetTSAsync(context.TODO())
 	time.Sleep(time.Second)
 	cli.Close()
+	physical, logical, err := ts.Wait()
+	if err == nil {
+		re.Greater(physical, int64(0))
+		re.Greater(logical, int64(0))
+	} else {
+		re.ErrorIs(err, context.Canceled)
+		re.Zero(physical)
+		re.Zero(logical)
+	}
+	ts = cli.GetTSAsync(context.TODO())
+	physical, logical, err = ts.Wait()
+	re.ErrorIs(err, context.Canceled)
+	re.Zero(physical)
+	re.Zero(logical)
 }
 
 type idAllocator struct {
