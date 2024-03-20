@@ -840,6 +840,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	storeID := stats.GetStoreId()
 	c.Lock()
 	defer c.Unlock()
+	failpoint.Inject("slowHeartbeat", func() {
+		time.Sleep(time.Millisecond * 500)
+	})
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)

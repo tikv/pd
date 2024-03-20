@@ -116,6 +116,14 @@ func (l *Controller) GetConcurrencyLimiterStatus(label string) (limit uint64, cu
 	return 0, 0
 }
 
+// GetBBRStatus returns the status of a given label's BBR.
+func (l *Controller) GetBBRStatus(label string) (enable bool, limit int64) {
+	if limit, exist := l.limiters.Load(label); exist {
+		return limit.(*limiter).getBBRStatus()
+	}
+	return false, 0
+}
+
 // IsInAllowList returns whether this label is in allow list.
 // If returns true, the given label won't be limited
 func (l *Controller) IsInAllowList(label string) bool {

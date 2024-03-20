@@ -39,7 +39,7 @@ func NewServiceMiddlewareConfig() *ServiceMiddlewareConfig {
 		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
 	}
 	grpcRateLimit := GRPCRateLimitConfig{
-		EnableRateLimit: defaultEnableRateLimitMiddleware,
+		EnableRateLimit: defaultEnableGRPCRateLimitMiddleware,
 		LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
 	}
 	cfg := &ServiceMiddlewareConfig{
