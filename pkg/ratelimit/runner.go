@@ -29,6 +29,8 @@ const initialCapacity = 100
 // Runner is the interface for running tasks.
 type Runner interface {
 	RunTask(ctx context.Context, opt TaskOpts, f func(context.Context)) error
+	Start()
+	Stop()
 }
 
 // Task is a task to be run.
@@ -60,9 +62,7 @@ func NewAsyncRunner(name string, maxPendingDuration time.Duration) *AsyncRunner 
 		maxPendingDuration: maxPendingDuration,
 		taskChan:           make(chan *Task),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
-		stopChan:           make(chan struct{}),
 	}
-	s.Start()
 	return s
 }
 
@@ -75,6 +75,7 @@ type TaskOpts struct {
 
 // Start starts the runner.
 func (s *AsyncRunner) Start() {
+	s.stopChan = make(chan struct{})
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -166,3 +167,9 @@ func (s *SyncRunner) RunTask(ctx context.Context, opt TaskOpts, f func(context.C
 	f(ctx)
 	return nil
 }
+
+// Start starts the runner.
+func (s *SyncRunner) Start() {}
+
+// Stop stops the runner.
+func (s *SyncRunner) Stop() {}

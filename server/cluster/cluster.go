@@ -21,6 +21,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,6 +45,7 @@ import (
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -56,6 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/unsaferecovery"
+	"github.com/tikv/pd/pkg/utils/ctxutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
@@ -166,6 +169,9 @@ type RaftCluster struct {
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
+
+	taskRunner           ratelimit.Runner
+	hbConcurrencyLimiter *ratelimit.ConcurrencyLimiter
 }
 
 // Status saves some state information.
@@ -182,13 +188,15 @@ type Status struct {
 func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
 	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:    ctx,
-		clusterID:    clusterID,
-		regionSyncer: regionSyncer,
-		httpClient:   httpClient,
-		etcdClient:   etcdClient,
-		core:         basicCluster,
-		storage:      storage,
+		serverCtx:            ctx,
+		clusterID:            clusterID,
+		regionSyncer:         regionSyncer,
+		httpClient:           httpClient,
+		etcdClient:           etcdClient,
+		core:                 basicCluster,
+		storage:              storage,
+		taskRunner:           ratelimit.NewAsyncRunner("heartbeat-async-task-runner", time.Minute),
+		hbConcurrencyLimiter: ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU() * 2)),
 	}
 }
 
@@ -291,7 +299,6 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-
 	c.isAPIServiceMode = s.IsAPIServiceMode()
 	err := c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
@@ -347,6 +354,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.startGCTuner()
 
 	c.running = true
+	c.taskRunner.Start()
 	return nil
 }
 
@@ -740,6 +748,7 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
+	c.taskRunner.Stop()
 	c.Unlock()
 
 	c.wg.Wait()
@@ -988,10 +997,21 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 }
 
 var regionGuide = core.GenerateRegionGuideFunc(true)
+var syncRunner = ratelimit.NewSyncRunner()
 
 // processRegionHeartbeat updates the region information.
-func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, tracer core.RegionHeartbeatProcessTracer) error {
-	origin, _, err := c.core.PreCheckPutRegion(region, tracer)
+func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.RegionInfo) error {
+	tracer, ok := ctx.Value(ctxutil.HeartbeatTracerKey).(core.RegionHeartbeatProcessTracer)
+	if !ok {
+		tracer = core.NewNoopHeartbeatProcessTracer()
+	}
+	runner, ok := ctx.Value(ctxutil.TaskRunnerKey).(ratelimit.Runner)
+	if !ok {
+		runner = syncRunner
+	}
+	limiter, _ := ctx.Value(ctxutil.LimiterKey).(*ratelimit.ConcurrencyLimiter)
+
+	origin, _, err := c.core.PreCheckPutRegion(region)
 	tracer.OnPreCheckFinished()
 	if err != nil {
 		return err
@@ -1000,13 +1020,22 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, tracer cor
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		cluster.HandleStatsAsync(c, region)
+		runner.RunTask(
+			ctx,
+			ratelimit.TaskOpts{
+				TaskName: "HandleStatsAsync",
+				Limit:    limiter,
+			},
+			func(ctx context.Context) {
+				cluster.HandleStatsAsync(c, region)
+			},
+		)
 	}
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	saveKV, saveCache, needSync := regionGuide(region, origin)
+	saveKV, saveCache, needSync := regionGuide(ctx, region, origin)
 	tracer.OnRegionGuideFinished()
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
@@ -1015,7 +1044,18 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, tracer cor
 		// region stats needs to be collected in API mode.
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
+			runner.RunTask(
+				ctx,
+				ratelimit.TaskOpts{
+					TaskName: "ObserveRegionStatsAsync",
+					Limit:    limiter,
+				},
+				func(ctx context.Context) {
+					if c.regionStats.RegionStatsNeedUpdate(region) {
+						cluster.Collect(c, region, hasRegionStats)
+					}
+				},
+			)
 		}
 		return nil
 	}
@@ -1032,43 +1072,72 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, tracer cor
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.core.AtomicCheckAndPutRegion(region, tracer); err != nil {
+		if overlaps, err = c.core.AtomicCheckAndPutRegion(ctx, region); err != nil {
 			tracer.OnSaveCacheFinished()
 			return err
 		}
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-			cluster.HandleOverlaps(c, overlaps)
+			runner.RunTask(
+				ctx,
+				ratelimit.TaskOpts{
+					TaskName: "HandleOverlaps",
+					Limit:    limiter,
+				},
+				func(ctx context.Context) {
+					cluster.HandleOverlaps(c, overlaps)
+				},
+			)
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
 
 	tracer.OnSaveCacheFinished()
-	// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
-	// region stats needs to be collected in API mode.
-	// We need to think of a better way to reduce this part of the cost in the future.
-	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
+	// handle region stats
+	runner.RunTask(
+		ctx,
+		ratelimit.TaskOpts{
+			TaskName: "CollectRegionStatsAsync",
+			Limit:    c.hbConcurrencyLimiter,
+		},
+		func(ctx context.Context) {
+			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
+			// region stats needs to be collected in API mode.
+			// We need to think of a better way to reduce this part of the cost in the future.
+			cluster.Collect(c, region, hasRegionStats)
+		},
+	)
+
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
-		// If there are concurrent heartbeats from the same region, the last write will win even if
-		// writes to storage in the critical area. So don't use mutex to protect it.
-		// Not successfully saved to storage is not fatal, it only leads to longer warm-up
-		// after restart. Here we only log the error then go on updating cache.
-		for _, item := range overlaps {
-			if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
-				log.Error("failed to delete region from storage",
-					zap.Uint64("region-id", item.GetID()),
-					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
-					errs.ZapError(err))
-			}
-		}
 		if saveKV {
-			if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
-				log.Error("failed to save region to storage",
-					zap.Uint64("region-id", region.GetID()),
-					logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
-					errs.ZapError(err))
-			}
-			regionUpdateKVEventCounter.Inc()
+			runner.RunTask(
+				ctx,
+				ratelimit.TaskOpts{
+					TaskName: "SaveRegionToKV",
+					Limit:    c.hbConcurrencyLimiter,
+				},
+				func(ctx context.Context) {
+					// If there are concurrent heartbeats from the same region, the last write will win even if
+					// writes to storage in the critical area. So don't use mutex to protect it.
+					// Not successfully saved to storage is not fatal, it only leads to longer warm-up
+					// after restart. Here we only log the error then go on updating cache.
+					for _, item := range overlaps {
+						if err := c.storage.DeleteRegion(item.GetMeta()); err != nil {
+							log.Error("failed to delete region from storage",
+								zap.Uint64("region-id", item.GetID()),
+								logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(item.GetMeta())),
+								errs.ZapError(err))
+						}
+					}
+					if err := c.storage.SaveRegion(region.GetMeta()); err != nil {
+						log.Error("failed to save region to storage",
+							zap.Uint64("region-id", region.GetID()),
+							logutil.ZapRedactStringer("region-meta", core.RegionToHexMeta(region.GetMeta())),
+							errs.ZapError(err))
+					}
+					regionUpdateKVEventCounter.Inc()
+				},
+			)
 		}
 	}
 
@@ -2067,16 +2136,6 @@ func (c *RaftCluster) resetProgressIndicator() {
 	storesProgressGauge.Reset()
 	storesSpeedGauge.Reset()
 	storesETAGauge.Reset()
-}
-
-func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
-	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
-	for _, p := range region.GetPeers() {
-		if store := c.core.GetStore(p.StoreId); store != nil {
-			stores = append(stores, store)
-		}
-	}
-	return stores
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.

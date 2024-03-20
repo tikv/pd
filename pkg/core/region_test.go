@@ -15,6 +15,7 @@
 package core
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"math"
@@ -363,7 +364,7 @@ func TestNeedSync(t *testing.T) {
 	for _, testCase := range testCases {
 		regionA := region.Clone(testCase.optionsA...)
 		regionB := region.Clone(testCase.optionsB...)
-		_, _, needSync := RegionGuide(regionA, regionB)
+		_, _, needSync := RegionGuide(context.TODO(), regionA, regionB)
 		re.Equal(testCase.needSync, needSync)
 	}
 }
@@ -459,9 +460,9 @@ func TestSetRegionConcurrence(t *testing.T) {
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
 	go func() {
-		regions.AtomicCheckAndPutRegion(region, NewNoopHeartbeatProcessTracer())
+		regions.AtomicCheckAndPutRegion(context.TODO(), region)
 	}()
-	regions.AtomicCheckAndPutRegion(region, NewNoopHeartbeatProcessTracer())
+	regions.AtomicCheckAndPutRegion(context.TODO(), region)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 

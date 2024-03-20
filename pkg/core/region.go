@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -35,6 +36,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/utils/ctxutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -711,20 +714,51 @@ func (r *RegionInfo) isRegionRecreated() bool {
 
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
+type RegionGuideFunc func(ctx context.Context, region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
 func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	noLog := func(msg string, fields ...zap.Field) {}
-	debug, info := noLog, noLog
+	d, i := noLog, noLog
+	debug, info := d, i
 	if enableLog {
-		debug = log.Debug
-		info = log.Info
+		d = log.Debug
+		i = log.Info
+		debug, info = d, i
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	return func(region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
+	return func(ctx context.Context, region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
+		taskRunner, ok := ctx.Value(ctxutil.TaskRunnerKey).(ratelimit.Runner)
+		limiter, _ := ctx.Value(ctxutil.LimiterKey).(*ratelimit.ConcurrencyLimiter)
+		// print log asynchronously
+		if ok {
+			debug = func(msg string, fields ...zap.Field) {
+				taskRunner.RunTask(
+					ctx,
+					ratelimit.TaskOpts{
+						TaskName: "Log",
+						Limit:    limiter,
+					},
+					func(ctx context.Context) {
+						d(msg, fields...)
+					},
+				)
+			}
+			info = func(msg string, fields ...zap.Field) {
+				taskRunner.RunTask(
+					ctx,
+					ratelimit.TaskOpts{
+						TaskName: "Log",
+						Limit:    limiter,
+					},
+					func(ctx context.Context) {
+						i(msg, fields...)
+					},
+				)
+			}
+		}
 		if origin == nil {
 			if log.GetLevel() <= zap.DebugLevel {
 				debug("insert new region",
@@ -789,7 +823,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
 				if log.GetLevel() <= zap.DebugLevel {
-					debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+					debug("down-peers changed", zap.Uint64("region-id", region.GetID()), zap.Reflect("before", origin.GetDownPeers()), zap.Reflect("after", region.GetDownPeers()))
 				}
 				saveCache, needSync = true, true
 				return
@@ -912,7 +946,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
-	err := check(region, origin, ols)
+	err := check(region, origin, convertItemsToRegions(ols))
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
@@ -933,48 +967,62 @@ func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
 }
 
 // PreCheckPutRegion checks if the region is valid to put.
-func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo, trace RegionHeartbeatProcessTracer) (*RegionInfo, []*regionItem, error) {
-	origin, overlaps := r.GetRelevantRegions(region, trace)
+func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*RegionInfo, error) {
+	origin, overlaps := r.GetRelevantRegions(region)
 	err := check(region, origin, overlaps)
 	return origin, overlaps, err
 }
 
+func convertItemsToRegions(items []*regionItem) []*RegionInfo {
+	regions := make([]*RegionInfo, 0, len(items))
+	for _, item := range items {
+		regions = append(regions, item.RegionInfo)
+	}
+	return regions
+}
+
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
-func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo, trace RegionHeartbeatProcessTracer) ([]*RegionInfo, error) {
+func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx context.Context, region *RegionInfo) ([]*RegionInfo, error) {
+	tracer, ok := ctx.Value(ctxutil.HeartbeatTracerKey).(RegionHeartbeatProcessTracer)
+	if !ok {
+		tracer = NewNoopHeartbeatProcessTracer()
+	}
 	r.t.Lock()
 	var ols []*regionItem
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
-	trace.OnCheckOverlapsFinished()
-	err := check(region, origin, ols)
+	tracer.OnCheckOverlapsFinished()
+	err := check(region, origin, convertItemsToRegions(ols))
 	if err != nil {
 		r.t.Unlock()
-		trace.OnValidateRegionFinished()
+		tracer.OnValidateRegionFinished()
 		return nil, err
 	}
-	trace.OnValidateRegionFinished()
+	tracer.OnValidateRegionFinished()
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
-	trace.OnSetRegionFinished()
+	tracer.OnSetRegionFinished()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	trace.OnUpdateSubTreeFinished()
+	tracer.OnUpdateSubTreeFinished()
 	return overlaps, nil
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
-func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo, trace RegionHeartbeatProcessTracer) (origin *RegionInfo, overlaps []*regionItem) {
+func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	origin = r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		overlaps = r.tree.overlaps(&regionItem{RegionInfo: region})
+		for _, item := range r.tree.overlaps(&regionItem{RegionInfo: region}) {
+			overlaps = append(overlaps, item.RegionInfo)
+		}
 	}
 	return
 }
 
-func check(region, origin *RegionInfo, overlaps []*regionItem) error {
+func check(region, origin *RegionInfo, overlaps []*RegionInfo) error {
 	for _, item := range overlaps {
 		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
 		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
@@ -1043,7 +1091,6 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		item = &regionItem{RegionInfo: region}
 		r.regions[region.GetID()] = item
 	}
-
 	var overlaps []*RegionInfo
 	if rangeChanged {
 		overlaps = r.tree.update(item, withOverlaps, ol...)
