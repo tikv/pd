@@ -34,6 +34,7 @@ type changeAndResult struct {
 	release           int
 	waitDuration      time.Duration
 	checkStatusFunc   func(string)
+	requestInterval   time.Duration
 }
 
 type labelCase struct {
@@ -57,19 +58,26 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 				time.Sleep(rd.waitDuration)
 				for i := 0; i < rd.totalRequest; i++ {
 					wg.Add(1)
+					if rd.requestInterval > 0 {
+						time.Sleep(rd.requestInterval)
+					}
 					go func() {
 						countRateLimiterHandleResult(limiter, cas.label, &successCount, &failedCount, &lock, &wg, r)
 					}()
 				}
 				wg.Wait()
-				re.Equal(rd.fail, failedCount)
-				re.Equal(rd.success, successCount)
+				if rd.fail >= 0 {
+					re.Equal(rd.fail, failedCount)
+				}
+				if rd.success >= 0 {
+					re.Equal(rd.success, successCount)
+				}
 				for i := 0; i < rd.release; i++ {
 					r.release()
 				}
 				rd.checkStatusFunc(cas.label)
-				failedCount -= rd.fail
-				successCount -= rd.success
+				failedCount = 0
+				successCount = 0
 			}
 			caseWG.Done()
 		}()
@@ -408,6 +416,107 @@ func TestControllerWithTwoLimiters(t *testing.T) {
 						limit, burst := limiter.GetQPSLimiterStatus(label)
 						re.Equal(rate.Limit(0), limit)
 						re.Equal(0, burst)
+					},
+				},
+			},
+		},
+	}
+	runMulitLabelLimiter(t, limiter, testCase)
+}
+
+func TestControllerWithEnableBBR(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	limiter := NewController(context.Background(), "grpc", nil)
+	testCase := []labelCase{
+		{
+			label: "test1",
+			round: []changeAndResult{
+				{
+					opt: UpdateDimensionConfigForTest(&DimensionConfig{
+						EnableBBR: true,
+					}, optsForTest...),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.NotEqual(0, status&BBRChanged)
+					},
+					totalRequest:    200,
+					fail:            -1,
+					success:         -1,
+					release:         0,
+					waitDuration:    time.Second,
+					requestInterval: 10 * time.Millisecond,
+					checkStatusFunc: func(label string) {
+						time.Sleep(bucketDuration)
+						bbr, limit := limiter.GetBBRStatus(label)
+						re.Less(int64(1), limit)
+						re.Less(limit, inf)
+						re.True(bbr)
+						climit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Less(current, uint64(200))
+						re.Less(uint64(1), current)
+						re.Equal(climit, current)
+					},
+				},
+				{
+					opt: UpdateDimensionConfigForTest(&DimensionConfig{
+						ConcurrencyLimit: 200,
+						EnableBBR:        true,
+					}, optsForTest...),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.NotEqual(0, status&BBRNoChange)
+						re.NotEqual(0, status&ConcurrencyNoChange)
+					},
+					totalRequest: 0,
+					fail:         0,
+					success:      0,
+					release:      20,
+					waitDuration: time.Second,
+					checkStatusFunc: func(label string) {
+						climit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Greater(climit, current)
+					},
+				},
+				{
+					opt: UpdateDimensionConfigForTest(&DimensionConfig{
+						ConcurrencyLimit: 200,
+						EnableBBR:        true,
+					}, optsForTest...),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.NotEqual(0, status&BBRNoChange)
+						re.NotEqual(0, status&ConcurrencyNoChange)
+					},
+					totalRequest: 100,
+					fail:         80,
+					success:      20,
+					release:      0,
+					waitDuration: time.Second,
+					checkStatusFunc: func(label string) {
+						climit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(climit, current)
+					},
+				},
+				{
+					opt: UpdateDimensionConfigForTest(&DimensionConfig{
+						ConcurrencyLimit: 200,
+						EnableBBR:        false,
+					}, optsForTest...),
+					checkOptionStatus: func(label string, o Option) {
+						status := limiter.Update(label, o)
+						re.NotEqual(0, status&BBRDeleted)
+						re.NotEqual(0, status&ConcurrencyNoChange)
+					},
+					totalRequest: 300,
+					fail:         -1,
+					success:      -1,
+					release:      0,
+					waitDuration: time.Second,
+					checkStatusFunc: func(label string) {
+						climit, current := limiter.GetConcurrencyLimiterStatus(label)
+						re.Equal(uint64(200), current)
+						re.Equal(uint64(200), climit)
 					},
 				},
 			},

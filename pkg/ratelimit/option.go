@@ -34,6 +34,10 @@ const (
 	ConcurrencyDeleted
 	// InAllowList shows that limiter's config isn't changed because it is in in allow list.
 	InAllowList
+
+	BBRNoChange
+	BBRChanged
+	BBRDeleted
 )
 
 // Option is used to create a limiter with the optional settings.
@@ -79,6 +83,18 @@ func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 		}
 		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
 		return lim.(*limiter).updateDimensionConfig(cfg)
+	}
+}
+
+// UpdateDimensionConfigForTest creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
+// only used in test.
+func UpdateDimensionConfigForTest(cfg *DimensionConfig, opt ...bbrOption) Option {
+	return func(label string, l *Controller) UpdateStatus {
+		if _, allow := l.labelAllowList[label]; allow {
+			return InAllowList
+		}
+		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		return lim.(*limiter).updateDimensionConfig(cfg, opt...)
 	}
 }
 
