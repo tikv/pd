@@ -183,7 +183,7 @@ func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
 // leader should be changed when campaign leader frequently.
 func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
 	failpoint.Inject("skipCampaignLeaderCheck", func() {
-		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
+		failpoint.Return(m.leadership.Campaign(ctx, leaseTimeout, m.MemberValue()))
 	})
 
 	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
@@ -194,12 +194,7 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
 
-	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
-}
-
-// KeepLeader is used to keep the PD leader's leadership.
-func (m *EmbeddedEtcdMember) KeepLeader(ctx context.Context) {
-	m.leadership.Keep(ctx)
+	return m.leadership.Campaign(ctx, leaseTimeout, m.MemberValue())
 }
 
 // PreCheckLeader does some pre-check before checking whether it's the leader.
