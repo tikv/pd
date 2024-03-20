@@ -16,7 +16,10 @@ package pd
 
 import (
 	"context"
+	"runtime/trace"
 	"time"
+
+	"github.com/tikv/pd/client/tsoutil"
 )
 
 type tsoBatchController struct {
@@ -130,7 +133,18 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
-func (tbc *tsoBatchController) revokePendingRequest(err error) {
+func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffixBits uint32, err error) {
+	for i := 0; i < tbc.collectedRequestCount; i++ {
+		tsoReq := tbc.collectedRequests[i]
+		tsoReq.physical, tsoReq.logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
+		defer trace.StartRegion(tsoReq.requestCtx, "pdclient.tsoReqDequeue").End()
+		tsoReq.done <- err
+	}
+	// Prevent the finished requests from being processed again.
+	tbc.collectedRequestCount = 0
+}
+
+func (tbc *tsoBatchController) revokePendingRequests(err error) {
 	for i := 0; i < len(tbc.tsoRequestCh); i++ {
 		req := <-tbc.tsoRequestCh
 		req.done <- err
