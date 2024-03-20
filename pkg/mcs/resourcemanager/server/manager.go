@@ -44,6 +44,7 @@ const (
 	metricsCleanupTimeout      = 20 * time.Minute
 	metricsAvailableRUInterval = 1 * time.Second
 	defaultCollectIntervalSec  = 20
+	tickPerSecond              = time.Second
 
 	reservedDefaultGroupName = "default"
 	middlePriority           = 8
@@ -359,7 +360,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer cleanUpTicker.Stop()
 	availableRUTicker := time.NewTicker(metricsAvailableRUInterval)
 	defer availableRUTicker.Stop()
-	recordMaxTicker := time.NewTicker(time.Second)
+	recordMaxTicker := time.NewTicker(tickPerSecond)
 	defer recordMaxTicker.Stop()
 	maxPerSecTrackers := make(map[string]*maxPerSecCostTracker)
 	rruSum := make(map[string]float64)
