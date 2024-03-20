@@ -355,7 +355,7 @@ func NewSplitBucketSchedulerCommand() *cobra.Command {
 func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "grant-hot-region-scheduler <store_leader_id> <store_leader_id,store_peer_id_1,store_peer_id_2>",
-		Short: "add a scheduler to grant hot region to fixed stores",
+		Short: "add a scheduler to grant hot region to fixed stores. Note: balance-hot-region-scheduler must be paused.",
 		Run:   addSchedulerForGrantHotRegionCommandFunc,
 	}
 	return c
