@@ -4510,7 +4510,7 @@
             "avg": false,
             "current": true,
             "hideEmpty": true,
-            "hideZero": true,
+            "hideZero": false,
             "max": true,
             "min": false,
             "rightSide": true,
