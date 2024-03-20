@@ -398,9 +398,16 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/miss-peer [get]
-func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.MissPeer)
+}
+
+func (h *regionsHandler) getRegionsByType(
+	w http.ResponseWriter,
+	typ statistics.RegionStatisticType,
+) {
 	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.MissPeer)
+	regions, err := handler.GetRegionsByType(typ)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -415,15 +422,8 @@ func (h *regionsHandler) GetMissPeerRegions(w http.ResponseWriter, r *http.Reque
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/extra-peer [get]
-func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.ExtraPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.ExtraPeer)
 }
 
 // @Tags     region
@@ -432,15 +432,8 @@ func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Requ
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/pending-peer [get]
-func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.PendingPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.PendingPeer)
 }
 
 // @Tags     region
@@ -449,15 +442,8 @@ func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Re
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/down-peer [get]
-func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.DownPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.DownPeer)
 }
 
 // @Tags     region
@@ -466,15 +452,8 @@ func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Reque
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/learner-peer [get]
-func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.LearnerPeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.LearnerPeer)
 }
 
 // @Tags     region
@@ -483,15 +462,8 @@ func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Re
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/offline-peer [get]
-func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetOfflinePeer(statistics.OfflinePeer)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.OfflinePeer)
 }
 
 // @Tags     region
@@ -500,15 +472,8 @@ func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Re
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/oversized-region [get]
-func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.OversizedRegion)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.OversizedRegion)
 }
 
 // @Tags     region
@@ -517,15 +482,8 @@ func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, r *http.Requ
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/undersized-region [get]
-func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.UndersizedRegion)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.UndersizedRegion)
 }
 
 // @Tags     region
@@ -534,15 +492,8 @@ func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Req
 // @Success  200  {object}  RegionsInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /regions/check/empty-region [get]
-func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, r *http.Request) {
-	handler := h.svr.GetHandler()
-	regions, err := handler.GetRegionsByType(statistics.EmptyRegion)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	regionsInfo := convertToAPIRegions(regions)
-	h.rd.JSON(w, http.StatusOK, regionsInfo)
+func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, _ *http.Request) {
+	h.getRegionsByType(w, statistics.EmptyRegion)
 }
 
 type histItem struct {

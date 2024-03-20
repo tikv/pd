@@ -165,9 +165,19 @@ func (s *testRegionSuite) TestRegion(c *C) {
 func (s *testRegionSuite) TestRegionCheck(c *C) {
 	r := newTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	downPeer := &metapb.Peer{Id: 13, StoreId: 2}
+<<<<<<< HEAD
 	r = r.Clone(core.WithAddPeer(downPeer), core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}), core.WithPendingPeers([]*metapb.Peer{downPeer}))
 	mustRegionHeartbeat(c, s.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", s.urlPrefix, r.GetID())
+=======
+	r = r.Clone(
+		core.WithAddPeer(downPeer),
+		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
+		core.WithPendingPeers([]*metapb.Peer{downPeer}))
+	re := suite.Require()
+	mustRegionHeartbeat(re, suite.svr, r)
+	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
+>>>>>>> 40eaa35f2 (statistics: get region info via core cluster inside RegionStatistics (#6804))
 	r1 := &RegionInfo{}
 	c.Assert(tu.ReadGetJSON(c, testDialClient, url, r1), IsNil)
 	r1.Adjust()
@@ -213,7 +223,20 @@ func (s *testRegionSuite) TestRegionCheck(c *C) {
 	r7 := make([]*histItem, 1)
 	c.Assert(tu.ReadGetJSON(c, testDialClient, url, &r7), IsNil)
 	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
+<<<<<<< HEAD
 	c.Assert(r7, DeepEquals, histKeys)
+=======
+	suite.Equal(histKeys, r7)
+
+	mustPutStore(re, suite.svr, 2, metapb.StoreState_Offline, metapb.NodeState_Removing, []*metapb.StoreLabel{})
+	mustRegionHeartbeat(re, suite.svr, r)
+	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
+	r8 := &RegionsInfo{}
+	suite.NoError(tu.ReadGetJSON(re, testDialClient, url, r8))
+	r4.Adjust()
+	suite.Equal(1, r8.Count)
+	suite.Equal(r.GetID(), r8.Regions[0].ID)
+>>>>>>> 40eaa35f2 (statistics: get region info via core cluster inside RegionStatistics (#6804))
 }
 
 func (s *testRegionSuite) TestRegions(c *C) {
