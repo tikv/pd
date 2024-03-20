@@ -36,18 +36,18 @@ type DimensionConfig struct {
 
 type limiter struct {
 	mu          syncutil.RWMutex
-	concurrency *concurrencyLimiter
+	concurrency *ConcurrencyLimiter
 	rate        *RateLimiter
 }
 
 func newLimiter() *limiter {
 	lim := &limiter{
-		concurrency: newConcurrencyLimiter(0),
+		concurrency: NewConcurrencyLimiter(0),
 	}
 	return lim
 }
 
-func (l *limiter) getConcurrencyLimiter() *concurrencyLimiter {
+func (l *limiter) getConcurrencyLimiter() *ConcurrencyLimiter {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.concurrency
@@ -101,7 +101,7 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 		}
 		l.concurrency.setLimit(limit)
 	} else {
-		l.concurrency = newConcurrencyLimiter(limit)
+		l.concurrency = NewConcurrencyLimiter(limit)
 	}
 	return ConcurrencyChanged
 }

@@ -14,24 +14,32 @@
 
 package ratelimit
 
-import "github.com/tikv/pd/pkg/utils/syncutil"
+import (
+	"context"
 
-type concurrencyLimiter struct {
-	mu      syncutil.RWMutex
+	"github.com/tikv/pd/pkg/utils/syncutil"
+)
+
+// ConcurrencyLimiter is a limiter that limits the number of concurrent tasks.
+type ConcurrencyLimiter struct {
+	mu      syncutil.Mutex
 	current uint64
 	limit   uint64
+	waiting uint64
 
 	// statistic
 	maxLimit uint64
+	queue    chan *TaskToken
 }
 
-func newConcurrencyLimiter(limit uint64) *concurrencyLimiter {
-	return &concurrencyLimiter{limit: limit}
+// NewConcurrencyLimiter creates a new ConcurrencyLimiter.
+func NewConcurrencyLimiter(limit uint64) *ConcurrencyLimiter {
+	return &ConcurrencyLimiter{limit: limit, queue: make(chan *TaskToken, limit)}
 }
 
 const unlimit = uint64(0)
 
-func (l *concurrencyLimiter) allow() bool {
+func (l *ConcurrencyLimiter) allow() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -45,7 +53,7 @@ func (l *concurrencyLimiter) allow() bool {
 	return false
 }
 
-func (l *concurrencyLimiter) release() {
+func (l *ConcurrencyLimiter) release() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -54,28 +62,28 @@ func (l *concurrencyLimiter) release() {
 	}
 }
 
-func (l *concurrencyLimiter) getLimit() uint64 {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+func (l *ConcurrencyLimiter) getLimit() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	return l.limit
 }
 
-func (l *concurrencyLimiter) setLimit(limit uint64) {
+func (l *ConcurrencyLimiter) setLimit(limit uint64) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	l.limit = limit
 }
 
-func (l *concurrencyLimiter) getCurrent() uint64 {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+func (l *ConcurrencyLimiter) getCurrent() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	return l.current
 }
 
-func (l *concurrencyLimiter) getMaxConcurrency() uint64 {
+func (l *ConcurrencyLimiter) getMaxConcurrency() uint64 {
 	l.mu.Lock()
 	defer func() {
 		l.maxLimit = l.current
@@ -83,4 +91,66 @@ func (l *concurrencyLimiter) getMaxConcurrency() uint64 {
 	}()
 
 	return l.maxLimit
+}
+
+// GetRunningTasksNum returns the number of running tasks.
+func (l *ConcurrencyLimiter) GetRunningTasksNum() uint64 {
+	return l.getCurrent()
+}
+
+// GetWaitingTasksNum returns the number of waiting tasks.
+func (l *ConcurrencyLimiter) GetWaitingTasksNum() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.waiting
+}
+
+// Acquire acquires a token from the limiter. which will block until a token is available or ctx is done, like Timeout.
+func (l *ConcurrencyLimiter) Acquire(ctx context.Context) (*TaskToken, error) {
+	l.mu.Lock()
+	if l.current >= l.limit {
+		l.waiting++
+		l.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			l.mu.Lock()
+			l.waiting--
+			l.mu.Unlock()
+			return nil, ctx.Err()
+		case token := <-l.queue:
+			l.mu.Lock()
+			token.released = false
+			l.current++
+			l.waiting--
+			l.mu.Unlock()
+			return token, nil
+		}
+	}
+	l.current++
+	token := &TaskToken{limiter: l}
+	l.mu.Unlock()
+	return token, nil
+}
+
+// TaskToken is a token that must be released after the task is done.
+type TaskToken struct {
+	released bool
+	limiter  *ConcurrencyLimiter
+}
+
+// Release releases the token.
+func (tt *TaskToken) Release() {
+	tt.limiter.mu.Lock()
+	defer tt.limiter.mu.Unlock()
+	if tt.released {
+		return
+	}
+	if tt.limiter.current == 0 {
+		panic("release token more than acquire")
+	}
+	tt.released = true
+	tt.limiter.current--
+	if len(tt.limiter.queue) < int(tt.limiter.limit) {
+		tt.limiter.queue <- tt
+	}
 }

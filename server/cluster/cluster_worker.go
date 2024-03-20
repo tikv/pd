@@ -16,6 +16,7 @@ package cluster
 
 import (
 	"bytes"
+	"context"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -26,6 +27,7 @@ import (
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/utils/ctxutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -39,7 +41,13 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
 	tracer.Begin()
-	if err := c.processRegionHeartbeat(region, tracer); err != nil {
+	ctx := context.WithValue(c.ctx, ctxutil.HeartbeatTracerKey, tracer)
+	ctx = context.WithValue(ctx, ctxutil.LimiterKey, c.hbConcurrencyLimiter)
+	if c.GetScheduleConfig().EnableHeartbeatAsyncRunner {
+		ctx = context.WithValue(ctx, ctxutil.TaskRunnerKey, c.taskRunner)
+	}
+
+	if err := c.processRegionHeartbeat(ctx, region); err != nil {
 		tracer.OnAllStageFinished()
 		return err
 	}
