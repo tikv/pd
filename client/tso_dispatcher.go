@@ -302,7 +302,8 @@ func (c *tsoClient) createTSODispatcher(dcLocation string) {
 func (c *tsoClient) handleDispatcher(
 	dispatcherCtx context.Context,
 	dc string,
-	tbc *tsoBatchController) {
+	tbc *tsoBatchController,
+) {
 	var (
 		err        error
 		streamAddr string
@@ -377,7 +378,11 @@ tsoBatchLoop:
 		}
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
+		// Once the TSO requests are collected, must make sure they could be finished or revoked eventually,
+		// otherwise the upper caller may get blocked on waiting for the results.
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
+			// Finish the collected requests if the fetch failed.
+			tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(err))
 			if err == context.Canceled {
 				log.Info("[tso] stop fetching the pending tso requests due to context canceled",
 					zap.String("dc-location", dc))
@@ -406,12 +411,24 @@ tsoBatchLoop:
 				}
 				select {
 				case <-dispatcherCtx.Done():
+<<<<<<< HEAD
+=======
+					// Finish the collected requests if the context is canceled.
+					tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(dispatcherCtx.Err()))
+					timer.Stop()
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 					return
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.svcDiscovery.ScheduleCheckMemberChanged()
+<<<<<<< HEAD
 					c.finishRequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
+=======
+					// Finish the collected requests if the stream is failed to be created.
+					tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(err))
+					timer.Stop()
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 					continue tsoBatchLoop
 				case <-time.After(retryInterval):
 					continue streamChoosingLoop
@@ -443,11 +460,18 @@ tsoBatchLoop:
 		}
 		select {
 		case <-dispatcherCtx.Done():
+			// Finish the collected requests if the context is canceled.
+			tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(dispatcherCtx.Err()))
 			return
 		case tsDeadlineCh.(chan deadline) <- dl:
 		}
+<<<<<<< HEAD
 		opts = extractSpanReference(tbc, opts[:0])
 		err = c.processRequests(stream, dc, tbc, opts)
+=======
+		// processRequests guarantees that the collected requests could be finished properly.
+		err = c.processRequests(stream, dc, tbc)
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 		close(done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err != nil {
@@ -698,6 +722,7 @@ func extractSpanReference(tbc *tsoBatchController, opts []opentracing.StartSpanO
 			opts = append(opts, opentracing.ChildOf(span.Context()))
 		}
 	}
+<<<<<<< HEAD
 	return opts
 }
 
@@ -710,14 +735,36 @@ func (c *tsoClient) processRequests(stream tsoStream, dcLocation string, tbc *ts
 	requests := tbc.getCollectedRequests()
 	count := int64(len(requests))
 	physical, logical, suffixBits, err := stream.processRequests(c.svcDiscovery.GetClusterID(), dcLocation, requests, tbc.batchStartTime)
+=======
+
+	count := int64(len(requests))
+	reqKeyspaceGroupID := c.svcDiscovery.GetKeyspaceGroupID()
+	respKeyspaceGroupID, physical, logical, suffixBits, err := stream.processRequests(
+		c.svcDiscovery.GetClusterID(), c.svcDiscovery.GetKeyspaceID(), reqKeyspaceGroupID,
+		dcLocation, count, tbc.batchStartTime)
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 	if err != nil {
-		c.finishRequest(requests, 0, 0, 0, err)
+		tbc.finishCollectedRequests(0, 0, 0, err)
 		return err
 	}
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
+<<<<<<< HEAD
 	firstLogical := addLogical(logical, -count+1, suffixBits)
 	c.compareAndSwapTS(dcLocation, physical, firstLogical, suffixBits, count)
 	c.finishRequest(requests, physical, firstLogical, suffixBits, nil)
+=======
+	firstLogical := tsoutil.AddLogical(logical, -count+1, suffixBits)
+	curTSOInfo := &tsoInfo{
+		tsoServer:           stream.getServerURL(),
+		reqKeyspaceGroupID:  reqKeyspaceGroupID,
+		respKeyspaceGroupID: respKeyspaceGroupID,
+		respReceivedAt:      time.Now(),
+		physical:            physical,
+		logical:             tsoutil.AddLogical(firstLogical, count-1, suffixBits),
+	}
+	c.compareAndSwapTS(dcLocation, curTSOInfo, physical, firstLogical)
+	tbc.finishCollectedRequests(physical, firstLogical, suffixBits, nil)
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 	return nil
 }
 
@@ -757,6 +804,7 @@ func tsLessEqual(physical, logical, thatPhysical, thatLogical int64) bool {
 	}
 	return physical < thatPhysical
 }
+<<<<<<< HEAD
 
 func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < len(requests); i++ {
@@ -767,3 +815,5 @@ func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical
 		requests[i].done <- err
 	}
 }
+=======
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))

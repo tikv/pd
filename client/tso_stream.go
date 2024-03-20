@@ -97,18 +97,34 @@ func checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done cha
 
 type tsoStream interface {
 	// processRequests processes TSO requests in streaming mode to get timestamps
+<<<<<<< HEAD
 	processRequests(clusterID uint64, dcLocation string, requests []*tsoRequest,
 		batchStartTime time.Time) (physical, logical int64, suffixBits uint32, err error)
+=======
+	processRequests(
+		clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
+		count int64, batchStartTime time.Time,
+	) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error)
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 }
 
 type pdTSOStream struct {
 	stream pdpb.PD_TsoClient
 }
 
+<<<<<<< HEAD
 func (s *pdTSOStream) processRequests(clusterID uint64, dcLocation string, requests []*tsoRequest,
 	batchStartTime time.Time) (physical, logical int64, suffixBits uint32, err error) {
+=======
+func (s *pdTSOStream) getServerURL() string {
+	return s.serverURL
+}
+
+func (s *pdTSOStream) processRequests(
+	clusterID uint64, _, _ uint32, dcLocation string, count int64, batchStartTime time.Time,
+) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 	start := time.Now()
-	count := int64(len(requests))
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
@@ -152,10 +168,20 @@ type tsoTSOStream struct {
 	stream tsopb.TSO_TsoClient
 }
 
+<<<<<<< HEAD
 func (s *tsoTSOStream) processRequests(clusterID uint64, dcLocation string, requests []*tsoRequest,
 	batchStartTime time.Time) (physical, logical int64, suffixBits uint32, err error) {
+=======
+func (s *tsoTSOStream) getServerURL() string {
+	return s.serverURL
+}
+
+func (s *tsoTSOStream) processRequests(
+	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
+	count int64, batchStartTime time.Time,
+) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 	start := time.Now()
-	count := int64(len(requests))
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId: clusterID,

@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -52,6 +53,10 @@ type tsoClientTestSuite struct {
 	client pd.TSOClient
 }
 
+func (suite *tsoClientTestSuite) getBackendEndpoints() []string {
+	return strings.Split(suite.backendEndpoints, ",")
+}
+
 func TestLegacyTSOClient(t *testing.T) {
 	suite.Run(t, &tsoClientTestSuite{
 		legacy: true,
@@ -82,7 +87,11 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	re.NoError(pdLeader.BootstrapCluster())
 	suite.backendEndpoints = pdLeader.GetAddr()
 	if suite.legacy {
+<<<<<<< HEAD
 		suite.client, err = pd.NewClientWithContext(suite.ctx, strings.Split(suite.backendEndpoints, ","), pd.SecurityOption{})
+=======
+		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 		re.NoError(err)
 	} else {
 		suite.tsoServer, suite.tsoServerCleanup = mcs.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
@@ -90,6 +99,39 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	}
 }
 
+<<<<<<< HEAD
+=======
+func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.Assertions) {
+	// The tso servers are loading keyspace groups asynchronously. Make sure all keyspace groups
+	// are available for serving tso requests from corresponding keyspaces by querying
+	// IsKeyspaceServing(keyspaceID, the Desired KeyspaceGroupID). if use default keyspace group id
+	// in the query, it will always return true as the keyspace will be served by default keyspace
+	// group before the keyspace groups are loaded.
+	testutil.Eventually(re, func() bool {
+		for _, keyspaceGroup := range suite.keyspaceGroups {
+			for _, keyspaceID := range keyspaceGroup.keyspaceIDs {
+				served := false
+				for _, server := range suite.tsoCluster.GetServers() {
+					if server.IsKeyspaceServing(keyspaceID, keyspaceGroup.keyspaceGroupID) {
+						served = true
+						break
+					}
+				}
+				if !served {
+					return false
+				}
+			}
+		}
+		return true
+	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+	// Create clients and make sure they all have discovered the tso service.
+	suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
+		suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
+	re.Equal(len(suite.keyspaceIDs), len(suite.clients))
+}
+
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 func (suite *tsoClientTestSuite) TearDownSuite() {
 	suite.cancel()
 	if !suite.legacy {
@@ -140,6 +182,81 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 	wg.Wait()
 }
 
+<<<<<<< HEAD
+=======
+func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
+	re := suite.Require()
+	keyspaceID := uint32(1000000)
+	// Make sure this keyspace ID is not in use somewhere.
+	re.False(slice.Contains(suite.keyspaceIDs, keyspaceID))
+	failpointValue := fmt.Sprintf(`return(%d)`, keyspaceID)
+	// Simulate the case that the server has lower version than the client and returns no tso addrs
+	// in the GetClusterInfo RPC.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID", failpointValue))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID"))
+	}()
+
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	client := mcs.SetupClientWithKeyspaceID(
+		ctx, re, keyspaceID, suite.getBackendEndpoints())
+	defer client.Close()
+	var lastTS uint64
+	for j := 0; j < tsoRequestRound; j++ {
+		physical, logical, err := client.GetTS(ctx)
+		re.NoError(err)
+		ts := tsoutil.ComposeTS(physical, logical)
+		re.Less(lastTS, ts)
+		lastTS = ts
+	}
+}
+
+// TestGetMinTS tests the correctness of GetMinTS.
+func (suite *tsoClientTestSuite) TestGetMinTS() {
+	re := suite.Require()
+	var wg sync.WaitGroup
+	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range suite.clients {
+			go func(client pd.Client) {
+				defer wg.Done()
+				var lastMinTS uint64
+				for j := 0; j < tsoRequestRound; j++ {
+					physical, logical, err := client.GetMinTS(suite.ctx)
+					re.NoError(err)
+					minTS := tsoutil.ComposeTS(physical, logical)
+					re.Less(lastMinTS, minTS)
+					lastMinTS = minTS
+
+					// Now we check whether the returned ts is the minimum one
+					// among all keyspace groups, i.e., the returned ts is
+					// less than the new timestamps of all keyspace groups.
+					for _, client := range suite.clients {
+						physical, logical, err := client.GetTS(suite.ctx)
+						re.NoError(err)
+						ts := tsoutil.ComposeTS(physical, logical)
+						re.Less(minTS, ts)
+					}
+				}
+			}(client)
+		}
+	}
+	wg.Wait()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		var err error
+		_, _, err = suite.clients[0].GetMinTS(suite.ctx)
+		return err == nil
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+}
+
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 // More details can be found in this issue: https://github.com/tikv/pd/issues/4884
 func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 	re := suite.Require()
@@ -233,6 +350,50 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	wg.Wait()
 	suite.TearDownSuite()
 	suite.SetupSuite()
+}
+
+func (suite *tsoClientTestSuite) TestGetTSWhileRestingTSOClient() {
+	re := suite.Require()
+	var (
+		clients    []pd.Client
+		stopSignal atomic.Bool
+		wg         sync.WaitGroup
+	)
+	// Create independent clients to prevent interfering with other tests.
+	if suite.legacy {
+		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
+		re.NoError(err)
+		clients = []pd.Client{client}
+	} else {
+		clients = mcs.WaitForMultiKeyspacesTSOAvailable(suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
+	}
+	wg.Add(tsoRequestConcurrencyNumber * len(clients))
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range clients {
+			go func(client pd.Client) {
+				defer wg.Done()
+				var lastTS uint64
+				for !stopSignal.Load() {
+					physical, logical, err := client.GetTS(suite.ctx)
+					if err != nil {
+						re.ErrorContains(err, context.Canceled.Error())
+					} else {
+						ts := tsoutil.ComposeTS(physical, logical)
+						re.Less(lastTS, ts)
+						lastTS = ts
+					}
+				}
+			}(client)
+		}
+	}
+	// Reset the TSO clients while requesting TSO concurrently.
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range clients {
+			client.(interface{ ResetTSOClient() }).ResetTSOClient()
+		}
+	}
+	stopSignal.Store(true)
+	wg.Wait()
 }
 
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.

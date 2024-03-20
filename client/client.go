@@ -386,12 +386,22 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	log.Info("[pd] changing service mode",
 		zap.String("old-mode", c.serviceMode.String()),
 		zap.String("new-mode", newMode.String()))
+	c.resetTSOClientLocked(newMode)
+	oldMode := c.serviceMode
+	c.serviceMode = newMode
+	log.Info("[pd] service mode changed",
+		zap.String("old-mode", oldMode.String()),
+		zap.String("new-mode", newMode.String()))
+}
+
+// Reset a new TSO client.
+func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tsoClient
 		newTSOSvcDiscovery ServiceDiscovery
 	)
-	switch newMode {
+	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = newTSOClient(c.ctx, c.option, c.keyspaceID,
 			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
@@ -424,6 +434,7 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 			oldTSOSvcDiscovery.Close()
 		}
 	}
+<<<<<<< HEAD
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed",
 		zap.String("old-mode", c.serviceMode.String()),
@@ -435,6 +446,27 @@ func (c *client) getTSOClient() *tsoClient {
 		return tsoCli.(*tsoClient)
 	}
 	return nil
+=======
+}
+
+func (c *client) getTSOClient() *tsoClient {
+	c.RLock()
+	defer c.RUnlock()
+	return c.tsoClient
+}
+
+// ResetTSOClient resets the TSO client, only for test.
+func (c *client) ResetTSOClient() {
+	c.Lock()
+	defer c.Unlock()
+	c.resetTSOClientLocked(c.serviceMode)
+}
+
+func (c *client) getServiceMode() pdpb.ServiceMode {
+	c.RLock()
+	defer c.RUnlock()
+	return c.serviceMode
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 }
 
 func (c *client) scheduleUpdateTokenConnection() {
@@ -598,6 +630,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 		ctx = opentracing.ContextWithSpan(ctx, span)
 	}
 
+<<<<<<< HEAD
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
@@ -617,10 +650,59 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 		if err = tsoClient.dispatchRequest(dcLocation, req); err != nil {
 			req.done <- err
 		}
+=======
+	req := c.getTSORequest(ctx, dcLocation)
+	if err := c.dispatchTSORequestWithRetry(req); err != nil {
+		req.done <- err
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 	}
 	return req
 }
 
+<<<<<<< HEAD
+=======
+func (c *client) getTSORequest(ctx context.Context, dcLocation string) *tsoRequest {
+	req := tsoReqPool.Get().(*tsoRequest)
+	// Set needed fields in the request before using it.
+	req.start = time.Now()
+	req.clientCtx = c.ctx
+	req.requestCtx = ctx
+	req.physical = 0
+	req.logical = 0
+	req.dcLocation = dcLocation
+	return req
+}
+
+const (
+	dispatchRetryDelay = 50 * time.Millisecond
+	dispatchRetryCount = 2
+)
+
+func (c *client) dispatchTSORequestWithRetry(req *tsoRequest) error {
+	var (
+		retryable bool
+		err       error
+	)
+	for i := 0; i < dispatchRetryCount; i++ {
+		// Do not delay for the first time.
+		if i > 0 {
+			time.Sleep(dispatchRetryDelay)
+		}
+		// Get the tsoClient each time, as it may be initialized or switched during the process.
+		tsoClient := c.getTSOClient()
+		if tsoClient == nil {
+			err = errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
+			continue
+		}
+		retryable, err = tsoClient.dispatchRequest(req)
+		if !retryable {
+			break
+		}
+	}
+	return err
+}
+
+>>>>>>> c00c42e77 (client/tso: fix the bug that collected TSO requests could never be finished (#7951))
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
 	resp := c.GetTSAsync(ctx)
 	return resp.Wait()

@@ -141,7 +141,7 @@ func (c *tsoClient) Close() {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
 			tsoErr := errors.WithStack(errClosing)
-			dispatcher.tsoBatchController.revokePendingRequest(tsoErr)
+			dispatcher.tsoBatchController.revokePendingRequests(tsoErr)
 			dispatcher.dispatcherCancel()
 		}
 		return true
