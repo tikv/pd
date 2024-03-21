@@ -363,8 +363,6 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	recordMaxTicker := time.NewTicker(tickPerSecond)
 	defer recordMaxTicker.Stop()
 	maxPerSecTrackers := make(map[string]*maxPerSecCostTracker)
-	rruSum := make(map[string]float64)
-	wruSum := make(map[string]float64)
 	for {
 		select {
 		case <-ctx.Done():
@@ -394,14 +392,19 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				readRequestCountMetrics  = requestCount.WithLabelValues(name, name, readTypeLabel)
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, name, writeTypeLabel)
 			)
+			t, ok := maxPerSecTrackers[name]
+			if !ok {
+				t = newMaxPerSecCostTracker(name, defaultCollectIntervalSec)
+				maxPerSecTrackers[name] = t
+			}
+			t.CollectConsumption(consumption)
+
 			// RU info.
 			if consumption.RRU > 0 {
 				rruMetrics.Add(consumption.RRU)
-				rruSum[name] += consumption.RRU
 			}
 			if consumption.WRU > 0 {
 				wruMetrics.Add(consumption.WRU)
-				wruSum[name] += consumption.WRU
 			}
 			// Byte info.
 			if consumption.ReadBytes > 0 {
@@ -448,8 +451,6 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					availableRUCounter.DeleteLabelValues(r.name, r.name, r.ruType)
 					delete(m.consumptionRecord, r)
 					delete(maxPerSecTrackers, r.name)
-					delete(rruSum, r.name)
-					delete(wruSum, r.name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
 					writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
 				}
@@ -482,10 +483,11 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 			m.RUnlock()
 			for _, name := range names {
-				if maxPerSecTrackers[name] == nil {
+				if t, ok := maxPerSecTrackers[name]; !ok {
 					maxPerSecTrackers[name] = newMaxPerSecCostTracker(name, defaultCollectIntervalSec)
+				} else {
+					t.FlushMetrics()
 				}
-				maxPerSecTrackers[name].Observe(rruSum[name], wruSum[name])
 			}
 		}
 	}
@@ -495,6 +497,8 @@ type maxPerSecCostTracker struct {
 	name          string
 	maxPerSecRRU  float64
 	maxPerSecWRU  float64
+	rruSum        float64
+	wruSum        float64
 	lastRRUSum    float64
 	lastWRUSum    float64
 	flushPeriod   int
@@ -512,17 +516,23 @@ func newMaxPerSecCostTracker(name string, flushPeriod int) *maxPerSecCostTracker
 	}
 }
 
-// Observe and set the maxPerSecRRU and maxPerSecWRU to the metrics.
-func (t *maxPerSecCostTracker) Observe(rruSum, wruSum float64) {
+// CollectConsumption collects the consumption info.
+func (t *maxPerSecCostTracker) CollectConsumption(consume *rmpb.Consumption) {
+	t.rruSum += consume.RRU
+	t.wruSum += consume.WRU
+}
+
+// FlushMetrics and set the maxPerSecRRU and maxPerSecWRU to the metrics.
+func (t *maxPerSecCostTracker) FlushMetrics() {
 	if t.lastRRUSum == 0 && t.lastWRUSum == 0 {
-		t.lastRRUSum = rruSum
-		t.lastWRUSum = wruSum
+		t.lastRRUSum = t.rruSum
+		t.lastWRUSum = t.wruSum
 		return
 	}
-	deltaRRU := rruSum - t.lastRRUSum
-	deltaWRU := wruSum - t.lastWRUSum
-	t.lastRRUSum = rruSum
-	t.lastWRUSum = wruSum
+	deltaRRU := t.rruSum - t.lastRRUSum
+	deltaWRU := t.wruSum - t.lastWRUSum
+	t.lastRRUSum = t.rruSum
+	t.lastWRUSum = t.wruSum
 	if deltaRRU > t.maxPerSecRRU {
 		t.maxPerSecRRU = deltaRRU
 	}
