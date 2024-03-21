@@ -18,12 +18,16 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"runtime/trace"
 	"sync"
 	"time"
 
+	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
@@ -70,7 +74,7 @@ type tsoClient struct {
 	wg     sync.WaitGroup
 	option *option
 
-	svcDiscovery ServiceDiscovery
+	ServiceDiscovery
 	tsoStreamBuilderFactory
 	// tsoAllocators defines the mapping {dc-location -> TSO allocator leader URL}
 	tsoAllocators sync.Map // Store as map[string]string
@@ -101,7 +105,7 @@ func newTSOClient(
 		ctx:                       ctx,
 		cancel:                    cancel,
 		option:                    option,
-		svcDiscovery:              svcDiscovery,
+		ServiceDiscovery:          svcDiscovery,
 		tsoStreamBuilderFactory:   factory,
 		checkTSDeadlineCh:         make(chan struct{}),
 		checkTSODispatcherCh:      make(chan struct{}, 1),
@@ -110,14 +114,14 @@ func newTSOClient(
 
 	eventSrc := svcDiscovery.(tsoAllocatorEventSource)
 	eventSrc.SetTSOLocalServURLsUpdatedCallback(c.updateTSOLocalServURLs)
-	eventSrc.SetTSOGlobalServURLUpdatedCallback(c.updateTSOGlobalServURL)
-	c.svcDiscovery.AddServiceURLsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
+	eventSrc.SetTSOGlobalServURLUpdatedCallback(c.updateGlobalDispatcher)
+	c.ServiceDiscovery.AddServiceURLsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
 
 	return c
 }
 
 func (c *tsoClient) Setup() {
-	c.svcDiscovery.CheckMemberChanged()
+	c.ServiceDiscovery.CheckMemberChanged()
 	c.updateTSODispatcher()
 
 	// Start the daemons.
@@ -172,7 +176,7 @@ func (c *tsoClient) GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*g
 		panic(fmt.Sprintf("the allocator leader in %s should exist", dcLocation))
 	}
 	// todo: if we support local tso forward, we should get or create client conns.
-	cc, ok := c.svcDiscovery.GetClientConns().Load(url)
+	cc, ok := c.ServiceDiscovery.GetClientConns().Load(url)
 	if !ok {
 		return nil, url.(string)
 	}
@@ -202,7 +206,7 @@ func (c *tsoClient) updateTSOLocalServURLs(allocatorMap map[string]string) error
 			continue
 		}
 		updated = true
-		if _, err := c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
+		if _, err := c.ServiceDiscovery.GetOrCreateGRPCConn(url); err != nil {
 			log.Warn("[tso] failed to connect dc tso allocator serving url",
 				zap.String("dc-location", dcLocation),
 				zap.String("serving-url", url),
@@ -226,7 +230,15 @@ func (c *tsoClient) updateTSOLocalServURLs(allocatorMap map[string]string) error
 	return nil
 }
 
-func (c *tsoClient) updateTSOGlobalServURL(url string) error {
+func (c *tsoClient) updateGlobalDispatcher(url string) error {
+	if d, ok := c.tsoDispatcher.Load(globalDCLocation); ok {
+		dispatcher := d.(*tsoDispatcher)
+		old := dispatcher.targetURL.Load()
+		if old != url {
+			dispatcher.targetURL.Store(url)
+			dispatcher.dispatcherCancel()
+		}
+	}
 	c.tsoAllocators.Store(globalDCLocation, url)
 	log.Info("[tso] switch dc tso global allocator serving url",
 		zap.String("dc-location", globalDCLocation),
@@ -251,11 +263,16 @@ func (c *tsoClient) gcAllocatorServingURL(curAllocatorMap map[string]string) {
 	})
 }
 
+// TSO Follower Proxy only supports the Global TSO proxy now.
+func (c *tsoClient) allowTSOFollowerProxy(dc string) bool {
+	return dc == globalDCLocation && c.option.getEnableTSOFollowerProxy()
+}
+
 // backupClientConn gets a grpc client connection of the current reachable and healthy
 // backup service endpoints randomly. Backup service endpoints are followers in a
 // quorum-based cluster or secondaries in a primary/secondary configured cluster.
 func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
-	urls := c.svcDiscovery.GetBackupURLs()
+	urls := c.ServiceDiscovery.GetBackupURLs()
 	if len(urls) < 1 {
 		return nil, ""
 	}
@@ -265,7 +282,7 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 	)
 	for i := 0; i < len(urls); i++ {
 		url := urls[rand.Intn(len(urls))]
-		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
+		if cc, err = c.ServiceDiscovery.GetOrCreateGRPCConn(url); err != nil {
 			continue
 		}
 		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
@@ -276,4 +293,168 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 		}
 	}
 	return nil, ""
+}
+
+// getAllTSOStreamBuilders returns a TSO stream builder for every service endpoint of TSO leader/followers
+// or of keyspace group primary/secondaries.
+func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
+	var (
+		addrs          = c.ServiceDiscovery.GetServiceURLs()
+		streamBuilders = make(map[string]tsoStreamBuilder, len(addrs))
+		cc             *grpc.ClientConn
+		err            error
+	)
+	for _, addr := range addrs {
+		if len(addrs) == 0 {
+			continue
+		}
+		if cc, err = c.ServiceDiscovery.GetOrCreateGRPCConn(addr); err != nil {
+			continue
+		}
+		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
+		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
+		healthCancel()
+		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
+			streamBuilders[addr] = c.tsoStreamBuilderFactory.makeBuilder(cc)
+		}
+	}
+	return streamBuilders
+}
+
+func (c *tsoClient) processRequests(
+	stream tsoStream, dcLocation string, tbc *tsoBatchController,
+) error {
+	requests := tbc.getCollectedRequests()
+	for _, req := range requests {
+		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqSend").End()
+		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {
+			span = span.Tracer().StartSpan("pdclient.processRequests", opentracing.ChildOf(span.Context()))
+			defer span.Finish()
+		}
+	}
+
+	count := int64(len(requests))
+	reqKeyspaceGroupID := c.ServiceDiscovery.GetKeyspaceGroupID()
+
+	select {
+	case <-stream.(*pdTSOStream).stream.Context().Done():
+		fmt.Println("stream context done before sleep")
+	default:
+		fmt.Println("stream context not done before sleep")
+	}
+	failpoint.Inject("waitBeforeProcessTSO", func() {
+		time.Sleep(time.Second * 5)
+	})
+	select {
+	case <-stream.(*pdTSOStream).stream.Context().Done():
+		fmt.Println("stream context done after sleep")
+	default:
+		fmt.Println("stream context not done after sleep")
+	}
+
+	respKeyspaceGroupID, physical, logical, suffixBits, err := stream.processRequests(
+		c.ServiceDiscovery.GetClusterID(), c.ServiceDiscovery.GetKeyspaceID(), reqKeyspaceGroupID,
+		dcLocation, count, tbc.batchStartTime)
+	if err != nil {
+		tbc.finishCollectedRequests(0, 0, 0, err)
+		return err
+	}
+	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
+	firstLogical := tsoutil.AddLogical(logical, -count+1, suffixBits)
+	curTSOInfo := &tsoInfo{
+		tsoServer:           stream.getServerURL(),
+		reqKeyspaceGroupID:  reqKeyspaceGroupID,
+		respKeyspaceGroupID: respKeyspaceGroupID,
+		respReceivedAt:      time.Now(),
+		physical:            physical,
+		logical:             tsoutil.AddLogical(firstLogical, count-1, suffixBits),
+	}
+	c.compareAndSwapTS(dcLocation, curTSOInfo, physical, firstLogical)
+	tbc.finishCollectedRequests(physical, firstLogical, suffixBits, nil)
+	return nil
+}
+
+type tsoInfo struct {
+	tsoServer           string
+	reqKeyspaceGroupID  uint32
+	respKeyspaceGroupID uint32
+	respReceivedAt      time.Time
+	physical            int64
+	logical             int64
+}
+
+// TSFuture is a future which promises to return a TSO.
+type TSFuture interface {
+	// Wait gets the physical and logical time, it would block caller if data is not available yet.
+	Wait() (int64, int64, error)
+}
+
+func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
+	// If tso command duration is observed very high, the reason could be it
+	// takes too long for Wait() be called.
+	start := time.Now()
+	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
+	select {
+	case err = <-req.done:
+		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
+		err = errors.WithStack(err)
+		defer tsoReqPool.Put(req)
+		if err != nil {
+			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
+			return 0, 0, err
+		}
+		physical, logical = req.physical, req.logical
+		now := time.Now()
+		cmdDurationWait.Observe(now.Sub(start).Seconds())
+		cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
+		return
+	case <-req.requestCtx.Done():
+		return 0, 0, errors.WithStack(req.requestCtx.Err())
+	case <-req.clientCtx.Done():
+		return 0, 0, errors.WithStack(req.clientCtx.Err())
+	}
+}
+
+func (c *tsoClient) compareAndSwapTS(
+	dcLocation string,
+	curTSOInfo *tsoInfo,
+	physical, firstLogical int64,
+) {
+	val, loaded := c.lastTSOInfoMap.LoadOrStore(dcLocation, curTSOInfo)
+	if !loaded {
+		return
+	}
+	lastTSOInfo := val.(*tsoInfo)
+	if lastTSOInfo.respKeyspaceGroupID != curTSOInfo.respKeyspaceGroupID {
+		log.Info("[tso] keyspace group changed",
+			zap.String("dc-location", dcLocation),
+			zap.Uint32("old-group-id", lastTSOInfo.respKeyspaceGroupID),
+			zap.Uint32("new-group-id", curTSOInfo.respKeyspaceGroupID))
+	}
+
+	// The TSO we get is a range like [largestLogical-count+1, largestLogical], so we save the last TSO's largest logical
+	// to compare with the new TSO's first logical. For example, if we have a TSO resp with logical 10, count 5, then
+	// all TSOs we get will be [6, 7, 8, 9, 10]. lastTSOInfo.logical stores the logical part of the largest ts returned
+	// last time.
+	if tsoutil.TSLessEqual(physical, firstLogical, lastTSOInfo.physical, lastTSOInfo.logical) {
+		log.Panic("[tso] timestamp fallback",
+			zap.String("dc-location", dcLocation),
+			zap.Uint32("keyspace", c.ServiceDiscovery.GetKeyspaceID()),
+			zap.String("last-ts", fmt.Sprintf("(%d, %d)", lastTSOInfo.physical, lastTSOInfo.logical)),
+			zap.String("cur-ts", fmt.Sprintf("(%d, %d)", physical, firstLogical)),
+			zap.String("last-tso-server", lastTSOInfo.tsoServer),
+			zap.String("cur-tso-server", curTSOInfo.tsoServer),
+			zap.Uint32("last-keyspace-group-in-request", lastTSOInfo.reqKeyspaceGroupID),
+			zap.Uint32("cur-keyspace-group-in-request", curTSOInfo.reqKeyspaceGroupID),
+			zap.Uint32("last-keyspace-group-in-response", lastTSOInfo.respKeyspaceGroupID),
+			zap.Uint32("cur-keyspace-group-in-response", curTSOInfo.respKeyspaceGroupID),
+			zap.Time("last-response-received-at", lastTSOInfo.respReceivedAt),
+			zap.Time("cur-response-received-at", curTSOInfo.respReceivedAt))
+	}
+	lastTSOInfo.tsoServer = curTSOInfo.tsoServer
+	lastTSOInfo.reqKeyspaceGroupID = curTSOInfo.reqKeyspaceGroupID
+	lastTSOInfo.respKeyspaceGroupID = curTSOInfo.respKeyspaceGroupID
+	lastTSOInfo.respReceivedAt = curTSOInfo.respReceivedAt
+	lastTSOInfo.physical = curTSOInfo.physical
+	lastTSOInfo.logical = curTSOInfo.logical
 }

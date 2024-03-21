@@ -226,6 +226,33 @@ func TestLeaderTransfer(t *testing.T) {
 	wg.Wait()
 }
 
+func TestGetTSAfterTransferLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	re.NoError(err)
+	endpoints := runServer(re, cluster)
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	defer cluster.Destroy()
+
+	cli := setupCli(re, ctx, endpoints, pd.WithCustomTimeoutOption(10*time.Second))
+	defer cli.Close()
+
+	err = cluster.GetServer(leader).ResignLeader()
+	re.NoError(err)
+	newLeader := cluster.WaitLeader()
+	re.NotEmpty(newLeader)
+	re.NotEqual(leader, newLeader)
+	leader = newLeader
+	err = cli.GetServiceDiscovery().CheckMemberChanged()
+	re.NoError(err)
+
+	_, _, err = cli.GetTS(context.TODO())
+	re.ErrorContains(err, errs.NotLeaderErr)
+}
+
 func TestTSOAllocatorLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
