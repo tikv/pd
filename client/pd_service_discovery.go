@@ -17,7 +17,7 @@ package pd
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
+	"net/url"
 	"reflect"
 	"sort"
 	"strings"
@@ -87,15 +87,15 @@ type ServiceDiscovery interface {
 	// which is the leader in a quorum-based cluster or the primary in a primary/secondary
 	// configured cluster.
 	GetServingEndpointClientConn() *grpc.ClientConn
-	// GetClientConns returns the mapping {addr -> a gRPC connection}
+	// GetClientConns returns the mapping {URL -> a gRPC connection}
 	GetClientConns() *sync.Map
-	// GetServingAddr returns the serving endpoint which is the leader in a quorum-based cluster
+	// GetServingURL returns the serving endpoint which is the leader in a quorum-based cluster
 	// or the primary in a primary/secondary configured cluster.
-	GetServingAddr() string
-	// GetBackupAddrs gets the addresses of the current reachable backup service
+	GetServingURL() string
+	// GetBackupURLs gets the URLs of the current reachable backup service
 	// endpoints. Backup service endpoints are followers in a quorum-based cluster or
 	// secondaries in a primary/secondary configured cluster.
-	GetBackupAddrs() []string
+	GetBackupURLs() []string
 	// GetServiceClient tries to get the leader/primary ServiceClient.
 	// If the leader ServiceClient meets network problem,
 	// it returns a follower/secondary ServiceClient which can forward the request to leader.
@@ -103,8 +103,8 @@ type ServiceDiscovery interface {
 	// GetAllServiceClients tries to get all ServiceClient.
 	// If the leader is not nil, it will put the leader service client first in the slice.
 	GetAllServiceClients() []ServiceClient
-	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
-	GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error)
+	// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given url.
+	GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error)
 	// ScheduleCheckMemberChanged is used to trigger a check to see if there is any membership change
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
 	// primary/secondary configured cluster.
@@ -112,23 +112,22 @@ type ServiceDiscovery interface {
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
-	// AddServingAddrSwitchedCallback adds callbacks which will be called when the leader
+	// AddServingURLSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
-	AddServingAddrSwitchedCallback(callbacks ...func())
-	// AddServiceAddrsSwitchedCallback adds callbacks which will be called when any leader/follower
+	AddServingURLSwitchedCallback(callbacks ...func())
+	// AddServiceURLsSwitchedCallback adds callbacks which will be called when any leader/follower
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
-	AddServiceAddrsSwitchedCallback(callbacks ...func())
+	AddServiceURLsSwitchedCallback(callbacks ...func())
 }
 
 // ServiceClient is an interface that defines a set of operations for a raw PD gRPC client to specific PD server.
 type ServiceClient interface {
-	// GetAddress returns the address information of the PD server.
-	GetAddress() string
-	// GetHTTPAddress returns the address with HTTP scheme of the PD server.
-	GetHTTPAddress() string
-	// GetClientConn returns the gRPC connection of the service client
+	// GetURL returns the client url of the PD/etcd server.
+	GetURL() string
+	// GetClientConn returns the gRPC connection of the service client.
+	// It returns nil if the connection is not available.
 	GetClientConn() *grpc.ClientConn
 	// BuildGRPCTargetContext builds a context object with a gRPC context.
 	// ctx: the original context object.
@@ -149,43 +148,23 @@ var (
 )
 
 type pdServiceClient struct {
-	addr        string
-	httpAddress string
-	conn        *grpc.ClientConn
-	isLeader    bool
-	leaderAddr  string
+	url       string
+	conn      *grpc.ClientConn
+	isLeader  bool
+	leaderURL string
 
 	networkFailure atomic.Bool
 }
 
-func newPDServiceClient(addr, leaderAddr string, tlsCfg *tls.Config, conn *grpc.ClientConn, isLeader bool) ServiceClient {
-	var httpAddress string
-	if tlsCfg == nil {
-		if strings.HasPrefix(addr, httpsScheme) {
-			addr = strings.TrimPrefix(addr, httpsScheme)
-			httpAddress = fmt.Sprintf("%s%s", httpScheme, addr)
-		} else if strings.HasPrefix(addr, httpScheme) {
-			httpAddress = addr
-		} else {
-			httpAddress = fmt.Sprintf("%s://%s", httpScheme, addr)
-		}
-	} else {
-		if strings.HasPrefix(addr, httpsScheme) {
-			httpAddress = addr
-		} else if strings.HasPrefix(addr, httpScheme) {
-			addr = strings.TrimPrefix(addr, httpScheme)
-			httpAddress = fmt.Sprintf("%s%s", httpsScheme, addr)
-		} else {
-			httpAddress = fmt.Sprintf("%s://%s", httpsScheme, addr)
-		}
-	}
-
+// NOTE: In the current implementation, the URL passed in is bound to have a scheme,
+// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member owns the sheme.
+// When testing, the URL is also bound to have a scheme.
+func newPDServiceClient(url, leaderURL string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
 	cli := &pdServiceClient{
-		addr:        addr,
-		httpAddress: httpAddress,
-		conn:        conn,
-		isLeader:    isLeader,
-		leaderAddr:  leaderAddr,
+		url:       url,
+		conn:      conn,
+		isLeader:  isLeader,
+		leaderURL: leaderURL,
 	}
 	if conn == nil {
 		cli.networkFailure.Store(true)
@@ -193,20 +172,12 @@ func newPDServiceClient(addr, leaderAddr string, tlsCfg *tls.Config, conn *grpc.
 	return cli
 }
 
-// GetAddress implements ServiceClient.
-func (c *pdServiceClient) GetAddress() string {
+// GetURL implements ServiceClient.
+func (c *pdServiceClient) GetURL() string {
 	if c == nil {
 		return ""
 	}
-	return c.addr
-}
-
-// GetHTTPAddress implements ServiceClient.
-func (c *pdServiceClient) GetHTTPAddress() string {
-	if c == nil {
-		return ""
-	}
-	return c.httpAddress
+	return c.url
 }
 
 // BuildGRPCTargetContext implements ServiceClient.
@@ -215,7 +186,7 @@ func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader b
 		return ctx
 	}
 	if toLeader {
-		return grpcutil.BuildForwardContext(ctx, c.leaderAddr)
+		return grpcutil.BuildForwardContext(ctx, c.leaderURL)
 	}
 	return grpcutil.BuildFollowerHandleContext(ctx)
 }
@@ -243,7 +214,7 @@ func (c *pdServiceClient) checkNetworkAvailable(ctx context.Context) {
 	healthCli := healthpb.NewHealthClient(c.conn)
 	resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
 	failpoint.Inject("unreachableNetwork1", func(val failpoint.Value) {
-		if val, ok := val.(string); (ok && val == c.GetAddress()) || !ok {
+		if val, ok := val.(string); (ok && val == c.GetURL()) || !ok {
 			resp = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
 		}
@@ -412,20 +383,22 @@ func (c *pdServiceBalancer) get() (ret ServiceClient) {
 }
 
 type updateKeyspaceIDFunc func() error
-type tsoLocalServAddrsUpdatedFunc func(map[string]string) error
-type tsoGlobalServAddrUpdatedFunc func(string) error
+type tsoLocalServURLsUpdatedFunc func(map[string]string) error
+type tsoGlobalServURLUpdatedFunc func(string) error
 
 type tsoAllocatorEventSource interface {
-	// SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
+	// SetTSOLocalServURLsUpdatedCallback adds a callback which will be called when the local tso
 	// allocator leader list is updated.
-	SetTSOLocalServAddrsUpdatedCallback(callback tsoLocalServAddrsUpdatedFunc)
-	// SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
+	SetTSOLocalServURLsUpdatedCallback(callback tsoLocalServURLsUpdatedFunc)
+	// SetTSOGlobalServURLUpdatedCallback adds a callback which will be called when the global tso
 	// allocator leader is updated.
-	SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc)
+	SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc)
 }
 
-var _ ServiceDiscovery = (*pdServiceDiscovery)(nil)
-var _ tsoAllocatorEventSource = (*pdServiceDiscovery)(nil)
+var (
+	_ ServiceDiscovery        = (*pdServiceDiscovery)(nil)
+	_ tsoAllocatorEventSource = (*pdServiceDiscovery)(nil)
+)
 
 // pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
 type pdServiceDiscovery struct {
@@ -440,10 +413,10 @@ type pdServiceDiscovery struct {
 	all               atomic.Value // Store as []pdServiceClient
 	apiCandidateNodes [apiKindCount]*pdServiceBalancer
 	// PD follower URLs. Only for tso.
-	followerAddresses atomic.Value // Store as []string
+	followerURLs atomic.Value // Store as []string
 
 	clusterID uint64
-	// addr -> a gRPC connection
+	// url -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// serviceModeUpdateCb will be called when the service mode gets updated
@@ -454,11 +427,11 @@ type pdServiceDiscovery struct {
 	// leader and followers
 	membersChangedCbs []func()
 	// tsoLocalAllocLeadersUpdatedCb will be called when the local tso allocator
-	// leader list is updated. The input is a map {DC Location -> Leader Addr}
-	tsoLocalAllocLeadersUpdatedCb tsoLocalServAddrsUpdatedFunc
+	// leader list is updated. The input is a map {DC Location -> Leader URL}
+	tsoLocalAllocLeadersUpdatedCb tsoLocalServURLsUpdatedFunc
 	// tsoGlobalAllocLeaderUpdatedCb will be called when the global tso allocator
 	// leader is updated.
-	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServAddrUpdatedFunc
+	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServURLUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -504,7 +477,7 @@ func newPDServiceDiscovery(
 		tlsCfg:              tlsCfg,
 		option:              option,
 	}
-	urls = addrsToUrls(urls)
+	urls = addrsToURLs(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
 }
@@ -699,17 +672,17 @@ func (c *pdServiceDiscovery) discoverMicroservice(svcType serviceType) (urls []s
 	case apiService:
 		urls = c.GetServiceURLs()
 	case tsoService:
-		leaderAddr := c.getLeaderAddr()
-		if len(leaderAddr) > 0 {
-			clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
+		leaderURL := c.getLeaderURL()
+		if len(leaderURL) > 0 {
+			clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.timeout)
 			if err != nil {
 				log.Error("[pd] failed to get cluster info",
-					zap.String("leader-addr", leaderAddr), errs.ZapError(err))
+					zap.String("leader-url", leaderURL), errs.ZapError(err))
 				return nil, err
 			}
 			urls = clusterInfo.TsoUrls
 		} else {
-			err = errors.New("failed to get leader addr")
+			err = errors.New("failed to get leader url")
 			return nil, err
 		}
 	default:
@@ -729,26 +702,26 @@ func (c *pdServiceDiscovery) GetServiceURLs() []string {
 // which is the leader in a quorum-based cluster or the primary in a primary/secondary
 // configured cluster.
 func (c *pdServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
-	if cc, ok := c.clientConns.Load(c.getLeaderAddr()); ok {
+	if cc, ok := c.clientConns.Load(c.getLeaderURL()); ok {
 		return cc.(*grpc.ClientConn)
 	}
 	return nil
 }
 
-// GetClientConns returns the mapping {addr -> a gRPC connection}
+// GetClientConns returns the mapping {URL -> a gRPC connection}
 func (c *pdServiceDiscovery) GetClientConns() *sync.Map {
 	return &c.clientConns
 }
 
-// GetServingAddr returns the leader address
-func (c *pdServiceDiscovery) GetServingAddr() string {
-	return c.getLeaderAddr()
+// GetServingURL returns the leader url
+func (c *pdServiceDiscovery) GetServingURL() string {
+	return c.getLeaderURL()
 }
 
-// GetBackupAddrs gets the addresses of the current reachable followers
+// GetBackupURLs gets the URLs of the current reachable followers
 // in a quorum-based cluster. Used for tso currently.
-func (c *pdServiceDiscovery) GetBackupAddrs() []string {
-	return c.getFollowerAddrs()
+func (c *pdServiceDiscovery) GetBackupURLs() []string {
+	return c.getFollowerURLs()
 }
 
 // getLeaderServiceClient returns the leader ServiceClient.
@@ -774,7 +747,7 @@ func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 	leaderClient := c.getLeaderServiceClient()
 	if c.option.enableForwarding && !leaderClient.Available() {
 		if followerClient := c.getServiceClientByKind(forwardAPIKind); followerClient != nil {
-			log.Debug("[pd] use follower client", zap.String("addr", followerClient.GetAddress()))
+			log.Debug("[pd] use follower client", zap.String("url", followerClient.GetURL()))
 			return followerClient
 		}
 	}
@@ -809,46 +782,46 @@ func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
-// AddServingAddrSwitchedCallback adds callbacks which will be called
+// AddServingURLSwitchedCallback adds callbacks which will be called
 // when the leader is switched.
-func (c *pdServiceDiscovery) AddServingAddrSwitchedCallback(callbacks ...func()) {
+func (c *pdServiceDiscovery) AddServingURLSwitchedCallback(callbacks ...func()) {
 	c.leaderSwitchedCbs = append(c.leaderSwitchedCbs, callbacks...)
 }
 
-// AddServiceAddrsSwitchedCallback adds callbacks which will be called when
+// AddServiceURLsSwitchedCallback adds callbacks which will be called when
 // any leader/follower is changed.
-func (c *pdServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
+func (c *pdServiceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {
 	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
-// SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
+// SetTSOLocalServURLsUpdatedCallback adds a callback which will be called when the local tso
 // allocator leader list is updated.
-func (c *pdServiceDiscovery) SetTSOLocalServAddrsUpdatedCallback(callback tsoLocalServAddrsUpdatedFunc) {
+func (c *pdServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLocalServURLsUpdatedFunc) {
 	c.tsoLocalAllocLeadersUpdatedCb = callback
 }
 
-// SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
+// SetTSOGlobalServURLUpdatedCallback adds a callback which will be called when the global tso
 // allocator leader is updated.
-func (c *pdServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc) {
-	addr := c.getLeaderAddr()
-	if len(addr) > 0 {
-		callback(addr)
+func (c *pdServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
+	url := c.getLeaderURL()
+	if len(url) > 0 {
+		callback(url)
 	}
 	c.tsoGlobalAllocLeaderUpdatedCb = callback
 }
 
-// getLeaderAddr returns the leader address.
-func (c *pdServiceDiscovery) getLeaderAddr() string {
-	return c.getLeaderServiceClient().GetAddress()
+// getLeaderURL returns the leader URL.
+func (c *pdServiceDiscovery) getLeaderURL() string {
+	return c.getLeaderServiceClient().GetURL()
 }
 
-// getFollowerAddrs returns the follower address.
-func (c *pdServiceDiscovery) getFollowerAddrs() []string {
-	followerAddrs := c.followerAddresses.Load()
-	if followerAddrs == nil {
+// getFollowerURLs returns the follower URLs.
+func (c *pdServiceDiscovery) getFollowerURLs() []string {
+	followerURLs := c.followerURLs.Load()
+	if followerURLs == nil {
 		return []string{}
 	}
-	return followerAddrs.([]string)
+	return followerURLs.([]string)
 }
 
 func (c *pdServiceDiscovery) initClusterID() error {
@@ -882,18 +855,20 @@ func (c *pdServiceDiscovery) initClusterID() error {
 }
 
 func (c *pdServiceDiscovery) checkServiceModeChanged() error {
-	leaderAddr := c.getLeaderAddr()
-	if len(leaderAddr) == 0 {
+	leaderURL := c.getLeaderURL()
+	if len(leaderURL) == 0 {
 		return errors.New("no leader found")
 	}
 
-	clusterInfo, err := c.getClusterInfo(c.ctx, leaderAddr, c.option.timeout)
+	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.timeout)
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
 			// If the method is not supported, we set it to pd mode.
 			// TODO: it's a hack way to solve the compatibility issue.
 			// we need to remove this after all maintained version supports the method.
-			c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+			if c.serviceModeUpdateCb != nil {
+				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+			}
 			return nil
 		}
 		return err
@@ -924,7 +899,7 @@ func (c *pdServiceDiscovery) updateMember() error {
 		var errTSO error
 		if err == nil {
 			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
-				err = errs.ErrClientGetLeader.FastGenByArgs("leader address doesn't exist")
+				err = errs.ErrClientGetLeader.FastGenByArgs("leader url doesn't exist")
 			}
 			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
 			errTSO = c.switchTSOAllocatorLeaders(members.GetTsoAllocatorLeaders())
@@ -932,8 +907,8 @@ func (c *pdServiceDiscovery) updateMember() error {
 
 		// Failed to get members
 		if err != nil {
-			log.Info("[pd] cannot update member from this address",
-				zap.String("address", url),
+			log.Info("[pd] cannot update member from this url",
+				zap.String("url", url),
 				errs.ZapError(err))
 			select {
 			case <-c.ctx.Done():
@@ -1016,68 +991,67 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
-func (c *pdServiceDiscovery) switchLeader(addrs []string) (bool, error) {
-	// FIXME: How to safely compare leader urls? For now, only allows one client url.
-	addr := addrs[0]
+func (c *pdServiceDiscovery) switchLeader(url string) (bool, error) {
 	oldLeader := c.getLeaderServiceClient()
-	if addr == oldLeader.GetAddress() && oldLeader.GetClientConn() != nil {
+	if url == oldLeader.GetURL() && oldLeader.GetClientConn() != nil {
 		return false, nil
 	}
 
-	newConn, err := c.GetOrCreateGRPCConn(addr)
+	newConn, err := c.GetOrCreateGRPCConn(url)
 	// If gRPC connect is created successfully or leader is new, still saves.
-	if addr != oldLeader.GetAddress() || newConn != nil {
+	if url != oldLeader.GetURL() || newConn != nil {
 		// Set PD leader and Global TSO Allocator (which is also the PD leader)
-		leaderClient := newPDServiceClient(addr, addr, c.tlsCfg, newConn, true)
+		leaderClient := newPDServiceClient(url, url, newConn, true)
 		c.leader.Store(leaderClient)
 	}
 	// Run callbacks
 	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
-		if err := c.tsoGlobalAllocLeaderUpdatedCb(addr); err != nil {
+		if err := c.tsoGlobalAllocLeaderUpdatedCb(url); err != nil {
 			return true, err
 		}
 	}
 	for _, cb := range c.leaderSwitchedCbs {
 		cb()
 	}
-	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader.GetAddress()))
+	log.Info("[pd] switch leader", zap.String("new-leader", url), zap.String("old-leader", oldLeader.GetURL()))
 	return true, err
 }
 
-func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leader *pdpb.Member) (changed bool) {
+func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint64, leaderURL string) (changed bool) {
 	followers := make(map[string]*pdServiceClient)
 	c.followers.Range(func(key, value any) bool {
 		followers[key.(string)] = value.(*pdServiceClient)
 		return true
 	})
-	var followerAddrs []string
+	var followerURLs []string
 	for _, member := range members {
-		if member.GetMemberId() != leader.GetMemberId() {
+		if member.GetMemberId() != leaderID {
 			if len(member.GetClientUrls()) > 0 {
-				followerAddrs = append(followerAddrs, member.GetClientUrls()...)
+				// Now we don't apply ServiceClient for TSO Follower Proxy, so just keep the all URLs.
+				followerURLs = append(followerURLs, member.GetClientUrls()...)
 
 				// FIXME: How to safely compare urls(also for leader)? For now, only allows one client url.
-				addr := member.GetClientUrls()[0]
-				if client, ok := c.followers.Load(addr); ok {
+				url := pickMatchedURL(member.GetClientUrls(), c.tlsCfg)
+				if client, ok := c.followers.Load(url); ok {
 					if client.(*pdServiceClient).GetClientConn() == nil {
-						conn, err := c.GetOrCreateGRPCConn(addr)
+						conn, err := c.GetOrCreateGRPCConn(url)
 						if err != nil || conn == nil {
-							log.Warn("[pd] failed to connect follower", zap.String("follower", addr), errs.ZapError(err))
+							log.Warn("[pd] failed to connect follower", zap.String("follower", url), errs.ZapError(err))
 							continue
 						}
-						follower := newPDServiceClient(addr, leader.GetClientUrls()[0], c.tlsCfg, conn, false)
-						c.followers.Store(addr, follower)
+						follower := newPDServiceClient(url, leaderURL, conn, false)
+						c.followers.Store(url, follower)
 						changed = true
 					}
-					delete(followers, addr)
+					delete(followers, url)
 				} else {
 					changed = true
-					conn, err := c.GetOrCreateGRPCConn(addr)
-					follower := newPDServiceClient(addr, leader.GetClientUrls()[0], c.tlsCfg, conn, false)
+					conn, err := c.GetOrCreateGRPCConn(url)
+					follower := newPDServiceClient(url, leaderURL, conn, false)
 					if err != nil || conn == nil {
-						log.Warn("[pd] failed to connect follower", zap.String("follower", addr), errs.ZapError(err))
+						log.Warn("[pd] failed to connect follower", zap.String("follower", url), errs.ZapError(err))
 					}
-					c.followers.LoadOrStore(addr, follower)
+					c.followers.LoadOrStore(url, follower)
 				}
 			}
 		}
@@ -1088,13 +1062,15 @@ func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leader *pdp
 			c.followers.Delete(key)
 		}
 	}
-	c.followerAddresses.Store(followerAddrs)
+	c.followerURLs.Store(followerURLs)
 	return
 }
 
 func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader *pdpb.Member) error {
-	leaderChanged, err := c.switchLeader(leader.GetClientUrls())
-	followerChanged := c.updateFollowers(members, leader)
+	// FIXME: How to safely compare leader urls? For now, only allows one client url.
+	leaderURL := pickMatchedURL(leader.GetClientUrls(), c.tlsCfg)
+	leaderChanged, err := c.switchLeader(leaderURL)
+	followerChanged := c.updateFollowers(members, leader.GetMemberId(), leaderURL)
 	// don't need to recreate balancer if no changess.
 	if !followerChanged && !leaderChanged {
 		return err
@@ -1141,20 +1117,55 @@ func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*
 	return nil
 }
 
-// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr
-func (c *pdServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
+// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
+func (c *pdServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
-func addrsToUrls(addrs []string) []string {
+func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
 	// Add default schema "http://" to addrs.
 	urls := make([]string, 0, len(addrs))
 	for _, addr := range addrs {
-		if strings.Contains(addr, "://") {
-			urls = append(urls, addr)
-		} else {
-			urls = append(urls, "http://"+addr)
-		}
+		urls = append(urls, modifyURLScheme(addr, tlsCfg))
 	}
 	return urls
+}
+
+func modifyURLScheme(url string, tlsCfg *tls.Config) string {
+	if tlsCfg == nil {
+		if strings.HasPrefix(url, httpsSchemePrefix) {
+			url = httpSchemePrefix + strings.TrimPrefix(url, httpsSchemePrefix)
+		} else if !strings.HasPrefix(url, httpSchemePrefix) {
+			url = httpSchemePrefix + url
+		}
+	} else {
+		if strings.HasPrefix(url, httpSchemePrefix) {
+			url = httpsSchemePrefix + strings.TrimPrefix(url, httpSchemePrefix)
+		} else if !strings.HasPrefix(url, httpsSchemePrefix) {
+			url = httpsSchemePrefix + url
+		}
+	}
+	return url
+}
+
+// pickMatchedURL picks the matched URL based on the TLS config.
+// Note: please make sure the URLs are valid.
+func pickMatchedURL(urls []string, tlsCfg *tls.Config) string {
+	for _, uStr := range urls {
+		u, err := url.Parse(uStr)
+		if err != nil {
+			continue
+		}
+		if tlsCfg != nil && u.Scheme == httpsScheme {
+			return uStr
+		}
+		if tlsCfg == nil && u.Scheme == httpScheme {
+			return uStr
+		}
+	}
+	ret := modifyURLScheme(urls[0], tlsCfg)
+	log.Warn("[pd] no matched url found", zap.Strings("urls", urls),
+		zap.Bool("tls-enabled", tlsCfg != nil),
+		zap.String("attempted-url", ret))
+	return ret
 }

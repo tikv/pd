@@ -17,13 +17,22 @@ package server
 import "github.com/prometheus/client_golang/prometheus"
 
 var (
-	// ServerMaxProcsGauge record the maxprocs.
+	// ServerMaxProcsGauge records the maxprocs.
 	ServerMaxProcsGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "service",
 			Name:      "maxprocs",
 			Help:      "The value of GOMAXPROCS.",
+		})
+
+	// ServerMemoryLimit records the cgroup memory limit.
+	ServerMemoryLimit = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "service",
+			Name:      "memory_quota_bytes",
+			Help:      "The value of memory quota bytes.",
 		})
 
 	// ServerInfoGauge indicates the pd server info including version and git hash.
@@ -38,5 +47,6 @@ var (
 
 func init() {
 	prometheus.MustRegister(ServerMaxProcsGauge)
+	prometheus.MustRegister(ServerMemoryLimit)
 	prometheus.MustRegister(ServerInfoGauge)
 }

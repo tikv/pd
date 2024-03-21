@@ -17,10 +17,12 @@ package http
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -30,6 +32,15 @@ type ClusterState struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
+}
+
+// State is the status of PD server.
+// NOTE: This type sync with https://github.com/tikv/pd/blob/1d77b25656bc18e1f5aa82337d4ab62a34b10087/pkg/versioninfo/versioninfo.go#L29
+type State struct {
+	BuildTS        string `json:"build_ts"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git_hash"`
+	StartTimestamp int64  `json:"start_timestamp"`
 }
 
 // KeyRange defines a range of keys in bytes.
@@ -600,4 +611,39 @@ type MicroServiceMember struct {
 	GitHash        string `json:"git-hash"`
 	DeployPath     string `json:"deploy-path"`
 	StartTimestamp int64  `json:"start-timestamp"`
+}
+
+// KeyspaceSafePointVersion represents parameters needed to modify the safe point version.
+type KeyspaceSafePointVersion struct {
+	SafePointVersion string `json:"safe_point_version,omitempty"`
+}
+
+// KeyspaceSafePointVersionConfig represents parameters needed to modify target keyspace's configs.
+type KeyspaceSafePointVersionConfig struct {
+	Config KeyspaceSafePointVersion `json:"config"`
+}
+
+// tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
+type tempKeyspaceMeta struct {
+	ID             uint32            `json:"id"`
+	Name           string            `json:"name"`
+	State          string            `json:"state"`
+	CreatedAt      int64             `json:"created_at"`
+	StateChangedAt int64             `json:"state_changed_at"`
+	Config         map[string]string `json:"config"`
+}
+
+func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
+	switch str {
+	case "ENABLED":
+		return keyspacepb.KeyspaceState_ENABLED, nil
+	case "DISABLED":
+		return keyspacepb.KeyspaceState_DISABLED, nil
+	case "ARCHIVED":
+		return keyspacepb.KeyspaceState_ARCHIVED, nil
+	case "TOMBSTONE":
+		return keyspacepb.KeyspaceState_TOMBSTONE, nil
+	default:
+		return keyspacepb.KeyspaceState(0), fmt.Errorf("invalid KeyspaceState string: %s", str)
+	}
 }
