@@ -47,7 +47,7 @@ func (f *tsoTSOStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamB
 // TSO Stream Builder
 
 type tsoStreamBuilder interface {
-	build(context.Context, context.CancelFunc, time.Duration) (tsoStream, error)
+	build(context.Context, context.CancelCauseFunc, time.Duration) (tsoStream, error)
 }
 
 type pdTSOStreamBuilder struct {
@@ -55,7 +55,7 @@ type pdTSOStreamBuilder struct {
 	client    pdpb.PDClient
 }
 
-func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (tsoStream, error) {
+func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelCauseFunc, timeout time.Duration) (tsoStream, error) {
 	done := make(chan struct{})
 	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
 	go checkStreamTimeout(ctx, cancel, done, timeout)
@@ -73,7 +73,7 @@ type tsoTSOStreamBuilder struct {
 }
 
 func (b *tsoTSOStreamBuilder) build(
-	ctx context.Context, cancel context.CancelFunc, timeout time.Duration,
+	ctx context.Context, cancel context.CancelCauseFunc, timeout time.Duration,
 ) (tsoStream, error) {
 	done := make(chan struct{})
 	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
@@ -86,14 +86,14 @@ func (b *tsoTSOStreamBuilder) build(
 	return nil, err
 }
 
-func checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done chan struct{}, timeout time.Duration) {
+func checkStreamTimeout(ctx context.Context, cancel context.CancelCauseFunc, done chan struct{}, timeout time.Duration) {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case <-done:
 		return
 	case <-timer.C:
-		cancel()
+		cancel(errs.ErrClientCreateTSOStream.FastGenByArgs("create stream timeout"))
 	case <-ctx.Done():
 	}
 	<-done
@@ -135,6 +135,10 @@ func (s *pdTSOStream) processRequests(
 		if err == io.EOF {
 			err = errs.ErrClientTSOStreamClosed
 		} else {
+			ctx := s.stream.Context()
+			if ctx.Err() != nil {
+				err = context.Cause(ctx)
+			}
 			err = errors.WithStack(err)
 		}
 		return
@@ -145,6 +149,10 @@ func (s *pdTSOStream) processRequests(
 		if err == io.EOF {
 			err = errs.ErrClientTSOStreamClosed
 		} else {
+			ctx := s.stream.Context()
+			if ctx.Err() != nil {
+				err = context.Cause(ctx)
+			}
 			err = errors.WithStack(err)
 		}
 		return

@@ -25,6 +25,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/replication"
@@ -334,4 +335,25 @@ func (suite *adminTestSuite) TestRecoverAllocID() {
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),
 		tu.Status(re, http.StatusForbidden), tu.StringContain(re, "can only recover alloc id when recovering")))
+}
+
+func TestContextCause(t *testing.T) {
+	re := require.New(t)
+	pctx := context.Background()
+	ctx, cancel := context.WithCancel(pctx)
+	cancel()
+	<-ctx.Done()
+	cancel()
+	<-ctx.Done()
+	re.ErrorIs(ctx.Err(), context.Canceled)
+	re.ErrorIs(context.Cause(ctx), context.Canceled)
+	ctx1, cancel2 := context.WithCancelCause(pctx)
+	err1 := fmt.Errorf("test1")
+	err2 := fmt.Errorf("test2")
+
+	cancel2(err1)
+	re.ErrorIs(ctx1.Err(), context.Canceled)
+	re.ErrorIs(context.Cause(ctx1), err1)
+	cancel2(err2)
+	re.ErrorIs(context.Cause(ctx1), err1)
 }

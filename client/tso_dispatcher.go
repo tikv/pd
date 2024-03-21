@@ -160,13 +160,13 @@ func (c *tsoClient) updateTSODispatcher() {
 type deadline struct {
 	timer  *time.Timer
 	done   chan struct{}
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 }
 
 func newTSDeadline(
 	timeout time.Duration,
 	done chan struct{},
-	cancel context.CancelFunc,
+	cancel context.CancelCauseFunc,
 ) *deadline {
 	timer := timerpool.GlobalTimerPool.Get(timeout)
 	return &deadline{
@@ -213,7 +213,7 @@ func (c *tsoClient) watchTSDeadline(ctx context.Context, dcLocation string) {
 					select {
 					case <-d.timer.C:
 						log.Error("[tso] tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
-						d.cancel()
+						d.cancel(errs.ErrClientGetTSOTimeout)
 						timerpool.GlobalTimerPool.Put(d.timer)
 					case <-d.done:
 						timerpool.GlobalTimerPool.Put(d.timer)
@@ -258,12 +258,12 @@ func (c *tsoClient) tsoDispatcherCheckLoop() {
 
 func (c *tsoClient) checkAllocator(
 	dispatcherCtx context.Context,
-	forwardCancel context.CancelFunc,
+	forwardCancel context.CancelCauseFunc,
 	dc, forwardedHostTrim, addr, url string,
 	updateAndClear func(newAddr string, connectionCtx *tsoConnectionContext)) {
 	defer func() {
 		// cancel the forward stream
-		forwardCancel()
+		forwardCancel(errs.ErrClientTSOStreamClosed)
 		requestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(0)
 	}()
 	cc, u := c.GetTSOAllocatorClientConnByDCLocation(dc)
@@ -288,7 +288,7 @@ func (c *tsoClient) checkAllocator(
 			healthCancel()
 			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 				// create a stream of the original allocator
-				cctx, cancel := context.WithCancel(dispatcherCtx)
+				cctx, cancel := context.WithCancelCause(dispatcherCtx)
 				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
@@ -357,7 +357,7 @@ func (c *tsoClient) handleDispatcher(
 		streamURL string
 		stream    tsoStream
 		streamCtx context.Context
-		cancel    context.CancelFunc
+		cancel    context.CancelCauseFunc
 		// url -> connectionContext
 		connectionCtxs sync.Map
 	)
@@ -365,7 +365,7 @@ func (c *tsoClient) handleDispatcher(
 		log.Info("[tso] exit tso dispatcher", zap.String("dc-location", dc))
 		// Cancel all connections.
 		connectionCtxs.Range(func(_, cc any) bool {
-			cc.(*tsoConnectionContext).cancel()
+			cc.(*tsoConnectionContext).cancel(errs.ErrClientTSOStreamClosed)
 			return true
 		})
 		c.wg.Done()
@@ -495,7 +495,8 @@ tsoBatchLoop:
 				log.Info("[tso] tso stream is canceled", zap.String("dc", dc), zap.String("stream-url", streamURL))
 				// Set `stream` to nil and remove this stream from the `connectionCtxs` due to being canceled.
 				connectionCtxs.Delete(streamURL)
-				cancel()
+				// FIXME: streamCtx has done, maybe don't need to cancel it again.
+				cancel(errs.ErrClientTSOStreamClosed)
 				stream = nil
 				continue
 			default:
@@ -534,7 +535,7 @@ tsoBatchLoop:
 				zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
 			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 			connectionCtxs.Delete(streamURL)
-			cancel()
+			cancel(err)
 			stream = nil
 			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
@@ -582,7 +583,7 @@ type tsoConnectionContext struct {
 	// or tsopb.TSO_TsoClient for a primary/secondary in the TSO cluster
 	stream tsoStream
 	ctx    context.Context
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 }
 
 func (c *tsoClient) updateTSOConnectionCtxs(updaterCtx context.Context, dc string, connectionCtxs *sync.Map) bool {
@@ -617,12 +618,12 @@ func (c *tsoClient) tryConnectToTSO(
 	updateAndClear := func(newURL string, connectionCtx *tsoConnectionContext) {
 		if cc, loaded := connectionCtxs.LoadOrStore(newURL, connectionCtx); loaded {
 			// If the previous connection still exists, we should close it first.
-			cc.(*tsoConnectionContext).cancel()
+			cc.(*tsoConnectionContext).cancel(errs.ErrClientTSOStreamClosed)
 			connectionCtxs.Store(newURL, connectionCtx)
 		}
 		connectionCtxs.Range(func(url, cc any) bool {
 			if url.(string) != newURL {
-				cc.(*tsoConnectionContext).cancel()
+				cc.(*tsoConnectionContext).cancel(errs.ErrClientTSOStreamClosed)
 				connectionCtxs.Delete(url)
 			}
 			return true
@@ -636,7 +637,7 @@ func (c *tsoClient) tryConnectToTSO(
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		if cc != nil {
-			cctx, cancel := context.WithCancel(dispatcherCtx)
+			cctx, cancel := context.WithCancelCause(dispatcherCtx)
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
 			failpoint.Inject("unreachableNetwork", func() {
 				stream = nil
@@ -657,7 +658,7 @@ func (c *tsoClient) tryConnectToTSO(
 					networkErrNum++
 				}
 			}
-			cancel()
+			cancel(errs.ErrClientCreateTSOStream.FastGenByArgs(err.Error()))
 		} else {
 			networkErrNum++
 		}
@@ -679,7 +680,7 @@ func (c *tsoClient) tryConnectToTSO(
 			}
 
 			// create the follower stream
-			cctx, cancel := context.WithCancel(dispatcherCtx)
+			cctx, cancel := context.WithCancelCause(dispatcherCtx)
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.timeout)
 			if err == nil {
@@ -691,7 +692,7 @@ func (c *tsoClient) tryConnectToTSO(
 				updateAndClear(backupURL, &tsoConnectionContext{backupURL, stream, cctx, cancel})
 				return nil
 			}
-			cancel()
+			cancel(errs.ErrClientCreateTSOStream.FastGenByArgs(err.Error()))
 		}
 	}
 	return err
@@ -739,7 +740,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 			log.Info("[tso] remove the stale tso stream",
 				zap.String("dc", dc),
 				zap.String("addr", addrStr))
-			cc.(*tsoConnectionContext).cancel()
+			cc.(*tsoConnectionContext).cancel(errs.ErrClientTSOStreamClosed)
 			connectionCtxs.Delete(addr)
 		}
 		return true
@@ -751,7 +752,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		}
 		log.Info("[tso] try to create tso stream",
 			zap.String("dc", dc), zap.String("addr", addr))
-		cctx, cancel := context.WithCancel(dispatcherCtx)
+		cctx, cancel := context.WithCancelCause(dispatcherCtx)
 		// Do not proxy the leader client.
 		if addr != leaderAddr {
 			log.Info("[tso] use follower to forward tso stream to do the proxy",
@@ -771,7 +772,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		}
 		log.Error("[tso] create the tso stream failed",
 			zap.String("dc", dc), zap.String("addr", addr), errs.ZapError(err))
-		cancel()
+		cancel(errs.ErrClientCreateTSOStream.FastGenByArgs(err.Error()))
 	}
 	return nil
 }
