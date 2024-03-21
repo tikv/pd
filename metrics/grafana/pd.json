@@ -1738,7 +1738,7 @@
           "tableColumn": "idalloc",
           "targets": [
             {
-              "expr": "max(pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"idalloc\"})",
+              "expr": "pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"idalloc\"}!=0",
               "format": "time_series",
               "hide": false,
               "instant": true,
@@ -2284,7 +2284,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})",
+              "expr": "pd_cluster_tso{type=\"tso\", dc=\"global\"}!=0",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -2588,7 +2588,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})",
+              "expr": "pd_cluster_tso{type=\"tso\", dc=\"global\"}!=0",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -7895,6 +7895,7 @@
           "targets": [
             {
               "expr": "pd_checker_patrol_regions_time{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"} != 0",
+              "legendFormat": "{{instance}}",
               "format": "time_series",
               "intervalFactor": 1,
               "refId": "A"
