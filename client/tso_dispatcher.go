@@ -95,7 +95,22 @@ func (c *tsoClient) dispatchRequest(request *tsoRequest) (bool, error) {
 		// tsoClient is closed due to the PD service mode switch, which is retryable.
 		return true, c.ctx.Err()
 	default:
+		// This failpoint will increase the possibility that the request is sent to a closed dispatcher.
+		failpoint.Inject("delayDispatchTSORequest", func() {
+			time.Sleep(time.Second)
+		})
 		dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+	}
+	// Check the contexts again to make sure the request is not been sent to a closed dispatcher.
+	// Never retry on these conditions to prevent unexpected data race.
+	select {
+	case <-request.requestCtx.Done():
+		return false, request.requestCtx.Err()
+	case <-request.clientCtx.Done():
+		return false, request.clientCtx.Err()
+	case <-c.ctx.Done():
+		return false, c.ctx.Err()
+	default:
 	}
 	return false, nil
 }
@@ -368,6 +383,8 @@ func (c *tsoClient) handleDispatcher(
 			cc.(*tsoConnectionContext).cancel()
 			return true
 		})
+		// Clear the tso batch controller.
+		tbc.clear()
 		c.wg.Done()
 	}()
 	// Call updateTSOConnectionCtxs once to init the connectionCtxs first.
