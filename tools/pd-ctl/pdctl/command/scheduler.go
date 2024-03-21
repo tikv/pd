@@ -689,7 +689,7 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 		for _, config := range hiddenHotConfig {
 			delete(schedulerConfig, config)
 		}
-		b, err := json.Marshal(schedulerConfig)
+		b, err := json.MarshalIndent(schedulerConfig, "", "  ")
 		if err != nil {
 			cmd.Println(err)
 			return
