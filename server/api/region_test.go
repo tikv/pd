@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -333,13 +334,28 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
 	mustBootstrapCluster(re, svr)
 	regionCount := 100000
-	for i := 0; i < regionCount; i++ {
-		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
-			core.SetApproximateKeys(10), core.SetApproximateSize(10))
-		mustRegionHeartbeat(re, svr, r)
+
+	// create data
+	var wg sync.WaitGroup
+	tasks := make(chan int, regionCount)
+	for w := 0; w < 16; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range tasks {
+				r := core.NewTestRegionInfo(uint64(i+2), 1,
+					[]byte(fmt.Sprintf("%09d", i)),
+					[]byte(fmt.Sprintf("%09d", i+1)),
+					core.SetApproximateKeys(10), core.SetApproximateSize(10))
+				mustRegionHeartbeat(re, svr, r)
+			}
+		}()
 	}
+	for i := 0; i < regionCount; i++ {
+		tasks <- i
+	}
+	close(tasks)
+	wg.Wait()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
