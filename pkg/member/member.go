@@ -187,10 +187,10 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 	})
 
 	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
-		m.leadership.ResetCampaignTimes()
 		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
 			return err
 		}
+		m.leadership.ResetCampaignTimes()
 		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
 

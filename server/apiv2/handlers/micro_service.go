@@ -28,28 +28,51 @@ func RegisterMicroService(r *gin.RouterGroup) {
 	router := r.Group("ms")
 	router.Use(middlewares.BootstrapChecker())
 	router.GET("members/:service", GetMembers)
+	router.GET("primary/:service", GetPrimary)
 }
 
 // GetMembers gets all members of the cluster for the specified service.
 // @Tags     members
 // @Summary  Get all members of the cluster for the specified service.
 // @Produce  json
-// @Success  200  {object}  []string
+// @Success  200  {object}  []discovery.ServiceRegistryEntry
 // @Router   /ms/members/{service} [get]
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	if !svr.IsAPIServiceMode() {
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, "not support micro service")
+		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
 		return
 	}
 
 	if service := c.Param("service"); len(service) > 0 {
-		addrs, err := discovery.GetMSMembers(service, svr.GetClient())
+		entries, err := discovery.GetMSMembers(service, svr.GetClient())
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
-		c.IndentedJSON(http.StatusOK, addrs)
+		c.IndentedJSON(http.StatusOK, entries)
+		return
+	}
+
+	c.AbortWithStatusJSON(http.StatusInternalServerError, "please specify service")
+}
+
+// GetPrimary gets the primary member of the specified service.
+// @Tags     primary
+// @Summary  Get the primary member of the specified service.
+// @Produce  json
+// @Success  200  {object}  string
+// @Router   /ms/primary/{service} [get]
+func GetPrimary(c *gin.Context) {
+	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
+	if !svr.IsAPIServiceMode() {
+		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
+		return
+	}
+
+	if service := c.Param("service"); len(service) > 0 {
+		addr, _ := svr.GetServicePrimaryAddr(c.Request.Context(), service)
+		c.IndentedJSON(http.StatusOK, addr)
 		return
 	}
 

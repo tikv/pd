@@ -72,9 +72,16 @@ func pauseSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	path := schedulersPrefix + "/" + args[0]
+	path := schedulersPrefix + "/" + getEscapedSchedulerName(args[0])
 	input := map[string]any{"delay": delay}
 	postJSON(cmd, path, input)
+}
+
+// Since certain scheduler's name is defined by caller such as scatter-range,
+// it's possible the name contains special characters, like "#", "&" and so on.
+// So we need to escape the scheduler name here before attaching it to the URL.
+func getEscapedSchedulerName(schedulerName string) string {
+	return url.PathEscape(schedulerName)
 }
 
 // NewResumeSchedulerCommand returns a command to resume a scheduler.
@@ -92,7 +99,7 @@ func resumeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	path := schedulersPrefix + "/" + args[0]
+	path := schedulersPrefix + "/" + getEscapedSchedulerName(args[0])
 	input := map[string]any{"delay": 0}
 	postJSON(cmd, path, input)
 }
@@ -475,7 +482,7 @@ func removeSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 	case strings.HasPrefix(args[0], grantLeaderSchedulerName) && args[0] != grantLeaderSchedulerName:
 		redirectRemoveSchedulerToDeleteConfig(cmd, grantLeaderSchedulerName, args)
 	default:
-		path := schedulersPrefix + "/" + args[0]
+		path := schedulersPrefix + "/" + getEscapedSchedulerName(args[0])
 		_, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
 		if err != nil {
 			cmd.Println(err)

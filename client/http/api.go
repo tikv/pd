@@ -77,8 +77,12 @@ const (
 	ClusterStatus       = "/pd/api/v1/cluster/status"
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
+	operators           = "/pd/api/v1/operators"
 	// Micro Service
 	microServicePrefix = "/pd/api/v2/ms"
+	// Keyspace
+	KeyspaceConfig        = "/pd/api/v2/keyspaces/%s/config"
+	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.
@@ -94,7 +98,7 @@ func RegionByKey(key []byte) string {
 // RegionsByKeyRange returns the path of PD HTTP API to scan regions with given start key, end key and limit parameters.
 func RegionsByKeyRange(keyRange *KeyRange, limit int) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
-	return fmt.Sprintf("%s?start_key=%s&end_key=%s&limit=%d",
+	return fmt.Sprintf("%s?key=%s&end_key=%s&limit=%d",
 		regionsByKey, startKeyStr, endKeyStr, limit)
 }
 
@@ -194,4 +198,19 @@ func PProfGoroutineWithDebugLevel(level int) string {
 // MicroServiceMembers returns the path of PD HTTP API to get the members of microservice.
 func MicroServiceMembers(service string) string {
 	return fmt.Sprintf("%s/members/%s", microServicePrefix, service)
+}
+
+// MicroServicePrimary returns the path of PD HTTP API to get the primary of microservice.
+func MicroServicePrimary(service string) string {
+	return fmt.Sprintf("%s/primary/%s", microServicePrefix, service)
+}
+
+// GetUpdateKeyspaceConfigURL returns the path of PD HTTP API to update keyspace config.
+func GetUpdateKeyspaceConfigURL(keyspaceName string) string {
+	return fmt.Sprintf(KeyspaceConfig, keyspaceName)
+}
+
+// GetKeyspaceMetaByNameURL returns the path of PD HTTP API to get keyspace meta by keyspace name.
+func GetKeyspaceMetaByNameURL(keyspaceName string) string {
+	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
 }

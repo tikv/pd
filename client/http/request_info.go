@@ -46,6 +46,7 @@ const (
 	getClusterVersionName                   = "GetClusterVersion"
 	getClusterName                          = "GetCluster"
 	getClusterStatusName                    = "GetClusterStatus"
+	getStatusName                           = "GetStatus"
 	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"
@@ -70,11 +71,15 @@ const (
 	accelerateScheduleInBatchName           = "AccelerateScheduleInBatch"
 	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
+	getMicroServicePrimaryName              = "GetMicroServicePrimary"
 	getPDVersionName                        = "GetPDVersion"
 	resetTSName                             = "ResetTS"
 	resetBaseAllocIDName                    = "ResetBaseAllocID"
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
+	deleteOperators                         = "DeleteOperators"
+	UpdateKeyspaceSafePointVersionName      = "UpdateKeyspaceSafePointVersion"
+	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
 )
 
 type requestInfo struct {

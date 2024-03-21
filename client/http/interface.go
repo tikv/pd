@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/client/retry"
@@ -57,6 +58,7 @@ type Client interface {
 	GetClusterVersion(context.Context) (string, error)
 	GetCluster(context.Context) (*metapb.Cluster, error)
 	GetClusterStatus(context.Context) (*ClusterState, error)
+	GetStatus(context.Context) (*State, error)
 	GetReplicateConfig(context.Context) (map[string]any, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
@@ -91,7 +93,13 @@ type Client interface {
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
-	GetMicroServiceMembers(context.Context, string) ([]string, error)
+	GetMicroServiceMembers(context.Context, string) ([]MicroServiceMember, error)
+	GetMicroServicePrimary(context.Context, string) (string, error)
+	DeleteOperators(context.Context) error
+
+	/* Keyspace interface */
+	UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error
+	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -450,6 +458,20 @@ func (c *client) GetClusterStatus(ctx context.Context) (*ClusterState, error) {
 		return nil, err
 	}
 	return clusterStatus, nil
+}
+
+// GetStatus gets the status of PD.
+func (c *client) GetStatus(ctx context.Context) (*State, error) {
+	var status *State
+	err := c.request(ctx, newRequestInfo().
+		WithName(getStatusName).
+		WithURI(Status).
+		WithMethod(http.MethodGet).
+		WithResp(&status))
+	if err != nil {
+		return nil, err
+	}
+	return status, nil
 }
 
 // GetReplicateConfig gets the replication configurations.
@@ -854,8 +876,8 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 }
 
 // GetMicroServiceMembers gets the members of the microservice.
-func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]string, error) {
-	var members []string
+func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]MicroServiceMember, error) {
+	var members []MicroServiceMember
 	err := c.request(ctx, newRequestInfo().
 		WithName(getMicroServiceMembersName).
 		WithURI(MicroServiceMembers(service)).
@@ -865,6 +887,17 @@ func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]
 		return nil, err
 	}
 	return members, nil
+}
+
+// GetMicroServicePrimary gets the primary of the microservice.
+func (c *client) GetMicroServicePrimary(ctx context.Context, service string) (string, error) {
+	var primary string
+	err := c.request(ctx, newRequestInfo().
+		WithName(getMicroServicePrimaryName).
+		WithURI(MicroServicePrimary(service)).
+		WithMethod(http.MethodGet).
+		WithResp(&primary))
+	return primary, err
 }
 
 // GetPDVersion gets the release version of the PD binary.
@@ -878,4 +911,57 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 		WithMethod(http.MethodGet).
 		WithResp(&ver))
 	return ver.Version, err
+}
+
+// DeleteOperators deletes the running operators.
+func (c *client) DeleteOperators(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteOperators).
+		WithURI(operators).
+		WithMethod(http.MethodDelete))
+}
+
+// UpdateKeyspaceSafePointVersion patches the keyspace config.
+func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error {
+	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceSafePointVersion)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(UpdateKeyspaceSafePointVersionName).
+		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
+		WithMethod(http.MethodPatch).
+		WithBody(keyspaceConfigPatchJSON))
+}
+
+// GetKeyspaceMetaByName get the given keyspace meta.
+func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error) {
+	var (
+		tempKeyspaceMeta tempKeyspaceMeta
+		keyspaceMetaPB   keyspacepb.KeyspaceMeta
+	)
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetKeyspaceMetaByNameName).
+		WithURI(GetKeyspaceMetaByNameURL(keyspaceName)).
+		WithMethod(http.MethodGet).
+		WithResp(&tempKeyspaceMeta))
+
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
+		Name:           tempKeyspaceMeta.Name,
+		Id:             tempKeyspaceMeta.ID,
+		Config:         tempKeyspaceMeta.Config,
+		CreatedAt:      tempKeyspaceMeta.CreatedAt,
+		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
+		State:          keyspaceState,
+	}
+	return &keyspaceMetaPB, nil
 }

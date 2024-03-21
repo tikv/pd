@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strconv"
+	"time"
 
 	"github.com/pingcap/log"
 	pd "github.com/tikv/pd/client"
@@ -120,11 +122,11 @@ type ETCDCase interface {
 	Unary(context.Context, *clientv3.Client) error
 }
 
-// ETCDCraeteFn is function type to create ETCDCase.
-type ETCDCraeteFn func() ETCDCase
+// ETCDCreateFn is function type to create ETCDCase.
+type ETCDCreateFn func() ETCDCase
 
 // ETCDCaseFnMap is the map for all ETCD case creation function.
-var ETCDCaseFnMap = map[string]ETCDCraeteFn{
+var ETCDCaseFnMap = map[string]ETCDCreateFn{
 	"Get":    newGetKV(),
 	"Put":    newPutKV(),
 	"Delete": newDeleteKV(),
@@ -137,17 +139,19 @@ type GRPCCase interface {
 	Unary(context.Context, pd.Client) error
 }
 
-// GRPCCraeteFn is function type to create GRPCCase.
-type GRPCCraeteFn func() GRPCCase
+// GRPCCreateFn is function type to create GRPCCase.
+type GRPCCreateFn func() GRPCCase
 
 // GRPCCaseFnMap is the map for all gRPC case creation function.
-var GRPCCaseFnMap = map[string]GRPCCraeteFn{
-	"GetRegion":               newGetRegion(),
-	"GetRegionEnableFollower": newGetRegionEnableFollower(),
-	"GetStore":                newGetStore(),
-	"GetStores":               newGetStores(),
-	"ScanRegions":             newScanRegions(),
-	"Tso":                     newTso(),
+var GRPCCaseFnMap = map[string]GRPCCreateFn{
+	"GetRegion":                newGetRegion(),
+	"GetRegionEnableFollower":  newGetRegionEnableFollower(),
+	"GetStore":                 newGetStore(),
+	"GetStores":                newGetStores(),
+	"ScanRegions":              newScanRegions(),
+	"Tso":                      newTso(),
+	"UpdateGCSafePoint":        newUpdateGCSafePoint(),
+	"UpdateServiceGCSafePoint": newUpdateServiceGCSafePoint(),
 }
 
 // HTTPCase is the interface for all HTTP cases.
@@ -156,11 +160,11 @@ type HTTPCase interface {
 	Do(context.Context, pdHttp.Client) error
 }
 
-// HTTPCraeteFn is function type to create HTTPCase.
-type HTTPCraeteFn func() HTTPCase
+// HTTPCreateFn is function type to create HTTPCase.
+type HTTPCreateFn func() HTTPCase
 
 // HTTPCaseFnMap is the map for all HTTP case creation function.
-var HTTPCaseFnMap = map[string]HTTPCraeteFn{
+var HTTPCaseFnMap = map[string]HTTPCreateFn{
 	"GetRegionStatus":  newRegionStats(),
 	"GetMinResolvedTS": newMinResolvedTS(),
 }
@@ -221,6 +225,55 @@ func (c *regionsStats) Do(ctx context.Context, cli pdHttp.Client) error {
 	if Debug {
 		log.Info("do HTTP case", zap.String("case", c.name), zap.Any("region-stats", regionStats), zap.Error(err))
 	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type updateGCSafePoint struct {
+	*baseCase
+}
+
+func newUpdateGCSafePoint() func() GRPCCase {
+	return func() GRPCCase {
+		return &updateGCSafePoint{
+			baseCase: &baseCase{
+				name: "UpdateGCSafePoint",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *updateGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
+	s := time.Now().Unix()
+	_, err := cli.UpdateGCSafePoint(ctx, uint64(s))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type updateServiceGCSafePoint struct {
+	*baseCase
+}
+
+func newUpdateServiceGCSafePoint() func() GRPCCase {
+	return func() GRPCCase {
+		return &updateServiceGCSafePoint{
+			baseCase: &baseCase{
+				name: "UpdateServiceGCSafePoint",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (c *updateServiceGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
+	s := time.Now().Unix()
+	id := rand.Int63n(100) + 1
+	_, err := cli.UpdateServiceGCSafePoint(ctx, strconv.FormatInt(id, 10), id, uint64(s))
 	if err != nil {
 		return err
 	}

@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -177,6 +178,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
+	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -367,10 +369,21 @@ func (s *Server) startServer() (err error) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	legacySvcRootPath := endpoint.LegacyRootPath(s.clusterID)
 	tsoSvcRootPath := endpoint.TSOSvcRootPath(s.clusterID)
-	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
+	if err != nil {
+		deployPath = ""
+	}
+	s.serviceID = &discovery.ServiceRegistryEntry{
+		ServiceAddr:    s.cfg.AdvertiseListenAddr,
+		Version:        versioninfo.PDReleaseVersion,
+		GitHash:        versioninfo.PDGitHash,
+		DeployPath:     deployPath,
+		StartTimestamp: s.StartTimestamp(),
+	}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(), s.cfg.AdvertiseListenAddr,
-		discovery.TSOPath(s.clusterID), legacySvcRootPath, tsoSvcRootPath, s.cfg)
+		s.clusterID, legacySvcRootPath, tsoSvcRootPath, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}

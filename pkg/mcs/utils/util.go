@@ -123,22 +123,23 @@ func WaitAPIServiceReady(s server) error {
 	)
 	ticker := time.NewTicker(RetryIntervalWaitAPIService)
 	defer ticker.Stop()
-	for i := 0; i < MaxRetryTimesWaitAPIService; i++ {
+	retryTimes := 0
+	for {
 		ready, err = isAPIServiceReady(s)
 		if err == nil && ready {
 			return nil
 		}
-		log.Debug("api server is not ready, retrying", errs.ZapError(err), zap.Bool("ready", ready))
 		select {
 		case <-s.Context().Done():
 			return errors.New("context canceled while waiting api server ready")
 		case <-ticker.C:
+			retryTimes++
+			if retryTimes/500 > 0 {
+				log.Warn("api server is not ready, retrying", errs.ZapError(err))
+				retryTimes /= 500
+			}
 		}
 	}
-	if err != nil {
-		log.Warn("failed to check api server ready", errs.ZapError(err))
-	}
-	return errors.Errorf("failed to wait api server ready after retrying %d times", MaxRetryTimesWaitAPIService)
 }
 
 func isAPIServiceReady(s server) (bool, error) {

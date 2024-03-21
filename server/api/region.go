@@ -488,7 +488,7 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 }
 
 // @Tags     region
-// @Summary  List all range holes whitout any region info.
+// @Summary  List all range holes without any region info.
 // @Produce  json
 // @Success  200  {object}  [][]string
 // @Router   /regions/range-holes [get]

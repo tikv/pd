@@ -1293,7 +1293,6 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			continue
 		}
 		start := time.Now()
-
 		err = rc.HandleRegionHeartbeat(region)
 		if err != nil {
 			regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "err").Inc()
@@ -1301,7 +1300,6 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			s.hbStreams.SendErr(pdpb.ErrorType_UNKNOWN, msg, request.GetLeader())
 			continue
 		}
-
 		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 
@@ -1347,7 +1345,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				}
 				lastForwardedSchedulingHost = forwardedSchedulingHost
 				forwardErrCh = make(chan error, 1)
-				go forwardRegionHeartbeatToScheduling(forwardSchedulingStream, server, forwardErrCh)
+				go forwardRegionHeartbeatToScheduling(rc, forwardSchedulingStream, server, forwardErrCh)
 			}
 			schedulingpbReq := &schedulingpb.RegionHeartbeatRequest{
 				Header: &schedulingpb.RequestHeader{
@@ -2568,7 +2566,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 
 // SplitAndScatterRegions split regions by the given split keys, and scatter regions.
 // Only regions which split successfully will be scattered.
-// scatterFinishedPercentage indicates the percentage of successfully splited regions that are scattered.
+// scatterFinishedPercentage indicates the percentage of successfully split regions that are scattered.
 func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.SplitAndScatterRegionsRequest) (*pdpb.SplitAndScatterRegionsResponse, error) {
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
@@ -2810,7 +2808,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			return err
 		}
 	}
-	ctx, cancel := context.WithCancel(s.Context())
+	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
 	configPath := req.GetConfigPath()
 	if configPath == "" {
@@ -2825,6 +2823,8 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	for {
 		select {
 		case <-ctx.Done():
+			return nil
+		case <-s.Context().Done():
 			return nil
 		case res := <-watchChan:
 			if res.Err() != nil {

@@ -20,10 +20,12 @@ import (
 	"net/http"
 
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
+	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -86,14 +88,15 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 	if err := s.checkServing(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithCancel(s.ctx)
+	ctx, cancel := context.WithCancel(server.Context())
 	defer cancel()
-	options := []clientv3.OpOption{}
+	var options []clientv3.OpOption
 	key := string(req.GetKey())
 	var startRevision int64
 	if endKey := req.GetRangeEnd(); endKey != nil {
 		options = append(options, clientv3.WithRange(string(endKey)))
 	}
+	log.Info("watch request", zap.String("key", key), zap.String("range-end", string(req.GetRangeEnd())), zap.Int64("start-revision", req.GetStartRevision()))
 	if startRevision = req.GetStartRevision(); startRevision != 0 {
 		options = append(options, clientv3.WithRev(startRevision))
 	}
@@ -105,6 +108,8 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 	for {
 		select {
 		case <-ctx.Done():
+			return nil
+		case <-s.ctx.Done():
 			return nil
 		case res := <-watchChan:
 			if res.Err() != nil {
@@ -124,8 +129,8 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 				return res.Err()
 			}
 
-			events := make([]*meta_storagepb.Event, 0, len(res.Events))
-			for _, e := range res.Events {
+			events := make([]*meta_storagepb.Event, len(res.Events))
+			for i, e := range res.Events {
 				event := &meta_storagepb.Event{Kv: &meta_storagepb.KeyValue{
 					Key:            e.Kv.Key,
 					Value:          e.Kv.Value,
@@ -137,7 +142,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 				if e.PrevKv != nil {
 					event.PrevKv = &meta_storagepb.KeyValue{Key: e.PrevKv.Key, Value: e.PrevKv.Value}
 				}
-				events = append(events, event)
+				events[i] = event
 			}
 			if len(events) > 0 {
 				if err := server.Send(&meta_storagepb.WatchResponse{
@@ -157,7 +162,7 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	options := []clientv3.OpOption{}
+	var options []clientv3.OpOption
 	key := string(req.GetKey())
 	if endKey := req.GetRangeEnd(); endKey != nil {
 		options = append(options, clientv3.WithRange(string(endKey)))
@@ -182,8 +187,9 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 		Count:  res.Count,
 		More:   res.More,
 	}
-	for _, kv := range res.Kvs {
-		resp.Kvs = append(resp.Kvs, &meta_storagepb.KeyValue{Key: kv.Key, Value: kv.Value})
+	resp.Kvs = make([]*meta_storagepb.KeyValue, len(res.Kvs))
+	for i, kv := range res.Kvs {
+		resp.Kvs[i] = &meta_storagepb.KeyValue{Key: kv.Key, Value: kv.Value}
 	}
 
 	return resp, nil
@@ -196,7 +202,7 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	options := []clientv3.OpOption{}
+	var options []clientv3.OpOption
 	key := string(req.GetKey())
 	value := string(req.GetValue())
 	if lease := clientv3.LeaseID(req.GetLease()); lease != 0 {
@@ -221,6 +227,39 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 	}
 	if res.PrevKv != nil {
 		resp.PrevKv = &meta_storagepb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
+	}
+	return resp, nil
+}
+
+// Delete deletes the key-value pair from meta storage.
+func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest) (*meta_storagepb.DeleteResponse, error) {
+	if err := s.checkServing(); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var options []clientv3.OpOption
+	key := string(req.GetKey())
+	if prevKv := req.GetPrevKv(); prevKv {
+		options = append(options, clientv3.WithPrevKV())
+	}
+
+	cli := s.manager.GetClient()
+	res, err := cli.Delete(ctx, key, options...)
+	var revision int64
+	if res != nil {
+		revision = res.Header.GetRevision()
+	}
+	if err != nil {
+		return &meta_storagepb.DeleteResponse{Header: s.wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
+	}
+
+	resp := &meta_storagepb.DeleteResponse{
+		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: revision},
+	}
+	resp.PrevKvs = make([]*meta_storagepb.KeyValue, len(res.PrevKvs))
+	for i, kv := range res.PrevKvs {
+		resp.PrevKvs[i] = &meta_storagepb.KeyValue{Key: kv.Key, Value: kv.Value}
 	}
 	return resp, nil
 }

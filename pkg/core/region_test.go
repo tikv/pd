@@ -363,7 +363,7 @@ func TestNeedSync(t *testing.T) {
 	for _, testCase := range testCases {
 		regionA := region.Clone(testCase.optionsA...)
 		regionB := region.Clone(testCase.optionsB...)
-		_, _, _, needSync := RegionGuide(regionA, regionB)
+		_, _, needSync := RegionGuide(regionA, regionB)
 		re.Equal(testCase.needSync, needSync)
 	}
 }
@@ -459,9 +459,9 @@ func TestSetRegionConcurrence(t *testing.T) {
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
 	go func() {
-		regions.AtomicCheckAndPutRegion(region)
+		regions.AtomicCheckAndPutRegion(region, NewNoopHeartbeatProcessTracer())
 	}()
-	regions.AtomicCheckAndPutRegion(region)
+	regions.AtomicCheckAndPutRegion(region, NewNoopHeartbeatProcessTracer())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 
