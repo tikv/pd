@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -413,7 +414,8 @@ func (s *Server) startServer() (err error) {
 	// different service modes provided by the same pd-server binary
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
-	deployPath, err := os.Executable()
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
 	if err != nil {
 		deployPath = ""
 	}
