@@ -680,7 +680,7 @@ func listSchedulerConfigCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	if p == "balance-hot-region-scheduler" {
-		schedulerConfig := make(map[string]interface{})
+		schedulerConfig := make(map[string]any)
 		err := json.Unmarshal([]byte(r), &schedulerConfig)
 		if err != nil {
 			cmd.Println(err)
