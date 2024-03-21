@@ -296,22 +296,28 @@ func (c *RaftCluster) runSyncConfig() {
 	defer ticker.Stop()
 	stores := c.GetStores()
 
-	syncConfig(c.storeConfigManager, stores)
+	syncConfig(c.ctx, c.storeConfigManager, stores)
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("sync store config job is stopped")
 			return
 		case <-ticker.C:
-			if !syncConfig(c.storeConfigManager, stores) {
+			if !syncConfig(c.ctx, c.storeConfigManager, stores) {
 				stores = c.GetStores()
 			}
 		}
 	}
 }
 
-func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
+func syncConfig(ctx context.Context, manager *config.StoreConfigManager, stores []*core.StoreInfo) bool {
 	for index := 0; index < len(stores); index++ {
+		select {
+		case <-ctx.Done():
+			log.Info("stop sync store config job due to server shutdown")
+			return false
+		default:
+		}
 		// filter out the stores that are tiflash
 		store := stores[index]
 		if core.IsStoreContainLabel(store.GetMeta(), core.EngineKey, core.EngineTiFlash) {
@@ -324,7 +330,11 @@ func syncConfig(manager *config.StoreConfigManager, stores []*core.StoreInfo) bo
 		}
 		// it will try next store if the current store is failed.
 		address := netutil.ResolveLoopBackAddr(stores[index].GetStatusAddress(), stores[index].GetAddress())
-		if err := manager.ObserveConfig(address); err != nil {
+		err := manager.ObserveConfig(ctx, address)
+		if err != nil {
+			// delete the store if it is failed and retry next store.
+			stores = append(stores[:index], stores[index+1:]...)
+			index--
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
 			continue
