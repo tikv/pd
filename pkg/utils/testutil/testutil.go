@@ -104,6 +104,7 @@ func InitTempFileLogger(level string) (fname string) {
 	return fname
 }
 
+// GenerateTestDataConcurrently generates test data concurrently.
 func GenerateTestDataConcurrently(count int, f func(int)) {
 	var wg sync.WaitGroup
 	tasks := make(chan int, count)
