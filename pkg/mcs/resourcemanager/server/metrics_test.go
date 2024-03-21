@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"testing"
 
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,22 +27,25 @@ func TestMaxPerSecCostTracker(t *testing.T) {
 	re := require.New(t)
 
 	// Define the expected max values for each flushPeriod
-	expectedMaxRRU := []float64{19, 39, 59}
-	expectedMaxWRU := []float64{19, 39, 59}
+	expectedMaxRU := []float64{19, 39, 59}
+	expectedSum := []float64{190, 780, 1770}
 
-	rSum := 0
-	wSum := 0
 	for i := 0; i < 60; i++ {
 		// Record data
-		rSum += i
-		wSum += i
-		tracker.Observe(float64(rSum), float64(wSum))
+		consumption := &rmpb.Consumption{
+			RRU: float64(i),
+			WRU: float64(i),
+		}
+		tracker.CollectConsumption(consumption)
+		tracker.FlushMetrics()
 
 		// Check the max values at the end of each flushPeriod
 		if (i+1)%20 == 0 {
 			period := i / 20
-			re.Equal(tracker.maxPerSecRRU, expectedMaxRRU[period], fmt.Sprintf("maxPerSecRRU in period %d is incorrect", period+1))
-			re.Equal(tracker.maxPerSecWRU, expectedMaxWRU[period], fmt.Sprintf("maxPerSecWRU in period %d is incorrect", period+1))
+			re.Equal(tracker.maxPerSecRRU, expectedMaxRU[period], fmt.Sprintf("maxPerSecRRU in period %d is incorrect", period+1))
+			re.Equal(tracker.maxPerSecWRU, expectedMaxRU[period], fmt.Sprintf("maxPerSecWRU in period %d is incorrect", period+1))
+			re.Equal(tracker.rruSum, expectedSum[period])
+			re.Equal(tracker.rruSum, expectedSum[period])
 		}
 	}
 }
