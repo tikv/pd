@@ -686,7 +686,7 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 		pdctl.MustPutStore(c, leader.GetServer(), store)
 	}
 	for i := 0; i < 100; i++ {
-		pdctl.MustPutRegion(c, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("p%d", i)), []byte(fmt.Sprintf("%d", i+1)), core.SetApproximateSize(10))
+		pdctl.MustPutRegion(c, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
 	}
 	// no store preparing
 	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
@@ -713,8 +713,8 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	c.Assert(p.LeftSeconds, Equals, math.MaxFloat64)
 
 	// update size
-	pdctl.MustPutRegion(c, cluster, 1000, 4, []byte(fmt.Sprintf("%d", 1000)), []byte(fmt.Sprintf("%d", 1001)), core.SetApproximateSize(10))
-	pdctl.MustPutRegion(c, cluster, 1001, 5, []byte(fmt.Sprintf("%d", 1001)), []byte(fmt.Sprintf("%d", 1002)), core.SetApproximateSize(40))
+	pdctl.MustPutRegion(c, cluster, 1000, 4, []byte(fmt.Sprintf("%20d", 1000)), []byte(fmt.Sprintf("%20d", 1001)), core.SetApproximateSize(10))
+	pdctl.MustPutRegion(c, cluster, 1001, 5, []byte(fmt.Sprintf("%20d", 1001)), []byte(fmt.Sprintf("%20d", 1002)), core.SetApproximateSize(40))
 	time.Sleep(2 * time.Second)
 	output = sendRequest(c, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	c.Assert(json.Unmarshal(output, &p), IsNil)
@@ -740,6 +740,46 @@ func (s *testProgressSuite) TestPreparingProgress(c *C) {
 	c.Assert(p.LeftSeconds, Equals, 179.0)
 
 	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"), IsNil)
+}
+
+func (s *testProgressSuite) TestSendApiWhenRestartRaftCluster(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+		conf.Replication.MaxReplicas = 1
+	})
+	c.Assert(err, IsNil)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	c.Assert(err, IsNil)
+	leader := cluster.GetServer(cluster.WaitLeader())
+
+	grpcPDClient := testutil.MustNewGrpcClient(c, leader.GetAddr())
+	clusterID := leader.GetClusterID()
+	req := &pdpb.BootstrapRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
+	}
+	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.GetHeader().GetError(), IsNil)
+
+	// Mock restart raft cluster
+	rc := leader.GetRaftCluster()
+	c.Assert(rc, NotNil)
+	rc.Stop()
+
+	// Mock client-go will still send request
+	output := sendRequest(c, leader.GetAddr()+"/pd/api/v1/min-resolved-ts", http.MethodGet, http.StatusInternalServerError)
+
+	c.Assert(strings.Contains(string(output), "TiKV cluster not bootstrapped, please start TiKV first"), IsTrue)
+
+	err = rc.Start(leader.GetServer())
+	c.Assert(err, IsNil)
+	rc = leader.GetRaftCluster()
+	c.Assert(rc, NotNil)
 }
 
 func sendRequest(c *C, url string, method string, statusCode int) []byte {

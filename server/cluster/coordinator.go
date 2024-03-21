@@ -641,6 +641,10 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
+	if err := schedule.SaveSchedulerConfig(c.cluster.storage, scheduler); err != nil {
+		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+		return err
+	}
 	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
 	return nil
 }
@@ -889,8 +893,23 @@ func (s *scheduleController) Schedule() []*operator.Operator {
 		}
 		cacheCluster := newCacheCluster(s.cluster)
 		// If we have schedule, reset interval to the minimal interval.
-		if ops := s.Scheduler.Schedule(cacheCluster); len(ops) > 0 {
+		ops := s.Scheduler.Schedule(cacheCluster)
+		foundDisabled := false
+		for _, op := range ops {
+			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
+				if labelMgr.ScheduleDisabled(s.cluster.GetRegion(op.RegionID())) {
+					denySchedulersByLabelerCounter.Inc()
+					foundDisabled = true
+					break
+				}
+			}
+		}
+		if len(ops) > 0 {
 			s.nextInterval = s.Scheduler.GetMinInterval()
+			// try regenerating operators
+			if foundDisabled {
+				continue
+			}
 			return ops
 		}
 	}
