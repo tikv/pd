@@ -26,7 +26,6 @@ import (
 )
 
 func TestJsonRespondErrorOk(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	rd := render.New(render.Options{
 		IndentJSON: true,
@@ -45,7 +44,6 @@ func TestJsonRespondErrorOk(t *testing.T) {
 }
 
 func TestJsonRespondErrorBadInput(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	rd := render.New(render.Options{
 		IndentJSON: true,
@@ -71,7 +69,6 @@ func TestJsonRespondErrorBadInput(t *testing.T) {
 }
 
 func TestGetIPPortFromHTTPRequest(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 
 	testCases := []struct {

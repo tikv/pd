@@ -16,6 +16,8 @@ package discovery
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,10 +61,17 @@ func TestRegister(t *testing.T) {
 	sr = NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	err = sr.Register()
 	re.NoError(err)
+	fname := testutil.InitTempFileLogger("info")
 	for i := 0; i < 3; i++ {
 		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(re, client, sr.key))
-		etcd.Server.HardStop()                  // close the etcd to make the keepalive failed
-		time.Sleep(etcdutil.DefaultDialTimeout) // ensure that the request is timeout
+		etcd.Server.HardStop() // close the etcd to make the keepalive failed
+		// ensure that the request is timeout
+		testutil.Eventually(re, func() bool {
+			b, _ := os.ReadFile(fname)
+			l := string(b)
+			count := strings.Count(l, "keep alive failed")
+			return count >= i+1
+		})
 		etcd.Close()
 		etcd, err = embed.StartEtcd(&cfg)
 		re.NoError(err)

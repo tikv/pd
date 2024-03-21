@@ -21,7 +21,6 @@ import (
 )
 
 func TestConcurrencyLimiter(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	cl := newConcurrencyLimiter(10)
 	for i := 0; i < 10; i++ {

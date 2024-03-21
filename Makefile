@@ -108,7 +108,10 @@ pd-server-basic:
 .PHONY: pre-build build tools pd-server pd-server-basic
 
 # Tools
-
+pd-ut: pd-xprog
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go
+pd-xprog:
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-ut/xprog.go
 pd-ctl:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl pd-ctl/main.go
 pd-tso-bench:
@@ -225,6 +228,11 @@ failpoint-disable: install-tools
 
 #### Test ####
 
+ut: pd-ut
+	./bin/pd-ut run --race
+	@$(CLEAN_UT_BINARY)
+	@$(FAILPOINT_DISABLE)
+
 PACKAGE_DIRECTORIES := $(subst $(PD_PKG)/,,$(PACKAGES))
 TEST_PKGS := $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/"),$(PACKAGES))
@@ -303,6 +311,8 @@ split:
 
 clean: failpoint-disable clean-test clean-build
 
+CLEAN_UT_BINARY := find . -name '*.test.bin'| xargs rm -f
+
 clean-test:
 	# Cleaning test tmp...
 	rm -rf /tmp/test_pd*
@@ -310,6 +320,7 @@ clean-test:
 	rm -rf /tmp/test_etcd*
 	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
+	@$(CLEAN_UT_BINARY)
 
 clean-build:
 	# Cleaning building files...

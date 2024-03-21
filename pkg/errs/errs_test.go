@@ -97,7 +97,6 @@ func TestError(t *testing.T) {
 }
 
 func TestErrorEqual(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	err1 := ErrSchedulerNotFound.FastGenByArgs()
 	err2 := ErrSchedulerNotFound.FastGenByArgs()
@@ -134,7 +133,6 @@ func TestZapError(t *testing.T) {
 }
 
 func TestErrorWithStack(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
 	lg := newZapTestLogger(conf)
