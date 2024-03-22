@@ -1738,7 +1738,7 @@
           "tableColumn": "idalloc",
           "targets": [
             {
-              "expr": "pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"idalloc\"}!=0",
+              "expr": "max(pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"idalloc\"})by(type)",
               "format": "time_series",
               "hide": false,
               "instant": true,
@@ -2284,7 +2284,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "pd_cluster_tso{type=\"tso\", dc=\"global\"}!=0",
+              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})by(type)",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -2588,7 +2588,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "pd_cluster_tso{type=\"tso\", dc=\"global\"}!=0",
+              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})by(type)",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -13266,7 +13266,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "rate(pd_replication_dr_tick_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[5m])",
+              "expr": "rate(pd_replication_dr_tick_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])!=0",
               "instant": false,
               "interval": "",
               "legendFormat": "{{instance}}",
@@ -13368,7 +13368,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "pd_replication_dr_state_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
+              "expr": "pd_replication_dr_state_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}!=0",
               "instant": false,
               "interval": "",
               "legendFormat": "{{instance}}",
