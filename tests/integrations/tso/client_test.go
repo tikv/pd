@@ -233,6 +233,56 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	wg.Wait()
 	suite.TearDownSuite()
 	suite.SetupSuite()
+<<<<<<< HEAD
+=======
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
+}
+
+func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/delayDispatchTSORequest", "return(true)"))
+	var (
+		clients    []pd.Client
+		stopSignal atomic.Bool
+		wg         sync.WaitGroup
+	)
+	// Create independent clients to prevent interfering with other tests.
+	if suite.legacy {
+		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
+		re.NoError(err)
+		clients = []pd.Client{client}
+	} else {
+		clients = mcs.WaitForMultiKeyspacesTSOAvailable(suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
+	}
+	wg.Add(tsoRequestConcurrencyNumber * len(clients))
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range clients {
+			go func(client pd.Client) {
+				defer wg.Done()
+				var lastTS uint64
+				for !stopSignal.Load() {
+					physical, logical, err := client.GetTS(suite.ctx)
+					if err != nil {
+						re.ErrorContains(err, context.Canceled.Error())
+					} else {
+						ts := tsoutil.ComposeTS(physical, logical)
+						re.Less(lastTS, ts)
+						lastTS = ts
+					}
+				}
+			}(client)
+		}
+	}
+	// Reset the TSO clients while requesting TSO concurrently.
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range clients {
+			client.(interface{ ResetTSOClient() }).ResetTSOClient()
+		}
+	}
+	stopSignal.Store(true)
+	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/delayDispatchTSORequest"))
+>>>>>>> fb9e2d561 (client/tso: double-check the contexts to prevent waiting for TSO requests in closed chan (#7962))
 }
 
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.

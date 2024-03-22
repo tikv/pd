@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
@@ -60,6 +59,13 @@ var tsoReqPool = sync.Pool{
 			logical:  0,
 		}
 	},
+}
+
+func (req *tsoRequest) tryDone(err error) {
+	select {
+	case req.done <- err:
+	default:
+	}
 }
 
 type tsoClient struct {
@@ -140,9 +146,13 @@ func (c *tsoClient) Close() {
 	c.tsoDispatcher.Range(func(_, dispatcherInterface interface{}) bool {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
+<<<<<<< HEAD
 			tsoErr := errors.WithStack(errClosing)
 			dispatcher.tsoBatchController.revokePendingRequest(tsoErr)
+=======
+>>>>>>> fb9e2d561 (client/tso: double-check the contexts to prevent waiting for TSO requests in closed chan (#7962))
 			dispatcher.dispatcherCancel()
+			dispatcher.tsoBatchController.clear()
 		}
 		return true
 	})

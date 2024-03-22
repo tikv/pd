@@ -598,6 +598,17 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 		ctx = opentracing.ContextWithSpan(ctx, span)
 	}
 
+<<<<<<< HEAD
+=======
+	req := c.getTSORequest(ctx, dcLocation)
+	if err := c.dispatchTSORequestWithRetry(req); err != nil {
+		req.tryDone(err)
+	}
+	return req
+}
+
+func (c *client) getTSORequest(ctx context.Context, dcLocation string) *tsoRequest {
+>>>>>>> fb9e2d561 (client/tso: double-check the contexts to prevent waiting for TSO requests in closed chan (#7962))
 	req := tsoReqPool.Get().(*tsoRequest)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx

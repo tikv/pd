@@ -74,8 +74,42 @@ func (c *tsoClient) dispatchRequest(dcLocation string, request *tsoRequest) erro
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		return err
 	}
+<<<<<<< HEAD
 	dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
 	return nil
+=======
+
+	defer trace.StartRegion(request.requestCtx, "pdclient.tsoReqEnqueue").End()
+	select {
+	case <-request.requestCtx.Done():
+		// Caller cancelled the request, no need to retry.
+		return false, request.requestCtx.Err()
+	case <-request.clientCtx.Done():
+		// Client is closed, no need to retry.
+		return false, request.clientCtx.Err()
+	case <-c.ctx.Done():
+		// tsoClient is closed due to the PD service mode switch, which is retryable.
+		return true, c.ctx.Err()
+	default:
+		// This failpoint will increase the possibility that the request is sent to a closed dispatcher.
+		failpoint.Inject("delayDispatchTSORequest", func() {
+			time.Sleep(time.Second)
+		})
+		dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+	}
+	// Check the contexts again to make sure the request is not been sent to a closed dispatcher.
+	// Never retry on these conditions to prevent unexpected data race.
+	select {
+	case <-request.requestCtx.Done():
+		return false, request.requestCtx.Err()
+	case <-request.clientCtx.Done():
+		return false, request.clientCtx.Err()
+	case <-c.ctx.Done():
+		return false, c.ctx.Err()
+	default:
+	}
+	return false, nil
+>>>>>>> fb9e2d561 (client/tso: double-check the contexts to prevent waiting for TSO requests in closed chan (#7962))
 }
 
 // TSFuture is a future which promises to return a TSO.
@@ -320,6 +354,8 @@ func (c *tsoClient) handleDispatcher(
 			cc.(*tsoConnectionContext).cancel()
 			return true
 		})
+		// Clear the tso batch controller.
+		tbc.clear()
 		c.wg.Done()
 	}()
 	// Call updateTSOConnectionCtxs once to init the connectionCtxs first.
