@@ -793,7 +793,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 
 	req := c.getTSORequest(ctx, dcLocation)
 	if err := c.dispatchTSORequestWithRetry(req); err != nil {
-		req.done <- err
+		req.tryDone(err)
 	}
 	return req
 }
