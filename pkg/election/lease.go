@@ -39,10 +39,17 @@ const (
 type lease struct {
 	// purpose is used to show what this election for
 	Purpose string
+	// store as clientv3.LeaseID
+	ID atomic.Value
+	// lessorID is the member ID of the lessor, which is not necessarily equals to
+	// the etcd leader since the follower could handle the lease request as well.
+	lessorID atomic.Uint64
+	// grantedTerm is the raft term that granted the lease.
+	grantedTerm atomic.Uint64
+
 	// etcd client and lease
 	client *clientv3.Client
 	lease  clientv3.Lease
-	ID     atomic.Value // store as clientv3.LeaseID
 	// leaseTimeout and expireTime are used to control the lease's lifetime
 	leaseTimeout time.Duration
 	expireTime   atomic.Value
@@ -60,11 +67,28 @@ func (l *lease) Grant(leaseTimeout int64) error {
 	if err != nil {
 		return errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
 	}
+	var (
+		leaseID     = leaseResp.ID
+		lessorID    = leaseResp.GetMemberId()
+		grantedTerm = leaseResp.GetRaftTerm()
+	)
 	if cost := time.Since(start); cost > slowRequestTime {
-		log.Warn("lease grants too slow", zap.Duration("cost", cost), zap.String("purpose", l.Purpose))
+		log.Warn("lease grants too slow",
+			zap.Duration("cost", cost),
+			zap.Int64("lease-id", int64(leaseID)),
+			zap.Uint64("lessor-id", lessorID),
+			zap.Uint64("granted-term", grantedTerm),
+			zap.String("purpose", l.Purpose))
 	}
-	log.Info("lease granted", zap.Int64("lease-id", int64(leaseResp.ID)), zap.Int64("lease-timeout", leaseTimeout), zap.String("purpose", l.Purpose))
-	l.ID.Store(leaseResp.ID)
+	log.Info("lease granted",
+		zap.Int64("lease-timeout", leaseTimeout),
+		zap.Int64("lease-id", int64(leaseID)),
+		zap.Uint64("lessor-id", lessorID),
+		zap.Uint64("granted-term", grantedTerm),
+		zap.String("purpose", l.Purpose))
+	l.ID.Store(leaseID)
+	l.lessorID.Store(lessorID)
+	l.grantedTerm.Store(grantedTerm)
 	l.leaseTimeout = time.Duration(leaseTimeout) * time.Second
 	l.expireTime.Store(start.Add(time.Duration(leaseResp.TTL) * time.Second))
 	return nil
@@ -135,7 +159,12 @@ func (l *lease) KeepAlive(ctx context.Context) {
 			// https://pkg.go.dev/time@master#Timer.Reset
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
-			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
+			log.Info("keep alive lease too slow",
+				zap.Duration("timeout-duration", l.leaseTimeout),
+				zap.Time("actual-expire", l.expireTime.Load().(time.Time)),
+				zap.Uint64("lessor-id", l.lessorID.Load()),
+				zap.Uint64("granted-term", l.grantedTerm.Load()),
+				zap.String("purpose", l.Purpose))
 			return
 		case <-ctx.Done():
 			return
@@ -170,9 +199,33 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				}
 				res, err := l.lease.KeepAliveOnce(ctx1, leaseID)
 				if err != nil {
-					log.Warn("lease keep alive failed", zap.String("purpose", l.Purpose), zap.Time("start", start), errs.ZapError(err))
+					log.Warn("lease keep alive failed",
+						zap.Uint64("lessor-id", l.lessorID.Load()),
+						zap.Uint64("granted-term", l.grantedTerm.Load()),
+						zap.String("purpose", l.Purpose),
+						zap.Time("start", start),
+						errs.ZapError(err))
 					return
 				}
+				var (
+					lessorID     = l.lessorID.Load()
+					grantedTerm  = l.grantedTerm.Load()
+					respLessorID = res.GetMemberId()
+					respRaftTerm = res.GetRaftTerm()
+				)
+				// If the Raft term in response is different from the granted term, it means
+				// the etcd leader might have changed, so we should exit the keep alive worker
+				// to trigger a new PD leader election as soon as possible.
+				if respRaftTerm != grantedTerm {
+					log.Warn("lessor raft term changed, exit keep alive worker",
+						zap.Uint64("lessor-id", lessorID),
+						zap.Uint64("resp-lessor-id", respLessorID),
+						zap.Uint64("granted-raft-term", grantedTerm),
+						zap.Uint64("resp-raft-term", respRaftTerm),
+						zap.String("purpose", l.Purpose))
+					return
+				}
+				l.lessorID.Store(respLessorID)
 				if res.TTL > 0 {
 					expire := start.Add(time.Duration(res.TTL) * time.Second)
 					select {
@@ -181,12 +234,19 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 					case <-ctx.Done():
 					}
 				} else {
-					log.Error("keep alive response ttl is zero", zap.String("purpose", l.Purpose))
+					log.Error("keep alive response ttl is zero",
+						zap.Uint64("lessor-id", respLessorID),
+						zap.Uint64("granted-term", grantedTerm),
+						zap.String("purpose", l.Purpose))
 				}
 			}(start)
 
 			select {
 			case <-ctx.Done():
+				log.Info("lease keep alive worker is canceled",
+					zap.Uint64("lessor-id", l.lessorID.Load()),
+					zap.Uint64("granted-term", l.grantedTerm.Load()),
+					zap.String("purpose", l.Purpose))
 				return
 			case <-ticker.C:
 				lastTime = start
