@@ -13098,7 +13098,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "pd_replication_dr_state{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}!=0",
+              "expr": "pd_replication_dr_state{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}!=0",
               "instant": false,
               "interval": "",
               "legendFormat": "{{instance}}",
