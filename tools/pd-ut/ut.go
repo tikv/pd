@@ -27,6 +27,7 @@ import (
 	"path"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -597,7 +598,8 @@ func buildTestBinaryMulti(pkgs []string) error {
 		packages = append(packages, path.Join(modulePath, pkg))
 	}
 
-	cmd := exec.Command("go", "test", "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
+	p := strconv.Itoa(buildParallel)
+	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
 	cmd.Args = append(cmd.Args, packages...)
 	cmd.Dir = workDir
 	cmd.Stdout = os.Stdout
