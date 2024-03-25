@@ -32,6 +32,7 @@ import (
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestMain(m *testing.M) {
@@ -74,7 +75,7 @@ func (suite *globalConfigTestSuite) SetupSuite() {
 	suite.server = &server.GrpcServer{Server: gsi}
 	suite.NoError(err)
 	addr := suite.server.GetAddr()
-	suite.client, err = grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+	suite.client, err = grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	suite.NoError(err)
 }
 

@@ -37,7 +37,7 @@ func TestMemberHelpers(t *testing.T) {
 	}()
 	re.NoError(err)
 
-	ep1 := cfg1.LCUrls[0].String()
+	ep1 := cfg1.ListenClientUrls[0].String()
 	client1, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep1},
 	})
@@ -56,11 +56,11 @@ func TestMemberHelpers(t *testing.T) {
 	// Make a new etcd config.
 	cfg2 := NewTestSingleConfig(t)
 	cfg2.Name = "etcd2"
-	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
+	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.ListenPeerUrls[0])
 	cfg2.ClusterState = embed.ClusterStateFlagExisting
 
 	// Add it to the cluster above.
-	peerURL := cfg2.LPUrls[0].String()
+	peerURL := cfg2.ListenPeerUrls[0].String()
 	addResp, err := AddEtcdMember(client1, []string{peerURL})
 	re.NoError(err)
 
@@ -71,7 +71,7 @@ func TestMemberHelpers(t *testing.T) {
 	re.NoError(err)
 	re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
 
-	ep2 := cfg2.LCUrls[0].String()
+	ep2 := cfg2.ListenClientUrls[0].String()
 	client2, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep2},
 	})
@@ -118,7 +118,7 @@ func TestEtcdKVGet(t *testing.T) {
 	}()
 	re.NoError(err)
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})
@@ -169,7 +169,7 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	}()
 	re.NoError(err)
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})

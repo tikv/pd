@@ -1341,22 +1341,22 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.Logger = "zap"
 	var err error
 
-	cfg.LPUrls, err = parseUrls(c.PeerUrls)
+	cfg.ListenPeerUrls, err = parseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.APUrls, err = parseUrls(c.AdvertisePeerUrls)
+	cfg.AdvertisePeerUrls, err = parseUrls(c.AdvertisePeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.LCUrls, err = parseUrls(c.ClientUrls)
+	cfg.ListenClientUrls, err = parseUrls(c.ClientUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.ACUrls, err = parseUrls(c.AdvertiseClientUrls)
+	cfg.AdvertiseClientUrls, err = parseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, err
 	}
