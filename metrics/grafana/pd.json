@@ -1738,7 +1738,7 @@
           "tableColumn": "idalloc",
           "targets": [
             {
-              "expr": "max(pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"idalloc\"})",
+              "expr": "pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"idalloc\"}!=0",
               "format": "time_series",
               "hide": false,
               "instant": true,
@@ -2284,7 +2284,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})",
+              "expr": "pd_cluster_tso{type=\"tso\", dc=\"global\"}!=0",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -2588,7 +2588,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})",
+              "expr": "pd_cluster_tso{type=\"tso\", dc=\"global\"}!=0",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -7895,6 +7895,7 @@
           "targets": [
             {
               "expr": "pd_checker_patrol_regions_time{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"} != 0",
+              "legendFormat": "{{instance}}",
               "format": "time_series",
               "intervalFactor": 1,
               "refId": "A"
@@ -8474,14 +8475,14 @@
               "refId": "A"
             },
             {
-              "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"fail\"}[1m]*60)",
+              "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"fail\"}[1m])*60",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "fail",
               "refId": "B"
             },
             {
-              "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"success\"}[1m]*60)",
+              "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"success\"}[1m])*60",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "success",
@@ -9296,7 +9297,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "etcd_mvcc_db_total_size_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
+              "expr": "etcd_mvcc_db_total_size_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\".*pd.*\"}",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,
@@ -9304,7 +9305,7 @@
               "refId": "A"
             },
             {
-              "expr": "etcd_mvcc_db_total_size_in_use_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
+              "expr": "etcd_mvcc_db_total_size_in_use_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\".*pd.*\"}",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,

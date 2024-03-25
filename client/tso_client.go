@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
@@ -62,6 +61,13 @@ var tsoReqPool = sync.Pool{
 			logical:  0,
 		}
 	},
+}
+
+func (req *tsoRequest) tryDone(err error) {
+	select {
+	case req.done <- err:
+	default:
+	}
 }
 
 type tsoClient struct {
@@ -140,9 +146,8 @@ func (c *tsoClient) Close() {
 	c.tsoDispatcher.Range(func(_, dispatcherInterface any) bool {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
-			tsoErr := errors.WithStack(errClosing)
-			dispatcher.tsoBatchController.revokePendingRequests(tsoErr)
 			dispatcher.dispatcherCancel()
+			dispatcher.tsoBatchController.clear()
 		}
 		return true
 	})
