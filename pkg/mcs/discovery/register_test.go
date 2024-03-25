@@ -69,6 +69,8 @@ func TestRegister(t *testing.T) {
 		testutil.Eventually(re, func() bool {
 			b, _ := os.ReadFile(fname)
 			l := string(b)
+			// check log in function `ServiceRegister.Register`
+			// ref https://github.com/tikv/pd/blob/6377b26e4e879e7623fbc1d0b7f1be863dea88ad/pkg/mcs/discovery/register.go#L77
 			count := strings.Count(l, "keep alive failed")
 			return count >= i+1
 		})
