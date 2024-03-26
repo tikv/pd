@@ -225,17 +225,24 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 
 	// ABC->ABCDEF
 	oldServers := cluster.GetServers()
-	for i := 0; i < 3; i++ {
-		cluster.Join(ctx)
-	}
 	oldLeaderName := cluster.WaitLeader()
+	for i := 0; i < 3; i++ {
+		newPD, err := cluster.Join(ctx)
+		re.NoError(err)
+		re.NoError(newPD.Run())
+		oldLeaderName = cluster.WaitLeader()
+		time.Sleep(5 * time.Second)
+	}
 
 	// ABCDEF->DEF
+	oldNames := make([]string, 0)
 	for _, s := range oldServers {
+		oldNames = append(oldNames, s.GetServer().GetMemberInfo().GetName())
 		s.Stop()
 	}
 	newLeaderName := cluster.WaitLeader()
 	re.NotEqual(oldLeaderName, newLeaderName)
+	re.NotContains(oldNames, newLeaderName)
 
 	close(quit)
 	wg.Wait()
