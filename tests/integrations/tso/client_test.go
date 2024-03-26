@@ -425,8 +425,9 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 }
 
-func (suite *tsoClientTestSuite) TestGetTSWhileRestingTSOClient() {
+func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/delayDispatchTSORequest", "return(true)"))
 	var (
 		clients    []pd.Client
 		stopSignal atomic.Bool
@@ -467,6 +468,7 @@ func (suite *tsoClientTestSuite) TestGetTSWhileRestingTSOClient() {
 	}
 	stopSignal.Store(true)
 	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/delayDispatchTSORequest"))
 }
 
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
