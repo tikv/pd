@@ -23,30 +23,140 @@ import (
 
 func TestMergeRegionsInfo(t *testing.T) {
 	re := require.New(t)
-	regionsInfo1 := &RegionsInfo{
-		Count: 1,
-		Regions: []RegionInfo{
-			{
-				ID:       1,
-				StartKey: "",
-				EndKey:   "a",
+	testCases := []struct {
+		source *RegionsInfo
+		target *RegionsInfo
+	}{
+		// Different regions.
+		{
+			source: &RegionsInfo{
+				Count: 1,
+				Regions: []RegionInfo{
+					{
+						ID:       1,
+						StartKey: "",
+						EndKey:   "a",
+					},
+				},
+			},
+			target: &RegionsInfo{
+				Count: 1,
+				Regions: []RegionInfo{
+					{
+						ID:       2,
+						StartKey: "a",
+						EndKey:   "",
+					},
+				},
 			},
 		},
-	}
-	regionsInfo2 := &RegionsInfo{
-		Count: 1,
-		Regions: []RegionInfo{
-			{
-				ID:       2,
-				StartKey: "a",
-				EndKey:   "",
+		// Same region.
+		{
+			source: &RegionsInfo{
+				Count: 1,
+				Regions: []RegionInfo{
+					{
+						ID:       1,
+						StartKey: "",
+						EndKey:   "a",
+					},
+				},
+			},
+			target: &RegionsInfo{
+				Count: 1,
+				Regions: []RegionInfo{
+					{
+						ID:       1,
+						StartKey: "",
+						EndKey:   "a",
+					},
+				},
 			},
 		},
+		{
+			source: &RegionsInfo{
+				Count: 1,
+				Regions: []RegionInfo{
+					{
+						ID:       1,
+						StartKey: "",
+						EndKey:   "a",
+					},
+				},
+			},
+			target: nil,
+		},
+		{
+			source: nil,
+			target: &RegionsInfo{
+				Count: 1,
+				Regions: []RegionInfo{
+					{
+						ID:       2,
+						StartKey: "a",
+						EndKey:   "",
+					},
+				},
+			},
+		},
+		{
+			source: nil,
+			target: nil,
+		},
+		{
+			source: &RegionsInfo{
+				Count: 1,
+				Regions: []RegionInfo{
+					{
+						ID:       1,
+						StartKey: "",
+						EndKey:   "a",
+					},
+				},
+			},
+			target: newRegionsInfo(0),
+		},
+		{
+			source: newRegionsInfo(0),
+			target: &RegionsInfo{
+				Count: 1,
+				Regions: []RegionInfo{
+					{
+						ID:       2,
+						StartKey: "a",
+						EndKey:   "",
+					},
+				},
+			},
+		},
+		{
+			source: newRegionsInfo(0),
+			target: newRegionsInfo(0),
+		},
 	}
-	regionsInfo := regionsInfo1.Merge(regionsInfo2)
-	re.Equal(int64(2), regionsInfo.Count)
-	re.Len(regionsInfo.Regions, 2)
-	re.Subset(regionsInfo.Regions, append(regionsInfo1.Regions, regionsInfo2.Regions...))
+	for idx, tc := range testCases {
+		regionsInfo := tc.source.Merge(tc.target)
+		if tc.source == nil {
+			tc.source = newRegionsInfo(0)
+		}
+		if tc.target == nil {
+			tc.target = newRegionsInfo(0)
+		}
+		m := make(map[int64]RegionInfo, tc.source.Count+tc.target.Count)
+		for _, region := range tc.source.Regions {
+			m[region.ID] = region
+		}
+		for _, region := range tc.target.Regions {
+			m[region.ID] = region
+		}
+		mergedCount := len(m)
+		re.Equal(int64(mergedCount), regionsInfo.Count, "case %d", idx)
+		re.Len(regionsInfo.Regions, mergedCount, "case %d", idx)
+		// All regions in source and target should be in the merged result.
+		for _, region := range append(tc.source.Regions, tc.target.Regions...) {
+			re.Contains(regionsInfo.Regions, region, "case %d", idx)
+		}
+	}
 }
 
 func TestRuleStartEndKey(t *testing.T) {
