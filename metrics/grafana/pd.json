@@ -13081,7 +13081,7 @@
           "id": 1601,
           "options": {
             "colorMode": "value",
-            "graphMode": "area",
+            "graphMode": "none",
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
@@ -13098,7 +13098,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "pd_replication_dr_state{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}!=0",
+              "expr": "max(pd_replication_dr_state{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"})",
               "instant": false,
               "interval": "",
               "legendFormat": "{{instance}}",
@@ -13266,7 +13266,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "rate(pd_replication_dr_tick_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[5m])",
+              "expr": "rate(pd_replication_dr_tick_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])",
               "instant": false,
               "interval": "",
               "legendFormat": "{{instance}}",
