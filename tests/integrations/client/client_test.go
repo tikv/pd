@@ -162,11 +162,11 @@ func TestClientLeaderChange(t *testing.T) {
 	re.Equal(endpoints, urls)
 }
 
-func TestLeaderTransfer(t *testing.T) {
+func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
@@ -222,6 +222,28 @@ func TestLeaderTransfer(t *testing.T) {
 		newLeaderName := cluster.WaitLeader()
 		re.NotEqual(oldLeaderName, newLeaderName)
 	}
+
+	// ABC->ABCDEF
+	oldServers := cluster.GetServers()
+	oldLeaderName := cluster.WaitLeader()
+	for i := 0; i < 3; i++ {
+		newPD, err := cluster.Join(ctx)
+		re.NoError(err)
+		re.NoError(newPD.Run())
+		oldLeaderName = cluster.WaitLeader()
+		time.Sleep(5 * time.Second)
+	}
+
+	// ABCDEF->DEF
+	oldNames := make([]string, 0)
+	for _, s := range oldServers {
+		oldNames = append(oldNames, s.GetServer().GetMemberInfo().GetName())
+		s.Stop()
+	}
+	newLeaderName := cluster.WaitLeader()
+	re.NotEqual(oldLeaderName, newLeaderName)
+	re.NotContains(oldNames, newLeaderName)
+
 	close(quit)
 	wg.Wait()
 }
