@@ -37,7 +37,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const randomRegionMaxRetry = 10
+const (
+	randomRegionMaxRetry = 10
+	scanRegionLimit      = 1000
+)
 
 // errRegionIsStale is error info for region is stale.
 func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
@@ -68,8 +71,26 @@ type RegionInfo struct {
 	queryStats        *pdpb.QueryStats
 	flowRoundDivisor  uint64
 	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets       unsafe.Pointer
-	fromHeartbeat bool
+	buckets unsafe.Pointer
+	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
+	source RegionSource
+}
+
+// RegionSource is the source of region.
+type RegionSource uint32
+
+const (
+	// Storage means this region's meta info might be stale.
+	Storage RegionSource = iota
+	// Sync means this region's meta info is relatively fresher.
+	Sync
+	// Heartbeat means this region's meta info is relatively fresher.
+	Heartbeat
+)
+
+// LoadedFromStorage means this region's meta info loaded from storage.
+func (r *RegionInfo) LoadedFromStorage() bool {
+	return r.source == Storage
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -166,6 +187,7 @@ func RegionFromHeartbeat(heartbeat *pdpb.RegionHeartbeatRequest, opts ...RegionC
 		interval:          heartbeat.GetInterval(),
 		replicationStatus: heartbeat.GetReplicationStatus(),
 		queryStats:        heartbeat.GetQueryStats(),
+		source:            Heartbeat,
 	}
 
 	for _, opt := range opts {
@@ -588,11 +610,6 @@ func (r *RegionInfo) IsFlashbackChanged(l *RegionInfo) bool {
 	return r.meta.IsInFlashback != l.meta.IsInFlashback
 }
 
-// IsFromHeartbeat returns whether the region info is from the region heartbeat.
-func (r *RegionInfo) IsFromHeartbeat() bool {
-	return r.fromHeartbeat
-}
-
 func (r *RegionInfo) isInvolved(startKey, endKey []byte) bool {
 	return bytes.Compare(r.GetStartKey(), startKey) >= 0 && (len(endKey) == 0 || (len(r.GetEndKey()) > 0 && bytes.Compare(r.GetEndKey(), endKey) <= 0))
 }
@@ -701,7 +718,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			if region.IsFlashbackChanged(origin) {
 				saveCache = true
 			}
-			if !origin.IsFromHeartbeat() {
+			if origin.LoadedFromStorage() {
 				isNew = true
 			}
 		}
@@ -1170,6 +1187,13 @@ func (r *RegionsInfo) GetStoreWriteRate(storeID uint64) (bytesRate, keysRate flo
 	return
 }
 
+// GetClusterNotFromStorageRegionsCnt gets the total count of regions that not loaded from storage anymore
+func (r *RegionsInfo) GetClusterNotFromStorageRegionsCnt() int {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	return r.tree.notFromStorageRegionsCnt
+}
+
 // GetMetaRegions gets a set of metapb.Region from regionMap
 func (r *RegionsInfo) GetMetaRegions() []*metapb.Region {
 	r.t.RLock()
@@ -1422,16 +1446,31 @@ func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(regio
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	r.t.RLock()
-	defer r.t.RUnlock()
 	var size int64
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-			return false
+	for {
+		r.t.RLock()
+		var cnt int
+		r.tree.scanRange(startKey, func(region *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+				return false
+			}
+			if cnt >= scanRegionLimit {
+				return false
+			}
+			cnt++
+			startKey = region.GetEndKey()
+			size += region.GetApproximateSize()
+			return true
+		})
+		r.t.RUnlock()
+		if cnt == 0 {
+			break
 		}
-		size += region.GetApproximateSize()
-		return true
-	})
+		if len(startKey) == 0 {
+			break
+		}
+	}
+
 	return size
 }
 

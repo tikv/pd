@@ -259,7 +259,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 	c.ruleManager = placement.NewRuleManager(c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
-		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels())
+		err = c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
 		if err != nil {
 			return err
 		}
@@ -379,7 +379,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err := storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -1558,12 +1558,13 @@ func (c *RaftCluster) checkStores() {
 				if err := c.ReadyToServe(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
+						zap.Int("region-count", c.GetRegionCount()),
 						errs.ZapError(err))
 				}
 			} else if c.IsPrepared() {
 				threshold := c.getThreshold(stores, store)
-				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
 				regionSize := float64(store.GetRegionSize())
+				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
 				if regionSize >= threshold {
 					if err := c.ReadyToServe(storeID); err != nil {
 						log.Error("change store to serving failed",

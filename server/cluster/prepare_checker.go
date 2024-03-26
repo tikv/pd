@@ -17,8 +17,10 @@ package cluster
 import (
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
+	"go.uber.org/zap"
 )
 
 type prepareChecker struct {
@@ -47,8 +49,16 @@ func (checker *prepareChecker) check(c *core.BasicCluster) bool {
 		checker.prepared = true
 		return true
 	}
+	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
+	totalRegionsCnt := c.GetRegionCount()
+	if float64(notLoadedFromRegionsCnt) > float64(totalRegionsCnt)*collectFactor {
+		log.Info("meta not loaded from region number is satisfied, finish prepare checker",
+			zap.Int("not-from-storage-region", notLoadedFromRegionsCnt), zap.Int("total-region", totalRegionsCnt))
+		checker.prepared = true
+		return true
+	}
 	// The number of active regions should be more than total region of all stores * collectFactor
-	if float64(c.GetRegionCount())*collectFactor > float64(checker.sum) {
+	if float64(totalRegionsCnt)*collectFactor > float64(checker.sum) {
 		return false
 	}
 	for _, store := range c.GetStores() {

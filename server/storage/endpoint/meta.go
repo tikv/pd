@@ -203,7 +203,7 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			}
 
 			nextID = region.GetId() + 1
-			overlaps := f(core.NewRegionInfo(region, nil))
+			overlaps := f(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
 			for _, item := range overlaps {
 				if err := se.DeleteRegion(item.GetMeta()); err != nil {
 					return err
