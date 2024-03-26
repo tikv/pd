@@ -214,6 +214,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
+	ttc.WaitForDefaultPrimaryServing(re)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", pdAddr)
 

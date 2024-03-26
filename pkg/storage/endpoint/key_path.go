@@ -64,6 +64,8 @@ const (
 	keyspaceGroupsMembershipKey = "membership"
 	keyspaceGroupsElectionKey   = "election"
 
+	tsoAllocatorsPrefix = "tso_allocators"
+
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
 )
@@ -414,4 +416,9 @@ func FullTimestampPath(clusterID uint64, groupID uint32) string {
 		rootPath = LegacyRootPath(clusterID)
 	}
 	return path.Join(rootPath, tsPath)
+}
+
+// GlobalTSOAllocatorsPrefix returns the global TSO allocators prefix.
+func GlobalTSOAllocatorsPrefix(clusterID uint64) string {
+	return path.Join(PDRootPath(clusterID), tsoAllocatorsPrefix)
 }
