@@ -129,7 +129,8 @@ type grantHotRegionScheduler struct {
 
 // newGrantHotRegionScheduler creates an admin scheduler that transfers hot region peer to fixed store and hot region leader to one store.
 func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHotRegionSchedulerConfig) *grantHotRegionScheduler {
-	base := newBaseHotScheduler(opController)
+	base := newBaseHotScheduler(opController,
+		statistics.DefaultHistorySampleDuration, statistics.DefaultHistorySampleInterval)
 	handler := newGrantHotRegionHandler(conf)
 	ret := &grantHotRegionScheduler{
 		baseHotScheduler: base,

@@ -216,6 +216,8 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"write-peer-priorities":      []interface{}{"byte", "key"},
 					"enable-for-tiflash":         "true",
 					"strict-picking-store":       "true",
+					"history-sample-duration":    "5m0s",
+					"history-sample-interval":    "30s",
 				}
 				re.Equal(len(expectMap), len(resp), "expect %v, got %v", expectMap, resp)
 				for key := range expectMap {

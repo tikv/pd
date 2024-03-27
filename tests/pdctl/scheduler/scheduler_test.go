@@ -306,6 +306,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		"enable-for-tiflash":         "true",
 		"rank-formula-version":       "v2",
 		"split-thresholds":           0.2,
+		"history-sample-duration":    "5m0s",
+		"history-sample-interval":    "30s",
 	}
 	var conf map[string]interface{}
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
@@ -364,6 +366,30 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 
 	expected1["forbid-rw-type"] = "read"
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "forbid-rw-type", "read"}, nil)
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	re.Equal(expected1, conf1)
+
+	expected1["history-sample-duration"] = "1m0s"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-duration", "1m"}, nil)
+	re.Contains(echo, "Success!")
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	re.Equal(expected1, conf1)
+
+	expected1["history-sample-interval"] = "1s"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-interval", "1s"}, nil)
+	re.Contains(echo, "Success!")
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	re.Equal(expected1, conf1)
+
+	expected1["history-sample-duration"] = "0s"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-duration", "0s"}, nil)
+	re.Contains(echo, "Success!")
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
+	re.Equal(expected1, conf1)
+
+	expected1["history-sample-interval"] = "0s"
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "history-sample-interval", "0s"}, nil)
+	re.Contains(echo, "Success!")
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler"}, &conf1)
 	re.Equal(expected1, conf1)
 

@@ -245,24 +245,29 @@ func MaxLoad(a, b *StoreLoad) *StoreLoad {
 	}
 }
 
-var (
-	// historySampleInterval is the sampling interval for history load.
-	historySampleInterval = 30 * time.Second
-	// HistorySampleDuration  is the duration for saving history load.
-	HistorySampleDuration = 5 * time.Minute
-	defaultSize           = 10
+const (
+	// DefaultHistorySampleInterval is the sampling interval for history load.
+	DefaultHistorySampleInterval = 30 * time.Second
+	// DefaultHistorySampleDuration  is the duration for saving history load.
+	DefaultHistorySampleDuration = 5 * time.Minute
 )
 
 // StoreHistoryLoads records the history load of a store.
 type StoreHistoryLoads struct {
 	// loads[read/write][leader/follower]-->[store id]-->history load
-	loads [utils.RWTypeLen][constant.ResourceKindLen]map[uint64]*storeHistoryLoad
-	dim   int
+	loads          [utils.RWTypeLen][constant.ResourceKindLen]map[uint64]*storeHistoryLoad
+	dim            int
+	sampleInterval time.Duration
+	sampleDuration time.Duration
 }
 
 // NewStoreHistoryLoads creates a StoreHistoryLoads.
-func NewStoreHistoryLoads(dim int) *StoreHistoryLoads {
-	st := StoreHistoryLoads{dim: dim}
+func NewStoreHistoryLoads(dim int, sampleDuration time.Duration, sampleInterval time.Duration) *StoreHistoryLoads {
+	st := StoreHistoryLoads{
+		dim:            dim,
+		sampleDuration: sampleDuration,
+		sampleInterval: sampleInterval,
+	}
 	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
 		for j := constant.ResourceKind(0); j < constant.ResourceKindLen; j++ {
 			st.loads[i][j] = make(map[uint64]*storeHistoryLoad)
@@ -272,20 +277,24 @@ func NewStoreHistoryLoads(dim int) *StoreHistoryLoads {
 }
 
 // Add adds the store load to the history.
-func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant.ResourceKind, loads []float64) {
+func (s *StoreHistoryLoads) Add(storeID uint64, rwTp utils.RWType, kind constant.ResourceKind, pointLoad []float64) {
 	load, ok := s.loads[rwTp][kind][storeID]
 	if !ok {
-		size := defaultSize
-		if historySampleInterval != 0 {
-			size = int(HistorySampleDuration / historySampleInterval)
+		size := int(DefaultHistorySampleDuration / DefaultHistorySampleInterval)
+		if s.sampleInterval != 0 {
+			size = int(s.sampleDuration / s.sampleInterval)
 		}
-		load = newStoreHistoryLoad(size, s.dim)
+		if s.sampleDuration == 0 {
+			size = 0
+		}
+		load = newStoreHistoryLoad(size, s.dim, s.sampleInterval)
 		s.loads[rwTp][kind][storeID] = load
 	}
-	load.add(loads)
+	load.add(pointLoad)
 }
 
 // Get returns the store loads from the history, not one time point.
+// In another word, the result is [dim][time].
 func (s *StoreHistoryLoads) Get(storeID uint64, rwTp utils.RWType, kind constant.ResourceKind) [][]float64 {
 	load, ok := s.loads[rwTp][kind][storeID]
 	if !ok {
@@ -294,36 +303,46 @@ func (s *StoreHistoryLoads) Get(storeID uint64, rwTp utils.RWType, kind constant
 	return load.get()
 }
 
+// UpdateConfig updates the sample duration and interval.
+func (s *StoreHistoryLoads) UpdateConfig(sampleDuration time.Duration, sampleInterval time.Duration) *StoreHistoryLoads {
+	if s.sampleDuration == sampleDuration && s.sampleInterval == sampleInterval {
+		return s
+	}
+	return NewStoreHistoryLoads(s.dim, sampleDuration, sampleInterval)
+}
+
 type storeHistoryLoad struct {
 	update time.Time
 	// loads is a circular buffer.
 	// [dim] --> [1,2,3...]
-	loads [][]float64
-	size  int
-	count int
+	loads          [][]float64
+	size           int
+	count          int
+	sampleInterval time.Duration
 }
 
-func newStoreHistoryLoad(size int, dim int) *storeHistoryLoad {
+func newStoreHistoryLoad(size int, dimLen int, sampleInterval time.Duration) *storeHistoryLoad {
 	return &storeHistoryLoad{
-		loads: make([][]float64, dim),
-		size:  size,
+		loads:          make([][]float64, dimLen),
+		size:           size,
+		sampleInterval: sampleInterval,
 	}
 }
 
 // add adds the store load to the history.
 // eg. add([1,2,3]) --> [][]float64{{1}, {2}, {3}}
-func (s *storeHistoryLoad) add(loads []float64) {
+func (s *storeHistoryLoad) add(pointLoad []float64) {
 	// reject if the loads length is not equal to the dimension.
-	if time.Since(s.update) < historySampleInterval || s.size == 0 || len(loads) != len(s.loads) {
+	if time.Since(s.update) < s.sampleInterval || s.size == 0 || len(pointLoad) != len(s.loads) {
 		return
 	}
 	if s.count == 0 {
-		for i := range s.loads {
-			s.loads[i] = make([]float64, s.size)
+		for dim := range s.loads {
+			s.loads[dim] = make([]float64, s.size)
 		}
 	}
-	for i, v := range loads {
-		s.loads[i][s.count%s.size] = v
+	for dim, v := range pointLoad {
+		s.loads[dim][s.count%s.size] = v
 	}
 	s.count++
 	s.update = time.Now()

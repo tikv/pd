@@ -57,7 +57,8 @@ type shuffleHotRegionScheduler struct {
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
 func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuffleHotRegionSchedulerConfig) Scheduler {
-	base := newBaseHotScheduler(opController)
+	base := newBaseHotScheduler(opController,
+		statistics.DefaultHistorySampleDuration, statistics.DefaultHistorySampleInterval)
 	ret := &shuffleHotRegionScheduler{
 		baseHotScheduler: base,
 		conf:             conf,
