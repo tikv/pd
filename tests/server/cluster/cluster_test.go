@@ -44,6 +44,7 @@ import (
 	syncer "github.com/tikv/pd/server/region_syncer"
 	"github.com/tikv/pd/server/schedule/operator"
 	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/server/statistics"
 	"github.com/tikv/pd/server/storage"
 	"github.com/tikv/pd/server/tso"
 	"github.com/tikv/pd/tests"
@@ -178,6 +179,99 @@ func TestDamagedRegion(t *testing.T) {
 	_, err1 := grpcPDClient.StoreHeartbeat(context.Background(), req1)
 	re.NoError(err1)
 	re.Equal(uint64(1), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+}
+
+func TestRegionStatistics(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 2)
+	defer tc.Destroy()
+	re.NoError(err)
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := tc.WaitLeader()
+	leaderServer := tc.GetServer(leaderName)
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+
+	region := &metapb.Region{
+		Id:       10,
+		StartKey: []byte("abc"),
+		EndKey:   []byte("xyz"),
+		Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1},
+			{Id: 102, StoreId: 2},
+			{Id: 103, StoreId: 3},
+			{Id: 104, StoreId: 4, Role: metapb.PeerRole_Learner},
+		},
+	}
+
+	// To put region.
+	regionInfo := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(0))
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+	regions := rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Len(regions, 1)
+
+	// wait for sync region
+	time.Sleep(1000 * time.Millisecond)
+
+	leaderServer.ResignLeader()
+	newLeaderName := tc.WaitLeader()
+	re.NotEqual(newLeaderName, leaderName)
+	leaderServer = tc.GetServer(newLeaderName)
+	rc = leaderServer.GetRaftCluster()
+	r := rc.GetRegion(region.Id)
+	re.NotNil(r)
+	re.True(r.LoadedFromSync())
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Empty(regions)
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Len(regions, 1)
+
+	leaderServer.ResignLeader()
+	newLeaderName = tc.WaitLeader()
+	re.Equal(newLeaderName, leaderName)
+	leaderServer = tc.GetServer(newLeaderName)
+	rc = leaderServer.GetRaftCluster()
+	re.NotNil(r)
+	re.True(r.LoadedFromStorage() || r.LoadedFromSync())
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Empty(regions)
+	regionInfo = regionInfo.Clone(core.SetSource(core.Heartbeat), core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+	rc = leaderServer.GetRaftCluster()
+	r = rc.GetRegion(region.Id)
+	re.NotNil(r)
+	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
+
+	leaderServer.ResignLeader()
+	newLeaderName = tc.WaitLeader()
+	re.NotEqual(newLeaderName, leaderName)
+	leaderServer.ResignLeader()
+	newLeaderName = tc.WaitLeader()
+	re.Equal(newLeaderName, leaderName)
+	leaderServer = tc.GetServer(newLeaderName)
+	rc = leaderServer.GetRaftCluster()
+	r = rc.GetRegion(region.Id)
+	re.NotNil(r)
+	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Empty(regions)
+
+	regionInfo = regionInfo.Clone(core.SetSource(core.Heartbeat), core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Len(regions, 1)
 }
 
 func TestStaleRegion(t *testing.T) {
