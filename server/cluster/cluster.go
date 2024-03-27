@@ -881,7 +881,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
-		// However it can't solve the race condition of concurrent heartbeats from the same region.
+		// However, it can't solve the race condition of concurrent heartbeats from the same region.
 		if overlaps, err = c.core.AtomicCheckAndPutRegion(region); err != nil {
 			return err
 		}
@@ -897,10 +897,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 
 	if hasRegionStats {
 		c.regionStats.Observe(region, c.getRegionStoresLocked(region))
-	}
-
-	if !c.IsPrepared() && isNew {
-		c.coordinator.prepareChecker.collect(region)
 	}
 
 	if c.storage != nil {

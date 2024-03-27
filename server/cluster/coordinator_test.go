@@ -147,7 +147,7 @@ func (c *testCluster) LoadRegion(regionID uint64, followerStoreIDs ...uint64) er
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	return c.putRegion(core.NewRegionInfo(region, nil))
+	return c.putRegion(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
 }
 
 func TestBasic(t *testing.T) {
@@ -231,7 +231,7 @@ func TestDispatch(t *testing.T) {
 
 func dispatchHeartbeat(co *coordinator, region *core.RegionInfo, stream hbstream.HeartbeatStream) error {
 	co.hbStreams.BindStream(region.GetLeader().GetStoreId(), stream)
-	if err := co.cluster.putRegion(region.Clone()); err != nil {
+	if err := co.cluster.putRegion(region.Clone(core.SetSource(core.Heartbeat))); err != nil {
 		return err
 	}
 	co.opController.Dispatch(region, schedule.DispatchFromHeartBeat)
@@ -658,14 +658,14 @@ func TestShouldRun(t *testing.T) {
 
 	for _, testCase := range testCases {
 		r := tc.GetRegion(testCase.regionID)
-		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
+		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
 		re.NoError(tc.processRegionHeartbeat(nr))
 		re.Equal(testCase.shouldRun, co.shouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
-	newRegion := core.NewRegionInfo(nr, nil)
+	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(newRegion))
-	re.Equal(7, co.prepareChecker.sum)
+	re.Equal(7, tc.core.GetClusterNotFromStorageRegionsCnt())
 }
 
 func TestShouldRunWithNonLeaderRegions(t *testing.T) {
@@ -701,14 +701,14 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 
 	for _, testCase := range testCases {
 		r := tc.GetRegion(testCase.regionID)
-		nr := r.Clone(core.WithLeader(r.GetPeers()[0]))
+		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
 		re.NoError(tc.processRegionHeartbeat(nr))
 		re.Equal(testCase.shouldRun, co.shouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
-	newRegion := core.NewRegionInfo(nr, nil)
+	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(newRegion))
-	re.Equal(9, co.prepareChecker.sum)
+	re.Equal(9, tc.core.GetClusterNotFromStorageRegionsCnt())
 
 	// Now, after server is prepared, there exist some regions with no leader.
 	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())
@@ -1003,7 +1003,6 @@ func TestRestart(t *testing.T) {
 	re.NoError(tc.addRegionStore(3, 3))
 	re.NoError(tc.addLeaderRegion(1, 1))
 	region := tc.GetRegion(1)
-	co.prepareChecker.collect(region)
 
 	// Add 1 replica on store 2.
 	stream := mockhbstream.NewHeartbeatStream()
@@ -1016,7 +1015,6 @@ func TestRestart(t *testing.T) {
 
 	// Recreate coordinator then add another replica on store 3.
 	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
-	co.prepareChecker.collect(region)
 	co.run()
 	re.NoError(dispatchHeartbeat(co, region, stream))
 	region = waitAddLearner(re, stream, region, 3)
