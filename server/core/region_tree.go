@@ -83,6 +83,13 @@ func (t *regionTree) length() int {
 	return t.tree.Len()
 }
 
+func (t *regionTree) notFromStorageRegionsCount() int {
+	if t == nil {
+		return 0
+	}
+	return t.notFromStorageRegionsCnt
+}
+
 // getOverlaps gets the regions which are overlapped with the specified region range.
 func (t *regionTree) getOverlaps(region *RegionInfo) []*RegionInfo {
 	item := &regionItem{RegionInfo: region}
