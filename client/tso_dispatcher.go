@@ -95,7 +95,22 @@ func (c *tsoClient) dispatchRequest(request *tsoRequest) (bool, error) {
 		// tsoClient is closed due to the PD service mode switch, which is retryable.
 		return true, c.ctx.Err()
 	default:
+		// This failpoint will increase the possibility that the request is sent to a closed dispatcher.
+		failpoint.Inject("delayDispatchTSORequest", func() {
+			time.Sleep(time.Second)
+		})
 		dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+	}
+	// Check the contexts again to make sure the request is not been sent to a closed dispatcher.
+	// Never retry on these conditions to prevent unexpected data race.
+	select {
+	case <-request.requestCtx.Done():
+		return false, request.requestCtx.Err()
+	case <-request.clientCtx.Done():
+		return false, request.clientCtx.Err()
+	case <-c.ctx.Done():
+		return false, c.ctx.Err()
+	default:
 	}
 	return false, nil
 }
@@ -350,7 +365,8 @@ func (c *tsoClient) createTSODispatcher(dcLocation string) {
 func (c *tsoClient) handleDispatcher(
 	dispatcherCtx context.Context,
 	dc string,
-	tbc *tsoBatchController) {
+	tbc *tsoBatchController,
+) {
 	var (
 		err       error
 		streamURL string
@@ -367,6 +383,8 @@ func (c *tsoClient) handleDispatcher(
 			cc.(*tsoConnectionContext).cancel()
 			return true
 		})
+		// Clear the tso batch controller.
+		tbc.clear()
 		c.wg.Done()
 	}()
 	// Call updateTSOConnectionCtxs once to init the connectionCtxs first.
@@ -428,7 +446,11 @@ tsoBatchLoop:
 		}
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
+		// Once the TSO requests are collected, must make sure they could be finished or revoked eventually,
+		// otherwise the upper caller may get blocked on waiting for the results.
 		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
+			// Finish the collected requests if the fetch failed.
+			tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(err))
 			if err == context.Canceled {
 				log.Info("[tso] stop fetching the pending tso requests due to context canceled",
 					zap.String("dc-location", dc))
@@ -468,13 +490,16 @@ tsoBatchLoop:
 				timer := time.NewTimer(retryInterval)
 				select {
 				case <-dispatcherCtx.Done():
+					// Finish the collected requests if the context is canceled.
+					tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(dispatcherCtx.Err()))
 					timer.Stop()
 					return
 				case <-streamLoopTimer.C:
 					err = errs.ErrClientCreateTSOStream.FastGenByArgs(errs.RetryTimeoutErr)
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					c.svcDiscovery.ScheduleCheckMemberChanged()
-					c.finishRequest(tbc.getCollectedRequests(), 0, 0, 0, errors.WithStack(err))
+					// Finish the collected requests if the stream is failed to be created.
+					tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(err))
 					timer.Stop()
 					continue tsoBatchLoop
 				case <-timer.C:
@@ -504,9 +529,12 @@ tsoBatchLoop:
 		}
 		select {
 		case <-dispatcherCtx.Done():
+			// Finish the collected requests if the context is canceled.
+			tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(dispatcherCtx.Err()))
 			return
 		case tsDeadlineCh.(chan *deadline) <- dl:
 		}
+		// processRequests guarantees that the collected requests could be finished properly.
 		err = c.processRequests(stream, dc, tbc)
 		close(done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
@@ -776,13 +804,14 @@ func (c *tsoClient) processRequests(
 			defer span.Finish()
 		}
 	}
+
 	count := int64(len(requests))
 	reqKeyspaceGroupID := c.svcDiscovery.GetKeyspaceGroupID()
 	respKeyspaceGroupID, physical, logical, suffixBits, err := stream.processRequests(
 		c.svcDiscovery.GetClusterID(), c.svcDiscovery.GetKeyspaceID(), reqKeyspaceGroupID,
-		dcLocation, requests, tbc.batchStartTime)
+		dcLocation, count, tbc.batchStartTime)
 	if err != nil {
-		c.finishRequest(requests, 0, 0, 0, err)
+		tbc.finishCollectedRequests(0, 0, 0, err)
 		return err
 	}
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
@@ -796,7 +825,7 @@ func (c *tsoClient) processRequests(
 		logical:             tsoutil.AddLogical(firstLogical, count-1, suffixBits),
 	}
 	c.compareAndSwapTS(dcLocation, curTSOInfo, physical, firstLogical)
-	c.finishRequest(requests, physical, firstLogical, suffixBits, nil)
+	tbc.finishCollectedRequests(physical, firstLogical, suffixBits, nil)
 	return nil
 }
 
@@ -842,12 +871,4 @@ func (c *tsoClient) compareAndSwapTS(
 	lastTSOInfo.respReceivedAt = curTSOInfo.respReceivedAt
 	lastTSOInfo.physical = curTSOInfo.physical
 	lastTSOInfo.logical = curTSOInfo.logical
-}
-
-func (c *tsoClient) finishRequest(requests []*tsoRequest, physical, firstLogical int64, suffixBits uint32, err error) {
-	for i := 0; i < len(requests); i++ {
-		requests[i].physical, requests[i].logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
-		defer trace.StartRegion(requests[i].requestCtx, "pdclient.tsoReqDequeue").End()
-		requests[i].done <- err
-	}
 }
