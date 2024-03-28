@@ -16,7 +16,9 @@ package testutil
 
 import (
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -100,4 +102,25 @@ func InitTempFileLogger(level string) (fname string) {
 	lg, p, _ := log.InitLogger(cfg)
 	log.ReplaceGlobals(lg, p)
 	return fname
+}
+
+// GenerateTestDataConcurrently generates test data concurrently.
+func GenerateTestDataConcurrently(count int, f func(int)) {
+	var wg sync.WaitGroup
+	tasks := make(chan int, count)
+	workers := runtime.NumCPU()
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range tasks {
+				f(i)
+			}
+		}()
+	}
+	for i := 0; i < count; i++ {
+		tasks <- i
+	}
+	close(tasks)
+	wg.Wait()
 }
