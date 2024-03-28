@@ -16,7 +16,6 @@ This section describes how to use the pd-ut tool.
 make ut 
 ```
 
-
 ### run by pd-ut
 
 - You should `make failpoint-enable` before running the tests.
@@ -63,4 +62,8 @@ pd-ut run --junitfile xxx
 
 // test with race flag
 pd-ut run --race
+
+// test with coverprofile
+pd-ut run --coverprofile xxx
+go tool cover --func=xxx
 ```
