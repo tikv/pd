@@ -35,6 +35,10 @@ func (r *regionItem) GetStartKey() []byte {
 	return r.meta.StartKey
 }
 
+func (r *regionItem) GetID() uint64 {
+	return r.meta.GetId()
+}
+
 // GetEndKey returns the end key of the region.
 func (r *regionItem) GetEndKey() []byte {
 	return r.meta.EndKey
