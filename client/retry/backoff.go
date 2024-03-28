@@ -16,11 +16,26 @@ package retry
 
 import (
 	"context"
+	"reflect"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
+
+// Option is used to customize the backoffer.
+type Option func(*Backoffer)
+
+// withMinLogInterval sets the mininum log interval for retrying.
+func withMinLogInterval(interval time.Duration) Option {
+	return func(bo *Backoffer) {
+		bo.logInterval = interval
+	}
+}
 
 // Backoffer is a backoff policy for retrying operations.
 type Backoffer struct {
@@ -33,7 +48,12 @@ type Backoffer struct {
 	// retryableChecker is used to check if the error is retryable.
 	// By default, all errors are retryable.
 	retryableChecker func(err error) bool
+	// logInterval defines the log interval for retrying.
+	logInterval time.Duration
+	// nextLogTime is used to record the next log time.
+	nextLogTime time.Duration
 
+	attempt      int
 	next         time.Duration
 	currentTotal time.Duration
 }
@@ -48,12 +68,21 @@ func (bo *Backoffer) Exec(
 		err   error
 		after *time.Timer
 	)
+	fnName := getFunctionName(fn)
 	for {
 		err = fn()
+		bo.attempt++
+		if err != nil {
+			if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
+				bo.nextLogTime %= bo.logInterval
+				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
+			}
+		}
 		if !bo.isRetryable(err) {
 			break
 		}
 		currentInterval := bo.nextInterval()
+		bo.nextLogTime += currentInterval
 		if after == nil {
 			after = time.NewTimer(currentInterval)
 		} else {
@@ -84,7 +113,7 @@ func (bo *Backoffer) Exec(
 //   - `base` defines the initial time interval to wait before each retry.
 //   - `max` defines the max time interval to wait before each retry.
 //   - `total` defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
-func InitialBackoffer(base, max, total time.Duration) *Backoffer {
+func InitialBackoffer(base, max, total time.Duration, opts ...Option) *Backoffer {
 	// Make sure the base is less than or equal to the max.
 	if base > max {
 		base = max
@@ -93,7 +122,7 @@ func InitialBackoffer(base, max, total time.Duration) *Backoffer {
 	if total > 0 && total < base {
 		total = base
 	}
-	return &Backoffer{
+	bo := &Backoffer{
 		base:  base,
 		max:   max,
 		total: total,
@@ -102,7 +131,12 @@ func InitialBackoffer(base, max, total time.Duration) *Backoffer {
 		},
 		next:         base,
 		currentTotal: 0,
+		attempt:      0,
 	}
+	for _, opt := range opts {
+		opt(bo)
+	}
+	return bo
 }
 
 // SetRetryableChecker sets the retryable checker.
@@ -141,6 +175,8 @@ func (bo *Backoffer) exponentialInterval() time.Duration {
 func (bo *Backoffer) resetBackoff() {
 	bo.next = bo.base
 	bo.currentTotal = 0
+	bo.attempt = 0
+	bo.nextLogTime = 0
 }
 
 // Only used for test.
@@ -149,4 +185,9 @@ var testBackOffExecuteFlag = false
 // TestBackOffExecute Only used for test.
 func TestBackOffExecute() bool {
 	return testBackOffExecuteFlag
+}
+
+func getFunctionName(f any) string {
+	strs := strings.Split(runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), ".")
+	return strings.Split(strs[len(strs)-1], "-")[0]
 }
