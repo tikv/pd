@@ -25,10 +25,10 @@ import (
 )
 
 const (
-	// speedStatisticalWindowCapacity is the size of the time window used to calculate the speed,
+	// maxSpeedCalculationWindow is the maximum size of the time window used to calculate the speed,
 	// but it does not mean that all data in it will be used to calculate the speed,
 	// which data is used depends on the patrol region duration
-	speedStatisticalWindowCapacity = 2 * time.Hour
+	maxSpeedCalculationWindow = 2 * time.Hour
 	// minSpeedCalculationWindow is the minimum speed calculation window
 	minSpeedCalculationWindow = 10 * time.Minute
 )
@@ -86,8 +86,8 @@ func WindowDurationOption(dur time.Duration) func(*progressIndicator) {
 	return func(pi *progressIndicator) {
 		if dur < minSpeedCalculationWindow {
 			dur = minSpeedCalculationWindow
-		} else if dur > speedStatisticalWindowCapacity {
-			dur = speedStatisticalWindowCapacity
+		} else if dur > maxSpeedCalculationWindow {
+			dur = maxSpeedCalculationWindow
 		}
 		pi.windowLength = int(dur/pi.updateInterval) + 1
 	}
@@ -105,7 +105,7 @@ func (m *Manager) AddProgress(progress string, current, total float64, updateInt
 			total:          total,
 			remaining:      total,
 			history:        history,
-			windowCapacity: int(speedStatisticalWindowCapacity/updateInterval) + 1,
+			windowCapacity: int(maxSpeedCalculationWindow/updateInterval) + 1,
 			windowLength:   int(minSpeedCalculationWindow / updateInterval),
 			updateInterval: updateInterval,
 		}
