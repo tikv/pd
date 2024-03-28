@@ -68,6 +68,13 @@ var tsoReqPool = sync.Pool{
 	},
 }
 
+func (req *tsoRequest) tryDone(err error) {
+	select {
+	case req.done <- err:
+	default:
+	}
+}
+
 type tsoClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -144,9 +151,8 @@ func (c *tsoClient) Close() {
 	c.tsoDispatcher.Range(func(_, dispatcherInterface any) bool {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
-			tsoErr := errors.WithStack(errClosing)
-			dispatcher.tsoBatchController.revokePendingRequests(tsoErr)
 			dispatcher.dispatcherCancel()
+			dispatcher.tsoBatchController.clear()
 		}
 		return true
 	})

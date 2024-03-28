@@ -133,11 +133,22 @@ type RegionsInfo struct {
 	Regions []RegionInfo `json:"regions"`
 }
 
+func newRegionsInfo(count int64) *RegionsInfo {
+	return &RegionsInfo{
+		Count:   count,
+		Regions: make([]RegionInfo, 0, count),
+	}
+}
+
 // Merge merges two RegionsInfo together and returns a new one.
 func (ri *RegionsInfo) Merge(other *RegionsInfo) *RegionsInfo {
-	newRegionsInfo := &RegionsInfo{
-		Regions: make([]RegionInfo, 0, ri.Count+other.Count),
+	if ri == nil {
+		ri = newRegionsInfo(0)
 	}
+	if other == nil {
+		other = newRegionsInfo(0)
+	}
+	newRegionsInfo := newRegionsInfo(ri.Count + other.Count)
 	m := make(map[int64]RegionInfo, ri.Count+other.Count)
 	for _, region := range ri.Regions {
 		m[region.ID] = region

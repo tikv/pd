@@ -523,6 +523,21 @@ func (suite *httpClientTestSuite) checkConfig(mode mode, client pd.Client) {
 	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
 	re.NoError(err)
 	re.Empty(resp.Kvs)
+
+	// Test the config with TTL for storing float64 as uint64.
+	newConfig = map[string]any{
+		"schedule.max-pending-peer-count": uint64(math.MaxInt32),
+	}
+	err = client.SetConfig(env.ctx, newConfig, 4)
+	re.NoError(err)
+	c := env.cluster.GetLeaderServer().GetRaftCluster().GetOpts().GetMaxPendingPeerCount()
+	re.Equal(uint64(math.MaxInt32), c)
+
+	err = client.SetConfig(env.ctx, newConfig, 0)
+	re.NoError(err)
+	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.max-pending-peer-count")
+	re.NoError(err)
+	re.Empty(resp.Kvs)
 }
 
 func (suite *httpClientTestSuite) TestScheduleConfig() {
