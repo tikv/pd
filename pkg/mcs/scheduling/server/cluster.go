@@ -500,6 +500,8 @@ func (c *Cluster) collectMetrics() {
 	c.labelStats.Collect()
 	// collect hot cache metrics
 	c.hotStat.CollectMetrics()
+	// collect the lock metrics
+	c.RegionsInfo.CollectWaitLockMetrics()
 }
 
 func (c *Cluster) resetMetrics() {
@@ -536,28 +538,36 @@ func (c *Cluster) IsBackgroundJobsRunning() bool {
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
-	if err := c.processRegionHeartbeat(region); err != nil {
+	tracer := core.NewNoopHeartbeatProcessTracer()
+	if c.persistConfig.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
+		tracer = core.NewHeartbeatProcessTracer()
+	}
+	tracer.Begin()
+	if err := c.processRegionHeartbeat(region, tracer); err != nil {
+		tracer.OnAllStageFinished()
 		return err
 	}
-
+	tracer.OnAllStageFinished()
 	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
 	return nil
 }
 
 // processRegionHeartbeat updates the region information.
-func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
-	origin, _, err := c.PreCheckPutRegion(region)
+func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo, tracer core.RegionHeartbeatProcessTracer) error {
+	origin, _, err := c.PreCheckPutRegion(region, tracer)
+	tracer.OnPreCheckFinished()
 	if err != nil {
 		return err
 	}
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	cluster.HandleStatsAsync(c, region)
-
+	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	_, saveCache, _ := core.GenerateRegionGuideFunc(true)(region, origin)
+
 	if !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
@@ -566,21 +576,23 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		return nil
 	}
-
+	tracer.OnSaveCacheBegin()
 	var overlaps []*core.RegionInfo
 	if saveCache {
 		// To prevent a concurrent heartbeat of another region from overriding the up-to-date region info by a stale one,
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.AtomicCheckAndPutRegion(region); err != nil {
+		if overlaps, err = c.AtomicCheckAndPutRegion(region, tracer); err != nil {
+			tracer.OnSaveCacheFinished()
 			return err
 		}
 
 		cluster.HandleOverlaps(c, overlaps)
 	}
-
+	tracer.OnSaveCacheFinished()
 	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
+	tracer.OnCollectRegionStatsFinished()
 	return nil
 }
 

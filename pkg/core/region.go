@@ -824,12 +824,49 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 }
 
+// RWLockStats is a read-write lock with statistics.
+type RWLockStats struct {
+	syncutil.RWMutex
+	totalWaitTime     int64
+	lockCount         int64
+	lastLockCount     int64
+	lastTotalWaitTime int64
+}
+
+// Lock locks the lock and records the waiting time.
+func (l *RWLockStats) Lock() {
+	startTime := time.Now()
+	l.RWMutex.Lock()
+	elapsed := time.Since(startTime).Nanoseconds()
+	atomic.AddInt64(&l.totalWaitTime, elapsed)
+	atomic.AddInt64(&l.lockCount, 1)
+}
+
+// Unlock unlocks the lock.
+func (l *RWLockStats) Unlock() {
+	l.RWMutex.Unlock()
+}
+
+// RLock locks the lock for reading and records the waiting time.
+func (l *RWLockStats) RLock() {
+	startTime := time.Now()
+	l.RWMutex.RLock()
+	elapsed := time.Since(startTime).Nanoseconds()
+	atomic.AddInt64(&l.totalWaitTime, elapsed)
+	atomic.AddInt64(&l.lockCount, 1)
+}
+
+// RUnlock unlocks the lock for reading.
+func (l *RWLockStats) RUnlock() {
+	l.RWMutex.RUnlock()
+}
+
 // RegionsInfo for export
 type RegionsInfo struct {
-	t            syncutil.RWMutex
+	t            RWLockStats
 	tree         *regionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
-	st           syncutil.RWMutex
+	st           RWLockStats
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
 	followers    map[uint64]*regionTree // storeID -> sub regionTree
@@ -896,33 +933,38 @@ func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
 }
 
 // PreCheckPutRegion checks if the region is valid to put.
-func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*regionItem, error) {
-	origin, overlaps := r.GetRelevantRegions(region)
+func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo, trace RegionHeartbeatProcessTracer) (*RegionInfo, []*regionItem, error) {
+	origin, overlaps := r.GetRelevantRegions(region, trace)
 	err := check(region, origin, overlaps)
 	return origin, overlaps, err
 }
 
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
-func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
+func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo, trace RegionHeartbeatProcessTracer) ([]*RegionInfo, error) {
 	r.t.Lock()
 	var ols []*regionItem
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
+	trace.OnCheckOverlapsFinished()
 	err := check(region, origin, ols)
 	if err != nil {
 		r.t.Unlock()
+		trace.OnValidateRegionFinished()
 		return nil, err
 	}
+	trace.OnValidateRegionFinished()
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
+	trace.OnSetRegionFinished()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	trace.OnUpdateSubTreeFinished()
 	return overlaps, nil
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
-func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*regionItem) {
+func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo, trace RegionHeartbeatProcessTracer) (origin *RegionInfo, overlaps []*regionItem) {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	origin = r.getRegionLocked(region.GetID())
@@ -1651,6 +1693,42 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 	}
 
 	return size
+}
+
+// metrics default poll interval
+const defaultPollInterval = 15 * time.Second
+
+// CollectWaitLockMetrics collects the metrics of waiting time for lock
+func (r *RegionsInfo) CollectWaitLockMetrics() {
+	regionsLockTotalWaitTime := atomic.LoadInt64(&r.t.totalWaitTime)
+	regionsLockCount := atomic.LoadInt64(&r.t.lockCount)
+
+	lastRegionsLockTotalWaitTime := atomic.LoadInt64(&r.t.lastTotalWaitTime)
+	lastsRegionsLockCount := atomic.LoadInt64(&r.t.lastLockCount)
+
+	subRegionsLockTotalWaitTime := atomic.LoadInt64(&r.st.totalWaitTime)
+	subRegionsLockCount := atomic.LoadInt64(&r.st.lockCount)
+
+	lastSubRegionsLockTotalWaitTime := atomic.LoadInt64(&r.st.lastTotalWaitTime)
+	lastSubRegionsLockCount := atomic.LoadInt64(&r.st.lastLockCount)
+
+	// update last metrics
+	atomic.StoreInt64(&r.t.lastTotalWaitTime, regionsLockTotalWaitTime)
+	atomic.StoreInt64(&r.t.lastLockCount, regionsLockCount)
+	atomic.StoreInt64(&r.st.lastTotalWaitTime, subRegionsLockTotalWaitTime)
+	atomic.StoreInt64(&r.st.lastLockCount, subRegionsLockCount)
+
+	// skip invalid situation like initial status
+	if lastRegionsLockTotalWaitTime == 0 || lastsRegionsLockCount == 0 || lastSubRegionsLockTotalWaitTime == 0 || lastSubRegionsLockCount == 0 ||
+		regionsLockTotalWaitTime-lastRegionsLockTotalWaitTime < 0 || regionsLockTotalWaitTime-lastRegionsLockTotalWaitTime > int64(defaultPollInterval) ||
+		subRegionsLockTotalWaitTime-lastSubRegionsLockTotalWaitTime < 0 || subRegionsLockTotalWaitTime-lastSubRegionsLockTotalWaitTime > int64(defaultPollInterval) {
+		return
+	}
+
+	waitRegionsLockDurationSum.Add(time.Duration(regionsLockTotalWaitTime - lastRegionsLockTotalWaitTime).Seconds())
+	waitRegionsLockCount.Add(float64(regionsLockCount - lastsRegionsLockCount))
+	waitSubRegionsLockDurationSum.Add(time.Duration(subRegionsLockTotalWaitTime - lastSubRegionsLockTotalWaitTime).Seconds())
+	waitSubRegionsLockCount.Add(float64(subRegionsLockCount - lastSubRegionsLockCount))
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region

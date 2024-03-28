@@ -109,7 +109,12 @@ func TestClientLeaderChange(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
+	endpointsWithWrongURL := append([]string{}, endpoints...)
+	// inject wrong http scheme
+	for i := range endpointsWithWrongURL {
+		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
+	}
+	cli := setupCli(re, ctx, endpointsWithWrongURL)
 	defer cli.Close()
 	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	re.True(ok)
@@ -127,14 +132,14 @@ func TestClientLeaderChange(t *testing.T) {
 	re.True(cluster.CheckTSOUnique(ts1))
 
 	leader := cluster.GetLeader()
-	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader))
 
 	err = cluster.GetServer(leader).Stop()
 	re.NoError(err)
 	leader = cluster.WaitLeader()
 	re.NotEmpty(leader)
 
-	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader))
 
 	// Check TS won't fall back after leader changed.
 	testutil.Eventually(re, func() bool {
@@ -157,11 +162,11 @@ func TestClientLeaderChange(t *testing.T) {
 	re.Equal(endpoints, urls)
 }
 
-func TestLeaderTransfer(t *testing.T) {
+func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 2)
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
@@ -217,6 +222,28 @@ func TestLeaderTransfer(t *testing.T) {
 		newLeaderName := cluster.WaitLeader()
 		re.NotEqual(oldLeaderName, newLeaderName)
 	}
+
+	// ABC->ABCDEF
+	oldServers := cluster.GetServers()
+	oldLeaderName := cluster.WaitLeader()
+	for i := 0; i < 3; i++ {
+		newPD, err := cluster.Join(ctx)
+		re.NoError(err)
+		re.NoError(newPD.Run())
+		oldLeaderName = cluster.WaitLeader()
+		time.Sleep(5 * time.Second)
+	}
+
+	// ABCDEF->DEF
+	oldNames := make([]string, 0)
+	for _, s := range oldServers {
+		oldNames = append(oldNames, s.GetServer().GetMemberInfo().GetName())
+		s.Stop()
+	}
+	newLeaderName := cluster.WaitLeader()
+	re.NotEqual(oldLeaderName, newLeaderName)
+	re.NotContains(oldNames, newLeaderName)
+
 	close(quit)
 	wg.Wait()
 }
@@ -782,6 +809,45 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	})
 }
 
+func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetworkErr() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	cluster := suite.cluster
+	re.NotEmpty(cluster.WaitLeader())
+	leader := cluster.GetLeaderServer()
+
+	follower := cluster.GetServer(cluster.GetFollower())
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+
+	cli := setupCli(re, ctx, suite.endpoints)
+	defer cli.Close()
+
+	cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
+	re.NotEmpty(cluster.WaitLeader())
+
+	// here is just for trigger the leader change.
+	cli.GetRegion(context.Background(), []byte("a"))
+
+	testutil.Eventually(re, func() bool {
+		return cli.GetLeaderURL() == follower.GetAddr()
+	})
+	r, err := cli.GetRegion(context.Background(), []byte("a"))
+	re.Error(err)
+	re.Nil(r)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2"))
+	cli.GetServiceDiscovery().CheckMemberChanged()
+	testutil.Eventually(re, func() bool {
+		r, err = cli.GetRegion(context.Background(), []byte("a"))
+		if err == nil && r != nil {
+			return true
+		}
+		return false
+	})
+}
+
 func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
@@ -955,10 +1021,10 @@ func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, o
 	return cli
 }
 
-func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader string) {
+func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader *tests.TestServer) {
 	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckMemberChanged()
-		return cli.GetServingAddr() == leader
+		return cli.GetServingURL() == leader.GetConfig().ClientUrls && leader.GetAddr() == cli.GetServingURL()
 	})
 }
 
@@ -1018,9 +1084,23 @@ func TestCloseClient(t *testing.T) {
 	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
 	cli := setupCli(re, ctx, endpoints)
-	cli.GetTSAsync(context.TODO())
+	ts := cli.GetTSAsync(context.TODO())
 	time.Sleep(time.Second)
 	cli.Close()
+	physical, logical, err := ts.Wait()
+	if err == nil {
+		re.Greater(physical, int64(0))
+		re.Greater(logical, int64(0))
+	} else {
+		re.ErrorIs(err, context.Canceled)
+		re.Zero(physical)
+		re.Zero(logical)
+	}
+	ts = cli.GetTSAsync(context.TODO())
+	physical, logical, err = ts.Wait()
+	re.ErrorIs(err, context.Canceled)
+	re.Zero(physical)
+	re.Zero(logical)
 }
 
 type idAllocator struct {
@@ -1853,7 +1933,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.True(ok)
 
 	leader := cluster.GetLeader()
-	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader).GetConfig().ClientUrls)
+	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader))
 	memberID := cluster.GetServer(leader).GetLeader().GetMemberId()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
