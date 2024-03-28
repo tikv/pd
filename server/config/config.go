@@ -542,9 +542,6 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
 	}
-	if !meta.IsDefined("trace-region-flow") {
-		c.TraceRegionFlow = defaultTraceRegionFlow
-	}
 	if !meta.IsDefined("flow-round-by-digit") {
 		configutil.AdjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
