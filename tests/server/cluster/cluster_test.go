@@ -753,20 +753,19 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		re.NoError(err)
 		peerID, err := id.Alloc()
 		re.NoError(err)
-		regionID, err := id.Alloc()
-		re.NoError(err)
 		peer := &metapb.Peer{Id: peerID, StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(clusterID),
 			Region: &metapb.Region{
-				Id:    regionID,
+				// mock error msg to trigger stream.Recv()
+				Id:    0,
 				Peers: []*metapb.Peer{peer},
 			},
 			Leader: peer,
 		}
 		err = stream.Send(regionReq)
 		re.NoError(err)
-		// make sure the first store can receive one response
+		// make sure the first store can receive one response(error msg)
 		if i == 0 {
 			wg.Add(1)
 		}
