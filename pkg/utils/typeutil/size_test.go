@@ -23,7 +23,6 @@ import (
 )
 
 func TestSizeJSON(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	b := ByteSize(265421587)
 	o, err := json.Marshal(b)
@@ -40,7 +39,6 @@ func TestSizeJSON(t *testing.T) {
 }
 
 func TestParseMbFromText(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	testCases := []struct {
 		body []string

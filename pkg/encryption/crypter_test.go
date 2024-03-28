@@ -24,7 +24,6 @@ import (
 )
 
 func TestEncryptionMethodSupported(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	re.Error(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_PLAINTEXT))
 	re.Error(CheckEncryptionMethodSupported(encryptionpb.EncryptionMethod_UNKNOWN))
@@ -34,7 +33,6 @@ func TestEncryptionMethodSupported(t *testing.T) {
 }
 
 func TestKeyLength(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	_, err := KeyLength(encryptionpb.EncryptionMethod_PLAINTEXT)
 	re.Error(err)
@@ -52,7 +50,6 @@ func TestKeyLength(t *testing.T) {
 }
 
 func TestNewIv(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	ivCtr, err := NewIvCTR()
 	re.NoError(err)
@@ -63,7 +60,6 @@ func TestNewIv(t *testing.T) {
 }
 
 func TestNewDataKey(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	for _, method := range []encryptionpb.EncryptionMethod{
 		encryptionpb.EncryptionMethod_AES128_CTR,
@@ -82,7 +78,6 @@ func TestNewDataKey(t *testing.T) {
 }
 
 func TestAesGcmCrypter(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	key, err := hex.DecodeString("ed568fbd8c8018ed2d042a4e5d38d6341486922d401d2022fb81e47c900d3f07")
 	re.NoError(err)

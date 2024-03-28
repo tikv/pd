@@ -23,7 +23,6 @@ import (
 )
 
 func TestStringToZapLogLevel(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	re.Equal(zapcore.FatalLevel, StringToZapLogLevel("fatal"))
 	re.Equal(zapcore.ErrorLevel, StringToZapLogLevel("ERROR"))
@@ -35,7 +34,6 @@ func TestStringToZapLogLevel(t *testing.T) {
 }
 
 func TestRedactLog(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	testCases := []struct {
 		name            string

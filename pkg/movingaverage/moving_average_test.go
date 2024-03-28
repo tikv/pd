@@ -72,7 +72,6 @@ func checkInstantaneous(re *require.Assertions, ma MovingAvg) {
 }
 
 func TestMedianFilter(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	var empty float64 = 0
 	data := []float64{2, 4, 2, 800, 600, 6, 3}
@@ -92,7 +91,6 @@ type testCase struct {
 }
 
 func TestMovingAvg(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	var empty float64 = 0
 	data := []float64{1, 1, 1, 1, 5, 1, 1, 1}

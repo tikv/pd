@@ -31,6 +31,7 @@ require (
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20240131130919-ff2304879e1b
+	go.uber.org/automaxprocs v1.5.3
 	go.uber.org/goleak v1.2.0
 	go.uber.org/zap v1.26.0
 	golang.org/x/text v0.14.0

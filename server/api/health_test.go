@@ -26,7 +26,7 @@ import (
 )
 
 func checkSliceResponse(re *require.Assertions, body []byte, cfgs []*config.Config, unhealthy string) {
-	got := []Health{}
+	var got []Health
 	re.NoError(json.Unmarshal(body, &got))
 	re.Len(cfgs, len(got))
 
