@@ -242,7 +242,6 @@ func (c *tsoClient) updateGlobalDispatcher(url string) error {
 		old := dispatcher.targetURL.Load()
 		if old != url {
 			dispatcher.targetURL.Store(url)
-			dispatcher.dispatcherCancel()
 		}
 	}
 	c.tsoAllocators.Store(globalDCLocation, url)
