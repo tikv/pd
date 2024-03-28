@@ -22,7 +22,6 @@ import (
 )
 
 func TestBalancerPutAndDelete(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	balancers := []Balancer[uint32]{
 		NewRoundRobin[uint32](),
@@ -56,7 +55,6 @@ func TestBalancerPutAndDelete(t *testing.T) {
 }
 
 func TestBalancerDuplicate(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	balancers := []Balancer[uint32]{
 		NewRoundRobin[uint32](),
@@ -77,7 +75,6 @@ func TestBalancerDuplicate(t *testing.T) {
 }
 
 func TestRoundRobin(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	balancer := NewRoundRobin[uint32]()
 	for i := 0; i < 100; i++ {

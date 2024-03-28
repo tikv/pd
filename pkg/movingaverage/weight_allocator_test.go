@@ -21,7 +21,6 @@ import (
 )
 
 func TestWeightAllocator(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 
 	checkSumFunc := func(wa *WeightAllocator, length int) {

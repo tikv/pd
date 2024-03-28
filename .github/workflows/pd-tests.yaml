@@ -25,9 +25,19 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        include:
+          - worker_id: 1
+            name: 'Unit Test'
+          - worker_id: 2
+            name: 'Tools Test'
+          - worker_id: 3
+            name: 'Client Integration Test'
+          - worker_id: 4
+            name: 'TSO Integration Test'
+          - worker_id: 5
+            name: 'MicroService Integration Test'
     outputs:
-      job-total: 13
+      job-total: 5
     steps:
       - uses: actions/setup-go@v3
         with:
@@ -42,12 +52,12 @@ jobs:
             ~/.cache/go-build
             **/.tools
             **/.dashboard_download_cache
-          key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
-      - name: Make Test
+          key: ${{ runner.os }}-go-${{ matrix.name }}-${{ hashFiles('**/go.sum') }}
+      - name: ${{ matrix.name }}
         env:
           WORKER_ID: ${{ matrix.worker_id }}
-          WORKER_COUNT: 13
-          JOB_COUNT: 9 # 10 is tools test, 11, 12, 13 are for other integrations jobs
+          WORKER_COUNT: 5
+          JOB_COUNT: 5
         run: |
           make ci-test-job JOB_COUNT=$(($JOB_COUNT)) JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID

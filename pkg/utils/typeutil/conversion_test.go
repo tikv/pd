@@ -23,7 +23,6 @@ import (
 )
 
 func TestBytesToUint64(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	str := "\x00\x00\x00\x00\x00\x00\x03\xe8"
 	a, err := BytesToUint64([]byte(str))
@@ -32,7 +31,6 @@ func TestBytesToUint64(t *testing.T) {
 }
 
 func TestUint64ToBytes(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	var a uint64 = 1000
 	b := Uint64ToBytes(a)
@@ -41,7 +39,6 @@ func TestUint64ToBytes(t *testing.T) {
 }
 
 func TestJSONToUint64Slice(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	type testArray struct {
 		Array []uint64 `json:"array"`
