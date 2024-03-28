@@ -65,11 +65,27 @@ func trimTransferLeaders(op *operator.Operator) (steps []operator.OpStep, lastLe
 // CheckTransferPeer checks if the operator is to transfer peer between the specified source and target stores.
 func CheckTransferPeer(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	re.NotNil(op)
+	var addLearnerTo, removePeerFrom uint64
 	steps, _ := trimTransferLeaders(op)
-	re.Len(steps, 3)
-	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
-	re.IsType(operator.PromoteLearner{}, steps[1])
-	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
+	switch len(steps) {
+	case 3: // without joint consensus
+		re.IsType(operator.AddLearner{}, steps[0])
+		re.IsType(operator.PromoteLearner{}, steps[1])
+		re.IsType(operator.RemovePeer{}, steps[2])
+		addLearnerTo = steps[0].(operator.AddLearner).ToStore
+		removePeerFrom = steps[2].(operator.RemovePeer).FromStore
+	case 4: // with joint consensus
+		re.IsType(operator.AddLearner{}, steps[0])
+		re.IsType(operator.ChangePeerV2Enter{}, steps[1])
+		re.IsType(operator.ChangePeerV2Leave{}, steps[2])
+		re.IsType(operator.RemovePeer{}, steps[3])
+		addLearnerTo = steps[0].(operator.AddLearner).ToStore
+		removePeerFrom = steps[3].(operator.RemovePeer).FromStore
+	default:
+		re.FailNow("unexpected operator steps")
+	}
+	re.Equal(sourceID, removePeerFrom)
+	re.Equal(targetID, addLearnerTo)
 	kind |= operator.OpRegion
 	re.Equal(kind, op.Kind()&kind)
 }
@@ -88,32 +104,36 @@ func CheckTransferLearner(re *require.Assertions, op *operator.Operator, kind op
 // CheckTransferPeerWithLeaderTransfer checks if the operator is to transfer
 // peer between the specified source and target stores and it meanwhile
 // transfers the leader out of source store.
+// If targetID is 0, it means the operator is to transfer peer to any store.
 func CheckTransferPeerWithLeaderTransfer(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID, targetID uint64) {
 	re.NotNil(op)
+	var addLearnerTo, removePeerFrom uint64
 	steps, lastLeader := trimTransferLeaders(op)
-	re.Len(steps, 3)
-	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
-	re.IsType(operator.PromoteLearner{}, steps[1])
-	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
+	switch len(steps) {
+	case 3: // without joint consensus
+		re.IsType(operator.AddLearner{}, steps[0])
+		re.IsType(operator.PromoteLearner{}, steps[1])
+		re.IsType(operator.RemovePeer{}, steps[2])
+		addLearnerTo = steps[0].(operator.AddLearner).ToStore
+		removePeerFrom = steps[2].(operator.RemovePeer).FromStore
+	case 4: // with joint consensus
+		re.IsType(operator.AddLearner{}, steps[0])
+		re.IsType(operator.ChangePeerV2Enter{}, steps[1])
+		re.IsType(operator.ChangePeerV2Leave{}, steps[2])
+		re.IsType(operator.RemovePeer{}, steps[3])
+		addLearnerTo = steps[0].(operator.AddLearner).ToStore
+		removePeerFrom = steps[3].(operator.RemovePeer).FromStore
+	default:
+		re.FailNow("unexpected operator steps")
+	}
 	re.NotZero(lastLeader)
 	re.NotEqual(sourceID, lastLeader)
 	kind |= operator.OpRegion
 	re.Equal(kind, op.Kind()&kind)
-}
-
-// CheckTransferPeerWithLeaderTransferFrom checks if the operator is to transfer
-// peer out of the specified store and it meanwhile transfers the leader out of
-// the store.
-func CheckTransferPeerWithLeaderTransferFrom(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID uint64) {
-	re.NotNil(op)
-	steps, lastLeader := trimTransferLeaders(op)
-	re.IsType(operator.AddLearner{}, steps[0])
-	re.IsType(operator.PromoteLearner{}, steps[1])
-	re.Equal(sourceID, steps[2].(operator.RemovePeer).FromStore)
-	re.NotZero(lastLeader)
-	re.NotEqual(sourceID, lastLeader)
-	kind |= operator.OpRegion | operator.OpLeader
-	re.Equal(kind, op.Kind()&kind)
+	re.Equal(sourceID, removePeerFrom)
+	if targetID != 0 {
+		re.Equal(targetID, addLearnerTo)
+	}
 }
 
 // CheckAddPeer checks if the operator is to add peer on specified store.
