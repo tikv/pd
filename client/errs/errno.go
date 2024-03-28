@@ -51,6 +51,7 @@ var (
 	ErrClientGetClusterInfo           = errors.Normalize("get cluster info failed", errors.RFCCodeText("PD:client:ErrClientGetClusterInfo"))
 	ErrClientUpdateMember             = errors.Normalize("update member failed, %v", errors.RFCCodeText("PD:client:ErrUpdateMember"))
 	ErrClientNoAvailableMember        = errors.Normalize("no available member", errors.RFCCodeText("PD:client:ErrClientNoAvailableMember"))
+	ErrClientNoTargetMember           = errors.Normalize("no target member", errors.RFCCodeText("PD:client:ErrClientNoTargetMember"))
 	ErrClientProtoUnmarshal           = errors.Normalize("failed to unmarshal proto", errors.RFCCodeText("PD:proto:ErrClientProtoUnmarshal"))
 	ErrClientGetMultiResponse         = errors.Normalize("get invalid value response %v, must only one", errors.RFCCodeText("PD:client:ErrClientGetMultiResponse"))
 	ErrClientGetServingEndpoint       = errors.Normalize("get serving endpoint failed", errors.RFCCodeText("PD:client:ErrClientGetServingEndpoint"))

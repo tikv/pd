@@ -129,14 +129,22 @@ func (ci *clientInner) requestWithRetry(
 		if len(clients) == 0 {
 			return errs.ErrClientNoAvailableMember
 		}
+		skipNum := 0
 		for _, cli := range clients {
 			url := cli.GetURL()
+			if reqInfo.targetURL != "" && reqInfo.targetURL != url {
+				skipNum++
+				continue
+			}
 			statusCode, err = ci.doRequest(ctx, url, reqInfo, headerOpts...)
 			if err == nil || noNeedRetry(statusCode) {
 				return err
 			}
 			log.Debug("[pd] request url failed",
 				zap.String("source", ci.source), zap.Bool("is-leader", cli.IsConnectedToLeader()), zap.String("url", url), zap.Error(err))
+		}
+		if skipNum == len(clients) {
+			return errs.ErrClientNoTargetMember
 		}
 		return err
 	}
@@ -244,6 +252,7 @@ type client struct {
 	callerID    string
 	respHandler respHandleFunc
 	bo          *retry.Backoffer
+	targetURL   string
 }
 
 // ClientOption configures the HTTP client.
@@ -343,6 +352,13 @@ func (c *client) WithBackoffer(bo *retry.Backoffer) Client {
 	return &newClient
 }
 
+// WithTargetURL sets and returns a new client with the given target URL.
+func (c *client) WithTargetURL(targetURL string) Client {
+	newClient := *c
+	newClient.targetURL = targetURL
+	return &newClient
+}
+
 // Header key definition constants.
 const (
 	pdAllowFollowerHandleKey = "PD-Allow-Follower-Handle"
@@ -363,7 +379,8 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 	return c.inner.requestWithRetry(ctx, reqInfo.
 		WithCallerID(c.callerID).
 		WithRespHandler(c.respHandler).
-		WithBackoffer(c.bo),
+		WithBackoffer(c.bo).
+		WithTargetURL(c.targetURL),
 		headerOpts...)
 }
 

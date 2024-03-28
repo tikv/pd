@@ -25,3 +25,4 @@ coverage.xml
 coverage
 *.txt
 go.work*
+embedded_assets_handler.go
