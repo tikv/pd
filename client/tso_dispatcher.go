@@ -77,7 +77,6 @@ func (d *tsoDispatcher) allowTSOFollowerProxy() bool {
 }
 
 func (d *tsoDispatcher) checkAllocator(
-	dispatcherCtx context.Context,
 	forwardCtx context.Context,
 	forwardCancel context.CancelFunc,
 	dc, forwardedHostTrim, addr, url string,
@@ -101,7 +100,7 @@ func (d *tsoDispatcher) checkAllocator(
 			healthCli = healthpb.NewHealthClient(cc)
 		}
 		if healthCli != nil {
-			healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, d.option.timeout)
+			healthCtx, healthCancel := context.WithTimeout(d.dispatcherCtx, d.option.timeout)
 			resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 			failpoint.Inject("unreachableNetwork", func() {
 				resp.Status = healthpb.HealthCheckResponse_UNKNOWN
@@ -109,7 +108,7 @@ func (d *tsoDispatcher) checkAllocator(
 			healthCancel()
 			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 				// create a stream of the original allocator
-				cctx, cancel := context.WithCancel(dispatcherCtx)
+				cctx, cancel := context.WithCancel(d.dispatcherCtx)
 				stream, err := d.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, d.option.timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
@@ -119,7 +118,7 @@ func (d *tsoDispatcher) checkAllocator(
 			}
 		}
 		select {
-		case <-dispatcherCtx.Done():
+		case <-d.dispatcherCtx.Done():
 			return
 		case <-forwardCtx.Done():
 			return
@@ -263,7 +262,7 @@ func (d *tsoDispatcher) tryConnectToTSO() error {
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addr := trimHTTPPrefix(backupURL)
 				// the goroutine is used to check the network and change back to the original stream
-				go d.checkAllocator(dispatcherCtx, cctx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
+				go d.checkAllocator(cctx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
 				updateAndClear(backupURL, &tsoConnectionContext{backupURL, stream, cctx, cancel})
 				return nil

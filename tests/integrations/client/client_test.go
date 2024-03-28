@@ -267,7 +267,8 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 	newLeader := cluster.WaitLeader()
 	re.NotEmpty(newLeader)
 	re.NotEqual(leader, newLeader)
-	leader = newLeader
+	leader = cluster.WaitLeader()
+	re.NotEmpty(leader)
 	err = cli.GetServiceDiscovery().CheckMemberChanged()
 	re.NoError(err)
 

@@ -342,21 +342,9 @@ func (c *tsoClient) processRequests(
 	count := int64(len(requests))
 	reqKeyspaceGroupID := c.ServiceDiscovery.GetKeyspaceGroupID()
 
-	select {
-	case <-stream.(*pdTSOStream).stream.Context().Done():
-		fmt.Println("stream context done before sleep")
-	default:
-		fmt.Println("stream context not done before sleep")
-	}
 	failpoint.Inject("waitBeforeProcessTSO", func() {
 		time.Sleep(time.Second * 5)
 	})
-	select {
-	case <-stream.(*pdTSOStream).stream.Context().Done():
-		fmt.Println("stream context done after sleep")
-	default:
-		fmt.Println("stream context not done after sleep")
-	}
 
 	respKeyspaceGroupID, physical, logical, suffixBits, err := stream.processRequests(
 		c.ServiceDiscovery.GetClusterID(), c.ServiceDiscovery.GetKeyspaceID(), reqKeyspaceGroupID,
