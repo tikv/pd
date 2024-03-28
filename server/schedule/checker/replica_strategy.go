@@ -92,7 +92,12 @@ func (s *ReplicaStrategy) SelectStoreToFix(coLocationStores []*core.StoreInfo, o
 	}
 	// trick to avoid creating a slice with `old` removed.
 	s.swapStoreToFirst(coLocationStores, old)
-	return s.SelectStoreToAdd(coLocationStores[1:])
+	// If the coLocationStores only has one store, no need to remove.
+	// Otherwise, the other stores will be filtered.
+	if len(coLocationStores) > 1 {
+		coLocationStores = coLocationStores[1:]
+	}
+	return s.SelectStoreToAdd(coLocationStores)
 }
 
 // SelectStoreToImprove returns a store to replace oldStore. The location

@@ -1919,3 +1919,63 @@ func (suite *ruleCheckerTestSuite) TestRemoveOrphanPeer() {
 	suite.NotNil(op)
 	suite.Equal("remove-orphan-peer", op.Desc())
 }
+
+func (suite *ruleCheckerTestSuite) TestIssue7808() {
+	re := suite.Require()
+	suite.cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1", "disk_type": "mix"})
+	suite.cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2", "disk_type": "mix"})
+	suite.cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3", "disk_type": "ssd"})
+	suite.cluster.AddLabelsStore(4, 1, map[string]string{"host": "host4", "disk_type": "ssd"})
+	suite.cluster.AddLabelsStore(5, 1, map[string]string{"host": "host5", "disk_type": "ssd"})
+	suite.cluster.AddLeaderRegionWithRange(1, "", "", 3, 4, 1)
+	err := suite.ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID: "pd",
+			ID:      "1",
+			Role:    placement.Voter,
+			Count:   2,
+			LabelConstraints: []placement.LabelConstraint{
+				{
+					Key: "disk_type",
+					Values: []string{
+						"ssd",
+					},
+					Op: placement.In,
+				},
+			},
+			LocationLabels: []string{"host"},
+			IsolationLevel: "host",
+		},
+		{
+			GroupID: "pd",
+			ID:      "2",
+			Role:    placement.Follower,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{
+					Key: "disk_type",
+					Values: []string{
+						"mix",
+					},
+					Op: placement.In,
+				},
+			},
+			LocationLabels: []string{"host"},
+			IsolationLevel: "host",
+		},
+	})
+	re.NoError(err)
+	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	re.NoError(err)
+	suite.cluster.SetStoreDown(1)
+	region := suite.cluster.GetRegion(1)
+	downPeer := []*pdpb.PeerStats{
+		{Peer: region.GetStorePeer(1), DownSeconds: 6000},
+	}
+	region = region.Clone(core.WithDownPeers(downPeer))
+	suite.cluster.PutRegion(region)
+	op := suite.rc.Check(suite.cluster.GetRegion(1))
+	re.NotNil(op)
+	re.Equal("fast-replace-rule-down-peer", op.Desc())
+	re.Contains(op.Brief(), "mv peer: store [1] to [2]")
+}
