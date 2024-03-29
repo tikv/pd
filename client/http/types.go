@@ -626,8 +626,8 @@ type MicroServiceMember struct {
 
 // KeyspaceGCManagementType represents parameters needed to modify the gc management type.
 // If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
-// configured to run a global gc worker to compute a global gc safe point.
-// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can compute gc safe point by its own.
+// configured to run a global gc worker to calculate a global gc safe point.
+// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
 type KeyspaceGCManagementType struct {
 	GCManagementType string `json:"gc_management_type,omitempty"`
 }
