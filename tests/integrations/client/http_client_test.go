@@ -797,7 +797,7 @@ func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode,
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
 		Config: pd.KeyspaceGCManagementType{
-			SafePointVersion: gcManagementType,
+			GCManagementType: gcManagementType,
 		},
 	}
 	err := client.UpdateKeyspaceGCManagementType(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)

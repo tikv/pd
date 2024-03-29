@@ -626,7 +626,7 @@ type MicroServiceMember struct {
 
 // KeyspaceGCManagementType represents parameters needed to modify the safe point version.
 type KeyspaceGCManagementType struct {
-	gc_management_type string `json:"gc_management_type,omitempty"`
+	GCManagementType string `json:"gc_management_type,omitempty"`
 }
 
 // KeyspaceGCManagementTypeConfig represents parameters needed to modify target keyspace's configs.
