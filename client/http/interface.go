@@ -98,6 +98,11 @@ type Client interface {
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
+
+	// UpdateKeyspaceGCManagementType update the `gc_management_type` in keyspace meta config.
+	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a global gc worker to compute a global gc safe point.
+	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can compute gc safe point by its own.
 	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 

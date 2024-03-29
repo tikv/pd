@@ -784,20 +784,20 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	c.Close()
 }
 
-func (suite *httpClientTestSuite) TestUpdateKeyspaceSafePointVersion() {
-	suite.RunTestInTwoModes(suite.checkUpdateKeyspaceSafePointVersion)
+func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
+	suite.RunTestInTwoModes(suite.checkUpdateKeyspaceGCManagementType)
 }
 
-func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode, client pd.Client) {
+func (suite *httpClientTestSuite) checkUpdateKeyspaceGCManagementType(mode mode, client pd.Client) {
 	re := suite.Require()
 	env := suite.env[mode]
 
 	keyspaceName := "DEFAULT"
-	gcManagementType := "keysapce_level_gc"
+	expectGCManagementType := "keysapce_level_gc"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
 		Config: pd.KeyspaceGCManagementType{
-			GCManagementType: gcManagementType,
+			GCManagementType: expectGCManagementType,
 		},
 	}
 	err := client.UpdateKeyspaceGCManagementType(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
@@ -806,6 +806,8 @@ func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode,
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(env.ctx, keyspaceName)
 	re.NoError(err)
 	val, ok := keyspaceMetaRes.Config["gc_management_type"]
+
+	// Check it can get expect key and value in keyspace meta config.
 	re.True(ok)
-	re.Equal(gcManagementType, val)
+	re.Equal(expectGCManagementType, val)
 }
