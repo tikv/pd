@@ -41,9 +41,7 @@ func TestProgress(t *testing.T) {
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.7, p)
-	// 30/(70/1s+) > 30/70
-	re.Greater(ls, 30.0/70.0)
-	// 70/1s+ > 70
+	re.Less(math.Abs(ls-30.0/7.0), 1e-6)
 	re.Less(math.Abs(cs-7), 1e-6)
 	// there is no scheduling
 	for i := 0; i < 1000; i++ {
@@ -115,9 +113,7 @@ func TestProgressWithDynamicWindow(t *testing.T) {
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.69, p)
-	// 31/(69/1s+) > 31/69
-	re.Greater(ls, 31.0/69.0)
-	// 70/1s+ > 70
+	re.Less(math.Abs(ls-31.0/6.9), 1e-6)
 	re.Less(math.Abs(cs-6.9), 1e-6)
 	re.Equal(2, m.progresses[n].currentWindowLength)
 	re.Equal(100.0, m.progresses[n].front.Value.(float64))
@@ -128,7 +124,7 @@ func TestProgressWithDynamicWindow(t *testing.T) {
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.7, p)
-	re.Greater(ls, 30.0/(70.0/2))
+	re.Less(math.Abs(ls-30.0/(7.0/2)), 1e-6)
 	re.Less(math.Abs(cs-3.5), 1e-6)
 
 	for i := 0; i < 1000; i++ {
