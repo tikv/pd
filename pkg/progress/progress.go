@@ -62,12 +62,12 @@ type progressIndicator struct {
 	windowLength int
 	// front is the first element which should be used.
 	// currentWindowLength indicates where the front is currently in the queue.
-	// Assume that the windowLength is 2, the init value is 1. The front is [1] and position is 1.
+	// Assume that the windowLength is 2, the init value is 1. The front is [1] and currentWindowLength is 1.
 	// After update 3 times with 2, 3, 4 separately.
-	// The front is [3], the position is 2, and values in queue are [(1,2),3,4]
+	// The front is [3], the currentWindowLength is 2, and values in queue are [(1,2),3,4]
 	//                                                                     ^ front
-	//                                                                     - - position = len([3,4]) = 2
-	// We will always keep the position equal to windowLength if the actual size is enough.
+	//                                                                     - - currentWindowLength = len([3,4]) = 2
+	// We will always keep the currentWindowLength equal to windowLength if the actual size is enough.
 	front               *list.Element
 	currentWindowLength int
 
