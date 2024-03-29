@@ -52,13 +52,14 @@ type progressIndicator struct {
 	remaining float64
 	// We use a fixed interval's history to calculate the latest average speed.
 	history *list.List
-	// We use (speedStatisticalWindowCapacity / updateInterval + 1) to get the windowCapacity.
+	// We use (maxSpeedCalculationWindow / updateInterval + 1) to get the windowCapacity.
 	// Assume that the windowCapacity is 4, the init value is 1. After update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
 	// Then we update it again with 5, the window will become [2, 3, 4, 5].
 	windowCapacity int
 	// windowLength is used to determine what data will be computed.
-	// Assume that the windowLength is 2, the init value is 1. The value that will be calculated are [1]. After update 3 times with 2, 3, 4 separately. The value that will be calculated are [3,4] and the values in queue are [(1,2),3,4].
-	// It helps us avoid calculation results jumping change when patrol-region-duration changes.
+	// Assume that the windowLength is 2, the init value is 1. The value that will be calculated are [1].
+	// After update 3 times with 2, 3, 4 separately. The value that will be calculated are [3,4] and the values in queue are [(1,2),3,4].
+	// It helps us avoid calculation results jumping change when patrol-region-interval changes.
 	windowLength int
 	// front is the first element which should be used.
 	// currentWindowLength indicates where the front is currently in the queue.
@@ -160,11 +161,11 @@ func (m *Manager) UpdateProgress(progress string, current, remaining float64, is
 			p.lastSpeed = 0
 		} else if isInc {
 			// the value increases, e.g., [1, 2, 3]
-			p.lastSpeed = (p.history.Back().Value.(float64) - p.front.Value.(float64)) /
+			p.lastSpeed = (current - p.front.Value.(float64)) /
 				(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
 		} else {
 			// the value decreases, e.g., [3, 2, 1]
-			p.lastSpeed = (p.front.Value.(float64) - p.history.Back().Value.(float64)) /
+			p.lastSpeed = (p.front.Value.(float64) - current) /
 				(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
 		}
 		if p.lastSpeed < 0 {
