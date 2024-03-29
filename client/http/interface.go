@@ -98,7 +98,7 @@ type Client interface {
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
-	UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error
+	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 
 	/* Client-related methods */
@@ -921,14 +921,14 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-// UpdateKeyspaceSafePointVersion patches the keyspace config.
-func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error {
-	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceSafePointVersion)
+// UpdateKeyspaceGCManagementType patches the keyspace config.
+func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
+	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceGCmanagementType)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName(UpdateKeyspaceSafePointVersionName).
+		WithName(UpdateKeyspaceGCManagementTypeName).
 		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
 		WithMethod(http.MethodPatch).
 		WithBody(keyspaceConfigPatchJSON))

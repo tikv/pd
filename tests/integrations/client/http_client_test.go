@@ -793,19 +793,19 @@ func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode,
 	env := suite.env[mode]
 
 	keyspaceName := "DEFAULT"
-	safePointVersion := "v2"
+	gcManagementType := "keysapce_level_gc"
 
-	keyspaceSafePointVersionConfig := pd.KeyspaceSafePointVersionConfig{
-		Config: pd.KeyspaceSafePointVersion{
-			SafePointVersion: safePointVersion,
+	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
+		Config: pd.KeyspaceGCManagementType{
+			SafePointVersion: gcManagementType,
 		},
 	}
-	err := client.UpdateKeyspaceSafePointVersion(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	err := client.UpdateKeyspaceGCManagementType(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
 	re.NoError(err)
 
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(env.ctx, keyspaceName)
 	re.NoError(err)
-	val, ok := keyspaceMetaRes.Config["safe_point_version"]
+	val, ok := keyspaceMetaRes.Config["gc_management_type"]
 	re.True(ok)
-	re.Equal(safePointVersion, val)
+	re.Equal(gcManagementType, val)
 }
