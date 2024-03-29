@@ -61,15 +61,15 @@ type progressIndicator struct {
 	// It helps us avoid calculation results jumping change when patrol-region-duration changes.
 	windowLength int
 	// front is the first element which should be used.
-	// position indicates where the front is currently in the queue.
+	// currentWindowLength indicates where the front is currently in the queue.
 	// Assume that the windowLength is 2, the init value is 1. The front is [1] and position is 1.
 	// After update 3 times with 2, 3, 4 separately.
 	// The front is [3], the position is 2, and values in queue are [(1,2),3,4]
 	//                                                                     ^ front
 	//                                                                     - - position = len([3,4]) = 2
 	// We will always keep the position equal to windowLength if the actual size is enough.
-	front    *list.Element
-	position int
+	front               *list.Element
+	currentWindowLength int
 
 	updateInterval time.Duration
 	lastSpeed      float64
@@ -119,7 +119,7 @@ func (m *Manager) AddProgress(progress string, current, total float64, updateInt
 		}
 		m.progresses[progress] = pi
 		pi.front = history.Front()
-		pi.position = 1
+		pi.currentWindowLength = 1
 	}
 	return
 }
@@ -139,16 +139,16 @@ func (m *Manager) UpdateProgress(progress string, current, remaining float64, is
 		}
 
 		p.history.PushBack(current)
-		p.position++
+		p.currentWindowLength++
 
 		// try to move `front` into correct place.
-		for p.position > p.windowLength {
+		for p.currentWindowLength > p.windowLength {
 			p.front = p.front.Next()
-			p.position--
+			p.currentWindowLength--
 		}
-		for p.position < p.windowLength && p.front.Prev() != nil {
+		for p.currentWindowLength < p.windowLength && p.front.Prev() != nil {
 			p.front = p.front.Prev()
-			p.position++
+			p.currentWindowLength++
 		}
 
 		for p.history.Len() > p.windowCapacity {
@@ -161,11 +161,11 @@ func (m *Manager) UpdateProgress(progress string, current, remaining float64, is
 		} else if isInc {
 			// the value increases, e.g., [1, 2, 3]
 			p.lastSpeed = (p.history.Back().Value.(float64) - p.front.Value.(float64)) /
-				(float64(p.position-1) * p.updateInterval.Seconds())
+				(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
 		} else {
 			// the value decreases, e.g., [3, 2, 1]
 			p.lastSpeed = (p.front.Value.(float64) - p.history.Back().Value.(float64)) /
-				(float64(p.position-1) * p.updateInterval.Seconds())
+				(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
 		}
 		if p.lastSpeed < 0 {
 			p.lastSpeed = 0
