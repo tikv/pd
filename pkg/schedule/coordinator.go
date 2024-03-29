@@ -73,8 +73,8 @@ type Coordinator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	schedulersInitialized      bool
-	patrolCheckRegionsDuration time.Duration
+	schedulersInitialized bool
+	patrolRegionsDuration time.Duration
 
 	cluster           sche.ClusterInformer
 	prepareChecker    *prepareChecker
@@ -118,13 +118,13 @@ func (c *Coordinator) GetPatrolRegionsDuration() time.Duration {
 	}
 	c.RLock()
 	defer c.RUnlock()
-	return c.patrolCheckRegionsDuration
+	return c.patrolRegionsDuration
 }
 
 func (c *Coordinator) setPatrolRegionsDuration(dur time.Duration) {
 	c.Lock()
 	defer c.Unlock()
-	c.patrolCheckRegionsDuration = dur
+	c.patrolRegionsDuration = dur
 }
 
 // markSchedulersInitialized marks the scheduler initialization is finished.
