@@ -24,7 +24,6 @@ import (
 )
 
 func TestProgress(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	n := "test"
 	m := NewManager()
@@ -68,7 +67,6 @@ func TestProgress(t *testing.T) {
 }
 
 func TestAbnormal(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	n := "test"
 	m := NewManager()
@@ -96,7 +94,6 @@ func TestAbnormal(t *testing.T) {
 
 func TestProgressWithDynamicWindow(t *testing.T) {
 	// The full capacity of queue is 721.
-	t.Parallel()
 	re := require.New(t)
 	n := "test"
 	m := NewManager()
