@@ -793,7 +793,7 @@ func (suite *httpClientTestSuite) checkUpdateKeyspaceGCManagementType(mode mode,
 	env := suite.env[mode]
 
 	keyspaceName := "DEFAULT"
-	expectGCManagementType := "keysapce_level_gc"
+	expectGCManagementType := "keyspace_level_gc"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
 		Config: pd.KeyspaceGCManagementType{
