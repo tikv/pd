@@ -274,12 +274,14 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 		pickedSet[ep] = true
 	}
 	// Reset the count to 0 if it's in evictedEps but not in the pickedEps.
-	checker.evictedEps.Range(func(key, _ any) bool {
+	checker.evictedEps.Range(func(key, value any) bool {
 		ep := key.(string)
-		if !pickedSet[ep] {
+		count := value.(int)
+		if count > 0 && !pickedSet[ep] {
 			checker.evictedEps.Store(ep, 0)
 			log.Info("reset evicted etcd endpoint picked count",
 				zap.String("endpoint", ep),
+				zap.Int("previous-count", count),
 				zap.String("source", checker.source))
 		}
 		return true
