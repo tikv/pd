@@ -471,7 +471,7 @@ func (oc *Controller) checkOperatorLightly(op *Operator) (*core.RegionInfo, Canc
 	// It may be suitable for all kinds of operator but not merge-region.
 	// But to be cautions, it only takes effect on merge-region currently.
 	// If the version of epoch is changed, the region has been splitted or merged, and the key range has been changed.
-	// The changing for conf_version of epoch doesn't modify the region key range, skipt it.
+	// The changing for conf_version of epoch doesn't modify the region key range, skip it.
 	if (op.Kind()&OpMerge != 0) && region.GetRegionEpoch().GetVersion() != op.RegionEpoch().GetVersion() {
 		operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
 		return nil, EpochNotMatch
