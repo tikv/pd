@@ -1159,25 +1159,6 @@ func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTre
 				err = createRegionErr
 				return false
 			}
-			// paranoid check: shouldn't overlap with any of the peers
-			for _, peers := range peersMap {
-				for _, peer := range peers {
-					if !peer.IsInitialized() {
-						continue
-					}
-					if (bytes.Compare(newRegion.StartKey, peer.Region().StartKey) <= 0 &&
-						(len(newRegion.EndKey) == 0 || bytes.Compare(peer.Region().StartKey, newRegion.EndKey) < 0)) ||
-						((len(peer.Region().EndKey) == 0 || bytes.Compare(newRegion.StartKey, peer.Region().EndKey) < 0) &&
-							(len(newRegion.EndKey) == 0 || (len(peer.Region().EndKey) != 0 && bytes.Compare(peer.Region().EndKey, newRegion.EndKey) <= 0))) {
-						err = errors.Errorf(
-							"Find overlap peer %v with newly created empty region %v",
-							logutil.RedactStringer(core.RegionToHexMeta(peer.Region())),
-							logutil.RedactStringer(core.RegionToHexMeta(newRegion)),
-						)
-						return false
-					}
-				}
-			}
 			storeRecoveryPlan := u.getRecoveryPlan(storeID)
 			storeRecoveryPlan.Creates = append(storeRecoveryPlan.Creates, newRegion)
 			u.recordAffectedRegion(newRegion)
