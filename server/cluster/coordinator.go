@@ -81,6 +81,8 @@ type coordinator struct {
 	hbStreams         *hbstream.HeartbeatStreams
 	pluginInterface   *schedule.PluginInterface
 	diagnosticManager *diagnosticManager
+
+	patrolRegionsDuration time.Duration
 }
 
 // newCoordinator creates a new coordinator.
@@ -102,6 +104,22 @@ func newCoordinator(ctx context.Context, cluster *RaftCluster, hbStreams *hbstre
 		pluginInterface:   schedule.NewPluginInterface(),
 		diagnosticManager: newDiagnosticManager(cluster),
 	}
+}
+
+// GetPatrolRegionsDuration returns the duration of the last patrol region round.
+func (c *coordinator) GetPatrolRegionsDuration() time.Duration {
+	if c == nil {
+		return 0
+	}
+	c.RLock()
+	defer c.RUnlock()
+	return c.patrolRegionsDuration
+}
+
+func (c *coordinator) setPatrolRegionsDuration(dur time.Duration) {
+	c.Lock()
+	defer c.Unlock()
+	c.patrolRegionsDuration = dur
 }
 
 func (c *coordinator) GetWaitingRegions() []*cache.Item {
@@ -132,6 +150,7 @@ func (c *coordinator) patrolRegions() {
 		case <-timer.C:
 			timer.Reset(c.cluster.GetOpts().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
+			c.setPatrolRegionsDuration(0)
 			log.Info("patrol regions has been stopped")
 			return
 		}
@@ -154,7 +173,9 @@ func (c *coordinator) patrolRegions() {
 		// Updates the label level isolation statistics.
 		c.cluster.updateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
-			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
+			dur := time.Since(start)
+			patrolCheckRegionsGauge.Set(dur.Seconds())
+			c.setPatrolRegionsDuration(dur)
 			start = time.Now()
 		}
 		failpoint.Inject("break-patrol", func() {

@@ -46,11 +46,7 @@ func TestProgress(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		m.UpdateProgress(n, 30, 30, false)
 	}
-<<<<<<< HEAD
-	re.Equal(61, m.progesses[n].history.Len())
-=======
 	re.Equal(721, m.progresses[n].history.Len())
->>>>>>> 945e29c03 (cluster: dynamic progress time window for offline scene (#7722))
 	p, ls, cs, err = m.Status(n)
 	re.NoError(err)
 	re.Equal(0.7, p)
