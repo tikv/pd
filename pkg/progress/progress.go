@@ -24,8 +24,14 @@ import (
 	"github.com/tikv/pd/pkg/syncutil"
 )
 
-// speedStatisticalWindow is the speed calculation window
-const speedStatisticalWindow = 10 * time.Minute
+const (
+	// maxSpeedCalculationWindow is the maximum size of the time window used to calculate the speed,
+	// but it does not mean that all data in it will be used to calculate the speed,
+	// which data is used depends on the patrol region duration
+	maxSpeedCalculationWindow = 2 * time.Hour
+	// minSpeedCalculationWindow is the minimum speed calculation window
+	minSpeedCalculationWindow = 10 * time.Minute
+)
 
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
@@ -46,12 +52,28 @@ type progressIndicator struct {
 	remaining float64
 	// We use a fixed interval's history to calculate the latest average speed.
 	history *list.List
-	// We use speedStatisticalWindow / updateInterval to get the windowLengthLimit.
-	// Assume that the windowLengthLimit is 3, the init value is 1. after update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
+	// We use (maxSpeedCalculationWindow / updateInterval + 1) to get the windowCapacity.
+	// Assume that the windowCapacity is 4, the init value is 1. After update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
 	// Then we update it again with 5, the window will become [2, 3, 4, 5].
-	windowLengthLimit int
-	updateInterval    time.Duration
-	lastSpeed         float64
+	windowCapacity int
+	// windowLength is used to determine what data will be computed.
+	// Assume that the windowLength is 2, the init value is 1. The value that will be calculated are [1].
+	// After update 3 times with 2, 3, 4 separately. The value that will be calculated are [3,4] and the values in queue are [(1,2),3,4].
+	// It helps us avoid calculation results jumping change when patrol-region-interval changes.
+	windowLength int
+	// front is the first element which should be used.
+	// currentWindowLength indicates where the front is currently in the queue.
+	// Assume that the windowLength is 2, the init value is 1. The front is [1] and currentWindowLength is 1.
+	// After update 3 times with 2, 3, 4 separately.
+	// The front is [3], the currentWindowLength is 2, and values in queue are [(1,2),3,4]
+	//                                                                                ^ front
+	//                                                                                - - currentWindowLength = len([3,4]) = 2
+	// We will always keep the currentWindowLength equal to windowLength if the actual size is enough.
+	front               *list.Element
+	currentWindowLength int
+
+	updateInterval time.Duration
+	lastSpeed      float64
 }
 
 // Reset resets the progress manager.
@@ -62,13 +84,29 @@ func (m *Manager) Reset() {
 	m.progesses = make(map[string]*progressIndicator)
 }
 
+// Option is used to do some action for progressIndicator.
+type Option func(*progressIndicator)
+
+// WindowDurationOption changes the time window size.
+func WindowDurationOption(dur time.Duration) func(*progressIndicator) {
+	return func(pi *progressIndicator) {
+		if dur < minSpeedCalculationWindow {
+			dur = minSpeedCalculationWindow
+		} else if dur > maxSpeedCalculationWindow {
+			dur = maxSpeedCalculationWindow
+		}
+		pi.windowLength = int(dur/pi.updateInterval) + 1
+	}
+}
+
 // AddProgress adds a progress into manager if it doesn't exist.
-func (m *Manager) AddProgress(progress string, current, total float64, updateInterval time.Duration) (exist bool) {
+func (m *Manager) AddProgress(progress string, current, total float64, updateInterval time.Duration, opts ...Option) (exist bool) {
 	m.Lock()
 	defer m.Unlock()
 
 	history := list.New()
 	history.PushBack(current)
+<<<<<<< HEAD
 	if _, exist = m.progesses[progress]; !exist {
 		m.progesses[progress] = &progressIndicator{
 			total:             total,
@@ -76,38 +114,73 @@ func (m *Manager) AddProgress(progress string, current, total float64, updateInt
 			history:           history,
 			windowLengthLimit: int(speedStatisticalWindow / updateInterval),
 			updateInterval:    updateInterval,
+=======
+	if _, exist = m.progresses[progress]; !exist {
+		pi := &progressIndicator{
+			total:          total,
+			remaining:      total,
+			history:        history,
+			windowCapacity: int(maxSpeedCalculationWindow/updateInterval) + 1,
+			windowLength:   int(minSpeedCalculationWindow / updateInterval),
+			updateInterval: updateInterval,
+>>>>>>> 945e29c03 (cluster: dynamic progress time window for offline scene (#7722))
 		}
+		for _, op := range opts {
+			op(pi)
+		}
+		m.progresses[progress] = pi
+		pi.front = history.Front()
+		pi.currentWindowLength = 1
 	}
 	return
 }
 
 // UpdateProgress updates the progress if it exists.
-func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool) {
+func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool, opts ...Option) {
 	m.Lock()
 	defer m.Unlock()
 
+<<<<<<< HEAD
 	if p, exist := m.progesses[progress]; exist {
+=======
+	if p, exist := m.progresses[progress]; exist {
+		for _, op := range opts {
+			op(p)
+		}
+>>>>>>> 945e29c03 (cluster: dynamic progress time window for offline scene (#7722))
 		p.remaining = remaining
 		if p.total < remaining {
 			p.total = remaining
 		}
 
-		if p.history.Len() > p.windowLengthLimit {
+		p.history.PushBack(current)
+		p.currentWindowLength++
+
+		// try to move `front` into correct place.
+		for p.currentWindowLength > p.windowLength {
+			p.front = p.front.Next()
+			p.currentWindowLength--
+		}
+		for p.currentWindowLength < p.windowLength && p.front.Prev() != nil {
+			p.front = p.front.Prev()
+			p.currentWindowLength++
+		}
+
+		for p.history.Len() > p.windowCapacity {
 			p.history.Remove(p.history.Front())
 		}
-		p.history.PushBack(current)
 
 		// It means it just init and we haven't update the progress
 		if p.history.Len() <= 1 {
 			p.lastSpeed = 0
 		} else if isInc {
 			// the value increases, e.g., [1, 2, 3]
-			p.lastSpeed = (p.history.Back().Value.(float64) - p.history.Front().Value.(float64)) /
-				(float64(p.history.Len()-1) * p.updateInterval.Seconds())
+			p.lastSpeed = (current - p.front.Value.(float64)) /
+				(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
 		} else {
 			// the value decreases, e.g., [3, 2, 1]
-			p.lastSpeed = (p.history.Front().Value.(float64) - p.history.Back().Value.(float64)) /
-				(float64(p.history.Len()-1) * p.updateInterval.Seconds())
+			p.lastSpeed = (p.front.Value.(float64) - current) /
+				(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
 		}
 		if p.lastSpeed < 0 {
 			p.lastSpeed = 0
