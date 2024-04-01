@@ -418,10 +418,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
-	source := newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(source)
-	target := newRegionInfo(102, "1b", "1c", 1, 1, []uint64{101, 1}, []uint64{101, 1})
+	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
 	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 	cluster.PutRegion(target)
 
@@ -448,9 +448,9 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(len(controller.opNotifierQueue), 1)
-	re.Equal(len(controller.operators), 0)
-	re.Equal(len(controller.wop.ListOperator()), 0)
+	re.Len(controller.opNotifierQueue, 1)
+	re.Empty(controller.operators)
+	re.Empty(controller.wop.ListOperator())
 	re.NotNil(controller.records.Get(101))
 	re.NotNil(controller.records.Get(102))
 
@@ -459,14 +459,14 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(len(controller.opNotifierQueue), 0)
+	re.Empty(controller.opNotifierQueue)
 
 	// Add the two ops to waiting operators again.
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
 	controller.records.ttl.Remove(101)
 	controller.records.ttl.Remove(102)
 	ops, err = CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
-	re.Nil(err)
+	re.NoError(err)
 	re.Equal(2, controller.AddWaitingOperator(ops...))
 	// change the target RegionEpoch
 	// first poll gets source region from opNotifierQueue
@@ -479,9 +479,9 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(len(controller.opNotifierQueue), 1)
-	re.Equal(len(controller.operators), 0)
-	re.Equal(len(controller.wop.ListOperator()), 0)
+	re.Len(controller.opNotifierQueue, 1)
+	re.Empty(controller.operators)
+	re.Empty(controller.wop.ListOperator())
 	re.NotNil(controller.records.Get(101))
 	re.NotNil(controller.records.Get(102))
 
@@ -489,7 +489,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(len(controller.opNotifierQueue), 0)
+	re.Empty(controller.opNotifierQueue)
 }
 
 func (suite *operatorControllerTestSuite) TestStoreLimit() {
