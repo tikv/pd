@@ -567,10 +567,10 @@ func (n *numa) testCommand(pkg string, fn string) *exec.Cmd {
 	exe := "./" + testFileName(pkg)
 	args = append(args, "-test.cpu", "1")
 	if !race {
-		args = append(args, []string{"-test.timeout", "5m"}...)
+		args = append(args, []string{"-test.timeout", "2m"}...)
 	} else {
 		// it takes a longer when race is enabled. so it is set more timeout value.
-		args = append(args, []string{"-test.timeout", "30m"}...)
+		args = append(args, []string{"-test.timeout", "5m"}...)
 	}
 
 	// core.test -test.run TestClusteredPrefixColum
