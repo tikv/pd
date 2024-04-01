@@ -448,6 +448,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 				errMsg := err.Error()
 				// Ignore the errors caused by the split and context cancellation.
 				if strings.Contains(errMsg, "context canceled") ||
+					// This is because after the leader changed, the stream to the old leader may be canceled.
+					strings.Contains(errMsg, "encountered TSO stream being closed unexpectedly") ||
 					strings.Contains(errMsg, "not leader") ||
 					strings.Contains(errMsg, "not served") ||
 					strings.Contains(errMsg, "ErrKeyspaceNotAssigned") ||
