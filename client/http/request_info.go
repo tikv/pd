@@ -78,7 +78,7 @@ const (
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
 	deleteOperators                         = "DeleteOperators"
-	UpdateKeyspaceSafePointVersionName      = "UpdateKeyspaceSafePointVersion"
+	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
 	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
 )
 

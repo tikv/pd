@@ -1131,20 +1131,21 @@ func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
 	return urls
 }
 
-func modifyURLScheme(uStr string, tlsCfg *tls.Config) string {
-	u, err := url.Parse(uStr)
-	if err != nil {
-		if tlsCfg != nil {
-			return httpsSchemePrefix + uStr
+func modifyURLScheme(url string, tlsCfg *tls.Config) string {
+	if tlsCfg == nil {
+		if strings.HasPrefix(url, httpsSchemePrefix) {
+			url = httpSchemePrefix + strings.TrimPrefix(url, httpsSchemePrefix)
+		} else if !strings.HasPrefix(url, httpSchemePrefix) {
+			url = httpSchemePrefix + url
 		}
-		return httpSchemePrefix + uStr
-	}
-	if tlsCfg != nil {
-		u.Scheme = httpsScheme
 	} else {
-		u.Scheme = httpScheme
+		if strings.HasPrefix(url, httpSchemePrefix) {
+			url = httpsSchemePrefix + strings.TrimPrefix(url, httpSchemePrefix)
+		} else if !strings.HasPrefix(url, httpsSchemePrefix) {
+			url = httpsSchemePrefix + url
+		}
 	}
-	return u.String()
+	return url
 }
 
 // pickMatchedURL picks the matched URL based on the TLS config.

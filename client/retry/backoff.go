@@ -110,17 +110,6 @@ func (bo *Backoffer) ExecWithoutReset(
 	return allErrors
 }
 
-// WaitAndExecWithoutReset waits for the backoff time first and then executes the function.
-func (bo *Backoffer) WaitAndExecWithoutReset(
-	ctx context.Context,
-	fn func() error,
-) bool {
-	if err := bo.wait(ctx, nil); err != nil {
-		return false
-	}
-	return bo.ExecWithoutReset(ctx, fn) == nil
-}
-
 func (bo *Backoffer) wait(
 	ctx context.Context,
 	after *time.Timer,

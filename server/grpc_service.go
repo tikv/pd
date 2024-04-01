@@ -833,7 +833,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	}
 
 	log.Info("put store ok", zap.Stringer("store", store))
-	CheckPDVersion(s.persistOptions)
+	CheckPDVersionWithClusterVersion(s.persistOptions)
 
 	return &pdpb.PutStoreResponse{
 		Header:            s.header(),

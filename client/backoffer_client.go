@@ -63,8 +63,7 @@ func createDefaultBackoffer() *retry.Backoffer {
 var _ RPCClient = (*backoffClient)(nil)
 
 // backoffClient is a RPCClient that retries requests using the given backoffer.
-// The TSFuture returned by GetTSAsync and GetLocalTSAsync also supports backoff,
-// because the backoff is done in the `client` layer.
+// The TSFuture returned by GetTSAsync and GetLocalTSAsync can't support to retry `Wait` itself.
 type backoffClient struct {
 	*baseBackoffClient
 	cli *client
@@ -73,8 +72,12 @@ type backoffClient struct {
 
 func (c *backoffClient) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
 	bo := c.bo.Clone()
-	resp := c.cli.getLocalTSAsyncWithRetry(ctx, globalDCLocation, bo)
-	return resp.Wait()
+	bo.Exec(ctx, func() error {
+		resp := c.cli.getLocalTSAsyncWithRetry(ctx, globalDCLocation, bo)
+		physical, logical, err = resp.Wait()
+		return err
+	})
+	return
 }
 
 func (c *backoffClient) GetTSAsync(ctx context.Context) TSFuture {
@@ -84,8 +87,12 @@ func (c *backoffClient) GetTSAsync(ctx context.Context) TSFuture {
 
 func (c *backoffClient) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
 	bo := c.bo.Clone()
-	resp := c.cli.getLocalTSAsyncWithRetry(ctx, dcLocation, bo)
-	return resp.Wait()
+	bo.Exec(ctx, func() error {
+		resp := c.cli.getLocalTSAsyncWithRetry(ctx, dcLocation, bo)
+		physical, logical, err = resp.Wait()
+		return err
+	})
+	return
 }
 
 func (c *backoffClient) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {

@@ -324,14 +324,44 @@ func TestServiceClientScheme(t *testing.T) {
 func TestSchemeFunction(t *testing.T) {
 	re := require.New(t)
 	tlsCfg := &tls.Config{}
+
+	endpoints1 := []string{
+		"http://tc-pd:2379",
+		"tc-pd:2379",
+		"https://tc-pd:2379",
+	}
+	endpoints2 := []string{
+		"127.0.0.1:2379",
+		"http://127.0.0.1:2379",
+		"https://127.0.0.1:2379",
+	}
+	urls := addrsToURLs(endpoints1, tlsCfg)
+	for _, u := range urls {
+		re.Equal("https://tc-pd:2379", u)
+	}
+	urls = addrsToURLs(endpoints2, tlsCfg)
+	for _, u := range urls {
+		re.Equal("https://127.0.0.1:2379", u)
+	}
+	urls = addrsToURLs(endpoints1, nil)
+	for _, u := range urls {
+		re.Equal("http://tc-pd:2379", u)
+	}
+	urls = addrsToURLs(endpoints2, nil)
+	for _, u := range urls {
+		re.Equal("http://127.0.0.1:2379", u)
+	}
+
 	re.Equal("https://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", tlsCfg))
 	re.Equal("https://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", tlsCfg))
 	re.Equal("https://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", tlsCfg))
+	re.Equal("https://tc-pd:2379", modifyURLScheme("tc-pd:2379", tlsCfg))
 	re.Equal("http://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", nil))
 	re.Equal("http://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", nil))
 	re.Equal("http://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", nil))
+	re.Equal("http://tc-pd:2379", modifyURLScheme("tc-pd:2379", nil))
 
-	urls := []string{
+	urls = []string{
 		"http://127.0.0.1:2379",
 		"https://127.0.0.1:2379",
 	}

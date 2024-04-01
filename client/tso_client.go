@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
@@ -53,7 +52,10 @@ type tsoRequest struct {
 	physical   int64
 	logical    int64
 	dcLocation string
-	bo         *retry.Backoffer
+	// the backoffer is applied in two steps:
+	// 1. dispatching the request to the corresponding dc-location TSO channel.
+	// 2. waiting for the TSO response. (this step is processed in the backoff client).
+	bo *retry.Backoffer
 }
 
 var tsoReqPool = sync.Pool{
@@ -64,6 +66,13 @@ var tsoReqPool = sync.Pool{
 			logical:  0,
 		}
 	},
+}
+
+func (req *tsoRequest) tryDone(err error) {
+	select {
+	case req.done <- err:
+	default:
+	}
 }
 
 type tsoClient struct {
@@ -82,7 +91,7 @@ type tsoClient struct {
 
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
-	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
+	tsoDispatcher sync.Map // Same as map[string]*tsoDispatcher
 	// dc-location -> deadline
 	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> *tsoInfo while the tsoInfo is the last TSO info
@@ -142,9 +151,8 @@ func (c *tsoClient) Close() {
 	c.tsoDispatcher.Range(func(_, dispatcherInterface any) bool {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
-			tsoErr := errors.WithStack(errClosing)
-			dispatcher.tsoBatchController.revokePendingRequest(tsoErr)
 			dispatcher.dispatcherCancel()
+			dispatcher.tsoBatchController.clear()
 		}
 		return true
 	})

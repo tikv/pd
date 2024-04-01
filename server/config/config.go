@@ -207,7 +207,6 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage  = true
-	defaultTraceRegionFlow   = true
 	defaultFlowRoundByDigit  = 3 // KB
 	maxTraceFlowRoundByDigit = 5 // 0.1 MB
 	defaultMaxResetTSGap     = 24 * time.Hour
@@ -547,9 +546,6 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	}
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
-	}
-	if !meta.IsDefined("trace-region-flow") {
-		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
 	if !meta.IsDefined("flow-round-by-digit") {
 		configutil.AdjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)

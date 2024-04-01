@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -368,7 +369,8 @@ func (s *Server) startServer() (err error) {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	legacySvcRootPath := endpoint.LegacyRootPath(s.clusterID)
 	tsoSvcRootPath := endpoint.TSOSvcRootPath(s.clusterID)
-	deployPath, err := os.Executable()
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
 	if err != nil {
 		deployPath = ""
 	}

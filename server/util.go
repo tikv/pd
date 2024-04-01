@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/coreos/go-semver/semver"
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -33,14 +34,21 @@ import (
 	"go.uber.org/zap"
 )
 
-// CheckPDVersion checks if PD needs to be upgraded.
-func CheckPDVersion(opt *config.PersistOptions) {
+// CheckAndGetPDVersion checks and returns the PD version.
+func CheckAndGetPDVersion() *semver.Version {
 	pdVersion := versioninfo.MinSupportedVersion(versioninfo.Base)
 	if versioninfo.PDReleaseVersion != "None" {
 		pdVersion = versioninfo.MustParseVersion(versioninfo.PDReleaseVersion)
 	}
+	return pdVersion
+}
+
+// CheckPDVersionWithClusterVersion checks if PD needs to be upgraded by comparing the PD version with the cluster version.
+func CheckPDVersionWithClusterVersion(opt *config.PersistOptions) {
+	pdVersion := CheckAndGetPDVersion()
 	clusterVersion := *opt.GetClusterVersion()
-	log.Info("load cluster version", zap.Stringer("cluster-version", clusterVersion))
+	log.Info("load pd and cluster version",
+		zap.Stringer("pd-version", pdVersion), zap.Stringer("cluster-version", clusterVersion))
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(
 			"PD version less than cluster version, please upgrade PD",

@@ -523,6 +523,21 @@ func (suite *httpClientTestSuite) checkConfig(mode mode, client pd.Client) {
 	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
 	re.NoError(err)
 	re.Empty(resp.Kvs)
+
+	// Test the config with TTL for storing float64 as uint64.
+	newConfig = map[string]any{
+		"schedule.max-pending-peer-count": uint64(math.MaxInt32),
+	}
+	err = client.SetConfig(env.ctx, newConfig, 4)
+	re.NoError(err)
+	c := env.cluster.GetLeaderServer().GetRaftCluster().GetOpts().GetMaxPendingPeerCount()
+	re.Equal(uint64(math.MaxInt32), c)
+
+	err = client.SetConfig(env.ctx, newConfig, 0)
+	re.NoError(err)
+	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.max-pending-peer-count")
+	re.NoError(err)
+	re.Empty(resp.Kvs)
 }
 
 func (suite *httpClientTestSuite) TestScheduleConfig() {
@@ -769,28 +784,30 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	c.Close()
 }
 
-func (suite *httpClientTestSuite) TestUpdateKeyspaceSafePointVersion() {
-	suite.RunTestInTwoModes(suite.checkUpdateKeyspaceSafePointVersion)
+func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
+	suite.RunTestInTwoModes(suite.checkUpdateKeyspaceGCManagementType)
 }
 
-func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode, client pd.Client) {
+func (suite *httpClientTestSuite) checkUpdateKeyspaceGCManagementType(mode mode, client pd.Client) {
 	re := suite.Require()
 	env := suite.env[mode]
 
 	keyspaceName := "DEFAULT"
-	safePointVersion := "v2"
+	expectGCManagementType := "keyspace_level_gc"
 
-	keyspaceSafePointVersionConfig := pd.KeyspaceSafePointVersionConfig{
-		Config: pd.KeyspaceSafePointVersion{
-			SafePointVersion: safePointVersion,
+	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
+		Config: pd.KeyspaceGCManagementType{
+			GCManagementType: expectGCManagementType,
 		},
 	}
-	err := client.UpdateKeyspaceSafePointVersion(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	err := client.UpdateKeyspaceGCManagementType(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
 	re.NoError(err)
 
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(env.ctx, keyspaceName)
 	re.NoError(err)
-	val, ok := keyspaceMetaRes.Config["safe_point_version"]
+	val, ok := keyspaceMetaRes.Config["gc_management_type"]
+
+	// Check it can get expect key and value in keyspace meta config.
 	re.True(ok)
-	re.Equal(safePointVersion, val)
+	re.Equal(expectGCManagementType, val)
 }
