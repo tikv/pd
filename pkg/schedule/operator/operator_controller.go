@@ -459,7 +459,7 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 }
 
 // checkOperatorLightly checks whether the ops can be dispatched in Controller::pollNeedDispatchRegion.
-// The operators can't be dispatched for some scenarios, such as region disapeared, region changed ...
+// The operators can't be dispatched for some scenarios, such as region disappeared, region changed ...
 // `region` is the target region of `op`.
 func (oc *Controller) checkOperatorLightly(op *Operator) (*core.RegionInfo, CancelReasonType) {
 	region := oc.cluster.GetRegion(op.RegionID())
