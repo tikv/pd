@@ -310,7 +310,7 @@ func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 		err            error
 	)
 	for _, addr := range addrs {
-		if len(addrs) == 0 {
+		if len(addr) == 0 {
 			continue
 		}
 		if cc, err = c.ServiceDiscovery.GetOrCreateGRPCConn(addr); err != nil {

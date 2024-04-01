@@ -37,7 +37,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-type dispatcherProvider interface {
+type dispatcherManager interface {
 	allowTSOFollowerProxy(string) bool
 	GetClientConns() *sync.Map
 	backupClientConn() (*grpc.ClientConn, string)
@@ -53,7 +53,7 @@ type tsoDispatcher struct {
 	checkConnectionResultCh chan bool
 
 	dc       string
-	provider dispatcherProvider
+	provider dispatcherManager
 	option   *option
 	tsoStreamBuilderFactory
 
