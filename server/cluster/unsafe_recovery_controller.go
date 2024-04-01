@@ -385,7 +385,7 @@ func (u *unsafeRecoveryController) generatePlan(newestRegionTree *regionTree, pe
 			}
 			fallthrough
 		case createEmptyRegion:
-			if hasPlan, err = u.generateCreateEmptyRegionPlan(newestRegionTree, peersMap); hasPlan && err == nil {
+			if hasPlan, err = u.generateCreateEmptyRegionPlan(newestRegionTree); hasPlan && err == nil {
 				u.changeStage(createEmptyRegion)
 				break
 			}
@@ -1104,7 +1104,7 @@ func (u *unsafeRecoveryController) generateDemoteFailedVoterPlan(newestRegionTre
 	return hasPlan
 }
 
-func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTree *regionTree, peersMap map[uint64][]*regionItem) (bool, error) {
+func (u *unsafeRecoveryController) generateCreateEmptyRegionPlan(newestRegionTree *regionTree) (bool, error) {
 	if u.err != nil {
 		return false, nil
 	}
