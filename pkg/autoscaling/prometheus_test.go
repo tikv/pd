@@ -168,7 +168,7 @@ func makeJSONResponse(promResp *response) (*http.Response, []byte, error) {
 	return response, body, nil
 }
 
-func (c *normalClient) URL(ep string, args map[string]string) *url.URL {
+func (*normalClient) URL(ep string, args map[string]string) *url.URL {
 	return doURL(ep, args)
 }
 
@@ -206,11 +206,11 @@ func TestRetrieveCPUMetrics(t *testing.T) {
 
 type emptyResponseClient struct{}
 
-func (c *emptyResponseClient) URL(ep string, args map[string]string) *url.URL {
+func (*emptyResponseClient) URL(ep string, args map[string]string) *url.URL {
 	return doURL(ep, args)
 }
 
-func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, err error) {
+func (*emptyResponseClient) Do(context.Context, *http.Request) (r *http.Response, body []byte, err error) {
 	promResp := &response{
 		Status: "success",
 		Data: data{
@@ -235,11 +235,11 @@ func TestEmptyResponse(t *testing.T) {
 
 type errorHTTPStatusClient struct{}
 
-func (c *errorHTTPStatusClient) URL(ep string, args map[string]string) *url.URL {
+func (*errorHTTPStatusClient) URL(ep string, args map[string]string) *url.URL {
 	return doURL(ep, args)
 }
 
-func (c *errorHTTPStatusClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, err error) {
+func (*errorHTTPStatusClient) Do(context.Context, *http.Request) (r *http.Response, body []byte, err error) {
 	promResp := &response{}
 
 	r, body, err = makeJSONResponse(promResp)
@@ -262,11 +262,11 @@ func TestErrorHTTPStatus(t *testing.T) {
 
 type errorPrometheusStatusClient struct{}
 
-func (c *errorPrometheusStatusClient) URL(ep string, args map[string]string) *url.URL {
+func (*errorPrometheusStatusClient) URL(ep string, args map[string]string) *url.URL {
 	return doURL(ep, args)
 }
 
-func (c *errorPrometheusStatusClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, err error) {
+func (*errorPrometheusStatusClient) Do(_ context.Context, _ *http.Request) (r *http.Response, body []byte, err error) {
 	promResp := &response{
 		Status: "error",
 	}

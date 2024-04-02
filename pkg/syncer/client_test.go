@@ -91,7 +91,7 @@ func (s *mockServer) LoopContext() context.Context {
 	return s.ctx
 }
 
-func (s *mockServer) ClusterID() uint64 {
+func (*mockServer) ClusterID() uint64 {
 	return 1
 }
 
@@ -107,7 +107,7 @@ func (s *mockServer) GetStorage() storage.Storage {
 	return s.storage
 }
 
-func (s *mockServer) Name() string {
+func (*mockServer) Name() string {
 	return "mock-server"
 }
 
@@ -115,7 +115,7 @@ func (s *mockServer) GetRegions() []*core.RegionInfo {
 	return s.bc.GetRegions()
 }
 
-func (s *mockServer) GetTLSConfig() *grpcutil.TLSConfig {
+func (*mockServer) GetTLSConfig() *grpcutil.TLSConfig {
 	return &grpcutil.TLSConfig{}
 }
 

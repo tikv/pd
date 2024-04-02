@@ -580,7 +580,7 @@ func (c *tsoClient) allowTSOFollowerProxy(dc string) bool {
 
 // chooseStream uses the reservoir sampling algorithm to randomly choose a connection.
 // connectionCtxs will only have only one stream to choose when the TSO Follower Proxy is off.
-func (c *tsoClient) chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext) {
+func (*tsoClient) chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext) {
 	idx := 0
 	connectionCtxs.Range(func(_, cc any) bool {
 		j := rand.Intn(idx + 1)
@@ -797,6 +797,7 @@ func (c *tsoClient) processRequests(
 	stream tsoStream, dcLocation string, tbc *tsoBatchController,
 ) error {
 	requests := tbc.getCollectedRequests()
+	// nolint
 	for _, req := range requests {
 		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqSend").End()
 		if span := opentracing.SpanFromContext(req.requestCtx); span != nil && span.Tracer() != nil {

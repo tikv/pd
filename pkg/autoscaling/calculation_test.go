@@ -203,7 +203,7 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 
 type mockQuerier struct{}
 
-func (q *mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
+func (*mockQuerier) Query(options *QueryOptions) (QueryResult, error) {
 	result := make(QueryResult)
 	for _, addr := range options.addresses {
 		result[addr] = mockResultValue

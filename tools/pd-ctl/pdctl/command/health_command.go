@@ -34,7 +34,7 @@ func NewHealthCommand() *cobra.Command {
 	return m
 }
 
-func showHealthCommandFunc(cmd *cobra.Command, args []string) {
+func showHealthCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, healthPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Println(err)

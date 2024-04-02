@@ -68,7 +68,7 @@ func init() {
 		}
 	})
 
-	schedulers.RegisterScheduler(EvictLeaderType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, removeSchedulerCb ...func(string) error) (schedulers.Scheduler, error) {
+	schedulers.RegisterScheduler(EvictLeaderType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(string) error) (schedulers.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -136,7 +136,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
-func (conf *evictLeaderSchedulerConfig) getScheduleName() string {
+func (*evictLeaderSchedulerConfig) getScheduleName() string {
 	return EvictLeaderName
 }
 
@@ -172,11 +172,11 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *evictLeaderScheduler) GetName() string {
+func (*evictLeaderScheduler) GetName() string {
 	return EvictLeaderName
 }
 
-func (s *evictLeaderScheduler) GetType() string {
+func (*evictLeaderScheduler) GetType() string {
 	return EvictLeaderType
 }
 
@@ -214,7 +214,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -231,7 +231,7 @@ func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bo
 		if target == nil {
 			continue
 		}
-		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), []uint64{}, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
@@ -283,7 +283,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
-func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }

@@ -531,6 +531,7 @@ const (
 	mockBrief      = "test"
 )
 
+// nolint
 // NewTestOperator creates a test operator, only used for unit test.
 func NewTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind OpKind, steps ...OpStep) *Operator {
 	// OpSteps can not be empty for test.

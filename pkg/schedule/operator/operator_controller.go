@@ -222,7 +222,7 @@ func (oc *Controller) checkStaleOperator(op *Operator, step OpStep, region *core
 	return false
 }
 
-func (oc *Controller) getNextPushOperatorTime(step OpStep, now time.Time) time.Time {
+func getNextPushOperatorTime(step OpStep, now time.Time) time.Time {
 	nextTime := slowNotifyInterval
 	switch step.(type) {
 	case TransferLeader, PromoteLearner, ChangePeerV2Enter, ChangePeerV2Leave:
@@ -270,7 +270,7 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 	}
 
 	// pushes with new notify time.
-	item.time = oc.getNextPushOperatorTime(step, now)
+	item.time = getNextPushOperatorTime(step, now)
 	oc.opNotifierQueue.Push(item)
 	return r, true
 }
@@ -559,7 +559,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		}
 	}
 
-	oc.opNotifierQueue.Push(&operatorWithTime{op: op, time: oc.getNextPushOperatorTime(step, time.Now())})
+	oc.opNotifierQueue.Push(&operatorWithTime{op: op, time: getNextPushOperatorTime(step, time.Now())})
 	operatorCounter.WithLabelValues(op.Desc(), "create").Inc()
 	for _, counter := range op.Counters {
 		counter.Inc()

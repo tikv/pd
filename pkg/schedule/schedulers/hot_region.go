@@ -254,7 +254,7 @@ func (h *hotScheduler) GetName() string {
 	return h.name
 }
 
-func (h *hotScheduler) GetType() string {
+func (*hotScheduler) GetType() string {
 	return HotRegionType
 }
 
@@ -306,11 +306,11 @@ func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
 }
 
-func (h *hotScheduler) GetMinInterval() time.Duration {
+func (*hotScheduler) GetMinInterval() time.Duration {
 	return minHotScheduleInterval
 }
 
-func (h *hotScheduler) GetNextInterval(interval time.Duration) time.Duration {
+func (h *hotScheduler) GetNextInterval(time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
@@ -322,7 +322,7 @@ func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return allowed
 }
 
-func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	hotSchedulerCounter.Inc()
 	rw := h.randomRWType()
 	return h.dispatch(rw, cluster), nil
@@ -1193,7 +1193,7 @@ func (bs *balanceSolver) checkHistoryByPriorityAndToleranceAnyOf(loads [][]float
 	})
 }
 
-func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(loads []float64, f func(int) bool) bool {
+func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(_ []float64, f func(int) bool) bool {
 	return f(bs.firstPriority)
 }
 
@@ -1732,7 +1732,6 @@ func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID,
 			"transfer-hot-read-leader",
 			bs,
 			region,
-			srcStoreID,
 			dstStoreID,
 			[]uint64{},
 			operator.OpHotRegion)
@@ -1769,7 +1768,6 @@ func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID
 			"transfer-hot-write-leader",
 			bs,
 			region,
-			srcStoreID,
 			dstStoreID,
 			[]uint64{},
 			operator.OpHotRegion)

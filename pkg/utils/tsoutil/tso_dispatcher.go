@@ -128,7 +128,7 @@ func (s *TSODispatcher) dispatch(
 			case <-dispatcherCtx.Done():
 				return
 			}
-			err = s.processRequests(forwardStream, requests[:pendingTSOReqCount], tsoProtoFactory)
+			err = s.processRequests(forwardStream, requests[:pendingTSOReqCount])
 			close(done)
 			if err != nil {
 				log.Error("proxy forward tso error",
@@ -155,7 +155,7 @@ func (s *TSODispatcher) dispatch(
 	}
 }
 
-func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request, tsoProtoFactory ProtoFactory) error {
+func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request) error {
 	// Merge the requests
 	count := uint32(0)
 	for _, request := range requests {
@@ -163,7 +163,7 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	}
 
 	start := time.Now()
-	resp, err := requests[0].process(forwardStream, count, tsoProtoFactory)
+	resp, err := requests[0].process(forwardStream, count)
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func addLogical(logical, count int64, suffixBits uint32) int64 {
 	return logical + count<<suffixBits
 }
 
-func (s *TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64, suffixBits uint32) error {
+func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64, suffixBits uint32) error {
 	countSum := int64(0)
 	for i := 0; i < len(requests); i++ {
 		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical, suffixBits)

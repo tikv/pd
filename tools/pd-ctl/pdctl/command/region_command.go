@@ -156,7 +156,7 @@ func showRegionCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func scanRegionCommandFunc(cmd *cobra.Command, args []string) {
+func scanRegionCommandFunc(cmd *cobra.Command, _ []string) {
 	const limit = 1024
 	var key []byte
 	for {
@@ -533,7 +533,7 @@ func NewRangesWithRangeHolesCommand() *cobra.Command {
 	return r
 }
 
-func showRangesWithRangeHolesCommandFunc(cmd *cobra.Command, args []string) {
+func showRangesWithRangeHolesCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, regionsRangeHolesPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get range holes: %s\n", err)

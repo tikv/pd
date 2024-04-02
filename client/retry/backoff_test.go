@@ -95,7 +95,7 @@ func TestBackoffer(t *testing.T) {
 	// Test the retryable checker.
 	execCount = 0
 	bo = InitialBackoffer(base, max, total)
-	bo.SetRetryableChecker(func(err error) bool {
+	bo.SetRetryableChecker(func(error) bool {
 		return execCount < 2
 	})
 	err = bo.Exec(ctx, func() error {

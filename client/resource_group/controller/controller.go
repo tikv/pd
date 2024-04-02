@@ -398,8 +398,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 
 			case gc := <-c.tokenBucketUpdateChan:
-				now := gc.run.now
-				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
+				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
 			}
 		}
 	}()
@@ -473,7 +472,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 }
 
 func (c *ResourceGroupsController) executeOnAllGroups(f func(controller *groupCostController)) {
-	c.groupsController.Range(func(name, value any) bool {
+	c.groupsController.Range(func(_, value any) bool {
 		f(value.(*groupCostController))
 		return true
 	})
@@ -504,7 +503,7 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 
 func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, typ selectType) {
 	c.run.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
-	c.groupsController.Range(func(name, value any) bool {
+	c.groupsController.Range(func(_, value any) bool {
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
@@ -856,7 +855,7 @@ func (gc *groupCostController) resetEmergencyTokenAcquisition() {
 	}
 }
 
-func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context, now time.Time) {
+func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context) {
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
@@ -873,7 +872,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context,
 				counter.notify.setupNotificationCh = nil
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(now, threshold)
+				counter.limiter.SetupNotificationThreshold(threshold)
 			case <-ctx.Done():
 				return
 			}
@@ -894,7 +893,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context,
 				counter.notify.setupNotificationCh = nil
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(now, threshold)
+				counter.limiter.SetupNotificationThreshold(threshold)
 			case <-ctx.Done():
 				return
 			}

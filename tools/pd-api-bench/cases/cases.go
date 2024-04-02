@@ -246,7 +246,7 @@ func newUpdateGCSafePoint() func() GRPCCase {
 	}
 }
 
-func (c *updateGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
+func (*updateGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
 	s := time.Now().Unix()
 	_, err := cli.UpdateGCSafePoint(ctx, uint64(s))
 	if err != nil {
@@ -270,7 +270,7 @@ func newUpdateServiceGCSafePoint() func() GRPCCase {
 	}
 }
 
-func (c *updateServiceGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
+func (*updateServiceGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
 	s := time.Now().Unix()
 	id := rand.Int63n(100) + 1
 	_, err := cli.UpdateServiceGCSafePoint(ctx, strconv.FormatInt(id, 10), id, uint64(s))
@@ -295,7 +295,7 @@ func newGetRegion() func() GRPCCase {
 	}
 }
 
-func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
+func (*getRegion) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
 	if err != nil {
@@ -319,7 +319,7 @@ func newGetRegionEnableFollower() func() GRPCCase {
 	}
 }
 
-func (c *getRegionEnableFollower) Unary(ctx context.Context, cli pd.Client) error {
+func (*getRegionEnableFollower) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
 	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56), pd.WithAllowFollowerHandle())
 	if err != nil {
@@ -372,7 +372,7 @@ func newTso() func() GRPCCase {
 	}
 }
 
-func (c *tso) Unary(ctx context.Context, cli pd.Client) error {
+func (*tso) Unary(ctx context.Context, cli pd.Client) error {
 	_, _, err := cli.GetTS(ctx)
 	if err != nil {
 		return err
@@ -395,7 +395,7 @@ func newGetStore() func() GRPCCase {
 	}
 }
 
-func (c *getStore) Unary(ctx context.Context, cli pd.Client) error {
+func (*getStore) Unary(ctx context.Context, cli pd.Client) error {
 	storeIdx := rand.Intn(totalStore)
 	_, err := cli.GetStore(ctx, storesID[storeIdx])
 	if err != nil {
@@ -419,7 +419,7 @@ func newGetStores() func() GRPCCase {
 	}
 }
 
-func (c *getStores) Unary(ctx context.Context, cli pd.Client) error {
+func (*getStores) Unary(ctx context.Context, cli pd.Client) error {
 	_, err := cli.GetAllStores(ctx)
 	if err != nil {
 		return err
@@ -449,7 +449,7 @@ func newGetKV() func() ETCDCase {
 	}
 }
 
-func (c *getKV) Init(ctx context.Context, cli *clientv3.Client) error {
+func (*getKV) Init(ctx context.Context, cli *clientv3.Client) error {
 	for i := 0; i < 100; i++ {
 		_, err := cli.Put(ctx, fmt.Sprintf("/test/0001/%4d", i), fmt.Sprintf("%4d", i))
 		if err != nil {
@@ -459,7 +459,7 @@ func (c *getKV) Init(ctx context.Context, cli *clientv3.Client) error {
 	return nil
 }
 
-func (c *getKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+func (*getKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	_, err := cli.Get(ctx, "/test/0001", clientv3.WithPrefix())
 	return err
 }
@@ -479,9 +479,9 @@ func newPutKV() func() ETCDCase {
 	}
 }
 
-func (c *putKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
+func (*putKV) Init(context.Context, *clientv3.Client) error { return nil }
 
-func (c *putKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+func (*putKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	_, err := cli.Put(ctx, "/test/0001/0000", "test")
 	return err
 }
@@ -501,9 +501,9 @@ func newDeleteKV() func() ETCDCase {
 	}
 }
 
-func (c *deleteKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
+func (*deleteKV) Init(context.Context, *clientv3.Client) error { return nil }
 
-func (c *deleteKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+func (*deleteKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	_, err := cli.Delete(ctx, "/test/0001/0000")
 	return err
 }
@@ -523,9 +523,9 @@ func newTxnKV() func() ETCDCase {
 	}
 }
 
-func (c *txnKV) Init(ctx context.Context, cli *clientv3.Client) error { return nil }
+func (*txnKV) Init(context.Context, *clientv3.Client) error { return nil }
 
-func (c *txnKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+func (*txnKV) Unary(ctx context.Context, cli *clientv3.Client) error {
 	txn := cli.Txn(ctx)
 	txn = txn.If(clientv3.Compare(clientv3.Value("/test/0001/0000"), "=", "test"))
 	txn = txn.Then(clientv3.OpPut("/test/0001/0000", "test2"))

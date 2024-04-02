@@ -256,13 +256,13 @@ func (suite *regionTestSuite) TestTop() {
 	mustRegionHeartbeat(re, suite.svr, r2)
 	r3 := core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
 	mustRegionHeartbeat(re, suite.svr, r3)
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/writeflow", suite.urlPrefix), []uint64{2, 1, 3})
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/readflow", suite.urlPrefix), []uint64{1, 3, 2})
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/writeflow?limit=2", suite.urlPrefix), []uint64{2, 1})
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/confver", suite.urlPrefix), []uint64{3, 2, 1})
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/confver?limit=2", suite.urlPrefix), []uint64{3, 2})
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/version", suite.urlPrefix), []uint64{2, 3, 1})
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/version?limit=2", suite.urlPrefix), []uint64{2, 3})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/writeflow", suite.urlPrefix), []uint64{2, 1, 3})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/readflow", suite.urlPrefix), []uint64{1, 3, 2})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/writeflow?limit=2", suite.urlPrefix), []uint64{2, 1})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/confver", suite.urlPrefix), []uint64{3, 2, 1})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/confver?limit=2", suite.urlPrefix), []uint64{3, 2})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/version", suite.urlPrefix), []uint64{2, 3, 1})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/version?limit=2", suite.urlPrefix), []uint64{2, 3})
 	// Top size.
 	baseOpt := []core.RegionCreateOption{core.SetRegionConfVer(3), core.SetRegionVersion(3)}
 	opt := core.SetApproximateSize(1000)
@@ -274,8 +274,8 @@ func (suite *regionTestSuite) TestTop() {
 	opt = core.SetApproximateSize(800)
 	r3 = core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r3)
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/size?limit=2", suite.urlPrefix), []uint64{1, 2})
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/size", suite.urlPrefix), []uint64{1, 2, 3})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/size?limit=2", suite.urlPrefix), []uint64{1, 2})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/size", suite.urlPrefix), []uint64{1, 2, 3})
 	// Top CPU usage.
 	baseOpt = []core.RegionCreateOption{core.SetRegionConfVer(4), core.SetRegionVersion(4)}
 	opt = core.SetCPUUsage(100)
@@ -287,11 +287,11 @@ func (suite *regionTestSuite) TestTop() {
 	opt = core.SetCPUUsage(500)
 	r3 = core.NewTestRegionInfo(3, 1, []byte("c"), []byte("d"), append(baseOpt, opt)...)
 	mustRegionHeartbeat(re, suite.svr, r3)
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/cpu?limit=2", suite.urlPrefix), []uint64{3, 2})
-	suite.checkTopRegions(re, fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{3, 2, 1})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/cpu?limit=2", suite.urlPrefix), []uint64{3, 2})
+	checkTopRegions(re, fmt.Sprintf("%s/regions/cpu", suite.urlPrefix), []uint64{3, 2, 1})
 }
 
-func (suite *regionTestSuite) checkTopRegions(re *require.Assertions, url string, regionIDs []uint64) {
+func checkTopRegions(re *require.Assertions, url string, regionIDs []uint64) {
 	regions := &response.RegionsInfo{}
 	err := tu.ReadGetJSON(re, testDialClient, url, regions)
 	re.NoError(err)

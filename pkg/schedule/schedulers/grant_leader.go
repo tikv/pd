@@ -98,7 +98,7 @@ func (conf *grantLeaderSchedulerConfig) Persist() error {
 	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
-func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
+func (*grantLeaderSchedulerConfig) getSchedulerName() string {
 	return GrantLeaderName
 }
 
@@ -176,11 +176,11 @@ func (s *grantLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *grantLeaderScheduler) GetName() string {
+func (*grantLeaderScheduler) GetName() string {
 	return GrantLeaderName
 }
 
-func (s *grantLeaderScheduler) GetType() string {
+func (*grantLeaderScheduler) GetType() string {
 	return GrantLeaderType
 }
 
@@ -235,7 +235,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
 	storeIDWithRanges := s.conf.getStoreIDWithRanges()
 	ops := make([]*operator.Operator, 0, len(storeIDWithRanges))
@@ -248,7 +248,7 @@ func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bo
 			continue
 		}
 
-		op, err := operator.CreateForceTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
+		op, err := operator.CreateForceTransferLeaderOperator(GrantLeaderType, cluster, region, id, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue
@@ -306,7 +306,7 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
-func (handler *grantLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *grantLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }

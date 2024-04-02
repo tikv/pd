@@ -44,12 +44,12 @@ type RuleStorage interface {
 var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
-func (se *StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule any) error {
+func (*StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule any) error {
 	return saveJSONInTxn(txn, ruleKeyPath(ruleKey), rule)
 }
 
 // DeleteRule removes a rule from storage.
-func (se *StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
+func (*StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
 	return txn.Remove(ruleKeyPath(ruleKey))
 }
 
@@ -59,12 +59,12 @@ func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
 }
 
 // SaveRuleGroup stores a rule group config to storage.
-func (se *StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group any) error {
+func (*StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group any) error {
 	return saveJSONInTxn(txn, ruleGroupIDPath(groupID), group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
-func (se *StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
+func (*StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
 	return txn.Remove(ruleGroupIDPath(groupID))
 }
 
@@ -74,12 +74,12 @@ func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
 }
 
 // SaveRegionRule saves a region rule to the storage.
-func (se *StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error {
+func (*StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error {
 	return saveJSONInTxn(txn, regionLabelKeyPath(ruleKey), rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
-func (se *StorageEndpoint) DeleteRegionRule(txn kv.Txn, ruleKey string) error {
+func (*StorageEndpoint) DeleteRegionRule(txn kv.Txn, ruleKey string) error {
 	return txn.Remove(regionLabelKeyPath(ruleKey))
 }
 

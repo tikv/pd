@@ -1417,7 +1417,7 @@ func TestSyncConfigContext(t *testing.T) {
 	tc := newTestCluster(ctx, opt)
 	tc.httpClient = &http.Client{}
 
-	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, _ *http.Request) {
 		time.Sleep(time.Second * 100)
 		cfg := &sc.StoreConfig{}
 		b, err := json.Marshal(cfg)
@@ -2517,7 +2517,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	}
 	schedule.ResetHotSpotMetrics()
 	schedulers.ResetSchedulerMetrics()
-	rc.resetSchedulingMetrics()
+	resetSchedulingMetrics()
 	wg.Wait()
 }
 
@@ -2568,7 +2568,7 @@ func TestCollectMetrics(t *testing.T) {
 	re.Equal(status1, status2)
 	schedule.ResetHotSpotMetrics()
 	schedulers.ResetSchedulerMetrics()
-	rc.resetSchedulingMetrics()
+	resetSchedulingMetrics()
 }
 
 func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func(*schedule.Coordinator), re *require.Assertions) (*testCluster, *schedule.Coordinator, func()) {
@@ -3537,7 +3537,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 

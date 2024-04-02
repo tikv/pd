@@ -431,12 +431,12 @@ func NewAPIContextV1() APIContext {
 }
 
 // GetAPIVersion returns the API version.
-func (apiCtx *apiContextV1) GetAPIVersion() (version APIVersion) {
+func (*apiContextV1) GetAPIVersion() (version APIVersion) {
 	return V1
 }
 
 // GetKeyspaceName returns the keyspace name.
-func (apiCtx *apiContextV1) GetKeyspaceName() (keyspaceName string) {
+func (*apiContextV1) GetKeyspaceName() (keyspaceName string) {
 	return ""
 }
 
@@ -453,7 +453,7 @@ func NewAPIContextV2(keyspaceName string) APIContext {
 }
 
 // GetAPIVersion returns the API version.
-func (apiCtx *apiContextV2) GetAPIVersion() (version APIVersion) {
+func (*apiContextV2) GetAPIVersion() (version APIVersion) {
 	return V2
 }
 
@@ -912,7 +912,7 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
-func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, opts ...GetRegionOption) (*Region, error) {
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()

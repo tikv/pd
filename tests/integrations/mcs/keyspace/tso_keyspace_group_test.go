@@ -91,7 +91,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	nodes := make(map[string]bs.Server)
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount+1; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup()
+		defer cleanup() // nolint
 		nodes[s.GetAddr()] = s
 	}
 	tests.WaitForPrimaryServing(re, nodes)
@@ -141,7 +141,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	nodes := make(map[string]bs.Server)
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup()
+		defer cleanup() // nolint
 		nodes[s.GetAddr()] = s
 	}
 	tests.WaitForPrimaryServing(re, nodes)
@@ -235,7 +235,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 	nodesList := []string{}
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup()
+		defer cleanup() // nolint
 		nodes[s.GetAddr()] = s
 		nodesList = append(nodesList, s.GetAddr())
 	}
@@ -296,7 +296,7 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	nodes := make(map[string]bs.Server)
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup()
+		defer cleanup() // nolint
 		nodes[s.GetAddr()] = s
 	}
 	tests.WaitForPrimaryServing(re, nodes)

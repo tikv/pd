@@ -55,7 +55,7 @@ func TestCamelCaseToSnakeCase(t *testing.T) {
 	}
 }
 
-func TestCoverage(t *testing.T) {
+func TestCoverage(_ *testing.T) {
 	cfgs := []*MetricConfig{
 		{
 			PushJob:     "j1",

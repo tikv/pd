@@ -43,7 +43,7 @@ func (w *testingWriter) Write(p []byte) (n int, err error) {
 	return n, nil
 }
 
-func (w *testingWriter) Sync() error {
+func (*testingWriter) Sync() error {
 	return nil
 }
 
@@ -124,7 +124,7 @@ func TestErrorEqual(t *testing.T) {
 	re.False(errors.ErrorEqual(err1, err2))
 }
 
-func TestZapError(t *testing.T) {
+func TestZapError(_ *testing.T) {
 	err := errors.New("test")
 	log.Info("test", ZapError(err))
 	err1 := ErrSchedulerNotFound
