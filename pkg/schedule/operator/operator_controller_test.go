@@ -483,6 +483,46 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	re.Empty(controller.opNotifierQueue)
 }
 
+func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(source)
+	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(target)
+
+	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+	re.NoError(err)
+	re.Len(ops, 2)
+
+	// check successfully
+	r, reason := controller.checkOperatorLightly(ops[0])
+	re.Empty(reason)
+	re.Equal(r, source)
+
+	// check failed because of region disappeared
+	cluster.RemoveRegion(target)
+	r, reason = controller.checkOperatorLightly(ops[1])
+	re.Nil(r)
+	re.Equal(reason, RegionNotFound)
+
+	// check failed because of verions of region epoch changed
+	cluster.PutRegion(target)
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	r, reason = controller.checkOperatorLightly(ops[0])
+	re.Nil(r)
+	re.Equal(reason, EpochNotMatch)
+}
+
 func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
