@@ -44,6 +44,7 @@ import (
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -237,7 +238,7 @@ type Server struct {
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
 
 	// Cgroup Monitor
-	cgmon cgroupMonitor
+	cgMonitor cgroup.Monitor
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -545,7 +546,7 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
-	s.cgmon.stopCgroupMonitor()
+	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
 	if s.IsAPIServiceMode() {
@@ -622,7 +623,7 @@ func (s *Server) Run() error {
 		return err
 	}
 
-	s.cgmon.startCgroupMonitor(s.ctx)
+	s.cgMonitor.StartMonitor(s.ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {
 		time.Sleep(2 * time.Second)
@@ -1799,7 +1800,7 @@ func (s *Server) campaignLeader() {
 		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
 	})
 
-	CheckPDVersion(s.persistOptions)
+	CheckPDVersionWithClusterVersion(s.persistOptions)
 	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
