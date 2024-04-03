@@ -1271,6 +1271,7 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, ""))
+	re.False(c.IsBackgroundRequest(suite.ctx, "none", "none"))
 
 	resourceGroupName = enableBackgroundGroup(true)
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_br"))
