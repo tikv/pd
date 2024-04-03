@@ -76,7 +76,7 @@ func (suite *regionSplitterTestSuite) SetupSuite() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 }
 
-func (suite *regionSplitterTestSuite) TearDownTest() {
+func (suite *regionSplitterTestSuite) TearDownSuite() {
 	suite.cancel()
 }
 
