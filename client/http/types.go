@@ -624,14 +624,17 @@ type MicroServiceMember struct {
 	StartTimestamp int64  `json:"start-timestamp"`
 }
 
-// KeyspaceSafePointVersion represents parameters needed to modify the safe point version.
-type KeyspaceSafePointVersion struct {
-	SafePointVersion string `json:"safe_point_version,omitempty"`
+// KeyspaceGCManagementType represents parameters needed to modify the gc management type.
+// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+// configured to run a global gc worker to calculate a global gc safe point.
+// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+type KeyspaceGCManagementType struct {
+	GCManagementType string `json:"gc_management_type,omitempty"`
 }
 
-// KeyspaceSafePointVersionConfig represents parameters needed to modify target keyspace's configs.
-type KeyspaceSafePointVersionConfig struct {
-	Config KeyspaceSafePointVersion `json:"config"`
+// KeyspaceGCManagementTypeConfig represents parameters needed to modify target keyspace's configs.
+type KeyspaceGCManagementTypeConfig struct {
+	Config KeyspaceGCManagementType `json:"config"`
 }
 
 // tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
