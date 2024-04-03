@@ -1738,7 +1738,7 @@
           "tableColumn": "idalloc",
           "targets": [
             {
-              "expr": "max(pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"idalloc\"})",
+              "expr": "max(pd_cluster_id{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"idalloc\"})by(type)",
               "format": "time_series",
               "hide": false,
               "instant": true,
@@ -2284,7 +2284,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})",
+              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})by(type)",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -2588,7 +2588,7 @@
           "tableColumn": "tso",
           "targets": [
             {
-              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})",
+              "expr": "max(pd_cluster_tso{type=\"tso\", dc=\"global\"})by(type)",
               "format": "time_series",
               "instant": true,
               "interval": "",
@@ -7895,6 +7895,7 @@
           "targets": [
             {
               "expr": "pd_checker_patrol_regions_time{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"} != 0",
+              "legendFormat": "{{instance}}",
               "format": "time_series",
               "intervalFactor": 1,
               "refId": "A"
@@ -8474,14 +8475,14 @@
               "refId": "A"
             },
             {
-              "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"fail\"}[1m]*60)",
+              "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"fail\"}[1m])*60",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "fail",
               "refId": "B"
             },
             {
-              "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"success\"}[1m]*60)",
+              "expr": "rate(pd_schedule_scatter_operators_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"success\"}[1m])*60",
               "format": "time_series",
               "intervalFactor": 2,
               "legendFormat": "success",
@@ -9296,7 +9297,7 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "etcd_mvcc_db_total_size_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
+              "expr": "etcd_mvcc_db_total_size_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\".*pd.*\"}",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,
@@ -9304,7 +9305,7 @@
               "refId": "A"
             },
             {
-              "expr": "etcd_mvcc_db_total_size_in_use_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", job=\"pd\"}",
+              "expr": "etcd_mvcc_db_total_size_in_use_in_bytes{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\".*pd.*\"}",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 1,
@@ -11367,6 +11368,128 @@
         },
         {
           "aliasColors": {},
+          "bars": true,
+          "dashLength": 10,
+          "dashes": false,
+          "datasource": "${DS_TEST-CLUSTER}",
+          "description": "The breakdown metric about heartbeat",
+          "editable": true,
+          "error": false,
+          "fill": 0,
+          "fillGradient": 0,
+          "grid": {},
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 31
+          },
+          "hiddenSeries": false,
+          "id": 1335,
+          "legend": {
+            "alignAsTable": true,
+            "avg": true,
+            "current": true,
+            "hideEmpty": true,
+            "hideZero": true,
+            "max": true,
+            "min": false,
+            "rightSide": true,
+            "show": true,
+            "sort": "current",
+            "sortDesc": true,
+            "total": false,
+            "values": true
+          },
+          "lines": false,
+          "linewidth": 1,
+          "links": [],
+          "nullPointMode": "null as zero",
+          "options": {
+            "alertThreshold": true
+          },
+          "paceLength": 10,
+          "percentage": false,
+          "pluginVersion": "8.5.27",
+          "pointradius": 5,
+          "points": false,
+          "renderer": "flot",
+          "seriesOverrides": [
+            {
+              "$$hashKey": "object:1147",
+              "alias": "WaitRegionsLock",
+              "bars": false,
+              "lines": true,
+              "linewidth": 2,
+              "stack": false
+            },
+            {
+              "$$hashKey": "object:1251",
+              "alias": "WaitSubRegionsLock",
+              "bars": false,
+              "lines": true,
+              "linewidth": 2,
+              "stack": false
+            }
+          ],
+          "spaceLength": 10,
+          "stack": true,
+          "steppedLine": false,
+          "targets": [
+            {
+              "expr": "sum(rate(pd_core_region_heartbeat_breakdown_handle_duration_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=~\"$tidb_cluster.*\"}[1m])) by (name)",
+              "format": "time_series",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "{{name}}",
+              "range": true,
+              "refId": "A",
+              "step": 4
+            },
+            {
+              "expr": "sum(rate(pd_core_acquire_regions_lock_wait_duration_seconds_sum{k8s_cluster=\"$k8s_cluster\",tidb_cluster=~\"$tidb_cluster.*\"}[1m])) by (type)",
+              "hide": false,
+              "legendFormat": "{{type}}",
+              "range": true,
+              "refId": "B"
+            }
+          ],
+          "thresholds": [],
+          "timeRegions": [],
+          "title": "Heartbeat Performance Duration BreakDown (Accumulation)",
+          "tooltip": {
+            "msResolution": false,
+            "shared": true,
+            "sort": 0,
+            "value_type": "individual"
+          },
+          "type": "graph",
+          "xaxis": {
+            "mode": "time",
+            "show": true,
+            "values": []
+          },
+          "yaxes": [
+            {
+              "$$hashKey": "object:322",
+              "format": "s",
+              "logBase": 1,
+              "min": "0",
+              "show": true
+            },
+            {
+              "$$hashKey": "object:323",
+              "format": "s",
+              "logBase": 1,
+              "show": true
+            }
+          ],
+          "yaxis": {
+            "align": false
+          }
+        },
+        {
+          "aliasColors": {},
           "bars": false,
           "dashLength": 10,
           "dashes": false,
@@ -11379,8 +11502,8 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 12,
-            "y": 31
+            "x": 0,
+            "y": 39
           },
           "id": 1304,
           "legend": {
@@ -11476,7 +11599,7 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 0,
+            "x": 12,
             "y": 39
           },
           "id": 1305,
@@ -11570,8 +11693,8 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 12,
-            "y": 39
+            "x": 0,
+            "y": 47
           },
           "id": 1306,
           "legend": {
@@ -11660,7 +11783,7 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 0,
+            "x": 12,
             "y": 47
           },
           "id": 1307,
@@ -11753,8 +11876,8 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 12,
-            "y": 47
+            "x": 0,
+            "y": 55
           },
           "id": 1308,
           "legend": {
@@ -11850,7 +11973,7 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 0,
+            "x": 12,
             "y": 55
           },
           "id": 1309,
@@ -11947,8 +12070,8 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 12,
-            "y": 55
+            "x": 0,
+            "y": 63
           },
           "id": 1310,
           "legend": {
@@ -12044,7 +12167,7 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 0,
+            "x": 12,
             "y": 63
           },
           "id": 1311,
@@ -12141,8 +12264,8 @@
           "gridPos": {
             "h": 8,
             "w": 12,
-            "x": 12,
-            "y": 63
+            "x": 0,
+            "y": 71
           },
           "id": 1312,
           "legend": {
@@ -12958,7 +13081,7 @@
           "id": 1601,
           "options": {
             "colorMode": "value",
-            "graphMode": "area",
+            "graphMode": "none",
             "justifyMode": "auto",
             "orientation": "auto",
             "reduceOptions": {
@@ -12975,7 +13098,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "pd_replication_dr_state{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}",
+              "expr": "max(pd_replication_dr_state{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"})",
               "instant": false,
               "interval": "",
               "legendFormat": "{{instance}}",
@@ -13143,7 +13266,7 @@
           "targets": [
             {
               "exemplar": true,
-              "expr": "rate(pd_replication_dr_tick_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=\"$instance\"}[5m])",
+              "expr": "rate(pd_replication_dr_tick_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[5m])",
               "instant": false,
               "interval": "",
               "legendFormat": "{{instance}}",

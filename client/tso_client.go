@@ -21,7 +21,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
@@ -64,6 +63,13 @@ var tsoReqPool = sync.Pool{
 	},
 }
 
+func (req *tsoRequest) tryDone(err error) {
+	select {
+	case req.done <- err:
+	default:
+	}
+}
+
 type tsoClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -80,7 +86,7 @@ type tsoClient struct {
 
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
-	tsoDispatcher sync.Map // Same as map[string]chan *tsoRequest
+	tsoDispatcher sync.Map // Same as map[string]*tsoDispatcher
 	// dc-location -> deadline
 	tsDeadline sync.Map // Same as map[string]chan deadline
 	// dc-location -> *tsoInfo while the tsoInfo is the last TSO info
@@ -140,9 +146,8 @@ func (c *tsoClient) Close() {
 	c.tsoDispatcher.Range(func(_, dispatcherInterface any) bool {
 		if dispatcherInterface != nil {
 			dispatcher := dispatcherInterface.(*tsoDispatcher)
-			tsoErr := errors.WithStack(errClosing)
-			dispatcher.tsoBatchController.revokePendingRequest(tsoErr)
 			dispatcher.dispatcherCancel()
+			dispatcher.tsoBatchController.clear()
 		}
 		return true
 	})

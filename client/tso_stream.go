@@ -106,7 +106,7 @@ type tsoStream interface {
 	// processRequests processes TSO requests in streaming mode to get timestamps
 	processRequests(
 		clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
-		requests []*tsoRequest, batchStartTime time.Time,
+		count int64, batchStartTime time.Time,
 	) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error)
 }
 
@@ -120,10 +120,9 @@ func (s *pdTSOStream) getServerURL() string {
 }
 
 func (s *pdTSOStream) processRequests(
-	clusterID uint64, _, _ uint32, dcLocation string, requests []*tsoRequest, batchStartTime time.Time,
+	clusterID uint64, _, _ uint32, dcLocation string, count int64, batchStartTime time.Time,
 ) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
 	start := time.Now()
-	count := int64(len(requests))
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
@@ -175,10 +174,9 @@ func (s *tsoTSOStream) getServerURL() string {
 
 func (s *tsoTSOStream) processRequests(
 	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
-	requests []*tsoRequest, batchStartTime time.Time,
+	count int64, batchStartTime time.Time,
 ) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
 	start := time.Now()
-	count := int64(len(requests))
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,
