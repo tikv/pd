@@ -25,34 +25,34 @@ import (
 	"github.com/unrolled/render"
 )
 
-type minResolvedTSHandler struct {
+type minWatermarkHandler struct {
 	svr *server.Server
 	rd  *render.Render
 }
 
-func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolvedTSHandler {
-	return &minResolvedTSHandler{
+func newMinWatermarkHandler(svr *server.Server, rd *render.Render) *minWatermarkHandler {
+	return &minWatermarkHandler{
 		svr: svr,
 		rd:  rd,
 	}
 }
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type minResolvedTS struct {
+type minWatermark struct {
 	IsRealTime          bool              `json:"is_real_time,omitempty"`
-	MinResolvedTS       uint64            `json:"min_resolved_ts"`
+	MinWatermark       uint64            `json:"min_resolved_ts"`
 	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
-	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
+	StoresMinWatermark map[uint64]uint64 `json:"stores_min_resolved_ts"`
 }
 
 // @Tags     min_store_resolved_ts
-// @Summary  Get store-level min resolved ts.
+// @Summary  Get store-level min watermark.
 // @Produce      json
-// @Success      200    {array}   minResolvedTS
+// @Success      200    {array}   minWatermark
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure      500    {string}  string  "PD server failed to proceed the request."
 // @Router   /min-resolved-ts/{store_id} [get]
-func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *http.Request) {
+func (h *minWatermarkHandler) GetStoreMinWatermark(w http.ResponseWriter, r *http.Request) {
 	c := getCluster(r)
 	idStr := mux.Vars(r)["store_id"]
 	storeID, err := strconv.ParseUint(idStr, 10, 64)
@@ -60,39 +60,39 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	value := c.GetStoreMinResolvedTS(storeID)
-	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
-	h.rd.JSON(w, http.StatusOK, minResolvedTS{
-		MinResolvedTS:   value,
+	value := c.GetStoreMinWatermark(storeID)
+	persistInterval := c.GetPDServerConfig().MinWatermarkPersistenceInterval
+	h.rd.JSON(w, http.StatusOK, minWatermark{
+		MinWatermark:   value,
 		PersistInterval: persistInterval,
 		IsRealTime:      persistInterval.Duration != 0,
 	})
 }
 
 // @Tags         min_resolved_ts
-// @Summary      Get cluster-level min resolved ts and optionally store-level min resolved ts.
+// @Summary      Get cluster-level min watermark and optionally store-level min watermark.
 // @Description  Optionally, we support a query parameter `scope`
-// to get store-level min resolved ts by specifying a list of store IDs.
-//   - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
-//   - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be filled.
+// to get store-level min watermark by specifying a list of store IDs.
+//   - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinWatermark will be nil.
+//   - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinWatermark will be filled.
 //   - When scope given a list of stores, min_resolved_ts will be provided for each store
 //     and the scope-specific min_resolved_ts will be returned.
 //
 // @Produce  json
-// @Param        scope  query     string  false  "Scope of the min resolved ts: comma-separated list of store IDs (e.g., '1,2,3')."  default(cluster)
-// @Success  200  {array}   minResolvedTS
+// @Param        scope  query     string  false  "Scope of the min watermark: comma-separated list of store IDs (e.g., '1,2,3')."  default(cluster)
+// @Success  200  {array}   minWatermark
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router       /min-resolved-ts [get]
-func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
+func (h *minWatermarkHandler) GetMinWatermark(w http.ResponseWriter, r *http.Request) {
 	c := getCluster(r)
-	scopeMinResolvedTS := c.GetMinResolvedTS()
-	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
+	scopeMinWatermark := c.GetMinWatermark()
+	persistInterval := c.GetPDServerConfig().MinWatermarkPersistenceInterval
 
-	var storesMinResolvedTS map[uint64]uint64
+	var storesMinWatermark map[uint64]uint64
 	if scopeStr := r.URL.Query().Get("scope"); len(scopeStr) > 0 {
 		// scope is an optional parameter, it can be `cluster` or specified store IDs.
-		// - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
-		// - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be filled.
+		// - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinWatermark will be nil.
+		// - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinWatermark will be filled.
 		// - When scope given a list of stores, min_resolved_ts will be provided for each store
 		//      and the scope-specific min_resolved_ts will be returned.
 		if scopeStr == "cluster" {
@@ -102,7 +102,7 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 				ids[i] = store.GetId()
 			}
 			// use cluster-level min_resolved_ts as the scope-specific min_resolved_ts.
-			_, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
+			_, storesMinWatermark = c.GetMinWatermarkByStoreIDs(ids)
 		} else {
 			scopeIDs := strings.Split(scopeStr, ",")
 			ids := make([]uint64, len(scopeIDs))
@@ -114,14 +114,14 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 				}
 				ids[i] = id
 			}
-			scopeMinResolvedTS, storesMinResolvedTS = c.GetMinResolvedTSByStoreIDs(ids)
+			scopeMinWatermark, storesMinWatermark = c.GetMinWatermarkByStoreIDs(ids)
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, minResolvedTS{
-		MinResolvedTS:       scopeMinResolvedTS,
+	h.rd.JSON(w, http.StatusOK, minWatermark{
+		MinWatermark:       scopeMinWatermark,
 		PersistInterval:     persistInterval,
 		IsRealTime:          persistInterval.Duration != 0,
-		StoresMinResolvedTS: storesMinResolvedTS,
+		StoresMinWatermark: storesMinWatermark,
 	})
 }

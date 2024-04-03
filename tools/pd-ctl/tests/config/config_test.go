@@ -269,7 +269,7 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	args = []string{"-u", pdAddr, "config", "set", "min-resolved-ts-persistence-interval", "1s"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Equal(typeutil.NewDuration(time.Second), svr.GetPDServerConfig().MinResolvedTSPersistenceInterval)
+	re.Equal(typeutil.NewDuration(time.Second), svr.GetPDServerConfig().MinWatermarkPersistenceInterval)
 
 	// config set max-store-preparing-time 10m
 	args = []string{"-u", pdAddr, "config", "set", "max-store-preparing-time", "10m"}

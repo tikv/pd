@@ -39,7 +39,7 @@ const (
 	customSchedulerConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
-	minResolvedTS              = "min_resolved_ts"
+	minWatermark              = "min_resolved_ts"
 	externalTimeStamp          = "external_timestamp"
 	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
 	keyspaceGCSafePointSuffix  = "gc"
@@ -208,9 +208,9 @@ func gcSafePointServicePath(serviceID string) string {
 	return path.Join(gcSafePointPath(), "service", serviceID)
 }
 
-// MinResolvedTSPath returns the min resolved ts path.
-func MinResolvedTSPath() string {
-	return path.Join(clusterPath, minResolvedTS)
+// MinWatermarkPath returns the min watermark path.
+func MinWatermarkPath() string {
+	return path.Join(clusterPath, minWatermark)
 }
 
 // ExternalTimestampPath returns the external timestamp path.

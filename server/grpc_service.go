@@ -2894,6 +2894,47 @@ func (s *GrpcServer) handleDamagedStore(stats *pdpb.StoreStats) {
 	}
 }
 
+// ReportMinWatermark implements gRPC PDServer.
+func (s *GrpcServer) ReportMinWatermark(ctx context.Context, request *pdpb.ReportMinWatermarkRequest) (*pdpb.ReportMinWatermarkResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if done, err := limiter.Allow(fName); err == nil {
+			defer done()
+		} else {
+			return &pdpb.ReportMinWatermarkResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
+		}
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).ReportMinWatermark(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.ReportMinWatermarkResponse), nil
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.ReportMinWatermarkResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	storeID := request.GetStoreId()
+	minWatermark := request.GetMinWatermark()
+	if err := rc.SetMinWatermark(storeID, minWatermark); err != nil {
+		return nil, err
+	}
+	log.Debug("updated min watermark",
+		zap.Uint64("store", storeID),
+		zap.Uint64("min watermark", minWatermark))
+	return &pdpb.ReportMinWatermarkResponse{
+		Header: s.header(),
+	}, nil
+}
+
+// Will be replaced by ReportMinWatermark in the future.
 // ReportMinResolvedTS implements gRPC PDServer.
 func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.ReportMinResolvedTsRequest) (*pdpb.ReportMinResolvedTsResponse, error) {
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
@@ -2922,13 +2963,13 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 	}
 
 	storeID := request.GetStoreId()
-	minResolvedTS := request.GetMinResolvedTs()
-	if err := rc.SetMinResolvedTS(storeID, minResolvedTS); err != nil {
+	minWatermark := request.GetMinWatermark()
+	if err := rc.SetMinWatermark(storeID, minWatermark); err != nil {
 		return nil, err
 	}
-	log.Debug("updated min resolved-ts",
+	log.Debug("updated min watermark",
 		zap.Uint64("store", storeID),
-		zap.Uint64("min resolved-ts", minResolvedTS))
+		zap.Uint64("min watermark", minWatermark))
 	return &pdpb.ReportMinResolvedTsResponse{
 		Header: s.header(),
 	}, nil

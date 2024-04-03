@@ -212,8 +212,8 @@ const (
 	defaultMaxResetTSGap     = 24 * time.Hour
 	defaultKeyType           = "table"
 
-	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
-	DefaultMinResolvedTSPersistenceInterval = time.Second
+	// DefaultMinWatermarkPersistenceInterval is the default value of min watermark persistent interval.
+	DefaultMinWatermarkPersistenceInterval = time.Second
 
 	defaultEnableGRPCGateway   = true
 	defaultDisableErrorVerbose = true
@@ -519,8 +519,8 @@ type PDServerConfig struct {
 	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
-	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
-	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
+	// MinWatermarkPersistenceInterval is the interval to save the min watermark.
+	MinWatermarkPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
 	// ServerMemoryLimit indicates the memory limit of current process.
 	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
 	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
@@ -550,8 +550,8 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	if !meta.IsDefined("flow-round-by-digit") {
 		configutil.AdjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
-	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
-		configutil.AdjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
+	if !meta.IsDefined("min-resolved-ts-persistence-interval") && !meta.IsDefined("min-watermark-persistence-interval") {
+		configutil.AdjustDuration(&c.MinWatermarkPersistenceInterval, DefaultMinWatermarkPersistenceInterval)
 	}
 	if !meta.IsDefined("server-memory-limit") {
 		configutil.AdjustFloat64(&c.ServerMemoryLimit, defaultServerMemoryLimit)

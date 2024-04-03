@@ -18,7 +18,7 @@ The api bench cases we support are as follows:
 1. HTTP
 
     + GetRegionStatus: /pd/api/v1/stats/region
-    + GetMinResolvedTS: /pd/api/v1/min-resolved-ts
+    + GetMinWatermark: /pd/api/v1/min-resolved-ts
 
 2. gRPC
 
@@ -45,7 +45,7 @@ The api bench cases we support are as follows:
 > pd address (default "127.0.0.1:2379")
 
 -http-cases
-> HTTP api bench cases list. Multiple cases are separated by commas. Such as `-http-cases GetRegionStatus,GetMinResolvedTS`
+> HTTP api bench cases list. Multiple cases are separated by commas. Such as `-http-cases GetRegionStatus,GetMinWatermark`
 > You can set qps with '-' and set burst with '+' such as `-http-cases GetRegionStatus-100+1`
 
 -grpc-cases
@@ -66,7 +66,7 @@ The api bench cases we support are as follows:
 You can run shell as follows.
 
 ```shell
-go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug true
+go run main.go -http-cases GetRegionStatus-1+1,GetMinWatermark-1+1 -client 1 -debug true
 ```
 
 ### TLS
@@ -76,7 +76,7 @@ You can use the following command to generate a certificate for testing TLS:
 ```shell
 mkdir cert
 ./cert_opt.sh generate cert
-go run main.go -http-cases GetRegionStatus-1+1,GetMinResolvedTS-1+1 -client 1 -debug true -cacert ./cert/ca.pem -cert ./cert/pd-server.pem  -key ./cert/pd-server-key.pem
+go run main.go -http-cases GetRegionStatus-1+1,GetMinWatermark-1+1 -client 1 -debug true -cacert ./cert/ca.pem -cert ./cert/pd-server.pem  -key ./cert/pd-server-key.pem
 ./cert_opt.sh cleanup cert
 rm -rf cert
 ```

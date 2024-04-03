@@ -215,41 +215,41 @@ func (suite *httpClientTestSuite) checkMeta(mode mode, client pd.Client) {
 	re.Equal(int64(2), rgs.Count)
 }
 
-func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
-	suite.RunTestInTwoModes(suite.checkGetMinResolvedTSByStoresIDs)
+func (suite *httpClientTestSuite) TestGetMinWatermarkByStoresIDs() {
+	suite.RunTestInTwoModes(suite.checkGetMinWatermarkByStoresIDs)
 }
 
-func (suite *httpClientTestSuite) checkGetMinResolvedTSByStoresIDs(mode mode, client pd.Client) {
+func (suite *httpClientTestSuite) checkGetMinWatermarkByStoresIDs(mode mode, client pd.Client) {
 	re := suite.Require()
 	env := suite.env[mode]
 
-	testMinResolvedTS := tsoutil.TimeToTS(time.Now())
+	testMinWatermark := tsoutil.TimeToTS(time.Now())
 	raftCluster := env.cluster.GetLeaderServer().GetRaftCluster()
-	err := raftCluster.SetMinResolvedTS(1, testMinResolvedTS)
+	err := raftCluster.SetMinWatermark(1, testMinWatermark)
 	re.NoError(err)
-	// Make sure the min resolved TS is updated.
+	// Make sure the min watermark is updated.
 	testutil.Eventually(re, func() bool {
-		minResolvedTS, _ := raftCluster.CheckAndUpdateMinResolvedTS()
-		return minResolvedTS == testMinResolvedTS
+		minWatermark, _ := raftCluster.CheckAndUpdateMinWatermark()
+		return minWatermark == testMinWatermark
 	})
-	// Wait for the cluster-level min resolved TS to be initialized.
-	minResolvedTS, storeMinResolvedTSMap, err := client.GetMinResolvedTSByStoresIDs(env.ctx, nil)
+	// Wait for the cluster-level min watermark to be initialized.
+	minWatermark, storeMinWatermarkMap, err := client.GetMinWatermarkByStoresIDs(env.ctx, nil)
 	re.NoError(err)
-	re.Equal(testMinResolvedTS, minResolvedTS)
-	re.Empty(storeMinResolvedTSMap)
-	// Get the store-level min resolved TS.
-	minResolvedTS, storeMinResolvedTSMap, err = client.GetMinResolvedTSByStoresIDs(env.ctx, []uint64{1})
+	re.Equal(testMinWatermark, minWatermark)
+	re.Empty(storeMinWatermarkMap)
+	// Get the store-level min watermark.
+	minWatermark, storeMinWatermarkMap, err = client.GetMinWatermarkByStoresIDs(env.ctx, []uint64{1})
 	re.NoError(err)
-	re.Equal(testMinResolvedTS, minResolvedTS)
-	re.Len(storeMinResolvedTSMap, 1)
-	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
-	// Get the store-level min resolved TS with an invalid store ID.
-	minResolvedTS, storeMinResolvedTSMap, err = client.GetMinResolvedTSByStoresIDs(env.ctx, []uint64{1, 2})
+	re.Equal(testMinWatermark, minWatermark)
+	re.Len(storeMinWatermarkMap, 1)
+	re.Equal(minWatermark, storeMinWatermarkMap[1])
+	// Get the store-level min watermark with an invalid store ID.
+	minWatermark, storeMinWatermarkMap, err = client.GetMinWatermarkByStoresIDs(env.ctx, []uint64{1, 2})
 	re.NoError(err)
-	re.Equal(testMinResolvedTS, minResolvedTS)
-	re.Len(storeMinResolvedTSMap, 2)
-	re.Equal(minResolvedTS, storeMinResolvedTSMap[1])
-	re.Equal(uint64(math.MaxUint64), storeMinResolvedTSMap[2])
+	re.Equal(testMinWatermark, minWatermark)
+	re.Len(storeMinWatermarkMap, 2)
+	re.Equal(minWatermark, storeMinWatermarkMap[1])
+	re.Equal(uint64(math.MaxUint64), storeMinWatermarkMap[2])
 }
 
 func (suite *httpClientTestSuite) TestRule() {

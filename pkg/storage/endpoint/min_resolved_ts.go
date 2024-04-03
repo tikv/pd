@@ -20,35 +20,35 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 )
 
-// MinResolvedTSPoint is the min resolved ts for a store
+// MinWatermarkPoint is the min watermark for a store
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type MinResolvedTSPoint struct {
-	MinResolvedTS uint64 `json:"min_resolved_ts"`
+type MinWatermarkPoint struct {
+	MinWatermark uint64 `json:"min_resolved_ts"`
 }
 
-// MinResolvedTSStorage defines the storage operations on the min resolved ts.
-type MinResolvedTSStorage interface {
-	LoadMinResolvedTS() (uint64, error)
-	SaveMinResolvedTS(minResolvedTS uint64) error
+// MinWatermarkStorage defines the storage operations on the min watermark.
+type MinWatermarkStorage interface {
+	LoadMinWatermark() (uint64, error)
+	SaveMinWatermark(minWatermark uint64) error
 }
 
-var _ MinResolvedTSStorage = (*StorageEndpoint)(nil)
+var _ MinWatermarkStorage = (*StorageEndpoint)(nil)
 
-// LoadMinResolvedTS loads the min resolved ts from storage.
-func (se *StorageEndpoint) LoadMinResolvedTS() (uint64, error) {
-	value, err := se.Load(MinResolvedTSPath())
+// LoadMinWatermark loads the min watermark from storage.
+func (se *StorageEndpoint) LoadMinWatermark() (uint64, error) {
+	value, err := se.Load(MinWatermarkPath())
 	if err != nil || value == "" {
 		return 0, err
 	}
-	minResolvedTS, err := strconv.ParseUint(value, 16, 64)
+	minWatermark, err := strconv.ParseUint(value, 16, 64)
 	if err != nil {
 		return 0, errs.ErrStrconvParseUint.Wrap(err).GenWithStackByArgs()
 	}
-	return minResolvedTS, nil
+	return minWatermark, nil
 }
 
-// SaveMinResolvedTS saves the min resolved ts.
-func (se *StorageEndpoint) SaveMinResolvedTS(minResolvedTS uint64) error {
-	value := strconv.FormatUint(minResolvedTS, 16)
-	return se.Save(MinResolvedTSPath(), value)
+// SaveMinWatermark saves the min watermark.
+func (se *StorageEndpoint) SaveMinWatermark(minWatermark uint64) error {
+	value := strconv.FormatUint(minWatermark, 16)
+	return se.Save(MinWatermarkPath(), value)
 }

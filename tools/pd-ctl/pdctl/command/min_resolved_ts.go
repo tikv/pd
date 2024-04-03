@@ -21,24 +21,24 @@ import (
 )
 
 var (
-	minResolvedTSPrefix = "pd/api/v1/min-resolved-ts"
+	minWatermarkPrefix = "pd/api/v1/min-resolved-ts"
 )
 
-// NewMinResolvedTSCommand return min resolved ts subcommand of rootCmd
-func NewMinResolvedTSCommand() *cobra.Command {
+// NewMinWatermarkCommand return min watermark subcommand of rootCmd
+func NewMinWatermarkCommand() *cobra.Command {
 	l := &cobra.Command{
 		Use:   "min-resolved-ts",
-		Short: "show min resolved ts",
-		Run:   ShowMinResolvedTS,
+		Short: "show min watermark",
+		Run:   ShowMinWatermark,
 	}
 	return l
 }
 
-// ShowMinResolvedTS show min resolved ts
-func ShowMinResolvedTS(cmd *cobra.Command, args []string) {
-	r, err := doRequest(cmd, minResolvedTSPrefix, http.MethodGet, http.Header{})
+// ShowMinWatermark show min watermark
+func ShowMinWatermark(cmd *cobra.Command, args []string) {
+	r, err := doRequest(cmd, minWatermarkPrefix, http.MethodGet, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to get min resolved ts: %s\n", err)
+		cmd.Printf("Failed to get min watermark: %s\n", err)
 		return
 	}
 	cmd.Println(r)

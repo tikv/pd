@@ -1504,40 +1504,40 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 	re.Equal(3, rc.GetStore(storeID).GetLeaderCount())
 }
 
-func checkMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
+func checkMinWatermark(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
 	re.Eventually(func() bool {
-		ts := rc.GetMinResolvedTS()
+		ts := rc.GetMinWatermark()
 		return expect == ts
 	}, time.Second*10, time.Millisecond*50)
 }
 
-func checkStoreMinResolvedTS(re *require.Assertions, rc *cluster.RaftCluster, expectTS, storeID uint64) {
+func checkStoreMinWatermark(re *require.Assertions, rc *cluster.RaftCluster, expectTS, storeID uint64) {
 	re.Eventually(func() bool {
-		ts := rc.GetStoreMinResolvedTS(storeID)
+		ts := rc.GetStoreMinWatermark(storeID)
 		return expectTS == ts
 	}, time.Second*10, time.Millisecond*50)
 }
 
-func checkMinResolvedTSFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
+func checkMinWatermarkFromStorage(re *require.Assertions, rc *cluster.RaftCluster, expect uint64) {
 	re.Eventually(func() bool {
-		ts2, err := rc.GetStorage().LoadMinResolvedTS()
+		ts2, err := rc.GetStorage().LoadMinWatermark()
 		re.NoError(err)
 		return expect == ts2
 	}, time.Second*10, time.Millisecond*50)
 }
 
-func setMinResolvedTSPersistenceInterval(re *require.Assertions, rc *cluster.RaftCluster, svr *server.Server, interval time.Duration) {
+func setMinWatermarkPersistenceInterval(re *require.Assertions, rc *cluster.RaftCluster, svr *server.Server, interval time.Duration) {
 	cfg := rc.GetPDServerConfig().Clone()
-	cfg.MinResolvedTSPersistenceInterval = typeutil.NewDuration(interval)
+	cfg.MinWatermarkPersistenceInterval = typeutil.NewDuration(interval)
 	err := svr.SetPDServerConfig(*cfg)
 	re.NoError(err)
 }
 
-func TestMinResolvedTS(t *testing.T) {
+func TestMinWatermark(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster.DefaultMinResolvedTSPersistenceInterval = time.Millisecond
+	cluster.DefaultMinWatermarkPersistenceInterval = time.Millisecond
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1552,7 +1552,7 @@ func TestMinResolvedTS(t *testing.T) {
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
 	svr := leaderServer.GetServer()
-	addStoreAndCheckMinResolvedTS := func(re *require.Assertions, isTiflash bool, minResolvedTS, expect uint64) uint64 {
+	addStoreAndCheckMinWatermark := func(re *require.Assertions, isTiflash bool, minWatermark, expect uint64) uint64 {
 		storeID, err := id.Alloc()
 		re.NoError(err)
 		store := &metapb.Store{
@@ -1566,80 +1566,80 @@ func TestMinResolvedTS(t *testing.T) {
 		resp, err := putStore(grpcPDClient, clusterID, store)
 		re.NoError(err)
 		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
-		req := &pdpb.ReportMinResolvedTsRequest{
+		req := &pdpb.ReportMinWatermarkRequest{
 			Header:        testutil.NewRequestHeader(clusterID),
 			StoreId:       storeID,
-			MinResolvedTs: minResolvedTS,
+			MinWatermark: minWatermark,
 		}
-		_, err = grpcPDClient.ReportMinResolvedTS(context.Background(), req)
+		_, err = grpcPDClient.ReportMinWatermark(context.Background(), req)
 		re.NoError(err)
-		ts := rc.GetMinResolvedTS()
+		ts := rc.GetMinWatermark()
 		re.Equal(expect, ts)
 		return storeID
 	}
 
 	// default run job
-	re.NotZero(rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration)
-	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
-	re.Equal(time.Duration(0), rc.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration)
+	re.NotZero(rc.GetPDServerConfig().MinWatermarkPersistenceInterval.Duration)
+	setMinWatermarkPersistenceInterval(re, rc, svr, 0)
+	re.Equal(time.Duration(0), rc.GetPDServerConfig().MinWatermarkPersistenceInterval.Duration)
 
 	// case1: cluster is no initialized
-	// min resolved ts should be not available
+	// min watermark should be not available
 	status, err := rc.LoadClusterStatus()
 	re.NoError(err)
 	re.False(status.IsInitialized)
 	store1TS := uint64(233)
-	store1 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store1TS, math.MaxUint64)
+	store1 := addStoreAndCheckMinWatermark(re, false /* not tiflash */, store1TS, math.MaxUint64)
 
 	// case2: add leader peer to store1 but no run job
-	// min resolved ts should be zero
+	// min watermark should be zero
 	putRegionWithLeader(re, rc, id, store1)
-	checkMinResolvedTS(re, rc, 0)
+	checkMinWatermark(re, rc, 0)
 
 	// case3: add leader peer to store1 and run job
-	// min resolved ts should be store1TS
-	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
-	checkMinResolvedTS(re, rc, store1TS)
-	checkMinResolvedTSFromStorage(re, rc, store1TS)
+	// min watermark should be store1TS
+	setMinWatermarkPersistenceInterval(re, rc, svr, time.Millisecond)
+	checkMinWatermark(re, rc, store1TS)
+	checkMinWatermarkFromStorage(re, rc, store1TS)
 
 	// case4: add tiflash store
-	// min resolved ts should no change
-	addStoreAndCheckMinResolvedTS(re, true /* is tiflash */, 0, store1TS)
+	// min watermark should no change
+	addStoreAndCheckMinWatermark(re, true /* is tiflash */, 0, store1TS)
 
-	// case5: add new store with lager min resolved ts
-	// min resolved ts should no change
+	// case5: add new store with lager min watermark
+	// min watermark should no change
 	store3TS := store1TS + 10
-	store3 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store3TS, store1TS)
+	store3 := addStoreAndCheckMinWatermark(re, false /* not tiflash */, store3TS, store1TS)
 	putRegionWithLeader(re, rc, id, store3)
 
 	// case6: set store1 to tombstone
-	// min resolved ts should change to store 3
+	// min watermark should change to store 3
 	resetStoreState(re, rc, store1, metapb.StoreState_Tombstone)
-	checkMinResolvedTS(re, rc, store3TS)
-	checkMinResolvedTSFromStorage(re, rc, store3TS)
-	checkStoreMinResolvedTS(re, rc, store3TS, store3)
+	checkMinWatermark(re, rc, store3TS)
+	checkMinWatermarkFromStorage(re, rc, store3TS)
+	checkStoreMinWatermark(re, rc, store3TS, store3)
 	// check no-exist store
-	checkStoreMinResolvedTS(re, rc, math.MaxUint64, 100)
+	checkStoreMinWatermark(re, rc, math.MaxUint64, 100)
 
-	// case7: add a store with leader peer but no report min resolved ts
-	// min resolved ts should be no change
-	store4 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, 0, store3TS)
+	// case7: add a store with leader peer but no report min watermark
+	// min watermark should be no change
+	store4 := addStoreAndCheckMinWatermark(re, false /* not tiflash */, 0, store3TS)
 	putRegionWithLeader(re, rc, id, store4)
-	checkMinResolvedTS(re, rc, store3TS)
-	checkMinResolvedTSFromStorage(re, rc, store3TS)
+	checkMinWatermark(re, rc, store3TS)
+	checkMinWatermarkFromStorage(re, rc, store3TS)
 	resetStoreState(re, rc, store4, metapb.StoreState_Tombstone)
 
-	// case8: set min resolved ts persist interval to zero
-	// although min resolved ts increase, it should be not persisted until job running.
+	// case8: set min watermark persist interval to zero
+	// although min watermark increase, it should be not persisted until job running.
 	store5TS := store3TS + 10
-	setMinResolvedTSPersistenceInterval(re, rc, svr, 0)
-	store5 := addStoreAndCheckMinResolvedTS(re, false /* not tiflash */, store5TS, store3TS)
+	setMinWatermarkPersistenceInterval(re, rc, svr, 0)
+	store5 := addStoreAndCheckMinWatermark(re, false /* not tiflash */, store5TS, store3TS)
 	resetStoreState(re, rc, store3, metapb.StoreState_Tombstone)
 	putRegionWithLeader(re, rc, id, store5)
-	checkMinResolvedTS(re, rc, store3TS)
-	setMinResolvedTSPersistenceInterval(re, rc, svr, time.Millisecond)
-	checkMinResolvedTS(re, rc, store5TS)
-	checkStoreMinResolvedTS(re, rc, store5TS, store5)
+	checkMinWatermark(re, rc, store3TS)
+	setMinWatermarkPersistenceInterval(re, rc, svr, time.Millisecond)
+	checkMinWatermark(re, rc, store5TS)
+	checkStoreMinWatermark(re, rc, store5TS, store5)
 }
 
 // See https://github.com/tikv/pd/issues/4941

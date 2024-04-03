@@ -69,7 +69,7 @@ const (
 	patchRegionLabelRulesName               = "PatchRegionLabelRules"
 	accelerateScheduleName                  = "AccelerateSchedule"
 	accelerateScheduleInBatchName           = "AccelerateScheduleInBatch"
-	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
+	getMinWatermarkByStoresIDsName          = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
 	getMicroServicePrimaryName              = "GetMicroServicePrimary"
 	getPDVersionName                        = "GetPDVersion"

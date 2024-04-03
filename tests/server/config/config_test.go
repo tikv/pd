@@ -410,7 +410,7 @@ func (suite *configTestSuite) checkConfigPDServer(cluster *tests.TestCluster) {
 		re.Equal(leaderServer.GetAddr(), sc.DashboardAddress)
 	}
 	re.Equal(int(3), sc.FlowRoundByDigit)
-	re.Equal(typeutil.NewDuration(time.Second), sc.MinResolvedTSPersistenceInterval)
+	re.Equal(typeutil.NewDuration(time.Second), sc.MinWatermarkPersistenceInterval)
 	re.Equal(24*time.Hour, sc.MaxResetTSGap.Duration)
 }
 

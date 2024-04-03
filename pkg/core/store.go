@@ -64,19 +64,19 @@ type StoreInfo struct {
 	leaderWeight        float64
 	regionWeight        float64
 	limiter             storelimit.StoreLimit
-	minResolvedTS       uint64
+	minWatermark        uint64
 	lastAwakenTime      time.Time
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
 func NewStoreInfo(store *metapb.Store, opts ...StoreCreateOption) *StoreInfo {
 	storeInfo := &StoreInfo{
-		meta:          store,
-		storeStats:    newStoreStats(),
-		leaderWeight:  1.0,
-		regionWeight:  1.0,
-		limiter:       storelimit.NewStoreRateLimit(0.0),
-		minResolvedTS: 0,
+		meta:         store,
+		storeStats:   newStoreStats(),
+		leaderWeight: 1.0,
+		regionWeight: 1.0,
+		limiter:      storelimit.NewStoreRateLimit(0.0),
+		minWatermark: 0,
 	}
 	for _, opt := range opts {
 		opt(storeInfo)
@@ -528,9 +528,9 @@ func (s *StoreInfo) GetUptime() time.Duration {
 	return 0
 }
 
-// GetMinResolvedTS returns min resolved ts.
-func (s *StoreInfo) GetMinResolvedTS() uint64 {
-	return s.minResolvedTS
+// GetMinWatermark returns min watermark.
+func (s *StoreInfo) GetMinWatermark() uint64 {
+	return s.minWatermark
 }
 
 // NeedAwakenStore checks whether all hibernated regions in this store should
@@ -832,9 +832,9 @@ func IsStoreContainLabel(store *metapb.Store, key, value string) bool {
 	return false
 }
 
-// IsAvailableForMinResolvedTS returns if the store is available for min resolved ts.
-func IsAvailableForMinResolvedTS(s *StoreInfo) bool {
-	// If a store is tombstone or no leader, it is not meaningful for min resolved ts.
-	// And we will skip tiflash, because it does not report min resolved ts.
+// IsAvailableForMinWatermark returns if the store is available for min watermark.
+func IsAvailableForMinWatermark(s *StoreInfo) bool {
+	// If a store is tombstone or no leader, it is not meaningful for min watermark.
+	// And we will skip tiflash, because it does not report min watermark.
 	return !s.IsRemoved() && !s.IsTiFlash() && s.GetLeaderCount() != 0
 }

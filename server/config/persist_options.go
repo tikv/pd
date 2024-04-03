@@ -844,9 +844,9 @@ func (o *PersistOptions) CheckLabelProperty(typ string, labels []*metapb.StoreLa
 	return false
 }
 
-// GetMinResolvedTSPersistenceInterval gets the interval for PD to save min resolved ts.
-func (o *PersistOptions) GetMinResolvedTSPersistenceInterval() time.Duration {
-	return o.GetPDServerConfig().MinResolvedTSPersistenceInterval.Duration
+// GetMinWatermarkPersistenceInterval gets the interval for PD to save min watermark.
+func (o *PersistOptions) GetMinWatermarkPersistenceInterval() time.Duration {
+	return o.GetPDServerConfig().MinWatermarkPersistenceInterval.Duration
 }
 
 // SetTTLData set temporary configuration

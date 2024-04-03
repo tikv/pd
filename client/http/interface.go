@@ -90,7 +90,9 @@ type Client interface {
 	SetSnapshotRecoveringMark(context.Context) error
 	DeleteSnapshotRecoveringMark(context.Context) error
 	/* Other interfaces */
+	// GetMinResolvedTSByStoresIDs will be replaced by GetMinWatermarkByStoresIDs.
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
+	GetMinWatermarkByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]MicroServiceMember, error)
@@ -846,15 +848,20 @@ func (c *client) SetSchedulerDelay(ctx context.Context, scheduler string, delayS
 		WithBody(inputJSON))
 }
 
-// GetMinResolvedTSByStoresIDs get min-resolved-ts by stores IDs.
+// Compatible with the old API.
+func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uint64) (uint64, map[uint64]uint64, error) {
+	return c.GetMinWatermarkByStoresIDs(ctx, storeIDs)
+}
+
+// GetMinWatermarkByStoresIDs get min-resolved-ts by stores IDs.
 // - When storeIDs has zero length, it will return (cluster-level's min_resolved_ts, nil, nil) when no error.
 // - When storeIDs is {"cluster"}, it will return (cluster-level's min_resolved_ts, stores_min_resolved_ts, nil) when no error.
 // - When storeID is specified to ID lists, it will return (min_resolved_ts of given stores, stores_min_resolved_ts, nil) when no error.
-func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uint64) (uint64, map[uint64]uint64, error) {
-	uri := MinResolvedTSPrefix
+func (c *client) GetMinWatermarkByStoresIDs(ctx context.Context, storeIDs []uint64) (uint64, map[uint64]uint64, error) {
+	uri := MinWatermarkPrefix
 	// scope is an optional parameter, it can be `cluster` or specified store IDs.
-	// - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be nil.
-	// - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinResolvedTS will be filled.
+	// - When no scope is given, cluster-level's min_resolved_ts will be returned and storesMinWatermark will be nil.
+	// - When scope is `cluster`, cluster-level's min_resolved_ts will be returned and storesMinWatermark will be filled.
 	// - When scope given a list of stores, min_resolved_ts will be provided for each store
 	//      and the scope-specific min_resolved_ts will be returned.
 	if len(storeIDs) != 0 {
@@ -865,12 +872,12 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		uri = fmt.Sprintf("%s?scope=%s", uri, strings.Join(storeIDStrs, ","))
 	}
 	resp := struct {
-		MinResolvedTS       uint64            `json:"min_resolved_ts"`
+		MinWatermark       uint64            `json:"min_resolved_ts"`
 		IsRealTime          bool              `json:"is_real_time,omitempty"`
-		StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
+		StoresMinWatermark map[uint64]uint64 `json:"stores_min_resolved_ts"`
 	}{}
 	err := c.request(ctx, newRequestInfo().
-		WithName(getMinResolvedTSByStoresIDsName).
+		WithName(getMinWatermarkByStoresIDsName).
 		WithURI(uri).
 		WithMethod(http.MethodGet).
 		WithResp(&resp))
@@ -878,9 +885,9 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		return 0, nil, err
 	}
 	if !resp.IsRealTime {
-		return 0, nil, errors.Trace(errors.New("min resolved ts is not enabled"))
+		return 0, nil, errors.Trace(errors.New("min watermark is not enabled"))
 	}
-	return resp.MinResolvedTS, resp.StoresMinResolvedTS, nil
+	return resp.MinWatermark, resp.StoresMinWatermark, nil
 }
 
 // GetMicroServiceMembers gets the members of the microservice.

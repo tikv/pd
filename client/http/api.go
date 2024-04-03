@@ -72,7 +72,7 @@ const (
 	PProfBlock     = "/pd/api/v1/debug/pprof/block"
 	PProfGoroutine = "/pd/api/v1/debug/pprof/goroutine"
 	// Others
-	MinResolvedTSPrefix = "/pd/api/v1/min-resolved-ts"
+	MinWatermarkPrefix = "/pd/api/v1/min-resolved-ts"
 	Cluster             = "/pd/api/v1/cluster"
 	ClusterStatus       = "/pd/api/v1/cluster/status"
 	Status              = "/pd/api/v1/status"

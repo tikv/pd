@@ -38,7 +38,7 @@ type Storage interface {
 	endpoint.RuleStorage
 	endpoint.ReplicationStatusStorage
 	endpoint.GCSafePointStorage
-	endpoint.MinResolvedTSStorage
+	endpoint.MinWatermarkStorage
 	endpoint.ExternalTSStorage
 	endpoint.SafePointV2Storage
 	endpoint.KeyspaceStorage

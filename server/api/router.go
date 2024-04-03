@@ -354,10 +354,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/gc/safepoint", serviceGCSafepointHandler.GetGCSafePoint, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/gc/safepoint/{service_id}", serviceGCSafepointHandler.DeleteGCSafePoint, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 
-	// min resolved ts API
-	minResolvedTSHandler := newMinResolvedTSHandler(svr, rd)
-	registerFunc(clusterRouter, "/min-resolved-ts", minResolvedTSHandler.GetMinResolvedTS, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/min-resolved-ts/{store_id}", minResolvedTSHandler.GetStoreMinResolvedTS, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	// min watermark API
+	minWatermarkHandler := newMinWatermarkHandler(svr, rd)
+	registerFunc(clusterRouter, "/min-resolved-ts", minWatermarkHandler.GetMinWatermark, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/min-resolved-ts/{store_id}", minWatermarkHandler.GetStoreMinWatermark, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)

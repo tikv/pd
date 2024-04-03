@@ -166,28 +166,28 @@ type HTTPCreateFn func() HTTPCase
 // HTTPCaseFnMap is the map for all HTTP case creation function.
 var HTTPCaseFnMap = map[string]HTTPCreateFn{
 	"GetRegionStatus":  newRegionStats(),
-	"GetMinResolvedTS": newMinResolvedTS(),
+	"GetMinWatermark": newMinWatermark(),
 }
 
-type minResolvedTS struct {
+type minWatermark struct {
 	*baseCase
 }
 
-func newMinResolvedTS() func() HTTPCase {
+func newMinWatermark() func() HTTPCase {
 	return func() HTTPCase {
-		return &minResolvedTS{
+		return &minWatermark{
 			baseCase: &baseCase{
-				name: "GetMinResolvedTS",
+				name: "GetMinWatermark",
 				cfg:  newConfig(),
 			},
 		}
 	}
 }
 
-func (c *minResolvedTS) Do(ctx context.Context, cli pdHttp.Client) error {
-	minResolvedTS, storesMinResolvedTS, err := cli.GetMinResolvedTSByStoresIDs(ctx, storesID)
+func (c *minWatermark) Do(ctx context.Context, cli pdHttp.Client) error {
+	minWatermark, storesMinWatermark, err := cli.GetMinWatermarkByStoresIDs(ctx, storesID)
 	if Debug {
-		log.Info("do HTTP case", zap.String("case", c.name), zap.Uint64("min-resolved-ts", minResolvedTS), zap.Any("store-min-resolved-ts", storesMinResolvedTS), zap.Error(err))
+		log.Info("do HTTP case", zap.String("case", c.name), zap.Uint64("min-resolved-ts", minWatermark), zap.Any("store-min-resolved-ts", storesMinWatermark), zap.Error(err))
 	}
 	if err != nil {
 		return err

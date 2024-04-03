@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 )
 
-type minResolvedTSTestSuite struct {
+type minWatermarkTestSuite struct {
 	suite.Suite
 	svr             *server.Server
 	cleanup         testutil.CleanupFunc
@@ -42,13 +42,13 @@ type minResolvedTSTestSuite struct {
 	storesNum       int
 }
 
-func TestMinResolvedTSTestSuite(t *testing.T) {
-	suite.Run(t, new(minResolvedTSTestSuite))
+func TestMinWatermarkTestSuite(t *testing.T) {
+	suite.Run(t, new(minWatermarkTestSuite))
 }
 
-func (suite *minResolvedTSTestSuite) SetupSuite() {
+func (suite *minWatermarkTestSuite) SetupSuite() {
 	suite.defaultInterval = time.Millisecond
-	cluster.DefaultMinResolvedTSPersistenceInterval = suite.defaultInterval
+	cluster.DefaultMinWatermarkPersistenceInterval = suite.defaultInterval
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
@@ -66,71 +66,71 @@ func (suite *minResolvedTSTestSuite) SetupSuite() {
 	}
 }
 
-func (suite *minResolvedTSTestSuite) TearDownSuite() {
+func (suite *minWatermarkTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
-func (suite *minResolvedTSTestSuite) TestMinResolvedTS() {
+func (suite *minWatermarkTestSuite) TestMinWatermark() {
 	re := suite.Require()
 	// case1: default run job
-	interval := suite.svr.GetRaftCluster().GetPDServerConfig().MinResolvedTSPersistenceInterval
-	suite.checkMinResolvedTS(re, &minResolvedTS{
-		MinResolvedTS:   0,
+	interval := suite.svr.GetRaftCluster().GetPDServerConfig().MinWatermarkPersistenceInterval
+	suite.checkMinWatermark(re, &minWatermark{
+		MinWatermark:   0,
 		IsRealTime:      true,
 		PersistInterval: interval,
 	})
 	// case2: stop run job
 	zero := typeutil.Duration{Duration: 0}
-	suite.setMinResolvedTSPersistenceInterval(zero)
-	suite.checkMinResolvedTS(re, &minResolvedTS{
-		MinResolvedTS:   0,
+	suite.setMinWatermarkPersistenceInterval(zero)
+	suite.checkMinWatermark(re, &minWatermark{
+		MinWatermark:   0,
 		IsRealTime:      false,
 		PersistInterval: zero,
 	})
 	// case3: start run job
 	interval = typeutil.Duration{Duration: suite.defaultInterval}
-	suite.setMinResolvedTSPersistenceInterval(interval)
+	suite.setMinWatermarkPersistenceInterval(interval)
 	suite.Eventually(func() bool {
-		return interval == suite.svr.GetRaftCluster().GetPDServerConfig().MinResolvedTSPersistenceInterval
+		return interval == suite.svr.GetRaftCluster().GetPDServerConfig().MinWatermarkPersistenceInterval
 	}, time.Second*10, time.Millisecond*20)
-	suite.checkMinResolvedTS(re, &minResolvedTS{
-		MinResolvedTS:   0,
+	suite.checkMinWatermark(re, &minWatermark{
+		MinWatermark:   0,
 		IsRealTime:      true,
 		PersistInterval: interval,
 	})
-	// case4: set min resolved ts
+	// case4: set min watermark
 	ts := uint64(233)
-	suite.setAllStoresMinResolvedTS(ts)
-	suite.checkMinResolvedTS(re, &minResolvedTS{
-		MinResolvedTS:   ts,
+	suite.setAllStoresMinWatermark(ts)
+	suite.checkMinWatermark(re, &minWatermark{
+		MinWatermark:   ts,
 		IsRealTime:      true,
 		PersistInterval: interval,
 	})
 	// case5: stop persist and return last persist value when interval is 0
 	interval = typeutil.Duration{Duration: 0}
-	suite.setMinResolvedTSPersistenceInterval(interval)
-	suite.checkMinResolvedTS(re, &minResolvedTS{
-		MinResolvedTS:   ts,
+	suite.setMinWatermarkPersistenceInterval(interval)
+	suite.checkMinWatermark(re, &minWatermark{
+		MinWatermark:   ts,
 		IsRealTime:      false,
 		PersistInterval: interval,
 	})
-	suite.setAllStoresMinResolvedTS(ts)
-	suite.checkMinResolvedTS(re, &minResolvedTS{
-		MinResolvedTS:   ts, // last persist value
+	suite.setAllStoresMinWatermark(ts)
+	suite.checkMinWatermark(re, &minWatermark{
+		MinWatermark:   ts, // last persist value
 		IsRealTime:      false,
 		PersistInterval: interval,
 	})
 }
 
-func (suite *minResolvedTSTestSuite) TestMinResolvedTSByStores() {
+func (suite *minWatermarkTestSuite) TestMinWatermarkByStores() {
 	re := suite.Require()
 	// run job.
 	interval := typeutil.Duration{Duration: suite.defaultInterval}
-	suite.setMinResolvedTSPersistenceInterval(interval)
+	suite.setMinWatermarkPersistenceInterval(interval)
 	suite.Eventually(func() bool {
-		return interval == suite.svr.GetRaftCluster().GetPDServerConfig().MinResolvedTSPersistenceInterval
+		return interval == suite.svr.GetRaftCluster().GetPDServerConfig().MinWatermarkPersistenceInterval
 	}, time.Second*10, time.Millisecond*20)
-	// set min resolved ts.
+	// set min watermark.
 	rc := suite.svr.GetRaftCluster()
 	ts := uint64(233)
 
@@ -141,71 +141,71 @@ func (suite *minResolvedTSTestSuite) TestMinResolvedTSByStores() {
 		storeID := uint64(i)
 		testTS := ts + storeID
 		testMap[storeID] = testTS
-		rc.SetMinResolvedTS(storeID, testTS)
+		rc.SetMinWatermark(storeID, testTS)
 
 		testStoresID = append(testStoresID, strconv.Itoa(i))
 	}
-	suite.checkMinResolvedTSByStores(re, &minResolvedTS{
-		MinResolvedTS:       234,
+	suite.checkMinWatermarkByStores(re, &minWatermark{
+		MinWatermark:       234,
 		IsRealTime:          true,
 		PersistInterval:     interval,
-		StoresMinResolvedTS: testMap,
+		StoresMinWatermark: testMap,
 	}, "cluster")
 
-	// set all stores min resolved ts.
+	// set all stores min watermark.
 	testStoresIDStr := strings.Join(testStoresID, ",")
-	suite.checkMinResolvedTSByStores(re, &minResolvedTS{
-		MinResolvedTS:       234,
+	suite.checkMinWatermarkByStores(re, &minWatermark{
+		MinWatermark:       234,
 		IsRealTime:          true,
 		PersistInterval:     interval,
-		StoresMinResolvedTS: testMap,
+		StoresMinWatermark: testMap,
 	}, testStoresIDStr)
 
 	// remove last store for test.
 	testStoresID = testStoresID[:len(testStoresID)-1]
 	testStoresIDStr = strings.Join(testStoresID, ",")
 	delete(testMap, uint64(suite.storesNum))
-	suite.checkMinResolvedTSByStores(re, &minResolvedTS{
-		MinResolvedTS:       234,
+	suite.checkMinWatermarkByStores(re, &minWatermark{
+		MinWatermark:       234,
 		IsRealTime:          true,
 		PersistInterval:     interval,
-		StoresMinResolvedTS: testMap,
+		StoresMinWatermark: testMap,
 	}, testStoresIDStr)
 }
 
-func (suite *minResolvedTSTestSuite) setMinResolvedTSPersistenceInterval(duration typeutil.Duration) {
+func (suite *minWatermarkTestSuite) setMinWatermarkPersistenceInterval(duration typeutil.Duration) {
 	cfg := suite.svr.GetRaftCluster().GetPDServerConfig().Clone()
-	cfg.MinResolvedTSPersistenceInterval = duration
+	cfg.MinWatermarkPersistenceInterval = duration
 	suite.svr.GetRaftCluster().SetPDServerConfig(cfg)
 }
 
-func (suite *minResolvedTSTestSuite) setAllStoresMinResolvedTS(ts uint64) {
+func (suite *minWatermarkTestSuite) setAllStoresMinWatermark(ts uint64) {
 	rc := suite.svr.GetRaftCluster()
 	for i := 1; i <= suite.storesNum; i++ {
-		rc.SetMinResolvedTS(uint64(i), ts)
+		rc.SetMinWatermark(uint64(i), ts)
 	}
 }
 
-func (suite *minResolvedTSTestSuite) checkMinResolvedTS(re *require.Assertions, expect *minResolvedTS) {
+func (suite *minWatermarkTestSuite) checkMinWatermark(re *require.Assertions, expect *minWatermark) {
 	suite.Eventually(func() bool {
 		res, err := testDialClient.Get(suite.url)
 		re.NoError(err)
 		defer res.Body.Close()
-		listResp := &minResolvedTS{}
+		listResp := &minWatermark{}
 		err = apiutil.ReadJSON(res.Body, listResp)
 		re.NoError(err)
-		re.Nil(listResp.StoresMinResolvedTS)
+		re.Nil(listResp.StoresMinWatermark)
 		return reflect.DeepEqual(expect, listResp)
 	}, time.Second*10, time.Millisecond*20)
 }
 
-func (suite *minResolvedTSTestSuite) checkMinResolvedTSByStores(re *require.Assertions, expect *minResolvedTS, scope string) {
+func (suite *minWatermarkTestSuite) checkMinWatermarkByStores(re *require.Assertions, expect *minWatermark, scope string) {
 	suite.Eventually(func() bool {
 		url := fmt.Sprintf("%s?scope=%s", suite.url, scope)
 		res, err := testDialClient.Get(url)
 		re.NoError(err)
 		defer res.Body.Close()
-		listResp := &minResolvedTS{}
+		listResp := &minWatermark{}
 		err = apiutil.ReadJSON(res.Body, listResp)
 		re.NoError(err)
 		return reflect.DeepEqual(expect, listResp)

@@ -68,9 +68,9 @@ import (
 )
 
 var (
-	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
-	// If interval in config is zero, it means not to persist resolved ts and check config with this DefaultMinResolvedTSPersistenceInterval
-	DefaultMinResolvedTSPersistenceInterval = config.DefaultMinResolvedTSPersistenceInterval
+	// DefaultMinWatermarkPersistenceInterval is the default value of min watermark persistence interval.
+	// If interval in config is zero, it means not to persist watermark and check config with this DefaultMinWatermarkPersistenceInterval
+	DefaultMinWatermarkPersistenceInterval = config.DefaultMinWatermarkPersistenceInterval
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
@@ -143,7 +143,7 @@ type RaftCluster struct {
 	isAPIServiceMode bool
 	meta             *metapb.Cluster
 	storage          storage.Storage
-	minResolvedTS    uint64
+	minWatermark    uint64
 	externalTS       uint64
 
 	// Keep the previous store limit settings when removing a store.
@@ -341,7 +341,7 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.runNodeStateCheckJob()
 	go c.syncRegions()
 	go c.runReplicationMode()
-	go c.runMinResolvedTSJob()
+	go c.runMinWatermarkJob()
 	go c.runStoreConfigSync()
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
@@ -2235,8 +2235,8 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	log.Error("persist store limit meet error", errs.ZapError(err))
 }
 
-// SetMinResolvedTS sets up a store with min resolved ts.
-func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
+// SetMinWatermark sets up a store with min watermark.
+func (c *RaftCluster) SetMinWatermark(storeID, minWatermark uint64) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -2245,117 +2245,117 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-	newStore := store.Clone(core.SetMinResolvedTS(minResolvedTS))
+	newStore := store.Clone(core.SetMinWatermark(minWatermark))
 	c.core.PutStore(newStore)
 	return nil
 }
 
-// CheckAndUpdateMinResolvedTS checks and updates the min resolved ts of the cluster.
+// CheckAndUpdateMinWatermark checks and updates the min watermark of the cluster.
 // This is exported for testing purpose.
-func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
+func (c *RaftCluster) CheckAndUpdateMinWatermark() (uint64, bool) {
 	c.Lock()
 	defer c.Unlock()
 
 	if !c.isInitialized() {
 		return math.MaxUint64, false
 	}
-	curMinResolvedTS := uint64(math.MaxUint64)
+	curMinWatermark := uint64(math.MaxUint64)
 	for _, s := range c.GetStores() {
-		if !core.IsAvailableForMinResolvedTS(s) {
+		if !core.IsAvailableForMinWatermark(s) {
 			continue
 		}
-		if curMinResolvedTS > s.GetMinResolvedTS() {
-			curMinResolvedTS = s.GetMinResolvedTS()
+		if curMinWatermark > s.GetMinWatermark() {
+			curMinWatermark = s.GetMinWatermark()
 		}
 	}
-	if curMinResolvedTS == math.MaxUint64 || curMinResolvedTS <= c.minResolvedTS {
-		return c.minResolvedTS, false
+	if curMinWatermark == math.MaxUint64 || curMinWatermark <= c.minWatermark {
+		return c.minWatermark, false
 	}
-	c.minResolvedTS = curMinResolvedTS
-	return c.minResolvedTS, true
+	c.minWatermark = curMinWatermark
+	return c.minWatermark, true
 }
 
-func (c *RaftCluster) runMinResolvedTSJob() {
+func (c *RaftCluster) runMinWatermarkJob() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	interval := c.opt.GetMinResolvedTSPersistenceInterval()
+	interval := c.opt.GetMinWatermarkPersistenceInterval()
 	if interval == 0 {
-		interval = DefaultMinResolvedTSPersistenceInterval
+		interval = DefaultMinWatermarkPersistenceInterval
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	c.loadMinResolvedTS()
+	c.loadMinWatermark()
 	for {
 		select {
 		case <-c.ctx.Done():
-			log.Info("min resolved ts background jobs has been stopped")
+			log.Info("min watermark background jobs has been stopped")
 			return
 		case <-ticker.C:
-			interval = c.opt.GetMinResolvedTSPersistenceInterval()
+			interval = c.opt.GetMinWatermarkPersistenceInterval()
 			if interval != 0 {
-				if current, needPersist := c.CheckAndUpdateMinResolvedTS(); needPersist {
-					c.storage.SaveMinResolvedTS(current)
+				if current, needPersist := c.CheckAndUpdateMinWatermark(); needPersist {
+					c.storage.SaveMinWatermark(current)
 				}
 			} else {
-				// If interval in config is zero, it means not to persist resolved ts and check config with this interval
-				interval = DefaultMinResolvedTSPersistenceInterval
+				// If interval in config is zero, it means not to persist watermark and check config with this interval
+				interval = DefaultMinWatermarkPersistenceInterval
 			}
 			ticker.Reset(interval)
 		}
 	}
 }
 
-func (c *RaftCluster) loadMinResolvedTS() {
+func (c *RaftCluster) loadMinWatermark() {
 	// Use `c.GetStorage()` here to prevent from the data race in test.
-	minResolvedTS, err := c.GetStorage().LoadMinResolvedTS()
+	minWatermark, err := c.GetStorage().LoadMinWatermark()
 	if err != nil {
-		log.Error("load min resolved ts meet error", errs.ZapError(err))
+		log.Error("load min watermark meet error", errs.ZapError(err))
 		return
 	}
 	c.Lock()
 	defer c.Unlock()
-	c.minResolvedTS = minResolvedTS
+	c.minWatermark = minWatermark
 }
 
-// GetMinResolvedTS returns the min resolved ts of the cluster.
-func (c *RaftCluster) GetMinResolvedTS() uint64 {
+// GetMinWatermark returns the min watermark of the cluster.
+func (c *RaftCluster) GetMinWatermark() uint64 {
 	c.RLock()
 	defer c.RUnlock()
 	if !c.isInitialized() {
 		return math.MaxUint64
 	}
-	return c.minResolvedTS
+	return c.minWatermark
 }
 
-// GetStoreMinResolvedTS returns the min resolved ts of the store.
-func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
+// GetStoreMinWatermark returns the min watermark of the store.
+func (c *RaftCluster) GetStoreMinWatermark(storeID uint64) uint64 {
 	c.RLock()
 	defer c.RUnlock()
 	store := c.GetStore(storeID)
 	if store == nil {
 		return math.MaxUint64
 	}
-	if !c.isInitialized() || !core.IsAvailableForMinResolvedTS(store) {
+	if !c.isInitialized() || !core.IsAvailableForMinWatermark(store) {
 		return math.MaxUint64
 	}
-	return store.GetMinResolvedTS()
+	return store.GetMinWatermark()
 }
 
-// GetMinResolvedTSByStoreIDs returns the min_resolved_ts for each store
+// GetMinWatermarkByStoreIDs returns the min_resolved_ts for each store
 // and returns the min_resolved_ts for all given store lists.
-func (c *RaftCluster) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, map[uint64]uint64) {
-	minResolvedTS := uint64(math.MaxUint64)
-	storesMinResolvedTS := make(map[uint64]uint64)
+func (c *RaftCluster) GetMinWatermarkByStoreIDs(ids []uint64) (uint64, map[uint64]uint64) {
+	minWatermark := uint64(math.MaxUint64)
+	storesMinWatermark := make(map[uint64]uint64)
 	for _, storeID := range ids {
-		storeTS := c.GetStoreMinResolvedTS(storeID)
-		storesMinResolvedTS[storeID] = storeTS
-		if minResolvedTS > storeTS {
-			minResolvedTS = storeTS
+		storeTS := c.GetStoreMinWatermark(storeID)
+		storesMinWatermark[storeID] = storeTS
+		if minWatermark > storeTS {
+			minWatermark = storeTS
 		}
 	}
-	return minResolvedTS, storesMinResolvedTS
+	return minWatermark, storesMinWatermark
 }
 
 // GetExternalTS returns the external timestamp.

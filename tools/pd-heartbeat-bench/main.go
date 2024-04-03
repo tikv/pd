@@ -526,8 +526,8 @@ func main() {
 	}
 	var heartbeatTicker = time.NewTicker(regionReportInterval * time.Second)
 	defer heartbeatTicker.Stop()
-	var resolvedTSTicker = time.NewTicker(time.Second)
-	defer resolvedTSTicker.Stop()
+	var watermarkTicker = time.NewTicker(time.Second)
+	defer watermarkTicker.Stop()
 	for {
 		select {
 		case <-heartbeatTicker.C:
@@ -561,7 +561,7 @@ func main() {
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 			regions.update(cfg, options)
 			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
-		case <-resolvedTSTicker.C:
+		case <-watermarkTicker.C:
 			wg := &sync.WaitGroup{}
 			for i := 1; i <= cfg.StoreCount; i++ {
 				id := uint64(i)
@@ -569,13 +569,13 @@ func main() {
 				go func(wg *sync.WaitGroup, id uint64) {
 					defer wg.Done()
 					cli := clis[id]
-					_, err := cli.ReportMinResolvedTS(ctx, &pdpb.ReportMinResolvedTsRequest{
+					_, err := cli.ReportMinWatermark(ctx, &pdpb.ReportMinWatermarkRequest{
 						Header:        header,
 						StoreId:       id,
-						MinResolvedTs: uint64(time.Now().Unix()),
+						MinWatermark: uint64(time.Now().Unix()),
 					})
 					if err != nil {
-						log.Error("send resolved TS error", zap.Uint64("store-id", id), zap.Error(err))
+						log.Error("send watermark error", zap.Uint64("store-id", id), zap.Error(err))
 						return
 					}
 				}(wg, id)

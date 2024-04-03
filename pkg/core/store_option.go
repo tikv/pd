@@ -239,10 +239,10 @@ func SetNewStoreStats(stats *pdpb.StoreStats) StoreCreateOption {
 	}
 }
 
-// SetMinResolvedTS sets min resolved ts for the store.
-func SetMinResolvedTS(minResolvedTS uint64) StoreCreateOption {
+// SetMinWatermark sets min watermark for the store.
+func SetMinWatermark(minWatermark uint64) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.minResolvedTS = minResolvedTS
+		store.minWatermark = minWatermark
 	}
 }
 
