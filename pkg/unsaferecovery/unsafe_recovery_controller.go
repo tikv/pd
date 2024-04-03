@@ -781,7 +781,7 @@ func (r *regionItem) IsRaftStale(origin *regionItem, u *Controller) bool {
 		func(a, b *regionItem) int {
 			return int(a.report.GetRaftState().GetHardState().GetTerm()) - int(b.report.GetRaftState().GetHardState().GetTerm())
 		},
-		// choose the peer has maximum applied_index or last index.
+		// choose the peer has maximum applied index or last index.
 		func(a, b *regionItem) int {
 			maxIdxA := typeutil.MaxUint64(a.report.GetRaftState().GetLastIndex(), a.report.AppliedIndex)
 			maxIdxB := typeutil.MaxUint64(b.report.GetRaftState().GetLastIndex(), b.report.AppliedIndex)
