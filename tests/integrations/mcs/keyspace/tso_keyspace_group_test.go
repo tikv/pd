@@ -89,9 +89,15 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	re := suite.Require()
 	// add three nodes.
 	nodes := make(map[string]bs.Server)
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount+1; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup() // nolint
+		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
 	tests.WaitForPrimaryServing(re, nodes)
@@ -139,9 +145,15 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	re := suite.Require()
 	nodes := make(map[string]bs.Server)
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup() // nolint
+		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
 	tests.WaitForPrimaryServing(re, nodes)
@@ -233,9 +245,15 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 	re := suite.Require()
 	nodes := make(map[string]bs.Server)
 	nodesList := []string{}
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup() // nolint
+		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 		nodesList = append(nodesList, s.GetAddr())
 	}
@@ -294,9 +312,15 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	re := suite.Require()
 	nodes := make(map[string]bs.Server)
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-		defer cleanup() // nolint
+		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
 	tests.WaitForPrimaryServing(re, nodes)

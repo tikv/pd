@@ -96,11 +96,6 @@ func (suite *operatorTestSuite) TestOperatorStep() {
 	re.True(RemovePeer{FromStore: 3}.IsFinish(region))
 }
 
-// nolint
-func newTestOperator(regionID uint64, kind OpKind, steps ...OpStep) *Operator {
-	return NewTestOperator(regionID, &metapb.RegionEpoch{}, kind, steps...)
-}
-
 func checkSteps(re *require.Assertions, op *Operator, steps []OpStep) {
 	re.Len(steps, op.Len())
 	for i := range steps {
@@ -117,7 +112,7 @@ func (suite *operatorTestSuite) TestOperator() {
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := newTestOperator(1, OpAdmin|OpLeader|OpRegion, steps...)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpLeader|OpRegion, steps...)
 	re.Equal(constant.Urgent, op.GetPriorityLevel())
 	checkSteps(re, op, steps)
 	op.Start()
@@ -133,7 +128,7 @@ func (suite *operatorTestSuite) TestOperator() {
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
-	op = newTestOperator(1, OpLeader|OpRegion, steps...)
+	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 	re.Equal(constant.Medium, op.GetPriorityLevel())
 	checkSteps(re, op, steps)
 	op.Start()
@@ -150,7 +145,7 @@ func (suite *operatorTestSuite) TestOperator() {
 
 	// check short timeout for transfer leader only operators.
 	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
-	op = newTestOperator(1, OpLeader, steps...)
+	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, steps...)
 	op.Start()
 	re.False(op.CheckTimeout())
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
@@ -310,7 +305,7 @@ func (suite *operatorTestSuite) TestCheckSuccess() {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
-		op := newTestOperator(1, OpLeader|OpRegion, steps...)
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.Equal(CREATED, op.Status())
 		re.False(op.CheckSuccess())
 		re.True(op.Start())
@@ -325,7 +320,7 @@ func (suite *operatorTestSuite) TestCheckSuccess() {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
-		op := newTestOperator(1, OpLeader|OpRegion, steps...)
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		op.currentStep = int32(len(op.steps))
 		re.Equal(CREATED, op.Status())
 		re.False(op.CheckSuccess())
@@ -343,7 +338,7 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
-		op := newTestOperator(1, OpLeader|OpRegion, steps...)
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.Equal(CREATED, op.Status())
 		re.True(op.Start())
 		op.currentStep = int32(len(op.steps))
@@ -356,7 +351,7 @@ func (suite *operatorTestSuite) TestCheckTimeout() {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
-		op := newTestOperator(1, OpLeader|OpRegion, steps...)
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.Equal(CREATED, op.Status())
 		re.True(op.Start())
 		op.currentStep = int32(len(op.steps))
@@ -373,7 +368,7 @@ func (suite *operatorTestSuite) TestStart() {
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
-	op := newTestOperator(1, OpLeader|OpRegion, steps...)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 	re.Equal(0, op.GetStartTime().Nanosecond())
 	re.Equal(CREATED, op.Status())
 	re.True(op.Start())
@@ -388,7 +383,7 @@ func (suite *operatorTestSuite) TestCheckExpired() {
 		TransferLeader{FromStore: 2, ToStore: 1},
 		RemovePeer{FromStore: 2},
 	}
-	op := newTestOperator(1, OpLeader|OpRegion, steps...)
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 	re.False(op.CheckExpired())
 	re.Equal(CREATED, op.Status())
 	op.SetStatusReachTime(CREATED, time.Now().Add(-OperatorExpireTime))
@@ -405,7 +400,7 @@ func (suite *operatorTestSuite) TestCheck() {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
-		op := newTestOperator(2, OpLeader|OpRegion, steps...)
+		op := NewTestOperator(2, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.True(op.Start())
 		re.NotNil(op.Check(region))
 
@@ -422,7 +417,7 @@ func (suite *operatorTestSuite) TestCheck() {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
-		op := newTestOperator(1, OpLeader|OpRegion, steps...)
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.True(op.Start())
 		re.NotNil(op.Check(region))
 		re.Equal(STARTED, op.Status())
@@ -437,7 +432,7 @@ func (suite *operatorTestSuite) TestCheck() {
 			TransferLeader{FromStore: 2, ToStore: 1},
 			RemovePeer{FromStore: 2},
 		}
-		op := newTestOperator(1, OpLeader|OpRegion, steps...)
+		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 		re.True(op.Start())
 		re.NotNil(op.Check(region))
 		re.Equal(STARTED, op.Status())
@@ -455,28 +450,28 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 		expect OpKind
 	}{
 		{
-			op:     newTestOperator(1, OpAdmin|OpMerge|OpRegion),
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpMerge|OpRegion),
 			expect: OpAdmin,
 		}, {
-			op:     newTestOperator(1, OpMerge|OpLeader|OpRegion),
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpMerge|OpLeader|OpRegion),
 			expect: OpMerge,
 		}, {
-			op:     newTestOperator(1, OpReplica|OpRegion),
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpReplica|OpRegion),
 			expect: OpReplica,
 		}, {
-			op:     newTestOperator(1, OpSplit|OpRegion),
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpSplit|OpRegion),
 			expect: OpSplit,
 		}, {
-			op:     newTestOperator(1, OpRange|OpRegion),
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpRange|OpRegion),
 			expect: OpRange,
 		}, {
-			op:     newTestOperator(1, OpHotRegion|OpLeader|OpRegion),
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpHotRegion|OpLeader|OpRegion),
 			expect: OpHotRegion,
 		}, {
-			op:     newTestOperator(1, OpRegion|OpLeader),
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion|OpLeader),
 			expect: OpRegion,
 		}, {
-			op:     newTestOperator(1, OpLeader),
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
 			expect: OpLeader,
 		},
 	}
@@ -535,7 +530,7 @@ func (suite *operatorTestSuite) TestOpStepTimeout() {
 
 func (suite *operatorTestSuite) TestRecord() {
 	re := suite.Require()
-	operator := newTestOperator(1, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
+	operator := NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, AddLearner{ToStore: 1, PeerID: 1}, RemovePeer{FromStore: 1, PeerID: 1})
 	now := time.Now()
 	time.Sleep(time.Second)
 	ob := operator.Record(now)
@@ -549,7 +544,7 @@ func (suite *operatorTestSuite) TestToJSONObject() {
 		TransferLeader{FromStore: 3, ToStore: 1},
 		RemovePeer{FromStore: 3},
 	}
-	op := newTestOperator(101, OpLeader|OpRegion, steps...)
+	op := NewTestOperator(101, &metapb.RegionEpoch{}, OpLeader|OpRegion, steps...)
 	op.Start()
 	obj := op.ToJSONObject()
 	suite.Equal("test", obj.Desc)
@@ -568,7 +563,7 @@ func (suite *operatorTestSuite) TestToJSONObject() {
 
 	// Test TIMEOUT status.
 	steps = []OpStep{TransferLeader{FromStore: 2, ToStore: 1}}
-	op = newTestOperator(1, OpLeader, steps...)
+	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader, steps...)
 	op.Start()
 	op.SetStatusReachTime(STARTED, op.GetStartTime().Add(-FastStepWaitTime-time.Second))
 	suite.True(op.CheckTimeout())

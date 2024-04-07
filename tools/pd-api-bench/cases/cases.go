@@ -37,6 +37,8 @@ var (
 	storesID    []uint64
 )
 
+const defaultKeyLen = 56
+
 // InitCluster initializes the cluster.
 func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) error {
 	statsResp, err := httpCli.GetRegionStatusByKeyRange(ctx, pdHttp.NewKeyRange([]byte(""), []byte("")), false)
@@ -221,7 +223,7 @@ func (c *regionsStats) Do(ctx context.Context, cli pdHttp.Client) error {
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
 	regionStats, err := cli.GetRegionStatusByKeyRange(ctx,
-		pdHttp.NewKeyRange(generateKeyForSimulator(startID, 56), generateKeyForSimulator(endID, 56)), false)
+		pdHttp.NewKeyRange(generateKeyForSimulator(startID), generateKeyForSimulator(endID)), false)
 	if Debug {
 		log.Info("do HTTP case", zap.String("case", c.name), zap.Any("region-stats", regionStats), zap.Error(err))
 	}
@@ -297,7 +299,7 @@ func newGetRegion() func() GRPCCase {
 
 func (*getRegion) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
-	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id))
 	if err != nil {
 		return err
 	}
@@ -321,7 +323,7 @@ func newGetRegionEnableFollower() func() GRPCCase {
 
 func (*getRegionEnableFollower) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
-	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56), pd.WithAllowFollowerHandle())
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), pd.WithAllowFollowerHandle())
 	if err != nil {
 		return err
 	}
@@ -350,7 +352,7 @@ func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
-	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID, 56), generateKeyForSimulator(endID, 56), c.regionSample)
+	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID), generateKeyForSimulator(endID), c.regionSample)
 	if err != nil {
 		return err
 	}
@@ -427,9 +429,8 @@ func (*getStores) Unary(ctx context.Context, cli pd.Client) error {
 	return nil
 }
 
-// nolint
-func generateKeyForSimulator(id int, keyLen int) []byte {
-	k := make([]byte, keyLen)
+func generateKeyForSimulator(id int) []byte {
+	k := make([]byte, defaultKeyLen)
 	copy(k, fmt.Sprintf("%010d", id))
 	return k
 }

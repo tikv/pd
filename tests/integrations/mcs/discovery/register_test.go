@@ -124,9 +124,15 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	re.Empty(primary)
 
 	serverMap := make(map[string]bs.Server)
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
 	for i := 0; i < serverNum; i++ {
 		s, cleanup := suite.addServer(serviceName)
-		defer cleanup() // nolint
+		cleanups = append(cleanups, cleanup)
 		serverMap[s.GetAddr()] = s
 	}
 

@@ -345,17 +345,23 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	re.NoError(err)
-	respCh := make(chan *http.Response)
+	doneCh := make(chan struct{})
 	go func() {
-		resp, err := testDialClient.Do(req) // nolint:bodyclose
+		resp, err := testDialClient.Do(req)
+		defer func() {
+			if resp != nil {
+				resp.Body.Close()
+			}
+		}()
 		re.Error(err)
 		re.Contains(err.Error(), "context canceled")
-		respCh <- resp
+		re.Nil(resp)
+		doneCh <- struct{}{}
 	}()
 	time.Sleep(100 * time.Millisecond) // wait for the request to be sent
-	cancel()                           // close the request
-	resp := <-respCh
-	re.Nil(resp)
+	cancel()
+	<-doneCh
+	close(doneCh)
 }
 
 type getRegionTestSuite struct {

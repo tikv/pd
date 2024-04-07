@@ -1928,9 +1928,9 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		cli := forwardCli.getClient()
 		if cli != nil {
 			var regionsID []uint64
-			// nolint
+			// nolint:staticcheck
 			if request.GetRegionId() != 0 {
-				// nolint
+				// nolint:staticcheck
 				regionsID = []uint64{request.GetRegionId()}
 			} else {
 				regionsID = request.GetRegionsId()
@@ -1986,11 +1986,10 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		}, nil
 	}
 	// TODO: Deprecate it use `request.GetRegionsID`.
-	//nolint
+	// nolint:staticcheck
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
-			//nolint
 			return &pdpb.ScatterRegionResponse{
 				Header: s.wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 					"region %d not found"),
