@@ -112,8 +112,7 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if rmc == nil {
 		return
 	}
-	rmc.RequestUnit.Adjust(meta)
-
+	rmc.RequestUnit.Adjust(meta.Child("request-unit"))
 	if !meta.IsDefined("degraded-mode-wait-duration") {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
 	}
