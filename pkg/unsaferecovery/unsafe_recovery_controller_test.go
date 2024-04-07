@@ -1856,3 +1856,105 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 func getTestDeployPath(storeID uint64) string {
 	return fmt.Sprintf("test/store%d", storeID)
 }
+
+func TestSelectLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(ctx, opts)
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator.Run()
+	stores := newTestStores(6, "6.0.0")
+	labels := []*metapb.StoreLabel{
+		{
+			Key:   core.EngineKey,
+			Value: core.EngineTiFlash,
+		},
+	}
+	stores[5].IsTiFlash()
+	core.SetStoreLabels(labels)(stores[5])
+	for _, store := range stores {
+		cluster.PutStore(store)
+	}
+	recoveryController := NewController(cluster)
+
+	cases := []struct {
+		peers    []*regionItem
+		leaderID uint64
+	}{
+		{
+			peers: []*regionItem{
+				newPeer(1, 1, 10, 5, 4),
+				newPeer(2, 2, 9, 9, 8),
+			},
+			leaderID: 2,
+		},
+		{
+			peers: []*regionItem{
+				newPeer(1, 1, 10, 10, 9),
+				newPeer(2, 1, 8, 8, 15),
+				newPeer(3, 1, 12, 11, 11),
+			},
+			leaderID: 2,
+		},
+		{
+			peers: []*regionItem{
+				newPeer(1, 1, 9, 9, 11),
+				newPeer(2, 1, 10, 8, 7),
+				newPeer(3, 1, 11, 7, 6),
+			},
+			leaderID: 3,
+		},
+		{
+			peers: []*regionItem{
+				newPeer(1, 1, 11, 11, 8),
+				newPeer(2, 1, 11, 10, 10),
+				newPeer(3, 1, 11, 9, 8),
+			},
+			leaderID: 1,
+		},
+		{
+			peers: []*regionItem{
+				newPeer(6, 1, 11, 11, 9),
+				newPeer(1, 1, 11, 11, 8),
+				newPeer(2, 1, 11, 10, 10),
+				newPeer(3, 1, 11, 9, 8),
+			},
+			leaderID: 1,
+		},
+	}
+
+	for i, c := range cases {
+		peersMap := map[uint64][]*regionItem{
+			1: c.peers,
+		}
+		region := &metapb.Region{
+			Id: 1,
+		}
+		leader := recoveryController.selectLeader(peersMap, region)
+		re.Equal(leader.Region().Id, c.leaderID, "case: %d", i)
+	}
+}
+
+func newPeer(storeID, term, lastIndex, committedIndex, appliedIndex uint64) *regionItem {
+	return &regionItem{
+		storeID: storeID,
+		report: &pdpb.PeerReport{
+			RaftState: &raft_serverpb.RaftLocalState{
+				HardState: &eraftpb.HardState{
+					Term:   term,
+					Commit: committedIndex,
+				},
+				LastIndex: lastIndex,
+			},
+			RegionState: &raft_serverpb.RegionLocalState{
+				Region: &metapb.Region{
+					Id: storeID,
+				},
+			},
+			AppliedIndex: appliedIndex,
+		},
+	}
+}
