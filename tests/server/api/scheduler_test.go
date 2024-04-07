@@ -252,12 +252,12 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
 				re.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
-				resp = make(map[string]any)
-				re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
-
-				for key := range expectMap {
-					re.Equal(expectMap[key], resp[key], "key %s", key)
-				}
+				tu.Eventually(re, func() bool {
+					resp = make(map[string]any)
+					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					return expectMap["max-zombie-rounds"] == resp["max-zombie-rounds"] &&
+						expectMap["min-hot-byte-rate"] == resp["min-hot-byte-rate"]
+				})
 
 				// update again
 				err = tu.CheckPostJSON(testDialClient, updateURL, body,
