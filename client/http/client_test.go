@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 	"go.uber.org/atomic"
 )
@@ -49,7 +50,7 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re.Equal(2, checked)
 }
 
-func TestCallerID(t *testing.T) {
+func TestWithCallerID(t *testing.T) {
 	re := require.New(t)
 	checked := 0
 	expectedVal := atomic.NewString(defaultCallerID)
@@ -95,4 +96,17 @@ func TestWithBackoffer(t *testing.T) {
 	_, err = c.WithBackoffer(bo).GetPDVersion(timeoutCtx)
 	re.InDelta(3*time.Second, time.Since(start), float64(250*time.Millisecond))
 	re.ErrorIs(err, context.DeadlineExceeded)
+}
+
+func TestWithTargetURL(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := newClientWithMockServiceDiscovery("test-with-target-url", []string{"http://127.0.0.1", "http://127.0.0.2", "http://127.0.0.3"})
+	defer c.Close()
+
+	_, err := c.WithTargetURL("http://127.0.0.4").GetStatus(ctx)
+	re.ErrorIs(err, errs.ErrClientNoTargetMember)
+	_, err = c.WithTargetURL("http://127.0.0.2").GetStatus(ctx)
+	re.ErrorContains(err, "connect: connection refused")
 }

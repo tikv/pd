@@ -98,7 +98,12 @@ type Client interface {
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
-	UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error
+
+	// UpdateKeyspaceGCManagementType update the `gc_management_type` in keyspace meta config.
+	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a global gc worker to calculate a global gc safe point.
+	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
 	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 
 	/* Client-related methods */
@@ -111,6 +116,8 @@ type Client interface {
 	WithRespHandler(func(resp *http.Response, res any) error) Client
 	// WithBackoffer sets and returns a new client with the given backoffer.
 	WithBackoffer(*retry.Backoffer) Client
+	// WithTargetURL sets and returns a new client with the given target URL.
+	WithTargetURL(string) Client
 	// Close gracefully closes the HTTP client.
 	Close()
 }
@@ -467,7 +474,8 @@ func (c *client) GetStatus(ctx context.Context) (*State, error) {
 		WithName(getStatusName).
 		WithURI(Status).
 		WithMethod(http.MethodGet).
-		WithResp(&status))
+		WithResp(&status),
+		WithAllowFollowerHandle())
 	if err != nil {
 		return nil, err
 	}
@@ -921,14 +929,14 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithMethod(http.MethodDelete))
 }
 
-// UpdateKeyspaceSafePointVersion patches the keyspace config.
-func (c *client) UpdateKeyspaceSafePointVersion(ctx context.Context, keyspaceName string, keyspaceSafePointVersion *KeyspaceSafePointVersionConfig) error {
-	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceSafePointVersion)
+// UpdateKeyspaceGCManagementType patches the keyspace config.
+func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
+	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceGCmanagementType)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName(UpdateKeyspaceSafePointVersionName).
+		WithName(UpdateKeyspaceGCManagementTypeName).
 		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
 		WithMethod(http.MethodPatch).
 		WithBody(keyspaceConfigPatchJSON))
