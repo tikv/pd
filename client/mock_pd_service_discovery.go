@@ -41,7 +41,7 @@ func NewMockPDServiceDiscovery(urls []string, tlsCfg *tls.Config) *mockPDService
 func (m *mockPDServiceDiscovery) Init() error {
 	m.clients = make([]ServiceClient, 0, len(m.urls))
 	for _, url := range m.urls {
-		m.clients = append(m.clients, newPDServiceClient(url, url, nil, false))
+		m.clients = append(m.clients, newPDServiceClient(url, m.urls[0], nil, false))
 	}
 	return nil
 }
