@@ -35,7 +35,7 @@ test: failpoint-enable
 	$(MAKE) failpoint-disable
 
 ci-test-job:
-	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=$(ROOT_PATH)/...
+	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=$(ROOT_PATH)/...
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools

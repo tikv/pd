@@ -33,6 +33,10 @@ tidy:
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
+test: failpoint-enable
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
+
 ci-test-job:
 	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
 
