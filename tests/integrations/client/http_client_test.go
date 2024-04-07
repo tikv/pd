@@ -86,6 +86,7 @@ func (suite *httpClientTestSuite) SetupSuite() {
 		leader := cluster.WaitLeader()
 		re.NotEmpty(leader)
 		leaderServer := cluster.GetLeaderServer()
+
 		err = leaderServer.BootstrapCluster()
 		re.NoError(err)
 		for _, region := range []*core.RegionInfo{
@@ -206,6 +207,14 @@ func (suite *httpClientTestSuite) checkMeta(mode mode, client pd.Client) {
 	version, err := client.GetClusterVersion(env.ctx)
 	re.NoError(err)
 	re.Equal("0.0.0", version)
+	rgs, _ := client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
+	re.Equal(int64(0), rgs.Count)
+	rgs, _ = client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
+	re.Equal(int64(2), rgs.Count)
+	rgs, _ = client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte("a2"), []byte("b")), 100)
+	re.Equal(int64(1), rgs.Count)
+	rgs, _ = client.GetRegionsByKeyRange(env.ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
+	re.Equal(int64(2), rgs.Count)
 }
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
@@ -516,6 +525,21 @@ func (suite *httpClientTestSuite) checkConfig(mode mode, client pd.Client) {
 	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
 	re.NoError(err)
 	re.Empty(resp.Kvs)
+
+	// Test the config with TTL for storing float64 as uint64.
+	newConfig = map[string]any{
+		"schedule.max-pending-peer-count": uint64(math.MaxInt32),
+	}
+	err = client.SetConfig(env.ctx, newConfig, 4)
+	re.NoError(err)
+	c := env.cluster.GetLeaderServer().GetRaftCluster().GetOpts().GetMaxPendingPeerCount()
+	re.Equal(uint64(math.MaxInt32), c)
+
+	err = client.SetConfig(env.ctx, newConfig, 0)
+	re.NoError(err)
+	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.max-pending-peer-count")
+	re.NoError(err)
+	re.Empty(resp.Kvs)
 }
 
 func (suite *httpClientTestSuite) TestScheduleConfig() {
@@ -644,6 +668,22 @@ func (suite *httpClientTestSuite) checkVersion(mode mode, client pd.Client) {
 	re.Equal(versioninfo.PDReleaseVersion, ver)
 }
 
+func (suite *httpClientTestSuite) TestStatus() {
+	suite.RunTestInTwoModes(suite.checkStatus)
+}
+
+func (suite *httpClientTestSuite) checkStatus(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	status, err := client.GetStatus(env.ctx)
+	re.NoError(err)
+	re.Equal(versioninfo.PDReleaseVersion, status.Version)
+	re.Equal(versioninfo.PDGitHash, status.GitHash)
+	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
+	re.GreaterOrEqual(time.Now().Unix(), status.StartTimestamp)
+}
+
 func (suite *httpClientTestSuite) TestAdmin() {
 	suite.RunTestInTwoModes(suite.checkAdmin)
 }
@@ -739,7 +779,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	re.Equal(float64(2), out.Counter.GetValue())
 	c.Close()
 
-	leader := sd.GetServingAddr()
+	leader := sd.GetServingURL()
 	httpClient = pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
 		// mock leader success.
 		if !strings.Contains(leader, req.Host) {
@@ -773,4 +813,32 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	failureCnt.Write(&out)
 	re.Equal(float64(3), out.Counter.GetValue())
 	c.Close()
+}
+
+func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
+	suite.RunTestInTwoModes(suite.checkUpdateKeyspaceGCManagementType)
+}
+
+func (suite *httpClientTestSuite) checkUpdateKeyspaceGCManagementType(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	keyspaceName := "DEFAULT"
+	expectGCManagementType := "keyspace_level_gc"
+
+	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
+		Config: pd.KeyspaceGCManagementType{
+			GCManagementType: expectGCManagementType,
+		},
+	}
+	err := client.UpdateKeyspaceGCManagementType(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	re.NoError(err)
+
+	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(env.ctx, keyspaceName)
+	re.NoError(err)
+	val, ok := keyspaceMetaRes.Config["gc_management_type"]
+
+	// Check it can get expect key and value in keyspace meta config.
+	re.True(ok)
+	re.Equal(expectGCManagementType, val)
 }

@@ -217,10 +217,12 @@ func (oc *Controller) pollNeedDispatchRegion() (r *core.RegionInfo, next bool) {
 	if !ok || op == nil {
 		return nil, true
 	}
-	r = oc.cluster.GetRegion(regionID)
-	if r == nil {
+	// Check the operator lightly. It cant't dispatch the op for some scenario.
+	var reason CancelReasonType
+	r, reason = oc.checkOperatorLightly(op)
+	if len(reason) != 0 {
 		_ = oc.removeOperatorLocked(op)
-		if op.Cancel(RegionNotFound) {
+		if op.Cancel(reason) {
 			log.Warn("remove operator because region disappeared",
 				zap.Uint64("region-id", op.RegionID()),
 				zap.Stringer("operator", op))
@@ -301,6 +303,7 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 		if isMerge {
 			// count two merge operators as one, so wopStatus.ops[desc] should
 			// not be updated here
+			// TODO: call checkAddOperator ...
 			i++
 			added++
 			oc.wop.PutOperator(ops[i])
@@ -455,6 +458,27 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 	return reason != Expired, reason
 }
 
+// checkOperatorLightly checks whether the ops can be dispatched in Controller::pollNeedDispatchRegion.
+// The operators can't be dispatched for some scenarios, such as region disappeared, region changed ...
+// `region` is the target region of `op`.
+func (oc *Controller) checkOperatorLightly(op *Operator) (*core.RegionInfo, CancelReasonType) {
+	region := oc.cluster.GetRegion(op.RegionID())
+	if region == nil {
+		operatorCounter.WithLabelValues(op.Desc(), "not-found").Inc()
+		return nil, RegionNotFound
+	}
+
+	// It may be suitable for all kinds of operator but not merge-region.
+	// But to be cautions, it only takes effect on merge-region currently.
+	// If the version of epoch is changed, the region has been splitted or merged, and the key range has been changed.
+	// The changing for conf_version of epoch doesn't modify the region key range, skip it.
+	if (op.Kind()&OpMerge != 0) && region.GetRegionEpoch().GetVersion() > op.RegionEpoch().GetVersion() {
+		operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
+		return nil, EpochNotMatch
+	}
+	return region, ""
+}
+
 func isHigherPriorityOperator(new, old *Operator) bool {
 	return new.GetPriorityLevel() > old.GetPriorityLevel()
 }
@@ -486,6 +510,7 @@ func (oc *Controller) addOperatorLocked(op *Operator) bool {
 		return false
 	}
 	oc.operators[regionID] = op
+	oc.counts[op.SchedulerKind()]++
 	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
 	operatorSizeHist.WithLabelValues(op.Desc()).Observe(float64(op.ApproximateSize))
 	opInfluence := NewTotalOpInfluence([]*Operator{op}, oc.cluster)
@@ -505,7 +530,6 @@ func (oc *Controller) addOperatorLocked(op *Operator) bool {
 			storeLimitCostCounter.WithLabelValues(strconv.FormatUint(storeID, 10), n).Add(float64(stepCost) / float64(storelimit.RegionInfluence[v]))
 		}
 	}
-	oc.updateCounts(oc.operators)
 
 	var step OpStep
 	if region := oc.cluster.GetRegion(op.RegionID()); region != nil {
@@ -560,6 +584,7 @@ func (oc *Controller) removeOperatorsLocked() []*Operator {
 	var removed []*Operator
 	for regionID, op := range oc.operators {
 		delete(oc.operators, regionID)
+		oc.counts[op.SchedulerKind()]--
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
 		if op.Kind()&OpMerge != 0 {
@@ -567,7 +592,6 @@ func (oc *Controller) removeOperatorsLocked() []*Operator {
 		}
 		removed = append(removed, op)
 	}
-	oc.updateCounts(oc.operators)
 	return removed
 }
 
@@ -602,7 +626,7 @@ func (oc *Controller) removeOperatorLocked(op *Operator) bool {
 	regionID := op.RegionID()
 	if cur := oc.operators[regionID]; cur == op {
 		delete(oc.operators, regionID)
-		oc.updateCounts(oc.operators)
+		oc.counts[op.SchedulerKind()]--
 		operatorCounter.WithLabelValues(op.Desc(), "remove").Inc()
 		oc.ack(op)
 		if op.Kind()&OpMerge != 0 {
@@ -783,16 +807,6 @@ func (oc *Controller) GetHistory(start time.Time) []OpHistory {
 	return history
 }
 
-// updateCounts updates resource counts using current pending operators.
-func (oc *Controller) updateCounts(operators map[uint64]*Operator) {
-	for k := range oc.counts {
-		delete(oc.counts, k)
-	}
-	for _, op := range operators {
-		oc.counts[op.SchedulerKind()]++
-	}
-}
-
 // OperatorCount gets the count of operators filtered by kind.
 // kind only has one OpKind.
 func (oc *Controller) OperatorCount(kind OpKind) uint64 {
@@ -862,7 +876,7 @@ func (oc *Controller) SetOperator(op *Operator) {
 	oc.Lock()
 	defer oc.Unlock()
 	oc.operators[op.RegionID()] = op
-	oc.updateCounts(oc.operators)
+	oc.counts[op.SchedulerKind()]++
 }
 
 // OpWithStatus records the operator and its status.

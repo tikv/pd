@@ -140,7 +140,7 @@ func (suite *resourceManagerClientTestSuite) waitLeader(re *require.Assertions, 
 	re.NotNil(innerCli)
 	testutil.Eventually(re, func() bool {
 		innerCli.GetServiceDiscovery().ScheduleCheckMemberChanged()
-		return innerCli.GetServiceDiscovery().GetServingAddr() == leaderAddr
+		return innerCli.GetServiceDiscovery().GetServingURL() == leaderAddr
 	})
 }
 
@@ -679,7 +679,7 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	_, penalty, _, _, err = c.OnRequestWait(suite.ctx, resourceGroupName, req2)
 	re.NoError(err)
 	re.Equal(60.0, penalty.WriteBytes)
-	re.InEpsilon(penalty.TotalCpuTimeMs, 10.0/1000.0/1000.0, 1e-6)
+	re.InEpsilon(10.0/1000.0/1000.0, penalty.TotalCpuTimeMs, 1e-6)
 	_, err = c.OnResponse(resourceGroupName, req2, resp2)
 	re.NoError(err)
 
@@ -1108,7 +1108,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	re.NoError(err)
 	re.Equal(g.RUStats, testConsumption)
 
-	// update resoruce group, ru stats not change
+	// update resource group, ru stats not change
 	g.RUSettings.RU.Settings.FillRate = 12345
 	_, err = cli.ModifyResourceGroup(suite.ctx, g)
 	re.NoError(err)
@@ -1343,6 +1343,7 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_lightning"))
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_ddl"))
 	re.False(c.IsBackgroundRequest(suite.ctx, resourceGroupName, ""))
+	re.False(c.IsBackgroundRequest(suite.ctx, "none", "none"))
 
 	resourceGroupName = enableBackgroundGroup(true)
 	re.True(c.IsBackgroundRequest(suite.ctx, resourceGroupName, "internal_br"))

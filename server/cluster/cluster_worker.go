@@ -34,9 +34,16 @@ import (
 
 // HandleRegionHeartbeat processes RegionInfo reports from client.
 func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
-	if err := c.processRegionHeartbeat(region); err != nil {
+	tracer := core.NewNoopHeartbeatProcessTracer()
+	if c.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
+		tracer = core.NewHeartbeatProcessTracer()
+	}
+	tracer.Begin()
+	if err := c.processRegionHeartbeat(region, tracer); err != nil {
+		tracer.OnAllStageFinished()
 		return err
 	}
+	tracer.OnAllStageFinished()
 
 	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		return nil

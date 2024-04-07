@@ -34,7 +34,7 @@ import (
 func TestLoadRegion(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
-	rs, err := storage.NewStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
 
 	server := &mockServer{
@@ -62,7 +62,7 @@ func TestLoadRegion(t *testing.T) {
 func TestErrorCode(t *testing.T) {
 	re := require.New(t)
 	tempDir := t.TempDir()
-	rs, err := storage.NewStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
 	server := &mockServer{
 		ctx:     context.Background(),
@@ -71,7 +71,7 @@ func TestErrorCode(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.TODO())
 	rc := NewRegionSyncer(server)
-	conn, err := grpcutil.GetClientConn(ctx, "127.0.0.1", nil)
+	conn, err := grpcutil.GetClientConn(ctx, "http://127.0.0.1", nil)
 	re.NoError(err)
 	cancel()
 	_, err = rc.syncRegion(ctx, conn)

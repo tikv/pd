@@ -332,14 +332,15 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	addr := svr.GetAddr()
 	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
 	mustBootstrapCluster(re, svr)
+
 	regionCount := 100000
-	for i := 0; i < regionCount; i++ {
+	tu.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
 			[]byte(fmt.Sprintf("%09d", i+1)),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		mustRegionHeartbeat(re, svr, r)
-	}
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)

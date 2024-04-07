@@ -122,11 +122,11 @@ type ETCDCase interface {
 	Unary(context.Context, *clientv3.Client) error
 }
 
-// ETCDCraeteFn is function type to create ETCDCase.
-type ETCDCraeteFn func() ETCDCase
+// ETCDCreateFn is function type to create ETCDCase.
+type ETCDCreateFn func() ETCDCase
 
 // ETCDCaseFnMap is the map for all ETCD case creation function.
-var ETCDCaseFnMap = map[string]ETCDCraeteFn{
+var ETCDCaseFnMap = map[string]ETCDCreateFn{
 	"Get":    newGetKV(),
 	"Put":    newPutKV(),
 	"Delete": newDeleteKV(),
@@ -139,11 +139,11 @@ type GRPCCase interface {
 	Unary(context.Context, pd.Client) error
 }
 
-// GRPCCraeteFn is function type to create GRPCCase.
-type GRPCCraeteFn func() GRPCCase
+// GRPCCreateFn is function type to create GRPCCase.
+type GRPCCreateFn func() GRPCCase
 
 // GRPCCaseFnMap is the map for all gRPC case creation function.
-var GRPCCaseFnMap = map[string]GRPCCraeteFn{
+var GRPCCaseFnMap = map[string]GRPCCreateFn{
 	"GetRegion":                newGetRegion(),
 	"GetRegionEnableFollower":  newGetRegionEnableFollower(),
 	"GetStore":                 newGetStore(),
@@ -160,11 +160,11 @@ type HTTPCase interface {
 	Do(context.Context, pdHttp.Client) error
 }
 
-// HTTPCraeteFn is function type to create HTTPCase.
-type HTTPCraeteFn func() HTTPCase
+// HTTPCreateFn is function type to create HTTPCase.
+type HTTPCreateFn func() HTTPCase
 
 // HTTPCaseFnMap is the map for all HTTP case creation function.
-var HTTPCaseFnMap = map[string]HTTPCraeteFn{
+var HTTPCaseFnMap = map[string]HTTPCreateFn{
 	"GetRegionStatus":  newRegionStats(),
 	"GetMinResolvedTS": newMinResolvedTS(),
 }

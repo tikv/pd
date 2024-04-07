@@ -44,6 +44,7 @@ import (
 	"github.com/pingcap/sysutil"
 	"github.com/tikv/pd/pkg/audit"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -235,6 +236,9 @@ type Server struct {
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
+
+	// Cgroup Monitor
+	cgMonitor cgroup.Monitor
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -384,12 +388,12 @@ func (s *Server) startClient() error {
 	}
 	/* Starting two different etcd clients here is to avoid the throttling. */
 	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
-	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls, "server-etcd-client")
+	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "server-etcd-client")
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
-	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls, "election-etcd-client")
+	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "election-etcd-client")
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
@@ -449,11 +453,16 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
 	})
-	regionStorage, err := storage.NewStorageWithLevelDBBackend(ctx, filepath.Join(s.cfg.DataDir, "region-meta"), s.encryptionKeyManager)
+	// Initialize an etcd storage as the default storage.
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
+	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(
+		ctx,
+		filepath.Join(s.cfg.DataDir, "region-meta"),
+		s.encryptionKeyManager)
 	if err != nil {
 		return err
 	}
-	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	s.storage = storage.NewCoreStorage(defaultStorage, regionStorage)
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
@@ -537,6 +546,8 @@ func (s *Server) Close() {
 
 	log.Info("closing server")
 
+	s.cgMonitor.StopMonitor()
+
 	s.stopServerLoop()
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager.Close()
@@ -611,6 +622,8 @@ func (s *Server) Run() error {
 	if err := s.startServer(s.ctx); err != nil {
 		return err
 	}
+
+	s.cgMonitor.StartMonitor(s.ctx)
 
 	failpoint.Inject("delayStartServerLoop", func() {
 		time.Sleep(2 * time.Second)
@@ -1787,7 +1800,7 @@ func (s *Server) campaignLeader() {
 		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
 	})
 
-	CheckPDVersion(s.persistOptions)
+	CheckPDVersionWithClusterVersion(s.persistOptions)
 	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)

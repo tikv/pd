@@ -95,7 +95,8 @@ func NewService(srv *tsoserver.Service) *Service {
 	}
 	s.RegisterAdminRouter()
 	s.RegisterKeyspaceGroupRouter()
-	s.RegisterHealth()
+	s.RegisterHealthRouter()
+	s.RegisterConfigRouter()
 	return s
 }
 
@@ -112,10 +113,16 @@ func (s *Service) RegisterKeyspaceGroupRouter() {
 	router.GET("/members", GetKeyspaceGroupMembers)
 }
 
-// RegisterHealth registers the router of the health handler.
-func (s *Service) RegisterHealth() {
+// RegisterHealthRouter registers the router of the health handler.
+func (s *Service) RegisterHealthRouter() {
 	router := s.root.Group("health")
 	router.GET("", GetHealth)
+}
+
+// RegisterConfigRouter registers the router of the config handler.
+func (s *Service) RegisterConfigRouter() {
+	router := s.root.Group("config")
+	router.GET("", getConfig)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -247,4 +254,14 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 		}
 	}
 	c.IndentedJSON(http.StatusOK, members)
+}
+
+// @Tags     config
+// @Summary  Get full config.
+// @Produce  json
+// @Success  200  {object}  config.Config
+// @Router   /config [get]
+func getConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	c.IndentedJSON(http.StatusOK, svr.GetConfig())
 }

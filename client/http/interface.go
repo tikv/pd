@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/client/retry"
@@ -58,6 +59,7 @@ type Client interface {
 	GetClusterVersion(context.Context) (string, error)
 	GetCluster(context.Context) (*metapb.Cluster, error)
 	GetClusterStatus(context.Context) (*ClusterState, error)
+	GetStatus(context.Context) (*State, error)
 	GetReplicateConfig(context.Context) (map[string]any, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
@@ -96,6 +98,15 @@ type Client interface {
 	GetMicroServicePrimary(context.Context, string) (string, error)
 	DeleteOperators(context.Context) error
 
+	/* Keyspace interface */
+
+	// UpdateKeyspaceGCManagementType update the `gc_management_type` in keyspace meta config.
+	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a global gc worker to calculate a global gc safe point.
+	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
+	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
+
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
 	WithCallerID(string) Client
@@ -108,6 +119,8 @@ type Client interface {
 	WithBackoffer(*retry.Backoffer) Client
 	// WithTimeout sets and returns a new client with the timeout config.
 	WithTimeout(time.Duration) Client
+	// WithTargetURL sets and returns a new client with the given target URL.
+	WithTargetURL(string) Client
 	// Close gracefully closes the HTTP client.
 	Close()
 }
@@ -455,6 +468,21 @@ func (c *client) GetClusterStatus(ctx context.Context) (*ClusterState, error) {
 		return nil, err
 	}
 	return clusterStatus, nil
+}
+
+// GetStatus gets the status of PD.
+func (c *client) GetStatus(ctx context.Context) (*State, error) {
+	var status *State
+	err := c.request(ctx, newRequestInfo().
+		WithName(getStatusName).
+		WithURI(Status).
+		WithMethod(http.MethodGet).
+		WithResp(&status),
+		WithAllowFollowerHandle())
+	if err != nil {
+		return nil, err
+	}
+	return status, nil
 }
 
 // GetReplicateConfig gets the replication configurations.
@@ -902,4 +930,49 @@ func (c *client) DeleteOperators(ctx context.Context) error {
 		WithName(deleteOperators).
 		WithURI(operators).
 		WithMethod(http.MethodDelete))
+}
+
+// UpdateKeyspaceGCManagementType patches the keyspace config.
+func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
+	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceGCmanagementType)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(UpdateKeyspaceGCManagementTypeName).
+		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
+		WithMethod(http.MethodPatch).
+		WithBody(keyspaceConfigPatchJSON))
+}
+
+// GetKeyspaceMetaByName get the given keyspace meta.
+func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error) {
+	var (
+		tempKeyspaceMeta tempKeyspaceMeta
+		keyspaceMetaPB   keyspacepb.KeyspaceMeta
+	)
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetKeyspaceMetaByNameName).
+		WithURI(GetKeyspaceMetaByNameURL(keyspaceName)).
+		WithMethod(http.MethodGet).
+		WithResp(&tempKeyspaceMeta))
+
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
+		Name:           tempKeyspaceMeta.Name,
+		Id:             tempKeyspaceMeta.ID,
+		Config:         tempKeyspaceMeta.Config,
+		CreatedAt:      tempKeyspaceMeta.CreatedAt,
+		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
+		State:          keyspaceState,
+	}
+	return &keyspaceMetaPB, nil
 }

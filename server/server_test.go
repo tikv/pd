@@ -88,7 +88,7 @@ func (suite *leaderServerTestSuite) TearDownSuite() {
 	}
 }
 
-func (suite *leaderServerTestSuite) newTestServersWithCfgs(
+func newTestServersWithCfgs(
 	ctx context.Context,
 	cfgs []*config.Config,
 	re *require.Assertions,
@@ -133,52 +133,6 @@ func (suite *leaderServerTestSuite) newTestServersWithCfgs(
 	}
 
 	return svrs, cleanup
-}
-
-func (suite *leaderServerTestSuite) TestCheckClusterID() {
-	re := suite.Require()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 2)
-	for i, cfg := range cfgs {
-		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
-		// Clean up before testing.
-		testutil.CleanServer(cfg.DataDir)
-	}
-	originInitial := cfgs[0].InitialCluster
-	for _, cfg := range cfgs {
-		cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls)
-	}
-
-	cfgA, cfgB := cfgs[0], cfgs[1]
-	// Start a standalone cluster.
-	svrsA, cleanA := suite.newTestServersWithCfgs(ctx, []*config.Config{cfgA}, re)
-	defer cleanA()
-	// Close it.
-	for _, svr := range svrsA {
-		svr.Close()
-	}
-
-	// Start another cluster.
-	_, cleanB := suite.newTestServersWithCfgs(ctx, []*config.Config{cfgB}, re)
-	defer cleanB()
-
-	// Start previous cluster, expect an error.
-	cfgA.InitialCluster = originInitial
-	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfgA, nil, mockHandler)
-	re.NoError(err)
-
-	etcd, err := embed.StartEtcd(svr.etcdCfg)
-	re.NoError(err)
-	urlsMap, err := types.NewURLsMap(svr.cfg.InitialCluster)
-	re.NoError(err)
-	tlsConfig, err := svr.cfg.Security.ToTLSConfig()
-	re.NoError(err)
-	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
-	re.Error(err)
-	etcd.Close()
-	testutil.CleanServer(cfgA.DataDir)
 }
 
 func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
@@ -329,4 +283,50 @@ func TestIsPathInDirectory(t *testing.T) {
 	fileName = "../../test"
 	path = filepath.Join(directory, fileName)
 	re.False(isPathInDirectory(path, directory))
+}
+
+func TestCheckClusterID(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 2)
+	for i, cfg := range cfgs {
+		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
+		// Clean up before testing.
+		testutil.CleanServer(cfg.DataDir)
+	}
+	originInitial := cfgs[0].InitialCluster
+	for _, cfg := range cfgs {
+		cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls)
+	}
+
+	cfgA, cfgB := cfgs[0], cfgs[1]
+	// Start a standalone cluster.
+	svrsA, cleanA := newTestServersWithCfgs(ctx, []*config.Config{cfgA}, re)
+	defer cleanA()
+	// Close it.
+	for _, svr := range svrsA {
+		svr.Close()
+	}
+
+	// Start another cluster.
+	_, cleanB := newTestServersWithCfgs(ctx, []*config.Config{cfgB}, re)
+	defer cleanB()
+
+	// Start previous cluster, expect an error.
+	cfgA.InitialCluster = originInitial
+	mockHandler := CreateMockHandler(re, "127.0.0.1")
+	svr, err := CreateServer(ctx, cfgA, nil, mockHandler)
+	re.NoError(err)
+
+	etcd, err := embed.StartEtcd(svr.etcdCfg)
+	re.NoError(err)
+	urlsMap, err := types.NewURLsMap(svr.cfg.InitialCluster)
+	re.NoError(err)
+	tlsConfig, err := svr.cfg.Security.ToTLSConfig()
+	re.NoError(err)
+	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
+	re.Error(err)
+	etcd.Close()
+	testutil.CleanServer(cfgA.DataDir)
 }
