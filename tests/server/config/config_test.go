@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -470,9 +471,10 @@ func (suite *configTestSuite) assertTTLConfig(
 	}
 	checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())
 	if cluster.GetSchedulingPrimaryServer() != nil {
-		// wait for the scheduling primary server to be synced
-		options := cluster.GetSchedulingPrimaryServer().GetPersistConfig()
+		var options *cfg.PersistConfig
 		tu.Eventually(re, func() bool {
+			// wait for the scheduling primary server to be synced
+			options = cluster.GetSchedulingPrimaryServer().GetPersistConfig()
 			if expectedEqual {
 				return uint64(999) == options.GetMaxSnapshotCount()
 			}
