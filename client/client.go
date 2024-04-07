@@ -832,11 +832,17 @@ func (c *client) getLocalTSAsyncWithRetry(ctx context.Context, dcLocation string
 	}
 
 	if req.bo != nil {
+		// This is because caller should call `Wait` to get the error if dispatch failed.
 		if err := req.bo.ExecWithoutReset(ctx, func() error {
 			return c.dispatchTSORequestWithFastRetry(req)
 		}); err != nil {
 			req.tryDone(err)
 		}
+		return req
+	}
+
+	if err := c.dispatchTSORequestWithFastRetry(req); err != nil {
+		req.tryDone(err)
 	}
 	return req
 }
