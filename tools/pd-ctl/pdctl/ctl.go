@@ -100,6 +100,7 @@ func MainStart(args []string) {
 	rootCmd.SetArgs(args)
 	rootCmd.ParseFlags(args)
 	rootCmd.SetOut(os.Stdout)
+	rootCmd.SetErr(os.Stderr)
 
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)

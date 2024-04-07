@@ -33,6 +33,7 @@ import (
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -139,7 +140,7 @@ func (s TLSConfig) GetOneAllowedCN() (string, error) {
 // ctx will be noop. Users should call ClientConn.Close to terminate all the
 // pending operations after this function returns.
 func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...grpc.DialOption) (*grpc.ClientConn, error) {
-	opt := grpc.WithInsecure()
+	opt := grpc.WithTransportCredentials(insecure.NewCredentials())
 	if tlsCfg != nil {
 		creds := credentials.NewTLS(tlsCfg)
 		opt = grpc.WithTransportCredentials(creds)
@@ -168,8 +169,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 
 // BuildForwardContext creates a context with receiver metadata information.
 // It is used in client side.
-func BuildForwardContext(ctx context.Context, addr string) context.Context {
-	md := metadata.Pairs(ForwardMetadataKey, addr)
+func BuildForwardContext(ctx context.Context, url string) context.Context {
+	md := metadata.Pairs(ForwardMetadataKey, url)
 	return metadata.NewOutgoingContext(ctx, md)
 }
 

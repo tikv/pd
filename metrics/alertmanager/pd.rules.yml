@@ -195,3 +195,27 @@ groups:
       description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
       value: '{{ $value }}'
       summary: PD_cluster_slow_tikv_nums
+
+  - alert: PD_cpu_quota
+    expr:  irate(process_cpu_seconds_total{job="pd"}[30s]) / pd_service_maxprocs > 0.8
+    for: 45s
+    labels:
+      env: ENV_LABELS_ENV
+      level: warning
+      expr: irate(process_cpu_seconds_total{job="pd"}[30s]) / pd_service_maxprocs > 0.8
+    annotations:
+      description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
+      value: '{{ $value }}'
+      summary: PD CPU usage is over 80% of CPU quota
+
+  - alert: PD_memory_quota
+    expr:  process_resident_memory_bytes{job="pd"} / pd_service_memory_quota_bytes > 0.8
+    for: 15s
+    labels:
+      env: ENV_LABELS_ENV
+      level: warning
+      expr: process_resident_memory_bytes{job="pd"} / pd_service_memory_quota_bytes > 0.8
+    annotations:
+      description: 'cluster: ENV_LABELS_ENV, instance: {{ $labels.instance }}, values:{{ $value }}'
+      value: '{{ $value }}'
+      summary: PD memory usage is over 80% of memory quota

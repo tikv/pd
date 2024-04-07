@@ -127,13 +127,13 @@ type baseHotScheduler struct {
 	updateWriteTime time.Time
 }
 
-func newBaseHotScheduler(opController *operator.Controller) *baseHotScheduler {
+func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.Duration, sampleInterval time.Duration) *baseHotScheduler {
 	base := NewBaseScheduler(opController)
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
 		types:          []utils.RWType{utils.Write, utils.Read},
 		regionPendings: make(map[uint64]*pendingInfluence),
-		stHistoryLoads: statistics.NewStoreHistoryLoads(utils.DimLen),
+		stHistoryLoads: statistics.NewStoreHistoryLoads(utils.DimLen, sampleDuration, sampleInterval),
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -178,6 +178,10 @@ func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.Sched
 			h.updateWriteTime = time.Now()
 		}
 	}
+}
+
+func (h *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterval time.Duration) {
+	h.stHistoryLoads = h.stHistoryLoads.UpdateConfig(sampleDuration, sampleInterval)
 }
 
 // summaryPendingInfluence calculate the summary of pending Influence for each store
@@ -233,7 +237,8 @@ type hotScheduler struct {
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
-	base := newBaseHotScheduler(opController)
+	base := newBaseHotScheduler(opController,
+		conf.GetHistorySampleDuration(), conf.GetHistorySampleInterval())
 	ret := &hotScheduler{
 		name:             HotRegionName,
 		baseHotScheduler: base,
@@ -292,6 +297,8 @@ func (h *hotScheduler) ReloadConfig() error {
 	h.conf.RankFormulaVersion = newCfg.RankFormulaVersion
 	h.conf.ForbidRWType = newCfg.ForbidRWType
 	h.conf.SplitThresholds = newCfg.SplitThresholds
+	h.conf.HistorySampleDuration = newCfg.HistorySampleDuration
+	h.conf.HistorySampleInterval = newCfg.HistorySampleInterval
 	return nil
 }
 
@@ -324,6 +331,7 @@ func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*
 func (h *hotScheduler) dispatch(typ utils.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
+	h.updateHistoryLoadConfig(h.conf.GetHistorySampleDuration(), h.conf.GetHistorySampleInterval())
 	h.prepareForBalance(typ, cluster)
 	// it can not move earlier to support to use api and metrics.
 	if h.conf.IsForbidRWType(typ) {

@@ -24,8 +24,11 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
+
+const maxRecordErrorCount = 20
 
 // Option is used to customize the backoffer.
 type Option func(*Backoffer)
@@ -65,17 +68,21 @@ func (bo *Backoffer) Exec(
 ) error {
 	defer bo.resetBackoff()
 	var (
-		err   error
-		after *time.Timer
+		allErrors error
+		after     *time.Timer
 	)
 	fnName := getFunctionName(fn)
 	for {
-		err = fn()
+		err := fn()
 		bo.attempt++
 		if err != nil {
 			if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
 				bo.nextLogTime %= bo.logInterval
 				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
+			}
+			if bo.attempt < maxRecordErrorCount {
+				// multierr.Append will ignore nil error.
+				allErrors = multierr.Append(allErrors, err)
 			}
 		}
 		if !bo.isRetryable(err) {
@@ -91,7 +98,7 @@ func (bo *Backoffer) Exec(
 		select {
 		case <-ctx.Done():
 			after.Stop()
-			return errors.Trace(ctx.Err())
+			return multierr.Append(allErrors, errors.Trace(ctx.Err()))
 		case <-after.C:
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
@@ -106,7 +113,7 @@ func (bo *Backoffer) Exec(
 			}
 		}
 	}
-	return err
+	return allErrors
 }
 
 // InitialBackoffer make the initial state for retrying.

@@ -40,7 +40,7 @@ func RegisterMicroService(r *gin.RouterGroup) {
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	if !svr.IsAPIServiceMode() {
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, "not support micro service")
+		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
 		return
 	}
 
@@ -66,7 +66,7 @@ func GetMembers(c *gin.Context) {
 func GetPrimary(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	if !svr.IsAPIServiceMode() {
-		c.AbortWithStatusJSON(http.StatusServiceUnavailable, "not support micro service")
+		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
 		return
 	}
 
