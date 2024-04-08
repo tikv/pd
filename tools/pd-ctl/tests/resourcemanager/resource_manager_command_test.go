@@ -68,7 +68,7 @@ func (s *testResourceManagerSuite) TestConfigController() {
 
 		actualCfg := server.ControllerConfig{}
 		err = json.Unmarshal(output, &actualCfg)
-		re.NoError(err)
+		re.NoError(err, string(output))
 		re.Equal(expectCfg, actualCfg)
 	}
 
