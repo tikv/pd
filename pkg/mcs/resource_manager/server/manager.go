@@ -42,7 +42,7 @@ const (
 	defaultConsumptionChanSize = 1024
 	metricsCleanupInterval     = time.Minute
 	metricsCleanupTimeout      = 20 * time.Minute
-	metricsAvailableRUInterval = 1 * time.Second
+	metricsAvailableRUInterval = 30 * time.Second
 	defaultCollectIntervalSec  = 20
 	tickPerSecond              = time.Second
 
@@ -420,7 +420,6 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			// Clean up the metrics that have not been updated for a long time.
 			for name, lastTime := range m.consumptionRecord {
 				if time.Since(lastTime) > metricsCleanupTimeout {
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/manager.go
 					readRequestUnitCost.DeleteLabelValues(name)
 					writeRequestUnitCost.DeleteLabelValues(name)
 					sqlLayerRequestUnitCost.DeleteLabelValues(name)
@@ -432,22 +431,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					requestCount.DeleteLabelValues(name, writeTypeLabel)
 					availableRUCounter.DeleteLabelValues(name)
 					delete(m.consumptionRecord, name)
-=======
-					readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
-					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(r.name, r.name, r.ruType)
-					delete(m.consumptionRecord, r)
-					delete(maxPerSecTrackers, r.name)
-					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
-					writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
->>>>>>> 52e876337 (resource_manager: record the max RU per second (#7936)):pkg/mcs/resourcemanager/server/manager.go
+					delete(maxPerSecTrackers, name)
+					readRequestUnitMaxPerSecCost.DeleteLabelValues(name)
+					writeRequestUnitMaxPerSecCost.DeleteLabelValues(name)
 				}
 			}
 		case <-availableRUTicker.C:
@@ -466,10 +452,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if ru < 0 {
 					ru = 0
 				}
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/manager.go
-				availableRUCounter.WithLabelValues(name).Set(ru)
-=======
-				availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
+				availableRUCounter.WithLabelValues(group.Name).Set(ru)
 			}
 
 		case <-recordMaxTicker.C:
@@ -478,7 +461,6 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			names := make([]string, 0, len(m.groups))
 			for name := range m.groups {
 				names = append(names, name)
->>>>>>> 52e876337 (resource_manager: record the max RU per second (#7936)):pkg/mcs/resourcemanager/server/manager.go
 			}
 			m.RUnlock()
 			for _, name := range names {
