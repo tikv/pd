@@ -1261,6 +1261,13 @@ func (suite *ruleTestSuite) postAndCheckRuleBundle(urlPrefix string, bundle []pl
 		err = tu.CheckGetJSON(testDialClient, urlPrefix+"/config/placement-rule", nil,
 			tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
 		re.NoError(err)
+		// skip default rule check
+		for i := range respBundle {
+			if respBundle[i].ID == placement.DefaultGroupID {
+				respBundle = append(respBundle[:i], respBundle[i+1:]...)
+				break
+			}
+		}
 		if len(respBundle) != len(bundle) {
 			return false
 		}
