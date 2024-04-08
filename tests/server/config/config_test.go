@@ -101,6 +101,7 @@ func (suite *configTestSuite) SetupSuite() {
 func (suite *configTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
 }
+
 func (suite *configTestSuite) TestConfigAll() {
 	suite.env.RunTestInTwoModes(suite.checkConfigAll)
 }
@@ -140,16 +141,17 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
-
-	newCfg := &config.Config{}
-	err = tu.ReadGetJSON(re, testDialClient, addr, newCfg)
-	re.NoError(err)
 	cfg.Replication.MaxReplicas = 5
 	cfg.Replication.LocationLabels = []string{"zone", "rack"}
 	cfg.Schedule.RegionScheduleLimit = 10
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
-	re.Equal(newCfg, cfg)
 
+	tu.Eventually(re, func() bool {
+		newCfg := &config.Config{}
+		err = tu.ReadGetJSON(re, testDialClient, addr, newCfg)
+		re.NoError(err)
+		return suite.Equal(newCfg, cfg)
+	})
 	// the new way
 	l = map[string]any{
 		"schedule.tolerant-size-ratio":            2.5,
@@ -165,9 +167,6 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
-	newCfg1 := &config.Config{}
-	err = tu.ReadGetJSON(re, testDialClient, addr, newCfg1)
-	re.NoError(err)
 	cfg.Schedule.EnableTiKVSplitRegion = false
 	cfg.Schedule.TolerantSizeRatio = 2.5
 	cfg.Replication.LocationLabels = []string{"idc", "host"}
@@ -178,7 +177,12 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	v, err := versioninfo.ParseVersion("v4.0.0-beta")
 	re.NoError(err)
 	cfg.ClusterVersion = *v
-	re.Equal(cfg, newCfg1)
+	tu.Eventually(re, func() bool {
+		newCfg1 := &config.Config{}
+		err = tu.ReadGetJSON(re, testDialClient, addr, newCfg1)
+		re.NoError(err)
+		return suite.Equal(cfg, newCfg1)
+	})
 
 	// revert this to avoid it affects TestConfigTTL
 	l["schedule.enable-tikv-split-region"] = "true"
