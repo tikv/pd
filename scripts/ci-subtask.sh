@@ -2,7 +2,7 @@
 
 # ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX>
 
-ROOT_PATH=../../
+ROOT_PATH_COV=$(pwd)/covprofile
 
 if [[ $2 -gt 9 ]]; then
     # run tools tests
@@ -17,11 +17,11 @@ if [[ $2 -gt 9 ]]; then
     for t in "${integrations_tasks[@]}"; do
         if [[ "$t" = "$integrations_dir/client" && $2 -eq 11 ]]; then
             cd ./client && make ci-test-job && cat covprofile >> ../covprofile && cd .. || exit 1
-            cd $integrations_dir && make ci-test-job test_name=client && cat ./client/covprofile >> "$ROOT_PATH/covprofile" || exit 1
+            cd $integrations_dir && make ci-test-job test_name=client && cat ./client/covprofile >> $ROOT_PATH_COV || exit 1
         elif [[ "$t" = "$integrations_dir/tso" && $2 -eq 12 ]]; then
-            cd $integrations_dir && make ci-test-job test_name=tso && cat ./tso/covprofile >> "$ROOT_PATH/covprofile" || exit 1
+            cd $integrations_dir && make ci-test-job test_name=tso && cat ./tso/covprofile >> $ROOT_PATH_COV || exit 1
         elif [[ "$t" = "$integrations_dir/mcs" && $2 -eq 13 ]]; then
-            cd $integrations_dir && make ci-test-job test_name=mcs && cat ./mcs/covprofile >> "$ROOT_PATH/covprofile" || exit 1
+            cd $integrations_dir && make ci-test-job test_name=mcs && cat ./mcs/covprofile >> $ROOT_PATH_COV || exit 1
         fi
     done
 else

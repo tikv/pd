@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ROOT_PATH := ..
+ROOT_PATH := $(shell pwd)/..
 GO_TOOLS_BIN_PATH := $(shell pwd)/../.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
