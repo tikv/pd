@@ -33,7 +33,8 @@ const maxRecordErrorCount = 20
 // Option is used to customize the backoffer.
 type Option func(*Backoffer)
 
-// withMinLogInterval sets the mininum log interval for retrying.
+// withMinLogInterval sets the minimum log interval for retrying.
+// Because the retry interval may be not the factor of log interval, so this is the minimum interval.
 func withMinLogInterval(interval time.Duration) Option {
 	return func(bo *Backoffer) {
 		bo.logInterval = interval
@@ -69,27 +70,28 @@ func (bo *Backoffer) Exec(
 	defer bo.resetBackoff()
 	var (
 		allErrors error
+		err       error
 		after     *time.Timer
 	)
 	fnName := getFunctionName(fn)
 	for {
-		err := fn()
+		err = fn()
 		bo.attempt++
-		if err != nil {
-			if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
-				bo.nextLogTime %= bo.logInterval
-				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
-			}
-			if bo.attempt < maxRecordErrorCount {
-				// multierr.Append will ignore nil error.
-				allErrors = multierr.Append(allErrors, err)
-			}
+		if bo.attempt < maxRecordErrorCount {
+			// multierr.Append will ignore nil error.
+			allErrors = multierr.Append(allErrors, err)
 		}
 		if !bo.isRetryable(err) {
 			break
 		}
 		currentInterval := bo.nextInterval()
 		bo.nextLogTime += currentInterval
+		if err != nil {
+			if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
+				bo.nextLogTime %= bo.logInterval
+				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
+			}
+		}
 		if after == nil {
 			after = time.NewTimer(currentInterval)
 		} else {

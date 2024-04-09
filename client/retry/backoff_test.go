@@ -126,10 +126,13 @@ func TestBackofferWithLog(t *testing.T) {
 
 	ms := lg.Messages()
 	len1 := len(ms)
-	re.Len(ms, 9)
+	// 10 + 20 + 40 + 80(log) + 100(log) * 9 >= 1000, so log ten times.
+	re.Len(ms, 10)
+	// 10 + 20 + 40 + 80 + 100 * 9, 13 times retry.
 	rfc := `["call PD API failed and retrying"] [api=testFn] [retry-time=13] [error=test]`
 	re.Contains(ms[len(ms)-1], rfc)
-	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=5] [error=test]`
+	// 10 + 20 + 40 + 80(log), 4 times retry.
+	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=4] [error=test]`
 	re.Contains(ms[0], rfc)
 
 	bo.resetBackoff()
@@ -137,10 +140,10 @@ func TestBackofferWithLog(t *testing.T) {
 	re.ErrorIs(err, errTest)
 
 	ms = lg.Messages()
-	re.Len(ms, 18)
+	re.Len(ms, 20)
 	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=13] [error=test]`
 	re.Contains(ms[len(ms)-1], rfc)
-	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=5] [error=test]`
+	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=4] [error=test]`
 	re.Contains(ms[len1], rfc)
 }
 
@@ -150,7 +153,7 @@ func testFn() error {
 	return errTest
 }
 
-// testingWriter is a WriteSyncer that writes to the the messages.
+// testingWriter is a WriteSyncer that writes the the messages.
 type testingWriter struct {
 	messages []string
 }
@@ -158,6 +161,7 @@ type testingWriter struct {
 func newTestingWriter() *testingWriter {
 	return &testingWriter{}
 }
+
 func (w *testingWriter) Write(p []byte) (n int, err error) {
 	n = len(p)
 	p = bytes.TrimRight(p, "\n")
