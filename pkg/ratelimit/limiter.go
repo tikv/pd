@@ -32,16 +32,21 @@ type DimensionConfig struct {
 	QPSBurst int
 	// concurrency config
 	ConcurrencyLimit uint64
+	// BBR config
+	EnableBBR bool
 }
 
 type limiter struct {
+	cfg         *DimensionConfig
 	mu          syncutil.RWMutex
 	concurrency *concurrencyLimiter
 	rate        *RateLimiter
+	bbr         *bbr
 }
 
 func newLimiter() *limiter {
 	lim := &limiter{
+		cfg:         &DimensionConfig{},
 		concurrency: newConcurrencyLimiter(0),
 	}
 	return lim
@@ -59,15 +64,30 @@ func (l *limiter) getRateLimiter() *RateLimiter {
 	return l.rate
 }
 
-func (l *limiter) deleteRateLimiter() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.rate = nil
-	return l.isEmpty()
+func (l *limiter) getBBR() *bbr {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.bbr
 }
 
-func (l *limiter) isEmpty() bool {
-	return l.concurrency == nil && l.rate == nil
+func (l *limiter) deleteRateLimiter() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg.QPS = 0
+	l.cfg.QPSBurst = 0
+	l.rate = nil
+}
+
+func (l *limiter) deleteBBR() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.bbr = nil
+	l.cfg.EnableBBR = false
+	if l.cfg.ConcurrencyLimit > 0 {
+		if l.concurrency != nil {
+			l.concurrency.setLimit(l.cfg.ConcurrencyLimit)
+		}
+	}
 }
 
 func (l *limiter) getQPSLimiterStatus() (limit rate.Limit, burst int) {
@@ -86,6 +106,41 @@ func (l *limiter) getConcurrencyLimiterStatus() (limit uint64, current uint64) {
 	return 0, 0
 }
 
+func (l *limiter) getBBRStatus() (enable bool, limit int64) {
+	baseLimiter := l.getBBR()
+	if baseLimiter != nil {
+		return true, baseLimiter.bbrStatus.getRDP()
+	}
+	return false, 0
+}
+
+func (l *limiter) updateBBRConfig(enable bool, o ...bbrOption) UpdateStatus {
+	oldEnableBBR, _ := l.getBBRStatus()
+	if oldEnableBBR == enable {
+		return BBRNoChange
+	}
+	if !enable {
+		l.deleteBBR()
+		return BBRDeleted
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.cfg.EnableBBR = enable
+	if l.concurrency == nil {
+		l.concurrency = newConcurrencyLimiter(uint64(inf))
+	}
+	fb := func(s *bbrStatus) {
+		if s.getMinDuration() == infDuration {
+			current := l.concurrency.getCurrent()
+			l.concurrency.tryToSetLimit(current)
+		} else {
+			l.concurrency.tryToSetLimit(uint64(s.getRDP()))
+		}
+	}
+	l.bbr = newBBR(newConfig(o...), fb)
+	return BBRChanged
+}
+
 func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 	oldConcurrencyLimit, _ := l.getConcurrencyLimiterStatus()
 	if oldConcurrencyLimit == limit {
@@ -94,15 +149,22 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.cfg.ConcurrencyLimit = limit
 	if l.concurrency != nil {
 		if limit < 1 {
 			l.concurrency.setLimit(0)
 			return ConcurrencyDeleted
 		}
+		if bbr := l.bbr; bbr != nil && bbr.bbrStatus.getRDP() != inf {
+			if l.concurrency.tryToSetLimit(limit) {
+				return ConcurrencyChanged
+			}
+			return ConcurrencyNoChange
+		}
 		l.concurrency.setLimit(limit)
-	} else {
-		l.concurrency = newConcurrencyLimiter(limit)
+		return ConcurrencyChanged
 	}
+	l.concurrency = newConcurrencyLimiter(limit)
 	return ConcurrencyChanged
 }
 
@@ -117,6 +179,8 @@ func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.cfg.QPS = limit
+	l.cfg.QPSBurst = burst
 	if l.rate != nil {
 		l.rate.SetLimit(rate.Limit(limit))
 		l.rate.SetBurst(burst)
@@ -126,9 +190,10 @@ func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
 	return QPSChanged
 }
 
-func (l *limiter) updateDimensionConfig(cfg *DimensionConfig) UpdateStatus {
+func (l *limiter) updateDimensionConfig(cfg *DimensionConfig, op ...bbrOption) UpdateStatus {
 	status := l.updateQPSConfig(cfg.QPS, cfg.QPSBurst)
 	status |= l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
+	status |= l.updateBBRConfig(cfg.EnableBBR, op...)
 	return status
 }
 
@@ -145,7 +210,17 @@ func (l *limiter) allow() (DoneFunc, error) {
 		}
 		return nil, errs.ErrRateLimitExceeded
 	}
+	bbr := l.getBBR()
+	if bbr == nil {
+		return func() {
+			if concurrency != nil {
+				concurrency.release()
+			}
+		}, nil
+	}
+	done := bbr.process()
 	return func() {
+		done()
 		if concurrency != nil {
 			concurrency.release()
 		}
