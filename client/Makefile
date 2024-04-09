@@ -12,20 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+ROOT_PATH := $(shell pwd)/..
 GO_TOOLS_BIN_PATH := $(shell pwd)/../.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 default: static tidy test
 
-test:
-	CGO_ENABLE=1 go test ./... -race -cover
+test: failpoint-enable
+	CGO_ENABLE=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
 
-basic-test:
-	CGO_ENABLE=1 go test ./...
+basic-test: failpoint-enable
+	CGO_ENABLE=1 go test ./... || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
 
 ci-test-job:
-	CGO_ENABLED=1 go test ./... -race -covermode=atomic -coverprofile=covprofile -coverpkg=../... github.com/tikv/pd/client
+	if [ -f covprofile ]; then rm covprofile; fi
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
+
+failpoint-enable:
+	cd $(ROOT_PATH) && $(MAKE) failpoint-enable
+
+failpoint-disable:
+	cd $(ROOT_PATH) && $(MAKE) failpoint-disable
 
 install-tools:
 	cd .. && $(MAKE) install-tools

@@ -1940,7 +1940,7 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string
 	switch action {
 	case removingAction:
 		progressName = encodeRemovingProgressKey(storeID)
-		opts = []progress.Option{progress.WindowDurationOption(c.coordinator.GetPatrolRegionsDuration())}
+		opts = []progress.Option{progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration())}
 	case preparingAction:
 		progressName = encodePreparingProgressKey(storeID)
 	}
