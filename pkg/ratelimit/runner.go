@@ -92,6 +92,7 @@ func (s *AsyncRunner) Start() {
 					go s.run(task.Ctx, task.f, nil)
 				}
 			case <-s.stopChan:
+				log.Info("stopping async task runner", zap.String("name", s.name))
 				return
 			}
 		}
