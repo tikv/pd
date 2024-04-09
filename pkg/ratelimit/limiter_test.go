@@ -15,7 +15,9 @@
 package ratelimit
 
 import (
+	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,10 +27,13 @@ import (
 )
 
 type releaseUtil struct {
+	mu    sync.Mutex
 	dones []DoneFunc
 }
 
 func (r *releaseUtil) release() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if len(r.dones) > 0 {
 		r.dones[0]()
 		r.dones = r.dones[1:]
@@ -36,6 +41,8 @@ func (r *releaseUtil) release() {
 }
 
 func (r *releaseUtil) append(d DoneFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.dones = append(r.dones, d)
 }
 
@@ -176,7 +183,148 @@ func TestWithQPSLimiter(t *testing.T) {
 	re.Equal(101, successCount)
 }
 
-func TestWithTwoLimiters(t *testing.T) {
+func TestWithBBR(t *testing.T) {
+	t.Parallel()
+	re := require.New(t)
+	cfg := &DimensionConfig{
+		EnableBBR: true,
+	}
+	limiter := newLimiter()
+	status := limiter.updateDimensionConfig(cfg, optsForTest...)
+	re.NotEqual(0, status&BBRChanged)
+	re.NotEqual(0, status&QPSNoChange)
+	re.NotEqual(0, status&ConcurrencyNoChange)
+
+	re.NotNil(limiter.getBBR())
+	re.NotNil(limiter.getConcurrencyLimiter())
+
+	// make BBR full.
+	for i := 0; i < 14; i++ {
+		for j := 0; j < i+2; j++ {
+			go func() {
+				done, err := limiter.allow()
+				time.Sleep(bucketDuration * 2)
+				if err == nil {
+					done()
+				}
+			}()
+		}
+		time.Sleep(bucketDuration)
+	}
+	enable, maxConcurrency := limiter.getBBRStatus()
+	re.True(enable)
+	limit, _ := limiter.getConcurrencyLimiterStatus()
+	re.Equal(limit, uint64(maxConcurrency))
+
+	// go check()
+	tricker := time.NewTicker(time.Millisecond)
+	pctx := context.Background()
+	ctx, cancel := context.WithCancel(pctx)
+	go func(ctx context.Context) {
+		select {
+		case <-tricker.C:
+			_, current := limiter.getConcurrencyLimiterStatus()
+			re.LessOrEqual(current, uint64(maxConcurrency))
+		case <-ctx.Done():
+			return
+		}
+	}(ctx)
+	var wg sync.WaitGroup
+	var exceeded atomic.Bool
+	for i := 0; i < 14; i++ {
+		for j := 0; j < 14; j++ {
+			wg.Add(1)
+			go func() {
+				done, err := limiter.allow()
+				time.Sleep(bucketDuration * 2)
+				if err == nil {
+					done()
+				} else {
+					exceeded.Store(true)
+				}
+				wg.Done()
+			}()
+		}
+	}
+	wg.Wait()
+	cancel()
+	tricker.Stop()
+	re.True(exceeded.Load())
+	_, current := limiter.getConcurrencyLimiterStatus()
+	re.Equal(uint64(0), current)
+
+	// test short RT
+	exceeded.Store(false)
+	ctx, cancel = context.WithCancel(pctx)
+	go func(ctx context.Context) {
+		select {
+		case <-tricker.C:
+			_, current := limiter.getConcurrencyLimiterStatus()
+			re.LessOrEqual(current, uint64(maxConcurrency))
+		case <-ctx.Done():
+			return
+		}
+	}(ctx)
+	for i := 0; i < 14; i++ {
+		for j := 0; j < 100; j++ {
+			done, err := limiter.allow()
+			if err == nil {
+				done()
+			} else {
+				exceeded.Store(true)
+			}
+		}
+	}
+	cancel()
+	re.False(exceeded.Load())
+
+	// disable
+	cfg = &DimensionConfig{
+		EnableBBR: false,
+	}
+	status = limiter.updateDimensionConfig(cfg)
+	re.NotEqual(0, status&BBRDeleted)
+
+	re.Nil(limiter.getBBR())
+	// for metrics, concurrency limiter will not be deleted.
+	re.NotNil(limiter.getConcurrencyLimiter())
+
+	// make BBR full.
+	for i := 0; i < 14; i++ {
+		for j := 0; j < i+2; j++ {
+			go func() {
+				done, err := limiter.allow()
+				time.Sleep(bucketDuration * 2)
+				if err == nil {
+					done()
+				}
+			}()
+		}
+		time.Sleep(bucketDuration)
+	}
+	enable, maxConcurrency = limiter.getBBRStatus()
+	re.False(enable)
+	limit, _ = limiter.getConcurrencyLimiterStatus()
+	re.Equal(uint64(0), limit)
+
+	exceeded.Store(false)
+	for i := 0; i < 14; i++ {
+		for j := 0; j < i+2; j++ {
+			go func() {
+				done, err := limiter.allow()
+				time.Sleep(bucketDuration * 2)
+				if err == nil {
+					done()
+				}
+			}()
+		}
+		time.Sleep(bucketDuration)
+	}
+	wg.Wait()
+	re.False(exceeded.Load())
+}
+
+func TestWithTwoLimitersAndBBRConfig(t *testing.T) {
 	t.Parallel()
 	re := require.New(t)
 	cfg := &DimensionConfig{
@@ -225,6 +373,39 @@ func TestWithTwoLimiters(t *testing.T) {
 	limit, current := limiter.getConcurrencyLimiterStatus()
 	re.Equal(uint64(100), limit)
 	re.Equal(uint64(1), current)
+
+	cfg.EnableBBR = true
+	limiter.updateDimensionConfig(cfg, optsForTest...)
+	failedCount = 0
+	successCount = 0
+	go func() {
+		for i := 0; i < 20; i++ {
+			wg.Add(1)
+			countSingleLimiterHandleResult(limiter, &successCount, &failedCount, &lock, &wg, r)
+			time.Sleep(bucketDuration)
+		}
+	}()
+	for i := 0; i < 20; i++ {
+		time.Sleep(bucketDuration * 2)
+		r.release()
+	}
+	wg.Wait()
+	re.GreaterOrEqual(failedCount, 1)
+	enable, maxConcurrency := limiter.getBBRStatus()
+	re.True(enable)
+	limit, _ = limiter.getConcurrencyLimiterStatus()
+	re.Equal(limit, uint64(maxConcurrency))
+	re.LessOrEqual(limit, cfg.ConcurrencyLimit)
+	re.NotNil(limiter.getConcurrencyLimiter())
+
+	re.Equal(uint64(100), limiter.cfg.ConcurrencyLimit)
+	cfg.EnableBBR = false
+
+	status = limiter.updateDimensionConfig(cfg)
+	re.NotEqual(0, status&BBRDeleted)
+	re.NotNil(limiter.getConcurrencyLimiter())
+	limit, _ = limiter.getConcurrencyLimiterStatus()
+	re.Equal(limit, cfg.ConcurrencyLimit)
 
 	cfg = &DimensionConfig{}
 	status = limiter.updateDimensionConfig(cfg)

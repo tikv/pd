@@ -184,26 +184,11 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 		return
 	}
 	cfg := h.svr.GetRateLimitConfig().LimiterConfig[serviceLabel]
-	// update concurrency limiter
 	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
-	concurrencyFloat, okc := input["concurrency"].(float64)
-	if okc {
-		cfg.ConcurrencyLimit = uint64(concurrencyFloat)
-	}
-	// update qps rate limiter
 	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
-	qps, okq := input["qps"].(float64)
-	if okq {
-		burst := 0
-		if int(qps) > 1 {
-			burst = int(qps)
-		} else if qps > 0 {
-			burst = 1
-		}
-		cfg.QPS = qps
-		cfg.QPSBurst = burst
-	}
-	if !okc && !okq {
+	bbrUpdatedFlag := "BBR option is not changed."
+	okc, okq, okb := getDimensionConfig(input, &cfg)
+	if !okc && !okq && !okb {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
 	} else {
 		status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&cfg))
@@ -219,11 +204,17 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 		case status&ratelimit.ConcurrencyDeleted != 0:
 			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
 		}
+		switch {
+		case status&ratelimit.BBRChanged != 0:
+			bbrUpdatedFlag = "BBR option is enabled."
+		case status&ratelimit.BBRDeleted != 0:
+			bbrUpdatedFlag = "BBR option is deleted."
+		}
 		err := h.svr.UpdateRateLimitConfig("limiter-config", serviceLabel, cfg)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
-			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, h.svr.GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig}
+			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, bbrUpdatedFlag, h.svr.GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig}
 			h.rd.JSON(w, http.StatusOK, result)
 		}
 	}
@@ -254,26 +245,11 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 	}
 
 	cfg := h.svr.GetGRPCRateLimitConfig().LimiterConfig[serviceLabel]
-	// update concurrency limiter
 	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
-	concurrencyFloat, okc := input["concurrency"].(float64)
-	if okc {
-		cfg.ConcurrencyLimit = uint64(concurrencyFloat)
-	}
-	// update qps rate limiter
 	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
-	qps, okq := input["qps"].(float64)
-	if okq {
-		burst := 0
-		if int(qps) > 1 {
-			burst = int(qps)
-		} else if qps > 0 {
-			burst = 1
-		}
-		cfg.QPS = qps
-		cfg.QPSBurst = burst
-	}
-	if !okc && !okq {
+	bbrUpdatedFlag := "BBR option is not changed."
+	okc, okq, okb := getDimensionConfig(input, &cfg)
+	if !okc && !okq && !okb {
 		h.rd.JSON(w, http.StatusOK, "No changed.")
 	} else {
 		status := h.svr.UpdateGRPCServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&cfg))
@@ -289,18 +265,63 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 		case status&ratelimit.ConcurrencyDeleted != 0:
 			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
 		}
+		switch {
+		case status&ratelimit.BBRChanged != 0:
+			bbrUpdatedFlag = "BBR option is enabled."
+		case status&ratelimit.BBRDeleted != 0:
+			bbrUpdatedFlag = "BBR option is deleted."
+		}
 		err := h.svr.UpdateGRPCRateLimitConfig("grpc-limiter-config", serviceLabel, cfg)
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
-			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, h.svr.GetServiceMiddlewareConfig().GRPCRateLimitConfig.LimiterConfig}
+			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, bbrUpdatedFlag, h.svr.GetServiceMiddlewareConfig().GRPCRateLimitConfig.LimiterConfig}
 			h.rd.JSON(w, http.StatusOK, result)
 		}
 	}
 }
 
+func getQPSSetting(input map[string]any, cfg *ratelimit.DimensionConfig) bool {
+	qps, ok := input["qps"].(float64)
+	if ok {
+		burst := 0
+		if int(qps) > 1 {
+			burst = int(qps)
+		} else if qps > 0 {
+			burst = 1
+		}
+		cfg.QPS = qps
+		cfg.QPSBurst = burst
+	}
+	return ok
+}
+
+func getConcurrencySetting(input map[string]any, cfg *ratelimit.DimensionConfig) bool {
+	concurrencyFloat, ok := input["concurrency"].(float64)
+	if ok {
+		cfg.ConcurrencyLimit = uint64(concurrencyFloat)
+	}
+	return ok
+}
+
+func getBBRSetting(input map[string]any, cfg *ratelimit.DimensionConfig) bool {
+	enableBBR, ok := input["bbr"].(bool)
+	if ok {
+		cfg.EnableBBR = enableBBR
+	}
+	return ok
+}
+
+func getDimensionConfig(input map[string]any, cfg *ratelimit.DimensionConfig) (okc, okq, okb bool) {
+	okc = getConcurrencySetting(input, cfg)
+	okq = getQPSSetting(input, cfg)
+	okb = getBBRSetting(input, cfg)
+	return
+}
+
 type rateLimitResult struct {
 	ConcurrencyUpdatedFlag string                               `json:"concurrency"`
 	QPSRateUpdatedFlag     string                               `json:"qps"`
+	BBRUpdateFlag          string                               `json:"BBR"`
 	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"limiter-config"`
 }
