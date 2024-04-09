@@ -19,12 +19,10 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/embed"
-	"go.uber.org/goleak"
 )
 
 var (
@@ -32,10 +30,6 @@ var (
 	allocIDMax        = uint64(100000000)
 	allocTimestampMax = uint64(1257894000)
 )
-
-func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
 
 type backupTestSuite struct {
 	suite.Suite

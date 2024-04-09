@@ -34,7 +34,12 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, tu.LeakOptions...)
+}
 
 func TestRateLimitConfigReload(t *testing.T) {
 	re := require.New(t)
