@@ -103,7 +103,7 @@ func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 	}
 }
 
-// WithWaitRetryTimes is the option to set the times to retry when waiting for the token.
+// WithWaitRetryInterval is the option to set the retry interval when waiting for the token.
 func WithWaitRetryInterval(d time.Duration) ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.ruConfig.WaitRetryInterval = d
