@@ -80,7 +80,7 @@ func (l *ConcurrencyLimiter) setLimit(limit uint64) {
 	l.limit = limit
 }
 
-// old interface. only used in the ratelimiter package.
+// GetRunningTasksNum returns the number of running tasks.
 func (l *ConcurrencyLimiter) GetRunningTasksNum() uint64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
