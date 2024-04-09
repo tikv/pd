@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,40 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package schedulers
 
 import (
 	"testing"
 
-	"github.com/gogo/protobuf/proto"
-
-	"github.com/pingcap/kvproto/pkg/metapb"
-
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
-
-func BenchmarkDeepClone(b *testing.B) {
-	for range b.N {
-		src := &metapb.Region{Id: 1}
-		dst := typeutil.DeepClone(src, RegionFactory)
-		dst.Id = 1
-	}
-}
-
-func BenchmarkProtoClone(b *testing.B) {
-	clone := func(src *metapb.Region) *metapb.Region {
-		dst := proto.Clone(src).(*metapb.Region)
-		return dst
-	}
-	for range b.N {
-		src := &metapb.Region{Id: 1}
-		dst := clone(src)
-		dst.Id = 1
-	}
+	testutil.TestMainWithLeakCheck(m)
 }

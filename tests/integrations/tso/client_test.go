@@ -47,7 +47,12 @@ import (
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs/utils"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
