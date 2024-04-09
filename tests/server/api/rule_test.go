@@ -780,11 +780,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 			},
 		},
 	}
-	var bundles []placement.GroupBundle
-	err := tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
-	re.NoError(err)
-	re.Len(bundles, 1)
-	suite.assertBundleEqual(re, bundles[0], b1)
+	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1}, 1)
 
 	// Set
 	b2 := placement.GroupBundle{
@@ -801,27 +797,17 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// Get
-	var bundle placement.GroupBundle
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule/foo", &bundle)
-	re.NoError(err)
-	suite.assertBundleEqual(re, bundle, b2)
+	suite.assertBundleEqual(re, urlPrefix+"/placement-rule/foo", b2)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
-	re.NoError(err)
-	re.Len(bundles, 2)
-	suite.assertBundleEqual(re, bundles[0], b1)
-	suite.assertBundleEqual(re, bundles[1], b2)
+	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b2}, 2)
 
 	// Delete
 	err = tu.CheckDelete(testDialClient, urlPrefix+"/placement-rule/pd", tu.StatusOK(re))
 	re.NoError(err)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
-	re.NoError(err)
-	re.Len(bundles, 1)
-	suite.assertBundleEqual(re, bundles[0], b2)
+	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b2}, 1)
 
 	// SetAll
 	b2.Rules = append(b2.Rules, &placement.Rule{GroupID: "foo", ID: "baz", Index: 2, Role: placement.Follower, Count: 1})
@@ -833,22 +819,14 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
-	re.NoError(err)
-	re.Len(bundles, 3)
-	suite.assertBundleEqual(re, bundles[0], b2)
-	suite.assertBundleEqual(re, bundles[1], b1)
-	suite.assertBundleEqual(re, bundles[2], b3)
+	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b2, b3}, 3)
 
 	// Delete using regexp
 	err = tu.CheckDelete(testDialClient, urlPrefix+"/placement-rule/"+url.PathEscape("foo.*")+"?regexp", tu.StatusOK(re))
 	re.NoError(err)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
-	re.NoError(err)
-	re.Len(bundles, 1)
-	suite.assertBundleEqual(re, bundles[0], b1)
+	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1}, 1)
 
 	// Set
 	id := "rule-without-group-id"
@@ -865,18 +843,11 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 
 	b4.ID = id
 	b4.Rules[0].GroupID = b4.ID
-
 	// Get
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule/"+id, &bundle)
-	re.NoError(err)
-	suite.assertBundleEqual(re, bundle, b4)
+	suite.assertBundleEqual(re, urlPrefix+"/placement-rule/"+id, b4)
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
-	re.NoError(err)
-	re.Len(bundles, 2)
-	suite.assertBundleEqual(re, bundles[0], b1)
-	suite.assertBundleEqual(re, bundles[1], b4)
+	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b4}, 2)
 
 	// SetAll
 	b5 := placement.GroupBundle{
@@ -894,12 +865,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	b5.Rules[0].GroupID = b5.ID
 
 	// GetAll again
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/placement-rule", &bundles)
-	re.NoError(err)
-	re.Len(bundles, 3)
-	suite.assertBundleEqual(re, bundles[0], b1)
-	suite.assertBundleEqual(re, bundles[1], b4)
-	suite.assertBundleEqual(re, bundles[2], b5)
+	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b4, b5}, 3)
 }
 
 func (suite *ruleTestSuite) TestBundleBadRequest() {
@@ -1228,9 +1194,35 @@ func (suite *ruleTestSuite) checkLargeRules(cluster *tests.TestCluster) {
 	suite.postAndCheckRuleBundle(urlPrefix, genBundlesWithRulesNum(etcdutil.MaxEtcdTxnOps*2))
 }
 
-func (suite *ruleTestSuite) assertBundleEqual(re *require.Assertions, b1, b2 placement.GroupBundle) {
+func (suite *ruleTestSuite) assertBundleEqual(re *require.Assertions, url string, expectedBundle placement.GroupBundle) {
+	var bundle placement.GroupBundle
 	tu.Eventually(re, func() bool {
-		return suite.compareBundle(b1, b2)
+		err := tu.ReadGetJSON(re, testDialClient, url, &bundle)
+		if err != nil {
+			return false
+		}
+		return suite.compareBundle(bundle, expectedBundle)
+	})
+}
+
+func (suite *ruleTestSuite) assertBundlesEqual(re *require.Assertions, url string, expectedBundles []placement.GroupBundle, expectedLen int) {
+	var bundles []placement.GroupBundle
+	tu.Eventually(re, func() bool {
+		err := tu.ReadGetJSON(re, testDialClient, url, &bundles)
+		if err != nil {
+			return false
+		}
+		if len(bundles) != expectedLen {
+			return false
+		}
+		sort.Slice(bundles, func(i, j int) bool { return bundles[i].ID < bundles[j].ID })
+		sort.Slice(expectedBundles, func(i, j int) bool { return expectedBundles[i].ID < expectedBundles[j].ID })
+		for i := range bundles {
+			if !suite.compareBundle(bundles[i], expectedBundles[i]) {
+				return false
+			}
+		}
+		return true
 	})
 }
 
