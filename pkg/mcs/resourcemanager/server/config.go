@@ -59,6 +59,10 @@ const (
 	defaultDegradedModeWaitDuration = time.Second * 0
 	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
 	defaultMaxWaitDuration = 30 * time.Second
+	// defaultWaitRetryTimes is the times to retry when waiting for the token.
+	defaultWaitRetryTimes = 10
+	// defaultWaitRetryInterval is the interval to retry when waiting for the token.
+	defaultWaitRetryInterval = 50 * time.Millisecond
 )
 
 // Config is the configuration for the resource manager.
@@ -99,6 +103,12 @@ type ControllerConfig struct {
 	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
 	LTBMaxWaitDuration typeutil.Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
 
+	// WaitRetryInterval is the interval to retry when waiting for the token.
+	WaitRetryInterval typeutil.Duration `toml:"wait-retry-interval" json:"wait-retry-interval"`
+
+	// WaitRetryTimes is the times to retry when waiting for the token.
+	WaitRetryTimes int `toml:"wait-retry-times" json:"wait-retry-times"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
@@ -116,6 +126,8 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 
 	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
 	configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
+	configutil.AdjustDuration(&rmc.WaitRetryInterval, defaultWaitRetryInterval)
+	configutil.AdjustInt(&rmc.WaitRetryTimes, defaultWaitRetryTimes)
 	failpoint.Inject("enableDegradedMode", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
 	})
