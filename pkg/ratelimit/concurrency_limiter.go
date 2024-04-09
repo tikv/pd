@@ -22,7 +22,7 @@ import (
 
 // ConcurrencyLimiter is a limiter that limits the number of concurrent tasks.
 type ConcurrencyLimiter struct {
-	mu      syncutil.RWMutex
+	mu      syncutil.Mutex
 	current uint64
 	waiting uint64
 	limit   uint64
@@ -66,8 +66,8 @@ func (l *ConcurrencyLimiter) release() {
 
 // old interface. only used in the ratelimiter package.
 func (l *ConcurrencyLimiter) getLimit() uint64 {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	return l.limit
 }
@@ -81,9 +81,9 @@ func (l *ConcurrencyLimiter) setLimit(limit uint64) {
 }
 
 // old interface. only used in the ratelimiter package.
-func (l *ConcurrencyLimiter) getCurrent() uint64 {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+func (l *ConcurrencyLimiter) GetRunningTasksNum() uint64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	return l.current
 }
@@ -97,11 +97,6 @@ func (l *ConcurrencyLimiter) getMaxConcurrency() uint64 {
 	}()
 
 	return l.maxLimit
-}
-
-// GetRunningTasksNum returns the number of running tasks.
-func (l *ConcurrencyLimiter) GetRunningTasksNum() uint64 {
-	return l.getCurrent()
 }
 
 // GetWaitingTasksNum returns the number of waiting tasks.

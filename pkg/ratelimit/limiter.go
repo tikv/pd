@@ -81,7 +81,7 @@ func (l *limiter) getQPSLimiterStatus() (limit rate.Limit, burst int) {
 func (l *limiter) getConcurrencyLimiterStatus() (limit uint64, current uint64) {
 	baseLimiter := l.getConcurrencyLimiter()
 	if baseLimiter != nil {
-		return baseLimiter.getLimit(), baseLimiter.getCurrent()
+		return baseLimiter.getLimit(), baseLimiter.GetRunningTasksNum()
 	}
 	return 0, 0
 }

@@ -143,7 +143,7 @@ func (s *AsyncRunner) RunTask(ctx context.Context, opt TaskOpts, f func(context.
 		if len(s.pendingTasks) > 0 {
 			maxWait := time.Since(s.pendingTasks[0].submittedAt)
 			if maxWait > s.maxPendingDuration {
-				return errors.New("max pending duration exceeded")
+				return ErrMaxWaitingTasksExceeded
 			}
 		}
 		task.submittedAt = time.Now()
