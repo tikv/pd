@@ -147,9 +147,6 @@ func (tt *TaskToken) Release() {
 	if tt.released {
 		return
 	}
-	if tt.limiter.current == 0 {
-		panic("release token more than acquire")
-	}
 	tt.released = true
 	tt.limiter.current--
 	if len(tt.limiter.queue) < int(tt.limiter.limit) {
