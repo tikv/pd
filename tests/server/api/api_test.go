@@ -755,9 +755,9 @@ func TestRemovingProgress(t *testing.T) {
 
 	// no store removing
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusNotFound)
-	re.Contains((string(output)), "no progress found for the action")
+	re.Contains(string(output), "no progress found for the action")
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusNotFound)
-	re.Contains((string(output)), "no progress found for the given store ID")
+	re.Contains(string(output), "no progress found for the given store ID")
 
 	// remove store 1 and store 2
 	_ = sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
@@ -776,32 +776,52 @@ func TestRemovingProgress(t *testing.T) {
 	tests.MustPutRegion(re, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
 	tests.MustPutRegion(re, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
 
-	// is not prepared
-	time.Sleep(2 * time.Second)
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
-	re.NoError(json.Unmarshal(output, &p))
-	re.Equal("removing", p.Action)
-	re.Equal(0.0, p.Progress)
-	re.Equal(0.0, p.CurrentSpeed)
-	re.Equal(math.MaxFloat64, p.LeftSeconds)
+	testutil.Eventually(re, func() bool {
+		if leader.GetRaftCluster().IsPrepared() {
+			// wait for cluster started
+			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=removing"
+			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
+			resp, err := dialClient.Do(req)
+			re.NoError(err)
+			defer resp.Body.Close()
+			return resp.StatusCode == http.StatusOK
+		}
+		// is not prepared
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
+		re.NoError(json.Unmarshal(output, &p))
+		re.Equal("removing", p.Action)
+		re.Equal(0.0, p.Progress)
+		re.Equal(0.0, p.CurrentSpeed)
+		re.Equal(math.MaxFloat64, p.LeftSeconds)
+		return false
+	})
 
-	leader.GetRaftCluster().SetPrepared()
-	time.Sleep(2 * time.Second)
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
-	re.NoError(json.Unmarshal(output, &p))
-	re.Equal("removing", p.Action)
-	// store 1: (60-20)/(60+50) ~= 0.36
-	// store 2: (30-10)/(30+40) ~= 0.28
-	// average progress ~= (0.36+0.28)/2 = 0.32
-	re.Equal("0.32", fmt.Sprintf("%.2f", p.Progress))
-	// store 1: 40/10s = 4
-	// store 2: 20/10s = 2
-	// average speed = (2+4)/2 = 33
-	re.Equal(3.0, p.CurrentSpeed)
-	// store 1: (20+50)/4 = 17.5s
-	// store 2: (10+40)/2 = 25s
-	// average time = (17.5+25)/2 = 21.25s
-	re.Equal(21.25, p.LeftSeconds)
+	testutil.Eventually(re, func() bool {
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
+		re.NoError(json.Unmarshal(output, &p))
+		if p.Action != "removing" {
+			return false
+		}
+		// store 1: (60-20)/(60+50) ~= 0.36
+		// store 2: (30-10)/(30+40) ~= 0.28
+		// average progress ~= (0.36+0.28)/2 = 0.32
+		if fmt.Sprintf("%.2f", p.Progress) != "0.32" {
+			return false
+		}
+		// store 1: 40/10s = 4
+		// store 2: 20/10s = 2
+		// average speed = (2+4)/2 = 33
+		if p.CurrentSpeed != 3.0 {
+			return false
+		}
+		// store 1: (20+50)/4 = 17.5s
+		// store 2: (10+40)/2 = 25s
+		// average time = (17.5+25)/2 = 21.25s
+		if p.LeftSeconds != 21.25 {
+			return false
+		}
+		return true
+	})
 
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
@@ -929,47 +949,67 @@ func TestPreparingProgress(t *testing.T) {
 	}
 	// no store preparing
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
-	re.Contains((string(output)), "no progress found for the action")
+	re.Contains(string(output), "no progress found for the action")
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
-	re.Contains((string(output)), "no progress found for the given store ID")
+	re.Contains(string(output), "no progress found for the given store ID")
 
-	// is not prepared
-	time.Sleep(2 * time.Second)
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
-	re.Contains((string(output)), "no progress found for the action")
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
-	re.Contains((string(output)), "no progress found for the given store ID")
+	testutil.Eventually(re, func() bool {
+		if leader.GetRaftCluster().IsPrepared() {
+			// wait for cluster started
+			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
+			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
+			resp, err := dialClient.Do(req)
+			re.NoError(err)
+			defer resp.Body.Close()
+			return resp.StatusCode == http.StatusOK
+		}
+		// is not prepared
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
+		re.Contains(string(output), "no progress found for the action")
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
+		re.Contains(string(output), "no progress found for the given store ID")
+		return false
+	})
 
-	// size is not changed.
-	leader.GetRaftCluster().SetPrepared()
-	time.Sleep(2 * time.Second)
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 	var p api.Progress
-	re.NoError(json.Unmarshal(output, &p))
-	re.Equal("preparing", p.Action)
-	re.Equal(0.0, p.Progress)
-	re.Equal(0.0, p.CurrentSpeed)
-	re.Equal(math.MaxFloat64, p.LeftSeconds)
+	testutil.Eventually(re, func() bool {
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
+		re.NoError(json.Unmarshal(output, &p))
+		if p.Action != "preparing" || p.Progress != 0.0 || p.CurrentSpeed != 0.0 || p.LeftSeconds != math.MaxFloat64 {
+			return false
+		}
+		return true
+	})
 
 	// update size
 	tests.MustPutRegion(re, cluster, 1000, 4, []byte(fmt.Sprintf("%20d", 1000)), []byte(fmt.Sprintf("%20d", 1001)), core.SetApproximateSize(10))
 	tests.MustPutRegion(re, cluster, 1001, 5, []byte(fmt.Sprintf("%20d", 1001)), []byte(fmt.Sprintf("%20d", 1002)), core.SetApproximateSize(40))
-	time.Sleep(2 * time.Second)
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
-	re.NoError(json.Unmarshal(output, &p))
-	re.Equal("preparing", p.Action)
-	// store 4: 10/(210*0.9) ~= 0.05
-	// store 5: 40/(210*0.9) ~= 0.21
-	// average progress ~= (0.05+0.21)/2 = 0.13
-	re.Equal("0.13", fmt.Sprintf("%.2f", p.Progress))
-	// store 4: 10/10s = 1
-	// store 5: 40/10s = 4
-	// average speed = (1+4)/2 = 2.5
-	re.Equal(2.5, p.CurrentSpeed)
-	// store 4: 179/1 ~= 179
-	// store 5: 149/4 ~= 37.25
-	// average time ~= (179+37.25)/2 = 108.125
-	re.Equal(108.125, p.LeftSeconds)
+	testutil.Eventually(re, func() bool {
+		output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
+		re.NoError(json.Unmarshal(output, &p))
+		if p.Action != "preparing" {
+			return false
+		}
+		// store 4: 10/(210*0.9) ~= 0.05
+		// store 5: 40/(210*0.9) ~= 0.21
+		// average progress ~= (0.05+0.21)/2 = 0.13
+		if fmt.Sprintf("%.2f", p.Progress) != "0.13" {
+			return false
+		}
+		// store 4: 10/10s = 1
+		// store 5: 40/10s = 4
+		// average speed = (1+4)/2 = 2.5
+		if p.CurrentSpeed != 2.5 {
+			return false
+		}
+		// store 4: 179/1 ~= 179
+		// store 5: 149/4 ~= 37.25
+		// average time ~= (179+37.25)/2 = 108.125
+		if p.LeftSeconds != 108.125 {
+			return false
+		}
+		return true
+	})
 
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
