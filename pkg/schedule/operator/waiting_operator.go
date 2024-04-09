@@ -16,6 +16,8 @@ package operator
 
 import (
 	"math/rand"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // priorityWeight is used to represent the weight of different priorities of operators.
@@ -36,6 +38,7 @@ type bucket struct {
 
 // randBuckets is an implementation of waiting operators
 type randBuckets struct {
+	mu          syncutil.Mutex
 	totalWeight float64
 	buckets     []*bucket
 }
@@ -53,6 +56,8 @@ func newRandBuckets() *randBuckets {
 
 // PutOperator puts an operator into the random buckets.
 func (b *randBuckets) PutOperator(op *Operator) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	priority := op.GetPriorityLevel()
 	bucket := b.buckets[priority]
 	if len(bucket.ops) == 0 {
@@ -63,6 +68,8 @@ func (b *randBuckets) PutOperator(op *Operator) {
 
 // ListOperator lists all operator in the random buckets.
 func (b *randBuckets) ListOperator() []*Operator {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	var ops []*Operator
 	for i := range b.buckets {
 		bucket := b.buckets[i]
@@ -73,6 +80,8 @@ func (b *randBuckets) ListOperator() []*Operator {
 
 // GetOperator gets an operator from the random buckets.
 func (b *randBuckets) GetOperator() []*Operator {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.totalWeight == 0 {
 		return nil
 	}
@@ -106,12 +115,34 @@ func (b *randBuckets) GetOperator() []*Operator {
 
 // waitingOperatorStatus is used to limit the count of each kind of operators.
 type waitingOperatorStatus struct {
+	mu  syncutil.Mutex
 	ops map[string]uint64
 }
 
 // newWaitingOperatorStatus creates a new waitingOperatorStatus.
 func newWaitingOperatorStatus() *waitingOperatorStatus {
 	return &waitingOperatorStatus{
-		make(map[string]uint64),
+		ops: make(map[string]uint64),
 	}
+}
+
+// incCount increments the count of the given operator kind.
+func (s *waitingOperatorStatus) incCount(kind string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ops[kind]++
+}
+
+// decCount decrements the count of the given operator kind.
+func (s *waitingOperatorStatus) decCount(kind string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ops[kind]--
+}
+
+// getCount returns the count of the given operator kind.
+func (s *waitingOperatorStatus) getCount(kind string) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ops[kind]
 }
