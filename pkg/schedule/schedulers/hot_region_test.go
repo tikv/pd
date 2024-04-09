@@ -41,7 +41,7 @@ import (
 
 func init() {
 	// TODO: remove this global variable in the future.
-	// And use a function to create hot schduler for test.
+	// And use a function to create hot scheduler for test.
 	schedulePeerPr = 1.0
 	RegisterScheduler(utils.Write.String(), func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 		cfg := initHotRegionScheduleConfig()

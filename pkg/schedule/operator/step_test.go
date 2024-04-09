@@ -29,6 +29,7 @@ import (
 type operatorStepTestSuite struct {
 	suite.Suite
 
+	cancel  context.CancelFunc
 	cluster *mockcluster.Cluster
 }
 
@@ -44,13 +45,21 @@ type testCase struct {
 }
 
 func (suite *operatorStepTestSuite) SetupTest() {
-	suite.cluster = mockcluster.NewCluster(context.Background(), mockconfig.NewTestOptions())
+	ctx, cancel := context.WithCancel(context.Background())
+	suite.cancel = cancel
+	suite.cluster = mockcluster.NewCluster(ctx, mockconfig.NewTestOptions())
 	for i := 1; i <= 10; i++ {
 		suite.cluster.PutStoreWithLabels(uint64(i))
 	}
 	suite.cluster.SetStoreDown(8)
 	suite.cluster.SetStoreDown(9)
 	suite.cluster.SetStoreDown(10)
+}
+
+func (suite *operatorStepTestSuite) TearDownTest() {
+	if suite.cancel != nil {
+		suite.cancel()
+	}
 }
 
 func (suite *operatorStepTestSuite) TestTransferLeader() {

@@ -32,7 +32,12 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestAdjustRule(t *testing.T) {
 	re := require.New(t)
@@ -95,7 +100,9 @@ func TestAdjustRule2(t *testing.T) {
 func TestGetSetRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
 		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: MakeKeyRanges("1234", "5678")},
@@ -148,7 +155,9 @@ func TestTxnWithEtcd(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
 	store := storage.NewStorageWithEtcdBackend(client, "")
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	// test patch rules in batch
 	rulesNum := 200
@@ -213,7 +222,9 @@ func TestTxnWithEtcd(t *testing.T) {
 func TestIndex(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
 		{ID: "rule0", Labels: []RegionLabel{{Key: "k1", Value: "v0"}}, RuleType: "key-range", Data: MakeKeyRanges("", "")},
@@ -255,7 +266,9 @@ func TestIndex(t *testing.T) {
 func TestSaveLoadRule(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
 		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: MakeKeyRanges("1234", "5678")},
@@ -266,8 +279,9 @@ func TestSaveLoadRule(t *testing.T) {
 		err := labeler.SetLabelRule(r)
 		re.NoError(err)
 	}
-
-	labeler, err = NewRegionLabeler(context.Background(), store, time.Millisecond*100)
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	labeler, err = NewRegionLabeler(ctx1, store, time.Millisecond*100)
 	re.NoError(err)
 	for _, r := range rules {
 		r2 := labeler.GetLabelRule(r.ID)
@@ -300,7 +314,9 @@ func expectSameRules(re *require.Assertions, r1, r2 *LabelRule) {
 func TestKeyRange(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
 		{ID: "rule1", Labels: []RegionLabel{{Key: "k1", Value: "v1"}}, RuleType: "key-range", Data: MakeKeyRanges("1234", "5678")},
@@ -341,7 +357,9 @@ func TestKeyRange(t *testing.T) {
 func TestLabelerRuleTTL(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	labeler, err := NewRegionLabeler(ctx, store, time.Millisecond*10)
 	re.NoError(err)
 	rules := []*LabelRule{
 		{
@@ -416,7 +434,9 @@ func TestGC(t *testing.T) {
 	re := require.New(t)
 	// set gcInterval to 1 hour.
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	labeler, err := NewRegionLabeler(ctx, store, time.Hour)
 	re.NoError(err)
 	ttls := []string{"1ms", "1ms", "1ms", "5ms", "5ms", "10ms", "1h", "24h"}
 	start, _ := hex.DecodeString("1234")

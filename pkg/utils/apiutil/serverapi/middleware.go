@@ -44,7 +44,6 @@ func (h *runtimeServiceValidator) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		next(w, r)
 		return
 	}
-
 	http.Error(w, "no service", http.StatusServiceUnavailable)
 }
 

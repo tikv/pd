@@ -35,7 +35,12 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, tu.LeakOptions...)
+}
 
 // testDialClient used to dial http request.
 var testDialClient = &http.Client{
