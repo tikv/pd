@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	cfg "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -100,6 +101,7 @@ func (suite *configTestSuite) SetupSuite() {
 func (suite *configTestSuite) TearDownSuite() {
 	suite.env.Cleanup()
 }
+
 func (suite *configTestSuite) TestConfigAll() {
 	suite.env.RunTestInTwoModes(suite.checkConfigAll)
 }
@@ -139,16 +141,17 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
-
-	newCfg := &config.Config{}
-	err = tu.ReadGetJSON(re, testDialClient, addr, newCfg)
-	re.NoError(err)
 	cfg.Replication.MaxReplicas = 5
 	cfg.Replication.LocationLabels = []string{"zone", "rack"}
 	cfg.Schedule.RegionScheduleLimit = 10
 	cfg.PDServerCfg.MetricStorage = "http://127.0.0.1:9090"
-	re.Equal(newCfg, cfg)
 
+	tu.Eventually(re, func() bool {
+		newCfg := &config.Config{}
+		err = tu.ReadGetJSON(re, testDialClient, addr, newCfg)
+		re.NoError(err)
+		return suite.Equal(newCfg, cfg)
+	})
 	// the new way
 	l = map[string]any{
 		"schedule.tolerant-size-ratio":            2.5,
@@ -164,9 +167,6 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
-	newCfg1 := &config.Config{}
-	err = tu.ReadGetJSON(re, testDialClient, addr, newCfg1)
-	re.NoError(err)
 	cfg.Schedule.EnableTiKVSplitRegion = false
 	cfg.Schedule.TolerantSizeRatio = 2.5
 	cfg.Replication.LocationLabels = []string{"idc", "host"}
@@ -177,7 +177,12 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 	v, err := versioninfo.ParseVersion("v4.0.0-beta")
 	re.NoError(err)
 	cfg.ClusterVersion = *v
-	re.Equal(cfg, newCfg1)
+	tu.Eventually(re, func() bool {
+		newCfg1 := &config.Config{}
+		err = tu.ReadGetJSON(re, testDialClient, addr, newCfg1)
+		re.NoError(err)
+		return suite.Equal(cfg, newCfg1)
+	})
 
 	// revert this to avoid it affects TestConfigTTL
 	l["schedule.enable-tikv-split-region"] = "true"
@@ -470,9 +475,10 @@ func (suite *configTestSuite) assertTTLConfig(
 	}
 	checkFunc(cluster.GetLeaderServer().GetServer().GetPersistOptions())
 	if cluster.GetSchedulingPrimaryServer() != nil {
-		// wait for the scheduling primary server to be synced
-		options := cluster.GetSchedulingPrimaryServer().GetPersistConfig()
+		var options *cfg.PersistConfig
 		tu.Eventually(re, func() bool {
+			// wait for the scheduling primary server to be synced
+			options = cluster.GetSchedulingPrimaryServer().GetPersistConfig()
 			if expectedEqual {
 				return uint64(999) == options.GetMaxSnapshotCount()
 			}
