@@ -432,24 +432,28 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 }
 
 // logDownPeerOnConnectedStore logs the down peers on connected stores.
+// It is used to help users to know the down peer status.
+// TODO: It is not a good way to log during process region heartbeat, it is a temporary solution.
+// region: the region which has down peers
+// stores: the stores that the peers of the region belong to.
 func logDownPeerOnConnectedStore(region *core.RegionInfo, stores []*core.StoreInfo) {
 	if len(region.GetDownPeers()) == 0 {
 		return
 	}
-	downPeerOnDisconnectedStore := false
+	disconnectStoresNum := 0
 	for _, store := range stores {
 		if store.IsDisconnected() {
-			downPeerOnDisconnectedStore = true
-			break
+			disconnectStoresNum++
 		}
 	}
-	if downPeerOnDisconnectedStore {
-		for _, p := range region.GetDownPeers() {
-			log.Warn("region has down peer on connected store",
-				zap.Uint64("region-id", region.GetID()),
-				zap.Uint64("down-peer", p.Peer.Id),
-				zap.Uint64("down seconds", p.DownSeconds),
-				zap.Uint64("store-id", p.Peer.StoreId))
-		}
+	if len(region.GetDownPeers()) == disconnectStoresNum {
+		return
+	}
+	for _, p := range region.GetDownPeers() {
+		log.Warn("region has down peer on connected store",
+			zap.Uint64("region-id", region.GetID()),
+			zap.Uint64("down-peer", p.Peer.Id),
+			zap.Uint64("down seconds", p.DownSeconds),
+			zap.Uint64("store-id", p.Peer.StoreId))
 	}
 }
