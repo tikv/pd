@@ -169,7 +169,7 @@ func (w *testingWriter) Write(p []byte) (n int, err error) {
 	w.messages = append(w.messages, m)
 	return n, nil
 }
-func (w *testingWriter) Sync() error {
+func (*testingWriter) Sync() error {
 	return nil
 }
 

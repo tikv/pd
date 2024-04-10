@@ -162,7 +162,7 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (s *SyncRunner) RunTask(ctx context.Context, opt TaskOpts, f func(context.Context)) error {
+func (*SyncRunner) RunTask(ctx context.Context, _ TaskOpts, f func(context.Context)) error {
 	f(ctx)
 	return nil
 }
