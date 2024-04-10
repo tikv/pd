@@ -1003,19 +1003,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, tracer cor
 		cluster.HandleStatsAsync(c, region)
 	}
 	tracer.OnAsyncHotStatsFinished()
-	// log down peers when the related store is not disconnected.
-	for _, p := range region.GetDownPeers() {
-		store := c.GetStore(p.Peer.StoreId)
-		if store != nil && !store.IsDisconnected() {
-			log.Warn("region has down peer on connected store",
-				zap.Uint64("region-id", region.GetID()),
-				zap.Uint64("store-id", p.Peer.StoreId),
-				zap.String("store last heartbeat ts", store.GetLastHeartbeatTS().Format(time.UnixDate)),
-				zap.Uint64("down-peer", p.Peer.Id),
-				zap.Uint64("down seconds", p.DownSeconds))
-		}
-	}
-
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
