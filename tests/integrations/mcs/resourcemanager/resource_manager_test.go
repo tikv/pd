@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/client/resource_group/controller"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 
@@ -1436,14 +1437,20 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	waitDuration := 10 * time.Second
 	readBaseCost := 1.5
 	defaultCfg := controller.DefaultConfig()
-	// failpoint enableDegradedMode will setup and set it be 1s.
-	defaultCfg.DegradedModeWaitDuration.Duration = time.Second
+	expectCfg := server.ControllerConfig{
+		// failpoint enableDegradedMode will setup and set it be 1s.
+		DegradedModeWaitDuration: typeutil.NewDuration(time.Second),
+		LTBMaxWaitDuration:       typeutil.Duration(defaultCfg.LTBMaxWaitDuration),
+		RequestUnit:              server.RequestUnitConfig(defaultCfg.RequestUnit),
+		EnableControllerTraceLog: defaultCfg.EnableControllerTraceLog,
+	}
 	expectRUCfg := controller.GenerateRUConfig(defaultCfg)
+	expectRUCfg.DegradedModeWaitDuration = time.Second
 	// initial config verification
 	respString := sendRequest("GET", getAddr()+configURL, nil)
-	defaultString, err := json.Marshal(defaultCfg)
+	expectStr, err := json.Marshal(expectCfg)
 	re.NoError(err)
-	re.JSONEq(string(respString), string(defaultString))
+	re.JSONEq(string(respString), string(expectStr))
 	re.EqualValues(expectRUCfg, c1.GetConfig())
 
 	testCases := []struct {
