@@ -15,7 +15,6 @@
 package operator
 
 import (
-	"container/heap"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -365,10 +364,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 		oc.SetOperator(op4)
 		re.True(op2.Start())
 		oc.SetOperator(op2)
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
 	// first poll got nil
 	r, next := oc.pollNeedDispatchRegion()
@@ -405,6 +404,131 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	r, next = oc.pollNeedDispatchRegion()
 	re.Nil(r)
 	re.False(next)
+}
+
+// issue #7992
+func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(source)
+	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(target)
+
+	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+	re.NoError(err)
+	re.Len(ops, 2)
+	re.Equal(2, controller.AddWaitingOperator(ops...))
+	// Change next push time to now, it's used to make test case faster.
+	controller.opNotifierQueue.heap[0].time = time.Now()
+
+	// first poll gets source region op.
+	r, next := controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, source)
+
+	// second poll gets target region op.
+	controller.opNotifierQueue.heap[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, target)
+
+	// third poll removes the two merge-region ops.
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Empty(controller.GetOperators())
+	re.Empty(controller.wop.ListOperator())
+	re.NotNil(controller.records.Get(101))
+	re.NotNil(controller.records.Get(102))
+
+	// fourth poll removes target region op from opNotifierQueue
+	controller.opNotifierQueue.heap[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Equal(0, controller.opNotifierQueue.Len())
+
+	// Add the two ops to waiting operators again.
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
+	controller.records.ttl.Remove(101)
+	controller.records.ttl.Remove(102)
+	ops, err = CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+	re.NoError(err)
+	re.Equal(2, controller.AddWaitingOperator(ops...))
+	// change the target RegionEpoch
+	// first poll gets source region from opNotifierQueue
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	controller.opNotifierQueue.heap[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, source)
+
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Empty(controller.GetOperators())
+	re.Empty(controller.wop.ListOperator())
+	re.NotNil(controller.records.Get(101))
+	re.NotNil(controller.records.Get(102))
+
+	controller.opNotifierQueue.heap[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Equal(0, controller.opNotifierQueue.Len())
+}
+
+func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(source)
+	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(target)
+
+	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+	re.NoError(err)
+	re.Len(ops, 2)
+
+	// check successfully
+	r, reason := controller.checkOperatorLightly(ops[0])
+	re.Empty(reason)
+	re.Equal(r, source)
+
+	// check failed because of region disappeared
+	cluster.RemoveRegion(target)
+	r, reason = controller.checkOperatorLightly(ops[1])
+	re.Nil(r)
+	re.Equal(reason, RegionNotFound)
+
+	// check failed because of verions of region epoch changed
+	cluster.PutRegion(target)
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	r, reason = controller.checkOperatorLightly(ops[0])
+	re.Nil(r)
+	re.Equal(reason, EpochNotMatch)
 }
 
 func (suite *operatorControllerTestSuite) TestStoreLimit() {
@@ -786,7 +910,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	batch = append(batch, addPeerOp(100))
 	added = controller.AddWaitingOperator(batch...)
 	re.Equal(1, added)
-	re.NotNil(controller.operators[uint64(100)])
+	re.NotNil(controller.GetOperator(uint64(100)))
 
 	source := newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(source)
@@ -827,7 +951,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 		RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
 	}
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
-	re.True(oc.addOperatorLocked(op))
+	re.True(oc.AddOperator(op))
 	// Although store 3 does not exist in PD, PD can also send op to TiKV.
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 }

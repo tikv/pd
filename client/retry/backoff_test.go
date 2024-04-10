@@ -15,12 +15,15 @@
 package retry
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestBackoffer(t *testing.T) {
@@ -84,6 +87,7 @@ func TestBackoffer(t *testing.T) {
 		return expectedErr
 	})
 	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
+	re.ErrorContains(err, "test; test; test; test")
 	re.ErrorIs(err, expectedErr)
 	re.Equal(4, execCount)
 	re.True(isBackofferReset(bo))
@@ -105,4 +109,96 @@ func TestBackoffer(t *testing.T) {
 
 func isBackofferReset(bo *Backoffer) bool {
 	return bo.next == bo.base && bo.currentTotal == 0
+}
+
+func TestBackofferWithLog(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	conf := &log.Config{Level: "debug", File: log.FileLogConfig{}, DisableTimestamp: true}
+	lg := newZapTestLogger(conf)
+	log.ReplaceGlobals(lg.Logger, nil)
+
+	bo := InitialBackoffer(time.Millisecond*10, time.Millisecond*100, time.Millisecond*1000, withMinLogInterval(time.Millisecond*100))
+	err := bo.Exec(ctx, testFn)
+	re.ErrorIs(err, errTest)
+
+	ms := lg.Messages()
+	len1 := len(ms)
+	// 10 + 20 + 40 + 80(log) + 100(log) * 9 >= 1000, so log ten times.
+	re.Len(ms, 10)
+	// 10 + 20 + 40 + 80 + 100 * 9, 13 times retry.
+	rfc := `["call PD API failed and retrying"] [api=testFn] [retry-time=13] [error=test]`
+	re.Contains(ms[len(ms)-1], rfc)
+	// 10 + 20 + 40 + 80(log), 4 times retry.
+	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=4] [error=test]`
+	re.Contains(ms[0], rfc)
+
+	bo.resetBackoff()
+	err = bo.Exec(ctx, testFn)
+	re.ErrorIs(err, errTest)
+
+	ms = lg.Messages()
+	re.Len(ms, 20)
+	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=13] [error=test]`
+	re.Contains(ms[len(ms)-1], rfc)
+	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=4] [error=test]`
+	re.Contains(ms[len1], rfc)
+}
+
+var errTest = errors.New("test")
+
+func testFn() error {
+	return errTest
+}
+
+// testingWriter is a WriteSyncer that writes the the messages.
+type testingWriter struct {
+	messages []string
+}
+
+func newTestingWriter() *testingWriter {
+	return &testingWriter{}
+}
+
+func (w *testingWriter) Write(p []byte) (n int, err error) {
+	n = len(p)
+	p = bytes.TrimRight(p, "\n")
+	m := string(p)
+	w.messages = append(w.messages, m)
+	return n, nil
+}
+func (w *testingWriter) Sync() error {
+	return nil
+}
+
+type verifyLogger struct {
+	*zap.Logger
+	w *testingWriter
+}
+
+func (logger *verifyLogger) Message() string {
+	if logger.w.messages == nil {
+		return ""
+	}
+	return logger.w.messages[len(logger.w.messages)-1]
+}
+
+func (logger *verifyLogger) Messages() []string {
+	if logger.w.messages == nil {
+		return nil
+	}
+	return logger.w.messages
+}
+
+func newZapTestLogger(cfg *log.Config, opts ...zap.Option) verifyLogger {
+	// TestingWriter is used to write to memory.
+	// Used in the verify logger.
+	writer := newTestingWriter()
+	lg, _, _ := log.InitLoggerWithWriteSyncer(cfg, writer, writer, opts...)
+	return verifyLogger{
+		Logger: lg,
+		w:      writer,
+	}
 }
