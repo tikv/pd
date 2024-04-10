@@ -22,6 +22,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
 // RegionInfoProvider is an interface to provide the region information.
@@ -238,6 +239,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTS))
 				} else {
 					info.startDownPeerTS = time.Now().Unix()
+					logDownPeerOnConnectedStore(region, stores)
 				}
 			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
 				if info.startMissVoterPeerTS != 0 {
@@ -427,4 +429,27 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 		}
 	}
 	return res
+}
+
+// logDownPeerOnConnectedStore logs the down peers on connected stores.
+func logDownPeerOnConnectedStore(region *core.RegionInfo, stores []*core.StoreInfo) {
+	if len(region.GetDownPeers()) == 0 {
+		return
+	}
+	downPeerOnDisconnectedStore := false
+	for _, store := range stores {
+		if store.IsDisconnected() {
+			downPeerOnDisconnectedStore = true
+			break
+		}
+	}
+	if downPeerOnDisconnectedStore {
+		for _, p := range region.GetDownPeers() {
+			log.Warn("region has down peer on connected store",
+				zap.Uint64("region-id", region.GetID()),
+				zap.Uint64("down-peer", p.Peer.Id),
+				zap.Uint64("down seconds", p.DownSeconds),
+				zap.Uint64("store-id", p.Peer.StoreId))
+		}
+	}
 }
