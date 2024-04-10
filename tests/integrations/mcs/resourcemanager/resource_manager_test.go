@@ -1446,8 +1446,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	}
 	expectRUCfg := controller.GenerateRUConfig(defaultCfg)
 	expectRUCfg.DegradedModeWaitDuration = time.Second
-	expectRUCfg.WaitRetryInterval = 0 // server does not have it
-	expectRUCfg.WaitRetryTimes = 0    // server does not have it
 	// initial config verification
 	respString := sendRequest("GET", getAddr()+configURL, nil)
 	expectStr, err := json.Marshal(expectCfg)

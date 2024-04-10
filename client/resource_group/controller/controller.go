@@ -198,7 +198,7 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 		log.Warn("[resource group controller] server does not save config, load config failed")
 		return DefaultConfig(), nil
 	}
-	config := &Config{}
+	config := DefaultConfig()
 	err = json.Unmarshal(kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
@@ -379,7 +379,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 				for _, item := range resp {
 					cfgRevision = item.Kv.ModRevision
-					config := &Config{}
+					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
 					}
