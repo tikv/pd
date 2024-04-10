@@ -28,10 +28,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	maxRecordErrorCount                        = 20
-	defaultEnablelimitedRetryForTolerableError = false
-)
+const maxRecordErrorCount = 20
 
 // RetryableChecker is used to check if the error is retryable.
 type RetryableChecker func(err error) bool
@@ -209,6 +206,7 @@ func (bo *Backoffer) Clone() *Backoffer {
 		max:              bo.max,
 		total:            bo.total,
 		retryableChecker: bo.retryableChecker,
+		logInterval:      bo.logInterval,
 	}
 }
 
