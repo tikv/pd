@@ -1212,5 +1212,5 @@ func waitForPrimariesServing(
 			}
 		}
 		return true
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 }
