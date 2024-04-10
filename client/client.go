@@ -827,9 +827,6 @@ func (c *client) getLocalTSAsyncWithRetry(ctx context.Context, dcLocation string
 	}
 
 	req := c.getTSORequest(ctx, dcLocation, bo)
-	if err := c.dispatchTSORequestWithFastRetry(req); err != nil {
-		req.tryDone(err)
-	}
 
 	if req.bo != nil {
 		// This is because caller should call `Wait` to get the error if dispatch failed.
@@ -840,7 +837,6 @@ func (c *client) getLocalTSAsyncWithRetry(ctx context.Context, dcLocation string
 		}
 		return req
 	}
-
 	if err := c.dispatchTSORequestWithFastRetry(req); err != nil {
 		req.tryDone(err)
 	}
