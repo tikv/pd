@@ -776,28 +776,45 @@ func TestRemovingProgress(t *testing.T) {
 	tests.MustPutRegion(re, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(20))
 	tests.MustPutRegion(re, cluster, 1001, 2, []byte("c"), []byte("d"), core.SetApproximateSize(10))
 
-	testutil.Eventually(re, func() bool {
-		if leader.GetRaftCluster().IsPrepared() {
-			// wait for cluster started
+	if !leader.GetRaftCluster().IsPrepared() {
+		testutil.Eventually(re, func() bool {
+			if leader.GetRaftCluster().IsPrepared() {
+				return true
+			}
 			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=removing"
 			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
 			resp, err := dialClient.Do(req)
 			re.NoError(err)
 			defer resp.Body.Close()
-			return resp.StatusCode == http.StatusOK
-		}
-		// is not prepared
-		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
-		re.NoError(json.Unmarshal(output, &p))
-		re.Equal("removing", p.Action)
-		re.Equal(0.0, p.Progress)
-		re.Equal(0.0, p.CurrentSpeed)
-		re.Equal(math.MaxFloat64, p.LeftSeconds)
-		return false
-	})
+			if resp.StatusCode != http.StatusOK {
+				return false
+			}
+			// is not prepared
+			re.NoError(json.Unmarshal(output, &p))
+			re.Equal("removing", p.Action)
+			re.Equal(0.0, p.Progress)
+			re.Equal(0.0, p.CurrentSpeed)
+			re.Equal(math.MaxFloat64, p.LeftSeconds)
+			return true
+		})
+	}
 
 	testutil.Eventually(re, func() bool {
-		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=removing", http.MethodGet, http.StatusOK)
+		// wait for cluster prepare
+		if !leader.GetRaftCluster().IsPrepared() {
+			leader.GetRaftCluster().SetPrepared()
+			return false
+		}
+		url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=removing"
+		req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
+		resp, err := dialClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		output, err := io.ReadAll(resp.Body)
+		re.NoError(err)
 		re.NoError(json.Unmarshal(output, &p))
 		if p.Action != "removing" {
 			return false
@@ -953,31 +970,52 @@ func TestPreparingProgress(t *testing.T) {
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
 	re.Contains(string(output), "no progress found for the given store ID")
 
-	testutil.Eventually(re, func() bool {
-		if leader.GetRaftCluster().IsPrepared() {
-			// wait for cluster started
+	if !leader.GetRaftCluster().IsPrepared() {
+		testutil.Eventually(re, func() bool {
+			if leader.GetRaftCluster().IsPrepared() {
+				return true
+			}
 			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
 			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
 			resp, err := dialClient.Do(req)
 			re.NoError(err)
 			defer resp.Body.Close()
-			return resp.StatusCode == http.StatusOK
-		}
-		// is not prepared
-		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
-		re.Contains(string(output), "no progress found for the action")
-		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
-		re.Contains(string(output), "no progress found for the given store ID")
-		return false
-	})
+			if resp.StatusCode != http.StatusNotFound {
+				return false
+			}
+			// is not prepared
+			output, err := io.ReadAll(resp.Body)
+			re.NoError(err)
+			re.Contains(string(output), "no progress found for the action")
+			output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
+			re.Contains(string(output), "no progress found for the given store ID")
+			return true
+		})
+	}
 
 	var p api.Progress
 	testutil.Eventually(re, func() bool {
-		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
-		re.NoError(json.Unmarshal(output, &p))
-		if p.Action != "preparing" || p.Progress != 0.0 || p.CurrentSpeed != 0.0 || p.LeftSeconds != math.MaxFloat64 {
+		// wait for cluster prepare
+		if !leader.GetRaftCluster().IsPrepared() {
+			leader.GetRaftCluster().SetPrepared()
 			return false
 		}
+		url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
+		req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
+		resp, err := dialClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+		output, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		println("check!!!", resp.StatusCode)
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		re.NoError(json.Unmarshal(output, &p))
+		re.Equal("preparing", p.Action)
+		re.Equal(0.0, p.Progress)
+		re.Equal(0.0, p.CurrentSpeed)
+		re.Equal(math.MaxFloat64, p.LeftSeconds)
 		return true
 	})
 
