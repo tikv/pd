@@ -19,14 +19,15 @@ import (
 )
 
 const (
-	namespace              = "resource_manager"
-	serverSubsystem        = "server"
-	ruSubsystem            = "resource_unit"
-	resourceSubsystem      = "resource"
-	resourceGroupNameLabel = "name"
-	typeLabel              = "type"
-	readTypeLabel          = "read"
-	writeTypeLabel         = "write"
+	namespace                 = "resource_manager"
+	serverSubsystem           = "server"
+	ruSubsystem               = "resource_unit"
+	resourceSubsystem         = "resource"
+	resourceGroupNameLabel    = "name"
+	typeLabel                 = "type"
+	readTypeLabel             = "read"
+	writeTypeLabel            = "write"
+	newResourceGroupNameLabel = "resource_group"
 )
 
 var (
@@ -55,6 +56,21 @@ var (
 			Help:      "Bucketed histogram of the write request unit cost for all resource groups.",
 			Buckets:   prometheus.ExponentialBuckets(3, 10, 5), // 3 ~ 300000
 		}, []string{resourceGroupNameLabel})
+	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "read_request_unit_max_per_sec",
+			Help:      "Gauge of the max read request unit per second for all resource groups.",
+		}, []string{newResourceGroupNameLabel})
+	writeRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "write_request_unit_max_per_sec",
+			Help:      "Gauge of the max write request unit per second for all resource groups.",
+		}, []string{newResourceGroupNameLabel})
+
 	sqlLayerRequestUnitCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,

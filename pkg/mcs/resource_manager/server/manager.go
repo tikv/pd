@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -42,6 +43,8 @@ const (
 	metricsCleanupInterval     = time.Minute
 	metricsCleanupTimeout      = 20 * time.Minute
 	metricsAvailableRUInterval = 30 * time.Second
+	defaultCollectIntervalSec  = 20
+	tickPerSecond              = time.Second
 
 	reservedDefaultGroupName = "default"
 	middlePriority           = 8
@@ -350,6 +353,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer cleanUpTicker.Stop()
 	availableRUTicker := time.NewTicker(metricsAvailableRUInterval)
 	defer availableRUTicker.Stop()
+	recordMaxTicker := time.NewTicker(tickPerSecond)
+	defer recordMaxTicker.Stop()
+	maxPerSecTrackers := make(map[string]*maxPerSecCostTracker)
 	for {
 		select {
 		case <-ctx.Done():
@@ -371,6 +377,13 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				readRequestCountMetrics  = requestCount.WithLabelValues(name, readTypeLabel)
 				writeRequestCountMetrics = requestCount.WithLabelValues(name, writeTypeLabel)
 			)
+			t, ok := maxPerSecTrackers[name]
+			if !ok {
+				t = newMaxPerSecCostTracker(name, defaultCollectIntervalSec)
+				maxPerSecTrackers[name] = t
+			}
+			t.CollectConsumption(consumption)
+
 			// RU info.
 			if consumption.RRU > 0 {
 				rruMetrics.Observe(consumption.RRU)
@@ -418,21 +431,101 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					requestCount.DeleteLabelValues(name, writeTypeLabel)
 					availableRUCounter.DeleteLabelValues(name)
 					delete(m.consumptionRecord, name)
+					delete(maxPerSecTrackers, name)
+					readRequestUnitMaxPerSecCost.DeleteLabelValues(name)
+					writeRequestUnitMaxPerSecCost.DeleteLabelValues(name)
 				}
 			}
 		case <-availableRUTicker.C:
 			m.RLock()
+			groups := make([]*ResourceGroup, 0, len(m.groups))
 			for name, group := range m.groups {
 				if name == reservedDefaultGroupName {
 					continue
 				}
+				groups = append(groups, group)
+			}
+			m.RUnlock()
+			// prevent many groups and hold the lock long time.
+			for _, group := range groups {
 				ru := group.getRUToken()
 				if ru < 0 {
 					ru = 0
 				}
-				availableRUCounter.WithLabelValues(name).Set(ru)
+				availableRUCounter.WithLabelValues(group.Name).Set(ru)
+			}
+
+		case <-recordMaxTicker.C:
+			// Record the sum of RRU and WRU every second.
+			m.RLock()
+			names := make([]string, 0, len(m.groups))
+			for name := range m.groups {
+				names = append(names, name)
 			}
 			m.RUnlock()
+			for _, name := range names {
+				if t, ok := maxPerSecTrackers[name]; !ok {
+					maxPerSecTrackers[name] = newMaxPerSecCostTracker(name, defaultCollectIntervalSec)
+				} else {
+					t.FlushMetrics()
+				}
+			}
 		}
+	}
+}
+
+type maxPerSecCostTracker struct {
+	name          string
+	maxPerSecRRU  float64
+	maxPerSecWRU  float64
+	rruSum        float64
+	wruSum        float64
+	lastRRUSum    float64
+	lastWRUSum    float64
+	flushPeriod   int
+	cnt           int
+	rruMaxMetrics prometheus.Gauge
+	wruMaxMetrics prometheus.Gauge
+}
+
+func newMaxPerSecCostTracker(name string, flushPeriod int) *maxPerSecCostTracker {
+	return &maxPerSecCostTracker{
+		name:          name,
+		flushPeriod:   flushPeriod,
+		rruMaxMetrics: readRequestUnitMaxPerSecCost.WithLabelValues(name),
+		wruMaxMetrics: writeRequestUnitMaxPerSecCost.WithLabelValues(name),
+	}
+}
+
+// CollectConsumption collects the consumption info.
+func (t *maxPerSecCostTracker) CollectConsumption(consume *rmpb.Consumption) {
+	t.rruSum += consume.RRU
+	t.wruSum += consume.WRU
+}
+
+// FlushMetrics and set the maxPerSecRRU and maxPerSecWRU to the metrics.
+func (t *maxPerSecCostTracker) FlushMetrics() {
+	if t.lastRRUSum == 0 && t.lastWRUSum == 0 {
+		t.lastRRUSum = t.rruSum
+		t.lastWRUSum = t.wruSum
+		return
+	}
+	deltaRRU := t.rruSum - t.lastRRUSum
+	deltaWRU := t.wruSum - t.lastWRUSum
+	t.lastRRUSum = t.rruSum
+	t.lastWRUSum = t.wruSum
+	if deltaRRU > t.maxPerSecRRU {
+		t.maxPerSecRRU = deltaRRU
+	}
+	if deltaWRU > t.maxPerSecWRU {
+		t.maxPerSecWRU = deltaWRU
+	}
+	t.cnt++
+	// flush to metrics in every flushPeriod.
+	if t.cnt%t.flushPeriod == 0 {
+		t.rruMaxMetrics.Set(t.maxPerSecRRU)
+		t.wruMaxMetrics.Set(t.maxPerSecWRU)
+		t.maxPerSecRRU = 0
+		t.maxPerSecWRU = 0
 	}
 }
