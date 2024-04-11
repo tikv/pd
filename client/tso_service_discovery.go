@@ -349,13 +349,11 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 
 // AddServingURLSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
-func (c *tsoServiceDiscovery) AddServingURLSwitchedCallback(callbacks ...func()) {
-}
+func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
 
 // AddServiceURLsSwitchedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
-func (c *tsoServiceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {
-}
+func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
 
 // SetTSOLocalServURLsUpdatedCallback adds a callback which will be called when the local tso
 // allocator leader list is updated.

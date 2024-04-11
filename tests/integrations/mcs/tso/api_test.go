@@ -141,7 +141,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiCluster, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, serverName string) {
+	apiCluster, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
 	})
 	defer apiCluster.Destroy()

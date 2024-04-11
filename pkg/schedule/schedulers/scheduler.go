@@ -101,7 +101,7 @@ func ConfigJSONDecoder(data []byte) ConfigDecoder {
 func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 	builder, ok := schedulerArgsToDecoder[name]
 	if !ok {
-		return func(v any) error {
+		return func(any) error {
 			return errors.Errorf("the config decoder do not register for %s", name)
 		}
 	}

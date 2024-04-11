@@ -70,7 +70,7 @@ func (s *randomMergeScheduler) GetName() string {
 	return s.conf.Name
 }
 
-func (s *randomMergeScheduler) GetType() string {
+func (*randomMergeScheduler) GetType() string {
 	return RandomMergeType
 }
 
@@ -86,7 +86,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	return allowed
 }
 
-func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	randomMergeCounter.Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
@@ -113,7 +113,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bo
 		return nil, nil
 	}
 
-	if !s.allowMerge(cluster, region, target) {
+	if !allowMerge(cluster, region, target) {
 		randomMergeNotAllowedCounter.Inc()
 		return nil, nil
 	}
@@ -129,7 +129,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bo
 	return ops, nil
 }
 
-func (s *randomMergeScheduler) allowMerge(cluster sche.SchedulerCluster, region, target *core.RegionInfo) bool {
+func allowMerge(cluster sche.SchedulerCluster, region, target *core.RegionInfo) bool {
 	if !filter.IsRegionHealthy(region) || !filter.IsRegionHealthy(target) {
 		return false
 	}

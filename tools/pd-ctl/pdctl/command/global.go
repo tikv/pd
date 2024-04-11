@@ -126,7 +126,7 @@ var dialClient = &http.Client{
 }
 
 // RequireHTTPSClient creates a HTTPS client if the related flags are set
-func RequireHTTPSClient(cmd *cobra.Command, args []string) error {
+func RequireHTTPSClient(cmd *cobra.Command, _ []string) error {
 	caPath, err := cmd.Flags().GetString("cacert")
 	if err == nil && len(caPath) != 0 {
 		certPath, err := cmd.Flags().GetString("cert")

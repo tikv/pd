@@ -184,9 +184,6 @@ static: install-tools pre-build
 	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
-	@ echo "revive ..."
-	@ revive -formatter friendly -config revive.toml $(PACKAGES)
-
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
 
 # Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.

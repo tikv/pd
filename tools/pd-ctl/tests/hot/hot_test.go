@@ -51,7 +51,7 @@ func TestHotTestSuite(t *testing.T) {
 
 func (suite *hotTestSuite) SetupSuite() {
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, serverName string) {
+		func(conf *config.Config, _ string) {
 			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
 			conf.Schedule.HotRegionCacheHitsThreshold = 0
 		},
@@ -398,7 +398,7 @@ func TestHistoryHotRegions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1,
-		func(cfg *config.Config, serverName string) {
+		func(cfg *config.Config, _ string) {
 			cfg.Schedule.HotRegionCacheHitsThreshold = 0
 			cfg.Schedule.HotRegionsWriteInterval.Duration = 1000 * time.Millisecond
 			cfg.Schedule.HotRegionsReservedDays = 1
@@ -520,7 +520,7 @@ func TestBuckets(t *testing.T) {
 	statistics.Denoising = false
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, serverName string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
+	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Schedule.HotRegionCacheHitsThreshold = 0 })
 	re.NoError(err)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()

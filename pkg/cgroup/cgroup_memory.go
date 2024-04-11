@@ -177,7 +177,6 @@ func detectMemInactiveFileUsageInV2(root string) (uint64, error) {
 
 func detectMemStatValue(cRoot, filename, key string, cgVersion int) (value uint64, err error) {
 	statFilePath := filepath.Join(cRoot, filename)
-	//nolint:gosec
 	stat, err := os.Open(statFilePath)
 	if err != nil {
 		return 0, errors.Wrapf(err, "can't read file %s from cgroup v%d", filename, cgVersion)
