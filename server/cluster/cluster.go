@@ -1065,10 +1065,22 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.core.AtomicCheckAndPutRegion(ctx, region); err != nil {
+		if overlaps, err = c.core.CheckAndPutRootTree(ctx, region); err != nil {
 			tracer.OnSaveCacheFinished()
 			return err
 		}
+		ctx.TaskRunner.RunTask(
+			ctx,
+			ratelimit.TaskOpts{
+				TaskName: "UpdateSubTree",
+				Limit:    ctx.Limiter,
+			},
+			func(_ context.Context) {
+				c.CheckAndPutSubTree(region)
+			},
+		)
+		tracer.OnUpdateSubTreeFinished()
+
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
