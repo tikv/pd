@@ -23,10 +23,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAsyncRunner(t *testing.T) {
+func TestConcurrentRunner(t *testing.T) {
 	t.Run("RunTask", func(t *testing.T) {
 		limiter := NewConcurrencyLimiter(1)
-		runner := NewAsyncRunner("test", time.Second)
+		runner := NewConcurrentRunner("test", time.Second)
 		runner.Start()
 		defer runner.Stop()
 
@@ -48,7 +48,7 @@ func TestAsyncRunner(t *testing.T) {
 
 	t.Run("MaxPendingDuration", func(t *testing.T) {
 		limiter := NewConcurrencyLimiter(1)
-		runner := NewAsyncRunner("test", 2*time.Millisecond)
+		runner := NewConcurrentRunner("test", 2*time.Millisecond)
 		runner.Start()
 		defer runner.Stop()
 		var wg sync.WaitGroup

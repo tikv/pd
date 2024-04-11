@@ -65,7 +65,7 @@ const (
 	collectWaitTime       = time.Minute
 
 	// heartbeat relative const
-	hbAsyncRunner = "heartbeat-async-task-runner"
+	hbConcurrentRunner = "heartbeat-concurrent-task-runner"
 )
 
 var syncRunner = ratelimit.NewSyncRunner()
@@ -93,7 +93,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
 
-		taskRunner:           ratelimit.NewAsyncRunner(hbAsyncRunner, time.Minute),
+		taskRunner:           ratelimit.NewConcurrentRunner(hbConcurrentRunner, time.Minute),
 		hbConcurrencyLimiter: ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU() * 2)),
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
@@ -561,7 +561,7 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	tracer.Begin()
 	ctx := context.WithValue(c.ctx, ctxutil.HeartbeatTracerKey, tracer)
 	ctx = context.WithValue(ctx, ctxutil.LimiterKey, c.hbConcurrencyLimiter)
-	if c.persistConfig.GetScheduleConfig().EnableHeartbeatAsyncRunner {
+	if c.persistConfig.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
 		ctx = context.WithValue(ctx, ctxutil.TaskRunnerKey, c.taskRunner)
 	}
 

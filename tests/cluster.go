@@ -89,7 +89,7 @@ func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, err
 
 func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
 	//  disable the heartbeat async runner in test
-	cfg.Schedule.EnableHeartbeatAsyncRunner = false
+	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
 		return nil, err
