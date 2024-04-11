@@ -34,7 +34,7 @@ const pdControlCallerID = "pd-ctl"
 
 func TestSendAndGetComponent(t *testing.T) {
 	re := require.New(t)
-	handler := func(ctx context.Context, s *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)

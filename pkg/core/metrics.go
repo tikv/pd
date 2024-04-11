@@ -123,19 +123,19 @@ func NewNoopHeartbeatProcessTracer() RegionHeartbeatProcessTracer {
 	return &noopHeartbeatProcessTracer{}
 }
 
-func (n *noopHeartbeatProcessTracer) Begin()                        {}
-func (n *noopHeartbeatProcessTracer) OnPreCheckFinished()           {}
-func (n *noopHeartbeatProcessTracer) OnAsyncHotStatsFinished()      {}
-func (n *noopHeartbeatProcessTracer) OnRegionGuideFinished()        {}
-func (n *noopHeartbeatProcessTracer) OnSaveCacheBegin()             {}
-func (n *noopHeartbeatProcessTracer) OnSaveCacheFinished()          {}
-func (n *noopHeartbeatProcessTracer) OnCheckOverlapsFinished()      {}
-func (n *noopHeartbeatProcessTracer) OnValidateRegionFinished()     {}
-func (n *noopHeartbeatProcessTracer) OnSetRegionFinished()          {}
-func (n *noopHeartbeatProcessTracer) OnUpdateSubTreeFinished()      {}
-func (n *noopHeartbeatProcessTracer) OnCollectRegionStatsFinished() {}
-func (n *noopHeartbeatProcessTracer) OnAllStageFinished()           {}
-func (n *noopHeartbeatProcessTracer) LogFields() []zap.Field {
+func (*noopHeartbeatProcessTracer) Begin()                        {}
+func (*noopHeartbeatProcessTracer) OnPreCheckFinished()           {}
+func (*noopHeartbeatProcessTracer) OnAsyncHotStatsFinished()      {}
+func (*noopHeartbeatProcessTracer) OnRegionGuideFinished()        {}
+func (*noopHeartbeatProcessTracer) OnSaveCacheBegin()             {}
+func (*noopHeartbeatProcessTracer) OnSaveCacheFinished()          {}
+func (*noopHeartbeatProcessTracer) OnCheckOverlapsFinished()      {}
+func (*noopHeartbeatProcessTracer) OnValidateRegionFinished()     {}
+func (*noopHeartbeatProcessTracer) OnSetRegionFinished()          {}
+func (*noopHeartbeatProcessTracer) OnUpdateSubTreeFinished()      {}
+func (*noopHeartbeatProcessTracer) OnCollectRegionStatsFinished() {}
+func (*noopHeartbeatProcessTracer) OnAllStageFinished()           {}
+func (*noopHeartbeatProcessTracer) LogFields() []zap.Field {
 	return nil
 }
 

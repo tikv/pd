@@ -108,7 +108,7 @@ func (conf *grantHotRegionSchedulerConfig) Persist() error {
 	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
-func (conf *grantHotRegionSchedulerConfig) getSchedulerName() string {
+func (*grantHotRegionSchedulerConfig) getSchedulerName() string {
 	return GrantHotRegionName
 }
 
@@ -148,11 +148,11 @@ func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHo
 	return ret
 }
 
-func (s *grantHotRegionScheduler) GetName() string {
+func (*grantHotRegionScheduler) GetName() string {
 	return GrantHotRegionName
 }
 
-func (s *grantHotRegionScheduler) GetType() string {
+func (*grantHotRegionScheduler) GetType() string {
 	return GrantHotRegionType
 }
 
@@ -256,7 +256,7 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 	return router
 }
 
-func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
@@ -352,7 +352,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {
-		op, err = operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, srcRegion.GetLeader().GetStoreId(), dstStore.StoreId, []uint64{}, operator.OpLeader)
+		op, err = operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
 	} else {
 		op, err = operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}

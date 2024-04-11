@@ -49,7 +49,7 @@ func (suite *checkerTestSuite) TestAPI() {
 
 func (suite *checkerTestSuite) checkAPI(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.testErrCases(re, cluster)
+	testErrCases(re, cluster)
 
 	testCases := []struct {
 		name string
@@ -62,12 +62,12 @@ func (suite *checkerTestSuite) checkAPI(cluster *tests.TestCluster) {
 		{name: "joint-state"},
 	}
 	for _, testCase := range testCases {
-		suite.testGetStatus(re, cluster, testCase.name)
-		suite.testPauseOrResume(re, cluster, testCase.name)
+		testGetStatus(re, cluster, testCase.name)
+		testPauseOrResume(re, cluster, testCase.name)
 	}
 }
 
-func (suite *checkerTestSuite) testErrCases(re *require.Assertions, cluster *tests.TestCluster) {
+func testErrCases(re *require.Assertions, cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/checker", cluster.GetLeaderServer().GetAddr())
 	// missing args
 	input := make(map[string]any)
@@ -97,7 +97,7 @@ func (suite *checkerTestSuite) testErrCases(re *require.Assertions, cluster *tes
 	re.NoError(err)
 }
 
-func (suite *checkerTestSuite) testGetStatus(re *require.Assertions, cluster *tests.TestCluster, name string) {
+func testGetStatus(re *require.Assertions, cluster *tests.TestCluster, name string) {
 	input := make(map[string]any)
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/checker", cluster.GetLeaderServer().GetAddr())
 	// normal run
@@ -128,7 +128,7 @@ func (suite *checkerTestSuite) testGetStatus(re *require.Assertions, cluster *te
 	re.False(resp["paused"].(bool))
 }
 
-func (suite *checkerTestSuite) testPauseOrResume(re *require.Assertions, cluster *tests.TestCluster, name string) {
+func testPauseOrResume(re *require.Assertions, cluster *tests.TestCluster, name string) {
 	input := make(map[string]any)
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/checker", cluster.GetLeaderServer().GetAddr())
 	resp := make(map[string]any)

@@ -78,7 +78,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
-	suite.waitLeader(re, suite.client, leader.GetAddr())
+	waitLeader(re, suite.client, leader.GetAddr())
 
 	suite.initGroups = []*rmpb.ResourceGroup{
 		{
@@ -135,7 +135,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	}
 }
 
-func (suite *resourceManagerClientTestSuite) waitLeader(re *require.Assertions, cli pd.Client, leaderAddr string) {
+func waitLeader(re *require.Assertions, cli pd.Client, leaderAddr string) {
 	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	re.True(ok)
 	re.NotNil(innerCli)
@@ -177,7 +177,7 @@ func (suite *resourceManagerClientTestSuite) resignAndWaitLeader(re *require.Ass
 	re.NoError(suite.cluster.ResignLeader())
 	newLeader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(newLeader)
-	suite.waitLeader(re, suite.client, newLeader.GetAddr())
+	waitLeader(re, suite.client, newLeader.GetAddr())
 }
 
 func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
@@ -349,7 +349,7 @@ type tokenConsumptionPerSecond struct {
 	waitDuration     time.Duration
 }
 
-func (t tokenConsumptionPerSecond) makeReadRequest() *controller.TestRequestInfo {
+func (tokenConsumptionPerSecond) makeReadRequest() *controller.TestRequestInfo {
 	return controller.NewTestRequestInfo(false, 0, 0)
 }
 
@@ -365,7 +365,7 @@ func (t tokenConsumptionPerSecond) makeReadResponse() *controller.TestResponseIn
 	)
 }
 
-func (t tokenConsumptionPerSecond) makeWriteResponse() *controller.TestResponseInfo {
+func (tokenConsumptionPerSecond) makeWriteResponse() *controller.TestResponseInfo {
 	return controller.NewTestResponseInfo(
 		0,
 		time.Duration(0),
@@ -706,7 +706,6 @@ func (suite *resourceManagerClientTestSuite) TestResourcePenalty() {
 	c.Stop()
 }
 
-// nolint:gosec
 func (suite *resourceManagerClientTestSuite) TestAcquireTokenBucket() {
 	re := suite.Require()
 	cli := suite.client
@@ -960,7 +959,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		re.NoError(err)
 		resp, err := http.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
-		defer resp.Body.Close()
+		resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
 		if tcase.isNewGroup {
 			finalNum++
@@ -975,7 +974,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		req.Header.Set("Content-Type", "application/json")
 		resp, err = http.DefaultClient.Do(req)
 		re.NoError(err)
-		defer resp.Body.Close()
+		resp.Body.Close()
 		if tcase.modifySuccess {
 			re.Equal(http.StatusOK, resp.StatusCode)
 		} else {
@@ -985,9 +984,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		// Get Resource Group
 		resp, err = http.Get(getAddr(i) + "/resource-manager/api/v1/config/group/" + tcase.name)
 		re.NoError(err)
-		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		re.NoError(err)
 		re.Contains(string(respString), tcase.name)
 		if tcase.modifySuccess {
@@ -998,9 +997,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		if i == len(testCasesSet1)-1 {
 			resp, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
-			defer resp.Body.Close()
 			re.Equal(http.StatusOK, resp.StatusCode)
 			respString, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
 			re.NoError(err)
 			groups := make([]*server.ResourceGroup, 0)
 			json.Unmarshal(respString, &groups)
@@ -1012,8 +1011,8 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				re.NoError(err)
 				resp, err := http.DefaultClient.Do(req)
 				re.NoError(err)
-				defer resp.Body.Close()
 				respString, err := io.ReadAll(resp.Body)
+				resp.Body.Close()
 				re.NoError(err)
 				if g.Name == "default" {
 					re.Contains(string(respString), "cannot delete reserved group")
@@ -1026,9 +1025,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			// verify again
 			resp1, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
-			defer resp1.Body.Close()
 			re.Equal(http.StatusOK, resp1.StatusCode)
 			respString1, err := io.ReadAll(resp1.Body)
+			resp1.Body.Close()
 			re.NoError(err)
 			groups1 := make([]server.ResourceGroup, 0)
 			json.Unmarshal(respString1, &groups1)
@@ -1046,7 +1045,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	for _, s := range servers {
 		serverList = append(serverList, s)
 	}
-	re.NoError(suite.cluster.RunServers(serverList))
+	re.NoError(tests.RunServers(serverList))
 	suite.cluster.WaitLeader()
 	// re-connect client as well
 	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
@@ -1314,9 +1313,8 @@ func (suite *resourceManagerClientTestSuite) TestCheckBackgroundJobs() {
 	enableBackgroundGroup := func(enable bool) string {
 		if enable {
 			return "background_enable"
-		} else {
-			return "background_unable"
 		}
+		return "background_unable"
 	}
 	// Mock add resource group.
 	group := &rmpb.ResourceGroup{

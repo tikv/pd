@@ -108,6 +108,7 @@ func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys []
 		ticker.Stop()
 		cancel()
 	}()
+outerLoop:
 	for {
 		select {
 		case <-ticker.C:
@@ -118,7 +119,7 @@ func (r *RegionSplitter) splitRegionsByKeys(parCtx context.Context, splitKeys []
 				r.handler.ScanRegionsByKeyRange(groupKeys, results)
 			}
 		case <-ctx.Done():
-			break
+			break outerLoop
 		}
 		finished := true
 		for _, groupKeys := range validGroups {

@@ -37,7 +37,7 @@ func TestConcurrentRunner(t *testing.T) {
 			err := runner.RunTask(context.Background(), TaskOpts{
 				TaskName: "test1",
 				Limit:    limiter,
-			}, func(ctx context.Context) {
+			}, func(context.Context) {
 				defer wg.Done()
 				time.Sleep(100 * time.Millisecond)
 			})
@@ -57,7 +57,7 @@ func TestConcurrentRunner(t *testing.T) {
 			err := runner.RunTask(context.Background(), TaskOpts{
 				TaskName: "test2",
 				Limit:    limiter,
-			}, func(ctx context.Context) {
+			}, func(context.Context) {
 				defer wg.Done()
 				time.Sleep(100 * time.Millisecond)
 			})

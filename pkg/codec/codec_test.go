@@ -21,7 +21,6 @@ import (
 )
 
 func TestDecodeBytes(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	key := "abcdefghijklmnopqrstuvwxyz"
 	for i := 0; i < len(key); i++ {
@@ -32,7 +31,6 @@ func TestDecodeBytes(t *testing.T) {
 }
 
 func TestTableID(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	key := EncodeBytes([]byte("t\x80\x00\x00\x00\x00\x00\x00\xff"))
 	re.Equal(int64(0xff), key.TableID())

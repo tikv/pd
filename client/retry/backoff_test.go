@@ -95,7 +95,7 @@ func TestBackoffer(t *testing.T) {
 	// Test the retryable checker.
 	execCount = 0
 	bo = InitialBackoffer(base, max, total)
-	bo.SetRetryableChecker(func(err error) bool {
+	bo.SetRetryableChecker(func(error) bool {
 		return execCount < 2
 	})
 	err = bo.Exec(ctx, func() error {
@@ -169,7 +169,7 @@ func (w *testingWriter) Write(p []byte) (n int, err error) {
 	w.messages = append(w.messages, m)
 	return n, nil
 }
-func (w *testingWriter) Sync() error {
+func (*testingWriter) Sync() error {
 	return nil
 }
 

@@ -415,7 +415,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
 	for k, b := range c.migrateConfigurationMap() {
-		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
+		v, err := parseDeprecatedFlag(meta, k, *b[0], *b[1])
 		if err != nil {
 			return err
 		}
@@ -464,7 +464,7 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	return c.MaxMergeRegionSize * 10000
 }
 
-func (c *ScheduleConfig) parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
+func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
 	oldName, newName := "disable-"+name, "enable-"+name
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
 	switch {

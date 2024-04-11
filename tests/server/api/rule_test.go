@@ -49,7 +49,7 @@ func TestRuleTestSuite(t *testing.T) {
 }
 
 func (suite *ruleTestSuite) SetupSuite() {
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, serverName string) {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
 		conf.PDServerCfg.KeyType = "raw"
 		conf.Replication.EnablePlacementRules = true
 	})
@@ -235,7 +235,7 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 		if testCase.found {
 			tu.Eventually(re, func() bool {
 				err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-				return suite.compareRule(&resp, &testCase.rule)
+				return compareRule(&resp, &testCase.rule)
 			})
 		} else {
 			err = tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, testCase.code))
@@ -432,7 +432,7 @@ func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
 				return false
 			}
 			if testCase.count == 2 {
-				return suite.compareRule(resp[0], &rule) && suite.compareRule(resp[1], &rule1)
+				return compareRule(resp[0], &rule) && compareRule(resp[1], &rule1)
 			}
 			return true
 		})
@@ -492,7 +492,7 @@ func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
 				err = tu.ReadGetJSON(re, testDialClient, url, &resp)
 				for _, r := range resp {
 					if r.GroupID == "e" {
-						return suite.compareRule(r, &rule)
+						return compareRule(r, &rule)
 					}
 				}
 				return true
@@ -780,7 +780,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 			},
 		},
 	}
-	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1}, 1)
+	assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1}, 1)
 
 	// Set
 	b2 := placement.GroupBundle{
@@ -797,17 +797,17 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// Get
-	suite.assertBundleEqual(re, urlPrefix+"/placement-rule/foo", b2)
+	assertBundleEqual(re, urlPrefix+"/placement-rule/foo", b2)
 
 	// GetAll again
-	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b2}, 2)
+	assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b2}, 2)
 
 	// Delete
 	err = tu.CheckDelete(testDialClient, urlPrefix+"/placement-rule/pd", tu.StatusOK(re))
 	re.NoError(err)
 
 	// GetAll again
-	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b2}, 1)
+	assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b2}, 1)
 
 	// SetAll
 	b2.Rules = append(b2.Rules, &placement.Rule{GroupID: "foo", ID: "baz", Index: 2, Role: placement.Follower, Count: 1})
@@ -819,14 +819,14 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	// GetAll again
-	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b2, b3}, 3)
+	assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b2, b3}, 3)
 
 	// Delete using regexp
 	err = tu.CheckDelete(testDialClient, urlPrefix+"/placement-rule/"+url.PathEscape("foo.*")+"?regexp", tu.StatusOK(re))
 	re.NoError(err)
 
 	// GetAll again
-	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1}, 1)
+	assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1}, 1)
 
 	// Set
 	id := "rule-without-group-id"
@@ -844,10 +844,10 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	b4.ID = id
 	b4.Rules[0].GroupID = b4.ID
 	// Get
-	suite.assertBundleEqual(re, urlPrefix+"/placement-rule/"+id, b4)
+	assertBundleEqual(re, urlPrefix+"/placement-rule/"+id, b4)
 
 	// GetAll again
-	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b4}, 2)
+	assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b4}, 2)
 
 	// SetAll
 	b5 := placement.GroupBundle{
@@ -865,7 +865,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	b5.Rules[0].GroupID = b5.ID
 
 	// GetAll again
-	suite.assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b4, b5}, 3)
+	assertBundlesEqual(re, urlPrefix+"/placement-rule", []placement.GroupBundle{b1, b4, b5}, 3)
 }
 
 func (suite *ruleTestSuite) TestBundleBadRequest() {
@@ -1194,18 +1194,18 @@ func (suite *ruleTestSuite) checkLargeRules(cluster *tests.TestCluster) {
 	suite.postAndCheckRuleBundle(urlPrefix, genBundlesWithRulesNum(etcdutil.MaxEtcdTxnOps*2))
 }
 
-func (suite *ruleTestSuite) assertBundleEqual(re *require.Assertions, url string, expectedBundle placement.GroupBundle) {
+func assertBundleEqual(re *require.Assertions, url string, expectedBundle placement.GroupBundle) {
 	var bundle placement.GroupBundle
 	tu.Eventually(re, func() bool {
 		err := tu.ReadGetJSON(re, testDialClient, url, &bundle)
 		if err != nil {
 			return false
 		}
-		return suite.compareBundle(bundle, expectedBundle)
+		return compareBundle(bundle, expectedBundle)
 	})
 }
 
-func (suite *ruleTestSuite) assertBundlesEqual(re *require.Assertions, url string, expectedBundles []placement.GroupBundle, expectedLen int) {
+func assertBundlesEqual(re *require.Assertions, url string, expectedBundles []placement.GroupBundle, expectedLen int) {
 	var bundles []placement.GroupBundle
 	tu.Eventually(re, func() bool {
 		err := tu.ReadGetJSON(re, testDialClient, url, &bundles)
@@ -1218,7 +1218,7 @@ func (suite *ruleTestSuite) assertBundlesEqual(re *require.Assertions, url strin
 		sort.Slice(bundles, func(i, j int) bool { return bundles[i].ID < bundles[j].ID })
 		sort.Slice(expectedBundles, func(i, j int) bool { return expectedBundles[i].ID < expectedBundles[j].ID })
 		for i := range bundles {
-			if !suite.compareBundle(bundles[i], expectedBundles[i]) {
+			if !compareBundle(bundles[i], expectedBundles[i]) {
 				return false
 			}
 		}
@@ -1226,21 +1226,21 @@ func (suite *ruleTestSuite) assertBundlesEqual(re *require.Assertions, url strin
 	})
 }
 
-func (suite *ruleTestSuite) compareBundle(b1, b2 placement.GroupBundle) bool {
+func compareBundle(b1, b2 placement.GroupBundle) bool {
 	if b2.ID != b1.ID || b2.Index != b1.Index || b2.Override != b1.Override || len(b2.Rules) != len(b1.Rules) {
 		return false
 	}
 	sort.Slice(b1.Rules, func(i, j int) bool { return b1.Rules[i].ID < b1.Rules[j].ID })
 	sort.Slice(b2.Rules, func(i, j int) bool { return b2.Rules[i].ID < b2.Rules[j].ID })
 	for i := range b1.Rules {
-		if !suite.compareRule(b1.Rules[i], b2.Rules[i]) {
+		if !compareRule(b1.Rules[i], b2.Rules[i]) {
 			return false
 		}
 	}
 	return true
 }
 
-func (suite *ruleTestSuite) compareRule(r1 *placement.Rule, r2 *placement.Rule) bool {
+func compareRule(r1 *placement.Rule, r2 *placement.Rule) bool {
 	return r2.GroupID == r1.GroupID &&
 		r2.ID == r1.ID &&
 		r2.StartKeyHex == r1.StartKeyHex &&
@@ -1267,7 +1267,7 @@ func (suite *ruleTestSuite) postAndCheckRuleBundle(urlPrefix string, bundle []pl
 		sort.Slice(respBundle, func(i, j int) bool { return respBundle[i].ID < respBundle[j].ID })
 		sort.Slice(bundle, func(i, j int) bool { return bundle[i].ID < bundle[j].ID })
 		for i := range respBundle {
-			if !suite.compareBundle(respBundle[i], bundle[i]) {
+			if !compareBundle(respBundle[i], bundle[i]) {
 				return false
 			}
 		}
@@ -1285,7 +1285,7 @@ func TestRegionRuleTestSuite(t *testing.T) {
 }
 
 func (suite *regionRuleTestSuite) SetupSuite() {
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, serverName string) {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(), func(conf *config.Config, _ string) {
 		conf.Replication.EnablePlacementRules = true
 		conf.Replication.MaxReplicas = 1
 	})
@@ -1396,14 +1396,14 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	re.Equal("keyspaces/0", labels[0].ID)
 
 	u = fmt.Sprintf("%s/config/region-label/rules/ids", urlPrefix)
-	err = tu.CheckGetJSON(testDialClient, u, []byte(`["rule1", "rule3"]`), func(resp []byte, statusCode int, _ http.Header) {
+	err = tu.CheckGetJSON(testDialClient, u, []byte(`["rule1", "rule3"]`), func(resp []byte, _ int, _ http.Header) {
 		err := json.Unmarshal(resp, &labels)
 		re.NoError(err)
 		re.Empty(labels)
 	})
 	re.NoError(err)
 
-	err = tu.CheckGetJSON(testDialClient, u, []byte(`["keyspaces/0"]`), func(resp []byte, statusCode int, _ http.Header) {
+	err = tu.CheckGetJSON(testDialClient, u, []byte(`["keyspaces/0"]`), func(resp []byte, _ int, _ http.Header) {
 		err := json.Unmarshal(resp, &labels)
 		re.NoError(err)
 		re.Len(labels, 1)

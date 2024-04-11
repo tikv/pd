@@ -52,7 +52,7 @@ func (suite *dashboardTestSuite) SetupSuite() {
 	dashboard.SetCheckInterval(10 * time.Millisecond)
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.httpClient = &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(*http.Request, []*http.Request) error {
 			// ErrUseLastResponse can be returned by Client.CheckRedirect hooks to
 			// control how redirects are processed. If returned, the next request
 			// is not sent and the most recent response is returned with its body
@@ -123,7 +123,7 @@ func (suite *dashboardTestSuite) checkServiceIsStopped(re *require.Assertions, s
 }
 
 func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalProxy bool) {
-	cluster, err := tests.NewTestCluster(suite.ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(suite.ctx, 3, func(conf *config.Config, _ string) {
 		conf.Dashboard.InternalProxy = internalProxy
 	})
 	re.NoError(err)

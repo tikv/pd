@@ -167,7 +167,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	return resp, nil
 }
 
-func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region) error {
+func checkSplitRegion(left *metapb.Region, right *metapb.Region) error {
 	if left == nil || right == nil {
 		return errors.New("invalid split region")
 	}
@@ -183,7 +183,7 @@ func (c *RaftCluster) checkSplitRegion(left *metapb.Region, right *metapb.Region
 	return errors.New("invalid split region")
 }
 
-func (c *RaftCluster) checkSplitRegions(regions []*metapb.Region) error {
+func checkSplitRegions(regions []*metapb.Region) error {
 	if len(regions) <= 1 {
 		return errors.New("invalid split region")
 	}
@@ -202,11 +202,11 @@ func (c *RaftCluster) checkSplitRegions(regions []*metapb.Region) error {
 }
 
 // HandleReportSplit handles the report split request.
-func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
+func (*RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb.ReportSplitResponse, error) {
 	left := request.GetLeft()
 	right := request.GetRight()
 
-	err := c.checkSplitRegion(left, right)
+	err := checkSplitRegion(left, right)
 	if err != nil {
 		log.Warn("report split region is invalid",
 			logutil.ZapRedactStringer("left-region", core.RegionToHexMeta(left)),
@@ -226,11 +226,11 @@ func (c *RaftCluster) HandleReportSplit(request *pdpb.ReportSplitRequest) (*pdpb
 }
 
 // HandleBatchReportSplit handles the batch report split request.
-func (c *RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
+func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest) (*pdpb.ReportBatchSplitResponse, error) {
 	regions := request.GetRegions()
 
 	hrm := core.RegionsToHexMeta(regions)
-	err := c.checkSplitRegions(regions)
+	err := checkSplitRegions(regions)
 	if err != nil {
 		log.Warn("report batch split region is invalid",
 			zap.Stringer("region-meta", hrm),

@@ -719,7 +719,7 @@ type RegionGuideFunc func(ctx context.Context, region, origin *RegionInfo) (save
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
 func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
-	noLog := func(msg string, fields ...zap.Field) {}
+	noLog := func(string, ...zap.Field) {}
 	d, i := noLog, noLog
 	debug, info := d, i
 	if enableLog {

@@ -404,7 +404,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
 	re.Equal(exist, labeler.labelRules[ruleID] != nil)
 	existInStorage := false
-	labeler.storage.LoadRegionRules(func(k, v string) {
+	labeler.storage.LoadRegionRules(func(k, _ string) {
 		if k == ruleID {
 			existInStorage = true
 		}

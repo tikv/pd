@@ -2111,7 +2111,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	c.resetHealthStatus()
+	resetHealthStatus()
 	c.resetProgressIndicator()
 }
 
@@ -2130,7 +2130,7 @@ func (c *RaftCluster) collectHealthStatus() {
 	}
 }
 
-func (c *RaftCluster) resetHealthStatus() {
+func resetHealthStatus() {
 	healthStatusGauge.Reset()
 }
 

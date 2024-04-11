@@ -64,7 +64,7 @@ func (c *Coordinator) GetHTTPCase(name string) (*Config, error) {
 	if controller, ok := c.http[name]; ok {
 		return controller.GetConfig(), nil
 	}
-	return nil, errors.Errorf("case %v does not exist.", name)
+	return nil, errors.Errorf("case %v does not exist", name)
 }
 
 // GetGRPCCase returns the gRPC case config.
@@ -74,7 +74,7 @@ func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
 	if controller, ok := c.grpc[name]; ok {
 		return controller.GetConfig(), nil
 	}
-	return nil, errors.Errorf("case %v does not exist.", name)
+	return nil, errors.Errorf("case %v does not exist", name)
 }
 
 // GetETCDCase returns the etcd case config.
@@ -84,7 +84,7 @@ func (c *Coordinator) GetETCDCase(name string) (*Config, error) {
 	if controller, ok := c.etcd[name]; ok {
 		return controller.GetConfig(), nil
 	}
-	return nil, errors.Errorf("case %v does not exist.", name)
+	return nil, errors.Errorf("case %v does not exist", name)
 }
 
 // GetAllHTTPCases returns the all HTTP case configs.

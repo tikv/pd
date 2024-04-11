@@ -48,7 +48,7 @@ func newRegionSplit() *Case {
 	simCase.RegionSplitKeys = 10000
 	// Events description
 	e := &WriteFlowOnSpotDescriptor{}
-	e.Step = func(tick int64) map[string]int64 {
+	e.Step = func(int64) map[string]int64 {
 		return map[string]int64{
 			"foobar": 8 * units.MiB,
 		}
@@ -56,7 +56,7 @@ func newRegionSplit() *Case {
 	simCase.Events = []EventDescriptor{e}
 
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		res := true
 		regionCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {

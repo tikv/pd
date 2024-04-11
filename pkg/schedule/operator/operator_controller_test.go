@@ -108,7 +108,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	re.True(op2.Start())
 	oc.SetOperator(op2)
 	go func(ctx context.Context) {
-		suite.checkRemoveOperatorSuccess(re, oc, op1)
+		checkRemoveOperatorSuccess(re, oc, op1)
 		for {
 			select {
 			case <-ctx.Done():
@@ -550,7 +550,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	for i := uint64(1); i <= 5; i++ {
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: 1})
 	re.False(oc.AddOperator(op))
@@ -560,13 +560,13 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	for i := uint64(1); i <= 10; i++ {
 		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	tc.SetAllStoresLimit(storelimit.AddPeer, 60)
 	for i := uint64(1); i <= 5; i++ {
 		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: 1})
 	re.False(oc.AddOperator(op))
@@ -576,7 +576,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	for i := uint64(1); i <= 5; i++ {
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	re.False(oc.AddOperator(op))
@@ -586,13 +586,13 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	for i := uint64(1); i <= 10; i++ {
 		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	tc.SetAllStoresLimit(storelimit.RemovePeer, 60)
 	for i := uint64(1); i <= 5; i++ {
 		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	re.False(oc.AddOperator(op))
@@ -860,7 +860,7 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 	)
 }
 
-func (suite *operatorControllerTestSuite) checkRemoveOperatorSuccess(re *require.Assertions, oc *Controller, op *Operator) {
+func checkRemoveOperatorSuccess(re *require.Assertions, oc *Controller, op *Operator) {
 	re.True(oc.RemoveOperator(op))
 	re.True(op.IsEnd())
 	re.Equal(op, oc.GetOperatorStatus(op.RegionID()).Operator)

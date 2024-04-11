@@ -487,7 +487,7 @@ func (c *Cluster) runMetricsCollectionJob() {
 		select {
 		case <-c.ctx.Done():
 			log.Info("metrics are reset")
-			c.resetMetrics()
+			resetMetrics()
 			log.Info("metrics collection job has been stopped")
 			return
 		case <-ticker.C:
@@ -501,7 +501,7 @@ func (c *Cluster) collectMetrics() {
 	stores := c.GetStores()
 	for _, s := range stores {
 		statsMap.Observe(s)
-		statsMap.ObserveHotStat(s, c.hotStat.StoresStats)
+		statistics.ObserveHotStat(s, c.hotStat.StoresStats)
 	}
 	statsMap.Collect()
 
@@ -518,7 +518,7 @@ func (c *Cluster) collectMetrics() {
 	c.RegionsInfo.CollectWaitLockMetrics()
 }
 
-func (c *Cluster) resetMetrics() {
+func resetMetrics() {
 	statistics.Reset()
 	schedulers.ResetSchedulerMetrics()
 	schedule.ResetHotSpotMetrics()
