@@ -53,7 +53,7 @@ func NewLabelListStoresCommand() *cobra.Command {
 	return l
 }
 
-func showLabelsCommandFunc(cmd *cobra.Command, args []string) {
+func showLabelsCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, labelsPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get labels: %s\n", err)

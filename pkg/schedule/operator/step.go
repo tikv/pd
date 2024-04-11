@@ -70,7 +70,7 @@ type TransferLeader struct {
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
-func (tl TransferLeader) ConfVerChanged(_ *core.RegionInfo) uint64 {
+func (TransferLeader) ConfVerChanged(_ *core.RegionInfo) uint64 {
 	return 0 // transfer leader never change the conf version
 }
 
@@ -122,12 +122,12 @@ func (tl TransferLeader) Influence(opInfluence OpInfluence, region *core.RegionI
 }
 
 // Timeout returns duration that current step may take.
-func (tl TransferLeader) Timeout(regionSize int64) time.Duration {
+func (TransferLeader) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (tl TransferLeader) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
+func (tl TransferLeader) GetCmd(region *core.RegionInfo, _ bool) *hbstream.Operation {
 	peers := make([]*metapb.Peer, 0, len(tl.ToStores))
 	for _, storeID := range tl.ToStores {
 		peers = append(peers, region.GetStorePeer(storeID))
@@ -206,7 +206,7 @@ func (ap AddPeer) CheckInProgress(ci *core.BasicCluster, config config.SharedCon
 }
 
 // Timeout returns duration that current step may take.
-func (ap AddPeer) Timeout(regionSize int64) time.Duration {
+func (AddPeer) Timeout(regionSize int64) time.Duration {
 	return slowStepWaitDuration(regionSize)
 }
 
@@ -270,7 +270,7 @@ func (bw BecomeWitness) Influence(opInfluence OpInfluence, region *core.RegionIn
 }
 
 // Timeout returns duration that current step may take.
-func (bw BecomeWitness) Timeout(regionSize int64) time.Duration {
+func (BecomeWitness) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
 
@@ -338,12 +338,12 @@ func (bn BecomeNonWitness) Influence(opInfluence OpInfluence, region *core.Regio
 }
 
 // Timeout returns duration that current step may take.
-func (bn BecomeNonWitness) Timeout(regionSize int64) time.Duration {
+func (BecomeNonWitness) Timeout(regionSize int64) time.Duration {
 	return slowStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (bn BecomeNonWitness) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
+func (bn BecomeNonWitness) GetCmd(*core.RegionInfo, bool) *hbstream.Operation {
 	return switchWitness(bn.PeerID, false)
 }
 
@@ -518,7 +518,7 @@ func (al AddLearner) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // Timeout returns duration that current step may take.
-func (al AddLearner) Timeout(regionSize int64) time.Duration {
+func (AddLearner) Timeout(regionSize int64) time.Duration {
 	return slowStepWaitDuration(regionSize)
 }
 
@@ -565,7 +565,7 @@ func (pl PromoteLearner) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
 	peer := region.GetStorePeer(pl.ToStore)
 	if peer.GetId() != pl.PeerID {
 		return errors.New("peer does not exist")
@@ -574,10 +574,10 @@ func (pl PromoteLearner) CheckInProgress(_ *core.BasicCluster, config config.Sha
 }
 
 // Influence calculates the store difference that current step makes.
-func (pl PromoteLearner) Influence(_ OpInfluence, _ *core.RegionInfo) {}
+func (PromoteLearner) Influence(OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
-func (pl PromoteLearner) Timeout(regionSize int64) time.Duration {
+func (PromoteLearner) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
 
@@ -617,7 +617,7 @@ func (rp RemovePeer) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (rp RemovePeer) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
 	if rp.FromStore == region.GetLeader().GetStoreId() {
 		return errors.New("cannot remove leader peer")
 	}
@@ -648,7 +648,7 @@ func (rp RemovePeer) Influence(opInfluence OpInfluence, region *core.RegionInfo)
 }
 
 // Timeout returns duration that current step may take.
-func (rp RemovePeer) Timeout(regionSize int64) time.Duration {
+func (RemovePeer) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
 
@@ -674,7 +674,7 @@ type MergeRegion struct {
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
-func (mr MergeRegion) ConfVerChanged(_ *core.RegionInfo) uint64 {
+func (MergeRegion) ConfVerChanged(*core.RegionInfo) uint64 {
 	return 0
 }
 
@@ -691,7 +691,7 @@ func (mr MergeRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (mr MergeRegion) CheckInProgress(_ *core.BasicCluster, config config.SharedConfigProvider, _ *core.RegionInfo) error {
+func (MergeRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo) error {
 	return nil
 }
 
@@ -710,12 +710,12 @@ func (mr MergeRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 
 // Timeout returns duration that current step may take.
 // The merge step need more time to finish but less than slow step.
-func (mr MergeRegion) Timeout(regionSize int64) time.Duration {
+func (MergeRegion) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize) * 10
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (mr MergeRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
+func (mr MergeRegion) GetCmd(*core.RegionInfo, bool) *hbstream.Operation {
 	if mr.IsPassive {
 		return nil
 	}
@@ -734,7 +734,7 @@ type SplitRegion struct {
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
-func (sr SplitRegion) ConfVerChanged(_ *core.RegionInfo) uint64 {
+func (SplitRegion) ConfVerChanged(*core.RegionInfo) uint64 {
 	return 0
 }
 
@@ -748,7 +748,7 @@ func (sr SplitRegion) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Influence calculates the store difference that current step makes.
-func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
+func (SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo) {
 	for _, peer := range region.GetPeers() {
 		inf := opInfluence.GetStoreInfluence(peer.GetStoreId())
 		inf.RegionCount++
@@ -759,17 +759,17 @@ func (sr SplitRegion) Influence(opInfluence OpInfluence, region *core.RegionInfo
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (sr SplitRegion) CheckInProgress(_ *core.BasicCluster, config config.SharedConfigProvider, _ *core.RegionInfo) error {
+func (SplitRegion) CheckInProgress(*core.BasicCluster, config.SharedConfigProvider, *core.RegionInfo) error {
 	return nil
 }
 
 // Timeout returns duration that current step may take.
-func (sr SplitRegion) Timeout(regionSize int64) time.Duration {
+func (SplitRegion) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (sr SplitRegion) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
+func (sr SplitRegion) GetCmd(*core.RegionInfo, bool) *hbstream.Operation {
 	return &hbstream.Operation{
 		SplitRegion: &pdpb.SplitRegion{
 			Policy: sr.Policy,
@@ -814,7 +814,7 @@ func (dv DemoteVoter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // Timeout returns duration that current step may take.
-func (dv DemoteVoter) Timeout(regionSize int64) time.Duration {
+func (DemoteVoter) Timeout(regionSize int64) time.Duration {
 	return fastStepWaitDuration(regionSize)
 }
 
@@ -884,7 +884,7 @@ func (cpe ChangePeerV2Enter) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
 	inJointState, notInJointState := false, false
 	for _, pl := range cpe.PromoteLearners {
 		peer := region.GetStorePeer(pl.ToStore)
@@ -932,7 +932,7 @@ func (cpe ChangePeerV2Enter) CheckInProgress(_ *core.BasicCluster, config config
 }
 
 // Influence calculates the store difference that current step makes.
-func (cpe ChangePeerV2Enter) Influence(_ OpInfluence, _ *core.RegionInfo) {}
+func (ChangePeerV2Enter) Influence(OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
 func (cpe ChangePeerV2Enter) Timeout(regionSize int64) time.Duration {
@@ -1013,7 +1013,7 @@ func (cpl ChangePeerV2Leave) IsFinish(region *core.RegionInfo) bool {
 }
 
 // CheckInProgress checks if the step is in the progress of advancing.
-func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, config config.SharedConfigProvider, region *core.RegionInfo) error {
+func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, _ config.SharedConfigProvider, region *core.RegionInfo) error {
 	inJointState, notInJointState, demoteLeader := false, false, false
 	leaderStoreID := region.GetLeader().GetStoreId()
 
@@ -1072,7 +1072,7 @@ func (cpl ChangePeerV2Leave) CheckInProgress(_ *core.BasicCluster, config config
 }
 
 // Influence calculates the store difference that current step makes.
-func (cpl ChangePeerV2Leave) Influence(_ OpInfluence, _ *core.RegionInfo) {}
+func (ChangePeerV2Leave) Influence(OpInfluence, *core.RegionInfo) {}
 
 // Timeout returns duration that current step may take.
 func (cpl ChangePeerV2Leave) Timeout(regionSize int64) time.Duration {
@@ -1081,7 +1081,7 @@ func (cpl ChangePeerV2Leave) Timeout(regionSize int64) time.Duration {
 }
 
 // GetCmd returns the schedule command for heartbeat response.
-func (cpl ChangePeerV2Leave) GetCmd(region *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
+func (ChangePeerV2Leave) GetCmd(_ *core.RegionInfo, useConfChangeV2 bool) *hbstream.Operation {
 	if !useConfChangeV2 {
 		// only supported in ChangePeerV2
 		return nil

@@ -34,7 +34,7 @@ func TestLabel(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, serverName string) { cfg.Replication.StrictlyMatchLabel = false })
+	cluster, err := pdTests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Replication.StrictlyMatchLabel = false })
 	re.NoError(err)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()

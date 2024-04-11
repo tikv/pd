@@ -30,8 +30,8 @@ import (
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
-
-	"google.golang.org/grpc/test/grpc_testing"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/interop/grpc_testing"
 )
 
 func TestMain(m *testing.M) {
@@ -41,18 +41,18 @@ func TestMain(m *testing.M) {
 type testServiceRegistry struct {
 }
 
-func (t *testServiceRegistry) RegisterGRPCService(g *grpc.Server) {
+func (*testServiceRegistry) RegisterGRPCService(g *grpc.Server) {
 	grpc_testing.RegisterTestServiceServer(g, &grpc_testing.UnimplementedTestServiceServer{})
 }
 
-func (t *testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+func (*testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
 	group := apiutil.APIServiceGroup{
 		Name:       "my-http-service",
 		Version:    "v1alpha1",
 		IsCore:     false,
 		PathPrefix: "/my-service",
 	}
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Hello World!"))
 	})
@@ -80,7 +80,7 @@ func TestRegistryService(t *testing.T) {
 	leader := cluster.GetLeaderServer()
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"), grpc.WithInsecure())
+	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	defer cc.Close()
 	grpcClient := grpc_testing.NewTestServiceClient(cc)

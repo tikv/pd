@@ -29,6 +29,7 @@ import (
 func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
+	root.SetErr(buf)
 	root.SetArgs(args)
 	err = root.Execute()
 	return buf.Bytes(), err

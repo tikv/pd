@@ -49,7 +49,7 @@ func NewDeleteServiceGCSafepointCommand() *cobra.Command {
 	return l
 }
 
-func showSSPs(cmd *cobra.Command, args []string) {
+func showSSPs(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, serviceGCSafepointPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get service GC safepoint: %s\n", err)

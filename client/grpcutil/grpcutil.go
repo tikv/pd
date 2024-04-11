@@ -27,7 +27,9 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -53,7 +55,7 @@ const (
 // ctx will be noop. Users should call ClientConn.Close to terminate all the
 // pending operations after this function returns.
 func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...grpc.DialOption) (*grpc.ClientConn, error) {
-	opt := grpc.WithInsecure() //nolint
+	opt := grpc.WithTransportCredentials(insecure.NewCredentials())
 	if tlsCfg != nil {
 		creds := credentials.NewTLS(tlsCfg)
 		opt = grpc.WithTransportCredentials(creds)
@@ -62,7 +64,18 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	if err != nil {
 		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 	}
-	cc, err := grpc.DialContext(ctx, u.Host, append(do, opt)...)
+	// Here we use a shorter MaxDelay to make the connection recover faster.
+	// The default MaxDelay is 120s, which is too long for us.
+	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{
+		Backoff: backoff.Config{
+			BaseDelay:  time.Second,
+			Multiplier: 1.6,
+			Jitter:     0.2,
+			MaxDelay:   3 * time.Second,
+		},
+	})
+	do = append(do, opt, backoffOpts)
+	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
 	}
@@ -71,8 +84,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 
 // BuildForwardContext creates a context with receiver metadata information.
 // It is used in client side.
-func BuildForwardContext(ctx context.Context, addr string) context.Context {
-	md := metadata.Pairs(ForwardMetadataKey, addr)
+func BuildForwardContext(ctx context.Context, url string) context.Context {
+	md := metadata.Pairs(ForwardMetadataKey, url)
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
@@ -111,17 +124,17 @@ func getValueFromMetadata(ctx context.Context, key string, f func(context.Contex
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.
 // Returns the old one if's already existed in the clientConns; otherwise creates a new one and returns it.
-func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string, tlsCfg *tls.Config, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
-	conn, ok := clientConns.Load(addr)
+func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, url string, tlsCfg *tls.Config, opt ...grpc.DialOption) (*grpc.ClientConn, error) {
+	conn, ok := clientConns.Load(url)
 	if ok {
 		// TODO: check the connection state.
 		return conn.(*grpc.ClientConn), nil
 	}
 	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
-	cc, err := GetClientConn(dCtx, addr, tlsCfg, opt...)
+	cc, err := GetClientConn(dCtx, url, tlsCfg, opt...)
 	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
-		if val, ok := val.(string); ok && val == addr {
+		if val, ok := val.(string); ok && val == url {
 			cc = nil
 			err = errors.Errorf("unreachable network")
 		}
@@ -129,7 +142,7 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, addr string
 	if err != nil {
 		return nil, err
 	}
-	conn, loaded := clientConns.LoadOrStore(addr, cc)
+	conn, loaded := clientConns.LoadOrStore(url, cc)
 	if !loaded {
 		// Successfully stored the connection.
 		return cc, nil

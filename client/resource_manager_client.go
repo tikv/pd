@@ -74,7 +74,7 @@ func WithRUStats(op *GetResourceGroupOp) {
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
 func (c *client) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
-	cc, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(c.GetLeaderAddr())
+	cc, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(c.GetLeaderURL())
 	if err != nil {
 		return nil, err
 	}

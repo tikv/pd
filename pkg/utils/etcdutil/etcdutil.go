@@ -88,7 +88,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp := &http.Transport{
 			TLSClientConfig: tlsConfig,
 		}
-		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers(nil, []string{u}, trp)
+		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers(nil, []string{u}, trp, true)
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
@@ -418,6 +418,8 @@ type LoopWatcher struct {
 	// updateClientCh is used to update the etcd client.
 	// It's only used for testing.
 	updateClientCh chan *clientv3.Client
+	// watchChTimeoutDuration is the timeout duration for a watchChan.
+	watchChTimeoutDuration time.Duration
 }
 
 // NewLoopWatcher creates a new LoopWatcher.
@@ -448,6 +450,7 @@ func NewLoopWatcher(
 		loadRetryTimes:           defaultLoadFromEtcdRetryTimes,
 		loadBatchSize:            maxLoadBatchSize,
 		watchChangeRetryInterval: defaultEtcdRetryInterval,
+		watchChTimeoutDuration:   WatchChTimeoutDuration,
 	}
 }
 
@@ -597,7 +600,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 			cancel()
 			// If no message comes from an etcd watchChan for WatchChTimeoutDuration,
 			// create a new one and need not to reset lastReceivedResponseTime.
-			if time.Since(lastReceivedResponseTime) >= WatchChTimeoutDuration {
+			if time.Since(lastReceivedResponseTime) >= lw.watchChTimeoutDuration {
 				log.Warn("watch channel is blocked for a long time, recreating a new one in watch loop",
 					zap.Duration("timeout", time.Since(lastReceivedResponseTime)),
 					zap.Int64("revision", revision), zap.String("name", lw.name), zap.String("key", lw.key))

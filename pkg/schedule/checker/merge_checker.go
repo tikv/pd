@@ -94,7 +94,7 @@ func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf conf
 }
 
 // GetType return MergeChecker's type
-func (m *MergeChecker) GetType() string {
+func (*MergeChecker) GetType() string {
 	return "merge-checker"
 }
 

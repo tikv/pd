@@ -141,7 +141,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiCluster, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, serverName string) {
+	apiCluster, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
 	})
 	defer apiCluster.Destroy()
@@ -265,4 +265,23 @@ func (suite *tsoAPITestSuite) TestStatus() {
 	re.Equal(versioninfo.PDBuildTS, s.BuildTS)
 	re.Equal(versioninfo.PDGitHash, s.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, s.Version)
+}
+
+func (suite *tsoAPITestSuite) TestConfig() {
+	re := suite.Require()
+
+	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	resp, err := http.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/tso/api/v1/config")
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	respBytes, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	var cfg tso.Config
+	re.NoError(json.Unmarshal(respBytes, &cfg))
+	re.Equal(cfg.GetListenAddr(), primary.GetConfig().GetListenAddr())
+	re.Equal(cfg.GetTSOSaveInterval(), primary.GetConfig().GetTSOSaveInterval())
+	re.Equal(cfg.IsLocalTSOEnabled(), primary.GetConfig().IsLocalTSOEnabled())
+	re.Equal(cfg.GetTSOUpdatePhysicalInterval(), primary.GetConfig().GetTSOUpdatePhysicalInterval())
+	re.Equal(cfg.GetMaxResetTSGap(), primary.GetConfig().GetMaxResetTSGap())
 }

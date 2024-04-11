@@ -409,7 +409,7 @@ func buildPlans(planMap map[string]map[string]struct{}, resourceTypeMap map[stri
 }
 
 // TODO: implement heterogeneous logic and take cluster information into consideration.
-func findBestGroupToScaleIn(strategy *Strategy, scaleInQuota float64, groups []*Plan) Plan {
+func findBestGroupToScaleIn(_ *Strategy, _ float64, groups []*Plan) Plan {
 	return *groups[0]
 }
 

@@ -46,6 +46,7 @@ const (
 	getClusterVersionName                   = "GetClusterVersion"
 	getClusterName                          = "GetCluster"
 	getClusterStatusName                    = "GetClusterStatus"
+	getStatusName                           = "GetStatus"
 	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"
@@ -77,6 +78,8 @@ const (
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
 	deleteOperators                         = "DeleteOperators"
+	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
+	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
 )
 
 type requestInfo struct {
@@ -88,6 +91,7 @@ type requestInfo struct {
 	res         any
 	respHandler respHandleFunc
 	bo          *retry.Backoffer
+	targetURL   string
 }
 
 // newRequestInfo creates a new request info.
@@ -140,6 +144,12 @@ func (ri *requestInfo) WithRespHandler(respHandler respHandleFunc) *requestInfo 
 // WithBackoffer sets the backoffer of the request.
 func (ri *requestInfo) WithBackoffer(bo *retry.Backoffer) *requestInfo {
 	ri.bo = bo
+	return ri
+}
+
+// WithTargetURL sets the target URL of the request.
+func (ri *requestInfo) WithTargetURL(targetURL string) *requestInfo {
+	ri.targetURL = targetURL
 	return ri
 }
 

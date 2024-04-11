@@ -675,7 +675,7 @@ func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showStoresCommandFunc(cmd *cobra.Command, args []string) {
+func showStoresCommandFunc(cmd *cobra.Command, _ []string) {
 	prefix := storesPrefix
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
@@ -706,7 +706,7 @@ func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
+func removeTombStoneCommandFunc(cmd *cobra.Command, _ []string) {
 	prefix := path.Join(storesPrefix, "remove-tombstone")
 	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {

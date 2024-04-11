@@ -212,7 +212,7 @@ func NewDeleteLabelPropertyConfigCommand() *cobra.Command {
 	return sc
 }
 
-func showConfigCommandFunc(cmd *cobra.Command, args []string) {
+func showConfigCommandFunc(cmd *cobra.Command, _ []string) {
 	header := buildHeader(cmd)
 	allR, err := doRequest(cmd, configPrefix, http.MethodGet, header)
 	if err != nil {
@@ -268,7 +268,7 @@ var hideConfig = []string{
 	"scheduler-max-waiting-operator",
 }
 
-func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
+func showScheduleConfigCommandFunc(cmd *cobra.Command, _ []string) {
 	header := buildHeader(cmd)
 	r, err := doRequest(cmd, schedulePrefix, http.MethodGet, header)
 	if err != nil {
@@ -278,7 +278,7 @@ func showScheduleConfigCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
+func showReplicationConfigCommandFunc(cmd *cobra.Command, _ []string) {
 	header := buildHeader(cmd)
 	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, header)
 	if err != nil {
@@ -288,7 +288,7 @@ func showReplicationConfigCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
+func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, labelPropertyPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get config: %s\n", err)
@@ -297,7 +297,7 @@ func showLabelPropertyConfigCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
+func showAllConfigCommandFunc(cmd *cobra.Command, _ []string) {
 	header := buildHeader(cmd)
 	r, err := doRequest(cmd, configPrefix, http.MethodGet, header)
 	if err != nil {
@@ -307,7 +307,7 @@ func showAllConfigCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
+func showClusterVersionCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, clusterVersionPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get cluster version: %s\n", err)
@@ -316,7 +316,7 @@ func showClusterVersionCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
+func showReplicationModeCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, replicationModePrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get replication mode config: %s\n", err)
@@ -325,7 +325,7 @@ func showReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showServerCommandFunc(cmd *cobra.Command, args []string) {
+func showServerCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, pdServerPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get server config: %s\n", err)
@@ -408,7 +408,7 @@ func setReplicationModeCommandFunc(cmd *cobra.Command, args []string) {
 	} else if len(args) == 3 {
 		t := reflectutil.FindFieldByJSONTag(reflect.TypeOf(config.ReplicationModeConfig{}), []string{args[0], args[1]})
 		if t != nil && t.Kind() == reflect.Int {
-			// convert to number for numberic fields.
+			// convert to number for numeric fields.
 			arg2, err := strconv.ParseInt(args[2], 10, 64)
 			if err != nil {
 				cmd.Printf("value %v cannot covert to number: %v", args[2], err)
@@ -529,7 +529,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	return c
 }
 
-func enablePlacementRulesFunc(cmd *cobra.Command, args []string) {
+func enablePlacementRulesFunc(cmd *cobra.Command, _ []string) {
 	err := postConfigDataWithPath(cmd, "enable-placement-rules", "true", configPrefix)
 	if err != nil {
 		cmd.Printf("Failed to set config: %s\n", err)
@@ -538,7 +538,7 @@ func enablePlacementRulesFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func disablePlacementRulesFunc(cmd *cobra.Command, args []string) {
+func disablePlacementRulesFunc(cmd *cobra.Command, _ []string) {
 	err := postConfigDataWithPath(cmd, "enable-placement-rules", "false", configPrefix)
 	if err != nil {
 		cmd.Printf("Failed to set config: %s\n", err)
@@ -547,7 +547,7 @@ func disablePlacementRulesFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
+func getPlacementRulesFunc(cmd *cobra.Command, _ []string) {
 	getFlag := func(key string) string {
 		if f := cmd.Flag(key); f != nil {
 			return f.Value.String()
@@ -598,7 +598,7 @@ func getPlacementRulesFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("rules saved to file " + file)
 }
 
-func putPlacementRulesFunc(cmd *cobra.Command, args []string) {
+func putPlacementRulesFunc(cmd *cobra.Command, _ []string) {
 	var file string
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
@@ -712,7 +712,7 @@ func getRuleBundle(cmd *cobra.Command, args []string) {
 	cmd.Printf("rule group saved to file %s\n", file)
 }
 
-func setRuleBundle(cmd *cobra.Command, args []string) {
+func setRuleBundle(cmd *cobra.Command, _ []string) {
 	var file string
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()
@@ -763,7 +763,7 @@ func delRuleBundle(cmd *cobra.Command, args []string) {
 	cmd.Println(res)
 }
 
-func loadRuleBundle(cmd *cobra.Command, args []string) {
+func loadRuleBundle(cmd *cobra.Command, _ []string) {
 	header := buildHeader(cmd)
 	res, err := doRequest(cmd, ruleBundlePrefix, http.MethodGet, header)
 	if err != nil {
@@ -788,7 +788,7 @@ func loadRuleBundle(cmd *cobra.Command, args []string) {
 	cmd.Printf("rule group saved to file %s\n", file)
 }
 
-func saveRuleBundle(cmd *cobra.Command, args []string) {
+func saveRuleBundle(cmd *cobra.Command, _ []string) {
 	var file string
 	if f := cmd.Flag("in"); f != nil {
 		file = f.Value.String()

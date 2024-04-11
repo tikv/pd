@@ -488,7 +488,7 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 }
 
 // @Tags     region
-// @Summary  List all range holes whitout any region info.
+// @Summary  List all range holes without any region info.
 // @Produce  json
 // @Success  200  {object}  [][]string
 // @Router   /regions/range-holes [get]
@@ -774,7 +774,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 		if !ok {
 			return 0, nil, errors.New("regions_id is invalid")
 		}
-		return h.ScatterRegionsByID(ids, group, retryLimit, false)
+		return h.ScatterRegionsByID(ids, group, retryLimit)
 	}()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

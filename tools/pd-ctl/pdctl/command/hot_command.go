@@ -107,7 +107,7 @@ func NewHotStoreCommand() *cobra.Command {
 	return cmd
 }
 
-func showHotStoresCommandFunc(cmd *cobra.Command, args []string) {
+func showHotStoresCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, hotStoresPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store hotspot: %s\n", err)

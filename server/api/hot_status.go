@@ -101,7 +101,7 @@ func (h *hotStatusHandler) getHotRegions(typ utils.RWType, w http.ResponseWriter
 // @Success  200  {object}  handler.HotStoreStats
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /hotspot/stores [get]
-func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, r *http.Request) {
+func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, _ *http.Request) {
 	stats, err := h.Handler.GetHotStores()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

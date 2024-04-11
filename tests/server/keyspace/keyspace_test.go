@@ -53,7 +53,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cancel = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = preAllocKeyspace
 	})
 	suite.cluster = cluster

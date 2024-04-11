@@ -386,9 +386,9 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// Deprecated: use /pd/api/v1/health instead.
 	rootRouter.HandleFunc("/health", healthHandler.GetHealthStatus).Methods(http.MethodGet)
 	// Deprecated: use /pd/api/v1/ping instead.
-	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods(http.MethodGet)
+	rootRouter.HandleFunc("/ping", func(http.ResponseWriter, *http.Request) {}).Methods(http.MethodGet)
 
-	rootRouter.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+	rootRouter.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
 		serviceLabel := route.GetName()
 		methods, _ := route.GetMethods()
 		path, _ := route.GetPathTemplate()
