@@ -37,7 +37,6 @@ func TestToTLSConfig(t *testing.T) {
 		}
 	}()
 
-	t.Parallel()
 	re := require.New(t)
 	tlsConfig := TLSConfig{
 		KeyPath:  path.Join(certPath, "pd-server-key.pem"),
