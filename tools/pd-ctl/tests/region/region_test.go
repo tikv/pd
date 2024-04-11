@@ -83,7 +83,7 @@ func TestRegion(t *testing.T) {
 	r1 := pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1),
 		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(100),
-		core.SetReadQuery(100), core.SetWrittenQuery(100),
+		core.AddReadQuery(100), core.AddWrittenQuery(100),
 		core.SetPeers([]*metapb.Peer{
 			{Id: 1, StoreId: 1},
 			{Id: 5, StoreId: 2},
@@ -93,18 +93,18 @@ func TestRegion(t *testing.T) {
 	r2 := pdTests.MustPutRegion(re, cluster, 2, 1, []byte("b"), []byte("c"),
 		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2),
 		core.SetRegionVersion(3), core.SetApproximateSize(144), core.SetApproximateKeys(14400),
-		core.SetReadQuery(200), core.SetWrittenQuery(200),
+		core.AddReadQuery(200), core.AddWrittenQuery(200),
 	)
 	r3 := pdTests.MustPutRegion(re, cluster, 3, 1, []byte("c"), []byte("d"),
 		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3),
 		core.SetRegionVersion(2), core.SetApproximateSize(30), core.SetApproximateKeys(3000),
-		core.SetReadQuery(300), core.SetWrittenQuery(300),
+		core.AddReadQuery(300), core.AddWrittenQuery(300),
 		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
 		core.WithPendingPeers([]*metapb.Peer{downPeer}), core.WithLearners([]*metapb.Peer{{Id: 3, StoreId: 1}}))
 	r4 := pdTests.MustPutRegion(re, cluster, 4, 1, []byte("d"), []byte("e"),
 		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(4),
 		core.SetRegionVersion(4), core.SetApproximateSize(10), core.SetApproximateKeys(1000),
-		core.SetReadQuery(400), core.SetWrittenQuery(400),
+		core.AddReadQuery(400), core.AddWrittenQuery(400),
 	)
 	defer cluster.Destroy()
 

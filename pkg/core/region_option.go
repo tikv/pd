@@ -247,19 +247,36 @@ func SetReadKeys(v uint64) RegionCreateOption {
 }
 
 // SetReadQuery sets the read query for the region, only used for unit test.
+// It will cover previous statistic.
 func SetReadQuery(v uint64) RegionCreateOption {
+	q := RandomKindReadQuery(v)
+	return SetQueryStats(q)
+}
+
+// SetWrittenQuery sets the write query for the region, only used for unit test.
+// It will cover previous statistic.
+func SetWrittenQuery(v uint64) RegionCreateOption {
+	q := RandomKindWriteQuery(v)
+	return SetQueryStats(q)
+}
+
+// AddReadQuery adds the read query for the region, only used for unit test.
+// It will preserve previous statistic.
+func AddReadQuery(v uint64) RegionCreateOption {
 	q := RandomKindReadQuery(v)
 	return AddQueryStats(q)
 }
 
-// SetWrittenQuery sets the write query for the region, only used for unit test.
-func SetWrittenQuery(v uint64) RegionCreateOption {
+// AddWrittenQuery adds the write query for the region, only used for unit test.
+// It will preserve previous statistic.
+func AddWrittenQuery(v uint64) RegionCreateOption {
 	q := RandomKindWriteQuery(v)
 	return AddQueryStats(q)
 }
 
 // SetQueryStats sets the query stats for the region, it will cover previous statistic.
 // This func is only used for unit test.
+// It will cover previous statistic.
 func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.queryStats = v
@@ -268,6 +285,7 @@ func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 
 // AddQueryStats sets the query stats for the region, it will preserve previous statistic.
 // This func is only used for test and simulator.
+// It will preserve previous statistic.
 func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
 		q := mergeQueryStat(region.queryStats, v)
