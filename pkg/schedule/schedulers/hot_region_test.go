@@ -510,9 +510,11 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 		case 5:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			if op.RegionID() == 2 {
 				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
@@ -729,9 +731,11 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 		case 2:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLearner(re, op, operator.OpHotRegion, 8, 10)
 		default:
 			re.FailNow("wrong op: " + op.String())
@@ -822,9 +826,11 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 		case 5:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			if op.RegionID() == 2 {
 				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
@@ -1163,6 +1169,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 			switch op.Len() {
 			case 1:
 				// balance by leader selected
+				re.Equal("transfer-hot-write-leader", op.Desc())
 				operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 			case 5:
 				// balance by peer selected
