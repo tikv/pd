@@ -15,7 +15,6 @@
 package operator
 
 import (
-	"container/heap"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -365,10 +364,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 		oc.SetOperator(op4)
 		re.True(op2.Start())
 		oc.SetOperator(op2)
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
 	// first poll got nil
 	r, next := oc.pollNeedDispatchRegion()
@@ -430,7 +429,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	re.Len(ops, 2)
 	re.Equal(2, controller.AddWaitingOperator(ops...))
 	// Change next push time to now, it's used to make test case faster.
-	controller.opNotifierQueue[0].time = time.Now()
+	controller.opNotifierQueue.heap[0].time = time.Now()
 
 	// first poll gets source region op.
 	r, next := controller.pollNeedDispatchRegion()
@@ -438,7 +437,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	re.Equal(r, source)
 
 	// second poll gets target region op.
-	controller.opNotifierQueue[0].time = time.Now()
+	controller.opNotifierQueue.heap[0].time = time.Now()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Equal(r, target)
@@ -448,18 +447,18 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Len(controller.opNotifierQueue, 1)
-	re.Empty(controller.operators)
+	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Empty(controller.GetOperators())
 	re.Empty(controller.wop.ListOperator())
 	re.NotNil(controller.records.Get(101))
 	re.NotNil(controller.records.Get(102))
 
 	// fourth poll removes target region op from opNotifierQueue
-	controller.opNotifierQueue[0].time = time.Now()
+	controller.opNotifierQueue.heap[0].time = time.Now()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Empty(controller.opNotifierQueue)
+	re.Equal(0, controller.opNotifierQueue.Len())
 
 	// Add the two ops to waiting operators again.
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
@@ -471,7 +470,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	// change the target RegionEpoch
 	// first poll gets source region from opNotifierQueue
 	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
-	controller.opNotifierQueue[0].time = time.Now()
+	controller.opNotifierQueue.heap[0].time = time.Now()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Equal(r, source)
@@ -479,17 +478,17 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Len(controller.opNotifierQueue, 1)
-	re.Empty(controller.operators)
+	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Empty(controller.GetOperators())
 	re.Empty(controller.wop.ListOperator())
 	re.NotNil(controller.records.Get(101))
 	re.NotNil(controller.records.Get(102))
 
-	controller.opNotifierQueue[0].time = time.Now()
+	controller.opNotifierQueue.heap[0].time = time.Now()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Empty(controller.opNotifierQueue)
+	re.Equal(0, controller.opNotifierQueue.Len())
 }
 
 func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
@@ -911,7 +910,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	batch = append(batch, addPeerOp(100))
 	added = controller.AddWaitingOperator(batch...)
 	re.Equal(1, added)
-	re.NotNil(controller.operators[uint64(100)])
+	re.NotNil(controller.GetOperator(uint64(100)))
 
 	source := newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(source)
@@ -952,7 +951,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 		RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
 	}
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
-	re.True(oc.addOperatorLocked(op))
+	re.True(oc.AddOperator(op))
 	// Although store 3 does not exist in PD, PD can also send op to TiKV.
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 }
