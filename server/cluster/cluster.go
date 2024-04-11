@@ -106,6 +106,9 @@ const (
 	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
 	// It should enlarge the limiter if the snapshot's duration is less than this value.
 	minSnapshotDurationSec = 5
+
+	// heartbeat relative const
+	hbAsyncRunner = "heartbeat-async-task-runner"
 )
 
 // Server is the interface for cluster.
@@ -195,7 +198,7 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.Ba
 		etcdClient:           etcdClient,
 		core:                 basicCluster,
 		storage:              storage,
-		taskRunner:           ratelimit.NewAsyncRunner("heartbeat-async-task-runner", time.Minute),
+		taskRunner:           ratelimit.NewAsyncRunner(hbAsyncRunner, time.Minute),
 		hbConcurrencyLimiter: ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU() * 2)),
 	}
 }

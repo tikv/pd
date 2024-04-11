@@ -59,7 +59,11 @@ func HandleOverlaps(c Cluster, overlaps []*core.RegionInfo) {
 func Collect(c Cluster, region *core.RegionInfo, hasRegionStats bool) {
 	if hasRegionStats {
 		// get region again from root tree. make sure the observed region is the latest.
-		region = c.GetBasicCluster().GetRegion(region.GetID())
+		bc := c.GetBasicCluster()
+		if bc == nil {
+			return
+		}
+		region = bc.GetRegion(region.GetID())
 		if region == nil {
 			return
 		}

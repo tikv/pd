@@ -63,6 +63,9 @@ const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
 	collectWaitTime       = time.Minute
+
+	// heartbeat relative const
+	hbAsyncRunner = "heartbeat-async-task-runner"
 )
 
 var syncRunner = ratelimit.NewSyncRunner()
@@ -90,7 +93,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
 
-		taskRunner:           ratelimit.NewAsyncRunner("heartbeat-async-task-runner", time.Minute),
+		taskRunner:           ratelimit.NewAsyncRunner(hbAsyncRunner, time.Minute),
 		hbConcurrencyLimiter: ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU() * 2)),
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
