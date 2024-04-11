@@ -27,6 +27,7 @@ func TestAsyncRunner(t *testing.T) {
 	t.Run("RunTask", func(t *testing.T) {
 		limiter := NewConcurrencyLimiter(1)
 		runner := NewAsyncRunner("test", time.Second)
+		runner.Start()
 		defer runner.Stop()
 
 		var wg sync.WaitGroup
@@ -48,6 +49,7 @@ func TestAsyncRunner(t *testing.T) {
 	t.Run("MaxPendingDuration", func(t *testing.T) {
 		limiter := NewConcurrencyLimiter(1)
 		runner := NewAsyncRunner("test", 2*time.Millisecond)
+		runner.Start()
 		defer runner.Stop()
 		var wg sync.WaitGroup
 		for i := 0; i < 10; i++ {
