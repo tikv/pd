@@ -249,13 +249,13 @@ func SetReadKeys(v uint64) RegionCreateOption {
 // SetReadQuery sets the read query for the region, only used for unit test.
 func SetReadQuery(v uint64) RegionCreateOption {
 	q := RandomKindReadQuery(v)
-	return SetQueryStats(q)
+	return AddQueryStats(q)
 }
 
 // SetWrittenQuery sets the write query for the region, only used for unit test.
 func SetWrittenQuery(v uint64) RegionCreateOption {
 	q := RandomKindWriteQuery(v)
-	return SetQueryStats(q)
+	return AddQueryStats(q)
 }
 
 // SetQueryStats sets the query stats for the region, it will cover previous statistic.
