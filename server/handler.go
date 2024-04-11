@@ -369,15 +369,6 @@ func (h *Handler) SetLabelStoresLimit(ratePerMin float64, limitType storelimit.T
 	return nil
 }
 
-// GetAllStoresLimit is used to get limit of all stores.
-func (h *Handler) GetAllStoresLimit(limitType storelimit.Type) (map[uint64]sc.StoreLimitConfig, error) {
-	c, err := h.GetRaftCluster()
-	if err != nil {
-		return nil, err
-	}
-	return c.GetAllStoresLimit(), nil
-}
-
 // SetStoreLimit is used to set the limit of a store.
 func (h *Handler) SetStoreLimit(storeID uint64, ratePerMin float64, limitType storelimit.Type) error {
 	c, err := h.GetRaftCluster()

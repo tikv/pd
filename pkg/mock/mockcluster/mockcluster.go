@@ -123,7 +123,7 @@ func (mc *Cluster) AllocID() (uint64, error) {
 }
 
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
-func (mc *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {}
+func (*Cluster) UpdateRegionsLabelLevelStats(_ []*core.RegionInfo) {}
 
 // LoadRegion puts region info without leader
 func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {

@@ -98,7 +98,7 @@ func TestClusterID(t *testing.T) {
 		re.Equal(clusterID, s.GetClusterID())
 	}
 
-	cluster2, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.InitialClusterToken = "foobar" })
+	cluster2, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.InitialClusterToken = "foobar" })
 	defer cluster2.Destroy()
 	re.NoError(err)
 	err = cluster2.RunInitialServers()

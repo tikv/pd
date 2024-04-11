@@ -22,7 +22,6 @@ import (
 )
 
 func TestNilFail(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	var failErr error
 	checker := NewChecker()

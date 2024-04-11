@@ -89,7 +89,7 @@ func NewLeaderMemberCommand() *cobra.Command {
 	return d
 }
 
-func showMemberCommandFunc(cmd *cobra.Command, args []string) {
+func showMemberCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, membersPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get pd members: %s\n", err)
@@ -126,7 +126,7 @@ func deleteMemberByIDCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
+func getLeaderMemberCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, leaderMemberPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get the leader of pd members: %s\n", err)
@@ -135,7 +135,7 @@ func getLeaderMemberCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func resignLeaderCommandFunc(cmd *cobra.Command, args []string) {
+func resignLeaderCommandFunc(cmd *cobra.Command, _ []string) {
 	prefix := leaderMemberPrefix + "/resign"
 	_, err := doRequest(cmd, prefix, http.MethodPost, http.Header{})
 	if err != nil {

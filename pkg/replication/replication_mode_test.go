@@ -144,7 +144,7 @@ func (rep *mockFileReplicator) GetMembers() ([]*pdpb.Member, error) {
 	return members, nil
 }
 
-func (rep *mockFileReplicator) ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
+func (rep *mockFileReplicator) ReplicateFileToMember(_ context.Context, member *pdpb.Member, _ string, data []byte) error {
 	if err := rep.errors[member.GetMemberId()]; err != nil {
 		return err
 	}
@@ -260,7 +260,7 @@ func TestStateSwitch(t *testing.T) {
 	rep.tickUpdateState()
 	re.Equal(drStateSync, rep.drGetState())
 
-	// once zone2 down, swith to async state.
+	// once zone2 down, switch to async state.
 	setStoreState(cluster, "up", "up", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	re.Equal(drStateAsyncWait, rep.drGetState())

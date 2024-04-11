@@ -117,35 +117,35 @@ func TestExitWatch(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/fastTick", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Case1: close the client before the watch loop starts
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
 		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
 		client.Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
 		return func() {}
 	})
 	// Case2: close the client when the watch loop is running
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
 		// Wait for the watch loop to start
 		time.Sleep(500 * time.Millisecond)
 		client.Close()
 		return func() {}
 	})
 	// Case3: delete the leader key
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(_ *embed.Etcd, client *clientv3.Client) func() {
 		leaderKey := leaderKey
 		_, err := client.Delete(context.Background(), leaderKey)
 		re.NoError(err)
 		return func() {}
 	})
 	// Case4: close the server before the watch loop starts
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client) func() {
 		re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
 		server.Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
 		return func() {}
 	})
 	// Case5: close the server when the watch loop is running
-	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
+	checkExitWatch(t, leaderKey, func(server *embed.Etcd, _ *clientv3.Client) func() {
 		// Wait for the watch loop to start
 		time.Sleep(500 * time.Millisecond)
 		server.Close()
@@ -155,7 +155,7 @@ func TestExitWatch(t *testing.T) {
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
-		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().LCUrls)
+		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().ListenClientUrls)
 		re.NoError(err)
 		// close the original leader
 		server.Server.HardStop()
@@ -189,7 +189,7 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 	re := require.New(t)
 	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
+	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
 	re.NoError(err)
 	defer client2.Close()
 
@@ -225,7 +225,7 @@ func TestRequestProgress(t *testing.T) {
 		defer os.RemoveAll(fname)
 		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
 		defer clean()
-		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
+		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
 		re.NoError(err)
 		defer client2.Close()
 

@@ -95,7 +95,8 @@ type shuffleHotRegionScheduler struct {
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
 func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuffleHotRegionSchedulerConfig) Scheduler {
-	base := newBaseHotScheduler(opController)
+	base := newBaseHotScheduler(opController,
+		statistics.DefaultHistorySampleDuration, statistics.DefaultHistorySampleInterval)
 	handler := newShuffleHotRegionHandler(conf)
 	ret := &shuffleHotRegionScheduler{
 		baseHotScheduler: base,
@@ -113,7 +114,7 @@ func (s *shuffleHotRegionScheduler) GetName() string {
 	return s.conf.Name
 }
 
-func (s *shuffleHotRegionScheduler) GetType() string {
+func (*shuffleHotRegionScheduler) GetType() string {
 	return ShuffleHotRegionType
 }
 
@@ -156,7 +157,7 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerClus
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 
-func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleHotRegionCounter.Inc()
 	rw := s.randomRWType()
 	s.prepareForBalance(rw, cluster)
@@ -249,7 +250,7 @@ func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *h
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
-func (handler *shuffleHotRegionHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *shuffleHotRegionHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }

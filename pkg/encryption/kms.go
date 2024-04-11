@@ -60,7 +60,7 @@ func newMasterKeyFromKMS(
 	roleArn := os.Getenv(envAwsRoleArn)
 	tokenFile := os.Getenv(envAwsWebIdentityTokenFile)
 	sessionName := os.Getenv(envAwsRoleSessionName)
-	optFn := func(options *kms.Options) {}
+	optFn := func(*kms.Options) {}
 	// Session name is optional.
 	if roleArn != "" && tokenFile != "" {
 		client := sts.NewFromConfig(cfg)
@@ -90,7 +90,7 @@ func newMasterKeyFromKMS(
 		}
 		if len(output.Plaintext) != masterKeyLength {
 			return nil, errs.ErrEncryptionKMS.GenWithStack(
-				"unexpected data key length generated from AWS KMS, expectd %d vs actual %d",
+				"unexpected data key length generated from AWS KMS, expected %d vs actual %d",
 				masterKeyLength, len(output.Plaintext))
 		}
 		masterKey = &MasterKey{

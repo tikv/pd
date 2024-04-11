@@ -60,19 +60,19 @@ func newTransferWitnessLeaderScheduler(opController *operator.Controller) Schedu
 	}
 }
 
-func (s *transferWitnessLeaderScheduler) GetName() string {
+func (*transferWitnessLeaderScheduler) GetName() string {
 	return TransferWitnessLeaderName
 }
 
-func (s *transferWitnessLeaderScheduler) GetType() string {
+func (*transferWitnessLeaderScheduler) GetType() string {
 	return TransferWitnessLeaderType
 }
 
-func (s *transferWitnessLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+func (*transferWitnessLeaderScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {
 	return true
 }
 
-func (s *transferWitnessLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *transferWitnessLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	transferWitnessLeaderCounter.Inc()
 	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), s.GetType(), cluster, transferWitnessLeaderBatchSize), nil
 }
@@ -83,7 +83,7 @@ batchLoop:
 	for i := 0; i < batchSize; i++ {
 		select {
 		case region := <-s.regions:
-			op, err := s.scheduleTransferWitnessLeader(name, typ, cluster, region)
+			op, err := scheduleTransferWitnessLeader(name, typ, cluster, region)
 			if err != nil {
 				log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 				continue
@@ -100,7 +100,7 @@ batchLoop:
 	return ops
 }
 
-func (s *transferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ string, cluster sche.SchedulerCluster, region *core.RegionInfo) (*operator.Operator, error) {
+func scheduleTransferWitnessLeader(name, typ string, cluster sche.SchedulerCluster, region *core.RegionInfo) (*operator.Operator, error) {
 	var filters []filter.Filter
 	unhealthyPeerStores := make(map[uint64]struct{})
 	for _, peer := range region.GetDownPeers() {
@@ -123,7 +123,7 @@ func (s *transferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ
 	for _, t := range targets {
 		targetIDs = append(targetIDs, t.GetID())
 	}
-	return operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpWitnessLeader)
+	return operator.CreateTransferLeaderOperator(typ, cluster, region, target.GetID(), targetIDs, operator.OpWitnessLeader)
 }
 
 // RecvRegionInfo receives a checked region from coordinator

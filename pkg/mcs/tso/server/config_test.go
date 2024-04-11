@@ -83,7 +83,7 @@ max-gap-reset-ts = "1h"
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
-	err = cfg.Adjust(&meta, false)
+	err = cfg.Adjust(&meta)
 	re.NoError(err)
 
 	re.Equal("tso-test-name", cfg.GetName())

@@ -45,7 +45,6 @@ func TestStoreLimit(t *testing.T) {
 }
 
 func TestSlidingWindow(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	capacity := int64(defaultWindowSize)
 	s := NewSlidingWindows()
@@ -92,7 +91,6 @@ func TestSlidingWindow(t *testing.T) {
 }
 
 func TestWindow(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	capacity := int64(100 * 10)
 	s := newWindow(capacity)
@@ -101,18 +99,18 @@ func TestWindow(t *testing.T) {
 	token := capacity + 10
 	re.True(s.take(token))
 	re.False(s.take(token))
-	re.EqualValues(s.ack(token), 0)
+	re.EqualValues(0, s.ack(token))
 	re.True(s.take(token))
-	re.EqualValues(s.ack(token), 0)
+	re.EqualValues(0, s.ack(token))
 	re.Equal(s.ack(token), token)
-	re.EqualValues(s.getUsed(), 0)
+	re.EqualValues(0, s.getUsed())
 
 	// case2: the capacity of the window must greater than the minSnapSize.
 	s.reset(minSnapSize - 1)
-	re.EqualValues(s.capacity, minSnapSize)
+	re.EqualValues(minSnapSize, s.capacity)
 	re.True(s.take(minSnapSize))
-	re.EqualValues(s.ack(minSnapSize*2), minSnapSize)
-	re.EqualValues(s.getUsed(), 0)
+	re.EqualValues(minSnapSize, s.ack(minSnapSize*2))
+	re.EqualValues(0, s.getUsed())
 }
 
 func TestFeedback(t *testing.T) {

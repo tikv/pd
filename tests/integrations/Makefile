@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ROOT_PATH := ../..
+ROOT_PATH := $(shell pwd)/../..
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
@@ -22,8 +22,6 @@ static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run -c $(ROOT_PATH)/.golangci.yml --verbose ./... --allow-parallel-runners
-	@ echo "revive ..."
-	@ revive -formatter friendly -config $(ROOT_PATH)/revive.toml ./...
 
 tidy:
 	@ go mod tidy
@@ -35,7 +33,8 @@ test: failpoint-enable
 	$(MAKE) failpoint-disable
 
 ci-test-job:
-	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=$(ROOT_PATH)/...
+	if [ -f ./$(value test_name)/covprofile ]; then rm ./$(value test_name)/covprofile; fi
+	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=./$(value test_name)/covprofile -coverpkg=../../...
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools

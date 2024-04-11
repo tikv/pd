@@ -100,7 +100,8 @@ func ReadGetJSONWithBody(re *require.Assertions, client *http.Client, url string
 	if err != nil {
 		return err
 	}
-	return checkResp(resp, StatusOK(re), ExtractJSON(re, data))
+	checkOpts = append(checkOpts, StatusOK(re), ExtractJSON(re, data))
+	return checkResp(resp, checkOpts...)
 }
 
 // CheckPostJSON is used to do post request and do check options.

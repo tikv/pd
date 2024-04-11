@@ -207,7 +207,6 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage  = true
-	defaultTraceRegionFlow   = true
 	defaultFlowRoundByDigit  = 3 // KB
 	maxTraceFlowRoundByDigit = 5 // 0.1 MB
 	defaultMaxResetTSGap     = 24 * time.Hour
@@ -548,9 +547,6 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
 	}
-	if !meta.IsDefined("trace-region-flow") {
-		c.TraceRegionFlow = defaultTraceRegionFlow
-	}
 	if !meta.IsDefined("flow-round-by-digit") {
 		configutil.AdjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
@@ -748,22 +744,22 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.Logger = "zap"
 	var err error
 
-	cfg.LPUrls, err = parseUrls(c.PeerUrls)
+	cfg.ListenPeerUrls, err = parseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.APUrls, err = parseUrls(c.AdvertisePeerUrls)
+	cfg.AdvertisePeerUrls, err = parseUrls(c.AdvertisePeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.LCUrls, err = parseUrls(c.ClientUrls)
+	cfg.ListenClientUrls, err = parseUrls(c.ClientUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.ACUrls, err = parseUrls(c.AdvertiseClientUrls)
+	cfg.AdvertiseClientUrls, err = parseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, err
 	}

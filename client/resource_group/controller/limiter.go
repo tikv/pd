@@ -122,13 +122,14 @@ func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensN
 // A Reservation holds information about events that are permitted by a Limiter to happen after a delay.
 // A Reservation may be canceled, which may enable the Limiter to permit additional events.
 type Reservation struct {
-	ok              bool
-	lim             *Limiter
-	tokens          float64
-	timeToAct       time.Time
-	needWaitDurtion time.Duration
+	ok               bool
+	lim              *Limiter
+	tokens           float64
+	timeToAct        time.Time
+	needWaitDuration time.Duration
 	// This is the Limit at reservation time, it can change later.
-	limit Limit
+	limit           Limit
+	remainingTokens float64
 }
 
 // OK returns whether the limiter can provide the requested number of tokens
@@ -217,7 +218,7 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 }
 
 // SetupNotificationThreshold enables the notification at the given threshold.
-func (lim *Limiter) SetupNotificationThreshold(now time.Time, threshold float64) {
+func (lim *Limiter) SetupNotificationThreshold(threshold float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	lim.notifyThreshold = threshold
@@ -359,10 +360,11 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 
 	// Prepare reservation
 	r := Reservation{
-		ok:              ok,
-		lim:             lim,
-		limit:           lim.limit,
-		needWaitDurtion: waitDuration,
+		ok:               ok,
+		lim:              lim,
+		limit:            lim.limit,
+		needWaitDuration: waitDuration,
+		remainingTokens:  tokens,
 	}
 	if ok {
 		r.tokens = n
@@ -380,6 +382,8 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 			zap.Float64("current-ltb-tokens", lim.tokens),
 			zap.Float64("current-ltb-rate", float64(lim.limit)),
 			zap.Float64("request-tokens", n),
+			zap.Float64("notify-threshold", lim.notifyThreshold),
+			zap.Bool("is-low-process", lim.isLowProcess),
 			zap.Int64("burst", lim.burst),
 			zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
 		lim.last = last
@@ -461,7 +465,7 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
-			return res.needWaitDurtion, errs.ErrClientResourceGroupThrottled
+			return res.needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(res.needWaitDuration, res.limit, res.remainingTokens)
 		}
 		delay := res.DelayFrom(now)
 		if delay > longestDelayDuration {

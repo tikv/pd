@@ -49,14 +49,15 @@ const (
 	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
 	defaultMaxMovableHotPeerSize                        = int64(512)
 
-	defaultEnableJointConsensus  = true
-	defaultEnableTiKVSplitRegion = true
-	defaultEnableCrossTableMerge = true
-	defaultEnableDiagnostic      = true
-	defaultStrictlyMatchLabel    = false
-	defaultEnablePlacementRules  = true
-	defaultEnableWitness         = false
-	defaultHaltScheduling        = false
+	defaultEnableJointConsensus            = true
+	defaultEnableTiKVSplitRegion           = true
+	defaultEnableHeartbeatBreakdownMetrics = true
+	defaultEnableCrossTableMerge           = true
+	defaultEnableDiagnostic                = true
+	defaultStrictlyMatchLabel              = false
+	defaultEnablePlacementRules            = true
+	defaultEnableWitness                   = false
+	defaultHaltScheduling                  = false
 
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
@@ -263,6 +264,9 @@ type ScheduleConfig struct {
 	// on ebs-based BR we need to disable it with TTL
 	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
 
+	// EnableHeartbeatBreakdownMetrics is the option to enable heartbeat stats metrics.
+	EnableHeartbeatBreakdownMetrics bool `toml:"enable-heartbeat-breakdown-metrics" json:"enable-heartbeat-breakdown-metrics,string"`
+
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
@@ -373,6 +377,11 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("enable-tikv-split-region") {
 		c.EnableTiKVSplitRegion = defaultEnableTiKVSplitRegion
 	}
+
+	if !meta.IsDefined("enable-heartbeat-breakdown-metrics") {
+		c.EnableHeartbeatBreakdownMetrics = defaultEnableHeartbeatBreakdownMetrics
+	}
+
 	if !meta.IsDefined("enable-cross-table-merge") {
 		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
 	}
@@ -398,7 +407,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
 
 	for k, b := range c.migrateConfigurationMap() {
-		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
+		v, err := parseDeprecatedFlag(meta, k, *b[0], *b[1])
 		if err != nil {
 			return err
 		}
@@ -447,7 +456,7 @@ func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
 	return c.MaxMergeRegionSize * 10000
 }
 
-func (c *ScheduleConfig) parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
+func parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
 	oldName, newName := "disable-"+name, "enable-"+name
 	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
 	switch {

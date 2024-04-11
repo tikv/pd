@@ -570,17 +570,17 @@ func restartTestCluster(
 }
 
 // RunServer starts to run TestServer.
-func (c *TestCluster) RunServer(server *TestServer) <-chan error {
+func RunServer(server *TestServer) <-chan error {
 	resC := make(chan error)
 	go func() { resC <- server.Run() }()
 	return resC
 }
 
 // RunServers starts to run multiple TestServer.
-func (c *TestCluster) RunServers(servers []*TestServer) error {
+func RunServers(servers []*TestServer) error {
 	res := make([]<-chan error, len(servers))
 	for i, s := range servers {
-		res[i] = c.RunServer(s)
+		res[i] = RunServer(s)
 	}
 	for _, c := range res {
 		if err := <-c; err != nil {
@@ -596,7 +596,7 @@ func (c *TestCluster) RunInitialServers() error {
 	for _, conf := range c.config.InitialServers {
 		servers = append(servers, c.GetServer(conf.Name))
 	}
-	return c.RunServers(servers)
+	return RunServers(servers)
 }
 
 // StopAll is used to stop all servers.
@@ -852,8 +852,8 @@ func (c *TestCluster) CheckClusterDCLocation() {
 	wg := sync.WaitGroup{}
 	for _, server := range c.GetServers() {
 		wg.Add(1)
-		go func(ser *TestServer) {
-			ser.GetTSOAllocatorManager().ClusterDCLocationChecker()
+		go func(s *TestServer) {
+			s.GetTSOAllocatorManager().ClusterDCLocationChecker()
 			wg.Done()
 		}(server)
 	}

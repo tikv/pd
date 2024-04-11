@@ -990,34 +990,39 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 var regionGuide = core.GenerateRegionGuideFunc(true)
 
 // processRegionHeartbeat updates the region information.
-func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
-	origin, _, err := c.core.PreCheckPutRegion(region)
+func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo, tracer core.RegionHeartbeatProcessTracer) error {
+	origin, _, err := c.core.PreCheckPutRegion(region, tracer)
+	tracer.OnPreCheckFinished()
 	if err != nil {
 		return err
 	}
+
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		cluster.HandleStatsAsync(c, region)
 	}
-
+	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	saveKV, saveCache, needSync := regionGuide(region, origin)
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) && !saveKV && !saveCache {
+	tracer.OnRegionGuideFinished()
+	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
+		// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
+		// region stats needs to be collected in API mode.
+		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			c.regionStats.Observe(region, c.getRegionStoresLocked(region))
 		}
 		return nil
 	}
-
 	failpoint.Inject("concurrentRegionHeartbeat", func() {
 		time.Sleep(500 * time.Millisecond)
 	})
-
+	tracer.OnSaveCacheBegin()
 	var overlaps []*core.RegionInfo
 	if saveCache {
 		failpoint.Inject("decEpoch", func() {
@@ -1027,7 +1032,8 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.core.AtomicCheckAndPutRegion(region); err != nil {
+		if overlaps, err = c.core.AtomicCheckAndPutRegion(region, tracer); err != nil {
+			tracer.OnSaveCacheFinished()
 			return err
 		}
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
@@ -1035,10 +1041,13 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
-	}
 
+	tracer.OnSaveCacheFinished()
+	// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
+	// region stats needs to be collected in API mode.
+	// We need to think of a better way to reduce this part of the cost in the future.
+	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
+	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
 		// If there are concurrent heartbeats from the same region, the last write will win even if
 		// writes to storage in the critical area. So don't use mutex to protect it.
@@ -1069,7 +1078,6 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 		default:
 		}
 	}
-
 	return nil
 }
 
@@ -1401,7 +1409,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	if err == nil {
 		regionSize := float64(c.core.GetStoreRegionSize(storeID))
 		c.resetProgress(storeID, store.GetAddress())
-		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval)
+		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
 		// record the current store limit in memory
 		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
 			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
@@ -1927,21 +1935,23 @@ func updateTopology(topology map[string]any, sortedLabels []*metapb.StoreLabel) 
 
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string, current, remaining float64, isInc bool) {
 	storeLabel := strconv.FormatUint(storeID, 10)
-	var progress string
+	var progressName string
+	var opts []progress.Option
 	switch action {
 	case removingAction:
-		progress = encodeRemovingProgressKey(storeID)
+		progressName = encodeRemovingProgressKey(storeID)
+		opts = []progress.Option{progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration())}
 	case preparingAction:
-		progress = encodePreparingProgressKey(storeID)
+		progressName = encodePreparingProgressKey(storeID)
 	}
 
-	if exist := c.progressManager.AddProgress(progress, current, remaining, nodeStateCheckJobInterval); !exist {
+	if exist := c.progressManager.AddProgress(progressName, current, remaining, nodeStateCheckJobInterval, opts...); !exist {
 		return
 	}
-	c.progressManager.UpdateProgress(progress, current, remaining, isInc)
-	process, ls, cs, err := c.progressManager.Status(progress)
+	c.progressManager.UpdateProgress(progressName, current, remaining, isInc, opts...)
+	process, ls, cs, err := c.progressManager.Status(progressName)
 	if err != nil {
-		log.Error("get progress status failed", zap.String("progress", progress), zap.Float64("remaining", remaining), errs.ZapError(err))
+		log.Error("get progress status failed", zap.String("progress", progressName), zap.Float64("remaining", remaining), errs.ZapError(err))
 		return
 	}
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
@@ -2029,7 +2039,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	c.resetHealthStatus()
+	resetHealthStatus()
 	c.resetProgressIndicator()
 }
 
@@ -2048,7 +2058,7 @@ func (c *RaftCluster) collectHealthStatus() {
 	}
 }
 
-func (c *RaftCluster) resetHealthStatus() {
+func resetHealthStatus() {
 	healthStatusGauge.Reset()
 }
 

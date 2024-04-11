@@ -23,7 +23,7 @@ import (
 
 func transferCounterParseLog(operator, content string, expect []uint64) bool {
 	r, _ := GetTransferCounter().CompileRegex(operator)
-	results, _ := GetTransferCounter().parseLine(content, r)
+	results, _ := parseLine(content, r)
 	if len(results) != len(expect) {
 		return false
 	}

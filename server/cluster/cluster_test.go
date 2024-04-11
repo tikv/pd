@@ -50,6 +50,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -630,7 +631,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: utils.RegionHeartBeatReportInterval}),
 		core.SetWrittenBytes(30000*10),
 		core.SetWrittenKeys(300000*10))
-	err = cluster.processRegionHeartbeat(region)
+	err = cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer())
 	re.NoError(err)
 	// wait HotStat to update items
 	time.Sleep(time.Second)
@@ -643,7 +644,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 		StoreId: 4,
 	}
 	region = region.Clone(core.WithRemoveStorePeer(2), core.WithAddPeer(newPeer))
-	err = cluster.processRegionHeartbeat(region)
+	err = cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer())
 	re.NoError(err)
 	// wait HotStat to update items
 	time.Sleep(time.Second)
@@ -680,8 +681,8 @@ func TestBucketHeartbeat(t *testing.T) {
 		re.NoError(cluster.putStoreLocked(store))
 	}
 
-	re.NoError(cluster.processRegionHeartbeat(regions[0]))
-	re.NoError(cluster.processRegionHeartbeat(regions[1]))
+	re.NoError(cluster.processRegionHeartbeat(regions[0], core.NewNoopHeartbeatProcessTracer()))
+	re.NoError(cluster.processRegionHeartbeat(regions[1], core.NewNoopHeartbeatProcessTracer()))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
 	re.NoError(cluster.processReportBuckets(buckets))
 	re.Equal(buckets, cluster.GetRegion(uint64(1)).GetBuckets())
@@ -700,13 +701,13 @@ func TestBucketHeartbeat(t *testing.T) {
 	// case5: region update should inherit buckets.
 	newRegion := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
 	opt.SetRegionBucketEnabled(true)
-	re.NoError(cluster.processRegionHeartbeat(newRegion))
+	re.NoError(cluster.processRegionHeartbeat(newRegion, core.NewNoopHeartbeatProcessTracer()))
 	re.Len(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys(), 2)
 
 	// case6: disable region bucket in
 	opt.SetRegionBucketEnabled(false)
 	newRegion2 := regions[1].Clone(core.WithIncConfVer(), core.SetBuckets(nil))
-	re.NoError(cluster.processRegionHeartbeat(newRegion2))
+	re.NoError(cluster.processRegionHeartbeat(newRegion2, core.NewNoopHeartbeatProcessTracer()))
 	re.Nil(cluster.GetRegion(uint64(1)).GetBuckets())
 	re.Empty(cluster.GetRegion(uint64(1)).GetBuckets().GetKeys())
 }
@@ -732,25 +733,25 @@ func TestRegionHeartbeat(t *testing.T) {
 
 	for i, region := range regions {
 		// region does not exist.
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is the same, not updated.
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 		origin := region
 		// region is updated.
 		region = origin.Clone(core.WithIncVersion())
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is stale (Version).
 		stale := origin.Clone(core.WithIncConfVer())
-		re.Error(cluster.processRegionHeartbeat(stale))
+		re.Error(cluster.processRegionHeartbeat(stale, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
@@ -760,13 +761,13 @@ func TestRegionHeartbeat(t *testing.T) {
 			core.WithIncConfVer(),
 		)
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = origin.Clone(core.WithIncConfVer())
-		re.Error(cluster.processRegionHeartbeat(stale))
+		re.Error(cluster.processRegionHeartbeat(stale, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
@@ -778,38 +779,38 @@ func TestRegionHeartbeat(t *testing.T) {
 			},
 		}))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Add a pending peer.
 		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Clear down peers.
 		region = region.Clone(core.WithDownPeers(nil))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Clear pending peers.
 		region = region.Clone(core.WithPendingPeers(nil))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Remove peers.
 		origin = region
 		region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 		// Add peers.
 		region = origin
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
@@ -819,47 +820,47 @@ func TestRegionHeartbeat(t *testing.T) {
 			core.WithIncConfVer(),
 		)
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change ApproximateSize.
 		region = region.Clone(core.SetApproximateSize(144))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change ApproximateKeys.
 		region = region.Clone(core.SetApproximateKeys(144000))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change bytes written.
 		region = region.Clone(core.SetWrittenBytes(24000))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Change bytes read.
 		region = region.Clone(core.SetReadBytes(1080000))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 
 		// Flashback
 		region = region.Clone(core.WithFlashback(true, 1))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 		region = region.Clone(core.WithFlashback(false, 0))
 		regions[i] = region
-		re.NoError(cluster.processRegionHeartbeat(region))
+		re.NoError(cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer()))
 		checkRegions(re, cluster.core, regions[:i+1])
 	}
 
@@ -915,7 +916,8 @@ func TestRegionHeartbeat(t *testing.T) {
 			core.WithNewRegionID(10000),
 			core.WithDecVersion(),
 		)
-		re.Error(cluster.processRegionHeartbeat(overlapRegion))
+		tracer := core.NewHeartbeatProcessTracer()
+		re.Error(cluster.processRegionHeartbeat(overlapRegion, tracer))
 		region := &metapb.Region{}
 		ok, err := storage.LoadRegion(regions[n-1].GetID(), region)
 		re.True(ok)
@@ -939,7 +941,14 @@ func TestRegionHeartbeat(t *testing.T) {
 			core.WithStartKey(regions[n-2].GetStartKey()),
 			core.WithNewRegionID(regions[n-1].GetID()+1),
 		)
-		re.NoError(cluster.processRegionHeartbeat(overlapRegion))
+		tracer = core.NewHeartbeatProcessTracer()
+		tracer.Begin()
+		re.NoError(cluster.processRegionHeartbeat(overlapRegion, tracer))
+		tracer.OnAllStageFinished()
+		re.Condition(func() bool {
+			fileds := tracer.LogFields()
+			return slice.AllOf(fileds, func(i int) bool { return fileds[i].Integer > 0 })
+		}, "should have stats")
 		region = &metapb.Region{}
 		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
 		re.False(ok)
@@ -968,7 +977,7 @@ func TestRegionFlowChanged(t *testing.T) {
 	regions := []*core.RegionInfo{core.NewTestRegionInfo(1, 1, []byte{}, []byte{})}
 	processRegions := func(regions []*core.RegionInfo) {
 		for _, r := range regions {
-			cluster.processRegionHeartbeat(r)
+			cluster.processRegionHeartbeat(r, core.NewNoopHeartbeatProcessTracer())
 		}
 	}
 	regions = core.SplitRegions(regions)
@@ -1004,7 +1013,7 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.SetApproximateKeys(curMaxMergeKeys-1),
 		core.SetSource(core.Heartbeat),
 	)
-	cluster.processRegionHeartbeat(region)
+	cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer())
 	regionID := region.GetID()
 	re.True(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 	// Test ApproximateSize and ApproximateKeys change.
@@ -1014,16 +1023,16 @@ func TestRegionSizeChanged(t *testing.T) {
 		core.SetApproximateKeys(curMaxMergeKeys+1),
 		core.SetSource(core.Heartbeat),
 	)
-	cluster.processRegionHeartbeat(region)
+	cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer())
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 	// Test MaxMergeRegionSize and MaxMergeRegionKeys change.
 	cluster.opt.SetMaxMergeRegionSize(uint64(curMaxMergeSize + 2))
 	cluster.opt.SetMaxMergeRegionKeys(uint64(curMaxMergeKeys + 2))
-	cluster.processRegionHeartbeat(region)
+	cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer())
 	re.True(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 	cluster.opt.SetMaxMergeRegionSize(uint64(curMaxMergeSize))
 	cluster.opt.SetMaxMergeRegionKeys(uint64(curMaxMergeKeys))
-	cluster.processRegionHeartbeat(region)
+	cluster.processRegionHeartbeat(region, core.NewNoopHeartbeatProcessTracer())
 	re.False(cluster.regionStats.IsRegionStatsType(regionID, statistics.UndersizedRegion))
 }
 
@@ -1086,11 +1095,11 @@ func TestConcurrentRegionHeartbeat(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat", "return(true)"))
 	go func() {
 		defer wg.Done()
-		cluster.processRegionHeartbeat(source)
+		cluster.processRegionHeartbeat(source, core.NewNoopHeartbeatProcessTracer())
 	}()
 	time.Sleep(100 * time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/concurrentRegionHeartbeat"))
-	re.NoError(cluster.processRegionHeartbeat(target))
+	re.NoError(cluster.processRegionHeartbeat(target, core.NewNoopHeartbeatProcessTracer()))
 	wg.Wait()
 	checkRegion(re, cluster.GetRegionByKey([]byte{}), target)
 }
@@ -1152,7 +1161,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 func heartbeatRegions(re *require.Assertions, cluster *RaftCluster, regions []*core.RegionInfo) {
 	// Heartbeat and check region one by one.
 	for _, r := range regions {
-		re.NoError(cluster.processRegionHeartbeat(r))
+		re.NoError(cluster.processRegionHeartbeat(r, core.NewNoopHeartbeatProcessTracer()))
 
 		checkRegion(re, cluster.GetRegion(r.GetID()), r)
 		checkRegion(re, cluster.GetRegionByKey(r.GetStartKey()), r)
@@ -1189,7 +1198,7 @@ func TestHeartbeatSplit(t *testing.T) {
 
 	// 1: [nil, nil)
 	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
-	re.NoError(cluster.processRegionHeartbeat(region1))
+	re.NoError(cluster.processRegionHeartbeat(region1, core.NewNoopHeartbeatProcessTracer()))
 	checkRegion(re, cluster.GetRegionByKey([]byte("foo")), region1)
 
 	// split 1 to 2: [nil, m) 1: [m, nil), sync 2 first.
@@ -1198,12 +1207,12 @@ func TestHeartbeatSplit(t *testing.T) {
 		core.WithIncVersion(),
 	)
 	region2 := core.NewRegionInfo(&metapb.Region{Id: 2, EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
-	re.NoError(cluster.processRegionHeartbeat(region2))
+	re.NoError(cluster.processRegionHeartbeat(region2, core.NewNoopHeartbeatProcessTracer()))
 	checkRegion(re, cluster.GetRegionByKey([]byte("a")), region2)
 	// [m, nil) is missing before r1's heartbeat.
 	re.Nil(cluster.GetRegionByKey([]byte("z")))
 
-	re.NoError(cluster.processRegionHeartbeat(region1))
+	re.NoError(cluster.processRegionHeartbeat(region1, core.NewNoopHeartbeatProcessTracer()))
 	checkRegion(re, cluster.GetRegionByKey([]byte("z")), region1)
 
 	// split 1 to 3: [m, q) 1: [q, nil), sync 1 first.
@@ -1212,12 +1221,12 @@ func TestHeartbeatSplit(t *testing.T) {
 		core.WithIncVersion(),
 	)
 	region3 := core.NewRegionInfo(&metapb.Region{Id: 3, StartKey: []byte("m"), EndKey: []byte("q"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
-	re.NoError(cluster.processRegionHeartbeat(region1))
+	re.NoError(cluster.processRegionHeartbeat(region1, core.NewNoopHeartbeatProcessTracer()))
 	checkRegion(re, cluster.GetRegionByKey([]byte("z")), region1)
 	checkRegion(re, cluster.GetRegionByKey([]byte("a")), region2)
 	// [m, q) is missing before r3's heartbeat.
 	re.Nil(cluster.GetRegionByKey([]byte("n")))
-	re.NoError(cluster.processRegionHeartbeat(region3))
+	re.NoError(cluster.processRegionHeartbeat(region3, core.NewNoopHeartbeatProcessTracer()))
 	checkRegion(re, cluster.GetRegionByKey([]byte("n")), region3)
 }
 
@@ -1408,7 +1417,7 @@ func TestSyncConfigContext(t *testing.T) {
 	tc := newTestCluster(ctx, opt)
 	tc.httpClient = &http.Client{}
 
-	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, _ *http.Request) {
 		time.Sleep(time.Second * 100)
 		cfg := &sc.StoreConfig{}
 		b, err := json.Marshal(cfg)
@@ -1513,11 +1522,11 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 		},
 	}
 	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0], core.WithPendingPeers(peers[1:3]))
-	re.NoError(tc.processRegionHeartbeat(origin))
+	re.NoError(tc.processRegionHeartbeat(origin, core.NewNoopHeartbeatProcessTracer()))
 	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 1, 1, 0}, tc.RaftCluster, re)
 	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1], core.WithPendingPeers(peers[3:4]))
-	re.NoError(tc.processRegionHeartbeat(newRegion))
+	re.NoError(tc.processRegionHeartbeat(newRegion, core.NewNoopHeartbeatProcessTracer()))
 	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.RaftCluster, re)
 }
@@ -2279,10 +2288,6 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 	return nil
 }
 
-func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
-	return operator.NewTestOperator(regionID, regionEpoch, kind, steps...)
-}
-
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	id, err := c.AllocID()
 	if err != nil {
@@ -2395,19 +2400,19 @@ func TestBasic(t *testing.T) {
 
 	re.NoError(tc.addLeaderRegion(1, 1))
 
-	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
+	op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 	oc.AddWaitingOperator(op1)
 	re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader))
 	re.Equal(op1.RegionID(), oc.GetOperator(1).RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
-	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
+	op2 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op2)
 	re.Equal(uint64(0), oc.OperatorCount(operator.OpRegion))
 
 	// Remove the operator manually, then we can add a new operator.
 	re.True(oc.RemoveOperator(op1))
-	op3 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
+	op3 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op3)
 	re.Equal(uint64(1), oc.OperatorCount(operator.OpRegion))
 	re.Equal(op3.RegionID(), oc.GetOperator(1).RegionID())
@@ -2508,7 +2513,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	}
 	schedule.ResetHotSpotMetrics()
 	schedulers.ResetSchedulerMetrics()
-	rc.resetSchedulingMetrics()
+	resetSchedulingMetrics()
 	wg.Wait()
 }
 
@@ -2559,7 +2564,7 @@ func TestCollectMetrics(t *testing.T) {
 	re.Equal(status1, status2)
 	schedule.ResetHotSpotMetrics()
 	schedulers.ResetSchedulerMetrics()
-	rc.resetSchedulingMetrics()
+	resetSchedulingMetrics()
 }
 
 func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func(*schedule.Coordinator), re *require.Assertions) (*testCluster, *schedule.Coordinator, func()) {
@@ -2700,7 +2705,7 @@ func TestCheckerIsBusy(t *testing.T) {
 			re.NoError(tc.addLeaderRegion(regionID, 1))
 			switch operatorKind {
 			case operator.OpReplica:
-				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
+				op := operator.NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
 				re.Equal(1, co.GetOperatorController().AddWaitingOperator(op))
 			case operator.OpRegion | operator.OpMerge:
 				if regionID%2 == 1 {
@@ -2950,12 +2955,12 @@ func TestShouldRun(t *testing.T) {
 	for _, testCase := range testCases {
 		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
-		re.NoError(tc.processRegionHeartbeat(nr))
+		re.NoError(tc.processRegionHeartbeat(nr, core.NewNoopHeartbeatProcessTracer()))
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
-	re.Error(tc.processRegionHeartbeat(newRegion))
+	re.Error(tc.processRegionHeartbeat(newRegion, core.NewNoopHeartbeatProcessTracer()))
 	re.Equal(7, tc.core.GetClusterNotFromStorageRegionsCnt())
 }
 
@@ -2993,12 +2998,12 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	for _, testCase := range testCases {
 		r := tc.GetRegion(testCase.regionID)
 		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
-		re.NoError(tc.processRegionHeartbeat(nr))
+		re.NoError(tc.processRegionHeartbeat(nr, core.NewNoopHeartbeatProcessTracer()))
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
-	re.Error(tc.processRegionHeartbeat(newRegion))
+	re.Error(tc.processRegionHeartbeat(newRegion, core.NewNoopHeartbeatProcessTracer()))
 	re.Equal(9, tc.core.GetClusterNotFromStorageRegionsCnt())
 
 	// Now, after server is prepared, there exist some regions with no leader.
@@ -3366,10 +3371,10 @@ func TestOperatorCount(t *testing.T) {
 	re.NoError(tc.addLeaderRegion(1, 1))
 	re.NoError(tc.addLeaderRegion(2, 2))
 	{
-		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
+		op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 		oc.AddWaitingOperator(op1)
 		re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader)) // 1:leader
-		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
+		op2 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		oc.AddWaitingOperator(op2)
 		re.Equal(uint64(2), oc.OperatorCount(operator.OpLeader)) // 1:leader, 2:leader
 		re.True(oc.RemoveOperator(op1))
@@ -3377,11 +3382,11 @@ func TestOperatorCount(t *testing.T) {
 	}
 
 	{
-		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
+		op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 		oc.AddWaitingOperator(op1)
 		re.Equal(uint64(1), oc.OperatorCount(operator.OpRegion)) // 1:region 2:leader
 		re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader))
-		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion)
+		op2 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion)
 		op2.SetPriorityLevel(constant.High)
 		oc.AddWaitingOperator(op2)
 		re.Equal(uint64(2), oc.OperatorCount(operator.OpRegion)) // 1:region 2:region
@@ -3462,12 +3467,12 @@ func TestStoreOverloadedWithReplace(t *testing.T) {
 	tc.putRegion(region)
 	region = tc.GetRegion(2).Clone(core.SetApproximateSize(60))
 	tc.putRegion(region)
-	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 1})
+	op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 1})
 	re.True(oc.AddOperator(op1))
-	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 2})
+	op2 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 2})
 	op2.SetPriorityLevel(constant.High)
 	re.True(oc.AddOperator(op2))
-	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
+	op3 := operator.NewTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	re.False(oc.AddOperator(op3))
 	ops, _ := lb.Schedule(tc, false /* dryRun */)
 	re.Empty(ops)
@@ -3528,7 +3533,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 
@@ -3560,11 +3565,11 @@ func TestController(t *testing.T) {
 	// count = 0
 	{
 		re.True(sc.AllowSchedule(false))
-		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
+		op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op1))
 		// count = 1
 		re.True(sc.AllowSchedule(false))
-		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
+		op2 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op2))
 		// count = 2
 		re.False(sc.AllowSchedule(false))
@@ -3573,10 +3578,10 @@ func TestController(t *testing.T) {
 		re.True(sc.AllowSchedule(false))
 	}
 
-	op11 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
+	op11 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 	// add a PriorityKind operator will remove old operator
 	{
-		op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpHotRegion)
+		op3 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpHotRegion)
 		op3.SetPriorityLevel(constant.High)
 		re.Equal(1, oc.AddWaitingOperator(op11))
 		re.False(sc.AllowSchedule(false))
@@ -3587,10 +3592,10 @@ func TestController(t *testing.T) {
 
 	// add a admin operator will remove old operator
 	{
-		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
+		op2 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op2))
 		re.False(sc.AllowSchedule(false))
-		op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpAdmin)
+		op4 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpAdmin)
 		op4.SetPriorityLevel(constant.High)
 		re.Equal(1, oc.AddWaitingOperator(op4))
 		re.True(sc.AllowSchedule(false))
@@ -3599,7 +3604,7 @@ func TestController(t *testing.T) {
 
 	// test wrong region id.
 	{
-		op5 := newTestOperator(3, &metapb.RegionEpoch{}, operator.OpHotRegion)
+		op5 := operator.NewTestOperator(3, &metapb.RegionEpoch{}, operator.OpHotRegion)
 		re.Equal(0, oc.AddWaitingOperator(op5))
 	}
 
@@ -3610,12 +3615,12 @@ func TestController(t *testing.T) {
 		ConfVer: tc.GetRegion(1).GetRegionEpoch().GetConfVer(),
 	}
 	{
-		op6 := newTestOperator(1, epoch, operator.OpLeader)
+		op6 := operator.NewTestOperator(1, epoch, operator.OpLeader)
 		re.Equal(0, oc.AddWaitingOperator(op6))
 	}
 	epoch.Version--
 	{
-		op6 := newTestOperator(1, epoch, operator.OpLeader)
+		op6 := operator.NewTestOperator(1, epoch, operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op6))
 		re.True(oc.RemoveOperator(op6))
 	}

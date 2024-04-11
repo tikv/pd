@@ -149,7 +149,7 @@ type stringer struct {
 }
 
 // String implement fmt.Stringer
-func (s stringer) String() string {
+func (stringer) String() string {
 	return "?"
 }
 
