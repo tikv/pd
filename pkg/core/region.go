@@ -741,7 +741,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						TaskName: "Log",
 						Limit:    limiter,
 					},
-					func(ctx context.Context) {
+					func(_ context.Context) {
 						d(msg, fields...)
 					},
 				)
@@ -753,7 +753,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						TaskName: "Log",
 						Limit:    limiter,
 					},
-					func(ctx context.Context) {
+					func(_ context.Context) {
 						i(msg, fields...)
 					},
 				)

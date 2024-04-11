@@ -598,7 +598,7 @@ func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.Regio
 			TaskName: "HandleStatsAsync",
 			Limit:    limiter,
 		},
-		func(ctx context.Context) {
+		func(_ context.Context) {
 			cluster.HandleStatsAsync(c, region)
 		},
 	)
@@ -618,7 +618,7 @@ func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.Regio
 					TaskName: "ObserveRegionStatsAsync",
 					Limit:    limiter,
 				},
-				func(ctx context.Context) {
+				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
 					}
@@ -646,7 +646,7 @@ func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.Regio
 				TaskName: "HandleOverlaps",
 				Limit:    limiter,
 			},
-			func(ctx context.Context) {
+			func(_ context.Context) {
 				cluster.HandleOverlaps(c, overlaps)
 			},
 		)
@@ -659,7 +659,7 @@ func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.Regio
 			TaskName: "CollectRegionStatsAsync",
 			Limit:    c.hbConcurrencyLimiter,
 		},
-		func(ctx context.Context) {
+		func(_ context.Context) {
 			cluster.Collect(c, region, hasRegionStats)
 		},
 	)

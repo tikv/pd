@@ -43,7 +43,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	tracer.Begin()
 	ctx := context.WithValue(c.ctx, ctxutil.HeartbeatTracerKey, tracer)
 	ctx = context.WithValue(ctx, ctxutil.LimiterKey, c.hbConcurrencyLimiter)
-	if c.GetScheduleConfig().EnableHeartbeatAsyncRunner {
+	if c.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
 		ctx = context.WithValue(ctx, ctxutil.TaskRunnerKey, c.taskRunner)
 	}
 

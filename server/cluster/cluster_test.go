@@ -2139,7 +2139,7 @@ func newTestRaftCluster(
 	opt *config.PersistOptions,
 	s storage.Storage,
 ) *RaftCluster {
-	opt.GetScheduleConfig().EnableHeartbeatAsyncRunner = false
+	opt.GetScheduleConfig().EnableHeartbeatConcurrentRunner = false
 	rc := &RaftCluster{serverCtx: ctx, core: core.NewBasicCluster(), storage: s}
 	rc.InitCluster(id, opt, nil, nil)
 	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)

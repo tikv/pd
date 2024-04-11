@@ -108,7 +108,7 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	hbAsyncRunner = "heartbeat-async-task-runner"
+	hbConcurrentRunner = "heartbeat-async-task-runner"
 )
 
 // Server is the interface for cluster.
@@ -198,7 +198,7 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.Ba
 		etcdClient:           etcdClient,
 		core:                 basicCluster,
 		storage:              storage,
-		taskRunner:           ratelimit.NewAsyncRunner(hbAsyncRunner, time.Minute),
+		taskRunner:           ratelimit.NewConcurrentRunner(hbConcurrentRunner, time.Minute),
 		hbConcurrencyLimiter: ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU() * 2)),
 	}
 }
@@ -1029,7 +1029,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 				TaskName: "HandleStatsAsync",
 				Limit:    limiter,
 			},
-			func(ctx context.Context) {
+			func(_ context.Context) {
 				cluster.HandleStatsAsync(c, region)
 			},
 		)
@@ -1053,7 +1053,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 					TaskName: "ObserveRegionStatsAsync",
 					Limit:    limiter,
 				},
-				func(ctx context.Context) {
+				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
 					}
@@ -1086,7 +1086,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 					TaskName: "HandleOverlaps",
 					Limit:    limiter,
 				},
-				func(ctx context.Context) {
+				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
 				},
 			)
@@ -1102,7 +1102,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 			TaskName: "CollectRegionStatsAsync",
 			Limit:    c.hbConcurrencyLimiter,
 		},
-		func(ctx context.Context) {
+		func(_ context.Context) {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
 			// region stats needs to be collected in API mode.
 			// We need to think of a better way to reduce this part of the cost in the future.
@@ -1119,7 +1119,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 					TaskName: "SaveRegionToKV",
 					Limit:    c.hbConcurrencyLimiter,
 				},
-				func(ctx context.Context) {
+				func(_ context.Context) {
 					// If there are concurrent heartbeats from the same region, the last write will win even if
 					// writes to storage in the critical area. So don't use mutex to protect it.
 					// Not successfully saved to storage is not fatal, it only leads to longer warm-up
@@ -2111,7 +2111,7 @@ func (c *RaftCluster) collectMetrics() {
 }
 
 func (c *RaftCluster) resetMetrics() {
-	resetHealthStatus()
+	c.resetHealthStatus()
 	c.resetProgressIndicator()
 }
 
@@ -2130,7 +2130,7 @@ func (c *RaftCluster) collectHealthStatus() {
 	}
 }
 
-func resetHealthStatus() {
+func (*RaftCluster) resetHealthStatus() {
 	healthStatusGauge.Reset()
 }
 
