@@ -1007,7 +1007,6 @@ func TestPreparingProgress(t *testing.T) {
 		defer resp.Body.Close()
 		output, err := io.ReadAll(resp.Body)
 		re.NoError(err)
-		println("check!!!", resp.StatusCode)
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
