@@ -69,16 +69,10 @@ type GlobalConfigItem struct {
 	PayLoad   []byte
 }
 
-// Client is a PD (Placement Driver) RPC client.
-// It should not be used after calling Close().
-type Client interface {
-	// GetClusterID gets the cluster ID from PD.
-	GetClusterID(ctx context.Context) uint64
+// RPCClient is a PD (Placement Driver) RPC and related mcs client which can only call RPC.
+type RPCClient interface {
 	// GetAllMembers gets the members Info from PD
 	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
-	// GetLeaderURL returns current leader's URL. It returns "" before
-	// syncing leader from server.
-	GetLeaderURL() string
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -133,16 +127,11 @@ type Client interface {
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
 	// WatchGlobalConfig returns a stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error)
-	// UpdateOption updates the client option.
-	UpdateOption(option DynamicOption, value any) error
 
 	// GetExternalTimestamp returns external timestamp
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
-
-	// GetServiceDiscovery returns ServiceDiscovery
-	GetServiceDiscovery() ServiceDiscovery
 
 	// TSOClient is the TSO client.
 	TSOClient
@@ -154,6 +143,24 @@ type Client interface {
 	GCClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
+}
+
+// Client is a PD (Placement Driver) RPC client.
+// It should not be used after calling Close().
+type Client interface {
+	RPCClient
+
+	// GetClusterID gets the cluster ID from PD.
+	GetClusterID(ctx context.Context) uint64
+	// GetLeaderURL returns current leader's URL. It returns "" before
+	// syncing leader from server.
+	GetLeaderURL() string
+	// GetServiceDiscovery returns ServiceDiscovery
+	GetServiceDiscovery() ServiceDiscovery
+
+	// UpdateOption updates the client option.
+	UpdateOption(option DynamicOption, value any) error
+
 	// Close closes the client.
 	Close()
 }

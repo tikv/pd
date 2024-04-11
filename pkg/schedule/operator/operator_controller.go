@@ -324,14 +324,16 @@ func (oc *Controller) AddWaitingOperator(ops ...*Operator) int {
 			}
 			continue
 		}
-		oc.wop.PutOperator(op)
+
 		if isMerge {
 			// count two merge operators as one, so wopStatus.ops[desc] should
 			// not be updated here
 			// TODO: call checkAddOperator ...
+			oc.wop.PutMergeOperators([]*Operator{op, ops[i+1]})
 			i++
 			added++
-			oc.wop.PutOperator(ops[i])
+		} else {
+			oc.wop.PutOperator(op)
 		}
 		operatorCounter.WithLabelValues(desc, "put").Inc()
 		oc.wopStatus.incCount(desc)
