@@ -23,7 +23,6 @@ import (
 )
 
 func TestCamelCaseToSnakeCase(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	inputs := []struct {
 		name    string
