@@ -42,7 +42,7 @@ type Interpreter interface {
 }
 
 // CompileRegex is to provide regexp for transfer counter.
-func (c *TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) {
+func (*TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) {
 	var r *regexp.Regexp
 	var err error
 
@@ -64,7 +64,7 @@ func (c *TransferCounter) CompileRegex(operator string) (*regexp.Regexp, error) 
 	return r, err
 }
 
-func (c *TransferCounter) parseLine(content string, r *regexp.Regexp) ([]uint64, error) {
+func parseLine(content string, r *regexp.Regexp) ([]uint64, error) {
 	results := make([]uint64, 0, 4)
 	subStrings := r.FindStringSubmatch(content)
 	if len(subStrings) == 0 {
@@ -78,9 +78,8 @@ func (c *TransferCounter) parseLine(content string, r *regexp.Regexp) ([]uint64,
 			results = append(results, uint64(num))
 		}
 		return results, nil
-	} else {
-		return results, errors.New("Can't parse Log, with " + content)
 	}
+	return results, errors.New("Can't parse Log, with " + content)
 }
 
 func forEachLine(filename string, solve func(string) error) error {
@@ -116,7 +115,7 @@ func forEachLine(filename string, solve func(string) error) error {
 func isExpectTime(expect, layout string, isBeforeThanExpect bool) func(time.Time) bool {
 	expectTime, err := time.Parse(layout, expect)
 	if err != nil {
-		return func(current time.Time) bool {
+		return func(_ time.Time) bool {
 			return true
 		}
 	}
@@ -142,14 +141,13 @@ func currentTime(layout string) func(content string) (time.Time, error) {
 			return time.Parse(layout, result[1])
 		} else if len(result) == 0 {
 			return time.Time{}, nil
-		} else {
-			return time.Time{}, errors.New("There is no valid time in log with " + content)
 		}
+		return time.Time{}, errors.New("There is no valid time in log with " + content)
 	}
 }
 
 // ParseLog is to parse log for transfer counter.
-func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regexp.Regexp) error {
+func (*TransferCounter) ParseLog(filename, start, end, layout string, r *regexp.Regexp) error {
 	afterStart := isExpectTime(start, layout, false)
 	beforeEnd := isExpectTime(end, layout, true)
 	getCurrent := currentTime(layout)
@@ -161,7 +159,7 @@ func (c *TransferCounter) ParseLog(filename, start, end, layout string, r *regex
 		}
 		// if current line time between start and end
 		if afterStart(current) && beforeEnd(current) {
-			results, err := c.parseLine(content, r)
+			results, err := parseLine(content, r)
 			if err != nil {
 				return err
 			}

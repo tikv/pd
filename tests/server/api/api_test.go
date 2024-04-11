@@ -51,7 +51,7 @@ func TestReconnect(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
 		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
 	})
@@ -577,7 +577,7 @@ func (suite *redirectorTestSuite) SetupSuite() {
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cleanup = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
 		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
 	})
@@ -703,7 +703,7 @@ func TestRemovingProgress(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 	})
 	re.NoError(err)
@@ -857,7 +857,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 	})
 	re.NoError(err)
@@ -899,7 +899,7 @@ func TestPreparingProgress(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
 	})
 	re.NoError(err)

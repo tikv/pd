@@ -175,12 +175,12 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 }
 
 // GetName returns the name of the split bucket scheduler.
-func (s *splitBucketScheduler) GetName() string {
+func (*splitBucketScheduler) GetName() string {
 	return SplitBucketName
 }
 
 // GetType returns the type of the split bucket scheduler.
-func (s *splitBucketScheduler) GetType() string {
+func (*splitBucketScheduler) GetType() string {
 	return SplitBucketType
 }
 
@@ -230,7 +230,7 @@ type splitBucketPlan struct {
 }
 
 // Schedule return operators if some bucket is too hot.
-func (s *splitBucketScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *splitBucketScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	splitBucketScheduleCounter.Inc()
 	conf := s.conf.Clone()
 	plan := &splitBucketPlan{

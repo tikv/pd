@@ -748,7 +748,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 		if !ok {
 			return 0, nil, errors.New("regions_id is invalid")
 		}
-		return h.ScatterRegionsByID(ids, group, retryLimit, false)
+		return h.ScatterRegionsByID(ids, group, retryLimit)
 	}()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

@@ -263,7 +263,7 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
-func (handler *evictSlowTrendHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictSlowTrendHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -274,7 +274,7 @@ type evictSlowTrendScheduler struct {
 	handler http.Handler
 }
 
-func (s *evictSlowTrendScheduler) GetNextInterval(interval time.Duration) time.Duration {
+func (s *evictSlowTrendScheduler) GetNextInterval(time.Duration) time.Duration {
 	var growthType intervalGrowthType
 	// If it already found a slow node as candidate, the next interval should be shorter
 	// to make the next scheduling as soon as possible. This adjustment will decrease the
@@ -291,11 +291,11 @@ func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *evictSlowTrendScheduler) GetName() string {
+func (*evictSlowTrendScheduler) GetName() string {
 	return EvictSlowTrendName
 }
 
-func (s *evictSlowTrendScheduler) GetType() string {
+func (*evictSlowTrendScheduler) GetType() string {
 	return EvictSlowTrendType
 }
 
@@ -384,7 +384,7 @@ func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	return allowed
 }
 
-func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	var ops []*operator.Operator

@@ -294,7 +294,7 @@ func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
 }
 
 // AdjustScheduleCfg adjusts the schedule config during the initialization.
-func (o *PersistConfig) AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
+func AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 	// In case we add new default schedulers.
 	for _, ps := range sc.DefaultSchedulers {
 		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {
@@ -374,7 +374,7 @@ func (o *PersistConfig) IsUseJointConsensus() bool {
 }
 
 // GetKeyType returns the key type.
-func (o *PersistConfig) GetKeyType() constant.KeyType {
+func (*PersistConfig) GetKeyType() constant.KeyType {
 	return constant.StringToKeyType("table")
 }
 
@@ -685,7 +685,7 @@ func (o *PersistConfig) SetSplitMergeInterval(splitMergeInterval time.Duration) 
 }
 
 // SetHaltScheduling set HaltScheduling.
-func (o *PersistConfig) SetHaltScheduling(halt bool, source string) {
+func (o *PersistConfig) SetHaltScheduling(halt bool, _ string) {
 	v := o.GetScheduleConfig().Clone()
 	v.HaltScheduling = halt
 	o.SetScheduleConfig(v)
@@ -735,25 +735,25 @@ func (o *PersistConfig) IsRaftKV2() bool {
 
 // AddSchedulerCfg adds the scheduler configurations.
 // This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
-func (o *PersistConfig) AddSchedulerCfg(string, []string) {}
+func (*PersistConfig) AddSchedulerCfg(string, []string) {}
 
 // RemoveSchedulerCfg removes the scheduler configurations.
 // This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
-func (o *PersistConfig) RemoveSchedulerCfg(tp string) {}
+func (*PersistConfig) RemoveSchedulerCfg(string) {}
 
 // CheckLabelProperty checks if the label property is satisfied.
-func (o *PersistConfig) CheckLabelProperty(typ string, labels []*metapb.StoreLabel) bool {
+func (*PersistConfig) CheckLabelProperty(string, []*metapb.StoreLabel) bool {
 	return false
 }
 
 // IsTraceRegionFlow returns if the region flow is tracing.
 // If the accuracy cannot reach 0.1 MB, it is considered not.
-func (o *PersistConfig) IsTraceRegionFlow() bool {
+func (*PersistConfig) IsTraceRegionFlow() bool {
 	return false
 }
 
 // Persist saves the configuration to the storage.
-func (o *PersistConfig) Persist(storage endpoint.ConfigStorage) error {
+func (*PersistConfig) Persist(endpoint.ConfigStorage) error {
 	return nil
 }
 

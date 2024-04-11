@@ -40,7 +40,7 @@ func TestRegionSyncer(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
 
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer func() {
 		cluster.Destroy()
 		cancel()
@@ -163,7 +163,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -207,7 +207,7 @@ func TestPrepareChecker(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -256,7 +256,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 

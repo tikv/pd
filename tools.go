@@ -20,7 +20,6 @@ package tools
 import (
 	_ "github.com/AlekSi/gocov-xml"
 	_ "github.com/axw/gocov/gocov"
-	_ "github.com/mgechev/revive"
 	_ "github.com/pingcap/errors/errdoc-gen"
 	_ "github.com/pingcap/failpoint/failpoint-ctl"
 	_ "github.com/swaggo/swag/cmd/swag"

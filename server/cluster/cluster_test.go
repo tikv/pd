@@ -1417,7 +1417,7 @@ func TestSyncConfigContext(t *testing.T) {
 	tc := newTestCluster(ctx, opt)
 	tc.httpClient = &http.Client{}
 
-	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, req *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(res http.ResponseWriter, _ *http.Request) {
 		time.Sleep(time.Second * 100)
 		cfg := &sc.StoreConfig{}
 		b, err := json.Marshal(cfg)
@@ -2288,10 +2288,6 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 	return nil
 }
 
-func newTestOperator(regionID uint64, regionEpoch *metapb.RegionEpoch, kind operator.OpKind, steps ...operator.OpStep) *operator.Operator {
-	return operator.NewTestOperator(regionID, regionEpoch, kind, steps...)
-}
-
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 	id, err := c.AllocID()
 	if err != nil {
@@ -2404,19 +2400,19 @@ func TestBasic(t *testing.T) {
 
 	re.NoError(tc.addLeaderRegion(1, 1))
 
-	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
+	op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 	oc.AddWaitingOperator(op1)
 	re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader))
 	re.Equal(op1.RegionID(), oc.GetOperator(1).RegionID())
 
 	// Region 1 already has an operator, cannot add another one.
-	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
+	op2 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op2)
 	re.Equal(uint64(0), oc.OperatorCount(operator.OpRegion))
 
 	// Remove the operator manually, then we can add a new operator.
 	re.True(oc.RemoveOperator(op1))
-	op3 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
+	op3 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 	oc.AddWaitingOperator(op3)
 	re.Equal(uint64(1), oc.OperatorCount(operator.OpRegion))
 	re.Equal(op3.RegionID(), oc.GetOperator(1).RegionID())
@@ -2517,7 +2513,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	}
 	schedule.ResetHotSpotMetrics()
 	schedulers.ResetSchedulerMetrics()
-	rc.resetSchedulingMetrics()
+	resetSchedulingMetrics()
 	wg.Wait()
 }
 
@@ -2568,7 +2564,7 @@ func TestCollectMetrics(t *testing.T) {
 	re.Equal(status1, status2)
 	schedule.ResetHotSpotMetrics()
 	schedulers.ResetSchedulerMetrics()
-	rc.resetSchedulingMetrics()
+	resetSchedulingMetrics()
 }
 
 func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func(*schedule.Coordinator), re *require.Assertions) (*testCluster, *schedule.Coordinator, func()) {
@@ -2709,7 +2705,7 @@ func TestCheckerIsBusy(t *testing.T) {
 			re.NoError(tc.addLeaderRegion(regionID, 1))
 			switch operatorKind {
 			case operator.OpReplica:
-				op := newTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
+				op := operator.NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), operatorKind)
 				re.Equal(1, co.GetOperatorController().AddWaitingOperator(op))
 			case operator.OpRegion | operator.OpMerge:
 				if regionID%2 == 1 {
@@ -3375,10 +3371,10 @@ func TestOperatorCount(t *testing.T) {
 	re.NoError(tc.addLeaderRegion(1, 1))
 	re.NoError(tc.addLeaderRegion(2, 2))
 	{
-		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
+		op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 		oc.AddWaitingOperator(op1)
 		re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader)) // 1:leader
-		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
+		op2 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		oc.AddWaitingOperator(op2)
 		re.Equal(uint64(2), oc.OperatorCount(operator.OpLeader)) // 1:leader, 2:leader
 		re.True(oc.RemoveOperator(op1))
@@ -3386,11 +3382,11 @@ func TestOperatorCount(t *testing.T) {
 	}
 
 	{
-		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
+		op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion)
 		oc.AddWaitingOperator(op1)
 		re.Equal(uint64(1), oc.OperatorCount(operator.OpRegion)) // 1:region 2:leader
 		re.Equal(uint64(1), oc.OperatorCount(operator.OpLeader))
-		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion)
+		op2 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion)
 		op2.SetPriorityLevel(constant.High)
 		oc.AddWaitingOperator(op2)
 		re.Equal(uint64(2), oc.OperatorCount(operator.OpRegion)) // 1:region 2:region
@@ -3471,12 +3467,12 @@ func TestStoreOverloadedWithReplace(t *testing.T) {
 	tc.putRegion(region)
 	region = tc.GetRegion(2).Clone(core.SetApproximateSize(60))
 	tc.putRegion(region)
-	op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 1})
+	op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 1})
 	re.True(oc.AddOperator(op1))
-	op2 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 2})
+	op2 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 2})
 	op2.SetPriorityLevel(constant.High)
 	re.True(oc.AddOperator(op2))
-	op3 := newTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
+	op3 := operator.NewTestOperator(1, tc.GetRegion(2).GetRegionEpoch(), operator.OpRegion, operator.AddPeer{ToStore: 1, PeerID: 3})
 	re.False(oc.AddOperator(op3))
 	ops, _ := lb.Schedule(tc, false /* dryRun */)
 	re.Empty(ops)
@@ -3537,7 +3533,7 @@ type mockLimitScheduler struct {
 	kind    operator.OpKind
 }
 
-func (s *mockLimitScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+func (s *mockLimitScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {
 	return s.counter.OperatorCount(s.kind) < s.limit
 }
 
@@ -3569,11 +3565,11 @@ func TestController(t *testing.T) {
 	// count = 0
 	{
 		re.True(sc.AllowSchedule(false))
-		op1 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
+		op1 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op1))
 		// count = 1
 		re.True(sc.AllowSchedule(false))
-		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
+		op2 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op2))
 		// count = 2
 		re.False(sc.AllowSchedule(false))
@@ -3582,10 +3578,10 @@ func TestController(t *testing.T) {
 		re.True(sc.AllowSchedule(false))
 	}
 
-	op11 := newTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
+	op11 := operator.NewTestOperator(1, tc.GetRegion(1).GetRegionEpoch(), operator.OpLeader)
 	// add a PriorityKind operator will remove old operator
 	{
-		op3 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpHotRegion)
+		op3 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpHotRegion)
 		op3.SetPriorityLevel(constant.High)
 		re.Equal(1, oc.AddWaitingOperator(op11))
 		re.False(sc.AllowSchedule(false))
@@ -3596,10 +3592,10 @@ func TestController(t *testing.T) {
 
 	// add a admin operator will remove old operator
 	{
-		op2 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
+		op2 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op2))
 		re.False(sc.AllowSchedule(false))
-		op4 := newTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpAdmin)
+		op4 := operator.NewTestOperator(2, tc.GetRegion(2).GetRegionEpoch(), operator.OpAdmin)
 		op4.SetPriorityLevel(constant.High)
 		re.Equal(1, oc.AddWaitingOperator(op4))
 		re.True(sc.AllowSchedule(false))
@@ -3608,7 +3604,7 @@ func TestController(t *testing.T) {
 
 	// test wrong region id.
 	{
-		op5 := newTestOperator(3, &metapb.RegionEpoch{}, operator.OpHotRegion)
+		op5 := operator.NewTestOperator(3, &metapb.RegionEpoch{}, operator.OpHotRegion)
 		re.Equal(0, oc.AddWaitingOperator(op5))
 	}
 
@@ -3619,12 +3615,12 @@ func TestController(t *testing.T) {
 		ConfVer: tc.GetRegion(1).GetRegionEpoch().GetConfVer(),
 	}
 	{
-		op6 := newTestOperator(1, epoch, operator.OpLeader)
+		op6 := operator.NewTestOperator(1, epoch, operator.OpLeader)
 		re.Equal(0, oc.AddWaitingOperator(op6))
 	}
 	epoch.Version--
 	{
-		op6 := newTestOperator(1, epoch, operator.OpLeader)
+		op6 := operator.NewTestOperator(1, epoch, operator.OpLeader)
 		re.Equal(1, oc.AddWaitingOperator(op6))
 		re.True(oc.RemoveOperator(op6))
 	}
