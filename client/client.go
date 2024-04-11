@@ -69,16 +69,10 @@ type GlobalConfigItem struct {
 	PayLoad   []byte
 }
 
-// Client is a PD (Placement Driver) RPC client.
-// It should not be used after calling Close().
-type Client interface {
-	// GetClusterID gets the cluster ID from PD.
-	GetClusterID(ctx context.Context) uint64
+// RPCClient is a PD (Placement Driver) RPC and related mcs client which can only call RPC.
+type RPCClient interface {
 	// GetAllMembers gets the members Info from PD
 	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
-	// GetLeaderAddr returns current leader's address. It returns "" before
-	// syncing leader from server.
-	GetLeaderAddr() string
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -133,16 +127,11 @@ type Client interface {
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
 	// WatchGlobalConfig returns a stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error)
-	// UpdateOption updates the client option.
-	UpdateOption(option DynamicOption, value any) error
 
 	// GetExternalTimestamp returns external timestamp
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
-
-	// GetServiceDiscovery returns ServiceDiscovery
-	GetServiceDiscovery() ServiceDiscovery
 
 	// TSOClient is the TSO client.
 	TSOClient
@@ -154,6 +143,24 @@ type Client interface {
 	GCClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
+}
+
+// Client is a PD (Placement Driver) RPC client.
+// It should not be used after calling Close().
+type Client interface {
+	RPCClient
+
+	// GetClusterID gets the cluster ID from PD.
+	GetClusterID(ctx context.Context) uint64
+	// GetLeaderURL returns current leader's URL. It returns "" before
+	// syncing leader from server.
+	GetLeaderURL() string
+	// GetServiceDiscovery returns ServiceDiscovery
+	GetServiceDiscovery() ServiceDiscovery
+
+	// UpdateOption updates the client option.
+	UpdateOption(option DynamicOption, value any) error
+
 	// Close closes the client.
 	Close()
 }
@@ -431,12 +438,12 @@ func NewAPIContextV1() APIContext {
 }
 
 // GetAPIVersion returns the API version.
-func (apiCtx *apiContextV1) GetAPIVersion() (version APIVersion) {
+func (*apiContextV1) GetAPIVersion() (version APIVersion) {
 	return V1
 }
 
 // GetKeyspaceName returns the keyspace name.
-func (apiCtx *apiContextV1) GetKeyspaceName() (keyspaceName string) {
+func (*apiContextV1) GetKeyspaceName() (keyspaceName string) {
 	return ""
 }
 
@@ -453,7 +460,7 @@ func NewAPIContextV2(keyspaceName string) APIContext {
 }
 
 // GetAPIVersion returns the API version.
-func (apiCtx *apiContextV2) GetAPIVersion() (version APIVersion) {
+func (*apiContextV2) GetAPIVersion() (version APIVersion) {
 	return V2
 }
 
@@ -575,7 +582,7 @@ func (c *client) setup() error {
 	}
 
 	// Register callbacks
-	c.pdSvcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.pdSvcDiscovery.AddServingURLSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
@@ -606,12 +613,22 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	log.Info("[pd] changing service mode",
 		zap.String("old-mode", c.serviceMode.String()),
 		zap.String("new-mode", newMode.String()))
+	c.resetTSOClientLocked(newMode)
+	oldMode := c.serviceMode
+	c.serviceMode = newMode
+	log.Info("[pd] service mode changed",
+		zap.String("old-mode", oldMode.String()),
+		zap.String("new-mode", newMode.String()))
+}
+
+// Reset a new TSO client.
+func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tsoClient
 		newTSOSvcDiscovery ServiceDiscovery
 	)
-	switch newMode {
+	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = newTSOClient(c.ctx, c.option,
 			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
@@ -649,17 +666,19 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		// We are switching from API service mode to PD service mode, so delete the old tso microservice discovery.
 		oldTSOSvcDiscovery.Close()
 	}
-	oldMode := c.serviceMode
-	c.serviceMode = newMode
-	log.Info("[pd] service mode changed",
-		zap.String("old-mode", oldMode.String()),
-		zap.String("new-mode", newMode.String()))
 }
 
 func (c *client) getTSOClient() *tsoClient {
 	c.RLock()
 	defer c.RUnlock()
 	return c.tsoClient
+}
+
+// ResetTSOClient resets the TSO client, only for test.
+func (c *client) ResetTSOClient() {
+	c.Lock()
+	defer c.Unlock()
+	c.resetTSOClientLocked(c.serviceMode)
 }
 
 func (c *client) getServiceMode() pdpb.ServiceMode {
@@ -680,9 +699,9 @@ func (c *client) GetClusterID(context.Context) uint64 {
 	return c.pdSvcDiscovery.GetClusterID()
 }
 
-// GetLeaderAddr returns the leader address.
-func (c *client) GetLeaderAddr() string {
-	return c.pdSvcDiscovery.GetServingAddr()
+// GetLeaderURL returns the leader URL.
+func (c *client) GetLeaderURL() string {
+	return c.pdSvcDiscovery.GetServingURL()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
@@ -745,7 +764,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 // follower pd client and the context which holds forward information.
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
 	serviceClient := c.pdSvcDiscovery.GetServiceClient()
-	if serviceClient == nil {
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
 	return pdpb.NewPDClient(serviceClient.GetClientConn()), serviceClient.BuildGRPCTargetContext(ctx, true)
@@ -762,7 +781,7 @@ func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower
 		}
 	}
 	serviceClient = c.pdSvcDiscovery.GetServiceClient()
-	if serviceClient == nil {
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
 	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
@@ -779,26 +798,52 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 		defer span.Finish()
 	}
 
-	req := tsoReqPool.Get().(*tsoRequest)
-	req.requestCtx = ctx
-	req.clientCtx = c.ctx
-	tsoClient := c.getTSOClient()
-	req.start = time.Now()
-	req.dcLocation = dcLocation
-
-	if tsoClient == nil {
-		req.done <- errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
-		return req
-	}
-
-	if err := tsoClient.dispatchRequest(ctx, dcLocation, req); err != nil {
-		// Wait for a while and try again
-		time.Sleep(50 * time.Millisecond)
-		if err = tsoClient.dispatchRequest(ctx, dcLocation, req); err != nil {
-			req.done <- err
-		}
+	req := c.getTSORequest(ctx, dcLocation)
+	if err := c.dispatchTSORequestWithRetry(req); err != nil {
+		req.tryDone(err)
 	}
 	return req
+}
+
+func (c *client) getTSORequest(ctx context.Context, dcLocation string) *tsoRequest {
+	req := tsoReqPool.Get().(*tsoRequest)
+	// Set needed fields in the request before using it.
+	req.start = time.Now()
+	req.clientCtx = c.ctx
+	req.requestCtx = ctx
+	req.physical = 0
+	req.logical = 0
+	req.dcLocation = dcLocation
+	return req
+}
+
+const (
+	dispatchRetryDelay = 50 * time.Millisecond
+	dispatchRetryCount = 2
+)
+
+func (c *client) dispatchTSORequestWithRetry(req *tsoRequest) error {
+	var (
+		retryable bool
+		err       error
+	)
+	for i := 0; i < dispatchRetryCount; i++ {
+		// Do not delay for the first time.
+		if i > 0 {
+			time.Sleep(dispatchRetryDelay)
+		}
+		// Get the tsoClient each time, as it may be initialized or switched during the process.
+		tsoClient := c.getTSOClient()
+		if tsoClient == nil {
+			err = errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
+			continue
+		}
+		retryable, err = tsoClient.dispatchRequest(req)
+		if !retryable {
+			break
+		}
+	}
+	return err
 }
 
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
@@ -874,7 +919,7 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
-func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, opts ...GetRegionOption) (*Region, error) {
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...GetRegionOption) (*Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -1402,9 +1447,14 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, errs.NotServedErr)
 }
 
+const (
+	httpSchemePrefix  = "http://"
+	httpsSchemePrefix = "https://"
+)
+
 func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
+	str = strings.TrimPrefix(str, httpSchemePrefix)
+	str = strings.TrimPrefix(str, httpsSchemePrefix)
 	return str
 }
 

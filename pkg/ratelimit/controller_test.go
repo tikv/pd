@@ -78,7 +78,6 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 }
 
 func TestControllerWithConcurrencyLimiter(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	limiter := NewController(context.Background(), "grpc", nil)
 	defer limiter.Close()
@@ -109,7 +108,7 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 						status := limiter.Update(label, o)
 						re.NotZero(status & ConcurrencyNoChange)
 					},
-					checkStatusFunc: func(label string) {},
+					checkStatusFunc: func(_ string) {},
 				},
 				{
 					opt: UpdateConcurrencyLimiter(5),
@@ -191,7 +190,6 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 }
 
 func TestBlockList(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	opts := []Option{AddLabelAllowList()}
 	limiter := NewController(context.Background(), "grpc", nil)
@@ -213,7 +211,6 @@ func TestBlockList(t *testing.T) {
 }
 
 func TestControllerWithQPSLimiter(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	limiter := NewController(context.Background(), "grpc", nil)
 	defer limiter.Close()
@@ -243,7 +240,7 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 						status := limiter.Update(label, o)
 						re.NotZero(status & QPSNoChange)
 					},
-					checkStatusFunc: func(label string) {},
+					checkStatusFunc: func(_ string) {},
 				},
 				{
 					opt: UpdateQPSLimiter(5, 5),
@@ -323,7 +320,6 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 }
 
 func TestControllerWithTwoLimiters(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	limiter := NewController(context.Background(), "grpc", nil)
 	defer limiter.Close()

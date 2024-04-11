@@ -581,7 +581,7 @@ func TestStoreTLS(t *testing.T) {
 		CertFile:      filepath.Join(certPath, "pd-server.pem"),
 		TrustedCAFile: filepath.Join(certPath, "ca.pem"),
 	}
-	cluster, err := pdTests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+	cluster, err := pdTests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Security.TLSConfig = grpcutil.TLSConfig{
 			KeyPath:  tlsInfo.KeyFile,
 			CertPath: tlsInfo.CertFile,

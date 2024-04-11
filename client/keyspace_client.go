@@ -21,6 +21,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/tikv/pd/client/errs"
 )
 
 // KeyspaceClient manages keyspace metadata.
@@ -56,7 +57,12 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 		Header: c.requestHeader(),
 		Name:   name,
 	}
-	resp, err := c.keyspaceClient().LoadKeyspace(ctx, req)
+	protoClient := c.keyspaceClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.LoadKeyspace(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -96,7 +102,12 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 		Id:     id,
 		State:  state,
 	}
-	resp, err := c.keyspaceClient().UpdateKeyspaceState(ctx, req)
+	protoClient := c.keyspaceClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.UpdateKeyspaceState(ctx, req)
 	cancel()
 
 	if err != nil {
@@ -117,7 +128,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 // It returns a stream of slices of keyspace metadata.
 // The first message in stream contains all current keyspaceMeta,
 // all subsequent messages contains new put events for all keyspaces.
-func (c *client) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.KeyspaceMeta, error) {
+func (*client) WatchKeyspaces(context.Context) (chan []*keyspacepb.KeyspaceMeta, error) {
 	return nil, errors.Errorf("WatchKeyspaces unimplemented")
 }
 
@@ -135,7 +146,12 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 		StartId: startID,
 		Limit:   limit,
 	}
-	resp, err := c.keyspaceClient().GetAllKeyspaces(ctx, req)
+	protoClient := c.keyspaceClient()
+	if protoClient == nil {
+		cancel()
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.GetAllKeyspaces(ctx, req)
 	cancel()
 
 	if err != nil {

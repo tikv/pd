@@ -239,7 +239,7 @@ func TestRandomKillEtcd(t *testing.T) {
 
 	// Randomly kill an etcd server and restart it
 	cfgs := []embed.Config{etcds[0].Config(), etcds[1].Config(), etcds[2].Config()}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < len(cfgs)*2; i++ {
 		killIndex := rand.Intn(len(etcds))
 		etcds[killIndex].Close()
 		checkEtcdEndpointNum(re, client1, 2)
@@ -438,7 +438,7 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 			cache[string(kv.Key)] = struct{}{}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
@@ -452,9 +452,9 @@ func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/meetEtcdError", `return()`))
 	cache := make(map[string]struct{})
-	for i := 0; i < int(maxLoadBatchSize)*2; i++ {
+	testutil.GenerateTestDataConcurrently(int(maxLoadBatchSize)*2, func(i int) {
 		suite.put(re, fmt.Sprintf("TestLoadWithLimitChange%d", i), "")
-	}
+	})
 	watcher := NewLoopWatcher(
 		suite.ctx,
 		&suite.wg,
@@ -466,7 +466,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 			cache[string(kv.Key)] = struct{}{}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
@@ -559,7 +559,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 					cache = append(cache, string(kv.Key))
 					return nil
 				},
-				func(kv *mvccpb.KeyValue) error {
+				func(*mvccpb.KeyValue) error {
 					return nil
 				},
 				func([]*clientv3.Event) error {
@@ -583,9 +583,9 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 	count := 65536
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	for i := 0; i < count; i++ {
+	testutil.GenerateTestDataConcurrently(count, func(i int) {
 		suite.put(re, fmt.Sprintf("TestWatcherLoadLargeKey/test-%d", i), "")
-	}
+	})
 	cache := make([]string, 0)
 	watcher := NewLoopWatcher(
 		ctx,
@@ -598,7 +598,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 			cache = append(cache, string(kv.Key))
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error {
+		func(*mvccpb.KeyValue) error {
 			return nil
 		},
 		func([]*clientv3.Event) error {
@@ -641,7 +641,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 			}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
@@ -719,11 +719,12 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			"test",
 			"TestWatcherChanBlock",
 			func([]*clientv3.Event) error { return nil },
-			func(kv *mvccpb.KeyValue) error { return nil },
-			func(kv *mvccpb.KeyValue) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
 			func([]*clientv3.Event) error { return nil },
 			false, /* withPrefix */
 		)
+		watcher.watchChTimeoutDuration = 2 * RequestProgressInterval
 
 		suite.wg.Add(1)
 		go func() {

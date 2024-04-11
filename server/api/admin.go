@@ -148,7 +148,7 @@ func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) MarkSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) MarkSnapshotRecovering(w http.ResponseWriter, _ *http.Request) {
 	if err := h.svr.MarkSnapshotRecovering(); err != nil {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return

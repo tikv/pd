@@ -64,7 +64,7 @@ func (c *Coordinator) GetHTTPCase(name string) (*Config, error) {
 	if controller, ok := c.http[name]; ok {
 		return controller.GetConfig(), nil
 	}
-	return nil, errors.Errorf("case %v does not exist.", name)
+	return nil, errors.Errorf("case %v does not exist", name)
 }
 
 // GetGRPCCase returns the gRPC case config.
@@ -74,7 +74,7 @@ func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
 	if controller, ok := c.grpc[name]; ok {
 		return controller.GetConfig(), nil
 	}
-	return nil, errors.Errorf("case %v does not exist.", name)
+	return nil, errors.Errorf("case %v does not exist", name)
 }
 
 // GetETCDCase returns the etcd case config.
@@ -84,7 +84,7 @@ func (c *Coordinator) GetETCDCase(name string) (*Config, error) {
 	if controller, ok := c.etcd[name]; ok {
 		return controller.GetConfig(), nil
 	}
-	return nil, errors.Errorf("case %v does not exist.", name)
+	return nil, errors.Errorf("case %v does not exist", name)
 }
 
 // GetAllHTTPCases returns the all HTTP case configs.
@@ -214,7 +214,7 @@ func (c *httpController) run() {
 	qps := c.GetQPS()
 	burst := c.GetBurst()
 	cliNum := int64(len(c.clients))
-	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
+	tt := time.Duration(base*burst*cliNum/qps) * time.Microsecond
 	log.Info("begin to run http case", zap.String("case", c.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	for _, hCli := range c.clients {
 		c.wg.Add(1)
@@ -283,7 +283,7 @@ func (c *gRPCController) run() {
 	qps := c.GetQPS()
 	burst := c.GetBurst()
 	cliNum := int64(len(c.clients))
-	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
+	tt := time.Duration(base*burst*cliNum/qps) * time.Microsecond
 	log.Info("begin to run gRPC case", zap.String("case", c.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	for _, cli := range c.clients {
 		c.wg.Add(1)
@@ -352,7 +352,7 @@ func (c *etcdController) run() {
 	qps := c.GetQPS()
 	burst := c.GetBurst()
 	cliNum := int64(len(c.clients))
-	tt := time.Duration(base/qps*burst*cliNum) * time.Microsecond
+	tt := time.Duration(base*burst*cliNum/qps) * time.Microsecond
 	log.Info("begin to run etcd case", zap.String("case", c.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	err := c.Init(c.ctx, c.clients[0])
 	if err != nil {

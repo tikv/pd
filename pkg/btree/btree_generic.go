@@ -73,7 +73,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//revive:disable
+// nolint
 package btree
 
 import (

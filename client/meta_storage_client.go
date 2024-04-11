@@ -124,7 +124,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 		Lease:  options.lease,
 		PrevKv: options.prevKv,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderURL())
 	cli := c.metaStorageClient()
 	if cli == nil {
 		cancel()
@@ -162,7 +162,7 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 		Limit:    options.limit,
 		Revision: options.revision,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderURL())
 	cli := c.metaStorageClient()
 	if cli == nil {
 		cancel()

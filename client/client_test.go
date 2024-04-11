@@ -63,6 +63,12 @@ func TestUpdateURLs(t *testing.T) {
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
 	cli.updateURLs(members)
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetServiceURLs())
+	cli.updateURLs(members[1:])
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[2:])
+	re.Equal(getURLs([]*pdpb.Member{members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[3:])
+	re.Equal(getURLs([]*pdpb.Member{members[3]}), cli.GetServiceURLs())
 }
 
 const testClientURL = "tmp://test.url:5255"

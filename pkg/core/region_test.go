@@ -459,9 +459,9 @@ func TestSetRegionConcurrence(t *testing.T) {
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
 	go func() {
-		regions.AtomicCheckAndPutRegion(region)
+		regions.AtomicCheckAndPutRegion(region, NewNoopHeartbeatProcessTracer())
 	}()
-	regions.AtomicCheckAndPutRegion(region)
+	regions.AtomicCheckAndPutRegion(region, NewNoopHeartbeatProcessTracer())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 

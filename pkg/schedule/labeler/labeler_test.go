@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestAdjustRule(t *testing.T) {
@@ -382,8 +383,10 @@ func TestLabelerRuleTTL(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute", "return(true)"))
 
 	// rule2 should expire and only 2 labels left.
-	labels := labeler.GetRegionLabels(region)
-	re.Len(labels, 2)
+	testutil.Eventually(re, func() bool {
+		labels := labeler.GetRegionLabels(region)
+		return len(labels) == 2
+	})
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute"))
 	// rule2 should be existed since `GetRegionLabels` won't clear it physically.
@@ -401,7 +404,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
 	re.Equal(exist, labeler.labelRules[ruleID] != nil)
 	existInStorage := false
-	labeler.storage.LoadRegionRules(func(k, v string) {
+	labeler.storage.LoadRegionRules(func(k, _ string) {
 		if k == ruleID {
 			existInStorage = true
 		}

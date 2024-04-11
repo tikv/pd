@@ -16,6 +16,6 @@
 
 package tempurl
 
-func environmentCheck(addr string) bool {
+func environmentCheck(_ string) bool {
 	return true
 }
