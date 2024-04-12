@@ -29,6 +29,7 @@ import (
 func ExecuteCommand(root *cobra.Command, args ...string) (output []byte, err error) {
 	buf := new(bytes.Buffer)
 	root.SetOut(buf)
+	root.SetErr(buf)
 	root.SetArgs(args)
 	err = root.Execute()
 	return buf.Bytes(), err
@@ -77,6 +78,15 @@ func CheckRegionsInfo(re *require.Assertions, output *response.RegionsInfo, expe
 	sort.Slice(expected, func(i, j int) bool {
 		return expected[i].GetID() < expected[j].GetID()
 	})
+	for i, region := range expected {
+		CheckRegionInfo(re, &got[i], region)
+	}
+}
+
+// CheckRegionsInfoWithoutSort is used to check the test results without sort.
+func CheckRegionsInfoWithoutSort(re *require.Assertions, output *response.RegionsInfo, expected []*core.RegionInfo) {
+	re.Len(expected, output.Count)
+	got := output.Regions
 	for i, region := range expected {
 		CheckRegionInfo(re, &got[i], region)
 	}

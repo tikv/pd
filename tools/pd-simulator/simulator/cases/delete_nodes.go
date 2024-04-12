@@ -72,7 +72,7 @@ func newDeleteNodes() *Case {
 	simCase.Events = []EventDescriptor{e}
 
 	threshold := 0.05
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		res := numNodes == noEmptyStoreNum
 		leaderCounts := make([]int, 0, numNodes)
 		regionCounts := make([]int, 0, numNodes)

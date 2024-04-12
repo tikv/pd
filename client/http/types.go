@@ -133,11 +133,22 @@ type RegionsInfo struct {
 	Regions []RegionInfo `json:"regions"`
 }
 
+func newRegionsInfo(count int64) *RegionsInfo {
+	return &RegionsInfo{
+		Count:   count,
+		Regions: make([]RegionInfo, 0, count),
+	}
+}
+
 // Merge merges two RegionsInfo together and returns a new one.
 func (ri *RegionsInfo) Merge(other *RegionsInfo) *RegionsInfo {
-	newRegionsInfo := &RegionsInfo{
-		Regions: make([]RegionInfo, 0, ri.Count+other.Count),
+	if ri == nil {
+		ri = newRegionsInfo(0)
 	}
+	if other == nil {
+		other = newRegionsInfo(0)
+	}
+	newRegionsInfo := newRegionsInfo(ri.Count + other.Count)
 	m := make(map[int64]RegionInfo, ri.Count+other.Count)
 	for _, region := range ri.Regions {
 		m[region.ID] = region
@@ -613,14 +624,17 @@ type MicroServiceMember struct {
 	StartTimestamp int64  `json:"start-timestamp"`
 }
 
-// KeyspaceSafePointVersion represents parameters needed to modify the safe point version.
-type KeyspaceSafePointVersion struct {
-	SafePointVersion string `json:"safe_point_version,omitempty"`
+// KeyspaceGCManagementType represents parameters needed to modify the gc management type.
+// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+// configured to run a global gc worker to calculate a global gc safe point.
+// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+type KeyspaceGCManagementType struct {
+	GCManagementType string `json:"gc_management_type,omitempty"`
 }
 
-// KeyspaceSafePointVersionConfig represents parameters needed to modify target keyspace's configs.
-type KeyspaceSafePointVersionConfig struct {
-	Config KeyspaceSafePointVersion `json:"config"`
+// KeyspaceGCManagementTypeConfig represents parameters needed to modify target keyspace's configs.
+type KeyspaceGCManagementTypeConfig struct {
+	Config KeyspaceGCManagementType `json:"config"`
 }
 
 // tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.

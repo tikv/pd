@@ -380,7 +380,7 @@ func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) err
 	return nil
 }
 
-func (c *client) RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error {
+func (c *client) RegionHeartbeat(_ context.Context, region *core.RegionInfo) error {
 	c.reportRegionHeartbeatCh <- region
 	return nil
 }

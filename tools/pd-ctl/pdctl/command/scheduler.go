@@ -391,7 +391,7 @@ func NewSlowTrendEvictLeaderSchedulerCommand() *cobra.Command {
 	return c
 }
 
-func addSchedulerForSplitBucketCommandFunc(cmd *cobra.Command, args []string) {
+func addSchedulerForSplitBucketCommandFunc(cmd *cobra.Command, _ []string) {
 	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	postJSON(cmd, schedulersPrefix, input)

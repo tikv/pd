@@ -26,16 +26,16 @@ import (
 
 type pluginHandler struct{}
 
-func newPluginHandler(_ *server.Handler, _ *render.Render) *pluginHandler {
+func newPluginHandler(*server.Handler, *render.Render) *pluginHandler {
 	return &pluginHandler{}
 }
 
-func (h *pluginHandler) LoadPlugin(w http.ResponseWriter, r *http.Request) {
+func (*pluginHandler) LoadPlugin(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("load plugin is disabled, please `PLUGIN=1 $(MAKE) pd-server` first"))
 }
 
-func (h *pluginHandler) UnloadPlugin(w http.ResponseWriter, r *http.Request) {
+func (*pluginHandler) UnloadPlugin(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("unload plugin is disabled, please `PLUGIN=1 $(MAKE) pd-server` first"))
 }

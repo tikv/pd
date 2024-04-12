@@ -43,11 +43,11 @@ func init() {
 	// TODO: remove this global variable in the future.
 	// And use a function to create hot schduler for test.
 	schedulePeerPr = 1.0
-	RegisterScheduler(utils.Write.String(), func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
+	RegisterScheduler(utils.Write.String(), func(opController *operator.Controller, _ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		cfg := initHotRegionScheduleConfig()
 		return newHotWriteScheduler(opController, cfg), nil
 	})
-	RegisterScheduler(utils.Read.String(), func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
+	RegisterScheduler(utils.Read.String(), func(opController *operator.Controller, _ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
 	})
 }
@@ -68,6 +68,11 @@ func newHotWriteScheduler(opController *operator.Controller, conf *hotRegionSche
 
 func clearPendingInfluence(h *hotScheduler) {
 	h.regionPendings = make(map[uint64]*pendingInfluence)
+}
+
+func newTestRegion(id uint64) *core.RegionInfo {
+	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
+	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
 }
 
 func TestUpgrade(t *testing.T) {
@@ -138,7 +143,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		case movePeer:
 			op, err = operator.CreateMovePeerOperator("move-peer-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
 		case transferLeader:
-			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 1, 2, []uint64{}, operator.OpAdmin)
+			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 2, []uint64{}, operator.OpAdmin)
 		}
 		re.NoError(err)
 		re.NotNil(op)
@@ -191,20 +196,6 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 			}
 		}
 	}
-}
-
-func newTestRegion(id uint64) *core.RegionInfo {
-	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
-	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
-}
-
-func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
-	re := require.New(t)
-	statistics.Denoising = false
-	statisticsInterval = 0
-	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
-	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
-	checkHotWriteRegionPlacement(re, true)
 }
 
 func TestSplitIfRegionTooHot(t *testing.T) {
@@ -395,6 +386,15 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	}
 }
 
+func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	statisticsInterval = 0
+	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
+	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
+	checkHotWriteRegionPlacement(re, true)
+}
+
 func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules bool) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -446,14 +446,13 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	tc.RuleManager.DeleteRule("pd", "follower")
 	ops, _ = hb.Schedule(tc, false)
 	re.NotEmpty(ops)
-	// TODO: fix the test
-	// re.NotContains(ops[0].Step(1).String(), "transfer leader")
+	re.NotContains(ops[0].Step(1).String(), "transfer leader")
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
 	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
@@ -511,12 +510,14 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
-		case 4:
+		case 5:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			if op.RegionID() == 2 {
 				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-				operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
 			} else {
 				// peer in store 1 of the region 1,3 can only transfer to store 6
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
@@ -536,10 +537,10 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
 		clearPendingInfluence(hb.(*hotScheduler))
-		re.Equal(4, op.Len())
+		re.Equal(5, op.Len())
 		if op.RegionID() == 2 {
 			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
 		} else {
 			// peer in store 1 of the region 1,3 can only transfer to store 6
 			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
@@ -636,7 +637,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	statisticsInterval = 0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
 	tc.SetHotRegionCacheHitsThreshold(0)
 	re.NoError(tc.RuleManager.SetRules([]*placement.Rule{
 		{
@@ -730,9 +731,11 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 		case 2:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLearner(re, op, operator.OpHotRegion, 8, 10)
 		default:
 			re.FailNow("wrong op: " + op.String())
@@ -823,12 +826,14 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
-		case 4:
+		case 5:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			if op.RegionID() == 2 {
 				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-				operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
 			} else {
 				// peer in store 1 of the region 1,3 can only transfer to store 6
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
@@ -1164,9 +1169,11 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 			switch op.Len() {
 			case 1:
 				// balance by leader selected
+				re.Equal("transfer-hot-write-leader", op.Desc())
 				operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
-			case 4:
+			case 5:
 				// balance by peer selected
+				re.Equal("move-hot-write-leader", op.Desc())
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 4)
 				cnt++
 				if cnt == 3 {

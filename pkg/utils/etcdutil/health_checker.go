@@ -146,7 +146,7 @@ func (checker *healthChecker) inspector(ctx context.Context) {
 }
 
 func (checker *healthChecker) close() {
-	checker.healthyClients.Range(func(key, value any) bool {
+	checker.healthyClients.Range(func(_, value any) bool {
 		healthyCli := value.(*healthyClient)
 		healthyCli.healthState.Set(0)
 		healthyCli.Client.Close()
@@ -382,7 +382,7 @@ func (checker *healthChecker) update() {
 		}
 	}
 	// Clean up the stale clients which are not in the etcd cluster anymore.
-	checker.healthyClients.Range(func(key, value any) bool {
+	checker.healthyClients.Range(func(key, _ any) bool {
 		ep := key.(string)
 		if _, ok := epMap[ep]; !ok {
 			log.Info("remove stale etcd client",

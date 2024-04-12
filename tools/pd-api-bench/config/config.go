@@ -15,7 +15,6 @@
 package config
 
 import (
-	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	flag "github.com/spf13/pflag"
@@ -73,14 +72,13 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	// Load config file if specified.
-	var meta *toml.MetaData
 	if c.configFile != "" {
-		meta, err = configutil.ConfigFromFile(c, c.configFile)
+		_, err = configutil.ConfigFromFile(c, c.configFile)
 		if err != nil {
 			return err
 		}
 	}
-	c.Adjust(meta)
+	c.Adjust()
 
 	// Parse again to replace with command line options.
 	err = c.flagSet.Parse(arguments)
@@ -118,7 +116,7 @@ func (c *Config) InitCoordinator(co *cases.Coordinator) {
 }
 
 // Adjust is used to adjust configurations
-func (c *Config) Adjust(meta *toml.MetaData) {
+func (c *Config) Adjust() {
 	if len(c.Log.Format) == 0 {
 		c.Log.Format = "text"
 	}

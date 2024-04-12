@@ -138,7 +138,7 @@ func MustWaitLeader(re *require.Assertions, svrs []*Server) *Server {
 
 // CreateMockHandler creates a mock handler for test.
 func CreateMockHandler(re *require.Assertions, ip string) HandlerBuilder {
-	return func(ctx context.Context, s *Server) (http.Handler, apiutil.APIServiceGroup, error) {
+	return func(context.Context, *Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintln(w, "Hello World")

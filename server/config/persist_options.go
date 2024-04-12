@@ -257,27 +257,27 @@ func IsSupportedTTLConfig(key string) bool {
 
 // GetMaxSnapshotCount returns the number of the max snapshot which is allowed to send.
 func (o *PersistOptions) GetMaxSnapshotCount() uint64 {
-	return o.getTTLUintOr(sc.MaxSnapshotCountKey, o.GetScheduleConfig().MaxSnapshotCount)
+	return o.getTTLNumberOr(sc.MaxSnapshotCountKey, o.GetScheduleConfig().MaxSnapshotCount)
 }
 
 // GetMaxPendingPeerCount returns the number of the max pending peers.
 func (o *PersistOptions) GetMaxPendingPeerCount() uint64 {
-	return o.getTTLUintOr(sc.MaxPendingPeerCountKey, o.GetScheduleConfig().MaxPendingPeerCount)
+	return o.getTTLNumberOr(sc.MaxPendingPeerCountKey, o.GetScheduleConfig().MaxPendingPeerCount)
 }
 
 // GetMaxMergeRegionSize returns the max region size.
 func (o *PersistOptions) GetMaxMergeRegionSize() uint64 {
-	return o.getTTLUintOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
+	return o.getTTLNumberOr(sc.MaxMergeRegionSizeKey, o.GetScheduleConfig().MaxMergeRegionSize)
 }
 
 // GetMaxMergeRegionKeys returns the max number of keys.
 // It returns size * 10000 if the key of max-merge-region-Keys doesn't exist.
 func (o *PersistOptions) GetMaxMergeRegionKeys() uint64 {
-	keys, exist, err := o.getTTLUint(sc.MaxMergeRegionKeysKey)
+	keys, exist, err := o.getTTLNumber(sc.MaxMergeRegionKeysKey)
 	if exist && err == nil {
 		return keys
 	}
-	size, exist, err := o.getTTLUint(sc.MaxMergeRegionSizeKey)
+	size, exist, err := o.getTTLNumber(sc.MaxMergeRegionSizeKey)
 	if exist && err == nil {
 		return size * 10000
 	}
@@ -419,32 +419,32 @@ func (o *PersistOptions) GetMaxStorePreparingTime() time.Duration {
 
 // GetLeaderScheduleLimit returns the limit for leader schedule.
 func (o *PersistOptions) GetLeaderScheduleLimit() uint64 {
-	return o.getTTLUintOr(sc.LeaderScheduleLimitKey, o.GetScheduleConfig().LeaderScheduleLimit)
+	return o.getTTLNumberOr(sc.LeaderScheduleLimitKey, o.GetScheduleConfig().LeaderScheduleLimit)
 }
 
 // GetRegionScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetRegionScheduleLimit() uint64 {
-	return o.getTTLUintOr(sc.RegionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
+	return o.getTTLNumberOr(sc.RegionScheduleLimitKey, o.GetScheduleConfig().RegionScheduleLimit)
 }
 
 // GetWitnessScheduleLimit returns the limit for region schedule.
 func (o *PersistOptions) GetWitnessScheduleLimit() uint64 {
-	return o.getTTLUintOr(sc.WitnessScheduleLimitKey, o.GetScheduleConfig().WitnessScheduleLimit)
+	return o.getTTLNumberOr(sc.WitnessScheduleLimitKey, o.GetScheduleConfig().WitnessScheduleLimit)
 }
 
 // GetReplicaScheduleLimit returns the limit for replica schedule.
 func (o *PersistOptions) GetReplicaScheduleLimit() uint64 {
-	return o.getTTLUintOr(sc.ReplicaRescheduleLimitKey, o.GetScheduleConfig().ReplicaScheduleLimit)
+	return o.getTTLNumberOr(sc.ReplicaRescheduleLimitKey, o.GetScheduleConfig().ReplicaScheduleLimit)
 }
 
 // GetMergeScheduleLimit returns the limit for merge schedule.
 func (o *PersistOptions) GetMergeScheduleLimit() uint64 {
-	return o.getTTLUintOr(sc.MergeScheduleLimitKey, o.GetScheduleConfig().MergeScheduleLimit)
+	return o.getTTLNumberOr(sc.MergeScheduleLimitKey, o.GetScheduleConfig().MergeScheduleLimit)
 }
 
 // GetHotRegionScheduleLimit returns the limit for hot region schedule.
 func (o *PersistOptions) GetHotRegionScheduleLimit() uint64 {
-	return o.getTTLUintOr(sc.HotRegionScheduleLimitKey, o.GetScheduleConfig().HotRegionScheduleLimit)
+	return o.getTTLNumberOr(sc.HotRegionScheduleLimitKey, o.GetScheduleConfig().HotRegionScheduleLimit)
 }
 
 // GetStoreLimit returns the limit of a store.
@@ -547,7 +547,7 @@ func (o *PersistOptions) GetRegionScoreFormulaVersion() string {
 
 // GetSchedulerMaxWaitingOperator returns the number of the max waiting operators.
 func (o *PersistOptions) GetSchedulerMaxWaitingOperator() uint64 {
-	return o.getTTLUintOr(sc.SchedulerMaxWaitingOperatorKey, o.GetScheduleConfig().SchedulerMaxWaitingOperator)
+	return o.getTTLNumberOr(sc.SchedulerMaxWaitingOperatorKey, o.GetScheduleConfig().SchedulerMaxWaitingOperator)
 }
 
 // GetLeaderSchedulePolicy is to get leader schedule policy.
@@ -801,7 +801,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if err != nil {
 		return err
 	}
-	o.adjustScheduleCfg(&cfg.Schedule)
+	adjustScheduleCfg(&cfg.Schedule)
 	// Some fields may not be stored in the storage, we need to calculate them manually.
 	cfg.StoreConfig.Adjust()
 	cfg.PDServerCfg.MigrateDeprecatedFlags()
@@ -819,7 +819,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	return nil
 }
 
-func (o *PersistOptions) adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
+func adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 	// In case we add new default schedulers.
 	for _, ps := range sc.DefaultSchedulers {
 		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {
@@ -870,17 +870,29 @@ func (o *PersistOptions) SetTTLData(parCtx context.Context, client *clientv3.Cli
 	return nil
 }
 
-func (o *PersistOptions) getTTLUint(key string) (uint64, bool, error) {
+// getTTLNumber try to parse uint64 from ttl storage first, if failed, try to parse float64
+func (o *PersistOptions) getTTLNumber(key string) (uint64, bool, error) {
 	stringForm, ok := o.GetTTLData(key)
 	if !ok {
 		return 0, false, nil
 	}
 	r, err := strconv.ParseUint(stringForm, 10, 64)
-	return r, true, err
+	if err == nil {
+		return r, true, nil
+	}
+	// try to parse float64
+	// json unmarshal will convert number(such as `uint64(math.MaxInt32)`) to float64
+	f, err := strconv.ParseFloat(stringForm, 64)
+	if err != nil {
+		return 0, false, err
+	}
+	return uint64(f), true, nil
 }
 
-func (o *PersistOptions) getTTLUintOr(key string, defaultValue uint64) uint64 {
-	if v, ok, err := o.getTTLUint(key); ok {
+// getTTLNumberOr try to parse uint64 from ttl storage first, if failed, try to parse float64.
+// If both failed, return defaultValue.
+func (o *PersistOptions) getTTLNumberOr(key string, defaultValue uint64) uint64 {
+	if v, ok, err := o.getTTLNumber(key); ok {
 		if err == nil {
 			return v
 		}

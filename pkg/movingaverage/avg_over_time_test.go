@@ -23,7 +23,6 @@ import (
 )
 
 func TestPulse(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	aot := NewAvgOverTime(5 * time.Second)
 	// warm up
@@ -43,7 +42,6 @@ func TestPulse(t *testing.T) {
 }
 
 func TestPulse2(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	dur := 5 * time.Second
 	aot := NewAvgOverTime(dur)
@@ -57,7 +55,6 @@ func TestPulse2(t *testing.T) {
 }
 
 func TestChange(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	aot := NewAvgOverTime(5 * time.Second)
 
@@ -91,7 +88,6 @@ func TestChange(t *testing.T) {
 }
 
 func TestMinFilled(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	interval := 10 * time.Second
 	rate := 1.0
@@ -108,7 +104,6 @@ func TestMinFilled(t *testing.T) {
 }
 
 func TestUnstableInterval(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	aot := NewAvgOverTime(5 * time.Second)
 	re.Equal(0., aot.Get())

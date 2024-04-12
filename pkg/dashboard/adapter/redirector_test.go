@@ -42,14 +42,14 @@ func TestRedirectorTestSuite(t *testing.T) {
 
 func (suite *redirectorTestSuite) SetupSuite() {
 	suite.tempText = "temp1"
-	suite.tempServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	suite.tempServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, suite.tempText)
 	}))
 
 	suite.testName = "test1"
 	suite.redirector = NewRedirector(suite.testName, nil)
 	suite.noRedirectHTTPClient = &http.Client{
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		CheckRedirect: func(*http.Request, []*http.Request) error {
 			// ErrUseLastResponse can be returned by Client.CheckRedirect hooks to
 			// control how redirects are processed. If returned, the next request
 			// is not sent and the most recent response is returned with its body

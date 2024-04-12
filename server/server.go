@@ -127,7 +127,6 @@ var (
 )
 
 // Server is the pd server. It implements bs.Server
-// nolint
 type Server struct {
 	diagnosticspb.DiagnosticsServer
 
@@ -593,7 +592,7 @@ func (s *Server) Close() {
 		cb()
 	}
 
-	s.clientConns.Range(func(key, value any) bool {
+	s.clientConns.Range(func(_, value any) bool {
 		conn := value.(*grpc.ClientConn)
 		if err := conn.Close(); err != nil {
 			log.Error("close grpc client meet error", errs.ZapError(err))
@@ -1800,7 +1799,7 @@ func (s *Server) campaignLeader() {
 		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
 	})
 
-	CheckPDVersion(s.persistOptions)
+	CheckPDVersionWithClusterVersion(s.persistOptions)
 	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
 	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
@@ -2060,7 +2059,7 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 		}
 		return nil
 	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
+	deleteFn := func(*mvccpb.KeyValue) error {
 		var oldPrimary string
 		v, ok := s.servicePrimaryMap.Load(serviceName)
 		if ok {
@@ -2086,7 +2085,7 @@ func (s *Server) initServicePrimaryWatcher(serviceName string, primaryKey string
 }
 
 // RecoverAllocID recover alloc id. set current base id to input id
-func (s *Server) RecoverAllocID(ctx context.Context, id uint64) error {
+func (s *Server) RecoverAllocID(_ context.Context, id uint64) error {
 	return s.idAllocator.SetBase(id)
 }
 

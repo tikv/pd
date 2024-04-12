@@ -1292,7 +1292,7 @@ func scatterRegions(c *gin.Context) {
 		if !ok {
 			return 0, nil, errors.New("regions_id is invalid")
 		}
-		return handler.ScatterRegionsByID(ids, group, retryLimit, false)
+		return handler.ScatterRegionsByID(ids, group, retryLimit)
 	}()
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())

@@ -121,7 +121,7 @@ func (suite *httpClientTestSuite) TearDownSuite() {
 // RunTestInTwoModes is to run test in two modes.
 func (suite *httpClientTestSuite) RunTestInTwoModes(test func(mode mode, client pd.Client)) {
 	// Run test with specific service discovery.
-	cli := setupCli(suite.Require(), suite.env[specificServiceDiscovery].ctx, suite.env[specificServiceDiscovery].endpoints)
+	cli := setupCli(suite.env[specificServiceDiscovery].ctx, suite.Require(), suite.env[specificServiceDiscovery].endpoints)
 	sd := cli.GetServiceDiscovery()
 	client := pd.NewClientWithServiceDiscovery("pd-http-client-it-grpc", sd)
 	test(specificServiceDiscovery, client)
@@ -268,7 +268,7 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 	re.NoError(err)
 	re.Equal(bundles[0], bundle)
 	// Check if we have the default rule.
-	suite.checkRuleResult(re, env, client, &pd.Rule{
+	checkRuleResult(re, env, client, &pd.Rule{
 		GroupID:  placement.DefaultGroupID,
 		ID:       placement.DefaultRuleID,
 		Role:     pd.Voter,
@@ -277,7 +277,7 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 		EndKey:   []byte{},
 	}, 1, true)
 	// Should be the same as the rules in the bundle.
-	suite.checkRuleResult(re, env, client, bundle.Rules[0], 1, true)
+	checkRuleResult(re, env, client, bundle.Rules[0], 1, true)
 	testRule := &pd.Rule{
 		GroupID:  placement.DefaultGroupID,
 		ID:       "test",
@@ -288,24 +288,24 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 	}
 	err = client.SetPlacementRule(env.ctx, testRule)
 	re.NoError(err)
-	suite.checkRuleResult(re, env, client, testRule, 2, true)
+	checkRuleResult(re, env, client, testRule, 2, true)
 	err = client.DeletePlacementRule(env.ctx, placement.DefaultGroupID, "test")
 	re.NoError(err)
-	suite.checkRuleResult(re, env, client, testRule, 1, false)
+	checkRuleResult(re, env, client, testRule, 1, false)
 	testRuleOp := &pd.RuleOp{
 		Rule:   testRule,
 		Action: pd.RuleOpAdd,
 	}
 	err = client.SetPlacementRuleInBatch(env.ctx, []*pd.RuleOp{testRuleOp})
 	re.NoError(err)
-	suite.checkRuleResult(re, env, client, testRule, 2, true)
+	checkRuleResult(re, env, client, testRule, 2, true)
 	testRuleOp = &pd.RuleOp{
 		Rule:   testRule,
 		Action: pd.RuleOpDel,
 	}
 	err = client.SetPlacementRuleInBatch(env.ctx, []*pd.RuleOp{testRuleOp})
 	re.NoError(err)
-	suite.checkRuleResult(re, env, client, testRule, 1, false)
+	checkRuleResult(re, env, client, testRule, 1, false)
 	err = client.SetPlacementRuleBundles(env.ctx, []*pd.GroupBundle{
 		{
 			ID:    placement.DefaultGroupID,
@@ -313,7 +313,7 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 		},
 	}, true)
 	re.NoError(err)
-	suite.checkRuleResult(re, env, client, testRule, 1, true)
+	checkRuleResult(re, env, client, testRule, 1, true)
 	ruleGroups, err := client.GetAllPlacementRuleGroups(env.ctx)
 	re.NoError(err)
 	re.Len(ruleGroups, 1)
@@ -347,10 +347,10 @@ func (suite *httpClientTestSuite) checkRule(mode mode, client pd.Client) {
 	}
 	err = client.SetPlacementRule(env.ctx, testRule)
 	re.NoError(err)
-	suite.checkRuleResult(re, env, client, testRule, 1, true)
+	checkRuleResult(re, env, client, testRule, 1, true)
 }
 
-func (suite *httpClientTestSuite) checkRuleResult(
+func checkRuleResult(
 	re *require.Assertions,
 	env *httpClientTestEnv,
 	client pd.Client,
@@ -521,6 +521,21 @@ func (suite *httpClientTestSuite) checkConfig(mode mode, client pd.Client) {
 	err = client.SetConfig(env.ctx, newConfig, 0)
 	re.NoError(err)
 	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.leader-schedule-limit")
+	re.NoError(err)
+	re.Empty(resp.Kvs)
+
+	// Test the config with TTL for storing float64 as uint64.
+	newConfig = map[string]any{
+		"schedule.max-pending-peer-count": uint64(math.MaxInt32),
+	}
+	err = client.SetConfig(env.ctx, newConfig, 4)
+	re.NoError(err)
+	c := env.cluster.GetLeaderServer().GetRaftCluster().GetOpts().GetMaxPendingPeerCount()
+	re.Equal(uint64(math.MaxInt32), c)
+
+	err = client.SetConfig(env.ctx, newConfig, 0)
+	re.NoError(err)
+	resp, err = env.cluster.GetEtcdClient().Get(env.ctx, sc.TTLConfigPrefix+"/schedule.max-pending-peer-count")
 	re.NoError(err)
 	re.Empty(resp.Kvs)
 }
@@ -709,7 +724,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	re := suite.Require()
 	env := suite.env[defaultServiceDiscovery]
 
-	cli := setupCli(suite.Require(), env.ctx, env.endpoints)
+	cli := setupCli(env.ctx, suite.Require(), env.endpoints)
 	defer cli.Close()
 	sd := cli.GetServiceDiscovery()
 
@@ -769,28 +784,30 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	c.Close()
 }
 
-func (suite *httpClientTestSuite) TestUpdateKeyspaceSafePointVersion() {
-	suite.RunTestInTwoModes(suite.checkUpdateKeyspaceSafePointVersion)
+func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
+	suite.RunTestInTwoModes(suite.checkUpdateKeyspaceGCManagementType)
 }
 
-func (suite *httpClientTestSuite) checkUpdateKeyspaceSafePointVersion(mode mode, client pd.Client) {
+func (suite *httpClientTestSuite) checkUpdateKeyspaceGCManagementType(mode mode, client pd.Client) {
 	re := suite.Require()
 	env := suite.env[mode]
 
 	keyspaceName := "DEFAULT"
-	safePointVersion := "v2"
+	expectGCManagementType := "keyspace_level_gc"
 
-	keyspaceSafePointVersionConfig := pd.KeyspaceSafePointVersionConfig{
-		Config: pd.KeyspaceSafePointVersion{
-			SafePointVersion: safePointVersion,
+	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
+		Config: pd.KeyspaceGCManagementType{
+			GCManagementType: expectGCManagementType,
 		},
 	}
-	err := client.UpdateKeyspaceSafePointVersion(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	err := client.UpdateKeyspaceGCManagementType(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
 	re.NoError(err)
 
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(env.ctx, keyspaceName)
 	re.NoError(err)
-	val, ok := keyspaceMetaRes.Config["safe_point_version"]
+	val, ok := keyspaceMetaRes.Config["gc_management_type"]
+
+	// Check it can get expect key and value in keyspace meta config.
 	re.True(ok)
-	re.Equal(safePointVersion, val)
+	re.Equal(expectGCManagementType, val)
 }

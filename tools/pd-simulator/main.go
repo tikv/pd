@@ -128,8 +128,11 @@ func runHTTPServer() {
 	http.Handle("/pprof/allocs", pprof.Handler("allocs"))
 	http.Handle("/pprof/block", pprof.Handler("block"))
 	http.Handle("/pprof/goroutine", pprof.Handler("goroutine"))
-	// nolint
-	http.ListenAndServe(*statusAddress, nil)
+	server := &http.Server{
+		Addr:              *statusAddress,
+		ReadHeaderTimeout: 3 * time.Second,
+	}
+	server.ListenAndServe()
 }
 
 // NewSingleServer creates a pd server for simulator.

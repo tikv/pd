@@ -417,7 +417,7 @@ func (h *Handler) AddTransferLeaderOperator(regionID uint64, storeID uint64) err
 		return errors.Errorf("region has no voter in store %v", storeID)
 	}
 
-	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, region.GetLeader().GetStoreId(), newLeader.GetStoreId(), []uint64{}, operator.OpAdmin)
+	op, err := operator.CreateTransferLeaderOperator("admin-transfer-leader", c, region, newLeader.GetStoreId(), []uint64{}, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 		return err
@@ -1157,7 +1157,7 @@ func (h *Handler) AccelerateRegionsScheduleInRanges(startKeys [][]byte, endKeys 
 }
 
 // AdjustLimit adjusts the limit of regions to schedule.
-func (h *Handler) AdjustLimit(limitStr string, defaultLimits ...int) (int, error) {
+func (*Handler) AdjustLimit(limitStr string, defaultLimits ...int) (int, error) {
 	limit := defaultRegionLimit
 	if len(defaultLimits) > 0 {
 		limit = defaultLimits[0]
@@ -1181,7 +1181,7 @@ type ScatterRegionsResponse struct {
 }
 
 // BuildScatterRegionsResp builds ScatterRegionsResponse.
-func (h *Handler) BuildScatterRegionsResp(opsCount int, failures map[uint64]error) *ScatterRegionsResponse {
+func (*Handler) BuildScatterRegionsResp(opsCount int, failures map[uint64]error) *ScatterRegionsResponse {
 	// If there existed any operator failed to be added into Operator Controller, add its regions into unProcessedRegions
 	percentage := 100
 	if len(failures) > 0 {
@@ -1217,7 +1217,7 @@ func (h *Handler) ScatterRegionsByRange(rawStartKey, rawEndKey string, group str
 }
 
 // ScatterRegionsByID scatters regions by id.
-func (h *Handler) ScatterRegionsByID(ids []uint64, group string, retryLimit int, skipStoreLimit bool) (int, map[uint64]error, error) {
+func (h *Handler) ScatterRegionsByID(ids []uint64, group string, retryLimit int) (int, map[uint64]error, error) {
 	co := h.GetCoordinator()
 	if co == nil {
 		return 0, nil, errs.ErrNotBootstrapped.GenWithStackByArgs()

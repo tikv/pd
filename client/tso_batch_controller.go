@@ -19,7 +19,10 @@ import (
 	"runtime/trace"
 	"time"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/tsoutil"
+	"go.uber.org/zap"
 )
 
 type tsoBatchController struct {
@@ -137,8 +140,8 @@ func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical in
 	for i := 0; i < tbc.collectedRequestCount; i++ {
 		tsoReq := tbc.collectedRequests[i]
 		tsoReq.physical, tsoReq.logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
-		defer trace.StartRegion(tsoReq.requestCtx, "pdclient.tsoReqDequeue").End()
-		tsoReq.done <- err
+		defer trace.StartRegion(tsoReq.requestCtx, "pdclient.tsoReqDequeue").End() // nolint
+		tsoReq.tryDone(err)
 	}
 	// Prevent the finished requests from being processed again.
 	tbc.collectedRequestCount = 0
@@ -147,6 +150,15 @@ func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical in
 func (tbc *tsoBatchController) revokePendingRequests(err error) {
 	for i := 0; i < len(tbc.tsoRequestCh); i++ {
 		req := <-tbc.tsoRequestCh
-		req.done <- err
+		req.tryDone(err)
 	}
+}
+
+func (tbc *tsoBatchController) clear() {
+	log.Info("[pd] clear the tso batch controller",
+		zap.Int("max-batch-size", tbc.maxBatchSize), zap.Int("best-batch-size", tbc.bestBatchSize),
+		zap.Int("collected-request-count", tbc.collectedRequestCount), zap.Int("pending-request-count", len(tbc.tsoRequestCh)))
+	tsoErr := errors.WithStack(errClosing)
+	tbc.finishCollectedRequests(0, 0, 0, tsoErr)
+	tbc.revokePendingRequests(tsoErr)
 }
