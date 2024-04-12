@@ -1500,20 +1500,12 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	targetLabel := strconv.FormatUint(dstStoreID, 10)
 	dim := bs.rankToDimString()
 
-	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
-	switch bs.rwTy {
-	case utils.Read:
-		createOperator = bs.createReadOperator
-	case utils.Write:
-		createOperator = bs.createWriteOperator
-	}
-
-	currentOp, typ, err := createOperator(bs.cur.region, srcStoreID, dstStoreID)
+	currentOp, typ, err := bs.createOperator(bs.cur.region, srcStoreID, dstStoreID)
 	if err == nil {
 		bs.decorateOperator(currentOp, false, sourceLabel, targetLabel, typ, dim)
 		ops = []*operator.Operator{currentOp}
 		if bs.cur.revertRegion != nil {
-			currentOp, typ, err = createOperator(bs.cur.revertRegion, dstStoreID, srcStoreID)
+			currentOp, typ, err = bs.createOperator(bs.cur.revertRegion, dstStoreID, srcStoreID)
 			if err == nil {
 				bs.decorateOperator(currentOp, true, targetLabel, sourceLabel, typ, dim)
 				ops = append(ops, currentOp)
@@ -1679,11 +1671,11 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strateg
 	return operators
 }
 
-func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
+func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
 	if region.GetStorePeer(dstStoreID) != nil {
 		typ = "transfer-leader"
 		op, err = operator.CreateTransferLeaderOperator(
-			"transfer-hot-read-leader",
+			"transfer-hot-"+bs.rwTy.String()+"-leader",
 			bs,
 			region,
 			srcStoreID,
@@ -1696,7 +1688,7 @@ func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID,
 		if region.GetLeader().GetStoreId() == srcStoreID {
 			typ = "move-leader"
 			op, err = operator.CreateMoveLeaderOperator(
-				"move-hot-read-leader",
+				"move-hot-"+bs.rwTy.String()+"-leader",
 				bs,
 				region,
 				operator.OpHotRegion,
@@ -1705,7 +1697,7 @@ func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID,
 		} else {
 			typ = "move-peer"
 			op, err = operator.CreateMovePeerOperator(
-				"move-hot-read-peer",
+				"move-hot-"+bs.rwTy.String()+"-peer",
 				bs,
 				region,
 				operator.OpHotRegion,
@@ -1716,6 +1708,7 @@ func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID,
 	return
 }
 
+<<<<<<< HEAD
 func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
 	if region.GetStorePeer(dstStoreID) != nil {
 		typ = "transfer-leader"
@@ -1742,6 +1735,8 @@ func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID
 	return
 }
 
+=======
+>>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
 func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, sourceLabel, targetLabel, typ, dim string) {
 	op.SetPriorityLevel(constant.High)
 	op.FinishedCounters = append(op.FinishedCounters,
