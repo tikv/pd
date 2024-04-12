@@ -22,6 +22,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -29,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -190,6 +192,47 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 			}
 		}
 	}
+}
+
+func TestSplitBuckets(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tc.SetHotRegionCacheHitsThreshold(1)
+	defer cancel()
+	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
+	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
+
+	// the hot range is [a,c],[e,f]
+	b := &metapb.Buckets{
+		RegionId:   1,
+		PeriodInMs: 1000,
+		Keys:       [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")},
+		Stats: &metapb.BucketStats{
+			ReadBytes:  []uint64{10 * units.KiB, 10 * units.KiB, 0, 10 * units.KiB, 10 * units.KiB},
+			ReadKeys:   []uint64{256, 256, 0, 256, 256},
+			ReadQps:    []uint64{0, 0, 0, 0, 0},
+			WriteBytes: []uint64{0, 0, 0, 0, 0},
+			WriteQps:   []uint64{0, 0, 0, 0, 0},
+			WriteKeys:  []uint64{0, 0, 0, 0, 0},
+		},
+	}
+
+	task := buckets.NewCheckPeerTask(b)
+	re.True(tc.HotBucketCache.CheckAsync(task))
+	time.Sleep(time.Millisecond * 10)
+	ops := solve.createSplitOperator([]*core.RegionInfo{region})
+	re.Equal(1, len(ops))
+	op := ops[0]
+	re.Equal(splitBucket, op.Desc())
+	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
+	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
+	re.NoError(err)
+	expectOp.GetCreateTime()
+	re.Equal(expectOp.Brief(), op.Brief())
+	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
 }
 
 func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
