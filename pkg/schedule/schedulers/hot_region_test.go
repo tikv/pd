@@ -22,7 +22,6 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -30,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -194,170 +192,6 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 	}
 }
 
-<<<<<<< HEAD
-func newTestRegion(id uint64) *core.RegionInfo {
-	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
-	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
-}
-
-func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
-	re := require.New(t)
-	statistics.Denoising = false
-	statistics.HistorySampleDuration = 0
-	statisticsInterval = 0
-	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
-	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
-}
-
-func TestSplitBuckets(t *testing.T) {
-=======
-func TestSplitIfRegionTooHot(t *testing.T) {
->>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
-	re := require.New(t)
-	statistics.Denoising = false
-	cancel, _, tc, oc := prepareSchedulersTest()
-	tc.SetHotRegionCacheHitsThreshold(1)
-	defer cancel()
-	hb, err := schedule.CreateScheduler(statistics.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	solve := newBalanceSolver(hb.(*hotScheduler), tc, statistics.Read, transferLeader)
-	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
-
-	// the hot range is [a,c],[e,f]
-	b := &metapb.Buckets{
-		RegionId:   1,
-		PeriodInMs: 1000,
-		Keys:       [][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")},
-		Stats: &metapb.BucketStats{
-			ReadBytes:  []uint64{10 * units.KiB, 10 * units.KiB, 0, 10 * units.KiB, 10 * units.KiB},
-			ReadKeys:   []uint64{256, 256, 0, 256, 256},
-			ReadQps:    []uint64{0, 0, 0, 0, 0},
-			WriteBytes: []uint64{0, 0, 0, 0, 0},
-			WriteQps:   []uint64{0, 0, 0, 0, 0},
-			WriteKeys:  []uint64{0, 0, 0, 0, 0},
-		},
-	}
-
-	task := buckets.NewCheckPeerTask(b)
-	re.True(tc.HotBucketCache.CheckAsync(task))
-	time.Sleep(time.Millisecond * 10)
-	ops := solve.createSplitOperator([]*core.RegionInfo{region})
-	re.Equal(1, len(ops))
-	op := ops[0]
-	re.Equal(splitBucket, op.Desc())
-	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
-	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
-	re.NoError(err)
-<<<<<<< HEAD
-	expectOp.GetCreateTime()
-	re.Equal(expectOp.Brief(), op.Brief())
-	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
-=======
-	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
-	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
-
-	testdata := []struct {
-		hotBuckets [][]byte
-		splitKeys  [][]byte
-	}{
-		{
-			[][]byte{[]byte("a"), []byte("b"), []byte("f")},
-			[][]byte{[]byte("b")},
-		},
-		{
-			[][]byte{[]byte(""), []byte("a"), []byte("")},
-			nil,
-		},
-		{
-			[][]byte{},
-			nil,
-		},
-	}
-
-	for _, data := range testdata {
-		b := &metapb.Buckets{
-			RegionId:   1,
-			PeriodInMs: 1000,
-			Keys:       data.hotBuckets,
-		}
-		region.UpdateBuckets(b, region.GetBuckets())
-		ops := solve.createSplitOperator([]*core.RegionInfo{region}, bySize)
-		if data.splitKeys == nil {
-			re.Empty(ops)
-			continue
-		}
-		re.Len(ops, 1)
-		op := ops[0]
-		re.Equal(splitHotReadBuckets, op.Desc())
-
-		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
-		re.NoError(err)
-		re.Equal(expectOp.Brief(), op.Brief())
-	}
-}
-
-func TestSplitBucketsByLoad(t *testing.T) {
-	re := require.New(t)
-	statistics.Denoising = false
-	cancel, _, tc, oc := prepareSchedulersTest()
-	tc.SetHotRegionCacheHitsThreshold(1)
-	tc.SetRegionBucketEnabled(true)
-	defer cancel()
-	hb, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
-	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
-	testdata := []struct {
-		hotBuckets [][]byte
-		splitKeys  [][]byte
-	}{
-		{
-			[][]byte{[]byte(""), []byte("b"), []byte("")},
-			[][]byte{[]byte("b")},
-		},
-		{
-			[][]byte{[]byte(""), []byte("a"), []byte("")},
-			nil,
-		},
-		{
-			[][]byte{[]byte("b"), []byte("c"), []byte("")},
-			[][]byte{[]byte("c")},
-		},
-	}
-	for _, data := range testdata {
-		b := &metapb.Buckets{
-			RegionId:   1,
-			PeriodInMs: 1000,
-			Keys:       data.hotBuckets,
-			Stats: &metapb.BucketStats{
-				ReadBytes:  []uint64{10 * units.KiB, 10 * units.MiB},
-				ReadKeys:   []uint64{256, 256},
-				ReadQps:    []uint64{0, 0},
-				WriteBytes: []uint64{0, 0},
-				WriteQps:   []uint64{0, 0},
-				WriteKeys:  []uint64{0, 0},
-			},
-		}
-		task := buckets.NewCheckPeerTask(b)
-		re.True(tc.HotBucketCache.CheckAsync(task))
-		time.Sleep(time.Millisecond * 10)
-		ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
-		if data.splitKeys == nil {
-			re.Empty(ops)
-			continue
-		}
-		re.Len(ops, 1)
-		op := ops[0]
-		re.Equal(splitHotReadBuckets, op.Desc())
-
-		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
-		re.NoError(err)
-		re.Equal(expectOp.Brief(), op.Brief())
-	}
-}
-
 func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
@@ -375,9 +209,8 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
-	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	hb, err := schedule.CreateScheduler(statistics.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	tc.AddLabelsStore(1, 2, map[string]string{"zone": "z1", "host": "h1"})
@@ -394,15 +227,15 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	})
 	tc.RuleManager.DeleteRule("pd", "default")
 
-	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*statistics.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(2, 0)
-	tc.UpdateStorageWrittenBytes(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(4, 3*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(5, 3*units.MiB*utils.StoreHeartBeatReportInterval)
-	tc.UpdateStorageWrittenBytes(6, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(4, 3*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(5, 3*units.MiB*statistics.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(6, 6*units.MiB*statistics.StoreHeartBeatReportInterval)
 
 	// Region 1, 2 and 3 are hot regions.
-	addRegionInfo(tc, utils.Write, []testRegionInfo{
+	addRegionInfo(tc, statistics.Write, []testRegionInfo{
 		{1, []uint64{1, 3, 5}, 512 * units.KiB, 0, 0},
 		{2, []uint64{1, 4, 6}, 512 * units.KiB, 0, 0},
 		{3, []uint64{1, 3, 6}, 512 * units.KiB, 0, 0},
@@ -419,7 +252,6 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	ops, _ = hb.Schedule(tc, false)
 	re.NotEmpty(ops)
 	re.NotContains(ops[0].Step(1).String(), "transfer leader")
->>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {

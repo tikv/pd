@@ -1457,19 +1457,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	targetLabel := strconv.FormatUint(dstStoreID, 10)
 	dim := bs.rankToDimString()
 
-<<<<<<< HEAD
-	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
-	switch bs.rwTy {
-	case statistics.Read:
-		createOperator = bs.createReadOperator
-	case statistics.Write:
-		createOperator = bs.createWriteOperator
-	}
-
-	currentOp, typ, err := createOperator(bs.cur.region, srcStoreID, dstStoreID)
-=======
 	currentOp, typ, err := bs.createOperator(bs.cur.region, srcStoreID, dstStoreID)
->>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
 	if err == nil {
 		bs.decorateOperator(currentOp, false, sourceLabel, targetLabel, typ, dim)
 		ops = []*operator.Operator{currentOp}
@@ -1586,35 +1574,6 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 	return
 }
 
-<<<<<<< HEAD
-func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
-	if region.GetStorePeer(dstStoreID) != nil {
-		typ = "transfer-leader"
-		op, err = operator.CreateTransferLeaderOperator(
-			"transfer-hot-write-leader",
-			bs,
-			region,
-			srcStoreID,
-			dstStoreID,
-			[]uint64{},
-			operator.OpHotRegion)
-	} else {
-		srcPeer := region.GetStorePeer(srcStoreID) // checked in `filterHotPeers`
-		dstPeer := &metapb.Peer{StoreId: dstStoreID, Role: srcPeer.Role}
-		typ = "move-peer"
-		op, err = operator.CreateMovePeerOperator(
-			"move-hot-write-peer",
-			bs,
-			region,
-			operator.OpHotRegion,
-			srcStoreID,
-			dstPeer)
-	}
-	return
-}
-
-=======
->>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
 func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, sourceLabel, targetLabel, typ, dim string) {
 	op.SetPriorityLevel(constant.High)
 	op.FinishedCounters = append(op.FinishedCounters,
