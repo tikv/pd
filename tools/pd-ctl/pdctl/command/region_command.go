@@ -37,6 +37,8 @@ var (
 	regionsCheckPrefix      = "pd/api/v1/regions/check"
 	regionsWriteFlowPrefix  = "pd/api/v1/regions/writeflow"
 	regionsReadFlowPrefix   = "pd/api/v1/regions/readflow"
+	regionsWriteQueryPrefix = "pd/api/v1/regions/writequery"
+	regionsReadQueryPrefix  = "pd/api/v1/regions/readquery"
 	regionsConfVerPrefix    = "pd/api/v1/regions/confver"
 	regionsVersionPrefix    = "pd/api/v1/regions/version"
 	regionsSizePrefix       = "pd/api/v1/regions/size"
@@ -66,17 +68,17 @@ func NewRegionCommand() *cobra.Command {
 	r.AddCommand(NewRangesWithRangeHolesCommand())
 
 	topRead := &cobra.Command{
-		Use:   `topread <limit> [--jq="<query string>"]`,
-		Short: "show regions with top read flow",
-		Run:   showRegionsTopCommand(regionsReadFlowPrefix),
+		Use:   `topread [byte|query] <limit> [--jq="<query string>"]`,
+		Short: "show regions with top read flow or query",
+		Run:   showTopReadRegions,
 	}
 	topRead.Flags().String("jq", "", "jq query")
 	r.AddCommand(topRead)
 
 	topWrite := &cobra.Command{
-		Use:   `topwrite <limit> [--jq="<query string>"]`,
-		Short: "show regions with top write flow",
-		Run:   showRegionsTopCommand(regionsWriteFlowPrefix),
+		Use:   `topwrite [byte|query] <limit> [--jq="<query string>"]`,
+		Short: "show regions with top write flow or query",
+		Run:   showTopWriteRegions,
 	}
 	topWrite.Flags().String("jq", "", "jq query")
 	r.AddCommand(topWrite)
@@ -212,6 +214,9 @@ func showRegionsTopCommand(prefix string) run {
 				return
 			}
 			prefix += "?limit=" + args[0]
+		} else if len(args) > 1 {
+			cmd.Println(cmd.UsageString())
+			return
 		}
 		r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 		if err != nil {
@@ -223,6 +228,40 @@ func showRegionsTopCommand(prefix string) run {
 			return
 		}
 		cmd.Println(r)
+	}
+}
+
+func showTopReadRegions(cmd *cobra.Command, args []string) {
+	// default to show top read flow
+	if len(args) == 0 {
+		showRegionsTopCommand(regionsReadFlowPrefix)(cmd, args)
+		return
+	}
+	// default to show top read flow with limit
+	switch args[0] {
+	case "query":
+		showRegionsTopCommand(regionsReadQueryPrefix)(cmd, args[1:])
+	case "byte":
+		showRegionsTopCommand(regionsReadFlowPrefix)(cmd, args[1:])
+	default:
+		showRegionsTopCommand(regionsReadFlowPrefix)(cmd, args)
+	}
+}
+
+func showTopWriteRegions(cmd *cobra.Command, args []string) {
+	// default to show top write flow
+	if len(args) == 0 {
+		showRegionsTopCommand(regionsWriteFlowPrefix)(cmd, args)
+		return
+	}
+	// default to show top write flow with limit
+	switch args[0] {
+	case "query":
+		showRegionsTopCommand(regionsWriteQueryPrefix)(cmd, args[1:])
+	case "byte":
+		showRegionsTopCommand(regionsWriteFlowPrefix)(cmd, args[1:])
+	default:
+		showRegionsTopCommand(regionsWriteFlowPrefix)(cmd, args)
 	}
 }
 
