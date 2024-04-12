@@ -1329,6 +1329,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	targetLabel := strconv.FormatUint(dstStoreID, 10)
 	dim := bs.rankToDimString()
 
+<<<<<<< HEAD:server/schedulers/hot_region.go
 	var createOperator func(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error)
 	switch bs.rwTy {
 	case statistics.Read:
@@ -1338,11 +1339,14 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	}
 
 	currentOp, typ, err := createOperator(bs.cur.region, srcStoreID, dstStoreID)
+=======
+	currentOp, typ, err := bs.createOperator(bs.cur.region, srcStoreID, dstStoreID)
+>>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852)):pkg/schedule/schedulers/hot_region.go
 	if err == nil {
 		bs.decorateOperator(currentOp, false, sourceLabel, targetLabel, typ, dim)
 		ops = []*operator.Operator{currentOp}
 		if bs.cur.revertRegion != nil {
-			currentOp, typ, err = createOperator(bs.cur.revertRegion, dstStoreID, srcStoreID)
+			currentOp, typ, err = bs.createOperator(bs.cur.revertRegion, dstStoreID, srcStoreID)
 			if err == nil {
 				bs.decorateOperator(currentOp, true, targetLabel, sourceLabel, typ, dim)
 				ops = append(ops, currentOp)
@@ -1359,11 +1363,164 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	return
 }
 
+<<<<<<< HEAD:server/schedulers/hot_region.go
 func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
+=======
+// bucketFirstStat returns the first priority statistics of the bucket.
+// if the first priority is query rate, it will return the second priority .
+func (bs *balanceSolver) bucketFirstStat() utils.RegionStatKind {
+	base := utils.RegionReadBytes
+	if bs.rwTy == utils.Write {
+		base = utils.RegionWriteBytes
+	}
+	offset := bs.firstPriority
+	// todo: remove it if bucket's qps has been supported.
+	if bs.firstPriority == utils.QueryDim {
+		offset = bs.secondPriority
+	}
+	return base + utils.RegionStatKind(offset)
+}
+
+func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]byte) *operator.Operator {
+	splitKeys := make([][]byte, 0, len(keys))
+	for _, key := range keys {
+		// make sure that this split key is in the region
+		if keyutil.Between(region.GetStartKey(), region.GetEndKey(), key) {
+			splitKeys = append(splitKeys, key)
+		}
+	}
+	if len(splitKeys) == 0 {
+		hotSchedulerNotFoundSplitKeysCounter.Inc()
+		return nil
+	}
+	desc := splitHotReadBuckets
+	if bs.rwTy == utils.Write {
+		desc = splitHotWriteBuckets
+	}
+
+	op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKeys)
+	if err != nil {
+		log.Error("fail to create split operator",
+			zap.Stringer("resource-type", bs.resourceTy),
+			errs.ZapError(err))
+		return nil
+	}
+	hotSchedulerSplitSuccessCounter.Inc()
+	return op
+}
+
+func (bs *balanceSolver) splitBucketsByLoad(region *core.RegionInfo, bucketStats []*buckets.BucketStat) *operator.Operator {
+	// bucket key range maybe not match the region key range, so we should filter the invalid buckets.
+	// filter some buckets key range not match the region start key and end key.
+	stats := make([]*buckets.BucketStat, 0, len(bucketStats))
+	startKey, endKey := region.GetStartKey(), region.GetEndKey()
+	for _, stat := range bucketStats {
+		if keyutil.Between(startKey, endKey, stat.StartKey) || keyutil.Between(startKey, endKey, stat.EndKey) {
+			stats = append(stats, stat)
+		}
+	}
+	if len(stats) == 0 {
+		hotSchedulerHotBucketNotValidCounter.Inc()
+		return nil
+	}
+
+	// if this region has only one buckets, we can't split it into two hot region, so skip it.
+	if len(stats) == 1 {
+		hotSchedulerOnlyOneBucketsHotCounter.Inc()
+		return nil
+	}
+	totalLoads := uint64(0)
+	dim := bs.bucketFirstStat()
+	for _, stat := range stats {
+		totalLoads += stat.Loads[dim]
+	}
+
+	// find the half point of the total loads.
+	acc, splitIdx := uint64(0), 0
+	for ; acc < totalLoads/2 && splitIdx < len(stats); splitIdx++ {
+		acc += stats[splitIdx].Loads[dim]
+	}
+	if splitIdx <= 0 {
+		hotSchedulerRegionBucketsSingleHotSpotCounter.Inc()
+		return nil
+	}
+	splitKey := stats[splitIdx-1].EndKey
+	// if the split key is not in the region, we should use the start key of the bucket.
+	if !keyutil.Between(region.GetStartKey(), region.GetEndKey(), splitKey) {
+		splitKey = stats[splitIdx-1].StartKey
+	}
+	op := bs.splitBucketsOperator(region, [][]byte{splitKey})
+	if op != nil {
+		op.AdditionalInfos["accLoads"] = strconv.FormatUint(acc-stats[splitIdx-1].Loads[dim], 10)
+		op.AdditionalInfos["totalLoads"] = strconv.FormatUint(totalLoads, 10)
+	}
+	return op
+}
+
+// splitBucketBySize splits the region order by bucket count if the region is too big.
+func (bs *balanceSolver) splitBucketBySize(region *core.RegionInfo) *operator.Operator {
+	splitKeys := make([][]byte, 0)
+	for _, key := range region.GetBuckets().GetKeys() {
+		if keyutil.Between(region.GetStartKey(), region.GetEndKey(), key) {
+			splitKeys = append(splitKeys, key)
+		}
+	}
+	if len(splitKeys) == 0 {
+		return nil
+	}
+	splitKey := splitKeys[len(splitKeys)/2]
+	return bs.splitBucketsOperator(region, [][]byte{splitKey})
+}
+
+// createSplitOperator creates split operators for the given regions.
+func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strategy splitStrategy) []*operator.Operator {
+	if len(regions) == 0 {
+		return nil
+	}
+	ids := make([]uint64, len(regions))
+	for i, region := range regions {
+		ids[i] = region.GetID()
+	}
+	operators := make([]*operator.Operator, 0)
+	var hotBuckets map[uint64][]*buckets.BucketStat
+
+	createFunc := func(region *core.RegionInfo) {
+		switch strategy {
+		case bySize:
+			if op := bs.splitBucketBySize(region); op != nil {
+				operators = append(operators, op)
+			}
+		case byLoad:
+			if hotBuckets == nil {
+				hotBuckets = bs.SchedulerCluster.BucketsStats(bs.minHotDegree, ids...)
+			}
+			stats, ok := hotBuckets[region.GetID()]
+			if !ok {
+				hotSchedulerRegionBucketsNotHotCounter.Inc()
+				return
+			}
+			if op := bs.splitBucketsByLoad(region, stats); op != nil {
+				operators = append(operators, op)
+			}
+		}
+	}
+
+	for _, region := range regions {
+		createFunc(region)
+	}
+	// the split bucket's priority is highest
+	if len(operators) > 0 {
+		bs.cur.progressiveRank = splitProgressiveRank
+	}
+	return operators
+}
+
+func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
+>>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852)):pkg/schedule/schedulers/hot_region.go
 	if region.GetStorePeer(dstStoreID) != nil {
 		typ = "transfer-leader"
 		op, err = operator.CreateTransferLeaderOperator(
-			"transfer-hot-read-leader",
+			"transfer-hot-"+bs.rwTy.String()+"-leader",
 			bs,
 			region,
 			srcStoreID,
@@ -1376,7 +1533,7 @@ func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID,
 		if region.GetLeader().GetStoreId() == srcStoreID {
 			typ = "move-leader"
 			op, err = operator.CreateMoveLeaderOperator(
-				"move-hot-read-leader",
+				"move-hot-"+bs.rwTy.String()+"-leader",
 				bs,
 				region,
 				operator.OpHotRegion,
@@ -1385,7 +1542,7 @@ func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID,
 		} else {
 			typ = "move-peer"
 			op, err = operator.CreateMovePeerOperator(
-				"move-hot-read-peer",
+				"move-hot-"+bs.rwTy.String()+"-peer",
 				bs,
 				region,
 				operator.OpHotRegion,
@@ -1396,6 +1553,7 @@ func (bs *balanceSolver) createReadOperator(region *core.RegionInfo, srcStoreID,
 	return
 }
 
+<<<<<<< HEAD:server/schedulers/hot_region.go
 func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
 	if region.GetStorePeer(dstStoreID) != nil {
 		typ = "transfer-leader"
@@ -1422,6 +1580,8 @@ func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID
 	return
 }
 
+=======
+>>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852)):pkg/schedule/schedulers/hot_region.go
 func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, sourceLabel, targetLabel, typ, dim string) {
 	op.SetPriorityLevel(core.High)
 	op.FinishedCounters = append(op.FinishedCounters,
