@@ -67,6 +67,11 @@ func clearPendingInfluence(h *hotScheduler) {
 	h.regionPendings = make(map[uint64]*pendingInfluence)
 }
 
+func newTestRegion(id uint64) *core.RegionInfo {
+	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
+	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
+}
+
 func TestUpgrade(t *testing.T) {
 	re := require.New(t)
 	cancel, _, _, oc := prepareSchedulersTest()
@@ -189,6 +194,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 	}
 }
 
+<<<<<<< HEAD
 func newTestRegion(id uint64) *core.RegionInfo {
 	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
 	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
@@ -204,6 +210,9 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 }
 
 func TestSplitBuckets(t *testing.T) {
+=======
+func TestSplitIfRegionTooHot(t *testing.T) {
+>>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
 	re := require.New(t)
 	statistics.Denoising = false
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -239,15 +248,184 @@ func TestSplitBuckets(t *testing.T) {
 	expectKeys := [][]byte{[]byte("a"), []byte("c"), []byte("d"), []byte("f")}
 	expectOp, err := operator.CreateSplitRegionOperator(splitBucket, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, expectKeys)
 	re.NoError(err)
+<<<<<<< HEAD
 	expectOp.GetCreateTime()
 	re.Equal(expectOp.Brief(), op.Brief())
 	re.Equal(expectOp.GetAdditionalInfo(), op.GetAdditionalInfo())
+=======
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
+	solve.cur = &solution{}
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+
+	testdata := []struct {
+		hotBuckets [][]byte
+		splitKeys  [][]byte
+	}{
+		{
+			[][]byte{[]byte("a"), []byte("b"), []byte("f")},
+			[][]byte{[]byte("b")},
+		},
+		{
+			[][]byte{[]byte(""), []byte("a"), []byte("")},
+			nil,
+		},
+		{
+			[][]byte{},
+			nil,
+		},
+	}
+
+	for _, data := range testdata {
+		b := &metapb.Buckets{
+			RegionId:   1,
+			PeriodInMs: 1000,
+			Keys:       data.hotBuckets,
+		}
+		region.UpdateBuckets(b, region.GetBuckets())
+		ops := solve.createSplitOperator([]*core.RegionInfo{region}, bySize)
+		if data.splitKeys == nil {
+			re.Empty(ops)
+			continue
+		}
+		re.Len(ops, 1)
+		op := ops[0]
+		re.Equal(splitHotReadBuckets, op.Desc())
+
+		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		re.NoError(err)
+		re.Equal(expectOp.Brief(), op.Brief())
+	}
+}
+
+func TestSplitBucketsByLoad(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	cancel, _, tc, oc := prepareSchedulersTest()
+	tc.SetHotRegionCacheHitsThreshold(1)
+	tc.SetRegionBucketEnabled(true)
+	defer cancel()
+	hb, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
+	solve.cur = &solution{}
+	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
+	testdata := []struct {
+		hotBuckets [][]byte
+		splitKeys  [][]byte
+	}{
+		{
+			[][]byte{[]byte(""), []byte("b"), []byte("")},
+			[][]byte{[]byte("b")},
+		},
+		{
+			[][]byte{[]byte(""), []byte("a"), []byte("")},
+			nil,
+		},
+		{
+			[][]byte{[]byte("b"), []byte("c"), []byte("")},
+			[][]byte{[]byte("c")},
+		},
+	}
+	for _, data := range testdata {
+		b := &metapb.Buckets{
+			RegionId:   1,
+			PeriodInMs: 1000,
+			Keys:       data.hotBuckets,
+			Stats: &metapb.BucketStats{
+				ReadBytes:  []uint64{10 * units.KiB, 10 * units.MiB},
+				ReadKeys:   []uint64{256, 256},
+				ReadQps:    []uint64{0, 0},
+				WriteBytes: []uint64{0, 0},
+				WriteQps:   []uint64{0, 0},
+				WriteKeys:  []uint64{0, 0},
+			},
+		}
+		task := buckets.NewCheckPeerTask(b)
+		re.True(tc.HotBucketCache.CheckAsync(task))
+		time.Sleep(time.Millisecond * 10)
+		ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
+		if data.splitKeys == nil {
+			re.Empty(ops)
+			continue
+		}
+		re.Len(ops, 1)
+		op := ops[0]
+		re.Equal(splitHotReadBuckets, op.Desc())
+
+		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
+		re.NoError(err)
+		re.Equal(expectOp.Brief(), op.Brief())
+	}
+}
+
+func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
+	re := require.New(t)
+	statistics.Denoising = false
+	statisticsInterval = 0
+	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
+	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
+	checkHotWriteRegionPlacement(re, true)
+}
+
+func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules bool) {
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tc.SetEnableUseJointConsensus(true)
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
+	tc.SetEnablePlacementRules(enablePlacementRules)
+	labels := []string{"zone", "host"}
+	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
+	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	re.NoError(err)
+	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	tc.SetHotRegionCacheHitsThreshold(0)
+
+	tc.AddLabelsStore(1, 2, map[string]string{"zone": "z1", "host": "h1"})
+	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z1", "host": "h2"})
+	tc.AddLabelsStore(3, 2, map[string]string{"zone": "z2", "host": "h3"})
+	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z2", "host": "h4"})
+	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z2", "host": "h5"})
+	tc.AddLabelsStore(6, 2, map[string]string{"zone": "z2", "host": "h6"})
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd", ID: "leader", Role: placement.Leader, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z1"}}},
+	})
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd", ID: "voter", Role: placement.Follower, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
+	})
+	tc.RuleManager.DeleteRule("pd", "default")
+
+	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 0)
+	tc.UpdateStorageWrittenBytes(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(4, 3*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(5, 3*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(6, 6*units.MiB*utils.StoreHeartBeatReportInterval)
+
+	// Region 1, 2 and 3 are hot regions.
+	addRegionInfo(tc, utils.Write, []testRegionInfo{
+		{1, []uint64{1, 3, 5}, 512 * units.KiB, 0, 0},
+		{2, []uint64{1, 4, 6}, 512 * units.KiB, 0, 0},
+		{3, []uint64{1, 3, 6}, 512 * units.KiB, 0, 0},
+	})
+	ops, _ := hb.Schedule(tc, false)
+	re.NotEmpty(ops)
+	re.NotContains(ops[0].Step(1).String(), "transfer leader")
+	clearPendingInfluence(hb.(*hotScheduler))
+
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID: "pd", ID: "voter", Role: placement.Voter, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
+	})
+	tc.RuleManager.DeleteRule("pd", "follower")
+	ops, _ = hb.Schedule(tc, false)
+	re.NotEmpty(ops)
+	re.NotContains(ops[0].Step(1).String(), "transfer leader")
+>>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
 }
 
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
 	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
@@ -304,12 +482,14 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
-		case 4:
+		case 5:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			if op.RegionID() == 2 {
 				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-				operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
 			} else {
 				// peer in store 1 of the region 1,3 can only transfer to store 6
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
@@ -329,10 +509,10 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
 		clearPendingInfluence(hb.(*hotScheduler))
-		re.Equal(4, op.Len())
+		re.Equal(5, op.Len())
 		if op.RegionID() == 2 {
 			// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-			operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
 		} else {
 			// peer in store 1 of the region 1,3 can only transfer to store 6
 			operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
@@ -429,7 +609,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	statisticsInterval = 0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
 	tc.SetHotRegionCacheHitsThreshold(0)
 	re.NoError(tc.RuleManager.SetRules([]*placement.Rule{
 		{
@@ -522,9 +702,11 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
 		case 2:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLearner(re, op, operator.OpHotRegion, 8, 10)
 		default:
 			re.FailNow("wrong op: " + op.String())
@@ -615,12 +797,14 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		switch op.Len() {
 		case 1:
 			// balance by leader selected
+			re.Equal("transfer-hot-write-leader", op.Desc())
 			operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
-		case 4:
+		case 5:
 			// balance by peer selected
+			re.Equal("move-hot-write-leader", op.Desc())
 			if op.RegionID() == 2 {
 				// peer in store 1 of the region 2 can transfer to store 5 or store 6 because of the label
-				operatorutil.CheckTransferPeerWithLeaderTransferFrom(re, op, operator.OpHotRegion, 1)
+				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 0)
 			} else {
 				// peer in store 1 of the region 1,3 can only transfer to store 6
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 6)
@@ -952,9 +1136,11 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 			switch op.Len() {
 			case 1:
 				// balance by leader selected
+				re.Equal("transfer-hot-write-leader", op.Desc())
 				operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
-			case 4:
+			case 5:
 				// balance by peer selected
+				re.Equal("move-hot-write-leader", op.Desc())
 				operatorutil.CheckTransferPeerWithLeaderTransfer(re, op, operator.OpHotRegion, 1, 4)
 				cnt++
 				if cnt == 3 {
