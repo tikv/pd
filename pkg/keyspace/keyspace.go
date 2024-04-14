@@ -52,6 +52,12 @@ const (
 	// Note: Config[TSOKeyspaceGroupIDKey] is only used to judge whether there is keyspace group id.
 	// It will not update the keyspace group id when merging or splitting.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
+
+	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a global gc worker to calculate a global gc safe point.
+	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	GCManagementType = "gc_management_type"
+	KeyspaceLevelGC  = "keyspace_level_gc"
 )
 
 // Config is the interface for keyspace config.

@@ -88,6 +88,9 @@ var (
 	ErrModifyDefaultKeyspace = errors.New("cannot modify default keyspace's state")
 	errIllegalOperation      = errors.New("unknown operation")
 
+	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
+	ErrUnsupportedOperationInKeyspace = errors.New("it's a unsupported operation")
+
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
 	stateTransitionTable = map[keyspacepb.KeyspaceState][]keyspacepb.KeyspaceState{
