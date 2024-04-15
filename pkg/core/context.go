@@ -29,7 +29,7 @@ type MetaProcessContext struct {
 }
 
 // NewMetaProcessContext creates a new MetaProcessContext.
-// used in tests.
+// used in tests, can be changed if no need to test concurrency.
 func ContextTODO() *MetaProcessContext {
 	return &MetaProcessContext{
 		Context:    context.TODO(),

@@ -85,7 +85,6 @@ func (s *ConcurrentRunner) Start() {
 				if task.Opts.Limit != nil {
 					token, err := task.Opts.Limit.Acquire(context.Background())
 					if err != nil {
-						log.Error("failed to acquire semaphore", zap.String("task-name", task.Opts.TaskName), zap.Error(err))
 						continue
 					}
 					go s.run(task.Ctx, task.f, token)
