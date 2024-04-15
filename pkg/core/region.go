@@ -37,7 +37,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/ratelimit"
-	"github.com/tikv/pd/pkg/utils/ctxutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -714,7 +713,7 @@ func (r *RegionInfo) isRegionRecreated() bool {
 
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(ctx context.Context, region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
+type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
@@ -729,14 +728,14 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	return func(ctx context.Context, region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
-		taskRunner, ok := ctx.Value(ctxutil.TaskRunnerKey).(ratelimit.Runner)
-		limiter, _ := ctx.Value(ctxutil.LimiterKey).(*ratelimit.ConcurrencyLimiter)
+	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
+		taskRunner := ctx.TaskRunner
+		limiter := ctx.Limiter
 		// print log asynchronously
-		if ok {
+		if taskRunner != nil {
 			debug = func(msg string, fields ...zap.Field) {
 				taskRunner.RunTask(
-					ctx,
+					ctx.Context,
 					ratelimit.TaskOpts{
 						TaskName: "Log",
 						Limit:    limiter,
@@ -748,7 +747,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			info = func(msg string, fields ...zap.Field) {
 				taskRunner.RunTask(
-					ctx,
+					ctx.Context,
 					ratelimit.TaskOpts{
 						TaskName: "Log",
 						Limit:    limiter,
@@ -982,11 +981,8 @@ func convertItemsToRegions(items []*regionItem) []*RegionInfo {
 }
 
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
-func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx context.Context, region *RegionInfo) ([]*RegionInfo, error) {
-	tracer, ok := ctx.Value(ctxutil.HeartbeatTracerKey).(RegionHeartbeatProcessTracer)
-	if !ok {
-		tracer = NewNoopHeartbeatProcessTracer()
-	}
+func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *RegionInfo) ([]*RegionInfo, error) {
+	tracer := ctx.Tracer
 	r.t.Lock()
 	var ols []*regionItem
 	origin := r.getRegionLocked(region.GetID())

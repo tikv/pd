@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/ctxutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -558,13 +557,18 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
-	tracer.Begin()
-	ctx := context.WithValue(c.ctx, ctxutil.HeartbeatTracerKey, tracer)
-	ctx = context.WithValue(ctx, ctxutil.LimiterKey, c.hbConcurrencyLimiter)
+	var runner ratelimit.Runner
+	runner = syncRunner
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
-		ctx = context.WithValue(ctx, ctxutil.TaskRunnerKey, c.taskRunner)
+		runner = c.taskRunner
 	}
-
+	ctx := &core.MetaProcessContext{
+		Context:    c.ctx,
+		Limiter:    c.hbConcurrencyLimiter,
+		Tracer:     tracer,
+		TaskRunner: runner,
+	}
+	tracer.Begin()
 	if err := c.processRegionHeartbeat(ctx, region); err != nil {
 		tracer.OnAllStageFinished()
 		return err
@@ -575,16 +579,8 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 }
 
 // processRegionHeartbeat updates the region information.
-func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.RegionInfo) error {
-	tracer, ok := ctx.Value(ctxutil.HeartbeatTracerKey).(core.RegionHeartbeatProcessTracer)
-	if !ok {
-		tracer = core.NewNoopHeartbeatProcessTracer()
-	}
-	runner, ok := ctx.Value(ctxutil.TaskRunnerKey).(ratelimit.Runner)
-	if !ok {
-		runner = syncRunner
-	}
-	limiter, _ := ctx.Value(ctxutil.LimiterKey).(*ratelimit.ConcurrencyLimiter)
+func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *core.RegionInfo) error {
+	tracer := ctx.Tracer
 	origin, _, err := c.PreCheckPutRegion(region)
 	tracer.OnPreCheckFinished()
 	if err != nil {
@@ -592,11 +588,11 @@ func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.Regio
 	}
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
-	runner.RunTask(
+	ctx.TaskRunner.RunTask(
 		ctx,
 		ratelimit.TaskOpts{
 			TaskName: "HandleStatsAsync",
-			Limit:    limiter,
+			Limit:    ctx.Limiter,
 		},
 		func(_ context.Context) {
 			cluster.HandleStatsAsync(c, region)
@@ -612,11 +608,11 @@ func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.Regio
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			runner.RunTask(
+			ctx.TaskRunner.RunTask(
 				ctx,
 				ratelimit.TaskOpts{
 					TaskName: "ObserveRegionStatsAsync",
-					Limit:    limiter,
+					Limit:    ctx.Limiter,
 				},
 				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
@@ -640,11 +636,11 @@ func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.Regio
 			tracer.OnSaveCacheFinished()
 			return err
 		}
-		runner.RunTask(
+		ctx.TaskRunner.RunTask(
 			ctx,
 			ratelimit.TaskOpts{
 				TaskName: "HandleOverlaps",
-				Limit:    limiter,
+				Limit:    ctx.Limiter,
 			},
 			func(_ context.Context) {
 				cluster.HandleOverlaps(c, overlaps)
@@ -653,11 +649,11 @@ func (c *Cluster) processRegionHeartbeat(ctx context.Context, region *core.Regio
 	}
 	tracer.OnSaveCacheFinished()
 	// handle region stats
-	runner.RunTask(
+	ctx.TaskRunner.RunTask(
 		ctx,
 		ratelimit.TaskOpts{
 			TaskName: "CollectRegionStatsAsync",
-			Limit:    c.hbConcurrencyLimiter,
+			Limit:    ctx.Limiter,
 		},
 		func(_ context.Context) {
 			cluster.Collect(c, region, hasRegionStats)

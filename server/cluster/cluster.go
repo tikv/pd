@@ -58,7 +58,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/unsaferecovery"
-	"github.com/tikv/pd/pkg/utils/ctxutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
@@ -1003,17 +1002,8 @@ var regionGuide = core.GenerateRegionGuideFunc(true)
 var syncRunner = ratelimit.NewSyncRunner()
 
 // processRegionHeartbeat updates the region information.
-func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.RegionInfo) error {
-	tracer, ok := ctx.Value(ctxutil.HeartbeatTracerKey).(core.RegionHeartbeatProcessTracer)
-	if !ok {
-		tracer = core.NewNoopHeartbeatProcessTracer()
-	}
-	runner, ok := ctx.Value(ctxutil.TaskRunnerKey).(ratelimit.Runner)
-	if !ok {
-		runner = syncRunner
-	}
-	limiter, _ := ctx.Value(ctxutil.LimiterKey).(*ratelimit.ConcurrencyLimiter)
-
+func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *core.RegionInfo) error {
+	tracer := ctx.Tracer
 	origin, _, err := c.core.PreCheckPutRegion(region)
 	tracer.OnPreCheckFinished()
 	if err != nil {
@@ -1023,11 +1013,11 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		runner.RunTask(
-			ctx,
+		ctx.TaskRunner.RunTask(
+			ctx.Context,
 			ratelimit.TaskOpts{
 				TaskName: "HandleStatsAsync",
-				Limit:    limiter,
+				Limit:    ctx.Limiter,
 			},
 			func(_ context.Context) {
 				cluster.HandleStatsAsync(c, region)
@@ -1047,11 +1037,11 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 		// region stats needs to be collected in API mode.
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			runner.RunTask(
-				ctx,
+			ctx.TaskRunner.RunTask(
+				ctx.Context,
 				ratelimit.TaskOpts{
 					TaskName: "ObserveRegionStatsAsync",
-					Limit:    limiter,
+					Limit:    ctx.Limiter,
 				},
 				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1080,11 +1070,11 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 			return err
 		}
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-			runner.RunTask(
-				ctx,
+			ctx.TaskRunner.RunTask(
+				ctx.Context,
 				ratelimit.TaskOpts{
 					TaskName: "HandleOverlaps",
-					Limit:    limiter,
+					Limit:    ctx.Limiter,
 				},
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
@@ -1096,11 +1086,11 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 
 	tracer.OnSaveCacheFinished()
 	// handle region stats
-	runner.RunTask(
-		ctx,
+	ctx.TaskRunner.RunTask(
+		ctx.Context,
 		ratelimit.TaskOpts{
 			TaskName: "CollectRegionStatsAsync",
-			Limit:    c.hbConcurrencyLimiter,
+			Limit:    ctx.Limiter,
 		},
 		func(_ context.Context) {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
@@ -1113,11 +1103,11 @@ func (c *RaftCluster) processRegionHeartbeat(ctx context.Context, region *core.R
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
 		if saveKV {
-			runner.RunTask(
-				ctx,
+			ctx.TaskRunner.RunTask(
+				ctx.Context,
 				ratelimit.TaskOpts{
 					TaskName: "SaveRegionToKV",
-					Limit:    c.hbConcurrencyLimiter,
+					Limit:    ctx.Limiter,
 				},
 				func(_ context.Context) {
 					// If there are concurrent heartbeats from the same region, the last write will win even if
