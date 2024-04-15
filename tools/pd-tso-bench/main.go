@@ -382,10 +382,10 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 
 		i := 0
 		for ; i < maxRetryTime; i++ {
+			var ticker *time.Ticker
 			if *maxTSOSendIntervalMilliseconds > 0 {
 				sleepBeforeGetTS := time.Duration(rand.Intn(*maxTSOSendIntervalMilliseconds)) * time.Millisecond
-				ticker := time.NewTicker(sleepBeforeGetTS)
-				defer ticker.Stop()
+				ticker = time.NewTicker(sleepBeforeGetTS)
 				select {
 				case <-reqCtx.Done():
 				case <-ticker.C:
@@ -394,9 +394,11 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 			}
 			_, _, err = pdCli.GetLocalTS(reqCtx, *dcLocation)
 			if errors.Cause(err) == context.Canceled {
+				ticker.Stop()
 				return
 			}
 			if err == nil {
+				ticker.Stop()
 				break
 			}
 			log.Error(fmt.Sprintf("%v", err))

@@ -77,7 +77,7 @@ func (conf *shuffleRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *ht
 	router.ServeHTTP(w, r)
 }
 
-func (conf *shuffleRegionSchedulerConfig) handleGetRoles(w http.ResponseWriter, r *http.Request) {
+func (conf *shuffleRegionSchedulerConfig) handleGetRoles(w http.ResponseWriter, _ *http.Request) {
 	rd := render.New(render.Options{IndentJSON: true})
 	rd.JSON(w, http.StatusOK, conf.GetRoles())
 }

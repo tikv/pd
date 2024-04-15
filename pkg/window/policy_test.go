@@ -61,7 +61,7 @@ func TestRollingPolicy_Add(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		t.Run("test policy add", func(t *testing.T) {
+		t.Run("test policy add", func(_ *testing.T) {
 			var totalTS, lastOffset int
 			timeSleep := test.timeSleep
 			beginTime := time.Now()

@@ -60,7 +60,7 @@ func newMasterKeyFromKMS(
 	roleArn := os.Getenv(envAwsRoleArn)
 	tokenFile := os.Getenv(envAwsWebIdentityTokenFile)
 	sessionName := os.Getenv(envAwsRoleSessionName)
-	optFn := func(options *kms.Options) {}
+	optFn := func(*kms.Options) {}
 	// Session name is optional.
 	if roleArn != "" && tokenFile != "" {
 		client := sts.NewFromConfig(cfg)

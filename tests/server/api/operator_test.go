@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -56,7 +55,7 @@ func TestOperatorTestSuite(t *testing.T) {
 
 func (suite *operatorTestSuite) SetupSuite() {
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, serverName string) {
+		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 1
 		})
 }
@@ -71,7 +70,7 @@ func (suite *operatorTestSuite) TestAddRemovePeer() {
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(re, cluster)
+	pauseRuleChecker(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -206,7 +205,7 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	suite.pauseRuleChecker(re, cluster)
+	pauseRuleChecker(re, cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
@@ -233,7 +232,7 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, serverName string) {
+		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 3
 		})
 	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
@@ -242,7 +241,7 @@ func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(re, cluster)
+	pauseRuleChecker(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -513,7 +512,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 func (suite *operatorTestSuite) TestGetOperatorsAsObject() {
 	// use a new environment to avoid being affected by other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, serverName string) {
+		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 1
 		})
 	env.RunTestInTwoModes(suite.checkGetOperatorsAsObject)
@@ -522,7 +521,7 @@ func (suite *operatorTestSuite) TestGetOperatorsAsObject() {
 
 func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(re, cluster)
+	pauseRuleChecker(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -612,19 +611,6 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 	re.Equal("admin-add-peer", resp[2].Desc)
 }
 
-// pauseRuleChecker will pause rule checker to avoid unexpected operator.
-func (suite *operatorTestSuite) pauseRuleChecker(re *require.Assertions, cluster *tests.TestCluster) {
-	checkerName := "rule"
-	addr := cluster.GetLeaderServer().GetAddr()
-	resp := make(map[string]any)
-	url := fmt.Sprintf("%s/pd/api/v1/checker/%s", addr, checkerName)
-	err := tu.CheckPostJSON(testDialClient, url, []byte(`{"delay":1000}`), tu.StatusOK(re))
-	re.NoError(err)
-	err = tu.ReadGetJSON(re, testDialClient, url, &resp)
-	re.NoError(err)
-	re.True(resp["paused"].(bool))
-}
-
 func (suite *operatorTestSuite) TestRemoveOperators() {
 	suite.env.RunTestInTwoModes(suite.checkRemoveOperators)
 }
@@ -656,7 +642,7 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	suite.pauseRuleChecker(re, cluster)
+	pauseRuleChecker(re, cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))

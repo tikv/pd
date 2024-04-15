@@ -38,7 +38,7 @@ func newStatusHandler(svr *server.Server, rd *render.Render) *statusHandler {
 // @Produce  json
 // @Success  200  {object}  versioninfo.Status
 // @Router   /status [get]
-func (h *statusHandler) GetPDStatus(w http.ResponseWriter, r *http.Request) {
+func (h *statusHandler) GetPDStatus(w http.ResponseWriter, _ *http.Request) {
 	version := versioninfo.Status{
 		BuildTS:        versioninfo.PDBuildTS,
 		GitHash:        versioninfo.PDGitHash,

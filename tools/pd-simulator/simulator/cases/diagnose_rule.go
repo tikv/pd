@@ -100,7 +100,7 @@ func newRule1() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
@@ -179,7 +179,7 @@ func newRule2() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)

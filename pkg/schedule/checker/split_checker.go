@@ -51,7 +51,7 @@ func NewSplitChecker(cluster sche.CheckerCluster, ruleManager *placement.RuleMan
 }
 
 // GetType returns the checker type.
-func (c *SplitChecker) GetType() string {
+func (*SplitChecker) GetType() string {
 	return "split-checker"
 }
 

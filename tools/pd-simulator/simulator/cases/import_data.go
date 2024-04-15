@@ -78,7 +78,7 @@ func newImportData() *Case {
 	checkCount := uint64(0)
 	var newRegionCount [][3]int
 	var allRegionCount [][3]int
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
 		leaderTotal := 0

@@ -47,7 +47,7 @@ func TestKeyspace(t *testing.T) {
 	for i := 1; i < 10; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
+	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)

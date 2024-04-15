@@ -156,7 +156,7 @@ func (l *scatterRangeScheduler) GetName() string {
 	return l.name
 }
 
-func (l *scatterRangeScheduler) GetType() string {
+func (*scatterRangeScheduler) GetType() string {
 	return ScatterRangeType
 }
 
@@ -206,7 +206,7 @@ func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.SchedulerCluster
 	return allowed
 }
 
-func (l *scatterRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (l *scatterRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	scatterRangeCounter.Inc()
 	// isolate a new cluster according to the key range
 	c := genRangeCluster(cluster, l.config.GetStartKey(), l.config.GetEndKey())
@@ -282,7 +282,7 @@ func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
-func (handler *scatterRangeHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *scatterRangeHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }

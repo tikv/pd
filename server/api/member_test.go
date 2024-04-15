@@ -67,7 +67,7 @@ func relaxEqualStings(re *require.Assertions, a, b []string) {
 	re.Equal(sortedStringB, sortedStringA)
 }
 
-func (suite *memberTestSuite) checkListResponse(re *require.Assertions, body []byte, cfgs []*config.Config) {
+func checkListResponse(re *require.Assertions, body []byte, cfgs []*config.Config) {
 	got := make(map[string][]*pdpb.Member)
 	json.Unmarshal(body, &got)
 	re.Len(cfgs, len(got["members"]))
@@ -92,7 +92,7 @@ func (suite *memberTestSuite) TestMemberList() {
 		buf, err := io.ReadAll(resp.Body)
 		re.NoError(err)
 		resp.Body.Close()
-		suite.checkListResponse(re, buf, suite.cfgs)
+		checkListResponse(re, buf, suite.cfgs)
 	}
 }
 

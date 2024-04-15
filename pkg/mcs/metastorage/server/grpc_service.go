@@ -39,13 +39,13 @@ var (
 var _ meta_storagepb.MetaStorageServer = (*Service)(nil)
 
 // SetUpRestHandler is a hook to sets up the REST service.
-var SetUpRestHandler = func(srv *Service) (http.Handler, apiutil.APIServiceGroup) {
+var SetUpRestHandler = func(*Service) (http.Handler, apiutil.APIServiceGroup) {
 	return dummyRestService{}, apiutil.APIServiceGroup{}
 }
 
 type dummyRestService struct{}
 
-func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("not implemented"))
 }

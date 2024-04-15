@@ -144,7 +144,7 @@ func (rep *mockFileReplicator) GetMembers() ([]*pdpb.Member, error) {
 	return members, nil
 }
 
-func (rep *mockFileReplicator) ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error {
+func (rep *mockFileReplicator) ReplicateFileToMember(_ context.Context, member *pdpb.Member, _ string, data []byte) error {
 	if err := rep.errors[member.GetMemberId()]; err != nil {
 		return err
 	}

@@ -218,7 +218,7 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 }
 
 // SetupNotificationThreshold enables the notification at the given threshold.
-func (lim *Limiter) SetupNotificationThreshold(now time.Time, threshold float64) {
+func (lim *Limiter) SetupNotificationThreshold(threshold float64) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	lim.notifyThreshold = threshold

@@ -30,6 +30,6 @@ func NewExitCommand() *cobra.Command {
 	return conf
 }
 
-func exitCommandFunc(cmd *cobra.Command, args []string) {
+func exitCommandFunc(*cobra.Command, []string) {
 	os.Exit(0)
 }

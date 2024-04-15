@@ -32,7 +32,7 @@ type Request interface {
 	getCount() uint32
 	// process sends request and receive response via stream.
 	// count defines the count of timestamps to retrieve.
-	process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error)
+	process(forwardStream stream, count uint32) (tsoResp, error)
 	// postProcess sends the response back to the sender of the request
 	postProcess(countSum, physical, firstLogical int64, suffixBits uint32) (int64, error)
 }
@@ -78,7 +78,7 @@ func (r *TSOProtoRequest) getCount() uint32 {
 
 // process sends request and receive response via stream.
 // count defines the count of timestamps to retrieve.
-func (r *TSOProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
+func (r *TSOProtoRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		r.request.GetHeader().GetKeyspaceId(), r.request.GetHeader().GetKeyspaceGroupId(), r.request.GetDcLocation())
 }
@@ -139,7 +139,7 @@ func (r *PDProtoRequest) getCount() uint32 {
 
 // process sends request and receive response via stream.
 // count defines the count of timestamps to retrieve.
-func (r *PDProtoRequest) process(forwardStream stream, count uint32, tsoProtoFactory ProtoFactory) (tsoResp, error) {
+func (r *PDProtoRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
 		utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID, r.request.GetDcLocation())
 }

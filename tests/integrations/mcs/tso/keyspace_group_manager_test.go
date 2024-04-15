@@ -277,7 +277,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	})
 	// Wait for the split to complete automatically even there is no TSO request from the outside.
 	testutil.Eventually(re, func() bool {
-		kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+		kg2, code := handlersutil.TryLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+		if code != http.StatusOK {
+			return false
+		}
 		re.Equal(uint32(2), kg2.ID)
 		re.Equal([]uint32{222, 333}, kg2.Keyspaces)
 		return !kg2.IsSplitting()
@@ -793,9 +796,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	// Check if the first keyspace group is served.
 	svr := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
 	re.NotNil(svr)
-	// Check if the last keyspace group is served.
-	svr = suite.tsoCluster.WaitForPrimaryServing(re, uint32(keyspaceGroupNum), uint32(keyspaceGroupNum))
-	re.NotNil(svr)
+	for i := 1; i < keyspaceGroupNum; i++ {
+		// Check if the keyspace group is served.
+		svr = suite.tsoCluster.WaitForPrimaryServing(re, uint32(i), uint32(i))
+		re.NotNil(svr)
+	}
 	// Merge all the keyspace groups into the default keyspace group.
 	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
 		MergeAllIntoDefault: true,

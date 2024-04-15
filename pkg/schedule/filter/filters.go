@@ -185,18 +185,18 @@ func (f *excludedFilter) Scope() string {
 	return f.scope
 }
 
-func (f *excludedFilter) Type() filterType {
+func (*excludedFilter) Type() filterType {
 	return excluded
 }
 
-func (f *excludedFilter) Source(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *excludedFilter) Source(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if _, ok := f.sources[store.GetID()]; ok {
 		return statusStoreAlreadyHasPeer
 	}
 	return statusOK
 }
 
-func (f *excludedFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *excludedFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if _, ok := f.targets[store.GetID()]; ok {
 		return statusStoreAlreadyHasPeer
 	}
@@ -215,15 +215,15 @@ func (f *storageThresholdFilter) Scope() string {
 	return f.scope
 }
 
-func (f *storageThresholdFilter) Type() filterType {
+func (*storageThresholdFilter) Type() filterType {
 	return storageThreshold
 }
 
-func (f *storageThresholdFilter) Source(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (*storageThresholdFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
 	return statusOK
 }
 
-func (f *storageThresholdFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (*storageThresholdFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if !store.IsLowSpace(conf.GetLowSpaceRatio()) {
 		return statusOK
 	}
@@ -283,11 +283,11 @@ func (f *distinctScoreFilter) Scope() string {
 	return f.scope
 }
 
-func (f *distinctScoreFilter) Type() filterType {
+func (*distinctScoreFilter) Type() filterType {
 	return distinctScore
 }
 
-func (f *distinctScoreFilter) Source(_ config.SharedConfigProvider, _ *core.StoreInfo) *plan.Status {
+func (*distinctScoreFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
 	return statusOK
 }
 
@@ -387,7 +387,7 @@ func (f *StoreStateFilter) pauseLeaderTransfer(_ config.SharedConfigProvider, st
 	return statusOK
 }
 
-func (f *StoreStateFilter) slowStoreEvicted(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *StoreStateFilter) slowStoreEvicted(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if store.EvictedAsSlowStore() {
 		f.Reason = storeStateSlow
 		return statusStoreRejectLeader
@@ -583,12 +583,12 @@ func (f labelConstraintFilter) Scope() string {
 }
 
 // Type returns the name of the filter.
-func (f labelConstraintFilter) Type() filterType {
+func (labelConstraintFilter) Type() filterType {
 	return labelConstraint
 }
 
 // Source filters stores when select them as schedule source.
-func (f labelConstraintFilter) Source(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f labelConstraintFilter) Source(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if placement.MatchLabelConstraints(store, f.constraints) {
 		return statusOK
 	}
@@ -634,11 +634,11 @@ func (f *ruleFitFilter) Scope() string {
 	return f.scope
 }
 
-func (f *ruleFitFilter) Type() filterType {
+func (*ruleFitFilter) Type() filterType {
 	return ruleFit
 }
 
-func (f *ruleFitFilter) Source(_ config.SharedConfigProvider, _ *core.StoreInfo) *plan.Status {
+func (*ruleFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
 	return statusOK
 }
 
@@ -687,11 +687,11 @@ func (f *ruleLeaderFitFilter) Scope() string {
 	return f.scope
 }
 
-func (f *ruleLeaderFitFilter) Type() filterType {
+func (*ruleLeaderFitFilter) Type() filterType {
 	return ruleLeader
 }
 
-func (f *ruleLeaderFitFilter) Source(_ config.SharedConfigProvider, _ *core.StoreInfo) *plan.Status {
+func (*ruleLeaderFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
 	return statusOK
 }
 
@@ -743,11 +743,11 @@ func (f *ruleWitnessFitFilter) Scope() string {
 	return f.scope
 }
 
-func (f *ruleWitnessFitFilter) Type() filterType {
+func (*ruleWitnessFitFilter) Type() filterType {
 	return ruleFit
 }
 
-func (f *ruleWitnessFitFilter) Source(_ config.SharedConfigProvider, _ *core.StoreInfo) *plan.Status {
+func (*ruleWitnessFitFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
 	return statusOK
 }
 
@@ -815,7 +815,7 @@ func (f *engineFilter) Scope() string {
 	return f.scope
 }
 
-func (f *engineFilter) Type() filterType {
+func (*engineFilter) Type() filterType {
 	return engine
 }
 
@@ -858,7 +858,7 @@ func (f *specialUseFilter) Scope() string {
 	return f.scope
 }
 
-func (f *specialUseFilter) Type() filterType {
+func (*specialUseFilter) Type() filterType {
 	return specialUse
 }
 
@@ -869,7 +869,7 @@ func (f *specialUseFilter) Source(conf config.SharedConfigProvider, store *core.
 	return statusStoreNotMatchRule
 }
 
-func (f *specialUseFilter) Target(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (f *specialUseFilter) Target(_ config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
 	if !f.constraint.MatchStore(store) {
 		return statusOK
 	}
@@ -932,11 +932,11 @@ func (f *isolationFilter) Scope() string {
 	return f.scope
 }
 
-func (f *isolationFilter) Type() filterType {
+func (*isolationFilter) Type() filterType {
 	return isolation
 }
 
-func (f *isolationFilter) Source(conf config.SharedConfigProvider, store *core.StoreInfo) *plan.Status {
+func (*isolationFilter) Source(config.SharedConfigProvider, *core.StoreInfo) *plan.Status {
 	return statusOK
 }
 

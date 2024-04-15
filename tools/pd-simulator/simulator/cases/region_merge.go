@@ -54,7 +54,7 @@ func newRegionMerge() *Case {
 	// Checker description
 	threshold := 0.05
 	mergeRatio := 4 // when max-merge-region-size is 20, per region will reach 40MB
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		sum := 0
 		regionCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {

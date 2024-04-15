@@ -58,7 +58,7 @@ func (s *testResourceManagerSuite) TearDownSuite() {
 
 func (s *testResourceManagerSuite) TestConfigController() {
 	re := s.Require()
-	expectCfg := server.ControllerConfig{}
+	expectCfg := server.Config{}
 	expectCfg.Adjust(nil)
 	// Show controller config
 	checkShow := func() {
@@ -69,7 +69,7 @@ func (s *testResourceManagerSuite) TestConfigController() {
 		actualCfg := server.ControllerConfig{}
 		err = json.Unmarshal(output, &actualCfg)
 		re.NoError(err, string(output))
-		re.Equal(expectCfg, actualCfg)
+		re.Equal(expectCfg.Controller, actualCfg)
 	}
 
 	// Check default config
@@ -80,20 +80,20 @@ func (s *testResourceManagerSuite) TestConfigController() {
 	output, err := tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	expectCfg.LTBMaxWaitDuration = typeutil.Duration{Duration: 1 * time.Hour}
+	expectCfg.Controller.LTBMaxWaitDuration = typeutil.Duration{Duration: 1 * time.Hour}
 	checkShow()
 
 	args = []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "set", "enable-controller-trace-log", "true"}
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	expectCfg.EnableControllerTraceLog = true
+	expectCfg.Controller.EnableControllerTraceLog = true
 	checkShow()
 
 	args = []string{"-u", s.pdAddr, "resource-manager", "config", "controller", "set", "write-base-cost", "2"}
 	output, err = tests.ExecuteCommand(ctl.GetRootCmd(), args...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	expectCfg.RequestUnit.WriteBaseCost = 2
+	expectCfg.Controller.RequestUnit.WriteBaseCost = 2
 	checkShow()
 }

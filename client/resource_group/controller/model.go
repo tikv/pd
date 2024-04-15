@@ -75,8 +75,7 @@ func newKVCalculator(cfg *RUConfig) *KVCalculator {
 }
 
 // Trickle ...
-func (kc *KVCalculator) Trickle(*rmpb.Consumption) {
-}
+func (*KVCalculator) Trickle(*rmpb.Consumption) {}
 
 // BeforeKVRequest ...
 func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
@@ -166,11 +165,11 @@ func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption) {
 }
 
 // BeforeKVRequest ...
-func (dsc *SQLCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
+func (*SQLCalculator) BeforeKVRequest(*rmpb.Consumption, RequestInfo) {
 }
 
 // AfterKVRequest ...
-func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+func (*SQLCalculator) AfterKVRequest(*rmpb.Consumption, RequestInfo, ResponseInfo) {
 }
 
 func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {

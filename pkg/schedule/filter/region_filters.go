@@ -76,7 +76,7 @@ func NewRegionPendingFilter() RegionFilter {
 	return &regionPendingFilter{}
 }
 
-func (f *regionPendingFilter) Select(region *core.RegionInfo) *plan.Status {
+func (*regionPendingFilter) Select(region *core.RegionInfo) *plan.Status {
 	if hasPendingPeers(region) {
 		return statusRegionPendingPeer
 	}
@@ -91,7 +91,7 @@ func NewRegionDownFilter() RegionFilter {
 	return &regionDownFilter{}
 }
 
-func (f *regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
+func (*regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 	if hasDownPeers(region) {
 		return statusRegionDownPeer
 	}

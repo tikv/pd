@@ -50,7 +50,7 @@ func NewSlidingWindows() *SlidingWindows {
 }
 
 // Version returns v2
-func (s *SlidingWindows) Version() string {
+func (*SlidingWindows) Version() string {
 	return VersionV2
 }
 
@@ -75,8 +75,7 @@ func (s *SlidingWindows) Feedback(e float64) {
 }
 
 // Reset does nothing because the capacity depends on the feedback.
-func (s *SlidingWindows) Reset(_ float64, _ Type) {
-}
+func (*SlidingWindows) Reset(_ float64, _ Type) {}
 
 func (s *SlidingWindows) set(cap float64, typ Type) {
 	if typ != SendSnapshot {

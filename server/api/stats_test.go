@@ -193,9 +193,9 @@ func (suite *statsTestSuite) TestRegionStats() {
 			args := fmt.Sprintf("?start_key=%s&end_key=%s&%s", data.startKey, data.endKey, query)
 			res, err := testDialClient.Get(statsURL + args)
 			re.NoError(err)
-			defer res.Body.Close()
 			stats := &statistics.RegionStats{}
 			err = apiutil.ReadJSON(res.Body, stats)
+			res.Body.Close()
 			re.NoError(err)
 			re.Equal(data.expect.Count, stats.Count)
 			if query != "count" {

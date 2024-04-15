@@ -50,7 +50,7 @@ func newServiceMiddlewareHandler(svr *server.Server, rd *render.Render) *service
 // @Produce  json
 // @Success  200  {object}  config.Config
 // @Router   /service-middleware/config [get]
-func (h *serviceMiddlewareHandler) GetServiceMiddlewareConfig(w http.ResponseWriter, r *http.Request) {
+func (h *serviceMiddlewareHandler) GetServiceMiddlewareConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetServiceMiddlewareConfig())
 }
 

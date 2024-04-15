@@ -35,7 +35,7 @@ func NewMinResolvedTSCommand() *cobra.Command {
 }
 
 // ShowMinResolvedTS show min resolved ts
-func ShowMinResolvedTS(cmd *cobra.Command, args []string) {
+func ShowMinResolvedTS(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, minResolvedTSPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get min resolved ts: %s\n", err)

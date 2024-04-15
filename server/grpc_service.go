@@ -259,7 +259,7 @@ func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, f
 }
 
 // GetClusterInfo implements gRPC PDServer.
-func (s *GrpcServer) GetClusterInfo(ctx context.Context, _ *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
+func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
@@ -556,7 +556,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 			if errCh == nil {
 				doneCh = make(chan struct{})
-				defer close(doneCh)
+				defer close(doneCh) // nolint
 				errCh = make(chan error)
 			}
 
@@ -703,7 +703,7 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 }
 
 // IsSnapshotRecovering implements gRPC PDServer.
-func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, request *pdpb.IsSnapshotRecoveringRequest) (*pdpb.IsSnapshotRecoveringResponse, error) {
+func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapshotRecoveringRequest) (*pdpb.IsSnapshotRecoveringResponse, error) {
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
 		limiter := s.GetGRPCRateLimiter()
@@ -1337,7 +1337,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 					continue
 				}
 				log.Debug("create scheduling forwarding stream", zap.String("forwarded-host", forwardedSchedulingHost))
-				forwardSchedulingStream, _, cancel, err = s.createRegionHeartbeatSchedulingStream(stream.Context(), client)
+				forwardSchedulingStream, _, cancel, err = createRegionHeartbeatSchedulingStream(stream.Context(), client)
 				if err != nil {
 					errRegionHeartbeatStream.Inc()
 					log.Debug("failed to create stream", zap.Error(err))
@@ -1710,9 +1710,9 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 			if err != nil {
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
-				return s.convertAskSplitResponse(resp), err
+				return convertAskSplitResponse(resp), err
 			}
-			return s.convertAskSplitResponse(resp), nil
+			return convertAskSplitResponse(resp), nil
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1928,9 +1928,9 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		cli := forwardCli.getClient()
 		if cli != nil {
 			var regionsID []uint64
-			// nolint
+			// nolint:staticcheck
 			if request.GetRegionId() != 0 {
-				// nolint
+				// nolint:staticcheck
 				regionsID = []uint64{request.GetRegionId()}
 			} else {
 				regionsID = request.GetRegionsId()
@@ -1955,9 +1955,9 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 				errScatterRegionSend.Inc()
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
-				return s.convertScatterResponse(resp), err
+				return convertScatterResponse(resp), err
 			}
-			return s.convertScatterResponse(resp), nil
+			return convertScatterResponse(resp), nil
 		}
 	}
 
@@ -1986,11 +1986,10 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		}, nil
 	}
 	// TODO: Deprecate it use `request.GetRegionsID`.
-	//nolint
+	// nolint:staticcheck
 	region := rc.GetRegion(request.GetRegionId())
 	if region == nil {
 		if request.GetRegion() == nil {
-			//nolint
 			return &pdpb.ScatterRegionResponse{
 				Header: s.wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 					"region %d not found"),
@@ -2217,9 +2216,9 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 				errGetOperatorSend.Inc()
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
-				return s.convertOperatorResponse(resp), err
+				return convertOperatorResponse(resp), err
 			}
-			return s.convertOperatorResponse(resp), nil
+			return convertOperatorResponse(resp), nil
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2334,7 +2333,7 @@ func (s *GrpcServer) regionNotFound() *pdpb.ResponseHeader {
 	})
 }
 
-func (s *GrpcServer) convertHeader(header *schedulingpb.ResponseHeader) *pdpb.ResponseHeader {
+func convertHeader(header *schedulingpb.ResponseHeader) *pdpb.ResponseHeader {
 	switch header.GetError().GetType() {
 	case schedulingpb.ErrorType_UNKNOWN:
 		if strings.Contains(header.GetError().GetMessage(), "region not found") {
@@ -2358,23 +2357,23 @@ func (s *GrpcServer) convertHeader(header *schedulingpb.ResponseHeader) *pdpb.Re
 	}
 }
 
-func (s *GrpcServer) convertSplitResponse(resp *schedulingpb.SplitRegionsResponse) *pdpb.SplitRegionsResponse {
+func convertSplitResponse(resp *schedulingpb.SplitRegionsResponse) *pdpb.SplitRegionsResponse {
 	return &pdpb.SplitRegionsResponse{
-		Header:             s.convertHeader(resp.GetHeader()),
+		Header:             convertHeader(resp.GetHeader()),
 		FinishedPercentage: resp.GetFinishedPercentage(),
 	}
 }
 
-func (s *GrpcServer) convertScatterResponse(resp *schedulingpb.ScatterRegionsResponse) *pdpb.ScatterRegionResponse {
+func convertScatterResponse(resp *schedulingpb.ScatterRegionsResponse) *pdpb.ScatterRegionResponse {
 	return &pdpb.ScatterRegionResponse{
-		Header:             s.convertHeader(resp.GetHeader()),
+		Header:             convertHeader(resp.GetHeader()),
 		FinishedPercentage: resp.GetFinishedPercentage(),
 	}
 }
 
-func (s *GrpcServer) convertOperatorResponse(resp *schedulingpb.GetOperatorResponse) *pdpb.GetOperatorResponse {
+func convertOperatorResponse(resp *schedulingpb.GetOperatorResponse) *pdpb.GetOperatorResponse {
 	return &pdpb.GetOperatorResponse{
-		Header:   s.convertHeader(resp.GetHeader()),
+		Header:   convertHeader(resp.GetHeader()),
 		RegionId: resp.GetRegionId(),
 		Desc:     resp.GetDesc(),
 		Kind:     resp.GetKind(),
@@ -2382,9 +2381,9 @@ func (s *GrpcServer) convertOperatorResponse(resp *schedulingpb.GetOperatorRespo
 	}
 }
 
-func (s *GrpcServer) convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
+func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.AskBatchSplitResponse {
 	return &pdpb.AskBatchSplitResponse{
-		Header: s.convertHeader(resp.GetHeader()),
+		Header: convertHeader(resp.GetHeader()),
 		Ids:    resp.GetIds(),
 	}
 }
@@ -2537,9 +2536,9 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 				errSplitRegionsSend.Inc()
 				// reset to let it be updated in the next request
 				s.schedulingClient.CompareAndSwap(forwardCli, &schedulingClient{})
-				return s.convertSplitResponse(resp), err
+				return convertSplitResponse(resp), err
 			}
-			return s.convertSplitResponse(resp), nil
+			return convertSplitResponse(resp), nil
 		}
 	}
 

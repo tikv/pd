@@ -129,14 +129,14 @@ func (cw *Watcher) initializeConfigWatcher() error {
 			return err
 		}
 		log.Info("update scheduling config", zap.Reflect("new", cfg))
-		cw.AdjustScheduleCfg(&cfg.Schedule)
+		AdjustScheduleCfg(&cfg.Schedule)
 		cw.SetClusterVersion(&cfg.ClusterVersion)
 		cw.SetScheduleConfig(&cfg.Schedule)
 		cw.SetReplicationConfig(&cfg.Replication)
 		cw.SetStoreConfig(&cfg.Store)
 		return nil
 	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
+	deleteFn := func(*mvccpb.KeyValue) error {
 		return nil
 	}
 	cw.configWatcher = etcdutil.NewLoopWatcher(

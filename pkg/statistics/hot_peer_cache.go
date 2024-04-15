@@ -451,7 +451,7 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 		// For write stat, as the stat is send by region heartbeat, the first heartbeat will be skipped.
 		// For read stat, as the stat is send by store heartbeat, the first heartbeat won't be skipped.
 		if f.kind == utils.Write {
-			f.inheritItem(newItem, oldItem)
+			inheritItem(newItem, oldItem)
 			return newItem
 		}
 	} else {
@@ -465,25 +465,25 @@ func (f *hotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 	isFull := newItem.rollingLoads[0].isFull(f.interval()) // The intervals of dims are the same, so it is only necessary to determine whether any of them
 	if !isFull {
 		// not update hot degree and anti count
-		f.inheritItem(newItem, oldItem)
+		inheritItem(newItem, oldItem)
 	} else {
 		// If item is inCold, it means the pd didn't recv this item in the store heartbeat,
 		// thus we make it colder
 		if newItem.inCold {
-			f.coldItem(newItem, oldItem)
+			coldItem(newItem, oldItem)
 		} else {
 			thresholds := f.calcHotThresholds(newItem.StoreID)
 			if f.isOldColdPeer(oldItem, newItem.StoreID) {
 				if newItem.isHot(thresholds) {
-					f.initItem(newItem)
+					initItem(newItem, f.kind.DefaultAntiCount())
 				} else {
 					newItem.actionType = utils.Remove
 				}
 			} else {
 				if newItem.isHot(thresholds) {
-					f.hotItem(newItem, oldItem)
+					hotItem(newItem, oldItem, f.kind.DefaultAntiCount())
 				} else {
-					f.coldItem(newItem, oldItem)
+					coldItem(newItem, oldItem)
 				}
 			}
 		}
@@ -496,7 +496,7 @@ func (f *hotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 	regionStats := f.kind.RegionStats()
 	// interval is not 0 which is guaranteed by the caller.
 	if interval.Seconds() >= float64(f.kind.ReportInterval()) {
-		f.initItem(newItem)
+		initItem(newItem, f.kind.DefaultAntiCount())
 	}
 	newItem.actionType = utils.Add
 	newItem.rollingLoads = make([]*dimStat, len(regionStats))
@@ -556,7 +556,7 @@ func (f *hotPeerCache) removeAllItem() {
 	}
 }
 
-func (f *hotPeerCache) coldItem(newItem, oldItem *HotPeerStat) {
+func coldItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
 	if newItem.AntiCount <= 0 {
@@ -566,9 +566,9 @@ func (f *hotPeerCache) coldItem(newItem, oldItem *HotPeerStat) {
 	}
 }
 
-func (f *hotPeerCache) hotItem(newItem, oldItem *HotPeerStat) {
+func hotItem(newItem, oldItem *HotPeerStat, defaultAntiCount int) {
 	newItem.HotDegree = oldItem.HotDegree + 1
-	if oldItem.AntiCount < f.kind.DefaultAntiCount() {
+	if oldItem.AntiCount < defaultAntiCount {
 		newItem.AntiCount = oldItem.AntiCount + 1
 	} else {
 		newItem.AntiCount = oldItem.AntiCount
@@ -576,13 +576,13 @@ func (f *hotPeerCache) hotItem(newItem, oldItem *HotPeerStat) {
 	newItem.allowInherited = true
 }
 
-func (f *hotPeerCache) initItem(item *HotPeerStat) {
+func initItem(item *HotPeerStat, defaultAntiCount int) {
 	item.HotDegree = 1
-	item.AntiCount = f.kind.DefaultAntiCount()
+	item.AntiCount = defaultAntiCount
 	item.allowInherited = true
 }
 
-func (f *hotPeerCache) inheritItem(newItem, oldItem *HotPeerStat) {
+func inheritItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree
 	newItem.AntiCount = oldItem.AntiCount
 }

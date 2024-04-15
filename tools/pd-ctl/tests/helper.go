@@ -82,3 +82,12 @@ func CheckRegionsInfo(re *require.Assertions, output *response.RegionsInfo, expe
 		CheckRegionInfo(re, &got[i], region)
 	}
 }
+
+// CheckRegionsInfoWithoutSort is used to check the test results without sort.
+func CheckRegionsInfoWithoutSort(re *require.Assertions, output *response.RegionsInfo, expected []*core.RegionInfo) {
+	re.Len(expected, output.Count)
+	got := output.Regions
+	for i, region := range expected {
+		CheckRegionInfo(re, &got[i], region)
+	}
+}

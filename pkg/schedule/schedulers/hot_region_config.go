@@ -375,7 +375,7 @@ func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.R
 	router.ServeHTTP(w, r)
 }
 
-func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 	conf.RLock()
 	defer conf.RUnlock()
 	rd := render.New(render.Options{IndentJSON: true})

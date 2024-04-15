@@ -438,7 +438,7 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 			cache[string(kv.Key)] = struct{}{}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
@@ -466,7 +466,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 			cache[string(kv.Key)] = struct{}{}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
@@ -559,7 +559,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 					cache = append(cache, string(kv.Key))
 					return nil
 				},
-				func(kv *mvccpb.KeyValue) error {
+				func(*mvccpb.KeyValue) error {
 					return nil
 				},
 				func([]*clientv3.Event) error {
@@ -598,7 +598,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 			cache = append(cache, string(kv.Key))
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error {
+		func(*mvccpb.KeyValue) error {
 			return nil
 		},
 		func([]*clientv3.Event) error {
@@ -641,7 +641,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 			}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
@@ -719,8 +719,8 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			"test",
 			"TestWatcherChanBlock",
 			func([]*clientv3.Event) error { return nil },
-			func(kv *mvccpb.KeyValue) error { return nil },
-			func(kv *mvccpb.KeyValue) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
 			func([]*clientv3.Event) error { return nil },
 			false, /* withPrefix */
 		)

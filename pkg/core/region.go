@@ -716,7 +716,7 @@ type RegionGuideFunc func(region, origin *RegionInfo) (saveKV, saveCache, needSy
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
 func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
-	noLog := func(msg string, fields ...zap.Field) {}
+	noLog := func(string, ...zap.Field) {}
 	debug, info := noLog, noLog
 	if enableLog {
 		debug = log.Debug
@@ -964,7 +964,7 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo, trace RegionHe
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
-func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo, trace RegionHeartbeatProcessTracer) (origin *RegionInfo, overlaps []*regionItem) {
+func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo, _ RegionHeartbeatProcessTracer) (origin *RegionInfo, overlaps []*regionItem) {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	origin = r.getRegionLocked(region.GetID())

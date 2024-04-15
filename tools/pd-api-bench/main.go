@@ -341,7 +341,6 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		}
 		c.IndentedJSON(http.StatusOK, cfg)
 	})
-	// nolint
 	engine.Run(cfg.StatusAddr)
 }
 

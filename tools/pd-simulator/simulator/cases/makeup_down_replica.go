@@ -64,7 +64,7 @@ func newMakeupDownReplicas() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		sum := 0
 		regionCounts := make([]int, 0, storeNum)
 		for i := 1; i <= storeNum; i++ {

@@ -64,9 +64,8 @@ func (trk *OpStatusTracker) getTime(s OpStatus) time.Time {
 		return trk.reachTimes[s]
 	} else if trk.current == s {
 		return trk.reachTimes[firstEndStatus]
-	} else {
-		return time.Time{}
 	}
+	return time.Time{}
 }
 
 // To transfer the current status to dst if this transition is valid,

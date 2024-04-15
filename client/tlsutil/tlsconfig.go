@@ -131,7 +131,7 @@ func (info TLSInfo) baseConfig() (*tls.Config, error) {
 	}
 
 	if info.AllowedCN != "" {
-		cfg.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+		cfg.VerifyPeerCertificate = func(_ [][]byte, verifiedChains [][]*x509.Certificate) error {
 			for _, chains := range verifiedChains {
 				if len(chains) != 0 {
 					if info.AllowedCN == chains[0].Subject.CommonName {
@@ -145,10 +145,10 @@ func (info TLSInfo) baseConfig() (*tls.Config, error) {
 
 	// this only reloads certs when there's a client request
 	// TODO: support server-side refresh (e.g. inotify, SIGHUP), caching
-	cfg.GetCertificate = func(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	cfg.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 		return NewCert(info.CertFile, info.KeyFile, info.parseFunc)
 	}
-	cfg.GetClientCertificate = func(unused *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+	cfg.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
 		return NewCert(info.CertFile, info.KeyFile, info.parseFunc)
 	}
 	return cfg, nil

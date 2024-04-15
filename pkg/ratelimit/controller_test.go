@@ -108,7 +108,7 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 						status := limiter.Update(label, o)
 						re.NotZero(status & ConcurrencyNoChange)
 					},
-					checkStatusFunc: func(label string) {},
+					checkStatusFunc: func(_ string) {},
 				},
 				{
 					opt: UpdateConcurrencyLimiter(5),
@@ -240,7 +240,7 @@ func TestControllerWithQPSLimiter(t *testing.T) {
 						status := limiter.Update(label, o)
 						re.NotZero(status & QPSNoChange)
 					},
-					checkStatusFunc: func(label string) {},
+					checkStatusFunc: func(_ string) {},
 				},
 				{
 					opt: UpdateQPSLimiter(5, 5),

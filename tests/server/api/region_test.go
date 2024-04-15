@@ -114,14 +114,14 @@ func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
 	r1 := core.NewTestRegionInfo(601, 13, []byte("aaa"), []byte("ggg"))
 	r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 5, StoreId: 14}, &metapb.Peer{Id: 6, StoreId: 15})
 	tests.MustPutRegionInfo(re, cluster, r1)
-	suite.checkRegionCount(re, cluster, 1)
+	checkRegionCount(re, cluster, 1)
 
 	newRegionID := uint64(11)
 	body := fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 3,
 		hex.EncodeToString([]byte("bbb")),
 		hex.EncodeToString([]byte("ccc")),
 		hex.EncodeToString([]byte("ddd")))
-	checkOpt := func(res []byte, code int, _ http.Header) {
+	checkOpt := func(res []byte, _ int, _ http.Header) {
 		s := &struct {
 			ProcessedPercentage int      `json:"processed-percentage"`
 			NewRegionsID        []uint64 `json:"regions-id"`
@@ -159,7 +159,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 		r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 100 + i, StoreId: (i + 1) % regionCount}, &metapb.Peer{Id: 200 + i, StoreId: (i + 2) % regionCount})
 		tests.MustPutRegionInfo(re, cluster, r1)
 	}
-	suite.checkRegionCount(re, cluster, regionCount)
+	checkRegionCount(re, cluster, regionCount)
 
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
@@ -194,7 +194,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 		r1.GetMeta().Peers = append(r1.GetMeta().Peers, &metapb.Peer{Id: 100 + i, StoreId: (i + 1) % regionCount}, &metapb.Peer{Id: 200 + i, StoreId: (i + 2) % regionCount})
 		tests.MustPutRegionInfo(re, cluster, r1)
 	}
-	suite.checkRegionCount(re, cluster, regionCount)
+	checkRegionCount(re, cluster, regionCount)
 
 	body := fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`,
 		hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
@@ -236,7 +236,7 @@ func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
 	tests.MustPutRegionInfo(re, cluster, r1)
 	tests.MustPutRegionInfo(re, cluster, r2)
 	tests.MustPutRegionInfo(re, cluster, r3)
-	suite.checkRegionCount(re, cluster, 3)
+	checkRegionCount(re, cluster, 3)
 
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
 	err := tu.CheckPostJSON(testDialClient, fmt.Sprintf("%s/regions/scatter", urlPrefix), []byte(body), tu.StatusOK(re))
@@ -263,7 +263,7 @@ func (suite *regionTestSuite) TestCheckRegionsReplicated() {
 
 func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.pauseRuleChecker(re, cluster)
+	pauseRuleChecker(re, cluster)
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
@@ -276,7 +276,7 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	tests.MustPutStore(re, cluster, s1)
 	r1 := core.NewTestRegionInfo(2, 1, []byte("a"), []byte("b"))
 	tests.MustPutRegionInfo(re, cluster, r1)
-	suite.checkRegionCount(re, cluster, 1)
+	checkRegionCount(re, cluster, 1)
 
 	// set the bundle
 	bundle := []placement.GroupBundle{
@@ -404,7 +404,7 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 	})
 }
 
-func (suite *regionTestSuite) checkRegionCount(re *require.Assertions, cluster *tests.TestCluster, count uint64) {
+func checkRegionCount(re *require.Assertions, cluster *tests.TestCluster, count uint64) {
 	leader := cluster.GetLeaderServer()
 	tu.Eventually(re, func() bool {
 		return leader.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count == int(count)
@@ -417,7 +417,7 @@ func (suite *regionTestSuite) checkRegionCount(re *require.Assertions, cluster *
 }
 
 // pauseRuleChecker will pause rule checker to avoid unexpected operator.
-func (suite *regionTestSuite) pauseRuleChecker(re *require.Assertions, cluster *tests.TestCluster) {
+func pauseRuleChecker(re *require.Assertions, cluster *tests.TestCluster) {
 	checkerName := "rule"
 	addr := cluster.GetLeaderServer().GetAddr()
 	resp := make(map[string]any)

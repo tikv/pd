@@ -146,7 +146,7 @@ func newCollectMetricsTask() *collectMetricsTask {
 	return &collectMetricsTask{}
 }
 
-func (t *collectMetricsTask) runTask(cache *hotPeerCache) {
+func (*collectMetricsTask) runTask(cache *hotPeerCache) {
 	cache.collectMetrics()
 }
 

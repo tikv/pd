@@ -68,7 +68,7 @@ func (s *labelScheduler) GetName() string {
 	return s.conf.Name
 }
 
-func (s *labelScheduler) GetType() string {
+func (*labelScheduler) GetType() string {
 	return LabelType
 }
 
@@ -84,7 +84,7 @@ func (s *labelScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return allowed
 }
 
-func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	labelCounter.Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
@@ -119,7 +119,7 @@ func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([
 				continue
 			}
 
-			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), []uint64{}, operator.OpLeader)
+			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
 			if err != nil {
 				log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
 				return nil, nil

@@ -192,7 +192,7 @@ type Regions struct {
 	updateFlow   []int
 }
 
-func (rs *Regions) init(cfg *config.Config, options *config.Options) {
+func (rs *Regions) init(cfg *config.Config) {
 	rs.regions = make([]*pdpb.RegionHeartbeatRequest, 0, cfg.RegionCount)
 	rs.updateRound = 0
 
@@ -507,7 +507,7 @@ func main() {
 	initClusterID(ctx, cli)
 	go runHTTPServer(cfg, options)
 	regions := new(Regions)
-	regions.init(cfg, options)
+	regions.init(cfg)
 	log.Info("finish init regions")
 	stores := newStores(cfg.StoreCount)
 	stores.update(regions)

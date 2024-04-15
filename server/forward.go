@@ -39,7 +39,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (s *GrpcServer) forwardTSORequest(
+func forwardTSORequest(
 	ctx context.Context,
 	request *pdpb.TsoRequest,
 	forwardStream tsopb.TSO_TsoClient) (*tsopb.TsoResponse, error) {
@@ -149,7 +149,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 				tsoStreamErr = errors.WithStack(err)
 				return tsoStreamErr
 			}
-			forwardStream, forwardCtx, cancelForward, err = s.createTSOForwardStream(stream.Context(), clientConn)
+			forwardStream, forwardCtx, cancelForward, err = createTSOForwardStream(stream.Context(), clientConn)
 			if err != nil {
 				tsoStreamErr = errors.WithStack(err)
 				return tsoStreamErr
@@ -210,7 +210,7 @@ func (s *GrpcServer) forwardTSORequestWithDeadLine(
 	}
 
 	start := time.Now()
-	resp, err := s.forwardTSORequest(forwardCtx, request, forwardStream)
+	resp, err := forwardTSORequest(forwardCtx, request, forwardStream)
 	close(done)
 	if err != nil {
 		if strings.Contains(err.Error(), errs.NotLeaderErr) {
@@ -223,7 +223,7 @@ func (s *GrpcServer) forwardTSORequestWithDeadLine(
 	return resp, nil
 }
 
-func (s *GrpcServer) createTSOForwardStream(ctx context.Context, client *grpc.ClientConn) (tsopb.TSO_TsoClient, context.Context, context.CancelFunc, error) {
+func createTSOForwardStream(ctx context.Context, client *grpc.ClientConn) (tsopb.TSO_TsoClient, context.Context, context.CancelFunc, error) {
 	done := make(chan struct{})
 	forwardCtx, cancelForward := context.WithCancel(ctx)
 	go grpcutil.CheckStream(forwardCtx, cancelForward, done)
@@ -241,7 +241,7 @@ func (s *GrpcServer) createRegionHeartbeatForwardStream(client *grpc.ClientConn)
 	return forwardStream, cancel, err
 }
 
-func (s *GrpcServer) createRegionHeartbeatSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_RegionHeartbeatClient, context.Context, context.CancelFunc, error) {
+func createRegionHeartbeatSchedulingStream(ctx context.Context, client *grpc.ClientConn) (schedulingpb.Scheduling_RegionHeartbeatClient, context.Context, context.CancelFunc, error) {
 	done := make(chan struct{})
 	forwardCtx, cancelForward := context.WithCancel(ctx)
 	go grpcutil.CheckStream(forwardCtx, cancelForward, done)

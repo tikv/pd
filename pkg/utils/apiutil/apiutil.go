@@ -441,16 +441,15 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
-		defer resp.Body.Close()
 		var reader io.ReadCloser
 		switch resp.Header.Get("Content-Encoding") {
 		case "gzip":
 			reader, err = gzip.NewReader(resp.Body)
 			if err != nil {
 				log.Error("failed to parse response with gzip compress", zap.Error(err))
+				resp.Body.Close()
 				continue
 			}
-			defer reader.Close()
 		default:
 			reader = resp.Body
 		}
@@ -474,6 +473,8 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 				break
 			}
 		}
+		resp.Body.Close()
+		reader.Close()
 		if err != nil {
 			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
 			// try next url.

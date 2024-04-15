@@ -187,7 +187,7 @@ func (gta *GlobalTSOAllocator) Initialize(int) error {
 	gta.tsoAllocatorRoleGauge.Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0
-	return gta.timestampOracle.SyncTimestamp(gta.member.GetLeadership())
+	return gta.timestampOracle.SyncTimestamp()
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.
@@ -197,7 +197,7 @@ func (gta *GlobalTSOAllocator) IsInitialize() bool {
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (gta *GlobalTSOAllocator) UpdateTSO() error {
-	return gta.timestampOracle.UpdateTimestamp(gta.member.GetLeadership())
+	return gta.timestampOracle.UpdateTimestamp()
 }
 
 // SetTSO sets the physical part with given TSO.

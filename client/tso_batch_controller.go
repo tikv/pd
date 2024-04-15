@@ -140,7 +140,7 @@ func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical in
 	for i := 0; i < tbc.collectedRequestCount; i++ {
 		tsoReq := tbc.collectedRequests[i]
 		tsoReq.physical, tsoReq.logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
-		defer trace.StartRegion(tsoReq.requestCtx, "pdclient.tsoReqDequeue").End()
+		defer trace.StartRegion(tsoReq.requestCtx, "pdclient.tsoReqDequeue").End() // nolint
 		tsoReq.tryDone(err)
 	}
 	// Prevent the finished requests from being processed again.

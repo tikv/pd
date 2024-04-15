@@ -128,7 +128,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 // It returns a stream of slices of keyspace metadata.
 // The first message in stream contains all current keyspaceMeta,
 // all subsequent messages contains new put events for all keyspaces.
-func (c *client) WatchKeyspaces(ctx context.Context) (chan []*keyspacepb.KeyspaceMeta, error) {
+func (*client) WatchKeyspaces(context.Context) (chan []*keyspacepb.KeyspaceMeta, error) {
 	return nil, errors.Errorf("WatchKeyspaces unimplemented")
 }
 

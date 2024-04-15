@@ -118,7 +118,7 @@ func NewLocalLogBackend(before bool) Backend {
 }
 
 // ProcessHTTPRequest is used to implement audit.Backend
-func (l *LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
+func (*LocalLogBackend) ProcessHTTPRequest(r *http.Request) bool {
 	requestInfo, ok := requestutil.RequestInfoFrom(r.Context())
 	if !ok {
 		return false

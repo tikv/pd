@@ -55,7 +55,7 @@ func newAddNodes() *Case {
 	}
 
 	threshold := 0.05
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		res := true
 		leaderCounts := make([]int, 0, storeNum)
 		regionCounts := make([]int, 0, storeNum)

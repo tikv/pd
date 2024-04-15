@@ -51,7 +51,7 @@ func TestStoreTestSuite(t *testing.T) {
 	suite.Run(t, new(storeTestSuite))
 }
 
-func (suite *storeTestSuite) requestStatusBody(re *require.Assertions, client *http.Client, method string, url string) int {
+func requestStatusBody(re *require.Assertions, client *http.Client, method string, url string) int {
 	req, err := http.NewRequest(method, url, http.NoBody)
 	re.NoError(err)
 	resp, err := client.Do(req)
@@ -321,7 +321,7 @@ func (suite *storeTestSuite) TestStoreDelete() {
 	}
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/store/%d", suite.urlPrefix, testCase.id)
-		status := suite.requestStatusBody(re, testDialClient, http.MethodDelete, url)
+		status := requestStatusBody(re, testDialClient, http.MethodDelete, url)
 		re.Equal(testCase.status, status)
 	}
 	// store 6 origin status:offline
@@ -333,10 +333,10 @@ func (suite *storeTestSuite) TestStoreDelete() {
 	re.Equal(metapb.StoreState_Offline, store.Store.State)
 
 	// up store success because it is offline but not physically destroyed
-	status := suite.requestStatusBody(re, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	status := requestStatusBody(re, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
 	re.Equal(http.StatusOK, status)
 
-	status = suite.requestStatusBody(re, testDialClient, http.MethodGet, url)
+	status = requestStatusBody(re, testDialClient, http.MethodGet, url)
 	re.Equal(http.StatusOK, status)
 	store = new(response.StoreInfo)
 	err = tu.ReadGetJSON(re, testDialClient, url, store)
@@ -345,7 +345,7 @@ func (suite *storeTestSuite) TestStoreDelete() {
 	re.False(store.Store.PhysicallyDestroyed)
 
 	// offline store with physically destroyed
-	status = suite.requestStatusBody(re, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
+	status = requestStatusBody(re, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
 	re.Equal(http.StatusOK, status)
 	err = tu.ReadGetJSON(re, testDialClient, url, store)
 	re.NoError(err)
@@ -353,7 +353,7 @@ func (suite *storeTestSuite) TestStoreDelete() {
 	re.True(store.Store.PhysicallyDestroyed)
 
 	// try to up store again failed because it is physically destroyed
-	status = suite.requestStatusBody(re, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	status = requestStatusBody(re, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
 	re.Equal(http.StatusBadRequest, status)
 	// reset store 6
 	suite.cleanup()

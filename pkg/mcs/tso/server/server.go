@@ -250,7 +250,7 @@ func (s *Server) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
 
 // AddServiceReadyCallback implements basicserver.
 // It adds callbacks when it's ready for providing tso service.
-func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
+func (*Server) AddServiceReadyCallback(...func(context.Context) error) {
 	// Do nothing here. The primary of each keyspace group assigned to this host
 	// will respond to the requests accordingly.
 }
@@ -278,7 +278,7 @@ func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorM
 }
 
 // IsLocalRequest checks if the forwarded host is the current host
-func (s *Server) IsLocalRequest(forwardedHost string) bool {
+func (*Server) IsLocalRequest(forwardedHost string) bool {
 	// TODO: Check if the forwarded host is the current host.
 	// The logic is depending on etcd service mode -- if the TSO service
 	// uses the embedded etcd, check against ClientUrls; otherwise check
@@ -310,13 +310,13 @@ func (s *Server) ValidateRequest(header *tsopb.RequestHeader) error {
 
 // GetExternalTS returns external timestamp from the cache or the persistent storage.
 // TODO: Implement GetExternalTS
-func (s *Server) GetExternalTS() uint64 {
+func (*Server) GetExternalTS() uint64 {
 	return 0
 }
 
 // SetExternalTS saves external timestamp to cache and the persistent storage.
 // TODO: Implement SetExternalTS
-func (s *Server) SetExternalTS(externalTS uint64) error {
+func (*Server) SetExternalTS(uint64) error {
 	return nil
 }
 

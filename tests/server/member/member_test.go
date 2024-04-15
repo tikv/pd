@@ -152,7 +152,7 @@ func TestLeaderPriority(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.LeaderPriorityCheckInterval = typeutil.NewDuration(time.Second)
 	})
 	defer cluster.Destroy()

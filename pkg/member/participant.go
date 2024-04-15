@@ -200,7 +200,7 @@ func (m *Participant) KeepLeader(ctx context.Context) {
 
 // PreCheckLeader does some pre-check before checking whether or not it's the leader.
 // It returns true if it passes the pre-check, false otherwise.
-func (m *Participant) PreCheckLeader() error {
+func (*Participant) PreCheckLeader() error {
 	// No specific thing to check. Returns no error.
 	return nil
 }
@@ -280,7 +280,7 @@ func (m *Participant) IsSameLeader(leader participant) bool {
 }
 
 // CheckPriority checks whether there is another participant has higher priority and resign it as the leader if so.
-func (m *Participant) CheckPriority(ctx context.Context) {
+func (*Participant) CheckPriority(_ context.Context) {
 	// TODO: implement weighted-election when it's in need
 }
 

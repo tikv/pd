@@ -109,7 +109,7 @@ func NewWatcher(
 func (rw *Watcher) initializeRuleWatcher() error {
 	var suspectKeyRanges *core.KeyRanges
 
-	preEventsFn := func(events []*clientv3.Event) error {
+	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
@@ -149,10 +149,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			}
 			return nil
-		} else {
-			log.Warn("unknown key when updating placement rule", zap.String("key", key))
-			return nil
 		}
+		log.Warn("unknown key when updating placement rule", zap.String("key", key))
+		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
@@ -181,12 +180,11 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			}
 			return nil
-		} else {
-			log.Warn("unknown key when deleting placement rule", zap.String("key", key))
-			return nil
 		}
+		log.Warn("unknown key when deleting placement rule", zap.String("key", key))
+		return nil
 	}
-	postEventsFn := func(events []*clientv3.Event) error {
+	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.ruleManager.Unlock()
 		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
 			log.Error("failed to commit patch", zap.Error(err))
@@ -213,7 +211,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 func (rw *Watcher) initializeRegionLabelWatcher() error {
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	// TODO: use txn in region labeler.
-	preEventsFn := func(events []*clientv3.Event) error {
+	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.regionLabeler.Lock()
 		return nil
@@ -231,7 +229,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 		log.Info("delete region label rule", zap.String("key", key))
 		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, prefixToTrim))
 	}
-	postEventsFn := func(events []*clientv3.Event) error {
+	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()
 		rw.regionLabeler.BuildRangeListLocked()
 		return nil

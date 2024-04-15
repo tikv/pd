@@ -163,7 +163,7 @@ type KeyspaceGroupStorage interface {
 var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
 // LoadKeyspaceGroup loads the keyspace group by ID.
-func (se *StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
+func (*StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
 	value, err := txn.Load(KeyspaceGroupIDPath(id))
 	if err != nil || value == "" {
 		return nil, err
@@ -176,12 +176,12 @@ func (se *StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGr
 }
 
 // SaveKeyspaceGroup saves the keyspace group.
-func (se *StorageEndpoint) SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error {
+func (*StorageEndpoint) SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error {
 	return saveJSONInTxn(txn, KeyspaceGroupIDPath(kg.ID), kg)
 }
 
 // DeleteKeyspaceGroup deletes the keyspace group.
-func (se *StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
+func (*StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
 	return txn.Remove(KeyspaceGroupIDPath(id))
 }
 

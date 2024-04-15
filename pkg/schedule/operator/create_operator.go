@@ -78,7 +78,7 @@ func CreateRemovePeerOperator(desc string, ci sche.SharedCluster, kind OpKind, r
 }
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
-func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
+func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck).
 		SetLeader(targetStoreID).
 		SetLeaders(targetStoreIDs).
@@ -86,7 +86,7 @@ func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *co
 }
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
-func CreateForceTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+func CreateForceTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck, SkipPlacementRulesCheck).
 		SetLeader(targetStoreID).
 		EnableForceTargetLeader().

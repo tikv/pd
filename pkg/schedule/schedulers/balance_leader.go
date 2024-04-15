@@ -164,7 +164,7 @@ func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http
 	handler.rd.JSON(w, httpCode, v)
 }
 
-func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -219,7 +219,7 @@ func (l *balanceLeaderScheduler) GetName() string {
 	return l.name
 }
 
-func (l *balanceLeaderScheduler) GetType() string {
+func (*balanceLeaderScheduler) GetType() string {
 	return BalanceLeaderType
 }
 
@@ -553,7 +553,7 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, solver, solver.Region, solver.Region.GetLeader().GetStoreId(), solver.TargetStoreID(), []uint64{}, operator.OpLeader)
+	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, solver, solver.Region, solver.TargetStoreID(), []uint64{}, operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		if collector != nil {

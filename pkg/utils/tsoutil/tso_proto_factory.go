@@ -36,7 +36,7 @@ type TSOProtoFactory struct {
 type PDProtoFactory struct {
 }
 
-func (s *TSOProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (stream, context.CancelFunc, error) {
+func (*TSOProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (stream, context.CancelFunc, error) {
 	done := make(chan struct{})
 	cctx, cancel := context.WithCancel(ctx)
 	go grpcutil.CheckStream(cctx, cancel, done)
@@ -45,7 +45,7 @@ func (s *TSOProtoFactory) createForwardStream(ctx context.Context, clientConn *g
 	return &tsoStream{forwardStream}, cancel, err
 }
 
-func (s *PDProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (stream, context.CancelFunc, error) {
+func (*PDProtoFactory) createForwardStream(ctx context.Context, clientConn *grpc.ClientConn) (stream, context.CancelFunc, error) {
 	done := make(chan struct{})
 	cctx, cancel := context.WithCancel(ctx)
 	go grpcutil.CheckStream(cctx, cancel, done)

@@ -456,7 +456,7 @@ type ttlConfigInterface interface {
 	IsTikvRegionSplitEnabled() bool
 }
 
-func (suite *configTestSuite) assertTTLConfig(
+func assertTTLConfig(
 	re *require.Assertions,
 	cluster *tests.TestCluster,
 	expectedEqual bool,
@@ -493,7 +493,7 @@ func (suite *configTestSuite) assertTTLConfig(
 	}
 }
 
-func (suite *configTestSuite) assertTTLConfigItemEqual(
+func assertTTLConfigItemEqual(
 	re *require.Assertions,
 	cluster *tests.TestCluster,
 	item string,
@@ -537,22 +537,22 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 	// test no config and cleaning up
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 0), postData, tu.StatusOK(re))
 	re.NoError(err)
-	suite.assertTTLConfig(re, cluster, false)
+	assertTTLConfig(re, cluster, false)
 
 	// test time goes by
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 5), postData, tu.StatusOK(re))
 	re.NoError(err)
-	suite.assertTTLConfig(re, cluster, true)
+	assertTTLConfig(re, cluster, true)
 	time.Sleep(5 * time.Second)
-	suite.assertTTLConfig(re, cluster, false)
+	assertTTLConfig(re, cluster, false)
 
 	// test cleaning up
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 5), postData, tu.StatusOK(re))
 	re.NoError(err)
-	suite.assertTTLConfig(re, cluster, true)
+	assertTTLConfig(re, cluster, true)
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 0), postData, tu.StatusOK(re))
 	re.NoError(err)
-	suite.assertTTLConfig(re, cluster, false)
+	assertTTLConfig(re, cluster, false)
 
 	postData, err = json.Marshal(invalidTTLConfig)
 	re.NoError(err)
@@ -569,9 +569,9 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 1), postData, tu.StatusOK(re))
 	re.NoError(err)
-	suite.assertTTLConfigItemEqual(re, cluster, "max-merge-region-size", uint64(999))
+	assertTTLConfigItemEqual(re, cluster, "max-merge-region-size", uint64(999))
 	// max-merge-region-keys should keep consistence with max-merge-region-size.
-	suite.assertTTLConfigItemEqual(re, cluster, "max-merge-region-keys", uint64(999*10000))
+	assertTTLConfigItemEqual(re, cluster, "max-merge-region-keys", uint64(999*10000))
 
 	// on invalid value, we use default config
 	mergeConfig = map[string]any{
@@ -581,7 +581,7 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, createTTLUrl(urlPrefix, 10), postData, tu.StatusOK(re))
 	re.NoError(err)
-	suite.assertTTLConfigItemEqual(re, cluster, "enable-tikv-split-region", true)
+	assertTTLConfigItemEqual(re, cluster, "enable-tikv-split-region", true)
 }
 
 func (suite *configTestSuite) TestTTLConflict() {
@@ -597,7 +597,7 @@ func (suite *configTestSuite) checkTTLConflict(cluster *tests.TestCluster) {
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re))
 	re.NoError(err)
-	suite.assertTTLConfig(re, cluster, true)
+	assertTTLConfig(re, cluster, true)
 
 	cfg := map[string]any{"max-snapshot-count": 30}
 	postData, err = json.Marshal(cfg)

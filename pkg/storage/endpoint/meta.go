@@ -236,7 +236,7 @@ func (se *StorageEndpoint) DeleteRegion(region *metapb.Region) error {
 }
 
 // Flush flushes the pending data to the underlying storage backend.
-func (se *StorageEndpoint) Flush() error { return nil }
+func (*StorageEndpoint) Flush() error { return nil }
 
 // Close closes the underlying storage backend.
-func (se *StorageEndpoint) Close() error { return nil }
+func (*StorageEndpoint) Close() error { return nil }

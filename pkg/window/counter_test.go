@@ -98,7 +98,7 @@ func TestRollingCounterReduce(t *testing.T) {
 	re.Less(math.Abs(float64(r.Value())-6), 1e-7)
 }
 
-func TestRollingCounterDataRace(t *testing.T) {
+func TestRollingCounterDataRace(_ *testing.T) {
 	size := 3
 	bucketDuration := time.Millisecond * 10
 	opts := RollingCounterOpts{

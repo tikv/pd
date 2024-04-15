@@ -147,7 +147,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	}
 }
 
-func (s *storeStatistics) ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
+func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 	// Store flows.
 	storeAddress := store.GetAddress()
 	id := strconv.FormatUint(store.GetID(), 10)
@@ -307,10 +307,6 @@ func NewStoreStatisticsMap(opt config.ConfProvider) *storeStatisticsMap {
 
 func (m *storeStatisticsMap) Observe(store *core.StoreInfo) {
 	m.stats.Observe(store)
-}
-
-func (m *storeStatisticsMap) ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
-	m.stats.ObserveHotStat(store, stats)
 }
 
 func (m *storeStatisticsMap) Collect() {

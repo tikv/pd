@@ -261,7 +261,7 @@ type transferLeader struct {
 	toPeers         []*metapb.Peer
 }
 
-func (t *transferLeader) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (t *transferLeader) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	toPeer := t.toPeers[0] // TODO: Support selection logic
 	if peer := region.GetPeer(toPeer.GetId()); peer == nil || peer.GetRole() != toPeer.GetRole() || core.IsLearner(peer) {
@@ -313,7 +313,7 @@ type promoteLearner struct {
 	peer *metapb.Peer
 }
 
-func (pl *promoteLearner) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (pl *promoteLearner) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	peer := region.GetPeer(pl.peer.GetId())
 	opts := checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_Learner, metapb.PeerRole_Voter)
@@ -327,7 +327,7 @@ type demoteVoter struct {
 	peer *metapb.Peer
 }
 
-func (dv *demoteVoter) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (dv *demoteVoter) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	peer := region.GetPeer(dv.peer.GetId())
 	opts := checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_Voter, metapb.PeerRole_Learner)
@@ -342,7 +342,7 @@ type changePeerV2Enter struct {
 	demoteVoters    []*metapb.Peer
 }
 
-func (ce *changePeerV2Enter) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (ce *changePeerV2Enter) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	var opts []core.RegionCreateOption
 	for _, pl := range ce.promoteLearners {
@@ -367,7 +367,7 @@ func (ce *changePeerV2Enter) tick(engine *RaftEngine, region *core.RegionInfo) (
 
 type changePeerV2Leave struct{}
 
-func (cl *changePeerV2Leave) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (*changePeerV2Leave) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	var opts []core.RegionCreateOption
 	for _, peer := range region.GetPeers() {

@@ -114,7 +114,7 @@ func TestClientLeaderChange(t *testing.T) {
 	for i := range endpointsWithWrongURL {
 		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
 	}
-	cli := setupCli(re, ctx, endpointsWithWrongURL)
+	cli := setupCli(ctx, re, endpointsWithWrongURL)
 	defer cli.Close()
 	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	re.True(ok)
@@ -175,7 +175,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	}()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
 	var lastTS uint64
@@ -287,7 +287,7 @@ func TestTSOAllocatorLeader(t *testing.T) {
 		})
 		allocatorLeaderMap[dcLocation] = pdName
 	}
-	cli := setupCli(re, ctx, endpoints)
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	re.True(ok)
@@ -321,9 +321,9 @@ func TestTSOFollowerProxy(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli1 := setupCli(re, ctx, endpoints)
+	cli1 := setupCli(ctx, re, endpoints)
 	defer cli1.Close()
-	cli2 := setupCli(re, ctx, endpoints)
+	cli2 := setupCli(ctx, re, endpoints)
 	defer cli2.Close()
 	cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
 
@@ -385,7 +385,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
 	var wg sync.WaitGroup
@@ -417,7 +417,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 		leader.Stop()
 		re.NotEmpty(cluster.WaitLeader())
 		leaderReadyTime = time.Now()
-		cluster.RunServers([]*tests.TestServer{leader})
+		tests.RunServers([]*tests.TestServer{leader})
 	}()
 	wg.Wait()
 	re.Less(maxUnavailableTime.UnixMilli(), leaderReadyTime.Add(1*time.Second).UnixMilli())
@@ -458,14 +458,14 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
 	// Join a new dc-location
-	pd4, err := cluster.Join(ctx, func(conf *config.Config, serverName string) {
+	pd4, err := cluster.Join(ctx, func(conf *config.Config, _ string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
@@ -586,7 +586,7 @@ func TestCustomTimeout(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints, pd.WithCustomTimeoutOption(time.Second))
+	cli := setupCli(ctx, re, endpoints, pd.WithCustomTimeoutOption(time.Second))
 	defer cli.Close()
 
 	start := time.Now()
@@ -647,8 +647,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	})
 }
 
-func (suite *followerForwardAndHandleTestSuite) TearDownTest() {
-}
+func (*followerForwardAndHandleTestSuite) TearDownTest() {}
 
 func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
@@ -660,7 +659,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	cli := setupCli(re, ctx, suite.endpoints, pd.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
 	defer cli.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
 	time.Sleep(200 * time.Millisecond)
@@ -680,7 +679,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	cli := setupCli(re, ctx, suite.endpoints, pd.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
 	defer cli.Close()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
@@ -715,7 +714,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	cli := setupCli(re, ctx, suite.endpoints, pd.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
 	defer cli.Close()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
@@ -752,7 +751,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(re, ctx, suite.endpoints, pd.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
 	defer cli.Close()
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
@@ -821,7 +820,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(re, ctx, suite.endpoints)
+	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
 
 	cluster.GetLeaderServer().GetServer().GetMember().ResignEtcdLeader(ctx, leader.GetServer().Name(), follower.GetServer().Name())
@@ -854,7 +853,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	defer cancel()
 
 	cluster := suite.cluster
-	cli := setupCli(re, ctx, suite.endpoints)
+	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
 	cli.UpdateOption(pd.EnableFollowerHandle, true)
 	re.NotEmpty(cluster.WaitLeader())
@@ -949,7 +948,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/shortDispatcherChannel", "return(true)"))
 
-	cli := setupCli(re, ctx, suite.endpoints)
+	cli := setupCli(ctx, re, suite.endpoints)
 
 	ctxs := make([]context.Context, 20)
 	cancels := make([]context.CancelFunc, 20)
@@ -1015,7 +1014,7 @@ func runServer(re *require.Assertions, cluster *tests.TestCluster) []string {
 	return endpoints
 }
 
-func setupCli(re *require.Assertions, ctx context.Context, endpoints []string, opts ...pd.ClientOption) pd.Client {
+func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
 	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
@@ -1083,7 +1082,7 @@ func TestCloseClient(t *testing.T) {
 	re.NoError(err)
 	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
+	cli := setupCli(ctx, re, endpoints)
 	ts := cli.GetTSAsync(context.TODO())
 	time.Sleep(time.Second)
 	cli.Close()
@@ -1171,10 +1170,10 @@ func (suite *clientTestSuite) SetupSuite() {
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	server.MustWaitLeader(re, []*server.Server{suite.srv})
-	suite.bootstrapServer(re, newHeader(suite.srv), suite.grpcPDClient)
+	bootstrapServer(re, newHeader(suite.srv), suite.grpcPDClient)
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
-	suite.client = setupCli(re, suite.ctx, suite.srv.GetEndpoints())
+	suite.client = setupCli(suite.ctx, re, suite.srv.GetEndpoints())
 
 	suite.regionHeartbeat, err = suite.grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
@@ -1216,7 +1215,7 @@ func newHeader(srv *server.Server) *pdpb.RequestHeader {
 	}
 }
 
-func (suite *clientTestSuite) bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client pdpb.PDClient) {
+func bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client pdpb.PDClient) {
 	regionID := regionIDAllocator.alloc()
 	region := &metapb.Region{
 		Id: regionID,
@@ -1781,7 +1780,7 @@ func TestWatch(t *testing.T) {
 	re.NoError(err)
 	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
-	client := setupCli(re, ctx, endpoints)
+	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
 	key := "test"
@@ -1824,7 +1823,7 @@ func TestPutGet(t *testing.T) {
 	re.NoError(err)
 	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
-	client := setupCli(re, ctx, endpoints)
+	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 
 	key := []byte("test")
@@ -1859,7 +1858,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 	re.NoError(err)
 	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
-	client := setupCli(re, ctx, endpoints)
+	client := setupCli(ctx, re, endpoints)
 	defer client.Close()
 	s := cluster.GetLeaderServer()
 	watchPrefix := "watch_test"
@@ -1927,7 +1926,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(re, ctx, endpoints)
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 	re.True(ok)

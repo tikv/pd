@@ -562,7 +562,7 @@ func failureCases(input []JUnitTestCase) int {
 	return sum
 }
 
-func (n *numa) testCommand(pkg string, fn string) *exec.Cmd {
+func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args := make([]string, 0, 10)
 	exe := "./" + testFileName(pkg)
 	args = append(args, "-test.cpu", "1")

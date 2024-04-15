@@ -69,7 +69,7 @@ func GetServiceBuilders() []server.HandlerBuilder {
 	// The order of execution must be sequential.
 	return []server.HandlerBuilder{
 		// Dashboard API Service
-		func(ctx context.Context, srv *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		func(_ context.Context, srv *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 			distroutil.MustLoadAndReplaceStrings()
 
 			if cfg, err = adapter.GenDashboardConfig(srv); err != nil {

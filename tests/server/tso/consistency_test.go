@@ -275,7 +275,7 @@ func (suite *tsoConsistencyTestSuite) TestLocalTSOAfterMemberChanged() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/systemTimeSlow", `return(true)`))
 
 	// Join a new dc-location
-	pd4, err := cluster.Join(suite.ctx, func(conf *config.Config, serverName string) {
+	pd4, err := cluster.Join(suite.ctx, func(conf *config.Config, _ string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = "dc-4"
 	})

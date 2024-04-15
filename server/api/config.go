@@ -83,7 +83,7 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 // @Success  200  {object}  config.Config
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /config/default [get]
-func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, _ *http.Request) {
 	config := config.NewConfig()
 	err := config.Adjust(nil, false)
 	if err != nil {
@@ -447,7 +447,7 @@ func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Reques
 // @Produce  json
 // @Success  200  {object}  config.LabelPropertyConfig
 // @Router   /config/label-property [get]
-func (h *confHandler) GetLabelPropertyConfig(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetLabelPropertyConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLabelProperty())
 }
 
@@ -487,7 +487,7 @@ func (h *confHandler) SetLabelPropertyConfig(w http.ResponseWriter, r *http.Requ
 // @Produce  json
 // @Success  200  {object}  semver.Version
 // @Router   /config/cluster-version [get]
-func (h *confHandler) GetClusterVersion(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetClusterVersion(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetClusterVersion())
 }
 
@@ -524,7 +524,7 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 // @Produce  json
 // @Success  200  {object}  config.ReplicationModeConfig
 // @Router   /config/replication-mode [get]
-func (h *confHandler) GetReplicationModeConfig(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetReplicationModeConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationModeConfig())
 }
 
@@ -554,7 +554,7 @@ func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Re
 // @Produce  json
 // @Success  200  {object}  config.PDServerConfig
 // @Router   /config/pd-server [get]
-func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, r *http.Request) {
+func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetPDServerConfig())
 }
 
