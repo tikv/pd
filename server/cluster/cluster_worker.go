@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -38,8 +39,19 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
+	var runner ratelimit.Runner
+	runner = syncRunner
+	if c.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
+		runner = c.taskRunner
+	}
+	ctx := &core.MetaProcessContext{
+		Context:    c.ctx,
+		Limiter:    c.hbConcurrencyLimiter,
+		Tracer:     tracer,
+		TaskRunner: runner,
+	}
 	tracer.Begin()
-	if err := c.processRegionHeartbeat(region, tracer); err != nil {
+	if err := c.processRegionHeartbeat(ctx, region); err != nil {
 		tracer.OnAllStageFinished()
 		return err
 	}

@@ -158,6 +158,8 @@ func TestRegionTree(t *testing.T) {
 
 	updateNewItem(tree, regionA)
 	updateNewItem(tree, regionC)
+	re.Nil(tree.overlaps(newRegionItem([]byte("b"), []byte("c"))))
+	re.Equal(regionC, tree.overlaps(newRegionItem([]byte("a"), []byte("cc")))[1].RegionInfo)
 	re.Nil(tree.search([]byte{}))
 	re.Equal(regionA, tree.search([]byte("a")))
 	re.Nil(tree.search([]byte("b")))
