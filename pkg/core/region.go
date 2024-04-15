@@ -720,11 +720,9 @@ type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (
 func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	noLog := func(string, ...zap.Field) {}
 	d, i := noLog, noLog
-	debug, info := d, i
 	if enableLog {
 		d = log.Debug
 		i = log.Info
-		debug, info = d, i
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
@@ -732,6 +730,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 		taskRunner := ctx.TaskRunner
 		limiter := ctx.Limiter
 		// print log asynchronously
+		debug, info := d, i
 		if taskRunner != nil {
 			debug = func(msg string, fields ...zap.Field) {
 				taskRunner.RunTask(
