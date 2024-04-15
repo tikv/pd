@@ -277,7 +277,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	})
 	// Wait for the split to complete automatically even there is no TSO request from the outside.
 	testutil.Eventually(re, func() bool {
-		kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+		kg2, code := handlersutil.TryLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+		if code != http.StatusOK {
+			return false
+		}
 		re.Equal(uint32(2), kg2.ID)
 		re.Equal([]uint32{222, 333}, kg2.Keyspaces)
 		return !kg2.IsSplitting()

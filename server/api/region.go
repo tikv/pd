@@ -546,6 +546,19 @@ func (h *regionsHandler) GetTopWriteFlowRegions(w http.ResponseWriter, r *http.R
 }
 
 // @Tags     region
+// @Summary  List regions with the highest write flow.
+// @Param    limit  query  integer  false  "Limit count"  default(16)
+// @Produce  json
+// @Success  200  {object}  response.RegionsInfo
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/writequery [get]
+func (h *regionsHandler) GetTopWriteQueryRegions(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetWriteQueryNum() < b.GetWriteQueryNum()
+	})
+}
+
+// @Tags     region
 // @Summary  List regions with the highest read flow.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
 // @Produce  json
@@ -554,6 +567,19 @@ func (h *regionsHandler) GetTopWriteFlowRegions(w http.ResponseWriter, r *http.R
 // @Router   /regions/readflow [get]
 func (h *regionsHandler) GetTopReadFlowRegions(w http.ResponseWriter, r *http.Request) {
 	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() })
+}
+
+// @Tags     region
+// @Summary  List regions with the highest write flow.
+// @Param    limit  query  integer  false  "Limit count"  default(16)
+// @Produce  json
+// @Success  200  {object}  response.RegionsInfo
+// @Failure  400  {string}  string  "The input is invalid."
+// @Router   /regions/readquery [get]
+func (h *regionsHandler) GetTopReadQueryRegions(w http.ResponseWriter, r *http.Request) {
+	h.GetTopNRegions(w, r, func(a, b *core.RegionInfo) bool {
+		return a.GetReadQueryNum() < b.GetReadQueryNum()
+	})
 }
 
 // @Tags     region

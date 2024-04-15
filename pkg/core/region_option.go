@@ -248,18 +248,23 @@ func SetReadKeys(v uint64) RegionCreateOption {
 
 // SetReadQuery sets the read query for the region, only used for unit test.
 func SetReadQuery(v uint64) RegionCreateOption {
-	q := RandomKindReadQuery(v)
-	return SetQueryStats(q)
+	return func(region *RegionInfo) {
+		resetReadQuery(region.queryStats)
+		region.queryStats = mergeQueryStat(region.queryStats, RandomKindReadQuery(v))
+	}
 }
 
 // SetWrittenQuery sets the write query for the region, only used for unit test.
 func SetWrittenQuery(v uint64) RegionCreateOption {
-	q := RandomKindWriteQuery(v)
-	return SetQueryStats(q)
+	return func(region *RegionInfo) {
+		resetWriteQuery(region.queryStats)
+		region.queryStats = mergeQueryStat(region.queryStats, RandomKindWriteQuery(v))
+	}
 }
 
 // SetQueryStats sets the query stats for the region, it will cover previous statistic.
 // This func is only used for unit test.
+// It will cover previous statistic.
 func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
 		region.queryStats = v
@@ -268,6 +273,7 @@ func SetQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 
 // AddQueryStats sets the query stats for the region, it will preserve previous statistic.
 // This func is only used for test and simulator.
+// It will preserve previous statistic.
 func AddQueryStats(v *pdpb.QueryStats) RegionCreateOption {
 	return func(region *RegionInfo) {
 		q := mergeQueryStat(region.queryStats, v)
@@ -468,4 +474,26 @@ func mergeQueryStat(q1, q2 *pdpb.QueryStats) *pdpb.QueryStats {
 	q2.Commit += q1.Commit
 	q2.Rollback += q1.Rollback
 	return q2
+}
+
+func resetReadQuery(q *pdpb.QueryStats) {
+	if q == nil {
+		return
+	}
+	q.Get = 0
+	q.Scan = 0
+	q.Coprocessor = 0
+}
+
+func resetWriteQuery(q *pdpb.QueryStats) {
+	if q == nil {
+		return
+	}
+	q.Put = 0
+	q.Delete = 0
+	q.DeleteRange = 0
+	q.AcquirePessimisticLock = 0
+	q.Rollback = 0
+	q.Prewrite = 0
+	q.Commit = 0
 }
