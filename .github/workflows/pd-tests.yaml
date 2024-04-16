@@ -25,9 +25,21 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        include:
+          - worker_id: 1
+            name: 'Unit Test(1)'
+          - worker_id: 2
+            name: 'Unit Test(2)'
+          - worker_id: 3
+            name: 'Tools Test'
+          - worker_id: 4
+            name: 'Client Integration Test'
+          - worker_id: 5
+            name: 'TSO Integration Test'
+          - worker_id: 6
+            name: 'MicroService Integration Test'
     outputs:
-      job-total: 13
+      job-total: 6
     steps:
       - uses: actions/setup-go@v3
         with:
@@ -43,15 +55,12 @@ jobs:
             **/.tools
             **/.dashboard_download_cache
           key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
-      - name: Make Test
+      - name: ${{ matrix.name }}
         env:
           WORKER_ID: ${{ matrix.worker_id }}
-          WORKER_COUNT: 13
-          JOB_COUNT: 9 # 10 is tools test, 11, 12, 13 are for other integrations jobs
         run: |
-          make ci-test-job JOB_COUNT=$(($JOB_COUNT)) JOB_INDEX=$WORKER_ID
+          make ci-test-job JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID
-          sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
       - name: Upload coverage result ${{ matrix.worker_id }}
         uses: actions/upload-artifact@v2
         with:
@@ -70,7 +79,11 @@ jobs:
       - name: Merge
         env:
           TOTAL_JOBS: ${{needs.chunks.outputs.job-total}}
-        run: for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
+        run: |
+          for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
+          sed -i "/failpoint_binding/d" covprofile
+          # only keep the first line(`mode: aomic`) of the coverage profile
+          sed -i '2,${/mode: atomic/d;}' covprofile
       - name: Send coverage
         uses: codecov/codecov-action@v4.2.0
         with:

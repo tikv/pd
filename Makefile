@@ -80,7 +80,7 @@ BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
 build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench pd-ut
+tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench pd-dev
 
 PD_SERVER_DEP :=
 ifeq ($(SWAGGER), 1)
@@ -126,12 +126,12 @@ regions-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/regions-dump regions-dump/main.go
 stores-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
-pd-ut: pd-xprog
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go
+pd-dev: pd-xprog
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-dev pd-dev/ut.go pd-dev/coverProfile.go
 pd-xprog:
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-ut/xprog.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-dev/xprog.go
 
-.PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench pd-ut
+.PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench pd-dev
 
 #### Docker image ####
 
@@ -225,10 +225,16 @@ failpoint-disable: install-tools
 
 #### Test ####
 
-ut: pd-ut
+ut: pd-dev
 	@$(FAILPOINT_ENABLE)
-	./bin/pd-ut run --race
-	@$(CLEAN_UT_BINARY)
+	./bin/pd-dev run --race
+	@$(CLEAN_DEV_BINARY)
+	@$(FAILPOINT_DISABLE)
+
+dev-it: pd-dev
+	@$(FAILPOINT_ENABLE)
+	./bin/pd-dev it run --race
+	@$(CLEAN_DEV_BINARY)
 	@$(FAILPOINT_DISABLE)
 
 PACKAGE_DIRECTORIES := $(subst $(PD_PKG)/,,$(PACKAGES))
@@ -251,9 +257,10 @@ basic-test: install-tools
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-ci-test-job: install-tools dashboard-ui
+ci-test-job: install-tools dashboard-ui pd-dev
 	@$(FAILPOINT_ENABLE)
-	./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
+	./scripts/ci-subtask.sh $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
+	@$(CLEAN_DEV_BINARY)
 	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
@@ -309,7 +316,7 @@ split:
 
 clean: failpoint-disable clean-test clean-build
 
-CLEAN_UT_BINARY := find . -name '*.test.bin'| xargs rm -f
+CLEAN_DEV_BINARY := find . -name '*.test.bin'| xargs rm -f
 
 clean-test:
 	# Cleaning test tmp...
@@ -318,7 +325,7 @@ clean-test:
 	rm -rf /tmp/test_etcd*
 	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
-	@$(CLEAN_UT_BINARY)
+	@$(CLEAN_DEV_BINARY)
 
 clean-build:
 	# Cleaning building files...
