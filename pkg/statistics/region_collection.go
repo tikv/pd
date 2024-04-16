@@ -446,8 +446,8 @@ func logDownPeerWithNoDisconnectedStore(region *core.RegionInfo, stores []*core.
 	for _, p := range region.GetDownPeers() {
 		log.Warn("region has down peer on connected store",
 			zap.Uint64("region-id", region.GetID()),
-			zap.Uint64("down-peer", p.Peer.Id),
-			zap.Uint64("down seconds", p.DownSeconds),
-			zap.Uint64("store-id", p.Peer.StoreId))
+			zap.Uint64("down-peer", p.GetPeer().GetId()),
+			zap.Uint64("down-seconds", p.GetDownSeconds()),
+			zap.Uint64("store-id", p.GetPeer().GetStoreId()))
 	}
 }
