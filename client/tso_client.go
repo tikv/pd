@@ -43,25 +43,6 @@ type TSOClient interface {
 	GetMinTS(ctx context.Context) (int64, int64, error)
 }
 
-type tsoRequest struct {
-	start      time.Time
-	clientCtx  context.Context
-	requestCtx context.Context
-	done       chan error
-	physical   int64
-	logical    int64
-	dcLocation string
-
-	pool *sync.Pool
-}
-
-func (req *tsoRequest) tryDone(err error) {
-	select {
-	case req.done <- err:
-	default:
-	}
-}
-
 type tsoClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -156,6 +137,19 @@ func (c *tsoClient) Close() {
 	})
 
 	log.Info("tso client is closed")
+}
+
+func (c *tsoClient) getTSORequest(ctx context.Context, dcLocation string) *tsoRequest {
+	req := c.tsoReqPool.Get().(*tsoRequest)
+	// Set needed fields in the request before using it.
+	req.start = time.Now()
+	req.pool = c.tsoReqPool
+	req.requestCtx = ctx
+	req.clientCtx = c.ctx
+	req.physical = 0
+	req.logical = 0
+	req.dcLocation = dcLocation
+	return req
 }
 
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
