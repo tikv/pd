@@ -791,25 +791,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 		defer span.Finish()
 	}
 
-	req := c.getTSORequest(ctx, dcLocation)
-	if err := c.dispatchTSORequestWithRetry(req); err != nil {
-		req.tryDone(err)
-	}
-	return req
-}
-
-func (c *client) getTSORequest(ctx context.Context, dcLocation string) *tsoRequest {
-	tsoReqPool := c.tsoClient.tsoReqPool
-	req := tsoReqPool.Get().(*tsoRequest)
-	// Set needed fields in the request before using it.
-	req.start = time.Now()
-	req.clientCtx = c.ctx
-	req.requestCtx = ctx
-	req.physical = 0
-	req.logical = 0
-	req.dcLocation = dcLocation
-	req.pool = tsoReqPool
-	return req
+	return c.dispatchTSORequestWithRetry(ctx, dcLocation)
 }
 
 const (
@@ -817,10 +799,11 @@ const (
 	dispatchRetryCount = 2
 )
 
-func (c *client) dispatchTSORequestWithRetry(req *tsoRequest) error {
+func (c *client) dispatchTSORequestWithRetry(ctx context.Context, dcLocation string) TSFuture {
 	var (
 		retryable bool
 		err       error
+		req       *tsoRequest
 	)
 	for i := 0; i < dispatchRetryCount; i++ {
 		// Do not delay for the first time.
@@ -833,12 +816,22 @@ func (c *client) dispatchTSORequestWithRetry(req *tsoRequest) error {
 			err = errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
 			continue
 		}
+		// Get a new request from the pool if it's nil or not from the current pool.
+		if req == nil || req.pool != tsoClient.tsoReqPool {
+			req = tsoClient.getTSORequest(ctx, dcLocation)
+		}
 		retryable, err = tsoClient.dispatchRequest(req)
 		if !retryable {
 			break
 		}
 	}
-	return err
+	if err != nil {
+		if req == nil {
+			return newTSORequestFastFail(err)
+		}
+		req.tryDone(err)
+	}
+	return req
 }
 
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
