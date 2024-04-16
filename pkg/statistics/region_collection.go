@@ -239,7 +239,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTS))
 				} else {
 					info.startDownPeerTS = time.Now().Unix()
-					logDownPeerOnConnectedStore(region, stores)
+					logDownPeerWithNoDisconnectedStore(region, stores)
 				}
 			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
 				if info.startMissVoterPeerTS != 0 {
@@ -431,23 +431,17 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 	return res
 }
 
-// logDownPeerOnConnectedStore logs the down peers on connected stores.
-// It is used to help users to know the down peer status.
-// TODO: It is not a good way to log during process region heartbeat, it is a temporary solution.
-// region: the region which has down peers
-// stores: the stores that the peers of the region belong to.
-func logDownPeerOnConnectedStore(region *core.RegionInfo, stores []*core.StoreInfo) {
-	if len(region.GetDownPeers()) == 0 {
-		return
-	}
-	disconnectStoresNum := 0
+// logDownPeerWithNoDisconnectedStore logs down peers on connected stores.
+// It won't log down peer when any store of the replica is disconnected which is
+// used to avoid too many logs when a store is disconnected.
+// TODO: it's not a good way to log down peer during process region heartbeat, we should handle it in another way.
+// region: the region which has down peer
+// stores: all stores that the region has peer on them
+func logDownPeerWithNoDisconnectedStore(region *core.RegionInfo, stores []*core.StoreInfo) {
 	for _, store := range stores {
 		if store.IsDisconnected() {
-			disconnectStoresNum++
+			return
 		}
-	}
-	if len(region.GetDownPeers()) == disconnectStoresNum {
-		return
 	}
 	for _, p := range region.GetDownPeers() {
 		log.Warn("region has down peer on connected store",
