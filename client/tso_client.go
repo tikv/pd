@@ -51,16 +51,8 @@ type tsoRequest struct {
 	physical   int64
 	logical    int64
 	dcLocation string
-}
 
-var tsoReqPool = sync.Pool{
-	New: func() any {
-		return &tsoRequest{
-			done:     make(chan error, 1),
-			physical: 0,
-			logical:  0,
-		}
-	},
+	pool *sync.Pool
 }
 
 func (req *tsoRequest) tryDone(err error) {
@@ -84,6 +76,8 @@ type tsoClient struct {
 	// tso allocator leader is switched.
 	tsoAllocServingURLSwitchedCallback []func()
 
+	// tsoReqPool is the pool to recycle `*tsoRequest`.
+	tsoReqPool *sync.Pool
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
 	tsoDispatcher sync.Map // Same as map[string]*tsoDispatcher
@@ -104,11 +98,20 @@ func newTSOClient(
 ) *tsoClient {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoClient{
-		ctx:                       ctx,
-		cancel:                    cancel,
-		option:                    option,
-		svcDiscovery:              svcDiscovery,
-		tsoStreamBuilderFactory:   factory,
+		ctx:                     ctx,
+		cancel:                  cancel,
+		option:                  option,
+		svcDiscovery:            svcDiscovery,
+		tsoStreamBuilderFactory: factory,
+		tsoReqPool: &sync.Pool{
+			New: func() any {
+				return &tsoRequest{
+					done:     make(chan error, 1),
+					physical: 0,
+					logical:  0,
+				}
+			},
+		},
 		checkTSDeadlineCh:         make(chan struct{}),
 		checkTSODispatcherCh:      make(chan struct{}, 1),
 		updateTSOConnectionCtxsCh: make(chan struct{}, 1),
