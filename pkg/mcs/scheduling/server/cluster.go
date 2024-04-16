@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -51,13 +53,21 @@ type Cluster struct {
 	apiServerLeader   atomic.Value
 	clusterID         uint64
 	running           atomic.Bool
+
+	taskRunner           ratelimit.Runner
+	hbConcurrencyLimiter *ratelimit.ConcurrencyLimiter
 }
 
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
 	collectWaitTime       = time.Minute
+
+	// heartbeat relative const
+	hbConcurrentRunner = "heartbeat-concurrent-task-runner"
 )
+
+var syncRunner = ratelimit.NewSyncRunner()
 
 // NewCluster creates a new cluster.
 func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
@@ -81,6 +91,9 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		storage:           storage,
 		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
+
+		taskRunner:           ratelimit.NewConcurrentRunner(hbConcurrentRunner, time.Minute),
+		hbConcurrencyLimiter: ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU() * 2)),
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
 	err = c.ruleManager.Initialize(persistConfig.GetMaxReplicas(), persistConfig.GetLocationLabels(), persistConfig.GetIsolationLevel())
@@ -517,6 +530,7 @@ func (c *Cluster) StartBackgroundJobs() {
 	go c.runUpdateStoreStats()
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
+	c.taskRunner.Start()
 	c.running.Store(true)
 }
 
@@ -527,6 +541,7 @@ func (c *Cluster) StopBackgroundJobs() {
 	}
 	c.running.Store(false)
 	c.coordinator.Stop()
+	c.taskRunner.Stop()
 	c.cancel()
 	c.wg.Wait()
 }
@@ -542,8 +557,19 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
+	var runner ratelimit.Runner
+	runner = syncRunner
+	if c.persistConfig.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
+		runner = c.taskRunner
+	}
+	ctx := &core.MetaProcessContext{
+		Context:    c.ctx,
+		Limiter:    c.hbConcurrencyLimiter,
+		Tracer:     tracer,
+		TaskRunner: runner,
+	}
 	tracer.Begin()
-	if err := c.processRegionHeartbeat(region, tracer); err != nil {
+	if err := c.processRegionHeartbeat(ctx, region); err != nil {
 		tracer.OnAllStageFinished()
 		return err
 	}
@@ -553,26 +579,47 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 }
 
 // processRegionHeartbeat updates the region information.
-func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo, tracer core.RegionHeartbeatProcessTracer) error {
-	origin, _, err := c.PreCheckPutRegion(region, tracer)
+func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *core.RegionInfo) error {
+	tracer := ctx.Tracer
+	origin, _, err := c.PreCheckPutRegion(region)
 	tracer.OnPreCheckFinished()
 	if err != nil {
 		return err
 	}
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
-	cluster.HandleStatsAsync(c, region)
+	ctx.TaskRunner.RunTask(
+		ctx,
+		ratelimit.TaskOpts{
+			TaskName: "HandleStatsAsync",
+			Limit:    ctx.Limiter,
+		},
+		func(_ context.Context) {
+			cluster.HandleStatsAsync(c, region)
+		},
+	)
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	_, saveCache, _ := core.GenerateRegionGuideFunc(true)(region, origin)
+	_, saveCache, _ := core.GenerateRegionGuideFunc(true)(ctx, region, origin)
 
 	if !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			c.regionStats.Observe(region, c.GetRegionStores(region))
+			ctx.TaskRunner.RunTask(
+				ctx,
+				ratelimit.TaskOpts{
+					TaskName: "ObserveRegionStatsAsync",
+					Limit:    ctx.Limiter,
+				},
+				func(_ context.Context) {
+					if c.regionStats.RegionStatsNeedUpdate(region) {
+						cluster.Collect(c, region, hasRegionStats)
+					}
+				},
+			)
 		}
 		return nil
 	}
@@ -583,15 +630,35 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo, tracer core.Re
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.AtomicCheckAndPutRegion(region, tracer); err != nil {
+
+		// Async task in next PR.
+		if overlaps, err = c.AtomicCheckAndPutRegion(ctx, region); err != nil {
 			tracer.OnSaveCacheFinished()
 			return err
 		}
-
-		cluster.HandleOverlaps(c, overlaps)
+		ctx.TaskRunner.RunTask(
+			ctx,
+			ratelimit.TaskOpts{
+				TaskName: "HandleOverlaps",
+				Limit:    ctx.Limiter,
+			},
+			func(_ context.Context) {
+				cluster.HandleOverlaps(c, overlaps)
+			},
+		)
 	}
 	tracer.OnSaveCacheFinished()
-	cluster.Collect(c, region, c.GetRegionStores(region), hasRegionStats)
+	// handle region stats
+	ctx.TaskRunner.RunTask(
+		ctx,
+		ratelimit.TaskOpts{
+			TaskName: "CollectRegionStatsAsync",
+			Limit:    ctx.Limiter,
+		},
+		func(_ context.Context) {
+			cluster.Collect(c, region, hasRegionStats)
+		},
+	)
 	tracer.OnCollectRegionStatsFinished()
 	return nil
 }
