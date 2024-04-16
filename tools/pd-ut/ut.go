@@ -589,8 +589,28 @@ func skipDIR(pkg string) bool {
 	return false
 }
 
+func generateBuildCache() error {
+	// cd cmd/pd-server && go test -tags=tso_function_test,deadlock -exec-=true -vet=off -toolexec=go-compile-without-link
+	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=tso_function_test,deadlock")
+	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s/tools/pd-ut/go-compile-without-link.sh", workDir)
+	cmd.Args = append(cmd.Args, goCompileWithoutLink)
+	cmd.Dir = fmt.Sprintf("%s/cmd/pd-server", workDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return withTrace(err)
+	}
+	return nil
+}
+
 // buildTestBinaryMulti is much faster than build the test packages one by one.
 func buildTestBinaryMulti(pkgs []string) error {
+	// staged build, generate the build cache for all the tests first, then generate the test binary.
+	// This way is faster than generating test binaries directly, because the cache can be used.
+	if err := generateBuildCache(); err != nil {
+		return withTrace(err)
+	}
+
 	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
 	xprogPath := path.Join(workDir, "bin/xprog")
 	packages := make([]string, 0, len(pkgs))
