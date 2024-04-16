@@ -28,6 +28,7 @@ type Cluster interface {
 	GetLabelStats() *statistics.LabelStatistics
 	GetCoordinator() *schedule.Coordinator
 	GetRuleManager() *placement.RuleManager
+	GetBasicCluster() *core.BasicCluster
 }
 
 // HandleStatsAsync handles the flow asynchronously.
@@ -55,8 +56,17 @@ func HandleOverlaps(c Cluster, overlaps []*core.RegionInfo) {
 }
 
 // Collect collects the cluster information.
-func Collect(c Cluster, region *core.RegionInfo, stores []*core.StoreInfo, hasRegionStats bool) {
+func Collect(c Cluster, region *core.RegionInfo, hasRegionStats bool) {
 	if hasRegionStats {
-		c.GetRegionStats().Observe(region, stores)
+		// get region again from root tree. make sure the observed region is the latest.
+		bc := c.GetBasicCluster()
+		if bc == nil {
+			return
+		}
+		region = bc.GetRegion(region.GetID())
+		if region == nil {
+			return
+		}
+		c.GetRegionStats().Observe(region, c.GetBasicCluster().GetRegionStores(region))
 	}
 }
