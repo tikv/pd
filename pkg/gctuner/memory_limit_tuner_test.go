@@ -86,7 +86,7 @@ func TestGlobalMemoryTuner(t *testing.T) {
 		nextGC := r.NextGC
 		memoryLimit := GlobalMemoryLimitTuner.calcMemoryLimit(GlobalMemoryLimitTuner.GetPercentage())
 		// In golang source, nextGC = memoryLimit - three parts memory.
-		require.True(t, nextGC < uint64(memoryLimit))
+		require.Less(t, nextGC, uint64(memoryLimit))
 	}
 
 	memory600mb := allocator.alloc(600 << 20)
