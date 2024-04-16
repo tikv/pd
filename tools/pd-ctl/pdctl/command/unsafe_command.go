@@ -106,7 +106,7 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 	postJSON(cmd, prefix, postInput)
 }
 
-func removeFailedStoresShowCommandFunc(cmd *cobra.Command, args []string) {
+func removeFailedStoresShowCommandFunc(cmd *cobra.Command, _ []string) {
 	var resp string
 	var err error
 	prefix := fmt.Sprintf("%s/remove-failed-stores/show", unsafePrefix)

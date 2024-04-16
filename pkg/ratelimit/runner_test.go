@@ -23,10 +23,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAsyncRunner(t *testing.T) {
+func TestConcurrentRunner(t *testing.T) {
 	t.Run("RunTask", func(t *testing.T) {
 		limiter := NewConcurrencyLimiter(1)
-		runner := NewAsyncRunner("test", time.Second)
+		runner := NewConcurrentRunner("test", time.Second)
+		runner.Start()
 		defer runner.Stop()
 
 		var wg sync.WaitGroup
@@ -36,7 +37,7 @@ func TestAsyncRunner(t *testing.T) {
 			err := runner.RunTask(context.Background(), TaskOpts{
 				TaskName: "test1",
 				Limit:    limiter,
-			}, func(ctx context.Context) {
+			}, func(context.Context) {
 				defer wg.Done()
 				time.Sleep(100 * time.Millisecond)
 			})
@@ -47,7 +48,8 @@ func TestAsyncRunner(t *testing.T) {
 
 	t.Run("MaxPendingDuration", func(t *testing.T) {
 		limiter := NewConcurrencyLimiter(1)
-		runner := NewAsyncRunner("test", 2*time.Millisecond)
+		runner := NewConcurrentRunner("test", 2*time.Millisecond)
+		runner.Start()
 		defer runner.Stop()
 		var wg sync.WaitGroup
 		for i := 0; i < 10; i++ {
@@ -55,7 +57,7 @@ func TestAsyncRunner(t *testing.T) {
 			err := runner.RunTask(context.Background(), TaskOpts{
 				TaskName: "test2",
 				Limit:    limiter,
-			}, func(ctx context.Context) {
+			}, func(context.Context) {
 				defer wg.Done()
 				time.Sleep(100 * time.Millisecond)
 			})

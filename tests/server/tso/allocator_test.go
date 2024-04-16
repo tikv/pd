@@ -132,7 +132,7 @@ func TestPriorityAndDifferentLocalTSO(t *testing.T) {
 	time.Sleep(time.Second * 5)
 
 	// Join a new dc-location
-	pd4, err := cluster.Join(ctx, func(conf *config.Config, serverName string) {
+	pd4, err := cluster.Join(ctx, func(conf *config.Config, _ string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = "dc-4"
 	})

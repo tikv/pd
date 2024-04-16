@@ -801,7 +801,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if err != nil {
 		return err
 	}
-	o.adjustScheduleCfg(&cfg.Schedule)
+	adjustScheduleCfg(&cfg.Schedule)
 	// Some fields may not be stored in the storage, we need to calculate them manually.
 	cfg.StoreConfig.Adjust()
 	cfg.PDServerCfg.MigrateDeprecatedFlags()
@@ -819,7 +819,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	return nil
 }
 
-func (o *PersistOptions) adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
+func adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
 	// In case we add new default schedulers.
 	for _, ps := range sc.DefaultSchedulers {
 		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {

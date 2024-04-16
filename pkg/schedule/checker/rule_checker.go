@@ -107,7 +107,7 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 }
 
 // GetType returns RuleChecker's Type
-func (c *RuleChecker) GetType() string {
+func (*RuleChecker) GetType() string {
 	return ruleCheckerName
 }
 
@@ -347,7 +347,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 	if region.GetLeader().GetId() != peer.GetId() && rf.Rule.Role == placement.Leader {
 		ruleCheckerFixLeaderRoleCounter.Inc()
 		if c.allowLeader(fit, peer) {
-			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, region.GetLeader().GetStoreId(), peer.GetStoreId(), []uint64{}, 0)
+			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, peer.GetStoreId(), []uint64{}, 0)
 		}
 		ruleCheckerNotAllowLeaderCounter.Inc()
 		return nil, errPeerCannotBeLeader
@@ -356,7 +356,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 		ruleCheckerFixFollowerRoleCounter.Inc()
 		for _, p := range region.GetPeers() {
 			if c.allowLeader(fit, p) {
-				return operator.CreateTransferLeaderOperator("fix-follower-role", c.cluster, region, peer.GetStoreId(), p.GetStoreId(), []uint64{}, 0)
+				return operator.CreateTransferLeaderOperator("fix-follower-role", c.cluster, region, p.GetStoreId(), []uint64{}, 0)
 			}
 		}
 		ruleCheckerNoNewLeaderCounter.Inc()

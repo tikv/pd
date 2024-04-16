@@ -29,6 +29,8 @@ const initialCapacity = 100
 // Runner is the interface for running tasks.
 type Runner interface {
 	RunTask(ctx context.Context, opt TaskOpts, f func(context.Context)) error
+	Start()
+	Stop()
 }
 
 // Task is a task to be run.
@@ -42,8 +44,8 @@ type Task struct {
 // ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
 var ErrMaxWaitingTasksExceeded = errors.New("max waiting tasks exceeded")
 
-// AsyncRunner is a simple task runner that limits the number of concurrent tasks.
-type AsyncRunner struct {
+// ConcurrentRunner is a simple task runner that limits the number of concurrent tasks.
+type ConcurrentRunner struct {
 	name               string
 	maxPendingDuration time.Duration
 	taskChan           chan *Task
@@ -53,16 +55,14 @@ type AsyncRunner struct {
 	wg                 sync.WaitGroup
 }
 
-// NewAsyncRunner creates a new AsyncRunner.
-func NewAsyncRunner(name string, maxPendingDuration time.Duration) *AsyncRunner {
-	s := &AsyncRunner{
+// NewConcurrentRunner creates a new ConcurrentRunner.
+func NewConcurrentRunner(name string, maxPendingDuration time.Duration) *ConcurrentRunner {
+	s := &ConcurrentRunner{
 		name:               name,
 		maxPendingDuration: maxPendingDuration,
 		taskChan:           make(chan *Task),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
-		stopChan:           make(chan struct{}),
 	}
-	s.Start()
 	return s
 }
 
@@ -74,7 +74,8 @@ type TaskOpts struct {
 }
 
 // Start starts the runner.
-func (s *AsyncRunner) Start() {
+func (s *ConcurrentRunner) Start() {
+	s.stopChan = make(chan struct{})
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -84,7 +85,6 @@ func (s *AsyncRunner) Start() {
 				if task.Opts.Limit != nil {
 					token, err := task.Opts.Limit.Acquire(context.Background())
 					if err != nil {
-						log.Error("failed to acquire semaphore", zap.String("task-name", task.Opts.TaskName), zap.Error(err))
 						continue
 					}
 					go s.run(task.Ctx, task.f, token)
@@ -99,7 +99,7 @@ func (s *AsyncRunner) Start() {
 	}()
 }
 
-func (s *AsyncRunner) run(ctx context.Context, task func(context.Context), token *TaskToken) {
+func (s *ConcurrentRunner) run(ctx context.Context, task func(context.Context), token *TaskToken) {
 	task(ctx)
 	if token != nil {
 		token.Release()
@@ -107,7 +107,7 @@ func (s *AsyncRunner) run(ctx context.Context, task func(context.Context), token
 	}
 }
 
-func (s *AsyncRunner) processPendingTasks() {
+func (s *ConcurrentRunner) processPendingTasks() {
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
 	for len(s.pendingTasks) > 0 {
@@ -123,13 +123,13 @@ func (s *AsyncRunner) processPendingTasks() {
 }
 
 // Stop stops the runner.
-func (s *AsyncRunner) Stop() {
+func (s *ConcurrentRunner) Stop() {
 	close(s.stopChan)
 	s.wg.Wait()
 }
 
 // RunTask runs the task asynchronously.
-func (s *AsyncRunner) RunTask(ctx context.Context, opt TaskOpts, f func(context.Context)) error {
+func (s *ConcurrentRunner) RunTask(ctx context.Context, opt TaskOpts, f func(context.Context)) error {
 	task := &Task{
 		Ctx:  ctx,
 		Opts: opt,
@@ -162,7 +162,13 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (s *SyncRunner) RunTask(ctx context.Context, opt TaskOpts, f func(context.Context)) error {
+func (*SyncRunner) RunTask(ctx context.Context, _ TaskOpts, f func(context.Context)) error {
 	f(ctx)
 	return nil
 }
+
+// Start starts the runner.
+func (*SyncRunner) Start() {}
+
+// Stop stops the runner.
+func (*SyncRunner) Stop() {}

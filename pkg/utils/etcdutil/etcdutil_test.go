@@ -300,11 +300,10 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
 	defer etcd2.Close()
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
-	time.Sleep(1 * time.Second) // wait for etcd client sync endpoints
 
 	// Hang the etcd1 and wait for the client to connect to etcd2.
 	enableDiscard.Store(true)
-	time.Sleep(time.Second)
+	time.Sleep(3 * time.Second)
 	_, err = EtcdKVGet(client1, "test/key1")
 	return err
 }
@@ -366,7 +365,8 @@ func ioCopy(ctx context.Context, dst io.Writer, src io.Reader, enableDiscard *at
 			return nil
 		default:
 			if enableDiscard.Load() {
-				io.Copy(io.Discard, src)
+				_, err := io.Copy(io.Discard, src)
+				return err
 			}
 			readNum, errRead := src.Read(buffer)
 			if readNum > 0 {
@@ -438,7 +438,7 @@ func (suite *loopWatcherTestSuite) TestLoadNoExistedKey() {
 			cache[string(kv.Key)] = struct{}{}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
@@ -466,7 +466,7 @@ func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 			cache[string(kv.Key)] = struct{}{}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		true, /* withPrefix */
 	)
@@ -559,7 +559,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 					cache = append(cache, string(kv.Key))
 					return nil
 				},
-				func(kv *mvccpb.KeyValue) error {
+				func(*mvccpb.KeyValue) error {
 					return nil
 				},
 				func([]*clientv3.Event) error {
@@ -598,7 +598,7 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 			cache = append(cache, string(kv.Key))
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error {
+		func(*mvccpb.KeyValue) error {
 			return nil
 		},
 		func([]*clientv3.Event) error {
@@ -641,7 +641,7 @@ func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 			}
 			return nil
 		},
-		func(kv *mvccpb.KeyValue) error { return nil },
+		func(*mvccpb.KeyValue) error { return nil },
 		func([]*clientv3.Event) error { return nil },
 		false, /* withPrefix */
 	)
@@ -719,8 +719,8 @@ func (suite *loopWatcherTestSuite) TestWatcherRequestProgress() {
 			"test",
 			"TestWatcherChanBlock",
 			func([]*clientv3.Event) error { return nil },
-			func(kv *mvccpb.KeyValue) error { return nil },
-			func(kv *mvccpb.KeyValue) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
+			func(*mvccpb.KeyValue) error { return nil },
 			func([]*clientv3.Event) error { return nil },
 			false, /* withPrefix */
 		)

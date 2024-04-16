@@ -35,7 +35,7 @@ func TestWatcher(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -73,7 +73,7 @@ func TestWatcherCompacted(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	re.NoError(err)
 
