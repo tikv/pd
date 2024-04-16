@@ -799,6 +799,7 @@ func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFutur
 }
 
 func (c *client) getTSORequest(ctx context.Context, dcLocation string) *tsoRequest {
+	tsoReqPool := c.tsoClient.tsoReqPool
 	req := tsoReqPool.Get().(*tsoRequest)
 	// Set needed fields in the request before using it.
 	req.start = time.Now()
@@ -807,6 +808,7 @@ func (c *client) getTSORequest(ctx context.Context, dcLocation string) *tsoReque
 	req.physical = 0
 	req.logical = 0
 	req.dcLocation = dcLocation
+	req.pool = tsoReqPool
 	return req
 }
 
