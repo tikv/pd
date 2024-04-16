@@ -26,7 +26,13 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/testutil"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
 	group := &rmpb.ResourceGroup{

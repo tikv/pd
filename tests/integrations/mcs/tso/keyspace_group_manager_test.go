@@ -367,7 +367,7 @@ func waitFinishSplit(
 	splitSourceKeyspaces, splitTargetKeyspaces []uint32,
 ) {
 	testutil.Eventually(re, func() bool {
-		kg, code := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitTargetID)
+		kg, code, _ := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitTargetID)
 		if code != http.StatusOK {
 			return false
 		}
@@ -376,7 +376,7 @@ func waitFinishSplit(
 		return !kg.IsSplitTarget()
 	})
 	testutil.Eventually(re, func() bool {
-		kg, code := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitSourceID)
+		kg, code, _ := handlersutil.TryLoadKeyspaceGroupByID(re, server, splitSourceID)
 		if code != http.StatusOK {
 			return false
 		}

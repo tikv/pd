@@ -53,7 +53,7 @@ func TestReconnect(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.TickInterval = typeutil.Duration{Duration: 50 * time.Millisecond}
-		conf.ElectionInterval = typeutil.Duration{Duration: 250 * time.Millisecond}
+		conf.ElectionInterval = typeutil.Duration{Duration: 300 * time.Millisecond}
 	})
 	re.NoError(err)
 	defer cluster.Destroy()
