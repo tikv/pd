@@ -41,20 +41,11 @@ jobs:
     outputs:
       job-total: 6
     steps:
-      - uses: actions/setup-go@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Restore cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-            **/.tools
-            **/.dashboard_download_cache
-          key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
       - name: ${{ matrix.name }}
         env:
           WORKER_ID: ${{ matrix.worker_id }}
@@ -62,20 +53,21 @@ jobs:
           make ci-test-job JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID
       - name: Upload coverage result ${{ matrix.worker_id }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: cover-reports
+          name: cover-reports-${{ matrix.worker_id }}
           path: covprofile_${{ matrix.worker_id }}
   report-coverage:
     needs: chunks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Download chunk report
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
-          name: cover-reports
+          pattern: cover-reports-*
+          merge-multiple: true
       - name: Merge
         env:
           TOTAL_JOBS: ${{needs.chunks.outputs.job-total}}
