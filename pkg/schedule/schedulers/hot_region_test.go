@@ -43,6 +43,7 @@ func init() {
 	// TODO: remove this global variable in the future.
 	// And use a function to create hot schduler for test.
 	schedulePeerPr = 1.0
+	// disable denoising in test.
 	statistics.Denoising = false
 	statisticsInterval = 0
 	RegisterScheduler(utils.Write.String(), func(opController *operator.Controller, _ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
