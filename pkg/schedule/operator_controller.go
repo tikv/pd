@@ -213,8 +213,10 @@ func (oc *OperatorController) pollNeedDispatchRegion() (r *core.RegionInfo, next
 	if !ok || op == nil {
 		return nil, true
 	}
-	r = oc.cluster.GetRegion(regionID)
-	if r == nil {
+	// Check the operator lightly. It cant't dispatch the op for some scenario.
+	var reason operator.CancelReasonType
+	r, reason = oc.checkOperatorLightly(op)
+	if len(reason) != 0 {
 		_ = oc.removeOperatorLocked(op)
 		if op.Cancel() {
 			log.Warn("remove operator because region disappeared",
@@ -297,6 +299,7 @@ func (oc *OperatorController) AddWaitingOperator(ops ...*operator.Operator) int 
 		if isMerge {
 			// count two merge operators as one, so wopStatus.ops[desc] should
 			// not be updated here
+			// TODO: call checkAddOperator ...
 			i++
 			added++
 			oc.wop.PutOperator(ops[i])
@@ -432,6 +435,27 @@ func (oc *OperatorController) checkAddOperator(isPromoting bool, ops ...*operato
 		}
 	}
 	return !expired
+}
+
+// checkOperatorLightly checks whether the ops can be dispatched in Controller::pollNeedDispatchRegion.
+// The operators can't be dispatched for some scenarios, such as region disappeared, region changed ...
+// `region` is the target region of `op`.
+func (oc *OperatorController) checkOperatorLightly(op *operator.Operator) (*core.RegionInfo, operator.CancelReasonType) {
+	region := oc.cluster.GetRegion(op.RegionID())
+	if region == nil {
+		operatorCounter.WithLabelValues(op.Desc(), "not-found").Inc()
+		return nil, operator.RegionNotFound
+	}
+
+	// It may be suitable for all kinds of operator but not merge-region.
+	// But to be cautions, it only takes effect on merge-region currently.
+	// If the version of epoch is changed, the region has been splitted or merged, and the key range has been changed.
+	// The changing for conf_version of epoch doesn't modify the region key range, skip it.
+	if (op.Kind()&operator.OpMerge != 0) && region.GetRegionEpoch().GetVersion() > op.RegionEpoch().GetVersion() {
+		operatorCounter.WithLabelValues(op.Desc(), "epoch-not-match").Inc()
+		return nil, operator.EpochNotMatch
+	}
+	return region, ""
 }
 
 func isHigherPriorityOperator(new, old *operator.Operator) bool {
