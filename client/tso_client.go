@@ -43,33 +43,6 @@ type TSOClient interface {
 	GetMinTS(ctx context.Context) (int64, int64, error)
 }
 
-type tsoRequest struct {
-	start      time.Time
-	clientCtx  context.Context
-	requestCtx context.Context
-	done       chan error
-	physical   int64
-	logical    int64
-	dcLocation string
-}
-
-var tsoReqPool = sync.Pool{
-	New: func() any {
-		return &tsoRequest{
-			done:     make(chan error, 1),
-			physical: 0,
-			logical:  0,
-		}
-	},
-}
-
-func (req *tsoRequest) tryDone(err error) {
-	select {
-	case req.done <- err:
-	default:
-	}
-}
-
 type tsoClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -84,6 +57,8 @@ type tsoClient struct {
 	// tso allocator leader is switched.
 	tsoAllocServingURLSwitchedCallback []func()
 
+	// tsoReqPool is the pool to recycle `*tsoRequest`.
+	tsoReqPool *sync.Pool
 	// tsoDispatcher is used to dispatch different TSO requests to
 	// the corresponding dc-location TSO channel.
 	tsoDispatcher sync.Map // Same as map[string]*tsoDispatcher
@@ -104,11 +79,20 @@ func newTSOClient(
 ) *tsoClient {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoClient{
-		ctx:                       ctx,
-		cancel:                    cancel,
-		option:                    option,
-		svcDiscovery:              svcDiscovery,
-		tsoStreamBuilderFactory:   factory,
+		ctx:                     ctx,
+		cancel:                  cancel,
+		option:                  option,
+		svcDiscovery:            svcDiscovery,
+		tsoStreamBuilderFactory: factory,
+		tsoReqPool: &sync.Pool{
+			New: func() any {
+				return &tsoRequest{
+					done:     make(chan error, 1),
+					physical: 0,
+					logical:  0,
+				}
+			},
+		},
 		checkTSDeadlineCh:         make(chan struct{}),
 		checkTSODispatcherCh:      make(chan struct{}, 1),
 		updateTSOConnectionCtxsCh: make(chan struct{}, 1),
@@ -153,6 +137,19 @@ func (c *tsoClient) Close() {
 	})
 
 	log.Info("tso client is closed")
+}
+
+func (c *tsoClient) getTSORequest(ctx context.Context, dcLocation string) *tsoRequest {
+	req := c.tsoReqPool.Get().(*tsoRequest)
+	// Set needed fields in the request before using it.
+	req.start = time.Now()
+	req.pool = c.tsoReqPool
+	req.requestCtx = ctx
+	req.clientCtx = c.ctx
+	req.physical = 0
+	req.logical = 0
+	req.dcLocation = dcLocation
+	return req
 }
 
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
