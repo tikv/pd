@@ -181,7 +181,7 @@ func (suite *adminTestSuite) TestPersistFile() {
 
 func makeTS(offset time.Duration) uint64 {
 	physical := time.Now().Add(offset).UnixNano() / int64(time.Millisecond)
-	return uint64(physical << 18)
+	return uint64(physical) << 18
 }
 
 func (suite *adminTestSuite) TestResetTS() {
