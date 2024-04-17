@@ -781,8 +781,10 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		allowLeaderTiKVCount := aliveTiKVCount - 1 // store 5 with evict leader
 		aliveTiFlashCount := float64(aliveTiFlashLastID - aliveTiFlashStartID + 1)
 		tc.ObserveRegionsStats()
-		ops, _ := hb.Schedule(tc, false)
-		re.NotEmpty(ops)
+		testutil.Eventually(re, func() bool {
+			ops, _ := hb.Schedule(tc, false)
+			return len(ops) != 0
+		})
 		re.True(
 			loadsEqual(
 				hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
@@ -801,8 +803,10 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		pdServerCfg.FlowRoundByDigit = 8
 		tc.SetPDServerConfig(pdServerCfg)
 		clearPendingInfluence(hb)
-		ops, _ = hb.Schedule(tc, false)
-		re.NotEmpty(ops)
+		testutil.Eventually(re, func() bool {
+			ops, _ := hb.Schedule(tc, false)
+			return len(ops) != 0
+		})
 		re.True(
 			loadsEqual(
 				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,

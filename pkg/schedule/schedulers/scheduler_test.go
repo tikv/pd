@@ -317,6 +317,7 @@ func TestShuffleRegionRole(t *testing.T) {
 }
 
 func TestSpecialUseHotRegion(t *testing.T) {
+	schedulePeerPr = 1.0
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
