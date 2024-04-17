@@ -82,7 +82,7 @@ func CheckTransferPeer(re *require.Assertions, op *operator.Operator, kind opera
 		addLearnerTo = steps[0].(operator.AddLearner).ToStore
 		removePeerFrom = steps[3].(operator.RemovePeer).FromStore
 	default:
-		re.FailNow("unexpected operator steps")
+		re.FailNow("unexpected operator steps: " + op.String())
 	}
 	re.Equal(sourceID, removePeerFrom)
 	re.Equal(targetID, addLearnerTo)
@@ -95,7 +95,9 @@ func CheckTransferLearner(re *require.Assertions, op *operator.Operator, kind op
 	re.NotNil(op)
 	steps, _ := trimTransferLeaders(op)
 	re.Len(steps, 2)
-	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
+	if targetID != 0 {
+		re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
+	}
 	re.Equal(sourceID, steps[1].(operator.RemovePeer).FromStore)
 	kind |= operator.OpRegion
 	re.Equal(kind, op.Kind()&kind)
@@ -124,7 +126,7 @@ func CheckTransferPeerWithLeaderTransfer(re *require.Assertions, op *operator.Op
 		addLearnerTo = steps[0].(operator.AddLearner).ToStore
 		removePeerFrom = steps[3].(operator.RemovePeer).FromStore
 	default:
-		re.FailNow("unexpected operator steps")
+		re.FailNow("unexpected operator steps: " + op.String())
 	}
 	re.NotZero(lastLeader)
 	re.NotEqual(sourceID, lastLeader)
@@ -177,7 +179,7 @@ func CheckSteps(re *require.Assertions, op *operator.Operator, steps []operator.
 		case operator.MergeRegion:
 			re.Equal(steps[i].(operator.MergeRegion).IsPassive, op.Step(i).(operator.MergeRegion).IsPassive)
 		default:
-			re.FailNow("unknown operator step type")
+			re.FailNow("unexpected operator steps: " + op.String())
 		}
 	}
 }

@@ -47,25 +47,29 @@ const (
 	// HotRegionName is balance hot region scheduler name.
 	HotRegionName = "balance-hot-region-scheduler"
 	// HotRegionType is balance hot region scheduler type.
-	HotRegionType          = "hot-region"
-	splitHotReadBuckets    = "split-hot-read-region"
-	splitHotWriteBuckets   = "split-hot-write-region"
-	splitProgressiveRank   = int64(-5)
-	minHotScheduleInterval = time.Second
-	maxHotScheduleInterval = 20 * time.Second
+	HotRegionType           = "hot-region"
+	splitHotReadBuckets     = "split-hot-read-region"
+	splitHotWriteBuckets    = "split-hot-write-region"
+	splitProgressiveRank    = int64(-5)
+	minHotScheduleInterval  = time.Second
+	maxHotScheduleInterval  = 20 * time.Second
+	defaultSchedulePeerPr   = 0.66
+	defaultPendingAmpFactor = 2.0
+	defaultStddevThreshold  = 0.1
+	defaultTopnPosition     = 10
 )
 
 var (
 	// schedulePeerPr the probability of schedule the hot peer.
-	schedulePeerPr = 0.66
+	schedulePeerPr = defaultSchedulePeerPr
 	// pendingAmpFactor will amplify the impact of pending influence, making scheduling slower or even serial when two stores are close together
-	pendingAmpFactor = 2.0
+	pendingAmpFactor = defaultPendingAmpFactor
 	// If the distribution of a dimension is below the corresponding stddev threshold, then scheduling will no longer be based on this dimension,
 	// as it implies that this dimension is sufficiently uniform.
-	stddevThreshold = 0.1
+	stddevThreshold = defaultStddevThreshold
 	// topnPosition is the position of the topn peer in the hot peer list.
 	// We use it to judge whether to schedule the hot peer in some cases.
-	topnPosition = 10
+	topnPosition = defaultTopnPosition
 	// statisticsInterval is the interval to update statistics information.
 	statisticsInterval = time.Second
 )

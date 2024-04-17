@@ -35,9 +35,17 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
-func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.SchedulerConfigProvider, *mockcluster.Cluster, *operator.Controller) {
+func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerConfigProvider, *mockcluster.Cluster, *operator.Controller) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
+	clean := func() {
+		cancel()
+		// reset some config to avoid affecting other tests
+		schedulePeerPr = defaultSchedulePeerPr
+		pendingAmpFactor = defaultPendingAmpFactor
+		stddevThreshold = defaultStddevThreshold
+		topnPosition = defaultTopnPosition
+	}
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	var stream *hbstream.HeartbeatStreams
@@ -48,7 +56,7 @@ func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.
 	}
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSchedulerConfig(), stream)
 	tc.SetHotRegionCacheHitsThreshold(1)
-	return cancel, opt, tc, oc
+	return clean, opt, tc, oc
 }
 
 func TestShuffleLeader(t *testing.T) {
