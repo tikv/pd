@@ -172,6 +172,7 @@ func TestEtcdClientSync(t *testing.T) {
 	servers, client1, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
+	defer etcd1.Close()
 
 	// Add a new member.
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
@@ -180,10 +181,22 @@ func TestEtcdClientSync(t *testing.T) {
 	// wait for etcd client sync endpoints
 	checkEtcdEndpointNum(re, client1, 2)
 
-	// Remove the first member and close the etcd1.
-	_, err := RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// remove one member that is not the one we connected to.
+	resp, err := ListEtcdMembers(ctx, client1)
 	re.NoError(err)
-	etcd1.Close()
+
+	var memIDToRemove uint64
+	for _, m := range resp.Members {
+		if m.ID != resp.Header.MemberId {
+			memIDToRemove = m.ID
+			break
+		}
+	}
+
+	_, err = RemoveEtcdMember(client1, memIDToRemove)
+	re.NoError(err)
 
 	// Check the client can get the new member with the new endpoints.
 	checkEtcdEndpointNum(re, client1, 1)
