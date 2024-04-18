@@ -530,9 +530,11 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "404")
 	re.Contains(echo, "PD:scheduler:ErrSchedulerNotFound]scheduler not found")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler"}, nil)
-	re.Contains(echo, "404")
-	re.Contains(echo, "scheduler not found")
+	// The scheduling service need time to sync from PD.
+	testutil.Eventually(re, func() bool {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler"}, nil)
+		return strings.Contains(echo, "404") && strings.Contains(echo, "scheduler not found")
+	})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 
