@@ -22,6 +22,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
 // RegionInfoProvider is an interface to provide the region information.
@@ -250,6 +251,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTS))
 				} else {
 					info.startDownPeerTS = time.Now().Unix()
+					logDownPeerWithNoDisconnectedStore(region, stores)
 				}
 			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
 				if info.startMissVoterPeerTS != 0 {
@@ -439,4 +441,25 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 		}
 	}
 	return res
+}
+
+// logDownPeerWithNoDisconnectedStore logs down peers on connected stores.
+// It won't log down peer when any store of the replica is disconnected which is
+// used to avoid too many logs when a store is disconnected.
+// TODO: it's not a good way to log down peer during process region heartbeat, we should handle it in another way.
+// region: the region which has down peer
+// stores: all stores that the region has peer on them
+func logDownPeerWithNoDisconnectedStore(region *core.RegionInfo, stores []*core.StoreInfo) {
+	for _, store := range stores {
+		if store.IsDisconnected() {
+			return
+		}
+	}
+	for _, p := range region.GetDownPeers() {
+		log.Warn("region has down peer on connected store",
+			zap.Uint64("region-id", region.GetID()),
+			zap.Uint64("down-peer", p.GetPeer().GetId()),
+			zap.Uint64("down-seconds", p.GetDownSeconds()),
+			zap.Uint64("store-id", p.GetPeer().GetStoreId()))
+	}
 }
