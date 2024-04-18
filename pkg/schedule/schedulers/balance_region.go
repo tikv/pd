@@ -114,6 +114,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster
 
 func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := plan.NewBalanceSchedulerPlan()
+	defer s.filterCounter.Flush()
 	var collector *plan.Collector
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
@@ -217,7 +218,6 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		}
 		s.retryQuota.Attenuate(solver.Source)
 	}
-	s.filterCounter.Flush()
 	s.retryQuota.GC(stores)
 	return nil, collector.GetPlans()
 }
