@@ -20,14 +20,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestAdjustRule(t *testing.T) {
@@ -132,6 +136,78 @@ func TestGetSetRule(t *testing.T) {
 	for id, rule := range allRules {
 		expectSameRules(re, rule, rules[id+1])
 	}
+
+	for _, r := range rules {
+		labeler.DeleteLabelRule(r.ID)
+	}
+	re.Empty(labeler.GetAllLabelRules())
+}
+
+func TestTxnWithEtcd(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	store := storage.NewStorageWithEtcdBackend(client, "")
+	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	re.NoError(err)
+	// test patch rules in batch
+	rulesNum := 200
+	patch := LabelRulePatch{}
+	for i := 1; i <= rulesNum; i++ {
+		patch.SetRules = append(patch.SetRules, &LabelRule{
+			ID: fmt.Sprintf("rule_%d", i),
+			Labels: []RegionLabel{
+				{Key: fmt.Sprintf("k_%d", i), Value: fmt.Sprintf("v_%d", i)},
+			},
+			RuleType: "key-range",
+			Data:     MakeKeyRanges("", ""),
+		})
+	}
+	err = labeler.Patch(patch)
+	re.NoError(err)
+	allRules := labeler.GetAllLabelRules()
+	re.Len(allRules, rulesNum)
+	sort.Slice(allRules, func(i, j int) bool {
+		i1, err := strconv.Atoi(allRules[i].ID[5:])
+		re.NoError(err)
+		j1, err := strconv.Atoi(allRules[j].ID[5:])
+		re.NoError(err)
+		return i1 < j1
+	})
+	for id, rule := range allRules {
+		expectSameRules(re, rule, patch.SetRules[id])
+	}
+	patch.SetRules = patch.SetRules[:0]
+	patch.DeleteRules = patch.DeleteRules[:0]
+	for i := 1; i <= rulesNum; i++ {
+		patch.DeleteRules = append(patch.DeleteRules, fmt.Sprintf("rule_%d", i))
+	}
+	err = labeler.Patch(patch)
+	re.NoError(err)
+	allRules = labeler.GetAllLabelRules()
+	re.Empty(allRules)
+
+	// test patch rules in batch with duplicated rule id
+	patch.SetRules = patch.SetRules[:0]
+	patch.DeleteRules = patch.DeleteRules[:0]
+	for i := 0; i <= 3; i++ {
+		patch.SetRules = append(patch.SetRules, &LabelRule{
+			ID: "rule_1",
+			Labels: []RegionLabel{
+				{Key: fmt.Sprintf("k_%d", i), Value: fmt.Sprintf("v_%d", i)},
+			},
+			RuleType: "key-range",
+			Data:     MakeKeyRanges("", ""),
+		})
+	}
+	patch.DeleteRules = append(patch.DeleteRules, "rule_1")
+	err = labeler.Patch(patch)
+	re.NoError(err)
+	allRules = labeler.GetAllLabelRules()
+	re.Len(allRules, 1)
+	re.Equal("rule_1", allRules[0].ID)
+	re.Len(allRules[0].Labels, 1)
+	re.Equal("k_3", allRules[0].Labels[0].Key)
 }
 
 func TestIndex(t *testing.T) {
@@ -294,7 +370,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 	start, _ := hex.DecodeString("1234")
 	end, _ := hex.DecodeString("5678")
 	region := core.NewTestRegionInfo(1, 1, start, end)
-	// the region has no lable rule at the beginning.
+	// the region has no label rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))
 
 	// set rules for the region.
@@ -307,15 +383,17 @@ func TestLabelerRuleTTL(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute", "return(true)"))
 
 	// rule2 should expire and only 2 labels left.
-	labels := labeler.GetRegionLabels(region)
-	re.Len(labels, 2)
+	testutil.Eventually(re, func() bool {
+		labels := labeler.GetRegionLabels(region)
+		return len(labels) == 2
+	})
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/labeler/regionLabelExpireSub1Minute"))
-	// rule2 should be exist since `GetRegionLabels` won't clear it physically.
-	checkRuleInMemoryAndStoage(re, labeler, "rule2", true)
+	// rule2 should be existed since `GetRegionLabels` won't clear it physically.
+	checkRuleInMemoryAndStorage(re, labeler, "rule2", true)
 	re.Nil(labeler.GetLabelRule("rule2"))
 	// rule2 should be physically clear.
-	checkRuleInMemoryAndStoage(re, labeler, "rule2", false)
+	checkRuleInMemoryAndStorage(re, labeler, "rule2", false)
 
 	re.Equal("", labeler.GetRegionLabel(region, "k2"))
 
@@ -323,10 +401,10 @@ func TestLabelerRuleTTL(t *testing.T) {
 	re.NotNil(labeler.GetLabelRule("rule1"))
 }
 
-func checkRuleInMemoryAndStoage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
+func checkRuleInMemoryAndStorage(re *require.Assertions, labeler *RegionLabeler, ruleID string, exist bool) {
 	re.Equal(exist, labeler.labelRules[ruleID] != nil)
 	existInStorage := false
-	labeler.storage.LoadRegionRules(func(k, v string) {
+	labeler.storage.LoadRegionRules(func(k, _ string) {
 		if k == ruleID {
 			existInStorage = true
 		}
@@ -344,10 +422,10 @@ func TestGC(t *testing.T) {
 	start, _ := hex.DecodeString("1234")
 	end, _ := hex.DecodeString("5678")
 	region := core.NewTestRegionInfo(1, 1, start, end)
-	// the region has no lable rule at the beginning.
+	// the region has no label rule at the beginning.
 	re.Empty(labeler.GetRegionLabels(region))
 
-	labels := []RegionLabel{}
+	labels := make([]RegionLabel, 0, len(ttls))
 	for id, ttl := range ttls {
 		labels = append(labels, RegionLabel{Key: fmt.Sprintf("k%d", id), Value: fmt.Sprintf("v%d", id), TTL: ttl})
 		rule := &LabelRule{
@@ -361,7 +439,7 @@ func TestGC(t *testing.T) {
 
 	re.Len(labeler.labelRules, len(ttls))
 
-	// check all rules unitl some rule expired.
+	// check all rules until some rule expired.
 	for {
 		time.Sleep(time.Millisecond * 5)
 		labels := labeler.GetRegionLabels(region)

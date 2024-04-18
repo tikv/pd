@@ -128,7 +128,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 	defer client.Close()
 
-	listResp, err := etcdutil.ListEtcdMembers(client)
+	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	)
 
 	for i := 0; i < listMemberRetryTimes; i++ {
-		listResp, err = etcdutil.ListEtcdMembers(client)
+		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
 		if err != nil {
 			return err
 		}

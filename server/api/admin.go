@@ -148,7 +148,7 @@ func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) MarkSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) MarkSnapshotRecovering(w http.ResponseWriter, _ *http.Request) {
 	if err := h.svr.MarkSnapshotRecovering(); err != nil {
 		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
@@ -179,7 +179,7 @@ func (h *adminHandler) UnmarkSnapshotRecovering(w http.ResponseWriter, r *http.R
 // RecoverAllocID recover base alloc id
 // body should be in {"id": "123"} format
 func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}

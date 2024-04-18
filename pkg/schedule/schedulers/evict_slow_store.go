@@ -78,7 +78,7 @@ func (conf *evictSlowStoreSchedulerConfig) getStorage() endpoint.ConfigStorage {
 	return conf.storage
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getSchedulerName() string {
+func (*evictSlowStoreSchedulerConfig) getSchedulerName() string {
 	return EvictSlowStoreName
 }
 
@@ -150,7 +150,7 @@ func newEvictSlowStoreHandler(config *evictSlowStoreSchedulerConfig) http.Handle
 }
 
 func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -170,10 +170,10 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 	log.Info("evict-slow-store-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
-func (handler *evictSlowStoreHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictSlowStoreHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -188,11 +188,11 @@ func (s *evictSlowStoreScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *evictSlowStoreScheduler) GetName() string {
+func (*evictSlowStoreScheduler) GetName() string {
 	return EvictSlowStoreName
 }
 
-func (s *evictSlowStoreScheduler) GetType() string {
+func (*evictSlowStoreScheduler) GetType() string {
 	return EvictSlowStoreType
 }
 
@@ -276,7 +276,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	return true
 }
 
-func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
 	var ops []*operator.Operator
 

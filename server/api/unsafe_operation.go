@@ -43,10 +43,10 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 // Success 200 {string} string "Request has been accepted."
 // Failure 400 {string} string "The input is invalid."
 // Failure 500 {string} string "PD server failed to proceed the request."
-// @Router   /admin/unsafe/remove-failed-stores [POST]
+// @Router   /admin/unsafe/remove-failed-stores [post]
 func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -81,7 +81,7 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 // @Summary  Show the current status of failed stores removal.
 // @Produce  json
 // Success 200 {object} []StageOutput
-// @Router   /admin/unsafe/remove-failed-stores/show [GET]
+// @Router   /admin/unsafe/remove-failed-stores/show [get]
 func (h *unsafeOperationHandler) GetFailedStoresRemovalStatus(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	h.rd.JSON(w, http.StatusOK, rc.GetUnsafeRecoveryController().Show())

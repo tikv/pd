@@ -83,7 +83,7 @@ func (conf *splitBucketSchedulerConfig) getStorage() endpoint.ConfigStorage {
 	return conf.storage
 }
 
-func (conf *splitBucketSchedulerConfig) getSchedulerName() string {
+func (*splitBucketSchedulerConfig) getSchedulerName() string {
 	return SplitBucketName
 }
 
@@ -138,7 +138,7 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -175,12 +175,12 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 }
 
 // GetName returns the name of the split bucket scheduler.
-func (s *splitBucketScheduler) GetName() string {
+func (*splitBucketScheduler) GetName() string {
 	return SplitBucketName
 }
 
 // GetType returns the type of the split bucket scheduler.
-func (s *splitBucketScheduler) GetType() string {
+func (*splitBucketScheduler) GetType() string {
 	return SplitBucketType
 }
 
@@ -230,7 +230,7 @@ type splitBucketPlan struct {
 }
 
 // Schedule return operators if some bucket is too hot.
-func (s *splitBucketScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *splitBucketScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	splitBucketScheduleCounter.Inc()
 	conf := s.conf.Clone()
 	plan := &splitBucketPlan{

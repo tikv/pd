@@ -22,45 +22,49 @@ import (
 
 // RuleStorage defines the storage operations on the rule.
 type RuleStorage interface {
-	LoadRules(txn kv.Txn, f func(k, v string)) error
-	SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error
-	DeleteRule(txn kv.Txn, ruleKey string) error
-	LoadRuleGroups(txn kv.Txn, f func(k, v string)) error
-	SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error
-	DeleteRuleGroup(txn kv.Txn, groupID string) error
-	// LoadRule is used only in rule watcher.
+	// Load in txn is unnecessary and may cause txn too large.
+	// because scheduling server will load rules from etcd rather than watching.
 	LoadRule(ruleKey string) (string, error)
-
+	LoadRules(f func(k, v string)) error
+	LoadRuleGroups(f func(k, v string)) error
 	LoadRegionRules(f func(k, v string)) error
-	SaveRegionRule(ruleKey string, rule interface{}) error
-	DeleteRegionRule(ruleKey string) error
+
+	// We need to use txn to avoid concurrent modification.
+	// And it is helpful for the scheduling server to watch the rule.
+	SaveRule(txn kv.Txn, ruleKey string, rule any) error
+	DeleteRule(txn kv.Txn, ruleKey string) error
+	SaveRuleGroup(txn kv.Txn, groupID string, group any) error
+	DeleteRuleGroup(txn kv.Txn, groupID string) error
+	SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error
+	DeleteRegionRule(txn kv.Txn, ruleKey string) error
+
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
 var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
-func (se *StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule interface{}) error {
+func (*StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule any) error {
 	return saveJSONInTxn(txn, ruleKeyPath(ruleKey), rule)
 }
 
 // DeleteRule removes a rule from storage.
-func (se *StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
+func (*StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
 	return txn.Remove(ruleKeyPath(ruleKey))
 }
 
 // LoadRuleGroups loads all rule groups from storage.
-func (se *StorageEndpoint) LoadRuleGroups(txn kv.Txn, f func(k, v string)) error {
-	return loadRangeByPrefixInTxn(txn, ruleGroupPath+"/", f)
+func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
+	return se.loadRangeByPrefix(ruleGroupPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
-func (se *StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group interface{}) error {
+func (*StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group any) error {
 	return saveJSONInTxn(txn, ruleGroupIDPath(groupID), group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
-func (se *StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
+func (*StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
 	return txn.Remove(ruleGroupIDPath(groupID))
 }
 
@@ -70,13 +74,13 @@ func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
 }
 
 // SaveRegionRule saves a region rule to the storage.
-func (se *StorageEndpoint) SaveRegionRule(ruleKey string, rule interface{}) error {
-	return se.saveJSON(regionLabelKeyPath(ruleKey), rule)
+func (*StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error {
+	return saveJSONInTxn(txn, regionLabelKeyPath(ruleKey), rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
-func (se *StorageEndpoint) DeleteRegionRule(ruleKey string) error {
-	return se.Remove(regionLabelKeyPath(ruleKey))
+func (*StorageEndpoint) DeleteRegionRule(txn kv.Txn, ruleKey string) error {
+	return txn.Remove(regionLabelKeyPath(ruleKey))
 }
 
 // LoadRule load a placement rule from storage.
@@ -85,6 +89,6 @@ func (se *StorageEndpoint) LoadRule(ruleKey string) (string, error) {
 }
 
 // LoadRules loads placement rules from storage.
-func (se *StorageEndpoint) LoadRules(txn kv.Txn, f func(k, v string)) error {
-	return loadRangeByPrefixInTxn(txn, rulesPath+"/", f)
+func (se *StorageEndpoint) LoadRules(f func(k, v string)) error {
+	return se.loadRangeByPrefix(rulesPath+"/", f)
 }

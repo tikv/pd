@@ -17,44 +17,34 @@ package cases
 import (
 	"context"
 	"fmt"
-	"log"
 	"math/rand"
-	"net/http"
-	"net/url"
+	"strconv"
+	"time"
 
+	"github.com/pingcap/log"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
+	pdHttp "github.com/tikv/pd/client/http"
+	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/zap"
 )
 
 var (
-	// PDAddress is the address of PD server.
-	PDAddress string
 	// Debug is the flag to print the output of api response for debug.
 	Debug bool
-)
 
-var (
 	totalRegion int
 	totalStore  int
 	storesID    []uint64
 )
 
+const defaultKeyLen = 56
+
 // InitCluster initializes the cluster.
-func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) error {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
-		PDAddress+"/pd/api/v1/stats/region?start_key=&end_key=&count", http.NoBody)
-	resp, err := httpClit.Do(req)
+func InitCluster(ctx context.Context, cli pd.Client, httpCli pdHttp.Client) error {
+	statsResp, err := httpCli.GetRegionStatusByKeyRange(ctx, pdHttp.NewKeyRange([]byte(""), []byte("")), false)
 	if err != nil {
 		return err
 	}
-	statsResp := &statistics.RegionStats{}
-	err = apiutil.ReadJSON(resp.Body, statsResp)
-	if err != nil {
-		return err
-	}
-	resp.Body.Close()
 	totalRegion = statsResp.Count
 
 	stores, err := cli.GetAllStores(ctx)
@@ -66,8 +56,26 @@ func InitCluster(ctx context.Context, cli pd.Client, httpClit *http.Client) erro
 	for _, store := range stores {
 		storesID = append(storesID, store.GetId())
 	}
-	log.Printf("This cluster has region %d, and store %d[%v]", totalRegion, totalStore, storesID)
+	log.Info("init cluster info", zap.Int("total-region", totalRegion), zap.Int("total-store", totalStore), zap.Any("store-ids", storesID))
 	return nil
+}
+
+// Config is the configuration for the case.
+type Config struct {
+	QPS   int64 `toml:"qps" json:"qps"`
+	Burst int64 `toml:"burst" json:"burst"`
+}
+
+func newConfig() *Config {
+	return &Config{
+		Burst: 1,
+	}
+}
+
+// Clone returns a cloned configuration.
+func (c *Config) Clone() *Config {
+	cfg := *c
+	return &cfg
 }
 
 // Case is the interface for all cases.
@@ -77,12 +85,12 @@ type Case interface {
 	GetQPS() int64
 	SetBurst(int64)
 	GetBurst() int64
+	GetConfig() *Config
 }
 
 type baseCase struct {
-	name  string
-	qps   int64
-	burst int64
+	name string
+	cfg  *Config
 }
 
 func (c *baseCase) Name() string {
@@ -90,19 +98,41 @@ func (c *baseCase) Name() string {
 }
 
 func (c *baseCase) SetQPS(qps int64) {
-	c.qps = qps
+	c.cfg.QPS = qps
 }
 
 func (c *baseCase) GetQPS() int64 {
-	return c.qps
+	return c.cfg.QPS
 }
 
 func (c *baseCase) SetBurst(burst int64) {
-	c.burst = burst
+	c.cfg.Burst = burst
 }
 
 func (c *baseCase) GetBurst() int64 {
-	return c.burst
+	return c.cfg.Burst
+}
+
+func (c *baseCase) GetConfig() *Config {
+	return c.cfg.Clone()
+}
+
+// ETCDCase is the interface for all etcd api cases.
+type ETCDCase interface {
+	Case
+	Init(context.Context, *clientv3.Client) error
+	Unary(context.Context, *clientv3.Client) error
+}
+
+// ETCDCreateFn is function type to create ETCDCase.
+type ETCDCreateFn func() ETCDCase
+
+// ETCDCaseFnMap is the map for all ETCD case creation function.
+var ETCDCaseFnMap = map[string]ETCDCreateFn{
+	"Get":    newGetKV(),
+	"Put":    newPutKV(),
+	"Delete": newDeleteKV(),
+	"Txn":    newTxnKV(),
 }
 
 // GRPCCase is the interface for all gRPC cases.
@@ -111,94 +141,80 @@ type GRPCCase interface {
 	Unary(context.Context, pd.Client) error
 }
 
-// GRPCCaseMap is the map for all gRPC cases.
-var GRPCCaseMap = map[string]GRPCCase{
-	"GetRegion":   newGetRegion(),
-	"GetStore":    newGetStore(),
-	"GetStores":   newGetStores(),
-	"ScanRegions": newScanRegions(),
+// GRPCCreateFn is function type to create GRPCCase.
+type GRPCCreateFn func() GRPCCase
+
+// GRPCCaseFnMap is the map for all gRPC case creation function.
+var GRPCCaseFnMap = map[string]GRPCCreateFn{
+	"GetRegion":                newGetRegion(),
+	"GetRegionEnableFollower":  newGetRegionEnableFollower(),
+	"GetStore":                 newGetStore(),
+	"GetStores":                newGetStores(),
+	"ScanRegions":              newScanRegions(),
+	"Tso":                      newTso(),
+	"UpdateGCSafePoint":        newUpdateGCSafePoint(),
+	"UpdateServiceGCSafePoint": newUpdateServiceGCSafePoint(),
 }
 
 // HTTPCase is the interface for all HTTP cases.
 type HTTPCase interface {
 	Case
-	Do(context.Context, *http.Client) error
-	Params(string)
+	Do(context.Context, pdHttp.Client) error
 }
 
-// HTTPCaseMap is the map for all HTTP cases.
-var HTTPCaseMap = map[string]HTTPCase{
+// HTTPCreateFn is function type to create HTTPCase.
+type HTTPCreateFn func() HTTPCase
+
+// HTTPCaseFnMap is the map for all HTTP case creation function.
+var HTTPCaseFnMap = map[string]HTTPCreateFn{
 	"GetRegionStatus":  newRegionStats(),
 	"GetMinResolvedTS": newMinResolvedTS(),
 }
 
 type minResolvedTS struct {
 	*baseCase
-	path   string
-	params string
 }
 
-func newMinResolvedTS() *minResolvedTS {
-	return &minResolvedTS{
-		baseCase: &baseCase{
-			name:  "GetMinResolvedTS",
-			qps:   1000,
-			burst: 1,
-		},
-		path: "/pd/api/v1/min-resolved-ts",
+func newMinResolvedTS() func() HTTPCase {
+	return func() HTTPCase {
+		return &minResolvedTS{
+			baseCase: &baseCase{
+				name: "GetMinResolvedTS",
+				cfg:  newConfig(),
+			},
+		}
 	}
 }
 
-type minResolvedTSStruct struct {
-	IsRealTime          bool              `json:"is_real_time,omitempty"`
-	MinResolvedTS       uint64            `json:"min_resolved_ts"`
-	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
-	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
-}
-
-func (c *minResolvedTS) Do(ctx context.Context, cli *http.Client) error {
-	url := fmt.Sprintf("%s%s", PDAddress, c.path)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-	res, err := cli.Do(req)
-	if err != nil {
-		return err
-	}
-	listResp := &minResolvedTSStruct{}
-	err = apiutil.ReadJSON(res.Body, listResp)
+func (c *minResolvedTS) Do(ctx context.Context, cli pdHttp.Client) error {
+	minResolvedTS, storesMinResolvedTS, err := cli.GetMinResolvedTSByStoresIDs(ctx, storesID)
 	if Debug {
-		log.Printf("Do %s: url: %s resp: %v err: %v", c.name, url, listResp, err)
+		log.Info("do HTTP case", zap.String("case", c.name), zap.Uint64("min-resolved-ts", minResolvedTS), zap.Any("store-min-resolved-ts", storesMinResolvedTS), zap.Error(err))
 	}
 	if err != nil {
 		return err
 	}
-	res.Body.Close()
 	return nil
-}
-
-func (c *minResolvedTS) Params(param string) {
-	c.params = param
-	c.path = fmt.Sprintf("%s?%s", c.path, c.params)
 }
 
 type regionsStats struct {
 	*baseCase
 	regionSample int
-	path         string
 }
 
-func newRegionStats() *regionsStats {
-	return &regionsStats{
-		baseCase: &baseCase{
-			name:  "GetRegionStatus",
-			qps:   100,
-			burst: 1,
-		},
-		regionSample: 1000,
-		path:         "/pd/api/v1/stats/region",
+func newRegionStats() func() HTTPCase {
+	return func() HTTPCase {
+		return &regionsStats{
+			baseCase: &baseCase{
+				name: "GetRegionStatus",
+				cfg:  newConfig(),
+			},
+			regionSample: 1000,
+		}
 	}
 }
 
-func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
+func (c *regionsStats) Do(ctx context.Context, cli pdHttp.Client) error {
 	upperBound := totalRegion / c.regionSample
 	if upperBound < 1 {
 		upperBound = 1
@@ -206,48 +222,108 @@ func (c *regionsStats) Do(ctx context.Context, cli *http.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
-	url := fmt.Sprintf("%s%s?start_key=%s&end_key=%s&%s",
-		PDAddress,
-		c.path,
-		url.QueryEscape(string(generateKeyForSimulator(startID, 56))),
-		url.QueryEscape(string(generateKeyForSimulator(endID, 56))),
-		"")
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-	res, err := cli.Do(req)
-	if err != nil {
-		return err
-	}
-	statsResp := &statistics.RegionStats{}
-	err = apiutil.ReadJSON(res.Body, statsResp)
+	regionStats, err := cli.GetRegionStatusByKeyRange(ctx,
+		pdHttp.NewKeyRange(generateKeyForSimulator(startID), generateKeyForSimulator(endID)), false)
 	if Debug {
-		log.Printf("Do %s: url: %s resp: %v err: %v", c.name, url, statsResp, err)
+		log.Info("do HTTP case", zap.String("case", c.name), zap.Any("region-stats", regionStats), zap.Error(err))
 	}
 	if err != nil {
 		return err
 	}
-	res.Body.Close()
 	return nil
 }
 
-func (c *regionsStats) Params(_ string) {}
+type updateGCSafePoint struct {
+	*baseCase
+}
+
+func newUpdateGCSafePoint() func() GRPCCase {
+	return func() GRPCCase {
+		return &updateGCSafePoint{
+			baseCase: &baseCase{
+				name: "UpdateGCSafePoint",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*updateGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
+	s := time.Now().Unix()
+	_, err := cli.UpdateGCSafePoint(ctx, uint64(s))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type updateServiceGCSafePoint struct {
+	*baseCase
+}
+
+func newUpdateServiceGCSafePoint() func() GRPCCase {
+	return func() GRPCCase {
+		return &updateServiceGCSafePoint{
+			baseCase: &baseCase{
+				name: "UpdateServiceGCSafePoint",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*updateServiceGCSafePoint) Unary(ctx context.Context, cli pd.Client) error {
+	s := time.Now().Unix()
+	id := rand.Int63n(100) + 1
+	_, err := cli.UpdateServiceGCSafePoint(ctx, strconv.FormatInt(id, 10), id, uint64(s))
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 type getRegion struct {
 	*baseCase
 }
 
-func newGetRegion() *getRegion {
-	return &getRegion{
-		baseCase: &baseCase{
-			name:  "GetRegion",
-			qps:   10000,
-			burst: 1,
-		},
+func newGetRegion() func() GRPCCase {
+	return func() GRPCCase {
+		return &getRegion{
+			baseCase: &baseCase{
+				name: "GetRegion",
+				cfg:  newConfig(),
+			},
+		}
 	}
 }
 
-func (c *getRegion) Unary(ctx context.Context, cli pd.Client) error {
+func (*getRegion) Unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
-	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id, 56))
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type getRegionEnableFollower struct {
+	*baseCase
+}
+
+func newGetRegionEnableFollower() func() GRPCCase {
+	return func() GRPCCase {
+		return &getRegionEnableFollower{
+			baseCase: &baseCase{
+				name: "GetRegionEnableFollower",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*getRegionEnableFollower) Unary(ctx context.Context, cli pd.Client) error {
+	id := rand.Intn(totalRegion)*4 + 1
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), pd.WithAllowFollowerHandle())
 	if err != nil {
 		return err
 	}
@@ -259,14 +335,15 @@ type scanRegions struct {
 	regionSample int
 }
 
-func newScanRegions() *scanRegions {
-	return &scanRegions{
-		baseCase: &baseCase{
-			name:  "ScanRegions",
-			qps:   10000,
-			burst: 1,
-		},
-		regionSample: 10000,
+func newScanRegions() func() GRPCCase {
+	return func() GRPCCase {
+		return &scanRegions{
+			baseCase: &baseCase{
+				name: "ScanRegions",
+				cfg:  newConfig(),
+			},
+			regionSample: 10000,
+		}
 	}
 }
 
@@ -275,7 +352,30 @@ func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
-	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID, 56), generateKeyForSimulator(endID, 56), c.regionSample)
+	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID), generateKeyForSimulator(endID), c.regionSample)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type tso struct {
+	*baseCase
+}
+
+func newTso() func() GRPCCase {
+	return func() GRPCCase {
+		return &tso{
+			baseCase: &baseCase{
+				name: "Tso",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*tso) Unary(ctx context.Context, cli pd.Client) error {
+	_, _, err := cli.GetTS(ctx)
 	if err != nil {
 		return err
 	}
@@ -286,17 +386,18 @@ type getStore struct {
 	*baseCase
 }
 
-func newGetStore() *getStore {
-	return &getStore{
-		baseCase: &baseCase{
-			name:  "GetStore",
-			qps:   10000,
-			burst: 1,
-		},
+func newGetStore() func() GRPCCase {
+	return func() GRPCCase {
+		return &getStore{
+			baseCase: &baseCase{
+				name: "GetStore",
+				cfg:  newConfig(),
+			},
+		}
 	}
 }
 
-func (c *getStore) Unary(ctx context.Context, cli pd.Client) error {
+func (*getStore) Unary(ctx context.Context, cli pd.Client) error {
 	storeIdx := rand.Intn(totalStore)
 	_, err := cli.GetStore(ctx, storesID[storeIdx])
 	if err != nil {
@@ -309,17 +410,18 @@ type getStores struct {
 	*baseCase
 }
 
-func newGetStores() *getStores {
-	return &getStores{
-		baseCase: &baseCase{
-			name:  "GetStores",
-			qps:   10000,
-			burst: 1,
-		},
+func newGetStores() func() GRPCCase {
+	return func() GRPCCase {
+		return &getStores{
+			baseCase: &baseCase{
+				name: "GetStores",
+				cfg:  newConfig(),
+			},
+		}
 	}
 }
 
-func (c *getStores) Unary(ctx context.Context, cli pd.Client) error {
+func (*getStores) Unary(ctx context.Context, cli pd.Client) error {
 	_, err := cli.GetAllStores(ctx)
 	if err != nil {
 		return err
@@ -327,9 +429,107 @@ func (c *getStores) Unary(ctx context.Context, cli pd.Client) error {
 	return nil
 }
 
-// nolint
-func generateKeyForSimulator(id int, keyLen int) []byte {
-	k := make([]byte, keyLen)
+func generateKeyForSimulator(id int) []byte {
+	k := make([]byte, defaultKeyLen)
 	copy(k, fmt.Sprintf("%010d", id))
 	return k
+}
+
+type getKV struct {
+	*baseCase
+}
+
+func newGetKV() func() ETCDCase {
+	return func() ETCDCase {
+		return &getKV{
+			baseCase: &baseCase{
+				name: "Get",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*getKV) Init(ctx context.Context, cli *clientv3.Client) error {
+	for i := 0; i < 100; i++ {
+		_, err := cli.Put(ctx, fmt.Sprintf("/test/0001/%4d", i), fmt.Sprintf("%4d", i))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (*getKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+	_, err := cli.Get(ctx, "/test/0001", clientv3.WithPrefix())
+	return err
+}
+
+type putKV struct {
+	*baseCase
+}
+
+func newPutKV() func() ETCDCase {
+	return func() ETCDCase {
+		return &putKV{
+			baseCase: &baseCase{
+				name: "Put",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*putKV) Init(context.Context, *clientv3.Client) error { return nil }
+
+func (*putKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+	_, err := cli.Put(ctx, "/test/0001/0000", "test")
+	return err
+}
+
+type deleteKV struct {
+	*baseCase
+}
+
+func newDeleteKV() func() ETCDCase {
+	return func() ETCDCase {
+		return &deleteKV{
+			baseCase: &baseCase{
+				name: "Put",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*deleteKV) Init(context.Context, *clientv3.Client) error { return nil }
+
+func (*deleteKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+	_, err := cli.Delete(ctx, "/test/0001/0000")
+	return err
+}
+
+type txnKV struct {
+	*baseCase
+}
+
+func newTxnKV() func() ETCDCase {
+	return func() ETCDCase {
+		return &txnKV{
+			baseCase: &baseCase{
+				name: "Put",
+				cfg:  newConfig(),
+			},
+		}
+	}
+}
+
+func (*txnKV) Init(context.Context, *clientv3.Client) error { return nil }
+
+func (*txnKV) Unary(ctx context.Context, cli *clientv3.Client) error {
+	txn := cli.Txn(ctx)
+	txn = txn.If(clientv3.Compare(clientv3.Value("/test/0001/0000"), "=", "test"))
+	txn = txn.Then(clientv3.OpPut("/test/0001/0000", "test2"))
+	_, err := txn.Commit()
+	return err
 }

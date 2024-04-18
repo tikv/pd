@@ -36,16 +36,18 @@ type DimensionConfig struct {
 
 type limiter struct {
 	mu          syncutil.RWMutex
-	concurrency *concurrencyLimiter
+	concurrency *ConcurrencyLimiter
 	rate        *RateLimiter
 }
 
 func newLimiter() *limiter {
-	lim := &limiter{}
+	lim := &limiter{
+		concurrency: NewConcurrencyLimiter(0),
+	}
 	return lim
 }
 
-func (l *limiter) getConcurrencyLimiter() *concurrencyLimiter {
+func (l *limiter) getConcurrencyLimiter() *ConcurrencyLimiter {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return l.concurrency
@@ -64,13 +66,6 @@ func (l *limiter) deleteRateLimiter() bool {
 	return l.isEmpty()
 }
 
-func (l *limiter) deleteConcurrency() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.concurrency = nil
-	return l.isEmpty()
-}
-
 func (l *limiter) isEmpty() bool {
 	return l.concurrency == nil && l.rate == nil
 }
@@ -86,7 +81,7 @@ func (l *limiter) getQPSLimiterStatus() (limit rate.Limit, burst int) {
 func (l *limiter) getConcurrencyLimiterStatus() (limit uint64, current uint64) {
 	baseLimiter := l.getConcurrencyLimiter()
 	if baseLimiter != nil {
-		return baseLimiter.getLimit(), baseLimiter.getCurrent()
+		return baseLimiter.getLimit(), baseLimiter.GetRunningTasksNum()
 	}
 	return 0, 0
 }
@@ -96,17 +91,17 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 	if oldConcurrencyLimit == limit {
 		return ConcurrencyNoChange
 	}
-	if limit < 1 {
-		l.deleteConcurrency()
-		return ConcurrencyDeleted
-	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.concurrency != nil {
+		if limit < 1 {
+			l.concurrency.setLimit(0)
+			return ConcurrencyDeleted
+		}
 		l.concurrency.setLimit(limit)
 	} else {
-		l.concurrency = newConcurrencyLimiter(limit)
+		l.concurrency = NewConcurrencyLimiter(limit)
 	}
 	return ConcurrencyChanged
 }

@@ -29,24 +29,23 @@ import (
 	"go.etcd.io/etcd/etcdserver/etcdserverpb"
 )
 
-// newTestSingleConfig is used to create a etcd config for the unit test purpose.
-func newTestSingleConfig(t *testing.T) *embed.Config {
+// NewTestSingleConfig is used to create a etcd config for the unit test purpose.
+func NewTestSingleConfig() *embed.Config {
 	cfg := embed.NewConfig()
 	cfg.Name = genRandName()
-	cfg.Dir = t.TempDir()
 	cfg.WalDir = ""
 	cfg.Logger = "zap"
 	cfg.LogOutputs = []string{"stdout"}
 
 	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
+	cfg.ListenPeerUrls = []url.URL{*pu}
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
 	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
+	cfg.ListenClientUrls = []url.URL{*cu}
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
 
 	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.ListenPeerUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
 }
@@ -60,17 +59,18 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 	re := require.New(t)
 	servers = make([]*embed.Etcd, 0, count)
 
-	cfg := newTestSingleConfig(t)
+	cfg := NewTestSingleConfig()
+	cfg.Dir = t.TempDir()
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
-	etcdClient, err = CreateEtcdClient(nil, cfg.LCUrls)
+	etcdClient, err = CreateEtcdClient(nil, cfg.ListenClientUrls)
 	re.NoError(err)
 	<-etcd.Server.ReadyNotify()
 	servers = append(servers, etcd)
 
 	for i := 1; i < count; i++ {
 		// Check the client can get the new member.
-		listResp, err := ListEtcdMembers(etcdClient)
+		listResp, err := ListEtcdMembers(etcdClient.Ctx(), etcdClient)
 		re.NoError(err)
 		re.Len(listResp.Members, i)
 		// Add a new member.
@@ -98,16 +98,17 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 // MustAddEtcdMember is used to add a new etcd member to the cluster for test.
 func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client) *embed.Etcd {
 	re := require.New(t)
-	cfg2 := newTestSingleConfig(t)
+	cfg2 := NewTestSingleConfig()
+	cfg2.Dir = t.TempDir()
 	cfg2.Name = genRandName()
-	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.LPUrls[0])
+	cfg2.InitialCluster = cfg1.InitialCluster + fmt.Sprintf(",%s=%s", cfg2.Name, &cfg2.ListenPeerUrls[0])
 	cfg2.ClusterState = embed.ClusterStateFlagExisting
-	peerURL := cfg2.LPUrls[0].String()
+	peerURL := cfg2.ListenPeerUrls[0].String()
 	addResp, err := AddEtcdMember(client, []string{peerURL})
 	re.NoError(err)
 	// Check the client can get the new member.
 	testutil.Eventually(re, func() bool {
-		members, err := ListEtcdMembers(client)
+		members, err := ListEtcdMembers(client.Ctx(), client)
 		re.NoError(err)
 		return len(addResp.Members) == len(members.Members)
 	})
@@ -121,18 +122,27 @@ func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client
 
 func checkMembers(re *require.Assertions, client *clientv3.Client, etcds []*embed.Etcd) {
 	// Check the client can get the new member.
-	listResp, err := ListEtcdMembers(client)
-	re.NoError(err)
-	re.Len(listResp.Members, len(etcds))
-	inList := func(m *etcdserverpb.Member) bool {
-		for _, etcd := range etcds {
-			if m.ID == uint64(etcd.Server.ID()) {
-				return true
+	testutil.Eventually(re, func() bool {
+		listResp, err := ListEtcdMembers(client.Ctx(), client)
+		if err != nil {
+			return false
+		}
+		if len(etcds) != len(listResp.Members) {
+			return false
+		}
+		inList := func(m *etcdserverpb.Member) bool {
+			for _, etcd := range etcds {
+				if m.ID == uint64(etcd.Server.ID()) {
+					return true
+				}
+			}
+			return false
+		}
+		for _, m := range listResp.Members {
+			if !inList(m) {
+				return false
 			}
 		}
-		return false
-	}
-	for _, m := range listResp.Members {
-		re.True(inList(m))
-	}
+		return true
+	})
 }

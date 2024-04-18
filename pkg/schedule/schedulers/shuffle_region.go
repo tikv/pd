@@ -68,11 +68,11 @@ func (s *shuffleRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	s.conf.ServeHTTP(w, r)
 }
 
-func (s *shuffleRegionScheduler) GetName() string {
+func (*shuffleRegionScheduler) GetName() string {
 	return ShuffleRegionName
 }
 
-func (s *shuffleRegionScheduler) GetType() string {
+func (*shuffleRegionScheduler) GetType() string {
 	return ShuffleRegionType
 }
 
@@ -107,7 +107,7 @@ func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster
 	return allowed
 }
 
-func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleRegionCounter.Inc()
 	region, oldPeer := s.scheduleRemovePeer(cluster)
 	if region == nil {

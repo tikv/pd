@@ -85,7 +85,7 @@ func (m *EmbeddedEtcdMember) Name() string {
 }
 
 // GetMember returns the member.
-func (m *EmbeddedEtcdMember) GetMember() interface{} {
+func (m *EmbeddedEtcdMember) GetMember() any {
 	return m.member
 }
 
@@ -185,12 +185,15 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 	failpoint.Inject("skipCampaignLeaderCheck", func() {
 		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
 	})
+
 	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
-		log.Warn("campaign times is too frequent, resign and campaign again",
-			zap.String("leader-name", m.Name()), zap.String("leader-key", m.GetLeaderPath()))
+		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
+			return err
+		}
 		m.leadership.ResetCampaignTimes()
-		return m.ResignEtcdLeader(ctx, m.Name(), "")
+		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
+
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
@@ -352,7 +355,7 @@ func (m *EmbeddedEtcdMember) ResignEtcdLeader(ctx context.Context, from string, 
 	log.Info("try to resign etcd leader to next pd-server", zap.String("from", from), zap.String("to", nextEtcdLeader))
 	// Determine next etcd leader candidates.
 	var etcdLeaderIDs []uint64
-	res, err := etcdutil.ListEtcdMembers(m.client)
+	res, err := etcdutil.ListEtcdMembers(ctx, m.client)
 	if err != nil {
 		return err
 	}

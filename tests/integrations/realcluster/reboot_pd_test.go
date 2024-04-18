@@ -40,9 +40,12 @@ func TestReloadLabel(t *testing.T) {
 
 	resp, _ := pdHTTPCli.GetStores(ctx)
 	setStore := resp.Stores[0]
-	re.Empty(setStore.Store.Labels, nil)
+	// TiFlash labels will be ["engine": "tiflash"]
 	storeLabel := map[string]string{
 		"zone": "zone1",
+	}
+	for _, label := range setStore.Store.Labels {
+		storeLabel[label.Key] = label.Value
 	}
 	err := pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel)
 	re.NoError(err)

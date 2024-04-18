@@ -88,19 +88,16 @@ type RegionSyncer struct {
 	streamingRunning atomic.Bool
 }
 
-// NewRegionSyncer returns a region syncer.
-// The final consistency is ensured by the heartbeat.
-// Strong consistency is not guaranteed.
-// Usually open the region syncer in huge cluster and the server
-// no longer etcd but go-leveldb.
+// NewRegionSyncer returns a region syncer that ensures final consistency through the heartbeat,
+// but it does not guarantee strong consistency. Using the same storage backend of the region storage.
 func NewRegionSyncer(s Server) *RegionSyncer {
-	localRegionStorage := storage.TryGetLocalRegionStorage(s.GetStorage())
-	if localRegionStorage == nil {
+	regionStorage := storage.RetrieveRegionStorage(s.GetStorage())
+	if regionStorage == nil {
 		return nil
 	}
 	syncer := &RegionSyncer{
 		server:    s,
-		history:   newHistoryBuffer(defaultHistoryBufferSize, localRegionStorage.(kv.Base)),
+		history:   newHistoryBuffer(defaultHistoryBufferSize, regionStorage.(kv.Base)),
 		limit:     ratelimit.NewRateLimiter(defaultBucketRate, defaultBucketCapacity),
 		tlsConfig: s.GetTLSConfig(),
 	}

@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -66,6 +67,10 @@ type tsoClientTestSuite struct {
 	clients          []pd.Client
 }
 
+func (suite *tsoClientTestSuite) getBackendEndpoints() []string {
+	return strings.Split(suite.backendEndpoints, ",")
+}
+
 func TestLegacyTSOClient(t *testing.T) {
 	suite.Run(t, &tsoClientTestSuite{
 		legacy: true,
@@ -98,7 +103,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	suite.keyspaceIDs = make([]uint32, 0)
 
 	if suite.legacy {
-		client, err := pd.NewClientWithContext(suite.ctx, strings.Split(suite.backendEndpoints, ","), pd.SecurityOption{}, pd.WithForwardingOption(true))
+		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
 		re.NoError(err)
 		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 		re.True(ok)
@@ -173,7 +178,7 @@ func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.A
 
 	// Create clients and make sure they all have discovered the tso service.
 	suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
-		suite.ctx, re, suite.keyspaceIDs, strings.Split(suite.backendEndpoints, ","))
+		suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
 	re.Equal(len(suite.keyspaceIDs), len(suite.clients))
 }
 
@@ -183,9 +188,13 @@ func (suite *tsoClientTestSuite) TearDownSuite() {
 		suite.tsoCluster.Destroy()
 	}
 	suite.cluster.Destroy()
+	for _, client := range suite.clients {
+		client.Close()
+	}
 }
 
 func (suite *tsoClientTestSuite) TestGetTS() {
+	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -195,9 +204,9 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 				var lastTS uint64
 				for j := 0; j < tsoRequestRound; j++ {
 					physical, logical, err := client.GetTS(suite.ctx)
-					suite.NoError(err)
+					re.NoError(err)
 					ts := tsoutil.ComposeTS(physical, logical)
-					suite.Less(lastTS, ts)
+					re.Less(lastTS, ts)
 					lastTS = ts
 				}
 			}(client)
@@ -207,6 +216,7 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 }
 
 func (suite *tsoClientTestSuite) TestGetTSAsync() {
+	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -220,9 +230,9 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 				var lastTS uint64 = math.MaxUint64
 				for j := len(tsFutures) - 1; j >= 0; j-- {
 					physical, logical, err := tsFutures[j].Wait()
-					suite.NoError(err)
+					re.NoError(err)
 					ts := tsoutil.ComposeTS(physical, logical)
-					suite.Greater(lastTS, ts)
+					re.Greater(lastTS, ts)
 					lastTS = ts
 				}
 			}(client)
@@ -249,13 +259,14 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 	client := mcs.SetupClientWithKeyspaceID(
-		ctx, re, keyspaceID, strings.Split(suite.backendEndpoints, ","))
+		ctx, re, keyspaceID, suite.getBackendEndpoints())
+	defer client.Close()
 	var lastTS uint64
 	for j := 0; j < tsoRequestRound; j++ {
 		physical, logical, err := client.GetTS(ctx)
-		suite.NoError(err)
+		re.NoError(err)
 		ts := tsoutil.ComposeTS(physical, logical)
-		suite.Less(lastTS, ts)
+		re.Less(lastTS, ts)
 		lastTS = ts
 	}
 }
@@ -263,10 +274,6 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 // TestGetMinTS tests the correctness of GetMinTS.
 func (suite *tsoClientTestSuite) TestGetMinTS() {
 	re := suite.Require()
-	if !suite.legacy {
-		suite.waitForAllKeyspaceGroupsInServing(re)
-	}
-
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
@@ -418,6 +425,52 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 }
 
+func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/delayDispatchTSORequest", "return(true)"))
+	var (
+		clients    []pd.Client
+		stopSignal atomic.Bool
+		wg         sync.WaitGroup
+	)
+	// Create independent clients to prevent interfering with other tests.
+	if suite.legacy {
+		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
+		re.NoError(err)
+		clients = []pd.Client{client}
+	} else {
+		clients = mcs.WaitForMultiKeyspacesTSOAvailable(suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
+	}
+	wg.Add(tsoRequestConcurrencyNumber * len(clients))
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range clients {
+			go func(client pd.Client) {
+				defer wg.Done()
+				var lastTS uint64
+				for !stopSignal.Load() {
+					physical, logical, err := client.GetTS(suite.ctx)
+					if err != nil {
+						re.ErrorContains(err, context.Canceled.Error())
+					} else {
+						ts := tsoutil.ComposeTS(physical, logical)
+						re.Less(lastTS, ts)
+						lastTS = ts
+					}
+				}
+			}(client)
+		}
+	}
+	// Reset the TSO clients while requesting TSO concurrently.
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for _, client := range clients {
+			client.(interface{ ResetTSOClient() }).ResetTSOClient()
+		}
+	}
+	stopSignal.Store(true)
+	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/delayDispatchTSORequest"))
+}
+
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
 func TestMixedTSODeployment(t *testing.T) {
 	re := require.New(t)
@@ -489,6 +542,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	re.NoError(err)
+	defer pdClient.Close()
 
 	// Create a TSO cluster which has 2 servers
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)

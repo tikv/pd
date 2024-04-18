@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -176,6 +178,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
+	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -247,7 +250,7 @@ func (s *Server) ResignPrimary(keyspaceID, keyspaceGroupID uint32) error {
 
 // AddServiceReadyCallback implements basicserver.
 // It adds callbacks when it's ready for providing tso service.
-func (s *Server) AddServiceReadyCallback(callbacks ...func(context.Context) error) {
+func (*Server) AddServiceReadyCallback(...func(context.Context) error) {
 	// Do nothing here. The primary of each keyspace group assigned to this host
 	// will respond to the requests accordingly.
 }
@@ -275,7 +278,7 @@ func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorM
 }
 
 // IsLocalRequest checks if the forwarded host is the current host
-func (s *Server) IsLocalRequest(forwardedHost string) bool {
+func (*Server) IsLocalRequest(forwardedHost string) bool {
 	// TODO: Check if the forwarded host is the current host.
 	// The logic is depending on etcd service mode -- if the TSO service
 	// uses the embedded etcd, check against ClientUrls; otherwise check
@@ -307,13 +310,13 @@ func (s *Server) ValidateRequest(header *tsopb.RequestHeader) error {
 
 // GetExternalTS returns external timestamp from the cache or the persistent storage.
 // TODO: Implement GetExternalTS
-func (s *Server) GetExternalTS() uint64 {
+func (*Server) GetExternalTS() uint64 {
 	return 0
 }
 
 // SetExternalTS saves external timestamp to cache and the persistent storage.
 // TODO: Implement SetExternalTS
-func (s *Server) SetExternalTS(externalTS uint64) error {
+func (*Server) SetExternalTS(uint64) error {
 	return nil
 }
 
@@ -359,16 +362,28 @@ func (s *Server) startServer() (err error) {
 	metaDataGauge.WithLabelValues(fmt.Sprintf("cluster%d", s.clusterID)).Set(0)
 	// The independent TSO service still reuses PD version info since PD and TSO are just
 	// different service modes provided by the same pd-server binary
-	serverInfo.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
 
 	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	legacySvcRootPath := endpoint.LegacyRootPath(s.clusterID)
 	tsoSvcRootPath := endpoint.TSOSvcRootPath(s.clusterID)
-	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
+	if err != nil {
+		deployPath = ""
+	}
+	s.serviceID = &discovery.ServiceRegistryEntry{
+		ServiceAddr:    s.cfg.AdvertiseListenAddr,
+		Version:        versioninfo.PDReleaseVersion,
+		GitHash:        versioninfo.PDGitHash,
+		DeployPath:     deployPath,
+		StartTimestamp: s.StartTimestamp(),
+	}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(), s.cfg.AdvertiseListenAddr,
-		discovery.TSOPath(s.clusterID), legacySvcRootPath, tsoSvcRootPath, s.cfg)
+		s.clusterID, legacySvcRootPath, tsoSvcRootPath, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}

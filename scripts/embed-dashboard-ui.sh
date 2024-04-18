@@ -41,7 +41,7 @@ mkdir -p "${CACHE_DIR}"
 
 function download_embed_asset {
   echo '+ Discover TiDB Dashboard release version'
-  DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${DASHBOARD_DIR}/release-version")
+  DASHBOARD_RELEASE_VERSION=$(grep -v '^#' "${BASE_DIR}/scripts/dashboard-version")
   echo "  - TiDB Dashboard release version: ${DASHBOARD_RELEASE_VERSION}"
 
   echo '+ Check whether pre-built assets are available'

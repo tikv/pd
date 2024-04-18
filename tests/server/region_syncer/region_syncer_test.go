@@ -20,11 +20,9 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -35,23 +33,14 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
-type idAllocator struct {
-	allocator *mockid.IDAllocator
-}
-
-func (i *idAllocator) alloc() uint64 {
-	v, _ := i.allocator.Alloc()
-	return v
-}
-
 func TestRegionSyncer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
 
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer func() {
 		cluster.Destroy()
 		cancel()
@@ -77,14 +66,14 @@ func TestRegionSyncer(t *testing.T) {
 	})
 
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
 	// merge case
 	// region2 -> region1 -> region0
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region0 version is max(1, max(1, 1)+1)+1=3
 	regions[0] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[0])
@@ -92,7 +81,7 @@ func TestRegionSyncer(t *testing.T) {
 
 	// merge case
 	// region3 -> region4
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region4 version is max(1, 1)+1=2
 	regions[4] = regions[3].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[4])
@@ -100,7 +89,7 @@ func TestRegionSyncer(t *testing.T) {
 
 	// merge case
 	// region0 -> region4
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region4 version is max(3, 2)+1=4
 	regions[4] = regions[0].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[4])
@@ -167,14 +156,14 @@ func TestRegionSyncer(t *testing.T) {
 		re.Equal(region.GetBuckets(), r.GetBuckets())
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/noFastExitSync"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))
 }
 
 func TestFullSyncWithAddMember(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -186,7 +175,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -218,7 +207,7 @@ func TestPrepareChecker(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -230,7 +219,7 @@ func TestPrepareChecker(t *testing.T) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 110
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -267,7 +256,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -279,7 +268,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	rc := leaderServer.GetServer().GetRaftCluster()
 	re.NotNil(rc)
 	regionLen := 100
-	regions := initRegions(regionLen)
+	regions := tests.InitRegions(regionLen)
 	for _, region := range regions {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -305,37 +294,4 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re.Equal("pd1", cluster.WaitLeader())
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-}
-
-func initRegions(regionLen int) []*core.RegionInfo {
-	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
-	regions := make([]*core.RegionInfo, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
-		r := &metapb.Region{
-			Id: allocator.alloc(),
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
-			Peers: []*metapb.Peer{
-				{Id: allocator.alloc(), StoreId: uint64(1)},
-				{Id: allocator.alloc(), StoreId: uint64(2)},
-				{Id: allocator.alloc(), StoreId: uint64(3)},
-			},
-		}
-		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
-		// Here is used to simulate the upgrade process.
-		if i < regionLen/2 {
-			buckets := &metapb.Buckets{
-				RegionId: r.Id,
-				Keys:     [][]byte{r.StartKey, r.EndKey},
-				Version:  1,
-			}
-			region.UpdateBuckets(buckets, region.GetBuckets())
-		}
-		regions = append(regions, region)
-	}
-	return regions
 }

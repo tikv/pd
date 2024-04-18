@@ -37,6 +37,7 @@ import (
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -272,14 +273,14 @@ func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
 
 // RunTestInPDMode is to run test in pd mode.
 func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
-	s.t.Logf("start test %s in pd mode", s.getTestName())
+	s.t.Logf("start test %s in pd mode", getTestName())
 	if _, ok := s.clusters[pdMode]; !ok {
 		s.startCluster(pdMode)
 	}
 	test(s.clusters[pdMode])
 }
 
-func (s *SchedulingTestEnvironment) getTestName() string {
+func getTestName() string {
 	pc, _, _, _ := runtime.Caller(2)
 	caller := runtime.FuncForPC(pc)
 	if caller == nil || strings.Contains(caller.Name(), "RunTestInTwoModes") {
@@ -302,7 +303,7 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
-	s.t.Logf("start test %s in api mode", s.getTestName())
+	s.t.Logf("start test %s in api mode", getTestName())
 	if _, ok := s.clusters[apiMode]; !ok {
 		s.startCluster(apiMode)
 	}
@@ -356,6 +357,7 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		tc, err := NewTestSchedulingCluster(ctx, 1, leaderServer.GetAddr())
 		re.NoError(err)
 		tc.WaitForPrimaryServing(re)
+		tc.GetPrimaryServer().GetCluster().SetPrepared()
 		cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 		testutil.Eventually(re, func() bool {
@@ -363,4 +365,47 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		})
 		s.clusters[apiMode] = cluster
 	}
+}
+
+type idAllocator struct {
+	allocator *mockid.IDAllocator
+}
+
+func (i *idAllocator) alloc() uint64 {
+	v, _ := i.allocator.Alloc()
+	return v
+}
+
+// InitRegions is used for test purpose.
+func InitRegions(regionLen int) []*core.RegionInfo {
+	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
+	regions := make([]*core.RegionInfo, 0, regionLen)
+	for i := 0; i < regionLen; i++ {
+		r := &metapb.Region{
+			Id: allocator.alloc(),
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers: []*metapb.Peer{
+				{Id: allocator.alloc(), StoreId: uint64(1)},
+				{Id: allocator.alloc(), StoreId: uint64(2)},
+				{Id: allocator.alloc(), StoreId: uint64(3)},
+			},
+		}
+		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
+		// Here is used to simulate the upgrade process.
+		if i < regionLen/2 {
+			buckets := &metapb.Buckets{
+				RegionId: r.Id,
+				Keys:     [][]byte{r.StartKey, r.EndKey},
+				Version:  1,
+			}
+			region.UpdateBuckets(buckets, region.GetBuckets())
+		}
+		regions = append(regions, region)
+	}
+	return regions
 }

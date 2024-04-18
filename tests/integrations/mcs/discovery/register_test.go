@@ -96,10 +96,10 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	re.Equal(addr, returnedEntry.ServiceAddr)
 
 	// test primary when only one server
-	expectedPrimary := tests.WaitForPrimaryServing(suite.Require(), map[string]bs.Server{addr: s})
+	expectedPrimary := tests.WaitForPrimaryServing(re, map[string]bs.Server{addr: s})
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
-	re.Equal(primary, expectedPrimary)
+	re.Equal(expectedPrimary, primary)
 
 	// test API server discovery after unregister
 	cleanup()
@@ -124,13 +124,19 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	re.Empty(primary)
 
 	serverMap := make(map[string]bs.Server)
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
 	for i := 0; i < serverNum; i++ {
 		s, cleanup := suite.addServer(serviceName)
-		defer cleanup()
+		cleanups = append(cleanups, cleanup)
 		serverMap[s.GetAddr()] = s
 	}
 
-	expectedPrimary := tests.WaitForPrimaryServing(suite.Require(), serverMap)
+	expectedPrimary := tests.WaitForPrimaryServing(re, serverMap)
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(expectedPrimary, primary)
@@ -138,7 +144,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	serverMap[primary].Close()
 	delete(serverMap, primary)
 
-	expectedPrimary = tests.WaitForPrimaryServing(suite.Require(), serverMap)
+	expectedPrimary = tests.WaitForPrimaryServing(re, serverMap)
 	// test API server discovery
 	client := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(client, suite.clusterID, serviceName)

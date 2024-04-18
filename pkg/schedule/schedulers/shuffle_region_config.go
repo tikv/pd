@@ -47,7 +47,7 @@ func (conf *shuffleRegionSchedulerConfig) getStorage() endpoint.ConfigStorage {
 	return conf.storage
 }
 
-func (conf *shuffleRegionSchedulerConfig) getSchedulerName() string {
+func (*shuffleRegionSchedulerConfig) getSchedulerName() string {
 	return ShuffleRegionName
 }
 
@@ -85,7 +85,7 @@ func (conf *shuffleRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *ht
 	router.ServeHTTP(w, r)
 }
 
-func (conf *shuffleRegionSchedulerConfig) handleGetRoles(w http.ResponseWriter, r *http.Request) {
+func (conf *shuffleRegionSchedulerConfig) handleGetRoles(w http.ResponseWriter, _ *http.Request) {
 	rd := render.New(render.Options{IndentJSON: true})
 	rd.JSON(w, http.StatusOK, conf.GetRoles())
 }

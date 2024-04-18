@@ -50,18 +50,19 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
+	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cancel = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = preAllocKeyspace
 	})
 	suite.cluster = cluster
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
-	suite.NotEmpty(cluster.WaitLeader())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
 	suite.server = cluster.GetLeaderServer()
 	suite.manager = suite.server.GetKeyspaceManager()
-	suite.NoError(suite.server.BootstrapCluster())
+	re.NoError(suite.server.BootstrapCluster())
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {

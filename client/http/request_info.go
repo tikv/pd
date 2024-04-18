@@ -14,7 +14,11 @@
 
 package http
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/tikv/pd/client/retry"
+)
 
 // The following constants are the names of the requests.
 const (
@@ -26,6 +30,7 @@ const (
 	getRegionsName                          = "GetRegions"
 	getRegionsByKeyRangeName                = "GetRegionsByKeyRange"
 	getRegionsByStoreIDName                 = "GetRegionsByStoreID"
+	getEmptyRegionsName                     = "GetEmptyRegions"
 	getRegionsReplicatedStateByKeyRangeName = "GetRegionsReplicatedStateByKeyRange"
 	getHotReadRegionsName                   = "GetHotReadRegions"
 	getHotWriteRegionsName                  = "GetHotWriteRegions"
@@ -34,15 +39,22 @@ const (
 	getStoresName                           = "GetStores"
 	getStoreName                            = "GetStore"
 	setStoreLabelsName                      = "SetStoreLabels"
+	getConfigName                           = "GetConfig"
+	setConfigName                           = "SetConfig"
 	getScheduleConfigName                   = "GetScheduleConfig"
 	setScheduleConfigName                   = "SetScheduleConfig"
 	getClusterVersionName                   = "GetClusterVersion"
+	getClusterName                          = "GetCluster"
+	getClusterStatusName                    = "GetClusterStatus"
+	getStatusName                           = "GetStatus"
+	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"
 	setSchedulerDelayName                   = "SetSchedulerDelay"
 	getAllPlacementRuleBundlesName          = "GetAllPlacementRuleBundles"
 	getPlacementRuleBundleByGroupName       = "GetPlacementRuleBundleByGroup"
 	getPlacementRulesByGroupName            = "GetPlacementRulesByGroup"
+	getPlacementRuleName                    = "GetPlacementRule"
 	setPlacementRuleName                    = "SetPlacementRule"
 	setPlacementRuleInBatchName             = "SetPlacementRuleInBatch"
 	setPlacementRuleBundlesName             = "SetPlacementRuleBundles"
@@ -59,6 +71,15 @@ const (
 	accelerateScheduleInBatchName           = "AccelerateScheduleInBatch"
 	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
+	getMicroServicePrimaryName              = "GetMicroServicePrimary"
+	getPDVersionName                        = "GetPDVersion"
+	resetTSName                             = "ResetTS"
+	resetBaseAllocIDName                    = "ResetBaseAllocID"
+	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
+	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
+	deleteOperators                         = "DeleteOperators"
+	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
+	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
 )
 
 type requestInfo struct {
@@ -67,8 +88,10 @@ type requestInfo struct {
 	uri         string
 	method      string
 	body        []byte
-	res         interface{}
+	res         any
 	respHandler respHandleFunc
+	bo          *retry.Backoffer
+	targetURL   string
 }
 
 // newRequestInfo creates a new request info.
@@ -107,7 +130,7 @@ func (ri *requestInfo) WithBody(body []byte) *requestInfo {
 }
 
 // WithResp sets the response struct of the request.
-func (ri *requestInfo) WithResp(res interface{}) *requestInfo {
+func (ri *requestInfo) WithResp(res any) *requestInfo {
 	ri.res = res
 	return ri
 }
@@ -115,6 +138,18 @@ func (ri *requestInfo) WithResp(res interface{}) *requestInfo {
 // WithRespHandler sets the response handle function of the request.
 func (ri *requestInfo) WithRespHandler(respHandler respHandleFunc) *requestInfo {
 	ri.respHandler = respHandler
+	return ri
+}
+
+// WithBackoffer sets the backoffer of the request.
+func (ri *requestInfo) WithBackoffer(bo *retry.Backoffer) *requestInfo {
+	ri.bo = bo
+	return ri
+}
+
+// WithTargetURL sets the target URL of the request.
+func (ri *requestInfo) WithTargetURL(targetURL string) *requestInfo {
+	ri.targetURL = targetURL
 	return ri
 }
 

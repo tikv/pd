@@ -39,8 +39,6 @@ import (
 
 const (
 	controllerConfigPath    = "resource_group/controller"
-	maxRetry                = 10
-	retryInterval           = 50 * time.Millisecond
 	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
 	trickleReserveDuration  = 1250 * time.Millisecond
@@ -75,14 +73,15 @@ type ResourceGroupKVInterceptor interface {
 
 // ResourceGroupProvider provides some api to interact with resource manager server.
 type ResourceGroupProvider interface {
-	GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error)
+	GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error)
+	ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 
 	// meta storage client
+	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	Watch(ctx context.Context, key []byte, opts ...pd.OpOption) (chan []*meta_storagepb.Event, error)
 	Get(ctx context.Context, key []byte, opts ...pd.OpOption) (*meta_storagepb.GetResponse, error)
 }
@@ -101,6 +100,20 @@ func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.ruConfig.LTBMaxWaitDuration = d
+	}
+}
+
+// WithWaitRetryInterval is the option to set the retry interval when waiting for the token.
+func WithWaitRetryInterval(d time.Duration) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.WaitRetryInterval = d
+	}
+}
+
+// WithWaitRetryTimes is the option to set the times to retry when waiting for the token.
+func WithWaitRetryTimes(times int) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.WaitRetryTimes = times
 	}
 }
 
@@ -185,7 +198,7 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 		log.Warn("[resource group controller] server does not save config, load config failed")
 		return DefaultConfig(), nil
 	}
-	config := &Config{}
+	config := DefaultConfig()
 	err = json.Unmarshal(kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
@@ -346,7 +359,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 								continue
 							}
 							if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
-								resourceGroupStatusGauge.DeleteLabelValues(group.Name)
+								resourceGroupStatusGauge.DeleteLabelValues(group.Name, group.Name)
 							}
 						} else {
 							// Prev-kv is compacted means there must have been a delete event before this event,
@@ -366,7 +379,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 				for _, item := range resp {
 					cfgRevision = item.Kv.ModRevision
-					config := &Config{}
+					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
 					}
@@ -385,8 +398,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 
 			case gc := <-c.tokenBucketUpdateChan:
-				now := gc.run.now
-				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
+				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
 			}
 		}
 	}()
@@ -431,7 +443,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	// Check again to prevent initializing the same resource group concurrently.
 	tmp, loaded := c.groupsController.LoadOrStore(group.GetName(), gc)
 	if !loaded {
-		resourceGroupStatusGauge.WithLabelValues(name).Set(1)
+		resourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 		log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
 	}
 	return tmp.(*groupCostController), nil
@@ -448,7 +460,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.tombstone {
 				c.groupsController.Delete(resourceGroupName)
-				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName)
+				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				return true
 			}
 			gc.tombstone = true
@@ -460,7 +472,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 }
 
 func (c *ResourceGroupsController) executeOnAllGroups(f func(controller *groupCostController)) {
-	c.groupsController.Range(func(name, value any) bool {
+	c.groupsController.Range(func(_, value any) bool {
 		f(value.(*groupCostController))
 		return true
 	})
@@ -491,7 +503,7 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 
 func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, typ selectType) {
 	c.run.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
-	c.groupsController.Range(func(name, value any) bool {
+	c.groupsController.Range(func(_, value any) bool {
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
@@ -563,7 +575,6 @@ func (c *ResourceGroupsController) IsBackgroundRequest(ctx context.Context,
 	resourceGroupName, requestResource string) bool {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
-		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 		return false
 	}
 
@@ -576,7 +587,6 @@ func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, 
 		resourceGroupName := "default"
 		gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 		if err != nil {
-			failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 			return false
 		}
 		bg = gc.getMeta().BackgroundSettings
@@ -713,11 +723,11 @@ func newGroupCostController(
 		name:                       group.Name,
 		mainCfg:                    mainCfg,
 		mode:                       group.GetMode(),
-		successfulRequestDuration:  successfulRequestDuration.WithLabelValues(group.Name),
-		failedLimitReserveDuration: failedLimitReserveDuration.WithLabelValues(group.Name),
-		failedRequestCounter:       failedRequestCounter.WithLabelValues(group.Name),
-		requestRetryCounter:        requestRetryCounter.WithLabelValues(group.Name),
-		tokenRequestCounter:        resourceGroupTokenRequestCounter.WithLabelValues(group.Name),
+		successfulRequestDuration:  successfulRequestDuration.WithLabelValues(group.Name, group.Name),
+		failedLimitReserveDuration: failedLimitReserveDuration.WithLabelValues(group.Name, group.Name),
+		failedRequestCounter:       failedRequestCounter.WithLabelValues(group.Name, group.Name),
+		requestRetryCounter:        requestRetryCounter.WithLabelValues(group.Name, group.Name),
+		tokenRequestCounter:        resourceGroupTokenRequestCounter.WithLabelValues(group.Name, group.Name),
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
@@ -845,7 +855,7 @@ func (gc *groupCostController) resetEmergencyTokenAcquisition() {
 	}
 }
 
-func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context, now time.Time) {
+func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context) {
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
@@ -862,7 +872,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context,
 				counter.notify.setupNotificationCh = nil
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(now, threshold)
+				counter.limiter.SetupNotificationThreshold(threshold)
 			case <-ctx.Done():
 				return
 			}
@@ -883,7 +893,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context,
 				counter.notify.setupNotificationCh = nil
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(now, threshold)
+				counter.limiter.SetupNotificationThreshold(threshold)
 			case <-ctx.Done():
 				return
 			}
@@ -1207,7 +1217,7 @@ func (gc *groupCostController) onRequestWait(
 		var i int
 		var d time.Duration
 	retryLoop:
-		for i = 0; i < maxRetry; i++ {
+		for i = 0; i < gc.mainCfg.WaitRetryTimes; i++ {
 			switch gc.mode {
 			case rmpb.GroupMode_RawMode:
 				res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
@@ -1231,8 +1241,8 @@ func (gc *groupCostController) onRequestWait(
 				}
 			}
 			gc.requestRetryCounter.Inc()
-			time.Sleep(retryInterval)
-			waitDuration += retryInterval
+			time.Sleep(gc.mainCfg.WaitRetryInterval)
+			waitDuration += gc.mainCfg.WaitRetryInterval
 		}
 		if err != nil {
 			gc.failedRequestCounter.Inc()

@@ -81,3 +81,14 @@ func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 		return lim.(*limiter).updateDimensionConfig(cfg)
 	}
 }
+
+// InitLimiter creates empty concurrency limiter for a given label by config if it doesn't exist.
+func InitLimiter() Option {
+	return func(label string, l *Controller) UpdateStatus {
+		if _, allow := l.labelAllowList[label]; allow {
+			return InAllowList
+		}
+		l.limiters.LoadOrStore(label, newLimiter())
+		return ConcurrencyChanged
+	}
+}

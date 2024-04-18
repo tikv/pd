@@ -39,7 +39,7 @@ const (
 	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderType is evict leader scheduler type.
 	EvictLeaderType = "evict-leader"
-	// EvictLeaderBatchSize is the number of operators to to transfer
+	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
 	EvictLeaderBatchSize = 3
 	lastStoreDeleteInfo  = "The last store has been deleted"
@@ -103,7 +103,7 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 	}
 }
 
-func (conf *evictLeaderSchedulerConfig) getSchedulerName() string {
+func (*evictLeaderSchedulerConfig) getSchedulerName() string {
 	return EvictLeaderName
 }
 
@@ -179,11 +179,11 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *evictLeaderScheduler) GetName() string {
+func (*evictLeaderScheduler) GetName() string {
 	return EvictLeaderName
 }
 
-func (s *evictLeaderScheduler) GetType() string {
+func (*evictLeaderScheduler) GetType() string {
 	return EvictLeaderType
 }
 
@@ -240,7 +240,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	return allowed
 }
 
-func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize), nil
 }
@@ -327,7 +327,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster sche.SchedulerCluster, co
 		for _, t := range targets {
 			targetIDs = append(targetIDs, t.GetID())
 		}
-		op, err := operator.CreateTransferLeaderOperator(typ, cluster, region, region.GetLeader().GetStoreId(), target.GetID(), targetIDs, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(typ, cluster, region, target.GetID(), targetIDs, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
@@ -345,7 +345,7 @@ type evictLeaderHandler struct {
 }
 
 func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -383,10 +383,10 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
-func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -399,7 +399,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var resp interface{}
+	var resp any
 	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {

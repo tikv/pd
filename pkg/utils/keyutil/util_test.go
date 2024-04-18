@@ -21,7 +21,6 @@ import (
 )
 
 func TestKeyUtil(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	startKey := []byte("a")
 	endKey := []byte("b")

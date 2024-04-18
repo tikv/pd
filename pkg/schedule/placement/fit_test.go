@@ -151,7 +151,7 @@ func TestReplace(t *testing.T) {
 	}
 	for _, tc := range testCases {
 		region := makeRegion(tc.region)
-		var rules []*Rule
+		rules := make([]*Rule, 0, len(tc.rules))
 		for _, r := range tc.rules {
 			rules = append(rules, makeRule(r))
 		}
@@ -196,7 +196,7 @@ func TestFitRegion(t *testing.T) {
 
 	for _, testCase := range testCases {
 		region := makeRegion(testCase.region)
-		var rules []*Rule
+		rules := make([]*Rule, 0, len(testCase.rules))
 		for _, r := range testCase.rules {
 			rules = append(rules, makeRule(r))
 		}
@@ -215,7 +215,7 @@ func TestIsolationScore(t *testing.T) {
 	as := assert.New(t)
 	stores := makeStores()
 	testCases := []struct {
-		checker func(interface{}, interface{}, ...interface{}) bool
+		checker func(any, any, ...any) bool
 		peers1  []uint64
 		peers2  []uint64
 	}{

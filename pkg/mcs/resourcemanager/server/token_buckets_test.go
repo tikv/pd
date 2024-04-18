@@ -48,11 +48,40 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 		},
 	}
 	tb.patch(tbSetting)
-
+	time.Sleep(10 * time.Millisecond)
 	time2 := time.Now()
 	tb.request(time2, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.FillRate)+1e7)
 	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
+
+	tbSetting = &rmpb.TokenBucket{
+		Tokens: 0,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: -1,
+		},
+	}
+	tb = NewGroupTokenBucket(tbSetting)
+	tb.request(time2, 0, 0, clientUniqueID)
+	re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
+	time3 := time.Now()
+	tb.request(time3, 0, 0, clientUniqueID)
+	re.LessOrEqual(math.Abs(tbSetting.Tokens), 1e-7)
+
+	tbSetting = &rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: -1,
+		},
+	}
+	tb = NewGroupTokenBucket(tbSetting)
+	tb.request(time3, 0, 0, clientUniqueID)
+	re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
+	time.Sleep(10 * time.Millisecond)
+	time4 := time.Now()
+	tb.request(time4, 0, 0, clientUniqueID)
+	re.LessOrEqual(math.Abs(tbSetting.Tokens-200000), 1e-7)
 }
 
 func TestGroupTokenBucketRequest(t *testing.T) {

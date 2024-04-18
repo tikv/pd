@@ -91,7 +91,7 @@ func (conf *grantLeaderSchedulerConfig) getStorage() endpoint.ConfigStorage {
 	return conf.storage
 }
 
-func (conf *grantLeaderSchedulerConfig) getSchedulerName() string {
+func (*grantLeaderSchedulerConfig) getSchedulerName() string {
 	return GrantLeaderName
 }
 
@@ -169,11 +169,11 @@ func (s *grantLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *grantLeaderScheduler) GetName() string {
+func (*grantLeaderScheduler) GetName() string {
 	return GrantLeaderName
 }
 
-func (s *grantLeaderScheduler) GetType() string {
+func (*grantLeaderScheduler) GetType() string {
 	return GrantLeaderType
 }
 
@@ -228,7 +228,7 @@ func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	return allowed
 }
 
-func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
 	storeIDWithRanges := s.conf.getStoreIDWithRanges()
 	ops := make([]*operator.Operator, 0, len(storeIDWithRanges))
@@ -241,7 +241,7 @@ func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bo
 			continue
 		}
 
-		op, err := operator.CreateForceTransferLeaderOperator(GrantLeaderType, cluster, region, region.GetLeader().GetStoreId(), id, operator.OpLeader)
+		op, err := operator.CreateForceTransferLeaderOperator(GrantLeaderType, cluster, region, id, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue
@@ -260,7 +260,7 @@ type grantLeaderHandler struct {
 }
 
 func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -298,10 +298,10 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
-func (handler *grantLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *grantLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -314,7 +314,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	var resp interface{}
+	var resp any
 	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {

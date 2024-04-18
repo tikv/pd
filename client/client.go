@@ -16,12 +16,11 @@ package pd
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
-	"math/rand"
 	"runtime/trace"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/opentracing/opentracing-go"
@@ -32,14 +31,10 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -74,16 +69,10 @@ type GlobalConfigItem struct {
 	PayLoad   []byte
 }
 
-// Client is a PD (Placement Driver) RPC client.
-// It should not be used after calling Close().
-type Client interface {
-	// GetClusterID gets the cluster ID from PD.
-	GetClusterID(ctx context.Context) uint64
+// RPCClient is a PD (Placement Driver) RPC and related mcs client which can only call RPC.
+type RPCClient interface {
 	// GetAllMembers gets the members Info from PD
 	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
-	// GetLeaderAddr returns current leader's address. It returns "" before
-	// syncing leader from server.
-	GetLeaderAddr() string
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
 	// taking care of region change.
@@ -138,8 +127,6 @@ type Client interface {
 	StoreGlobalConfig(ctx context.Context, configPath string, items []GlobalConfigItem) error
 	// WatchGlobalConfig returns a stream with all global config and updates
 	WatchGlobalConfig(ctx context.Context, configPath string, revision int64) (chan []GlobalConfigItem, error)
-	// UpdateOption updates the client option.
-	UpdateOption(option DynamicOption, value interface{}) error
 
 	// GetExternalTimestamp returns external timestamp
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
@@ -156,6 +143,24 @@ type Client interface {
 	GCClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
+}
+
+// Client is a PD (Placement Driver) RPC client.
+// It should not be used after calling Close().
+type Client interface {
+	RPCClient
+
+	// GetClusterID gets the cluster ID from PD.
+	GetClusterID(ctx context.Context) uint64
+	// GetLeaderURL returns current leader's URL. It returns "" before
+	// syncing leader from server.
+	GetLeaderURL() string
+	// GetServiceDiscovery returns ServiceDiscovery
+	GetServiceDiscovery() ServiceDiscovery
+
+	// UpdateOption updates the client option.
+	UpdateOption(option DynamicOption, value any) error
+
 	// Close closes the client.
 	Close()
 }
@@ -216,9 +221,6 @@ func WithBuckets() GetRegionOption {
 func WithAllowFollowerHandle() GetRegionOption {
 	return func(op *GetRegionOp) { op.allowFollowerHandle = true }
 }
-
-// LeaderHealthCheckInterval might be changed in the unit to shorten the testing time.
-var LeaderHealthCheckInterval = time.Second
 
 var (
 	// errUnmatchedClusterID is returned when found a PD with a different cluster ID.
@@ -308,7 +310,7 @@ func (k *serviceModeKeeper) close() {
 type client struct {
 	keyspaceID      uint32
 	svrUrls         []string
-	pdSvcDiscovery  ServiceDiscovery
+	pdSvcDiscovery  *pdServiceDiscovery
 	tokenDispatcher *tokenDispatcher
 
 	// For service mode switching.
@@ -316,12 +318,11 @@ type client struct {
 
 	// For internal usage.
 	updateTokenConnectionCh chan struct{}
-	leaderNetworkFailure    int32
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	tlsCfg *tlsutil.TLSConfig
+	tlsCfg *tls.Config
 	option *option
 }
 
@@ -369,7 +370,7 @@ func createClientWithKeyspace(
 	ctx context.Context, keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	tlsCfg := &tlsutil.TLSConfig{
+	tlsCfg, err := tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
 		KeyPath:  security.KeyPath,
@@ -377,15 +378,17 @@ func createClientWithKeyspace(
 		SSLCABytes:   security.SSLCABytes,
 		SSLCertBytes: security.SSLCertBytes,
 		SSLKEYBytes:  security.SSLKEYBytes,
+	}.ToTLSConfig()
+	if err != nil {
+		return nil, err
 	}
-
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
 		keyspaceID:              keyspaceID,
-		svrUrls:                 addrsToUrls(svrAddrs),
+		svrUrls:                 svrAddrs,
 		tlsCfg:                  tlsCfg,
 		option:                  newOption(),
 	}
@@ -400,6 +403,9 @@ func createClientWithKeyspace(
 		nil, keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
+		if c.pdSvcDiscovery != nil {
+			c.pdSvcDiscovery.Close()
+		}
 		return nil, err
 	}
 
@@ -432,12 +438,12 @@ func NewAPIContextV1() APIContext {
 }
 
 // GetAPIVersion returns the API version.
-func (apiCtx *apiContextV1) GetAPIVersion() (version APIVersion) {
+func (*apiContextV1) GetAPIVersion() (version APIVersion) {
 	return V1
 }
 
 // GetKeyspaceName returns the keyspace name.
-func (apiCtx *apiContextV1) GetKeyspaceName() (keyspaceName string) {
+func (*apiContextV1) GetKeyspaceName() (keyspaceName string) {
 	return ""
 }
 
@@ -454,7 +460,7 @@ func NewAPIContextV2(keyspaceName string) APIContext {
 }
 
 // GetAPIVersion returns the API version.
-func (apiCtx *apiContextV2) GetAPIVersion() (version APIVersion) {
+func (*apiContextV2) GetAPIVersion() (version APIVersion) {
 	return V2
 }
 
@@ -484,7 +490,7 @@ func newClientWithKeyspaceName(
 	ctx context.Context, keyspaceName string, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	tlsCfg := &tlsutil.TLSConfig{
+	tlsCfg, err := tlsutil.TLSConfig{
 		CAPath:   security.CAPath,
 		CertPath: security.CertPath,
 		KeyPath:  security.KeyPath,
@@ -492,14 +498,16 @@ func newClientWithKeyspaceName(
 		SSLCABytes:   security.SSLCABytes,
 		SSLCertBytes: security.SSLCertBytes,
 		SSLKEYBytes:  security.SSLKEYBytes,
+	}.ToTLSConfig()
+	if err != nil {
+		return nil, err
 	}
-
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
-		svrUrls:                 addrsToUrls(svrAddrs),
+		svrUrls:                 svrAddrs,
 		tlsCfg:                  tlsCfg,
 		option:                  newOption(),
 	}
@@ -514,16 +522,19 @@ func newClientWithKeyspaceName(
 			return err
 		}
 		// c.keyspaceID is the source of truth for keyspace id.
-		c.pdSvcDiscovery.(*pdServiceDiscovery).SetKeyspaceID(c.keyspaceID)
+		c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
 		return nil
 	}
 
-	// Create a PD service discovery with null keyspace id, then query the real id wth the keyspace name,
+	// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
 	// finally update the keyspace id to the PD service discovery for the following interactions.
 	c.pdSvcDiscovery = newPDServiceDiscovery(
 		clientCtx, clientCancel, &c.wg, c.setServiceMode, updateKeyspaceIDCb, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
+		if c.pdSvcDiscovery != nil {
+			c.pdSvcDiscovery.Close()
+		}
 		return nil, err
 	}
 	log.Info("[pd] create pd client with endpoints and keyspace",
@@ -571,14 +582,10 @@ func (c *client) setup() error {
 	}
 
 	// Register callbacks
-	c.pdSvcDiscovery.AddServingAddrSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.pdSvcDiscovery.AddServingURLSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
-
-	// Start the daemons.
-	c.wg.Add(1)
-	go c.leaderCheckLoop()
 	return nil
 }
 
@@ -606,12 +613,22 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	log.Info("[pd] changing service mode",
 		zap.String("old-mode", c.serviceMode.String()),
 		zap.String("new-mode", newMode.String()))
+	c.resetTSOClientLocked(newMode)
+	oldMode := c.serviceMode
+	c.serviceMode = newMode
+	log.Info("[pd] service mode changed",
+		zap.String("old-mode", oldMode.String()),
+		zap.String("new-mode", newMode.String()))
+}
+
+// Reset a new TSO client.
+func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tsoClient
 		newTSOSvcDiscovery ServiceDiscovery
 	)
-	switch newMode {
+	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = newTSOClient(c.ctx, c.option,
 			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
@@ -649,17 +666,19 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		// We are switching from API service mode to PD service mode, so delete the old tso microservice discovery.
 		oldTSOSvcDiscovery.Close()
 	}
-	oldMode := c.serviceMode
-	c.serviceMode = newMode
-	log.Info("[pd] service mode changed",
-		zap.String("old-mode", oldMode.String()),
-		zap.String("new-mode", newMode.String()))
 }
 
 func (c *client) getTSOClient() *tsoClient {
 	c.RLock()
 	defer c.RUnlock()
 	return c.tsoClient
+}
+
+// ResetTSOClient resets the TSO client, only for test.
+func (c *client) ResetTSOClient() {
+	c.Lock()
+	defer c.Unlock()
+	c.resetTSOClientLocked(c.serviceMode)
 }
 
 func (c *client) getServiceMode() pdpb.ServiceMode {
@@ -680,9 +699,9 @@ func (c *client) GetClusterID(context.Context) uint64 {
 	return c.pdSvcDiscovery.GetClusterID()
 }
 
-// GetLeaderAddr returns the leader address.
-func (c *client) GetLeaderAddr() string {
-	return c.pdSvcDiscovery.GetServingAddr()
+// GetLeaderURL returns the leader URL.
+func (c *client) GetLeaderURL() string {
+	return c.pdSvcDiscovery.GetServingURL()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
@@ -691,7 +710,7 @@ func (c *client) GetServiceDiscovery() ServiceDiscovery {
 }
 
 // UpdateOption updates the client option.
-func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
+func (c *client) UpdateOption(option DynamicOption, value any) error {
 	switch option {
 	case MaxTSOBatchWaitInterval:
 		interval, ok := value.(time.Duration)
@@ -702,6 +721,9 @@ func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
 			return err
 		}
 	case EnableTSOFollowerProxy:
+		if c.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
+			return errors.New("[pd] tso follower proxy is only supported in PD service mode")
+		}
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
@@ -717,46 +739,6 @@ func (c *client) UpdateOption(option DynamicOption, value interface{}) error {
 		return errors.New("[pd] unsupported client option")
 	}
 	return nil
-}
-
-func (c *client) leaderCheckLoop() {
-	defer c.wg.Done()
-
-	leaderCheckLoopCtx, leaderCheckLoopCancel := context.WithCancel(c.ctx)
-	defer leaderCheckLoopCancel()
-
-	ticker := time.NewTicker(LeaderHealthCheckInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.ctx.Done():
-			return
-		case <-ticker.C:
-			c.checkLeaderHealth(leaderCheckLoopCtx)
-		}
-	}
-}
-
-func (c *client) checkLeaderHealth(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	defer cancel()
-	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
-		healthCli := healthpb.NewHealthClient(client)
-		resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
-		failpoint.Inject("unreachableNetwork1", func() {
-			resp = nil
-			err = status.New(codes.Unavailable, "unavailable").Err()
-		})
-		rpcErr, ok := status.FromError(err)
-		if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
-			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
-		} else {
-			atomic.StoreInt32(&(c.leaderNetworkFailure), int32(0))
-		}
-	} else {
-		atomic.StoreInt32(&(c.leaderNetworkFailure), int32(1))
-	}
 }
 
 func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
@@ -778,50 +760,31 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	return resp.GetMembers(), nil
 }
 
-// leaderClient gets the client of current PD leader.
-func (c *client) leaderClient() pdpb.PDClient {
-	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
-		return pdpb.NewPDClient(client)
-	}
-	return nil
-}
-
-// backupClientConn gets a grpc client connection of the current reachable and healthy
-// backup service endpoints randomly. Backup service endpoints are followers in a
-// quorum-based cluster or secondaries in a primary/secondary configured cluster.
-func (c *client) backupClientConn() (*grpc.ClientConn, string) {
-	addrs := c.pdSvcDiscovery.GetBackupAddrs()
-	if len(addrs) < 1 {
-		return nil, ""
-	}
-	var (
-		cc  *grpc.ClientConn
-		err error
-	)
-	for i := 0; i < len(addrs); i++ {
-		addr := addrs[rand.Intn(len(addrs))]
-		if cc, err = c.pdSvcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
-			continue
-		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
-		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-		healthCancel()
-		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			return cc, addr
-		}
-	}
-	return nil, ""
-}
-
+// getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
+// follower pd client and the context which holds forward information.
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
-	if c.option.enableForwarding && atomic.LoadInt32(&c.leaderNetworkFailure) == 1 {
-		backupClientConn, addr := c.backupClientConn()
-		if backupClientConn != nil {
-			log.Debug("[pd] use follower client", zap.String("addr", addr))
-			return pdpb.NewPDClient(backupClientConn), grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
+	serviceClient := c.pdSvcDiscovery.GetServiceClient()
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
+		return nil, ctx
+	}
+	return pdpb.NewPDClient(serviceClient.GetClientConn()), serviceClient.BuildGRPCTargetContext(ctx, true)
+}
+
+// getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
+// follower pd client and the context which holds forward information.
+func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (ServiceClient, context.Context) {
+	var serviceClient ServiceClient
+	if allowFollower {
+		serviceClient = c.pdSvcDiscovery.getServiceClientByKind(regionAPIKind)
+		if serviceClient != nil {
+			return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 		}
 	}
-	return c.leaderClient(), ctx
+	serviceClient = c.pdSvcDiscovery.GetServiceClient()
+	if serviceClient == nil || serviceClient.GetClientConn() == nil {
+		return nil, ctx
+	}
+	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 }
 
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
@@ -829,30 +792,51 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 }
 
 func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
-	defer trace.StartRegion(ctx, "GetLocalTSAsync").End()
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("GetLocalTSAsync", opentracing.ChildOf(span.Context()))
-		ctx = opentracing.ContextWithSpan(ctx, span)
+	defer trace.StartRegion(ctx, "pdclient.GetLocalTSAsync").End()
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetLocalTSAsync", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
 	}
 
-	req := tsoReqPool.Get().(*tsoRequest)
-	req.requestCtx = ctx
-	req.clientCtx = c.ctx
-	tsoClient := c.getTSOClient()
-	req.start = time.Now()
-	req.dcLocation = dcLocation
+	return c.dispatchTSORequestWithRetry(ctx, dcLocation)
+}
 
-	if tsoClient == nil {
-		req.done <- errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
-		return req
-	}
+const (
+	dispatchRetryDelay = 50 * time.Millisecond
+	dispatchRetryCount = 2
+)
 
-	if err := tsoClient.dispatchRequest(dcLocation, req); err != nil {
-		// Wait for a while and try again
-		time.Sleep(50 * time.Millisecond)
-		if err = tsoClient.dispatchRequest(dcLocation, req); err != nil {
-			req.done <- err
+func (c *client) dispatchTSORequestWithRetry(ctx context.Context, dcLocation string) TSFuture {
+	var (
+		retryable bool
+		err       error
+		req       *tsoRequest
+	)
+	for i := 0; i < dispatchRetryCount; i++ {
+		// Do not delay for the first time.
+		if i > 0 {
+			time.Sleep(dispatchRetryDelay)
 		}
+		// Get the tsoClient each time, as it may be initialized or switched during the process.
+		tsoClient := c.getTSOClient()
+		if tsoClient == nil {
+			err = errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
+			continue
+		}
+		// Get a new request from the pool if it's nil or not from the current pool.
+		if req == nil || req.pool != tsoClient.tsoReqPool {
+			req = tsoClient.getTSORequest(ctx, dcLocation)
+		}
+		retryable, err = tsoClient.dispatchRequest(req)
+		if !retryable {
+			break
+		}
+	}
+	if err != nil {
+		if req == nil {
+			return newTSORequestFastFail(err)
+		}
+		req.tryDone(err)
 	}
 	return req
 }
@@ -930,13 +914,9 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	return r
 }
 
-func isNetworkError(code codes.Code) bool {
-	return code == codes.Unavailable || code == codes.DeadlineExceeded
-}
-
-func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, opts ...GetRegionOption) (*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...GetRegionOption) (*Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -973,13 +953,14 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 }
 
 func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 
 	options := &GetRegionOp{}
 	for _, opt := range opts {
@@ -990,13 +971,18 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 		RegionKey:   key,
 		NeedBuckets: options.needBuckets,
 	}
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
-		cancel()
+	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetRegion(ctx, req)
-	cancel()
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetRegion(cctx, req)
+	}
 
 	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1005,13 +991,14 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 }
 
 func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 
 	options := &GetRegionOp{}
 	for _, opt := range opts {
@@ -1022,13 +1009,18 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 		RegionKey:   key,
 		NeedBuckets: options.needBuckets,
 	}
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
-		cancel()
+	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetPrevRegion(ctx, req)
-	cancel()
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetPrevRegion(cctx, req)
+	}
 
 	if err = c.respForErr(cmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1037,13 +1029,14 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 }
 
 func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 
 	options := &GetRegionOp{}
 	for _, opt := range opts {
@@ -1054,13 +1047,18 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 		RegionId:    regionID,
 		NeedBuckets: options.needBuckets,
 	}
-	protoClient, ctx := c.getClientAndContext(ctx)
-	if protoClient == nil {
-		cancel()
+	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.GetRegionByID(ctx, req)
-	cancel()
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(ctx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.GetRegionByID(cctx, req)
+	}
 
 	if err = c.respForErr(cmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1069,8 +1067,8 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 }
 
 func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...GetRegionOption) ([]*Region, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -1082,18 +1080,31 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		scanCtx, cancel = context.WithTimeout(ctx, c.option.timeout)
 		defer cancel()
 	}
+	options := &GetRegionOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
 	req := &pdpb.ScanRegionsRequest{
 		Header:   c.requestHeader(),
 		StartKey: key,
 		EndKey:   endKey,
 		Limit:    int32(limit),
 	}
-	protoClient, scanCtx := c.getClientAndContext(scanCtx)
-	if protoClient == nil {
-		cancel()
+	serviceClient, cctx := c.getRegionAPIClientAndContext(scanCtx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := protoClient.ScanRegions(scanCtx, req)
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
+	failpoint.Inject("responseNil", func() {
+		resp = nil
+	})
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(scanCtx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.ScanRegions(cctx, req)
+	}
 
 	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1131,8 +1142,8 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*Region {
 }
 
 func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetStore", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -1175,8 +1186,8 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 		opt(options)
 	}
 
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetAllStores", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -1202,8 +1213,8 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 }
 
 func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.UpdateGCSafePoint", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.UpdateGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -1233,8 +1244,8 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 // determine the safepoint for multiple services, it does not trigger a GC
 // job. Use UpdateGCSafePoint to trigger the GC job if needed.
 func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.UpdateServiceGCSafePoint", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.UpdateServiceGCSafePoint", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 
@@ -1263,8 +1274,8 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 }
 
 func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.ScatterRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	return c.scatterRegionsWithGroup(ctx, regionID, "")
@@ -1290,23 +1301,23 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 	if err != nil {
 		return err
 	}
-	if resp.Header.GetError() != nil {
-		return errors.Errorf("scatter region %d failed: %s", regionID, resp.Header.GetError().String())
+	if resp.GetHeader().GetError() != nil {
+		return errors.Errorf("scatter region %d failed: %s", regionID, resp.GetHeader().GetError().String())
 	}
 	return nil
 }
 
 func (c *client) ScatterRegions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.ScatterRegions", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.ScatterRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	return c.scatterRegionsWithOptions(ctx, regionsID, opts...)
 }
 
 func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.SplitAndScatterRegions", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.SplitAndScatterRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -1333,8 +1344,8 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 }
 
 func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetOperator", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -1356,8 +1367,8 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 
 // SplitRegions split regions by given split keys
 func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...RegionsOption) (*pdpb.SplitRegionsResponse, error) {
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.SplitRegions", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.SplitRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -1414,23 +1425,10 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	if err != nil {
 		return nil, err
 	}
-	if resp.Header.GetError() != nil {
-		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.Header.GetError().String())
+	if resp.GetHeader().GetError() != nil {
+		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.GetHeader().GetError().String())
 	}
 	return resp, nil
-}
-
-func addrsToUrls(addrs []string) []string {
-	// Add default schema "http://" to addrs.
-	urls := make([]string, 0, len(addrs))
-	for _, addr := range addrs {
-		if strings.Contains(addr, "://") {
-			urls = append(urls, addr)
-		} else {
-			urls = append(urls, "http://"+addr)
-		}
-	}
-	return urls
 }
 
 // IsLeaderChange will determine whether there is a leader change.
@@ -1444,9 +1442,14 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, errs.NotServedErr)
 }
 
+const (
+	httpSchemePrefix  = "http://"
+	httpsSchemePrefix = "https://"
+)
+
 func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, "http://")
-	str = strings.TrimPrefix(str, "https://")
+	str = strings.TrimPrefix(str, httpSchemePrefix)
+	str = strings.TrimPrefix(str, httpsSchemePrefix)
 	return str
 }
 

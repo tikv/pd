@@ -42,20 +42,20 @@ var (
 var _ tsopb.TSOServer = (*Service)(nil)
 
 // SetUpRestHandler is a hook to sets up the REST service.
-var SetUpRestHandler = func(srv *Service) (http.Handler, apiutil.APIServiceGroup) {
+var SetUpRestHandler = func(*Service) (http.Handler, apiutil.APIServiceGroup) {
 	return dummyRestService{}, apiutil.APIServiceGroup{}
 }
 
 type dummyRestService struct{}
 
-func (d dummyRestService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("not implemented"))
 }
 
 // ConfigProvider is used to get tso config from the given
 // `bs.server` without modifying its interface.
-type ConfigProvider interface{}
+type ConfigProvider any
 
 // Service is the TSO grpc service.
 type Service struct {
@@ -135,7 +135,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 
 // FindGroupByKeyspaceID returns the keyspace group that the keyspace belongs to.
 func (s *Service) FindGroupByKeyspaceID(
-	ctx context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
+	_ context.Context, request *tsopb.FindGroupByKeyspaceIDRequest,
 ) (*tsopb.FindGroupByKeyspaceIDResponse, error) {
 	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
 	if errorType, err := s.validRequest(request.GetHeader()); err != nil {
@@ -189,7 +189,7 @@ func (s *Service) FindGroupByKeyspaceID(
 // GetMinTS gets the minimum timestamp across all keyspace groups served by the TSO server
 // who receives and handles the request.
 func (s *Service) GetMinTS(
-	ctx context.Context, request *tsopb.GetMinTSRequest,
+	_ context.Context, request *tsopb.GetMinTSRequest,
 ) (*tsopb.GetMinTSResponse, error) {
 	respKeyspaceGroup := request.GetHeader().GetKeyspaceGroupId()
 	if errorType, err := s.validRequest(request.GetHeader()); err != nil {

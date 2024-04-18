@@ -19,7 +19,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
@@ -119,6 +118,9 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	if len(h.microserviceRedirectRules) == 0 {
 		return false, ""
 	}
+	if r.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) == "true" {
+		return false, ""
+	}
 	// Remove trailing '/' from the URL path
 	// It will be helpful when matching the redirect rules "schedulers" or "schedulers/{name}"
 	r.URL.Path = strings.TrimRight(r.URL.Path, "/")
@@ -200,11 +202,8 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 			return
 		}
 		clientUrls = append(clientUrls, targetAddr)
-		// Add a header to the response, this is not a failure injection
-		// it is used for testing, to check whether the request is forwarded to the micro service
-		failpoint.Inject("checkHeader", func() {
-			w.Header().Set(apiutil.ForwardToMicroServiceHeader, "true")
-		})
+		// Add a header to the response, it is used to mark whether the request has been forwarded to the micro service.
+		w.Header().Add(apiutil.XForwardedToMicroServiceHeader, "true")
 	} else {
 		leader := h.s.GetMember().GetLeader()
 		if leader == nil {

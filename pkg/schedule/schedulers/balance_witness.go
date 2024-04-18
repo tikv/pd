@@ -64,11 +64,11 @@ func (conf *balanceWitnessSchedulerConfig) getStorage() endpoint.ConfigStorage {
 	return conf.storage
 }
 
-func (conf *balanceWitnessSchedulerConfig) getSchedulerName() string {
+func (*balanceWitnessSchedulerConfig) getSchedulerName() string {
 	return BalanceWitnessName
 }
 
-func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}) {
+func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -91,7 +91,7 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
 		return http.StatusOK, "Config is updated."
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
@@ -154,7 +154,7 @@ func (handler *balanceWitnessHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	handler.rd.JSON(w, httpCode, v)
 }
 
-func (handler *balanceWitnessHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *balanceWitnessHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -218,7 +218,7 @@ func (b *balanceWitnessScheduler) GetName() string {
 	return b.name
 }
 
-func (b *balanceWitnessScheduler) GetType() string {
+func (*balanceWitnessScheduler) GetType() string {
 	return BalanceWitnessType
 }
 

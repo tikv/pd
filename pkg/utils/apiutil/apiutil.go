@@ -27,9 +27,12 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -59,11 +62,24 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
-	// ForwardToMicroServiceHeader is used to mark the request is forwarded to micro service.
-	ForwardToMicroServiceHeader = "Forward-To-Micro-Service"
+	// XForbiddenForwardToMicroServiceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
+	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
+	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
+	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
 
 	chunkSize = 4096
 )
+
+var once sync.Once
+
+func init() {
+	once.Do(func() {
+		// See https://github.com/pingcap/tidb-dashboard/blob/f8ecb64e3d63f4ed91c3dca7a04362418ade01d8/pkg/apiserver/apiserver.go#L84
+		// These global modification will be effective only for the first invoke.
+		_ = godotenv.Load()
+		gin.SetMode(gin.ReleaseMode)
+	})
+}
 
 // DeferClose captures the error returned from closing (if an error occurs).
 // This is designed to be used in a defer statement.
@@ -278,7 +294,7 @@ func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *Fiel
 }
 
 // CollectEscapeStringOption is used to collect string using escaping from input map for given option
-func CollectEscapeStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+func CollectEscapeStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
 		value, err := url.QueryUnescape(v)
 		if err != nil {
@@ -293,7 +309,7 @@ func CollectEscapeStringOption(option string, input map[string]interface{}, coll
 }
 
 // CollectStringOption is used to collect string using from input map for given option
-func CollectStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
 		for _, c := range collectors {
 			c(v)
@@ -304,7 +320,7 @@ func CollectStringOption(option string, input map[string]interface{}, collectors
 }
 
 // ParseKey is used to parse interface into []byte and string
-func ParseKey(name string, input map[string]interface{}) ([]byte, string, error) {
+func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 	k, ok := input[name]
 	if !ok {
 		return nil, "", fmt.Errorf("missing %s", name)
@@ -322,7 +338,7 @@ func ParseKey(name string, input map[string]interface{}) ([]byte, string, error)
 
 // ReadJSON reads a JSON data from r and then closes it.
 // An error due to invalid json will be returned as a JSONError
-func ReadJSON(r io.ReadCloser, data interface{}) error {
+func ReadJSON(r io.ReadCloser, data any) error {
 	var err error
 	defer DeferClose(r, &err)
 	b, err := io.ReadAll(r)
@@ -340,7 +356,7 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 
 // ReadJSONRespondError writes json into data.
 // On error respond with a 400 Bad Request
-func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data any) error {
 	err := ReadJSON(body, data)
 	if err == nil {
 		return nil
@@ -425,16 +441,15 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
-		defer resp.Body.Close()
 		var reader io.ReadCloser
 		switch resp.Header.Get("Content-Encoding") {
 		case "gzip":
 			reader, err = gzip.NewReader(resp.Body)
 			if err != nil {
 				log.Error("failed to parse response with gzip compress", zap.Error(err))
+				resp.Body.Close()
 				continue
 			}
-			defer reader.Close()
 		default:
 			reader = resp.Body
 		}
@@ -458,6 +473,8 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 				break
 			}
 		}
+		resp.Body.Close()
+		reader.Close()
 		if err != nil {
 			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
 			// try next url.

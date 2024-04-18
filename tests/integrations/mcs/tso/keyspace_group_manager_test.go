@@ -30,11 +30,11 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/keyspace"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -151,6 +151,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
+	for _, client := range clients {
+		client.Close()
+	}
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKeyspaceGroups() {
@@ -232,6 +235,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
+	for _, client := range clients {
+		client.Close()
+	}
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
@@ -271,7 +277,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	})
 	// Wait for the split to complete automatically even there is no TSO request from the outside.
 	testutil.Eventually(re, func() bool {
-		kg2 := handlersutil.MustLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+		kg2, code := handlersutil.TryLoadKeyspaceGroupByID(re, suite.pdLeaderServer, 2)
+		if code != http.StatusOK {
+			return false
+		}
 		re.Equal(uint32(2), kg2.ID)
 		re.Equal([]uint32{222, 333}, kg2.Keyspaces)
 		return !kg2.IsSplitting()
@@ -761,7 +770,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 
 	var (
-		keyspaceGroupNum = keyspace.MaxEtcdTxnOps
+		keyspaceGroupNum = etcdutil.MaxEtcdTxnOps
 		keyspaceGroups   = make([]*endpoint.KeyspaceGroup, 0, keyspaceGroupNum)
 		keyspaces        = make([]uint32, 0, keyspaceGroupNum)
 	)
@@ -772,13 +781,12 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 			Keyspaces: []uint32{uint32(i)},
 		})
 		keyspaces = append(keyspaces, uint32(i))
-		if len(keyspaceGroups) < keyspace.MaxEtcdTxnOps/2 && i != keyspaceGroupNum {
+		if i != keyspaceGroupNum {
 			continue
 		}
 		handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 			KeyspaceGroups: keyspaceGroups,
 		})
-		keyspaceGroups = keyspaceGroups[:0]
 	}
 	// Check if all the keyspace groups are created.
 	groups := handlersutil.MustLoadKeyspaceGroups(re, suite.pdLeaderServer, "0", "0")
@@ -787,9 +795,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 	// Check if the first keyspace group is served.
 	svr := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
 	re.NotNil(svr)
-	// Check if the last keyspace group is served.
-	svr = suite.tsoCluster.WaitForPrimaryServing(re, uint32(keyspaceGroupNum), uint32(keyspaceGroupNum))
-	re.NotNil(svr)
+	for i := 1; i < keyspaceGroupNum; i++ {
+		// Check if the keyspace group is served.
+		svr = suite.tsoCluster.WaitForPrimaryServing(re, uint32(i), uint32(i))
+		re.NotNil(svr)
+	}
 	// Merge all the keyspace groups into the default keyspace group.
 	handlersutil.MustMergeKeyspaceGroup(re, suite.pdLeaderServer, mcsutils.DefaultKeyspaceGroupID, &handlers.MergeKeyspaceGroupsParams{
 		MergeAllIntoDefault: true,

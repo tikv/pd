@@ -509,7 +509,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	}
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
-	// Config with different encrption method.
+	// Config with different encryption method.
 	config := &Config{
 		DataEncryptionMethod: "aes256-ctr",
 		MasterKey: MasterKeyConfig{
@@ -579,7 +579,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	}
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
-	// Config with different encrption method.
+	// Config with different encryption method.
 	config := &Config{
 		DataEncryptionMethod: "aes128-ctr",
 		MasterKey: MasterKeyConfig{
@@ -774,7 +774,7 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	outputMasterKey, _ := hex.DecodeString(testMasterKey)
 	outputCiphertextKey, _ := hex.DecodeString(testCiphertextKey)
 	helper.newMasterKey = func(
-		meta *encryptionpb.MasterKey,
+		_ *encryptionpb.MasterKey,
 		ciphertext []byte,
 	) (*MasterKey, error) {
 		if newMasterKeyCalled < 2 {
@@ -905,7 +905,7 @@ func TestKeyRotation(t *testing.T) {
 	mockNow := int64(1601679533)
 	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
 	mockTick := make(chan time.Time)
-	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
+	helper.tick = func(_ *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
@@ -1001,7 +1001,7 @@ func TestKeyRotationConflict(t *testing.T) {
 	mockNow := int64(1601679533)
 	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
 	mockTick := make(chan time.Time, 10)
-	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
+	helper.tick = func(_ *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on ticker event
 	tickerEvent := make(chan struct{}, 10)
 	helper.eventAfterTicker = func() {

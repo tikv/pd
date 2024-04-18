@@ -41,20 +41,20 @@ func TestRangeList(t *testing.T) {
 	key, data := rl.Get(0)
 	re.Nil(key)
 
-	re.Equal([]interface{}{1}, data)
+	re.Equal([]any{1}, data)
 	i, data = rl.GetDataByKey([]byte("foo"))
 	re.Equal(0, i)
-	re.Equal([]interface{}{1}, data)
+	re.Equal([]any{1}, data)
 	i, data = rl.GetData([]byte("a"), []byte("b"))
 	re.Equal(0, i)
-	re.Equal([]interface{}{1}, data)
+	re.Equal([]any{1}, data)
 	re.Nil(rl.GetSplitKeys(nil, []byte("foo")))
 }
 
 func TestRangeList2(t *testing.T) {
 	re := require.New(t)
 	b := NewBuilder()
-	b.SetCompareFunc(func(a, b interface{}) int {
+	b.SetCompareFunc(func(a, b any) int {
 		if a.(int) > b.(int) {
 			return 1
 		}
@@ -80,12 +80,12 @@ func TestRangeList2(t *testing.T) {
 	expectKeys := [][]byte{
 		{}, {'a'}, {'b'}, {'c'}, {'d'}, {'e'}, {'f'}, {'g'}, {'h'}, {'i'},
 	}
-	expectData := [][]interface{}{
+	expectData := [][]any{
 		{2, 3}, {2, 3, 4}, {4}, {1, 4}, {4}, {}, {3}, {2, 3}, {2}, {},
 	}
 
 	rl := b.Build()
-	re.Equal(len(expectKeys), rl.Len())
+	re.Len(expectKeys, rl.Len())
 	for i := 0; i < rl.Len(); i++ {
 		key, data := rl.Get(i)
 		re.Equal(expectKeys[i], key)

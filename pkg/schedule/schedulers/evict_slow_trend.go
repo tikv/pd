@@ -81,7 +81,7 @@ func (conf *evictSlowTrendSchedulerConfig) getStorage() endpoint.ConfigStorage {
 	return conf.storage
 }
 
-func (conf *evictSlowTrendSchedulerConfig) getSchedulerName() string {
+func (*evictSlowTrendSchedulerConfig) getSchedulerName() string {
 	return EvictSlowTrendName
 }
 
@@ -236,7 +236,7 @@ func newEvictSlowTrendHandler(config *evictSlowTrendSchedulerConfig) http.Handle
 }
 
 func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -256,10 +256,10 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
-	handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
-func (handler *evictSlowTrendHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictSlowTrendHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -270,7 +270,7 @@ type evictSlowTrendScheduler struct {
 	handler http.Handler
 }
 
-func (s *evictSlowTrendScheduler) GetNextInterval(interval time.Duration) time.Duration {
+func (s *evictSlowTrendScheduler) GetNextInterval(time.Duration) time.Duration {
 	var growthType intervalGrowthType
 	// If it already found a slow node as candidate, the next interval should be shorter
 	// to make the next scheduling as soon as possible. This adjustment will decrease the
@@ -287,11 +287,11 @@ func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *evictSlowTrendScheduler) GetName() string {
+func (*evictSlowTrendScheduler) GetName() string {
 	return EvictSlowTrendName
 }
 
-func (s *evictSlowTrendScheduler) GetType() string {
+func (*evictSlowTrendScheduler) GetType() string {
 	return EvictSlowTrendType
 }
 
@@ -380,7 +380,7 @@ func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	return allowed
 }
 
-func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
 	var ops []*operator.Operator
@@ -593,7 +593,7 @@ func checkStoreSlowerThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 		}
 		slowTrend := store.GetSlowTrend()
 		// Use `SlowTrend.ResultValue` at first, but not good, `CauseValue` is better
-		// Greater `CuaseValue` means slower
+		// Greater `CauseValue` means slower
 		if slowTrend != nil && (targetSlowTrend.CauseValue-slowTrend.CauseValue) > alterEpsilon && slowTrend.CauseValue > alterEpsilon {
 			slowerThanStoresNum += 1
 		}

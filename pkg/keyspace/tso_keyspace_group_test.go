@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
 type keyspaceGroupTestSuite struct {
@@ -449,7 +450,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 	err = suite.kgm.MergeKeyspaceGroups(4, []uint32{5})
 	re.ErrorContains(err, ErrKeyspaceGroupNotExists(5).Error())
 	// merge with the number of keyspace groups exceeds the limit
-	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, MaxEtcdTxnOps/2))
+	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, etcdutil.MaxEtcdTxnOps/2))
 	re.ErrorIs(err, ErrExceedMaxEtcdTxnOps)
 	// merge the default keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{utils.DefaultKeyspaceGroupID})

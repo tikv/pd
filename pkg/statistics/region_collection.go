@@ -22,6 +22,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
 // RegionInfoProvider is an interface to provide the region information.
@@ -32,6 +33,8 @@ type RegionInfoProvider interface {
 
 // RegionStatisticType represents the type of the region's status.
 type RegionStatisticType uint32
+
+const emptyStatistic = RegionStatisticType(0)
 
 // region status type
 const (
@@ -148,12 +151,35 @@ func (r *RegionStatistics) deleteEntry(deleteIndex RegionStatisticType, regionID
 // due to some special state types.
 func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 	regionID := region.GetID()
+	if !r.isObserved(regionID) {
+		return true
+	}
 	if r.IsRegionStatsType(regionID, OversizedRegion) !=
 		region.IsOversized(int64(r.conf.GetRegionMaxSize()), int64(r.conf.GetRegionMaxKeys())) {
 		return true
 	}
+	// expected to be zero for below type
+	if r.IsRegionStatsType(regionID, PendingPeer) && len(region.GetPendingPeers()) == 0 {
+		return true
+	}
+	if r.IsRegionStatsType(regionID, DownPeer) && len(region.GetDownPeers()) == 0 {
+		return true
+	}
+	if r.IsRegionStatsType(regionID, LearnerPeer) && len(region.GetLearners()) == 0 {
+		return true
+	}
+
+	// merge
 	return r.IsRegionStatsType(regionID, UndersizedRegion) !=
 		region.NeedMerge(int64(r.conf.GetMaxMergeRegionSize()), int64(r.conf.GetMaxMergeRegionKeys()))
+}
+
+// isObserved returns whether the region is observed. And it also shows whether PD received heartbeat of this region.
+func (r *RegionStatistics) isObserved(id uint64) bool {
+	r.RLock()
+	defer r.RUnlock()
+	_, ok := r.index[id]
+	return ok
 }
 
 // Observe records the current regions' status.
@@ -164,7 +190,6 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		desiredReplicas = r.conf.GetMaxReplicas()
 		desiredVoters   = desiredReplicas
 		peerTypeIndex   RegionStatisticType
-		deleteIndex     RegionStatisticType
 	)
 	// Check if the region meets count requirements of its rules.
 	if r.conf.IsPlacementRulesEnabled() {
@@ -226,6 +251,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTS))
 				} else {
 					info.startDownPeerTS = time.Now().Unix()
+					logDownPeerWithNoDisconnectedStore(region, stores)
 				}
 			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
 				if info.startMissVoterPeerTS != 0 {
@@ -240,10 +266,10 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 		}
 	}
 	// Remove the info if any of the conditions are not met any more.
-	if oldIndex, ok := r.index[regionID]; ok {
-		deleteIndex = oldIndex &^ peerTypeIndex
+	if oldIndex, ok := r.index[regionID]; ok && oldIndex > emptyStatistic {
+		deleteIndex := oldIndex &^ peerTypeIndex
+		r.deleteEntry(deleteIndex, regionID)
 	}
-	r.deleteEntry(deleteIndex, regionID)
 	r.index[regionID] = peerTypeIndex
 }
 
@@ -252,7 +278,10 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 	r.Lock()
 	defer r.Unlock()
 	if oldIndex, ok := r.index[regionID]; ok {
-		r.deleteEntry(oldIndex, regionID)
+		delete(r.index, regionID)
+		if oldIndex > emptyStatistic {
+			r.deleteEntry(oldIndex, regionID)
+		}
 	}
 }
 
@@ -412,4 +441,25 @@ func notIsolatedStoresWithLabel(stores []*core.StoreInfo, label string) [][]*cor
 		}
 	}
 	return res
+}
+
+// logDownPeerWithNoDisconnectedStore logs down peers on connected stores.
+// It won't log down peer when any store of the replica is disconnected which is
+// used to avoid too many logs when a store is disconnected.
+// TODO: it's not a good way to log down peer during process region heartbeat, we should handle it in another way.
+// region: the region which has down peer
+// stores: all stores that the region has peer on them
+func logDownPeerWithNoDisconnectedStore(region *core.RegionInfo, stores []*core.StoreInfo) {
+	for _, store := range stores {
+		if store.IsDisconnected() {
+			return
+		}
+	}
+	for _, p := range region.GetDownPeers() {
+		log.Warn("region has down peer on connected store",
+			zap.Uint64("region-id", region.GetID()),
+			zap.Uint64("down-peer", p.GetPeer().GetId()),
+			zap.Uint64("down-seconds", p.GetDownSeconds()),
+			zap.Uint64("store-id", p.GetPeer().GetStoreId()))
+	}
 }

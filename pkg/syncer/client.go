@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -205,7 +206,13 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-					_, saveKV, _, _ := regionGuide(region, origin)
+					ctx := &core.MetaProcessContext{
+						Context:    ctx,
+						TaskRunner: ratelimit.NewSyncRunner(),
+						Tracer:     core.NewNoopHeartbeatProcessTracer(),
+						// no limit for followers.
+					}
+					saveKV, _, _ := regionGuide(ctx, region, origin)
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {

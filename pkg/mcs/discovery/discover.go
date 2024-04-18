@@ -45,7 +45,7 @@ func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, er
 }
 
 // GetMSMembers returns all the members of the specified service name.
-func GetMSMembers(name string, client *clientv3.Client) ([]string, error) {
+func GetMSMembers(name string, client *clientv3.Client) ([]ServiceRegistryEntry, error) {
 	switch name {
 	case utils.TSOServiceName, utils.SchedulingServiceName, utils.ResourceManagerServiceName:
 		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
@@ -61,7 +61,7 @@ func GetMSMembers(name string, client *clientv3.Client) ([]string, error) {
 			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
 		}
 
-		var addrs []string
+		var entries []ServiceRegistryEntry
 		for _, resp := range resps.Responses {
 			for _, keyValue := range resp.GetResponseRange().GetKvs() {
 				var entry ServiceRegistryEntry
@@ -69,10 +69,10 @@ func GetMSMembers(name string, client *clientv3.Client) ([]string, error) {
 					log.Error("try to deserialize service registry entry failed", zap.String("key", string(keyValue.Key)), zap.Error(err))
 					continue
 				}
-				addrs = append(addrs, entry.ServiceAddr)
+				entries = append(entries, entry)
 			}
 		}
-		return addrs, nil
+		return entries, nil
 	}
 
 	return nil, errors.Errorf("unknown service name %s", name)

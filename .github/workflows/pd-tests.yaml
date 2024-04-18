@@ -7,6 +7,7 @@ on:
       - release-5.*
       - release-6.*
       - release-7.*
+      - release-8.*
   pull_request:
     branches:
       - master
@@ -14,6 +15,7 @@ on:
       - release-5.*
       - release-6.*
       - release-7.*
+      - release-8.*
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
@@ -27,50 +29,42 @@ jobs:
     outputs:
       job-total: 13
     steps:
-      - uses: actions/setup-go@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Restore cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-            **/.tools
-            **/.dashboard_download_cache
-          key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
       - name: Make Test
         env:
           WORKER_ID: ${{ matrix.worker_id }}
           WORKER_COUNT: 13
-          JOB_COUNT: 10 # 11, 12, 13 are for other integrations jobs
+          JOB_COUNT: 9 # 10 is tools test, 11, 12, 13 are for other integrations jobs
         run: |
           make ci-test-job JOB_COUNT=$(($JOB_COUNT)) JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID
           sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
       - name: Upload coverage result ${{ matrix.worker_id }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: cover-reports
+          name: cover-reports-${{ matrix.worker_id }}
           path: covprofile_${{ matrix.worker_id }}
   report-coverage:
     needs: chunks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Download chunk report
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
-          name: cover-reports
+          pattern: cover-reports-*
+          merge-multiple: true
       - name: Merge
         env:
           TOTAL_JOBS: ${{needs.chunks.outputs.job-total}}
         run: for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
       - name: Send coverage
-        uses: codecov/codecov-action@v1
+        uses: codecov/codecov-action@v4.2.0
         with:
           token: ${{ secrets.CODECOV }}
           file: ./covprofile

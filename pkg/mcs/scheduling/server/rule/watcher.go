@@ -109,8 +109,8 @@ func NewWatcher(
 func (rw *Watcher) initializeRuleWatcher() error {
 	var suspectKeyRanges *core.KeyRanges
 
-	preEventsFn := func(events []*clientv3.Event) error {
-		// It will be locked until the postFn is finished.
+	preEventsFn := func([]*clientv3.Event) error {
+		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
 		suspectKeyRanges = &core.KeyRanges{}
@@ -149,10 +149,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			}
 			return nil
-		} else {
-			log.Warn("unknown key when updating placement rule", zap.String("key", key))
-			return nil
 		}
+		log.Warn("unknown key when updating placement rule", zap.String("key", key))
+		return nil
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
@@ -181,14 +180,13 @@ func (rw *Watcher) initializeRuleWatcher() error {
 				suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			}
 			return nil
-		} else {
-			log.Warn("unknown key when deleting placement rule", zap.String("key", key))
-			return nil
 		}
+		log.Warn("unknown key when deleting placement rule", zap.String("key", key))
+		return nil
 	}
-	postEventsFn := func(events []*clientv3.Event) error {
+	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.ruleManager.Unlock()
-		if err := rw.ruleManager.TryCommitPatch(rw.patch); err != nil {
+		if err := rw.ruleManager.TryCommitPatchLocked(rw.patch); err != nil {
 			log.Error("failed to commit patch", zap.Error(err))
 			return err
 		}
@@ -204,7 +202,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
-		clientv3.WithPrefix(),
+		true, /* withPrefix */
 	)
 	rw.ruleWatcher.StartWatchLoop()
 	return rw.ruleWatcher.WaitLoad()
@@ -212,27 +210,38 @@ func (rw *Watcher) initializeRuleWatcher() error {
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
 	prefixToTrim := rw.regionLabelPathPrefix + "/"
+	// TODO: use txn in region labeler.
+	preEventsFn := func([]*clientv3.Event) error {
+		// It will be locked until the postEventsFn is finished.
+		rw.regionLabeler.Lock()
+		return nil
+	}
 	putFn := func(kv *mvccpb.KeyValue) error {
-		log.Info("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
+		log.Debug("update region label rule", zap.String("key", string(kv.Key)), zap.String("value", string(kv.Value)))
 		rule, err := labeler.NewLabelRuleFromJSON(kv.Value)
 		if err != nil {
 			return err
 		}
-		return rw.regionLabeler.SetLabelRule(rule)
+		return rw.regionLabeler.SetLabelRuleLocked(rule)
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Info("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRule(strings.TrimPrefix(key, prefixToTrim))
+		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, prefixToTrim))
+	}
+	postEventsFn := func([]*clientv3.Event) error {
+		defer rw.regionLabeler.Unlock()
+		rw.regionLabeler.BuildRangeListLocked()
+		return nil
 	}
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
 		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
-		func([]*clientv3.Event) error { return nil },
+		preEventsFn,
 		putFn, deleteFn,
-		func([]*clientv3.Event) error { return nil },
-		clientv3.WithPrefix(),
+		postEventsFn,
+		true, /* withPrefix */
 	)
 	rw.labelWatcher.StartWatchLoop()
 	return rw.labelWatcher.WaitLoad()

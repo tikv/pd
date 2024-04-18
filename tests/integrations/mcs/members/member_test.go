@@ -42,39 +42,40 @@ func TestMemberTestSuite(t *testing.T) {
 }
 
 func (suite *memberTestSuite) SetupTest() {
+	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
 	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
 	suite.cluster = cluster
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
-	suite.NotEmpty(cluster.WaitLeader())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
 	suite.server = cluster.GetLeaderServer()
-	suite.NoError(suite.server.BootstrapCluster())
+	re.NoError(suite.server.BootstrapCluster())
 	suite.backendEndpoints = suite.server.GetAddr()
 	suite.dialClient = pdClient.NewClient("mcs-member-test", []string{suite.server.GetAddr()})
 
 	// TSO
 	nodes := make(map[string]bs.Server)
 	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
-		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
 			cleanup()
 		})
 	}
-	tests.WaitForPrimaryServing(suite.Require(), nodes)
+	tests.WaitForPrimaryServing(re, nodes)
 
 	// Scheduling
 	nodes = make(map[string]bs.Server)
 	for i := 0; i < 3; i++ {
-		s, cleanup := tests.StartSingleSchedulingTestServer(suite.ctx, suite.Require(), suite.backendEndpoints, tempurl.Alloc())
+		s, cleanup := tests.StartSingleSchedulingTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
 			cleanup()
 		})
 	}
-	tests.WaitForPrimaryServing(suite.Require(), nodes)
+	tests.WaitForPrimaryServing(re, nodes)
 
 	suite.cleanupFunc = append(suite.cleanupFunc, func() {
 		cancel()
@@ -84,6 +85,9 @@ func (suite *memberTestSuite) SetupTest() {
 func (suite *memberTestSuite) TearDownTest() {
 	for _, cleanup := range suite.cleanupFunc {
 		cleanup()
+	}
+	if suite.dialClient != nil {
+		suite.dialClient.Close()
 	}
 	suite.cluster.Destroy()
 }
@@ -97,4 +101,15 @@ func (suite *memberTestSuite) TestMembers() {
 	members, err = suite.dialClient.GetMicroServiceMembers(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.Len(members, 3)
+}
+
+func (suite *memberTestSuite) TestPrimary() {
+	re := suite.Require()
+	primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
+	re.NoError(err)
+	re.NotEmpty(primary)
+
+	primary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, "scheduling")
+	re.NoError(err)
+	re.NotEmpty(primary)
 }

@@ -18,13 +18,11 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -44,7 +42,6 @@ const (
 )
 
 var (
-	once            sync.Once
 	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "tso",
 		Version:    "v1",
@@ -77,11 +74,6 @@ func createIndentRender() *render.Render {
 
 // NewService returns a new Service.
 func NewService(srv *tsoserver.Service) *Service {
-	once.Do(func() {
-		// These global modification will be effective only for the first invoke.
-		_ = godotenv.Load()
-		gin.SetMode(gin.ReleaseMode)
-	})
 	apiHandlerEngine := gin.New()
 	apiHandlerEngine.Use(gin.Recovery())
 	apiHandlerEngine.Use(cors.Default())
@@ -91,6 +83,7 @@ func NewService(srv *tsoserver.Service) *Service {
 		c.Next()
 	})
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
+	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
 	root := apiHandlerEngine.Group(APIPathPrefix)
 	root.Use(multiservicesapi.ServiceRedirector())
@@ -102,7 +95,8 @@ func NewService(srv *tsoserver.Service) *Service {
 	}
 	s.RegisterAdminRouter()
 	s.RegisterKeyspaceGroupRouter()
-	s.RegisterHealth()
+	s.RegisterHealthRouter()
+	s.RegisterConfigRouter()
 	return s
 }
 
@@ -119,10 +113,16 @@ func (s *Service) RegisterKeyspaceGroupRouter() {
 	router.GET("/members", GetKeyspaceGroupMembers)
 }
 
-// RegisterHealth registers the router of the health handler.
-func (s *Service) RegisterHealth() {
+// RegisterHealthRouter registers the router of the health handler.
+func (s *Service) RegisterHealthRouter() {
 	router := s.root.Group("health")
 	router.GET("", GetHealth)
+}
+
+// RegisterConfigRouter registers the router of the config handler.
+func (s *Service) RegisterConfigRouter() {
+	router := s.root.Group("config")
+	router.GET("", getConfig)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -254,4 +254,14 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 		}
 	}
 	c.IndentedJSON(http.StatusOK, members)
+}
+
+// @Tags     config
+// @Summary  Get full config.
+// @Produce  json
+// @Success  200  {object}  config.Config
+// @Router   /config [get]
+func getConfig(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	c.IndentedJSON(http.StatusOK, svr.GetConfig())
 }

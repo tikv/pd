@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -35,6 +36,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -96,6 +98,12 @@ const (
 // LoadedFromStorage means this region's meta info loaded from storage.
 func (r *RegionInfo) LoadedFromStorage() bool {
 	return r.source == Storage
+}
+
+// LoadedFromSync means this region's meta info loaded from region syncer.
+// Only used for test.
+func (r *RegionInfo) LoadedFromSync() bool {
+	return r.source == Sync
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -705,32 +713,58 @@ func (r *RegionInfo) isRegionRecreated() bool {
 
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool)
+type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
 func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
-	noLog := func(msg string, fields ...zap.Field) {}
-	debug, info := noLog, noLog
+	noLog := func(string, ...zap.Field) {}
+	d, i := noLog, noLog
 	if enableLog {
-		debug = log.Debug
-		info = log.Info
+		d = log.Debug
+		i = log.Info
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	// Mark isNew if the region in cache does not have leader.
-	return func(region, origin *RegionInfo) (isNew, saveKV, saveCache, needSync bool) {
+	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
+		taskRunner := ctx.TaskRunner
+		limiter := ctx.Limiter
+		// print log asynchronously
+		debug, info := d, i
+		if taskRunner != nil {
+			debug = func(msg string, fields ...zap.Field) {
+				taskRunner.RunTask(
+					ctx.Context,
+					ratelimit.TaskOpts{
+						TaskName: "Log",
+						Limit:    limiter,
+					},
+					func(_ context.Context) {
+						d(msg, fields...)
+					},
+				)
+			}
+			info = func(msg string, fields ...zap.Field) {
+				taskRunner.RunTask(
+					ctx.Context,
+					ratelimit.TaskOpts{
+						TaskName: "Log",
+						Limit:    limiter,
+					},
+					func(_ context.Context) {
+						i(msg, fields...)
+					},
+				)
+			}
+		}
 		if origin == nil {
 			if log.GetLevel() <= zap.DebugLevel {
 				debug("insert new region",
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			}
-			saveKV, saveCache, isNew = true, true, true
+			saveKV, saveCache = true, true
 		} else {
-			if origin.LoadedFromStorage() {
-				isNew = true
-			}
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
 			if r.GetVersion() > o.GetVersion() {
@@ -756,9 +790,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				saveKV, saveCache = true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
-				if origin.GetLeader().GetId() == 0 {
-					isNew = true
-				} else if log.GetLevel() <= zap.InfoLevel {
+				if origin.GetLeader().GetId() != 0 && log.GetLevel() <= zap.InfoLevel {
 					info("leader changed",
 						zap.Uint64("region-id", region.GetID()),
 						zap.Uint64("from", origin.GetLeader().GetStoreId()),
@@ -789,7 +821,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			if !SortedPeersStatsEqual(region.GetDownPeers(), origin.GetDownPeers()) {
 				if log.GetLevel() <= zap.DebugLevel {
-					debug("down-peers changed", zap.Uint64("region-id", region.GetID()))
+					debug("down-peers changed", zap.Uint64("region-id", region.GetID()), zap.Reflect("before", origin.GetDownPeers()), zap.Reflect("after", region.GetDownPeers()))
 				}
 				saveCache, needSync = true, true
 				return
@@ -824,12 +856,49 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 }
 
+// RWLockStats is a read-write lock with statistics.
+type RWLockStats struct {
+	syncutil.RWMutex
+	totalWaitTime     int64
+	lockCount         int64
+	lastLockCount     int64
+	lastTotalWaitTime int64
+}
+
+// Lock locks the lock and records the waiting time.
+func (l *RWLockStats) Lock() {
+	startTime := time.Now()
+	l.RWMutex.Lock()
+	elapsed := time.Since(startTime).Nanoseconds()
+	atomic.AddInt64(&l.totalWaitTime, elapsed)
+	atomic.AddInt64(&l.lockCount, 1)
+}
+
+// Unlock unlocks the lock.
+func (l *RWLockStats) Unlock() {
+	l.RWMutex.Unlock()
+}
+
+// RLock locks the lock for reading and records the waiting time.
+func (l *RWLockStats) RLock() {
+	startTime := time.Now()
+	l.RWMutex.RLock()
+	elapsed := time.Since(startTime).Nanoseconds()
+	atomic.AddInt64(&l.totalWaitTime, elapsed)
+	atomic.AddInt64(&l.lockCount, 1)
+}
+
+// RUnlock unlocks the lock for reading.
+func (l *RWLockStats) RUnlock() {
+	l.RWMutex.RUnlock()
+}
+
 // RegionsInfo for export
 type RegionsInfo struct {
-	t            syncutil.RWMutex
+	t            RWLockStats
 	tree         *regionTree
 	regions      map[uint64]*regionItem // regionID -> regionInfo
-	st           syncutil.RWMutex
+	st           RWLockStats
 	subRegions   map[uint64]*regionItem // regionID -> regionInfo
 	leaders      map[uint64]*regionTree // storeID -> sub regionTree
 	followers    map[uint64]*regionTree // storeID -> sub regionTree
@@ -875,7 +944,7 @@ func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
-	err := check(region, origin, ols)
+	err := check(region, origin, convertItemsToRegions(ols))
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
@@ -896,43 +965,59 @@ func (r *RegionsInfo) PutRegion(region *RegionInfo) []*RegionInfo {
 }
 
 // PreCheckPutRegion checks if the region is valid to put.
-func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*regionItem, error) {
+func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*RegionInfo, error) {
 	origin, overlaps := r.GetRelevantRegions(region)
 	err := check(region, origin, overlaps)
 	return origin, overlaps, err
 }
 
+func convertItemsToRegions(items []*regionItem) []*RegionInfo {
+	regions := make([]*RegionInfo, 0, len(items))
+	for _, item := range items {
+		regions = append(regions, item.RegionInfo)
+	}
+	return regions
+}
+
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
-func (r *RegionsInfo) AtomicCheckAndPutRegion(region *RegionInfo) ([]*RegionInfo, error) {
+func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *RegionInfo) ([]*RegionInfo, error) {
+	tracer := ctx.Tracer
 	r.t.Lock()
 	var ols []*regionItem
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
-	err := check(region, origin, ols)
+	tracer.OnCheckOverlapsFinished()
+	err := check(region, origin, convertItemsToRegions(ols))
 	if err != nil {
 		r.t.Unlock()
+		tracer.OnValidateRegionFinished()
 		return nil, err
 	}
+	tracer.OnValidateRegionFinished()
 	origin, overlaps, rangeChanged := r.setRegionLocked(region, true, ols...)
 	r.t.Unlock()
+	tracer.OnSetRegionFinished()
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
+	tracer.OnUpdateSubTreeFinished()
 	return overlaps, nil
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
-func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*regionItem) {
+func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo, overlaps []*RegionInfo) {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	origin = r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		overlaps = r.tree.overlaps(&regionItem{RegionInfo: region})
+		for _, item := range r.tree.overlaps(&regionItem{RegionInfo: region}) {
+			overlaps = append(overlaps, item.RegionInfo)
+		}
 	}
 	return
 }
 
-func check(region, origin *RegionInfo, overlaps []*regionItem) error {
+func check(region, origin *RegionInfo, overlaps []*RegionInfo) error {
 	for _, item := range overlaps {
 		// PD ignores stale regions' heartbeats, unless it is recreated recently by unsafe recover operation.
 		if region.GetRegionEpoch().GetVersion() < item.GetRegionEpoch().GetVersion() && !region.isRegionRecreated() {
@@ -1001,7 +1086,6 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 		item = &regionItem{RegionInfo: region}
 		r.regions[region.GetID()] = item
 	}
-
 	var overlaps []*RegionInfo
 	if rangeChanged {
 		overlaps = r.tree.update(item, withOverlaps, ol...)
@@ -1653,6 +1737,42 @@ func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
 	return size
 }
 
+// metrics default poll interval
+const defaultPollInterval = 15 * time.Second
+
+// CollectWaitLockMetrics collects the metrics of waiting time for lock
+func (r *RegionsInfo) CollectWaitLockMetrics() {
+	regionsLockTotalWaitTime := atomic.LoadInt64(&r.t.totalWaitTime)
+	regionsLockCount := atomic.LoadInt64(&r.t.lockCount)
+
+	lastRegionsLockTotalWaitTime := atomic.LoadInt64(&r.t.lastTotalWaitTime)
+	lastsRegionsLockCount := atomic.LoadInt64(&r.t.lastLockCount)
+
+	subRegionsLockTotalWaitTime := atomic.LoadInt64(&r.st.totalWaitTime)
+	subRegionsLockCount := atomic.LoadInt64(&r.st.lockCount)
+
+	lastSubRegionsLockTotalWaitTime := atomic.LoadInt64(&r.st.lastTotalWaitTime)
+	lastSubRegionsLockCount := atomic.LoadInt64(&r.st.lastLockCount)
+
+	// update last metrics
+	atomic.StoreInt64(&r.t.lastTotalWaitTime, regionsLockTotalWaitTime)
+	atomic.StoreInt64(&r.t.lastLockCount, regionsLockCount)
+	atomic.StoreInt64(&r.st.lastTotalWaitTime, subRegionsLockTotalWaitTime)
+	atomic.StoreInt64(&r.st.lastLockCount, subRegionsLockCount)
+
+	// skip invalid situation like initial status
+	if lastRegionsLockTotalWaitTime == 0 || lastsRegionsLockCount == 0 || lastSubRegionsLockTotalWaitTime == 0 || lastSubRegionsLockCount == 0 ||
+		regionsLockTotalWaitTime-lastRegionsLockTotalWaitTime < 0 || regionsLockTotalWaitTime-lastRegionsLockTotalWaitTime > int64(defaultPollInterval) ||
+		subRegionsLockTotalWaitTime-lastSubRegionsLockTotalWaitTime < 0 || subRegionsLockTotalWaitTime-lastSubRegionsLockTotalWaitTime > int64(defaultPollInterval) {
+		return
+	}
+
+	waitRegionsLockDurationSum.Add(time.Duration(regionsLockTotalWaitTime - lastRegionsLockTotalWaitTime).Seconds())
+	waitRegionsLockCount.Add(float64(regionsLockCount - lastsRegionsLockCount))
+	waitSubRegionsLockDurationSum.Add(time.Duration(subRegionsLockTotalWaitTime - lastSubRegionsLockTotalWaitTime).Seconds())
+	waitSubRegionsLockCount.Add(float64(subRegionsLockCount - lastSubRegionsLockCount))
+}
+
 // GetAdjacentRegions returns region's info that is adjacent with specific region
 func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
 	r.t.RLock()
@@ -1708,16 +1828,16 @@ func (r *RegionsInfo) GetAverageRegionSize() int64 {
 // ValidRegion is used to decide if the region is valid.
 func (r *RegionsInfo) ValidRegion(region *metapb.Region) error {
 	startKey := region.GetStartKey()
-	currnetRegion := r.GetRegionByKey(startKey)
-	if currnetRegion == nil {
+	currentRegion := r.GetRegionByKey(startKey)
+	if currentRegion == nil {
 		return errors.Errorf("region not found, request region: %v", logutil.RedactStringer(RegionToHexMeta(region)))
 	}
 	// If the request epoch is less than current region epoch, then returns an error.
 	regionEpoch := region.GetRegionEpoch()
-	currnetEpoch := currnetRegion.GetMeta().GetRegionEpoch()
-	if regionEpoch.GetVersion() < currnetEpoch.GetVersion() ||
-		regionEpoch.GetConfVer() < currnetEpoch.GetConfVer() {
-		return errors.Errorf("invalid region epoch, request: %v, current: %v", regionEpoch, currnetEpoch)
+	currentEpoch := currentRegion.GetMeta().GetRegionEpoch()
+	if regionEpoch.GetVersion() < currentEpoch.GetVersion() ||
+		regionEpoch.GetConfVer() < currentEpoch.GetConfVer() {
+		return errors.Errorf("invalid region epoch, request: %v, current: %v", regionEpoch, currentEpoch)
 	}
 	return nil
 }
@@ -1806,19 +1926,19 @@ func EncodeToString(src []byte) []byte {
 	return dst
 }
 
-// HexRegionKey converts region key to hex format. Used for formating region in
+// HexRegionKey converts region key to hex format. Used for formatting region in
 // logs.
 func HexRegionKey(key []byte) []byte {
 	return ToUpperASCIIInplace(EncodeToString(key))
 }
 
-// HexRegionKeyStr converts region key to hex format. Used for formating region in
+// HexRegionKeyStr converts region key to hex format. Used for formatting region in
 // logs.
 func HexRegionKeyStr(key []byte) string {
 	return String(HexRegionKey(key))
 }
 
-// RegionToHexMeta converts a region meta's keys to hex format. Used for formating
+// RegionToHexMeta converts a region meta's keys to hex format. Used for formatting
 // region in logs.
 func RegionToHexMeta(meta *metapb.Region) HexRegionMeta {
 	if meta == nil {
@@ -1827,7 +1947,7 @@ func RegionToHexMeta(meta *metapb.Region) HexRegionMeta {
 	return HexRegionMeta{meta}
 }
 
-// HexRegionMeta is a region meta in the hex format. Used for formating region in logs.
+// HexRegionMeta is a region meta in the hex format. Used for formatting region in logs.
 type HexRegionMeta struct {
 	*metapb.Region
 }
@@ -1839,7 +1959,7 @@ func (h HexRegionMeta) String() string {
 	return strings.TrimSpace(proto.CompactTextString(meta))
 }
 
-// RegionsToHexMeta converts regions' meta keys to hex format. Used for formating
+// RegionsToHexMeta converts regions' meta keys to hex format. Used for formatting
 // region in logs.
 func RegionsToHexMeta(regions []*metapb.Region) HexRegionsMeta {
 	hexRegionMetas := make([]*metapb.Region, len(regions))
@@ -1847,7 +1967,7 @@ func RegionsToHexMeta(regions []*metapb.Region) HexRegionsMeta {
 	return hexRegionMetas
 }
 
-// HexRegionsMeta is a slice of regions' meta in the hex format. Used for formating
+// HexRegionsMeta is a slice of regions' meta in the hex format. Used for formatting
 // region in logs.
 type HexRegionsMeta []*metapb.Region
 

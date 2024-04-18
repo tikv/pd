@@ -101,7 +101,7 @@ func (lta *LocalTSOAllocator) GetDCLocation() string {
 func (lta *LocalTSOAllocator) Initialize(suffix int) error {
 	lta.tsoAllocatorRoleGauge.Set(1)
 	lta.timestampOracle.suffix = suffix
-	return lta.timestampOracle.SyncTimestamp(lta.leadership)
+	return lta.timestampOracle.SyncTimestamp()
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.
@@ -112,7 +112,7 @@ func (lta *LocalTSOAllocator) IsInitialize() bool {
 // UpdateTSO is used to update the TSO in memory and the time window in etcd
 // for all local TSO allocators this PD server hold.
 func (lta *LocalTSOAllocator) UpdateTSO() error {
-	return lta.timestampOracle.UpdateTimestamp(lta.leadership)
+	return lta.timestampOracle.UpdateTimestamp()
 }
 
 // SetTSO sets the physical part with given TSO.
@@ -139,7 +139,7 @@ func (lta *LocalTSOAllocator) Reset() {
 }
 
 // setAllocatorLeader sets the current Local TSO Allocator leader.
-func (lta *LocalTSOAllocator) setAllocatorLeader(member interface{}) {
+func (lta *LocalTSOAllocator) setAllocatorLeader(member any) {
 	lta.allocatorLeader.Store(member)
 }
 

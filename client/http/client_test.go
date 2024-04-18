@@ -16,48 +16,21 @@ package http
 
 import (
 	"context"
-	"crypto/tls"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/retry"
 	"go.uber.org/atomic"
 )
 
-func TestPDAddrNormalization(t *testing.T) {
-	re := require.New(t)
-	c := NewClient("test-http-pd-addr", []string{"127.0.0.1"})
-	pdAddrs, leaderAddrIdx := c.(*client).inner.getPDAddrs()
-	re.Equal(1, len(pdAddrs))
-	re.Equal(-1, leaderAddrIdx)
-	re.Contains(pdAddrs[0], httpScheme)
-	c = NewClient("test-https-pd-addr", []string{"127.0.0.1"}, WithTLSConfig(&tls.Config{}))
-	pdAddrs, leaderAddrIdx = c.(*client).inner.getPDAddrs()
-	re.Equal(1, len(pdAddrs))
-	re.Equal(-1, leaderAddrIdx)
-	re.Contains(pdAddrs[0], httpsScheme)
-}
-
-// requestChecker is used to check the HTTP request sent by the client.
-type requestChecker struct {
-	checker func(req *http.Request) error
-}
-
-// RoundTrip implements the `http.RoundTripper` interface.
-func (rc *requestChecker) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	return &http.Response{StatusCode: http.StatusOK}, rc.checker(req)
-}
-
-func newHTTPClientWithRequestChecker(checker func(req *http.Request) error) *http.Client {
-	return &http.Client{
-		Transport: &requestChecker{checker: checker},
-	}
-}
-
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re := require.New(t)
-	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
+	checked := 0
+	httpClient := NewHTTPClientWithRequestChecker(func(req *http.Request) error {
 		var expectedVal string
 		if req.URL.Path == HotHistory {
 			expectedVal = "true"
@@ -67,29 +40,73 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 			re.Failf("PD allow follower handler header check failed",
 				"should be %s, but got %s", expectedVal, val)
 		}
+		checked++
 		return nil
 	})
-	c := NewClient("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := newClientWithMockServiceDiscovery("test-header", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	defer c.Close()
 	c.GetRegions(context.Background())
 	c.GetHistoryHotRegions(context.Background(), &HistoryHotRegionsRequest{})
-	c.Close()
+	re.Equal(2, checked)
 }
 
-func TestCallerID(t *testing.T) {
+func TestWithCallerID(t *testing.T) {
 	re := require.New(t)
+	checked := 0
 	expectedVal := atomic.NewString(defaultCallerID)
-	httpClient := newHTTPClientWithRequestChecker(func(req *http.Request) error {
+	httpClient := NewHTTPClientWithRequestChecker(func(req *http.Request) error {
 		val := req.Header.Get(xCallerIDKey)
 		// Exclude the request sent by the inner client.
 		if !strings.Contains(val, defaultInnerCallerID) && val != expectedVal.Load() {
 			re.Failf("Caller ID header check failed",
 				"should be %s, but got %s", expectedVal, val)
 		}
+		checked++
 		return nil
 	})
-	c := NewClient("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	c := newClientWithMockServiceDiscovery("test-caller-id", []string{"http://127.0.0.1"}, WithHTTPClient(httpClient))
+	defer c.Close()
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
 	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())
-	c.Close()
+	re.Equal(2, checked)
+}
+
+func TestWithBackoffer(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := newClientWithMockServiceDiscovery("test-with-backoffer", []string{"http://127.0.0.1"})
+	defer c.Close()
+
+	base := 100 * time.Millisecond
+	max := 500 * time.Millisecond
+	total := time.Second
+	bo := retry.InitialBackoffer(base, max, total)
+	// Test the time cost of the backoff.
+	start := time.Now()
+	_, err := c.WithBackoffer(bo).GetPDVersion(ctx)
+	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
+	re.Error(err)
+	// Test if the infinite retry works.
+	bo = retry.InitialBackoffer(base, max, 0)
+	timeoutCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	start = time.Now()
+	_, err = c.WithBackoffer(bo).GetPDVersion(timeoutCtx)
+	re.InDelta(3*time.Second, time.Since(start), float64(250*time.Millisecond))
+	re.ErrorIs(err, context.DeadlineExceeded)
+}
+
+func TestWithTargetURL(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := newClientWithMockServiceDiscovery("test-with-target-url", []string{"http://127.0.0.1", "http://127.0.0.2", "http://127.0.0.3"})
+	defer c.Close()
+
+	_, err := c.WithTargetURL("http://127.0.0.4").GetStatus(ctx)
+	re.ErrorIs(err, errs.ErrClientNoTargetMember)
+	_, err = c.WithTargetURL("http://127.0.0.2").GetStatus(ctx)
+	re.ErrorContains(err, "connect: connection refused")
 }

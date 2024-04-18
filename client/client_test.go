@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/testutil"
-	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
@@ -64,6 +63,12 @@ func TestUpdateURLs(t *testing.T) {
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
 	cli.updateURLs(members)
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetServiceURLs())
+	cli.updateURLs(members[1:])
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[2:])
+	re.Equal(getURLs([]*pdpb.Member{members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[3:])
+	re.Equal(getURLs([]*pdpb.Member{members[3]}), cli.GetServiceURLs())
 }
 
 const testClientURL = "tmp://test.url:5255"
@@ -95,7 +100,7 @@ func TestGRPCDialOption(t *testing.T) {
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,
-		tlsCfg:            &tlsutil.TLSConfig{},
+		tlsCfg:            nil,
 		option:            newOption(),
 	}
 	cli.urls.Store([]string{testClientURL})

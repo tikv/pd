@@ -82,7 +82,7 @@ func allrev[T Item[T]](t *BTreeG[T]) (out []T) {
 	return
 }
 
-func assertEq(t *testing.T, desc string, got, need interface{}) {
+func assertEq(t *testing.T, desc string, got, need any) {
 	if !reflect.DeepEqual(need, got) {
 		t.Fatalf("%s failed: need %T %v, but got %T %v", desc, need, need, got, got)
 	}
@@ -475,7 +475,7 @@ func BenchmarkSeek(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		tr.AscendGreaterOrEqual(Int(i%size), func(i Int) bool { return false })
+		tr.AscendGreaterOrEqual(Int(i%size), func(_ Int) bool { return false })
 	}
 }
 

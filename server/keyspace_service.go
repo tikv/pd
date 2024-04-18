@@ -86,7 +86,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		keyspaces = append(keyspaces, meta)
 		return nil
 	}
-	deleteFn := func(kv *mvccpb.KeyValue) error {
+	deleteFn := func(*mvccpb.KeyValue) error {
 		return nil
 	}
 	postEventsFn := func([]*clientv3.Event) error {
@@ -116,7 +116,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 		putFn,
 		deleteFn,
 		postEventsFn,
-		clientv3.WithRange(clientv3.GetPrefixRangeEnd(startKey)),
+		true, /* withPrefix */
 	)
 	watcher.StartWatchLoop()
 	if err := watcher.WaitLoad(); err != nil {

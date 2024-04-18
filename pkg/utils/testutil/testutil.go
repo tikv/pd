@@ -16,13 +16,16 @@ package testutil
 
 import (
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 const (
@@ -77,7 +80,7 @@ func NewRequestHeader(clusterID uint64) *pdpb.RequestHeader {
 
 // MustNewGrpcClient must create a new PD grpc client.
 func MustNewGrpcClient(re *require.Assertions, addr string) pdpb.PDClient {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	return pdpb.NewPDClient(conn)
 }
@@ -99,4 +102,25 @@ func InitTempFileLogger(level string) (fname string) {
 	lg, p, _ := log.InitLogger(cfg)
 	log.ReplaceGlobals(lg, p)
 	return fname
+}
+
+// GenerateTestDataConcurrently generates test data concurrently.
+func GenerateTestDataConcurrently(count int, f func(int)) {
+	var wg sync.WaitGroup
+	tasks := make(chan int, count)
+	workers := runtime.NumCPU()
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range tasks {
+				f(i)
+			}
+		}()
+	}
+	for i := 0; i < count; i++ {
+		tasks <- i
+	}
+	close(tasks)
+	wg.Wait()
 }
