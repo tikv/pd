@@ -1661,8 +1661,8 @@ func (bs *balanceSolver) splitBucketsByLoad(region *core.RegionInfo, bucketStats
 	}
 	op := bs.splitBucketsOperator(region, [][]byte{splitKey})
 	if op != nil {
-		op.AdditionalInfos["accLoads"] = strconv.FormatUint(acc-stats[splitIdx-1].Loads[dim], 10)
-		op.AdditionalInfos["totalLoads"] = strconv.FormatUint(totalLoads, 10)
+		op.SetAdditionalInfo("accLoads", strconv.FormatUint(acc-stats[splitIdx-1].Loads[dim], 10))
+		op.SetAdditionalInfo("totalLoads", strconv.FormatUint(totalLoads, 10))
 	}
 	return op
 }

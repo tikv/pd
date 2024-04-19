@@ -378,7 +378,7 @@ func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 		b.counter.WithLabelValues("move-witness", solver.SourceMetricLabel()+"-out"),
 		b.counter.WithLabelValues("move-witness", solver.TargetMetricLabel()+"-in"),
 	)
-	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
-	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
+	op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
+	op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 	return op
 }

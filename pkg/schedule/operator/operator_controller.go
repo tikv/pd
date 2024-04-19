@@ -510,7 +510,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 	log.Info("add operator",
 		zap.Uint64("region-id", regionID),
 		zap.Reflect("operator", op),
-		zap.String("additional-info", op.GetAdditionalInfo()))
+		zap.String("additional-info", op.LogAdditionalInfo()))
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
@@ -657,7 +657,7 @@ func (oc *Controller) removeOperatorInner(op *Operator) bool {
 }
 
 func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
-	relatedID, _ := strconv.ParseUint(op.AdditionalInfos[string(RelatedMergeRegion)], 10, 64)
+	relatedID, _ := strconv.ParseUint(op.GetAdditionalInfo(string(RelatedMergeRegion)), 10, 64)
 	relatedOpi, ok := oc.operators.Load(relatedID)
 	if !ok {
 		return
@@ -666,7 +666,7 @@ func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
 	if relatedOp != nil && relatedOp.Status() != CANCELED {
 		log.Info("operator canceled related merge region",
 			zap.Uint64("region-id", relatedOp.RegionID()),
-			zap.String("additional-info", relatedOp.GetAdditionalInfo()),
+			zap.String("additional-info", relatedOp.LogAdditionalInfo()),
 			zap.Duration("takes", relatedOp.RunningTime()))
 		oc.removeOperatorInner(relatedOp)
 		relatedOp.Cancel(RelatedMergeRegion)
@@ -695,7 +695,7 @@ func (oc *Controller) buryOperator(op *Operator) {
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
-			zap.String("additional-info", op.GetAdditionalInfo()))
+			zap.String("additional-info", op.LogAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "finish").Inc()
 		operatorDuration.WithLabelValues(op.Desc()).Observe(op.RunningTime().Seconds())
 		for _, counter := range op.FinishedCounters {
@@ -706,7 +706,7 @@ func (oc *Controller) buryOperator(op *Operator) {
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
-			zap.String("additional-info", op.GetAdditionalInfo()))
+			zap.String("additional-info", op.LogAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "replace").Inc()
 	case EXPIRED:
 		log.Info("operator expired",
@@ -719,14 +719,14 @@ func (oc *Controller) buryOperator(op *Operator) {
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
-			zap.String("additional-info", op.GetAdditionalInfo()))
+			zap.String("additional-info", op.LogAdditionalInfo()))
 		operatorCounter.WithLabelValues(op.Desc(), "timeout").Inc()
 	case CANCELED:
 		log.Info("operator canceled",
 			zap.Uint64("region-id", op.RegionID()),
 			zap.Duration("takes", op.RunningTime()),
 			zap.Reflect("operator", op),
-			zap.String("additional-info", op.GetAdditionalInfo()),
+			zap.String("additional-info", op.LogAdditionalInfo()),
 		)
 		operatorCounter.WithLabelValues(op.Desc(), "cancel").Inc()
 	}
