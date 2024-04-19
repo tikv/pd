@@ -647,11 +647,14 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 			Version:   "2.0.0",
 		},
 	}
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
 	// prevent the offline store from changing to tombstone
 	tests.MustPutRegion(re, cluster, 3, 6, []byte("a"), []byte("b"))
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+		if store.GetId() == 6 {
+			cluster.GetLeaderServer().GetRaftCluster().GetBasicCluster().UpdateStoreStatus(6)
+		}
+	}
 	// Test /stores
 	apiServerAddr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/stores", apiServerAddr)

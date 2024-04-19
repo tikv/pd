@@ -781,13 +781,12 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspaceGroupMergeIntoDefault
 			Keyspaces: []uint32{uint32(i)},
 		})
 		keyspaces = append(keyspaces, uint32(i))
-		if len(keyspaceGroups) < etcdutil.MaxEtcdTxnOps/2 && i != keyspaceGroupNum {
+		if i != keyspaceGroupNum {
 			continue
 		}
 		handlersutil.MustCreateKeyspaceGroup(re, suite.pdLeaderServer, &handlers.CreateKeyspaceGroupParams{
 			KeyspaceGroups: keyspaceGroups,
 		})
-		keyspaceGroups = keyspaceGroups[:0]
 	}
 	// Check if all the keyspace groups are created.
 	groups := handlersutil.MustLoadKeyspaceGroups(re, suite.pdLeaderServer, "0", "0")

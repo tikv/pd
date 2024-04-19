@@ -115,38 +115,6 @@ func (c *tsoClient) dispatchRequest(request *tsoRequest) (bool, error) {
 	return false, nil
 }
 
-// TSFuture is a future which promises to return a TSO.
-type TSFuture interface {
-	// Wait gets the physical and logical time, it would block caller if data is not available yet.
-	Wait() (int64, int64, error)
-}
-
-func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
-	// If tso command duration is observed very high, the reason could be it
-	// takes too long for Wait() be called.
-	start := time.Now()
-	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
-	select {
-	case err = <-req.done:
-		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
-		err = errors.WithStack(err)
-		defer tsoReqPool.Put(req)
-		if err != nil {
-			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
-			return 0, 0, err
-		}
-		physical, logical = req.physical, req.logical
-		now := time.Now()
-		cmdDurationWait.Observe(now.Sub(start).Seconds())
-		cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
-		return
-	case <-req.requestCtx.Done():
-		return 0, 0, errors.WithStack(req.requestCtx.Err())
-	case <-req.clientCtx.Done():
-		return 0, 0, errors.WithStack(req.clientCtx.Err())
-	}
-}
-
 func (c *tsoClient) updateTSODispatcher() {
 	// Set up the new TSO dispatcher and batch controller.
 	c.GetTSOAllocators().Range(func(dcLocationKey, _ any) bool {
