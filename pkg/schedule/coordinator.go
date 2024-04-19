@@ -52,7 +52,7 @@ const (
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+	patrolScanRegionLimit = 1024 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
@@ -184,6 +184,7 @@ func (c *Coordinator) PatrolRegions() {
 
 		// Check priority regions first.
 		c.checkPriorityRegions()
+
 		// Check suspect regions first.
 		c.checkSuspectRegions()
 		// Check regions in the waiting list
@@ -211,6 +212,42 @@ func (c *Coordinator) isSchedulingHalted() bool {
 	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
+var coordinatorPool = sync.Pool{
+	New: func() any {
+		return func(w *sync.WaitGroup, r *core.RegionInfo, f func(w *sync.WaitGroup, r *core.RegionInfo)) {
+			go f(w, r)
+		}
+	},
+}
+
+func (c *Coordinator) concurrentlyExecute(regionNum int,
+	getRegionFunc func(int) *core.RegionInfo, executeForRegion func(*core.RegionInfo),
+) (key []byte, removeRegions []uint64) {
+	workers := c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency()
+	var wg sync.WaitGroup
+	for i := 0; i < regionNum; i += workers {
+		// run workers concurrently, and limit the number of workers.
+		for j := i; j < i+workers && j < regionNum; j += 1 {
+			curRegion := getRegionFunc(j)
+			if curRegion == nil {
+				// Now only for priority regions, it may be removed from the cluster if it is not exist.
+				removeRegions = append(removeRegions, uint64(j))
+				continue
+			}
+			wg.Add(1)
+			coordinatorWorker := coordinatorPool.Get().(func(*sync.WaitGroup, *core.RegionInfo, func(*sync.WaitGroup, *core.RegionInfo)))
+			coordinatorWorker(&wg, curRegion, func(w *sync.WaitGroup, r *core.RegionInfo) {
+				executeForRegion(r)
+				w.Done()
+			})
+			coordinatorPool.Put(coordinatorWorker)
+			key = curRegion.GetEndKey()
+		}
+		wg.Wait()
+	}
+	return
+}
+
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
 	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
 	if len(regions) == 0 {
@@ -219,49 +256,49 @@ func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core
 		return
 	}
 
-	for _, region := range regions {
-		c.tryAddOperators(region)
-		key = region.GetEndKey()
-	}
+	key, _ = c.concurrentlyExecute(len(regions), func(i int) *core.RegionInfo {
+		return regions[i]
+	}, c.tryAddOperators)
+
 	return
 }
 
 func (c *Coordinator) checkSuspectRegions() {
-	for _, id := range c.checkers.GetSuspectRegions() {
-		region := c.cluster.GetRegion(id)
-		c.tryAddOperators(region)
-	}
+	items := c.checkers.GetSuspectRegions()
+
+	c.concurrentlyExecute(len(items), func(i int) *core.RegionInfo {
+		return c.cluster.GetRegion(items[i])
+	}, c.tryAddOperators)
 }
 
 func (c *Coordinator) checkWaitingRegions() {
 	items := c.checkers.GetWaitingRegions()
 	waitingListGauge.Set(float64(len(items)))
-	for _, item := range items {
-		region := c.cluster.GetRegion(item.Key)
-		c.tryAddOperators(region)
-	}
+
+	c.concurrentlyExecute(len(items), func(i int) *core.RegionInfo {
+		return c.cluster.GetRegion(items[i].Key)
+	}, c.tryAddOperators)
 }
 
 // checkPriorityRegions checks priority regions
 func (c *Coordinator) checkPriorityRegions() {
 	items := c.checkers.GetPriorityRegions()
-	removes := make([]uint64, 0)
 	priorityListGauge.Set(float64(len(items)))
-	for _, id := range items {
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			removes = append(removes, id)
-			continue
-		}
+
+	// need to remove the region from priority list if it is not exist
+	_, removes := c.concurrentlyExecute(len(items), func(i int) *core.RegionInfo {
+		return c.cluster.GetRegion(items[i])
+	}, func(region *core.RegionInfo) {
 		ops := c.checkers.CheckRegion(region)
 		// it should skip if region needs to merge
 		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
-			continue
+			return
 		}
 		if !c.opController.ExceedStoreLimit(ops...) {
 			c.opController.AddWaitingOperator(ops...)
 		}
-	}
+	})
+
 	for _, v := range removes {
 		c.checkers.RemovePriorityRegions(v)
 	}

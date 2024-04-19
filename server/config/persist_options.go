@@ -228,6 +228,11 @@ func (o *PersistOptions) SetMaxReplicas(replicas int) {
 	o.SetReplicationConfig(v)
 }
 
+// GetPatrolRegionConcurrency  returns the worker count of the patrol.
+func (o *PersistOptions) GetPatrolRegionConcurrency() int {
+	return int(o.GetScheduleConfig().PatrolRegionConcurrency)
+}
+
 var supportedTTLConfigs = []string{
 	sc.MaxSnapshotCountKey,
 	sc.MaxMergeRegionSizeKey,
