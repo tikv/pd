@@ -118,7 +118,12 @@ func TestRegion(t *testing.T) {
 		{[]string{"region", "sibling", "2"}, leaderServer.GetAdjacentRegions(leaderServer.GetRegionInfoByID(2))},
 		// region store <store_id> command
 		{[]string{"region", "store", "1"}, leaderServer.GetStoreRegions(1)},
-		{[]string{"region", "store", "1"}, []*core.RegionInfo{r1, r2, r3, r4}},
+		{[]string{"region", "store", "1", "--type=leader"}, leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(1, core.LeaderInSubTree)},
+		{[]string{"region", "store", "1", "--type=follower"}, leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(1, core.FollowerInSubTree)},
+		{[]string{"region", "store", "1", "--type=learner"}, leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(1, core.LearnerInSubTree)},
+		{[]string{"region", "store", "1", "--type=witness"}, leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(1, core.WitnessInSubTree)},
+		{[]string{"region", "store", "1", "--type=pending"}, leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(1, core.PendingPeerInSubTree)},
+		{[]string{"region", "store", "1", "--type=all"}, []*core.RegionInfo{r1, r2, r3, r4}},
 		// region check extra-peer command
 		{[]string{"region", "check", "extra-peer"}, []*core.RegionInfo{r1}},
 		// region check miss-peer command

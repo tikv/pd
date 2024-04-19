@@ -1204,6 +1204,11 @@ func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 	return c.core.GetStoreRegions(storeID)
 }
 
+// GetStoreRegions returns all regions' information with a given storeID.
+func (c *RaftCluster) GetStoreRegionsByType(storeID uint64) []*core.RegionInfo {
+	return c.core.GetStoreRegions(storeID)
+}
+
 // RandLeaderRegions returns some random regions that has leader on the store.
 func (c *RaftCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
 	return c.core.RandLeaderRegions(storeID, ranges)
