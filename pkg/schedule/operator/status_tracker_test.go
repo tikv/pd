@@ -15,6 +15,8 @@
 package operator
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -176,5 +178,28 @@ func checkReachTime(re *require.Assertions, trk *OpStatusTracker, reached ...OpS
 			continue
 		}
 		re.True(trk.ReachTimeOf(st).IsZero())
+	}
+}
+
+func TestAdditionalInfoConcurrent(t *testing.T) {
+	op := NewOperator("test", "test", 0, nil, OpAdmin, 0)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 1000; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			key := fmt.Sprintf("key%d", i)
+			value := fmt.Sprintf("value%d", i)
+			op.SetAdditionalInfo(key, value)
+			if op.GetAdditionalInfo(key) != value {
+				t.Errorf("unexpected value for key %s", key)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if logInfo := op.LogAdditionalInfo(); logInfo == "" {
+		t.Error("LogAdditionalInfo returned an empty string")
 	}
 }
