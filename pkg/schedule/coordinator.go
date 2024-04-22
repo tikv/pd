@@ -259,6 +259,9 @@ func (c *Coordinator) startPatrolRegionWorkers(workers int, regionChan <-chan *c
 // It is used to avoid duplicated regions in the regionChan from different sources.
 func (c *Coordinator) waitDrainRegionChan(regionChan chan *core.RegionInfo) {
 	patrolCheckRegionsChanLenGauge.Set(float64(len(regionChan)))
+	if len(regionChan) == 0 {
+		return
+	}
 	ticker := time.NewTicker(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 	defer ticker.Stop()
 	for {
