@@ -179,6 +179,10 @@ func (c *Coordinator) PatrolRegions() {
 			ticker.Reset(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 			newWorkersCount := c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency()
 			if newWorkersCount != workersCount {
+				log.Info("coordinator starts patrol regions with new workers count",
+					zap.Int("old-workers-count", workersCount),
+					zap.Int("new-workers-count", newWorkersCount))
+				workersCount = newWorkersCount
 				close(quit)
 				wg.Wait()
 				quit = make(chan bool)
