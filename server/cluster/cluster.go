@@ -107,9 +107,9 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	heartbeatTaskRunner  = "heartbeat-async"
-	statisticsTaskRunner = "statistics-async"
-	logTaskRunner        = "log-async"
+	heartbeatTaskRunner = "heartbeat-async"
+	miscTaskRunner      = "misc-async"
+	logTaskRunner       = "log-async"
 )
 
 // Server is the interface for cluster.
@@ -161,7 +161,6 @@ type RaftCluster struct {
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
 	clusterID uint64
 	id        id.Allocator
-	core      *core.BasicCluster // cached cluster info
 	opt       *config.PersistOptions
 	limiter   *StoreLimiter
 	*schedulingController
@@ -203,10 +202,10 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.Ba
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
 		etcdClient:      etcdClient,
-		core:            basicCluster,
+		BasicCluster:    basicCluster,
 		storage:         storage,
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		miscRunner:      ratelimit.NewConcurrentRunner(statisticsTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
 }
@@ -297,7 +296,7 @@ func (c *RaftCluster) InitCluster(
 			return err
 		}
 	}
-	c.schedulingController = newSchedulingController(c.ctx, c.core, c.opt, c.ruleManager)
+	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
 	return nil
 }
 
@@ -659,7 +658,7 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
@@ -731,7 +730,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 		case <-ticker.C:
 			// Update related stores.
 			start := time.Now()
-			c.core.UpdateAllStoreStatus()
+			c.UpdateAllStoreStatus()
 			updateStoreStatsGauge.Set(time.Since(start).Seconds())
 		}
 	}
@@ -920,7 +919,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	if store := c.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}
-	c.core.PutStore(newStore)
+	c.PutStore(newStore)
 	var (
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
@@ -1023,7 +1022,7 @@ var syncRunner = ratelimit.NewSyncRunner()
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *core.RegionInfo) error {
 	tracer := ctx.Tracer
-	origin, _, err := c.core.PreCheckPutRegion(region)
+	origin, _, err := c.PreCheckPutRegion(region)
 	tracer.OnPreCheckFinished()
 	if err != nil {
 		return err
@@ -1083,7 +1082,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.core.CheckAndPutRootTree(ctx, region); err != nil {
+		if overlaps, err = c.CheckAndPutRootTree(ctx, region); err != nil {
 			tracer.OnSaveCacheFinished()
 			return err
 		}
@@ -1174,158 +1173,7 @@ func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 
 // GetBasicCluster returns the basic cluster.
 func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
-	return c.core
-}
-
-// GetRegionByKey gets regionInfo by region key from cluster.
-func (c *RaftCluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.GetRegionByKey(regionKey)
-}
-
-// GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
-func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.GetPrevRegionByKey(regionKey)
-}
-
-// ScanRegions scans region with start key, until the region contains endKey, or
-// total number greater than limit.
-func (c *RaftCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRegions(startKey, endKey, limit)
-}
-
-// GetRegion searches for a region by ID.
-func (c *RaftCluster) GetRegion(regionID uint64) *core.RegionInfo {
-	return c.core.GetRegion(regionID)
-}
-
-// GetMetaRegions gets regions from cluster.
-func (c *RaftCluster) GetMetaRegions() []*metapb.Region {
-	return c.core.GetMetaRegions()
-}
-
-// GetRegions returns all regions' information in detail.
-func (c *RaftCluster) GetRegions() []*core.RegionInfo {
-	return c.core.GetRegions()
-}
-
-// ValidRegion is used to decide if the region is valid.
-func (c *RaftCluster) ValidRegion(region *metapb.Region) error {
-	return c.core.ValidRegion(region)
-}
-
-// GetTotalRegionCount returns total count of regions
-func (c *RaftCluster) GetTotalRegionCount() int {
-	return c.core.GetTotalRegionCount()
-}
-
-// GetStoreRegions returns all regions' information with a given storeID.
-func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
-	return c.core.GetStoreRegions(storeID)
-}
-
-// GetStoreRegions returns all regions' information with a given storeID.
-func (c *RaftCluster) GetStoreRegionsByType(storeID uint64) []*core.RegionInfo {
-	return c.core.GetStoreRegions(storeID)
-}
-
-// RandLeaderRegions returns some random regions that has leader on the store.
-func (c *RaftCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandLeaderRegions(storeID, ranges)
-}
-
-// RandFollowerRegions returns some random regions that has a follower on the store.
-func (c *RaftCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandFollowerRegions(storeID, ranges)
-}
-
-// RandPendingRegions returns some random regions that has a pending peer on the store.
-func (c *RaftCluster) RandPendingRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandPendingRegions(storeID, ranges)
-}
-
-// RandLearnerRegions returns some random regions that has a learner peer on the store.
-func (c *RaftCluster) RandLearnerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandLearnerRegions(storeID, ranges)
-}
-
-// RandWitnessRegions returns some random regions that has a witness peer on the store.
-func (c *RaftCluster) RandWitnessRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandWitnessRegions(storeID, ranges)
-}
-
-// GetLeaderStore returns all stores that contains the region's leader peer.
-func (c *RaftCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
-	return c.core.GetLeaderStore(region)
-}
-
-// GetNonWitnessVoterStores returns all stores that contains the region's non-witness voter peer.
-func (c *RaftCluster) GetNonWitnessVoterStores(region *core.RegionInfo) []*core.StoreInfo {
-	return c.core.GetNonWitnessVoterStores(region)
-}
-
-// GetFollowerStores returns all stores that contains the region's follower peer.
-func (c *RaftCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
-	return c.core.GetFollowerStores(region)
-}
-
-// GetRegionStores returns all stores that contains the region's peer.
-func (c *RaftCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
-	return c.core.GetRegionStores(region)
-}
-
-// GetStoreCount returns the count of stores.
-func (c *RaftCluster) GetStoreCount() int {
-	return c.core.GetStoreCount()
-}
-
-// GetStoreRegionCount returns the number of regions for a given store.
-func (c *RaftCluster) GetStoreRegionCount(storeID uint64) int {
-	return c.core.GetStoreRegionCount(storeID)
-}
-
-// GetAverageRegionSize returns the average region approximate size.
-func (c *RaftCluster) GetAverageRegionSize() int64 {
-	return c.core.GetAverageRegionSize()
-}
-
-// DropCacheRegion removes a region from the cache.
-func (c *RaftCluster) DropCacheRegion(id uint64) {
-	c.core.RemoveRegionIfExist(id)
-}
-
-// DropCacheAllRegion removes all regions from the cache.
-func (c *RaftCluster) DropCacheAllRegion() {
-	c.core.ResetRegionCache()
-}
-
-// GetMetaStores gets stores from cluster.
-func (c *RaftCluster) GetMetaStores() []*metapb.Store {
-	return c.core.GetMetaStores()
-}
-
-// GetStores returns all stores in the cluster.
-func (c *RaftCluster) GetStores() []*core.StoreInfo {
-	return c.core.GetStores()
-}
-
-// GetLeaderStoreByRegionID returns the leader store of the given region.
-func (c *RaftCluster) GetLeaderStoreByRegionID(regionID uint64) *core.StoreInfo {
-	return c.core.GetLeaderStoreByRegionID(regionID)
-}
-
-// GetStore gets store from cluster.
-func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
-	return c.core.GetStore(storeID)
-}
-
-// GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
-func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
-	return c.core.GetAdjacentRegions(region)
-}
-
-// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
-func (c *RaftCluster) GetRangeHoles() [][]string {
-	return c.core.GetRangeHoles()
+	return c.BasicCluster
 }
 
 // UpdateStoreLabels updates a store's location labels
@@ -1719,7 +1567,7 @@ func (c *RaftCluster) setStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	c.core.PutStore(store)
+	c.PutStore(store)
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.updateStoreStatistics(store.GetID(), store.IsSlow())
 	}
@@ -2162,7 +2010,7 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 
 // GetRegionStatsByRange returns region statistics from cluster.
 func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte) *statistics.RegionStats {
-	return statistics.GetRegionStats(c.core.ScanRegions(startKey, endKey, -1))
+	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1))
 }
 
 // GetRegionStatsCount returns the number of regions in the range.

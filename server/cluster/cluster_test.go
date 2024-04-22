@@ -227,7 +227,7 @@ func TestFilterUnhealthyStore(t *testing.T) {
 			RegionCount: 1,
 		}
 		newStore := store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
-		re.NoError(cluster.putStoreLocked(newStore))
+		re.NoError(cluster.setStore(newStore))
 		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
 		re.Nil(cluster.hotStat.GetRollingStoreStats(store.GetID()))
 	}
@@ -734,25 +734,25 @@ func TestRegionHeartbeat(t *testing.T) {
 	for i, region := range regions {
 		// region does not exist.
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is the same, not updated.
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 		origin := region
 		// region is updated.
 		region = origin.Clone(core.WithIncVersion())
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is stale (Version).
 		stale := origin.Clone(core.WithIncConfVer())
 		re.Error(cluster.processRegionHeartbeat(core.ContextTODO(), stale))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is updated
@@ -762,13 +762,13 @@ func TestRegionHeartbeat(t *testing.T) {
 		)
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// region is stale (ConfVer).
 		stale = origin.Clone(core.WithIncConfVer())
 		re.Error(cluster.processRegionHeartbeat(core.ContextTODO(), stale))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// Add a down peer.
@@ -780,38 +780,38 @@ func TestRegionHeartbeat(t *testing.T) {
 		}))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Add a pending peer.
 		region = region.Clone(core.WithPendingPeers([]*metapb.Peer{region.GetPeers()[rand.Intn(len(region.GetPeers()))]}))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Clear down peers.
 		region = region.Clone(core.WithDownPeers(nil))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Clear pending peers.
 		region = region.Clone(core.WithPendingPeers(nil))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Remove peers.
 		origin = region
 		region = origin.Clone(core.SetPeers(region.GetPeers()[:1]))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 		// Add peers.
 		region = origin
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		checkRegionsKV(re, cluster.storage, regions[:i+1])
 
 		// Change one peer to witness
@@ -821,47 +821,47 @@ func TestRegionHeartbeat(t *testing.T) {
 		)
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Change leader.
 		region = region.Clone(core.WithLeader(region.GetPeers()[1]))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Change ApproximateSize.
 		region = region.Clone(core.SetApproximateSize(144))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Change ApproximateKeys.
 		region = region.Clone(core.SetApproximateKeys(144000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Change bytes written.
 		region = region.Clone(core.SetWrittenBytes(24000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Change bytes read.
 		region = region.Clone(core.SetReadBytes(1080000))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 
 		// Flashback
 		region = region.Clone(core.WithFlashback(true, 1))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 		region = region.Clone(core.WithFlashback(false, 0))
 		regions[i] = region
 		re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region))
-		checkRegions(re, cluster.core, regions[:i+1])
+		checkRegions(re, cluster.BasicCluster, regions[:i+1])
 	}
 
 	regionCounts := make(map[uint64]int)
@@ -1435,7 +1435,7 @@ func TestSyncConfigContext(t *testing.T) {
 	}))
 	stores := newTestStores(1, "2.0.0")
 	for _, s := range stores {
-		re.NoError(tc.putStoreLocked(s))
+		re.NoError(tc.setStore(s))
 	}
 	// trip schema header
 	now := time.Now()
@@ -1457,7 +1457,7 @@ func TestStoreConfigSync(t *testing.T) {
 	tc := newTestCluster(ctx, opt)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
-		re.NoError(tc.putStoreLocked(s))
+		re.NoError(tc.setStore(s))
 	}
 	re.Len(tc.getUpStores(), 5)
 
@@ -1842,7 +1842,7 @@ func Test(t *testing.T) {
 	_, opts, err := newTestScheduleConfig()
 	re.NoError(err)
 	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opts, storage.NewStorageWithMemoryBackend())
-	cache := tc.core
+	cache := tc.BasicCluster
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
@@ -2141,7 +2141,7 @@ func newTestRaftCluster(
 	s storage.Storage,
 ) *RaftCluster {
 	opt.GetScheduleConfig().EnableHeartbeatConcurrentRunner = false
-	rc := &RaftCluster{serverCtx: ctx, core: core.NewBasicCluster(), storage: s}
+	rc := &RaftCluster{serverCtx: ctx, BasicCluster: core.NewBasicCluster(), storage: s}
 	rc.InitCluster(id, opt, nil, nil)
 	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
@@ -2150,7 +2150,7 @@ func newTestRaftCluster(
 			panic(err)
 		}
 	}
-	rc.schedulingController = newSchedulingController(rc.ctx, rc.core, rc.opt, rc.ruleManager)
+	rc.schedulingController = newSchedulingController(rc.ctx, rc.BasicCluster, rc.opt, rc.ruleManager)
 	return rc
 }
 
@@ -2965,7 +2965,7 @@ func TestShouldRun(t *testing.T) {
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.Equal(7, tc.core.GetClusterNotFromStorageRegionsCnt())
+	re.Equal(7, tc.GetClusterNotFromStorageRegionsCnt())
 }
 
 func TestShouldRunWithNonLeaderRegions(t *testing.T) {
@@ -3008,7 +3008,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
 	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
-	re.Equal(9, tc.core.GetClusterNotFromStorageRegionsCnt())
+	re.Equal(9, tc.GetClusterNotFromStorageRegionsCnt())
 
 	// Now, after server is prepared, there exist some regions with no leader.
 	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())

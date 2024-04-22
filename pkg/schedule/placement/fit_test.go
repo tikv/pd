@@ -47,7 +47,7 @@ func makeStores() StoreSet {
 					if id == 1111 || id == 2111 || id == 3111 {
 						labels["disk"] = "ssd"
 					}
-					stores.SetStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now)))
+					stores.PutStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now)))
 				}
 			}
 		}
