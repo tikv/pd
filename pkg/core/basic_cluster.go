@@ -30,7 +30,7 @@ func NewBasicCluster() *BasicCluster {
 
 // UpdateStoreStatus updates the information of the store.
 func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
-	leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize := bc.RegionsInfo.GetStoreStats(storeID)
+	leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize := bc.GetStoreStats(storeID)
 	bc.StoresInfo.UpdateStoreStatus(storeID, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
@@ -38,7 +38,7 @@ func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
 
 // GetLeaderStoreByRegionID returns the leader store of the given region.
 func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
-	region := bc.RegionsInfo.GetRegion(regionID)
+	region := bc.GetRegion(regionID)
 	if region == nil || region.GetLeader() == nil {
 		return nil
 	}
@@ -63,12 +63,12 @@ func (bc *BasicCluster) getWriteRate(
 
 // GetStoresLeaderWriteRate get total write rate of each store's leaders.
 func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
-	return bc.getWriteRate(bc.RegionsInfo.GetStoreLeaderWriteRate)
+	return bc.getWriteRate(bc.GetStoreLeaderWriteRate)
 }
 
 // GetStoresWriteRate get total write rate of each store's regions.
 func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
-	return bc.getWriteRate(bc.RegionsInfo.GetStoreWriteRate)
+	return bc.getWriteRate(bc.GetStoreWriteRate)
 }
 
 // UpdateAllStoreStatus updates the information of all stores.

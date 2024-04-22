@@ -893,10 +893,10 @@ func TestRegionHeartbeat(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 	for _, store := range cluster.GetStores() {
-		re.Equal(cluster.BasicCluster.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
-		re.Equal(cluster.BasicCluster.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
-		re.Equal(cluster.BasicCluster.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
-		re.Equal(cluster.BasicCluster.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
+		re.Equal(cluster.GetStoreLeaderCount(store.GetID()), store.GetLeaderCount())
+		re.Equal(cluster.GetStoreRegionCount(store.GetID()), store.GetRegionCount())
+		re.Equal(cluster.GetStoreLeaderRegionSize(store.GetID()), store.GetLeaderSize())
+		re.Equal(cluster.GetStoreRegionSize(store.GetID()), store.GetRegionSize())
 	}
 
 	// Test with storage.

@@ -521,7 +521,7 @@ func (c *Cluster) collectMetrics() {
 	// collect hot cache metrics
 	c.hotStat.CollectMetrics()
 	// collect the lock metrics
-	c.RegionsInfo.CollectWaitLockMetrics()
+	c.CollectWaitLockMetrics()
 }
 
 func resetMetrics() {
