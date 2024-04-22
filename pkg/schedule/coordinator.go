@@ -52,7 +52,6 @@ const (
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	patrolScanRegionLimit = 1024 // It takes about 14 minutes to iterate 1 million regions.
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
@@ -161,7 +160,7 @@ func (c *Coordinator) PatrolRegions() {
 	defer ticker.Stop()
 
 	workersCount := c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency()
-	regionChan := make(chan *core.RegionInfo, patrolScanRegionLimit)
+	regionChan := make(chan *core.RegionInfo, c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency())
 	quit := make(chan bool)
 	var wg sync.WaitGroup
 	c.startPatrolRegionWorkers(workersCount, regionChan, quit, &wg)
@@ -206,7 +205,7 @@ func (c *Coordinator) PatrolRegions() {
 			c.checkWaitingRegions(regionChan)
 
 			c.waitDrainRegionChan(regionChan)
-			regions = c.cluster.ScanRegions(key, nil, patrolScanRegionLimit)
+			regions = c.cluster.ScanRegions(key, nil, c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency())
 			if len(regions) == 0 {
 				continue
 			}
