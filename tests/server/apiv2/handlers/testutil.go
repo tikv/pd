@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
@@ -168,8 +169,14 @@ func tryCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, re
 
 // MustLoadKeyspaceGroupByID loads the keyspace group by ID with HTTP API.
 func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) *endpoint.KeyspaceGroup {
-	kg, code := TryLoadKeyspaceGroupByID(re, server, id)
-	re.Equal(http.StatusOK, code)
+	var (
+		kg   *endpoint.KeyspaceGroup
+		code int
+	)
+	testutil.Eventually(re, func() bool {
+		kg, code = TryLoadKeyspaceGroupByID(re, server, id)
+		return code == http.StatusOK
+	})
 	return kg
 }
 
@@ -232,15 +239,28 @@ func MustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id
 
 // MustFinishSplitKeyspaceGroup finishes a keyspace group split with HTTP API.
 func MustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32) {
-	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), http.NoBody)
-	re.NoError(err)
-	// Send request.
-	resp, err := dialClient.Do(httpReq)
-	re.NoError(err)
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+	testutil.Eventually(re, func() bool {
+		httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), http.NoBody)
+		if err != nil {
+			return false
+		}
+		// Send request.
+		resp, err := dialClient.Do(httpReq)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return false
+		}
+		if resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusInternalServerError {
+			return false
+		}
+		re.Equal(http.StatusOK, resp.StatusCode, string(data))
+		return true
+	})
 }
 
 // MustMergeKeyspaceGroup merges keyspace groups with HTTP API.

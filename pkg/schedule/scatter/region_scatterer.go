@@ -399,8 +399,8 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	if op != nil {
 		scatterSuccessCounter.Inc()
 		r.Put(targetPeers, targetLeader, group)
-		op.AdditionalInfos["group"] = group
-		op.AdditionalInfos["leader-picked-count"] = strconv.FormatUint(leaderStorePickedCount, 10)
+		op.SetAdditionalInfo("group", group)
+		op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
 		op.SetPriorityLevel(constant.High)
 	}
 	return op, nil

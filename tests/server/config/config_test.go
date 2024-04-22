@@ -32,7 +32,6 @@ import (
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -74,11 +73,7 @@ func TestRateLimitConfigReload(t *testing.T) {
 
 	oldLeaderName := leader.GetServer().Name()
 	leader.GetServer().GetMember().ResignEtcdLeader(leader.GetServer().Context(), oldLeaderName, "")
-	var servers []*server.Server
-	for _, s := range cluster.GetServers() {
-		servers = append(servers, s.GetServer())
-	}
-	server.MustWaitLeader(re, servers)
+	re.NotEmpty(cluster.WaitLeader())
 	leader = cluster.GetLeaderServer()
 	re.NotNil(leader)
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
