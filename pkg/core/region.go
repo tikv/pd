@@ -1048,7 +1048,7 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 
 // CheckAndPutSubTree checks if the region is valid to put to the sub tree, if valid then return error.
 // Usually used with CheckAndPutRootTree together.
-func (r *RegionsInfo) CheckAndPutSubTree(region *RegionInfo) error {
+func (r *RegionsInfo) CheckAndPutSubTree(region *RegionInfo) {
 	// new region get from root tree again
 	var newRegion *RegionInfo
 	newRegion = r.GetRegion(region.GetID())
@@ -1056,7 +1056,6 @@ func (r *RegionsInfo) CheckAndPutSubTree(region *RegionInfo) error {
 		newRegion = region
 	}
 	r.UpdateSubTreeOrderInsensitive(newRegion)
-	return nil
 }
 
 // UpdateSubTreeOrderInsensitive updates the subtree.
