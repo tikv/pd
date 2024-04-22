@@ -18,6 +18,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const nameStr = "runner_name"
+
 var (
 	RunnerTaskMaxWaitingDuration = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -25,7 +27,7 @@ var (
 			Subsystem: "ratelimit",
 			Name:      "runner_task_max_waiting_duration_seconds",
 			Help:      "The duration of tasks waiting in the runner.",
-		}, []string{"name"})
+		}, []string{nameStr})
 
 	RunnerTaskPendingTasks = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -33,14 +35,14 @@ var (
 			Subsystem: "ratelimit",
 			Name:      "runner_task_pending_tasks",
 			Help:      "The number of pending tasks in the runner.",
-		}, []string{"name"})
+		}, []string{nameStr})
 	RunnerTaskFailedTasks = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "ratelimit",
 			Name:      "runner_task_failed_tasks_total",
 			Help:      "The number of failed tasks in the runner.",
-		}, []string{"name"})
+		}, []string{nameStr})
 )
 
 func init() {

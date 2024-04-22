@@ -590,10 +590,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 
 	ctx.TaskRunner.RunTask(
 		ctx,
-		ratelimit.TaskOpts{
-			TaskName: "HandleStatsAsync",
-			Limit:    ctx.Limiter,
-		},
+		core.ExtraTaskOpts(ctx, core.HandleStatsAsync),
 		func(_ context.Context) {
 			cluster.HandleStatsAsync(c, region)
 		},
@@ -610,10 +607,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.TaskRunner.RunTask(
 				ctx,
-				ratelimit.TaskOpts{
-					TaskName: "ObserveRegionStatsAsync",
-					Limit:    ctx.Limiter,
-				},
+				core.ExtraTaskOpts(ctx, core.ObserveRegionStatsAsync),
 				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
@@ -638,10 +632,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		}
 		ctx.TaskRunner.RunTask(
 			ctx,
-			ratelimit.TaskOpts{
-				TaskName: "UpdateSubTree",
-				Limit:    ctx.Limiter,
-			},
+			core.ExtraTaskOpts(ctx, core.UpdateSubTree),
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
@@ -649,10 +640,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		tracer.OnUpdateSubTreeFinished()
 		ctx.TaskRunner.RunTask(
 			ctx,
-			ratelimit.TaskOpts{
-				TaskName: "HandleOverlaps",
-				Limit:    ctx.Limiter,
-			},
+			core.ExtraTaskOpts(ctx, core.HandleOverlaps),
 			func(_ context.Context) {
 				cluster.HandleOverlaps(c, overlaps)
 			},
@@ -662,10 +650,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 	// handle region stats
 	ctx.TaskRunner.RunTask(
 		ctx,
-		ratelimit.TaskOpts{
-			TaskName: "CollectRegionStatsAsync",
-			Limit:    ctx.Limiter,
-		},
+		core.ExtraTaskOpts(ctx, core.CollectRegionStatsAsync),
 		func(_ context.Context) {
 			cluster.Collect(c, region, hasRegionStats)
 		},

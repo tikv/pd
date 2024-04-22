@@ -856,6 +856,24 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 }
 
+// RegionHeartbeatStageName is the name of the stage of the region heartbeat.
+const (
+	HandleStatsAsync        = "HandleStatsAsync"
+	ObserveRegionStatsAsync = "ObserveRegionStatsAsync"
+	UpdateSubTree           = "UpdateSubTree"
+	HandleOverlaps          = "HandleOverlaps"
+	CollectRegionStatsAsync = "CollectRegionStatsAsync"
+	SaveRegionToKV          = "SaveRegionToKV"
+)
+
+// ExtraTaskOpts returns the task options for the task.
+func ExtraTaskOpts(ctx *MetaProcessContext, name string) ratelimit.TaskOpts {
+	return ratelimit.TaskOpts{
+		TaskName: name,
+		Limit:    ctx.Limiter,
+	}
+}
+
 // RWLockStats is a read-write lock with statistics.
 type RWLockStats struct {
 	syncutil.RWMutex
