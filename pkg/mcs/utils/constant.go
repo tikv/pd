@@ -34,6 +34,8 @@ const (
 	DefaultHTTPGracefulShutdownTimeout = 5 * time.Second
 	// DefaultLogFormat is the default log format
 	DefaultLogFormat = "text"
+	// DefaultLogLevel is the default log level
+	DefaultLogLevel = "info"
 	// DefaultDisableErrorVerbose is the default value of DisableErrorVerbose
 	DefaultDisableErrorVerbose = true
 	// DefaultLeaderLease is the default value of LeaderLease
