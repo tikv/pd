@@ -245,6 +245,22 @@ tso-update-physical-interval = "15s"
 	re.NoError(err)
 
 	re.Equal(maxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
+
+	cfgData = `
+[log]
+level = "debug"
+`
+	flagSet = pflag.NewFlagSet("testlog", pflag.ContinueOnError)
+	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	flagSet.Parse(nil)
+	cfg = NewConfig()
+	err = cfg.Parse(flagSet)
+	re.NoError(err)
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal("debug", cfg.Log.Level)
 }
 
 func TestMigrateFlags(t *testing.T) {
