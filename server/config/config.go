@@ -234,6 +234,7 @@ const (
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
+	defaultLogLevel  = "info"
 
 	defaultServerMemoryLimit          = 0
 	minServerMemoryLimit              = 0
@@ -468,10 +469,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Security.Encryption.Adjust()
 
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = defaultLogFormat
-	}
-
 	c.Controller.Adjust(configMetaData.Child("controller"))
 
 	return nil
@@ -481,6 +478,8 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, defaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, defaultLogLevel)
 }
 
 // Clone returns a cloned configuration.
