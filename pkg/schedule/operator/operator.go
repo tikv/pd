@@ -15,7 +15,6 @@
 package operator
 
 import (
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -83,7 +82,7 @@ type Operator struct {
 	level            constant.PriorityLevel
 	Counters         []prometheus.Counter
 	FinishedCounters []prometheus.Counter
-	AdditionalInfos  map[string]string
+	additionalInfos  opAdditionalInfo
 	ApproximateSize  int64
 	timeout          time.Duration
 	influence        *OpInfluence
@@ -100,16 +99,18 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 		maxDuration += v.Timeout(approximateSize).Seconds()
 	}
 	return &Operator{
-		desc:            desc,
-		brief:           brief,
-		regionID:        regionID,
-		regionEpoch:     regionEpoch,
-		kind:            kind,
-		steps:           steps,
-		stepsTime:       make([]int64, len(steps)),
-		status:          NewOpStatusTracker(),
-		level:           level,
-		AdditionalInfos: make(map[string]string),
+		desc:        desc,
+		brief:       brief,
+		regionID:    regionID,
+		regionEpoch: regionEpoch,
+		kind:        kind,
+		steps:       steps,
+		stepsTime:   make([]int64, len(steps)),
+		status:      NewOpStatusTracker(),
+		level:       level,
+		additionalInfos: opAdditionalInfo{
+			value: make(map[string]string),
+		},
 		ApproximateSize: approximateSize,
 		timeout:         time.Duration(maxDuration) * time.Second,
 	}
@@ -118,8 +119,8 @@ func NewOperator(desc, brief string, regionID uint64, regionEpoch *metapb.Region
 // Sync some attribute with the given timeout.
 func (o *Operator) Sync(other *Operator) {
 	o.timeout = other.timeout
-	o.AdditionalInfos[string(RelatedMergeRegion)] = strconv.FormatUint(other.RegionID(), 10)
-	other.AdditionalInfos[string(RelatedMergeRegion)] = strconv.FormatUint(o.RegionID(), 10)
+	o.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(other.RegionID(), 10))
+	other.SetAdditionalInfo(string(RelatedMergeRegion), strconv.FormatUint(o.RegionID(), 10))
 }
 
 func (o *Operator) String() string {
@@ -297,8 +298,10 @@ func (o *Operator) CheckSuccess() bool {
 
 // Cancel marks the operator canceled.
 func (o *Operator) Cancel(reason ...CancelReasonType) bool {
-	if _, ok := o.AdditionalInfos[cancelReason]; !ok && len(reason) != 0 {
-		o.AdditionalInfos[cancelReason] = string(reason[0])
+	o.additionalInfos.Lock()
+	defer o.additionalInfos.Unlock()
+	if _, ok := o.additionalInfos.value[cancelReason]; !ok && len(reason) != 0 {
+		o.additionalInfos.value[cancelReason] = string(reason[0])
 	}
 	return o.status.To(CANCELED)
 }
@@ -505,17 +508,6 @@ func (o *Operator) Record(finishTime time.Time) *OpRecord {
 	}
 	record.duration = finishTime.Sub(start)
 	return record
-}
-
-// GetAdditionalInfo returns additional info with string
-func (o *Operator) GetAdditionalInfo() string {
-	if len(o.AdditionalInfos) != 0 {
-		additionalInfo, err := json.Marshal(o.AdditionalInfos)
-		if err == nil {
-			return string(additionalInfo)
-		}
-	}
-	return ""
 }
 
 // IsLeaveJointStateOperator returns true if the desc is OpDescLeaveJointState.

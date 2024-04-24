@@ -651,6 +651,9 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 	tests.MustPutRegion(re, cluster, 3, 6, []byte("a"), []byte("b"))
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
+		if store.GetId() == 6 {
+			cluster.GetLeaderServer().GetRaftCluster().GetBasicCluster().UpdateStoreStatus(6)
+		}
 	}
 	// Test /stores
 	apiServerAddr := cluster.GetLeaderServer().GetAddr()
