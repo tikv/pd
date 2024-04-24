@@ -283,20 +283,17 @@ func (c *tsoClient) checkTSODispatcher(dcLocation string) bool {
 
 func (c *tsoClient) createTSODispatcher(dcLocation string) {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(c.ctx)
-	dispatcher := &tsoDispatcher{
-		dispatcherCancel: dispatcherCancel,
-		tsoBatchController: newTSOBatchController(
-			make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
-			defaultMaxTSOBatchSize),
-	}
+	tsoBatchController := newTSOBatchController(
+		make(chan *tsoRequest, defaultMaxTSOBatchSize*2),
+		defaultMaxTSOBatchSize,
+	)
 	failpoint.Inject("shortDispatcherChannel", func() {
-		dispatcher = &tsoDispatcher{
-			dispatcherCancel: dispatcherCancel,
-			tsoBatchController: newTSOBatchController(
-				make(chan *tsoRequest, 1),
-				defaultMaxTSOBatchSize),
-		}
+		tsoBatchController = newTSOBatchController(
+			make(chan *tsoRequest, 1),
+			defaultMaxTSOBatchSize,
+		)
 	})
+	dispatcher := &tsoDispatcher{dispatcherCancel, tsoBatchController}
 
 	if _, ok := c.tsoDispatcher.LoadOrStore(dcLocation, dispatcher); !ok {
 		// Successfully stored the value. Start the following goroutine.
@@ -313,7 +310,7 @@ func (c *tsoClient) createTSODispatcher(dcLocation string) {
 }
 
 func (c *tsoClient) handleDispatcher(
-	dispatcherCtx context.Context,
+	ctx context.Context,
 	dc string,
 	tbc *tsoBatchController,
 ) {
@@ -351,9 +348,9 @@ func (c *tsoClient) handleDispatcher(
 		defer setNewUpdateTicker(nil)
 
 		for {
-			c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+			c.updateTSOConnectionCtxs(ctx, dc, &connectionCtxs)
 			select {
-			case <-dispatcherCtx.Done():
+			case <-ctx.Done():
 				return
 			case <-c.option.enableTSOFollowerProxyCh:
 				// TODO: implement TSO Follower Proxy support for the Local TSO.
@@ -391,7 +388,7 @@ func (c *tsoClient) handleDispatcher(
 tsoBatchLoop:
 	for {
 		select {
-		case <-dispatcherCtx.Done():
+		case <-ctx.Done():
 			return
 		default:
 		}
@@ -399,7 +396,7 @@ tsoBatchLoop:
 		maxBatchWaitInterval := c.option.getMaxTSOBatchWaitInterval()
 		// Once the TSO requests are collected, must make sure they could be finished or revoked eventually,
 		// otherwise the upper caller may get blocked on waiting for the results.
-		if err = tbc.fetchPendingRequests(dispatcherCtx, maxBatchWaitInterval); err != nil {
+		if err = tbc.fetchPendingRequests(ctx, maxBatchWaitInterval); err != nil {
 			// Finish the collected requests if the fetch failed.
 			tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(err))
 			if err == context.Canceled {
@@ -435,14 +432,14 @@ tsoBatchLoop:
 			// Check stream and retry if necessary.
 			if stream == nil {
 				log.Info("[tso] tso stream is not ready", zap.String("dc", dc))
-				if c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs) {
+				if c.updateTSOConnectionCtxs(ctx, dc, &connectionCtxs) {
 					continue streamChoosingLoop
 				}
 				timer := time.NewTimer(retryInterval)
 				select {
-				case <-dispatcherCtx.Done():
+				case <-ctx.Done():
 					// Finish the collected requests if the context is canceled.
-					tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(dispatcherCtx.Err()))
+					tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(ctx.Err()))
 					timer.Stop()
 					return
 				case <-streamLoopTimer.C:
@@ -479,9 +476,9 @@ tsoBatchLoop:
 			tsDeadlineCh, ok = c.tsDeadline.Load(dc)
 		}
 		select {
-		case <-dispatcherCtx.Done():
+		case <-ctx.Done():
 			// Finish the collected requests if the context is canceled.
-			tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(dispatcherCtx.Err()))
+			tbc.finishCollectedRequests(0, 0, 0, errors.WithStack(ctx.Err()))
 			return
 		case tsDeadlineCh.(chan *deadline) <- dl:
 		}
@@ -491,7 +488,7 @@ tsoBatchLoop:
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err != nil {
 			select {
-			case <-dispatcherCtx.Done():
+			case <-ctx.Done():
 				return
 			default:
 			}
@@ -506,9 +503,9 @@ tsoBatchLoop:
 			stream = nil
 			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 			if IsLeaderChange(err) {
-				if err := bo.Exec(dispatcherCtx, c.svcDiscovery.CheckMemberChanged); err != nil {
+				if err := bo.Exec(ctx, c.svcDiscovery.CheckMemberChanged); err != nil {
 					select {
-					case <-dispatcherCtx.Done():
+					case <-ctx.Done():
 						return
 					default:
 					}
@@ -518,7 +515,7 @@ tsoBatchLoop:
 				// will cancel the current stream, then the EOF error caused by cancel()
 				// should not trigger the updateTSOConnectionCtxs here.
 				// So we should only call it when the leader changes.
-				c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+				c.updateTSOConnectionCtxs(ctx, dc, &connectionCtxs)
 			}
 		}
 	}

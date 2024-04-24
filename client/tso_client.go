@@ -342,7 +342,7 @@ func (c *tsoClient) updateTSOConnectionCtxs(updaterCtx context.Context, dc strin
 // while a new daemon will be created also to switch back to a normal leader connection ASAP the
 // connection comes back to normal.
 func (c *tsoClient) tryConnectToTSO(
-	dispatcherCtx context.Context,
+	ctx context.Context,
 	dc string,
 	connectionCtxs *sync.Map,
 ) error {
@@ -376,7 +376,7 @@ func (c *tsoClient) tryConnectToTSO(
 			return nil
 		}
 		if cc != nil {
-			cctx, cancel := context.WithCancel(dispatcherCtx)
+			cctx, cancel := context.WithCancel(ctx)
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
 			failpoint.Inject("unreachableNetwork", func() {
 				stream = nil
@@ -402,7 +402,7 @@ func (c *tsoClient) tryConnectToTSO(
 			networkErrNum++
 		}
 		select {
-		case <-dispatcherCtx.Done():
+		case <-ctx.Done():
 			return err
 		case <-ticker.C:
 		}
@@ -419,14 +419,14 @@ func (c *tsoClient) tryConnectToTSO(
 			}
 
 			// create the follower stream
-			cctx, cancel := context.WithCancel(dispatcherCtx)
+			cctx, cancel := context.WithCancel(ctx)
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.timeout)
 			if err == nil {
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addr := trimHTTPPrefix(backupURL)
 				// the goroutine is used to check the network and change back to the original stream
-				go c.checkAllocator(dispatcherCtx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
+				go c.checkAllocator(ctx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
 				updateAndClear(backupURL, &tsoConnectionContext{backupURL, stream, cctx, cancel})
 				return nil
@@ -439,7 +439,11 @@ func (c *tsoClient) tryConnectToTSO(
 
 // tryConnectToTSOWithProxy will create multiple streams to all the service endpoints to work as
 // a TSO proxy to reduce the pressure of the main serving service endpoint.
-func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc string, connectionCtxs *sync.Map) error {
+func (c *tsoClient) tryConnectToTSOWithProxy(
+	ctx context.Context,
+	dc string,
+	connectionCtxs *sync.Map,
+) error {
 	tsoStreamBuilders := c.getAllTSOStreamBuilders()
 	leaderAddr := c.svcDiscovery.GetServingURL()
 	forwardedHost, ok := c.GetTSOAllocatorServingURLByDCLocation(dc)
@@ -465,7 +469,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		}
 		log.Info("[tso] try to create tso stream",
 			zap.String("dc", dc), zap.String("addr", addr))
-		cctx, cancel := context.WithCancel(dispatcherCtx)
+		cctx, cancel := context.WithCancel(ctx)
 		// Do not proxy the leader client.
 		if addr != leaderAddr {
 			log.Info("[tso] use follower to forward tso stream to do the proxy",
