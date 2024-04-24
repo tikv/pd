@@ -26,7 +26,6 @@ import (
 // RegisterMicroService registers microservice handler to the router.
 func RegisterMicroService(r *gin.RouterGroup) {
 	router := r.Group("ms")
-	router.Use(middlewares.BootstrapChecker())
 	router.GET("members/:service", GetMembers)
 	router.GET("primary/:service", GetPrimary)
 }

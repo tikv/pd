@@ -856,6 +856,24 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 }
 
+// RegionHeartbeatStageName is the name of the stage of the region heartbeat.
+const (
+	HandleStatsAsync        = "HandleStatsAsync"
+	ObserveRegionStatsAsync = "ObserveRegionStatsAsync"
+	UpdateSubTree           = "UpdateSubTree"
+	HandleOverlaps          = "HandleOverlaps"
+	CollectRegionStatsAsync = "CollectRegionStatsAsync"
+	SaveRegionToKV          = "SaveRegionToKV"
+)
+
+// ExtraTaskOpts returns the task options for the task.
+func ExtraTaskOpts(ctx *MetaProcessContext, name string) ratelimit.TaskOpts {
+	return ratelimit.TaskOpts{
+		TaskName: name,
+		Limit:    ctx.Limiter,
+	}
+}
+
 // RWLockStats is a read-write lock with statistics.
 type RWLockStats struct {
 	syncutil.RWMutex
@@ -1002,6 +1020,161 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 	r.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	tracer.OnUpdateSubTreeFinished()
 	return overlaps, nil
+}
+
+// CheckAndPutRootTree checks if the region is valid to put to the root, if valid then return error.
+// Usually used with CheckAndPutSubTree together.
+func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *RegionInfo) ([]*RegionInfo, error) {
+	tracer := ctx.Tracer
+	r.t.Lock()
+	var ols []*regionItem
+	origin := r.getRegionLocked(region.GetID())
+	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
+		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
+	}
+	tracer.OnCheckOverlapsFinished()
+	err := check(region, origin, convertItemsToRegions(ols))
+	if err != nil {
+		r.t.Unlock()
+		tracer.OnValidateRegionFinished()
+		return nil, err
+	}
+	tracer.OnValidateRegionFinished()
+	_, overlaps, _ := r.setRegionLocked(region, true, ols...)
+	r.t.Unlock()
+	tracer.OnSetRegionFinished()
+	return overlaps, nil
+}
+
+// CheckAndPutSubTree checks if the region is valid to put to the sub tree, if valid then return error.
+// Usually used with CheckAndPutRootTree together.
+func (r *RegionsInfo) CheckAndPutSubTree(region *RegionInfo) {
+	// new region get from root tree again
+	var newRegion *RegionInfo
+	newRegion = r.GetRegion(region.GetID())
+	if newRegion == nil {
+		newRegion = region
+	}
+	r.UpdateSubTreeOrderInsensitive(newRegion)
+}
+
+// UpdateSubTreeOrderInsensitive updates the subtree.
+// It's can used to update the subtree concurrently.
+// because it can use concurrently, check region version to make sure the order.
+//  1. if the version is stale, drop this update.
+//  2. if the version is same, then only some statistic info need to be updated.
+//     in this situation, the order of update is not important.
+//
+// in another hand, the overlap regions need re-check, because the region tree and the subtree update is not atomic.
+func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
+	var origin *RegionInfo
+	r.st.Lock()
+	defer r.st.Unlock()
+	originItem, ok := r.subRegions[region.GetID()]
+	if ok {
+		origin = originItem.RegionInfo
+	}
+	rangeChanged := true
+
+	if origin != nil {
+		re := region.GetRegionEpoch()
+		oe := origin.GetRegionEpoch()
+		isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
+		if (isTermBehind || re.GetVersion() < oe.GetVersion() || re.GetConfVer() < oe.GetConfVer()) && !region.isRegionRecreated() {
+			// Region meta is stale, skip.
+			return
+		}
+		rangeChanged = !origin.rangeEqualsTo(region)
+
+		if rangeChanged || !origin.peersEqualTo(region) {
+			// If the range or peers have changed, the sub regionTree needs to be cleaned up.
+			// TODO: Improve performance by deleting only the different peers.
+			r.removeRegionFromSubTreeLocked(origin)
+		} else {
+			// The region tree and the subtree update is not atomic and the region tree is updated first.
+			// If there are two thread needs to update region tree,
+			// t1: thread-A  update region tree
+			// 										t2: thread-B: update region tree again
+			//										t3: thread-B: update subtree
+			// t4: thread-A: update region subtree
+			// to keep region tree consistent with subtree, we need to drop this update.
+			if tree, ok := r.subRegions[region.GetID()]; ok {
+				r.updateSubTreeStat(origin, region)
+				tree.RegionInfo = region
+			}
+			return
+		}
+	}
+
+	if rangeChanged {
+		overlaps := r.getOverlapRegionFromSubTreeLocked(region)
+		for _, re := range overlaps {
+			r.removeRegionFromSubTreeLocked(re)
+		}
+	}
+
+	item := &regionItem{region}
+	r.subRegions[region.GetID()] = item
+	// It has been removed and all information needs to be updated again.
+	// Set peers then.
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+		store, ok := peersMap[storeID]
+		if !ok {
+			store = newRegionTree()
+			peersMap[storeID] = store
+		}
+		store.update(item, false)
+	}
+
+	// Add to leaders and followers.
+	for _, peer := range region.GetVoters() {
+		storeID := peer.GetStoreId()
+		if peer.GetId() == region.leader.GetId() {
+			// Add leader peer to leaders.
+			setPeer(r.leaders, storeID, item)
+		} else {
+			// Add follower peer to followers.
+			setPeer(r.followers, storeID, item)
+		}
+	}
+
+	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
+		for _, peer := range peers {
+			storeID := peer.GetStoreId()
+			setPeer(peersMap, storeID, item)
+		}
+	}
+	// Add to learners.
+	setPeers(r.learners, region.GetLearners())
+	// Add to witnesses.
+	setPeers(r.witnesses, region.GetWitnesses())
+	// Add to PendingPeers
+	setPeers(r.pendingPeers, region.GetPendingPeers())
+}
+
+func (r *RegionsInfo) getOverlapRegionFromSubTreeLocked(region *RegionInfo) []*RegionInfo {
+	it := &regionItem{RegionInfo: region}
+	overlaps := make([]*RegionInfo, 0)
+	overlapsMap := make(map[uint64]struct{})
+	collectFromItemSlice := func(peersMap map[uint64]*regionTree, storeID uint64) {
+		if tree, ok := peersMap[storeID]; ok {
+			items := tree.overlaps(it)
+			for _, item := range items {
+				if _, ok := overlapsMap[item.GetID()]; !ok {
+					overlapsMap[item.GetID()] = struct{}{}
+					overlaps = append(overlaps, item.RegionInfo)
+				}
+			}
+		}
+	}
+	for _, peer := range region.GetMeta().GetPeers() {
+		storeID := peer.GetStoreId()
+		collectFromItemSlice(r.leaders, storeID)
+		collectFromItemSlice(r.followers, storeID)
+		collectFromItemSlice(r.learners, storeID)
+		collectFromItemSlice(r.witnesses, storeID)
+	}
+	return overlaps
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.

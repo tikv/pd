@@ -201,7 +201,7 @@
 ## When enabled, usage data will be sent to PingCAP for improving user experience.
 # enable-telemetry = false
 
-[keyspaces]
+[keyspace]
 ## pre-alloc is used to pre-allocate keyspaces during pd bootstrap.
 ## Its value should be a list of strings, denotting the name of the keyspaces.
 ## Example:
