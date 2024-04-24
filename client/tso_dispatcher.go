@@ -712,7 +712,8 @@ func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 // a TSO proxy to reduce the pressure of the main serving service endpoint.
 func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc string, connectionCtxs *sync.Map) error {
 	tsoStreamBuilders := c.getAllTSOStreamBuilders()
-	leaderAddr := c.svcDiscovery.GetServingURL()
+	// Note: the forwardedHost is the main serving service endpoint such as leader or primary.
+	// But now only the Global TSO supports the TSO Follower Proxy.
 	forwardedHost, ok := c.GetTSOAllocatorServingURLByDCLocation(dc)
 	if !ok {
 		return errors.Errorf("cannot find the allocator leader in %s", dc)
@@ -737,8 +738,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		log.Info("[tso] try to create tso stream",
 			zap.String("dc", dc), zap.String("addr", addr))
 		cctx, cancel := context.WithCancel(dispatcherCtx)
-		// Do not proxy the leader client.
-		if addr != leaderAddr {
+		// Do not proxy the target forwared host client.
+		if addr != forwardedHost {
 			log.Info("[tso] use follower to forward tso stream to do the proxy",
 				zap.String("dc", dc), zap.String("addr", addr))
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
@@ -746,7 +747,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(dispatcherCtx context.Context, dc s
 		// Create the TSO stream.
 		stream, err := tsoStreamBuilder.build(cctx, cancel, c.option.timeout)
 		if err == nil {
-			if addr != leaderAddr {
+			if addr != forwardedHost {
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addrTrim := trimHTTPPrefix(addr)
 				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
