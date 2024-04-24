@@ -1015,10 +1015,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		ctx.TaskRunner.RunTask(
 			ctx.Context,
-			ratelimit.TaskOpts{
-				TaskName: "HandleStatsAsync",
-				Limit:    ctx.Limiter,
-			},
+			core.ExtraTaskOpts(ctx, core.HandleStatsAsync),
 			func(_ context.Context) {
 				cluster.HandleStatsAsync(c, region)
 			},
@@ -1039,10 +1036,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
-				ratelimit.TaskOpts{
-					TaskName: "ObserveRegionStatsAsync",
-					Limit:    ctx.Limiter,
-				},
+				core.ExtraTaskOpts(ctx, core.ObserveRegionStatsAsync),
 				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
@@ -1065,17 +1059,23 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.core.AtomicCheckAndPutRegion(ctx, region); err != nil {
+		if overlaps, err = c.core.CheckAndPutRootTree(ctx, region); err != nil {
 			tracer.OnSaveCacheFinished()
 			return err
 		}
+		ctx.TaskRunner.RunTask(
+			ctx,
+			core.ExtraTaskOpts(ctx, core.UpdateSubTree),
+			func(_ context.Context) {
+				c.CheckAndPutSubTree(region)
+			},
+		)
+		tracer.OnUpdateSubTreeFinished()
+
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
-				ratelimit.TaskOpts{
-					TaskName: "HandleOverlaps",
-					Limit:    ctx.Limiter,
-				},
+				core.ExtraTaskOpts(ctx, core.HandleOverlaps),
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
 				},
@@ -1088,10 +1088,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	// handle region stats
 	ctx.TaskRunner.RunTask(
 		ctx.Context,
-		ratelimit.TaskOpts{
-			TaskName: "CollectRegionStatsAsync",
-			Limit:    ctx.Limiter,
-		},
+		core.ExtraTaskOpts(ctx, core.CollectRegionStatsAsync),
 		func(_ context.Context) {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
 			// region stats needs to be collected in API mode.
@@ -1105,10 +1102,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if saveKV {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
-				ratelimit.TaskOpts{
-					TaskName: "SaveRegionToKV",
-					Limit:    ctx.Limiter,
-				},
+				core.ExtraTaskOpts(ctx, core.SaveRegionToKV),
 				func(_ context.Context) {
 					// If there are concurrent heartbeats from the same region, the last write will win even if
 					// writes to storage in the critical area. So don't use mutex to protect it.
