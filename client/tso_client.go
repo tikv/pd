@@ -178,6 +178,14 @@ func (c *tsoClient) getTSORequest(ctx context.Context, dcLocation string) *tsoRe
 	return req
 }
 
+func (c *tsoClient) getTSODispatcher(dcLocation string) (*tsoDispatcher, bool) {
+	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
+	if !ok {
+		return nil, false
+	}
+	return dispatcher.(*tsoDispatcher), true
+}
+
 // GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
 func (c *tsoClient) GetTSOAllocators() *sync.Map {
 	return &c.tsoAllocators
@@ -259,6 +267,7 @@ func (c *tsoClient) updateTSOGlobalServURL(url string) error {
 	log.Info("[tso] switch dc tso global allocator serving url",
 		zap.String("dc-location", globalDCLocation),
 		zap.String("new-url", url))
+	c.scheduleUpdateTSOConnectionCtxs()
 	c.scheduleCheckTSODispatcher()
 	return nil
 }
@@ -338,33 +347,34 @@ func (c *tsoClient) tryConnectToTSO(
 	connectionCtxs *sync.Map,
 ) error {
 	var (
-		networkErrNum uint64
-		err           error
-		stream        tsoStream
-		url           string
-		cc            *grpc.ClientConn
-	)
-	updateAndClear := func(newURL string, connectionCtx *tsoConnectionContext) {
-		if cc, loaded := connectionCtxs.LoadOrStore(newURL, connectionCtx); loaded {
-			// If the previous connection still exists, we should close it first.
-			cc.(*tsoConnectionContext).cancel()
-			connectionCtxs.Store(newURL, connectionCtx)
+		networkErrNum  uint64
+		err            error
+		stream         tsoStream
+		url            string
+		cc             *grpc.ClientConn
+		updateAndClear = func(newURL string, connectionCtx *tsoConnectionContext) {
+			// Only store the connectionCtx if it does not exist before.
+			connectionCtxs.LoadOrStore(newURL, connectionCtx)
+			// Remove all other connection contexts.
+			connectionCtxs.Range(func(url, cc any) bool {
+				if url.(string) != newURL {
+					cc.(*tsoConnectionContext).cancel()
+					connectionCtxs.Delete(url)
+				}
+				return true
+			})
 		}
-		connectionCtxs.Range(func(url, cc any) bool {
-			if url.(string) != newURL {
-				cc.(*tsoConnectionContext).cancel()
-				connectionCtxs.Delete(url)
-			}
-			return true
-		})
-	}
-	// retry several times before falling back to the follower when the network problem happens
+	)
 
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
+	// Retry several times before falling back to the follower when the network problem happens
 	for i := 0; i < maxRetryTimes; i++ {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
+		if _, ok := connectionCtxs.Load(url); ok {
+			return nil
+		}
 		if cc != nil {
 			cctx, cancel := context.WithCancel(dispatcherCtx)
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)

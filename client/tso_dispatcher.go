@@ -44,8 +44,17 @@ type tsoDispatcher struct {
 	tsoBatchController *tsoBatchController
 }
 
+func (td *tsoDispatcher) close() {
+	td.dispatcherCancel()
+	td.tsoBatchController.clear()
+}
+
+func (td *tsoDispatcher) push(request *tsoRequest) {
+	td.tsoBatchController.tsoRequestCh <- request
+}
+
 func (c *tsoClient) dispatchRequest(request *tsoRequest) (bool, error) {
-	dispatcher, ok := c.tsoDispatcher.Load(request.dcLocation)
+	dispatcher, ok := c.getTSODispatcher(request.dcLocation)
 	if !ok {
 		err := errs.ErrClientGetTSO.FastGenByArgs(fmt.Sprintf("unknown dc-location %s to the client", request.dcLocation))
 		log.Error("[tso] dispatch tso request error", zap.String("dc-location", request.dcLocation), errs.ZapError(err))
@@ -70,7 +79,7 @@ func (c *tsoClient) dispatchRequest(request *tsoRequest) (bool, error) {
 		failpoint.Inject("delayDispatchTSORequest", func() {
 			time.Sleep(time.Second)
 		})
-		dispatcher.(*tsoDispatcher).tsoBatchController.tsoRequestCh <- request
+		dispatcher.push(request)
 	}
 	// Check the contexts again to make sure the request is not been sent to a closed dispatcher.
 	// Never retry on these conditions to prevent unexpected data race.
@@ -89,9 +98,7 @@ func (c *tsoClient) dispatchRequest(request *tsoRequest) (bool, error) {
 func (c *tsoClient) closeTSODispatcher() {
 	c.tsoDispatcher.Range(func(_, dispatcherInterface any) bool {
 		if dispatcherInterface != nil {
-			dispatcher := dispatcherInterface.(*tsoDispatcher)
-			dispatcher.dispatcherCancel()
-			dispatcher.tsoBatchController.clear()
+			dispatcherInterface.(*tsoDispatcher).close()
 		}
 		return true
 	})
@@ -115,7 +122,7 @@ func (c *tsoClient) updateTSODispatcher() {
 		}
 		if _, exist := c.GetTSOAllocators().Load(dcLocation); !exist {
 			log.Info("[tso] delete unused tso dispatcher", zap.String("dc-location", dcLocation))
-			dispatcher.(*tsoDispatcher).dispatcherCancel()
+			dispatcher.(*tsoDispatcher).close()
 			c.tsoDispatcher.Delete(dcLocation)
 		}
 		return true
@@ -319,6 +326,7 @@ func (c *tsoClient) handleDispatcher(
 		// url -> connectionContext
 		connectionCtxs sync.Map
 	)
+	// Clean up the connectionCtxs when the dispatcher exits.
 	defer func() {
 		log.Info("[tso] exit tso dispatcher", zap.String("dc-location", dc))
 		// Cancel all connections.
@@ -330,51 +338,51 @@ func (c *tsoClient) handleDispatcher(
 		tbc.clear()
 		c.wg.Done()
 	}()
-	// Call updateTSOConnectionCtxs once to init the connectionCtxs first.
-	c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-	// Only the Global TSO needs to watch the updateTSOConnectionCtxsCh to sense the
-	// change of the cluster when TSO Follower Proxy is enabled.
-	// TODO: support TSO Follower Proxy for the Local TSO.
-	if dc == globalDCLocation {
-		go func() {
-			var updateTicker = &time.Ticker{}
-			setNewUpdateTicker := func(ticker *time.Ticker) {
-				if updateTicker.C != nil {
-					updateTicker.Stop()
-				}
-				updateTicker = ticker
+	// Daemon goroutine to update the connectionCtxs periodically and handle the TSO Follower Proxy switch event.
+	go func() {
+		var updateTicker = &time.Ticker{}
+		setNewUpdateTicker := func(ticker *time.Ticker) {
+			if updateTicker.C != nil {
+				updateTicker.Stop()
 			}
-			// Set to nil before returning to ensure that the existing ticker can be GC.
-			defer setNewUpdateTicker(nil)
+			updateTicker = ticker
+		}
+		// Set to nil before returning to ensure that the existing ticker can be GC.
+		defer setNewUpdateTicker(nil)
 
-			for {
-				select {
-				case <-dispatcherCtx.Done():
-					return
-				case <-c.option.enableTSOFollowerProxyCh:
-					enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
-					log.Info("[tso] tso follower proxy status changed",
-						zap.String("dc-location", dc),
-						zap.Bool("enable", enableTSOFollowerProxy))
-					if enableTSOFollowerProxy && updateTicker.C == nil {
-						// Because the TSO Follower Proxy is enabled,
-						// the periodic check needs to be performed.
-						setNewUpdateTicker(time.NewTicker(memberUpdateInterval))
-					} else if !enableTSOFollowerProxy && updateTicker.C != nil {
-						// Because the TSO Follower Proxy is disabled,
-						// the periodic check needs to be turned off.
-						setNewUpdateTicker(&time.Ticker{})
-					} else {
-						// The status of TSO Follower Proxy does not change, and updateTSOConnectionCtxs is not triggered
-						continue
-					}
-				case <-updateTicker.C:
-				case <-c.updateTSOConnectionCtxsCh:
+		for {
+			c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+			select {
+			case <-dispatcherCtx.Done():
+				return
+			case <-c.option.enableTSOFollowerProxyCh:
+				// TODO: implement TSO Follower Proxy support for the Local TSO.
+				if dc != globalDCLocation {
+					continue
 				}
-				c.updateTSOConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
+				enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
+				log.Info("[tso] tso follower proxy status changed",
+					zap.String("dc-location", dc),
+					zap.Bool("enable", enableTSOFollowerProxy))
+				if enableTSOFollowerProxy && updateTicker.C == nil {
+					// Because the TSO Follower Proxy is enabled,
+					// the periodic check needs to be performed.
+					setNewUpdateTicker(time.NewTicker(memberUpdateInterval))
+				} else if !enableTSOFollowerProxy && updateTicker.C != nil {
+					// Because the TSO Follower Proxy is disabled,
+					// the periodic check needs to be turned off.
+					setNewUpdateTicker(&time.Ticker{})
+				} else {
+					// The status of TSO Follower Proxy does not change, and updateTSOConnectionCtxs is not triggered
+					continue
+				}
+			case <-updateTicker.C:
+				// Triggered periodically when the TSO Follower Proxy is enabled.
+			case <-c.updateTSOConnectionCtxsCh:
+				// Triggered by the Global TSO Allocator leader change.
 			}
-		}()
-	}
+		}
+	}()
 
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
