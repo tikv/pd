@@ -336,50 +336,7 @@ func (c *tsoClient) handleDispatcher(
 		c.wg.Done()
 	}()
 	// Daemon goroutine to update the connectionCtxs periodically and handle the `connectionCtxs` update event.
-	go func() {
-		var updateTicker = &time.Ticker{}
-		setNewUpdateTicker := func(ticker *time.Ticker) {
-			if updateTicker.C != nil {
-				updateTicker.Stop()
-			}
-			updateTicker = ticker
-		}
-		// Set to nil before returning to ensure that the existing ticker can be GC.
-		defer setNewUpdateTicker(nil)
-
-		for {
-			c.updateTSOConnectionCtxs(ctx, dc, &connectionCtxs)
-			select {
-			case <-ctx.Done():
-				return
-			case <-c.option.enableTSOFollowerProxyCh:
-				// TODO: implement TSO Follower Proxy support for the Local TSO.
-				if dc != globalDCLocation {
-					continue
-				}
-				enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
-				log.Info("[tso] tso follower proxy status changed",
-					zap.String("dc-location", dc),
-					zap.Bool("enable", enableTSOFollowerProxy))
-				if enableTSOFollowerProxy && updateTicker.C == nil {
-					// Because the TSO Follower Proxy is enabled,
-					// the periodic check needs to be performed.
-					setNewUpdateTicker(time.NewTicker(memberUpdateInterval))
-				} else if !enableTSOFollowerProxy && updateTicker.C != nil {
-					// Because the TSO Follower Proxy is disabled,
-					// the periodic check needs to be turned off.
-					setNewUpdateTicker(&time.Ticker{})
-				} else {
-					// The status of TSO Follower Proxy does not change, and updateTSOConnectionCtxs is not triggered
-					continue
-				}
-			case <-updateTicker.C:
-				// Triggered periodically when the TSO Follower Proxy is enabled.
-			case <-c.updateTSOConnectionCtxsCh:
-				// Triggered by the Global TSO Allocator leader change.
-			}
-		}
-	}()
+	go c.connectionCtxsUpdater(ctx, dc, &connectionCtxs)
 
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
@@ -517,6 +474,58 @@ tsoBatchLoop:
 				// So we should only call it when the leader changes.
 				c.updateTSOConnectionCtxs(ctx, dc, &connectionCtxs)
 			}
+		}
+	}
+}
+
+// updateTSOConnectionCtxs updates the `connectionCtxs` for the specified DC location regularly.
+func (c *tsoClient) connectionCtxsUpdater(
+	ctx context.Context,
+	dc string,
+	connectionCtxs *sync.Map,
+) {
+	log.Info("[tso] start tso connection contexts updater", zap.String("dc-location", dc))
+	var updateTicker = &time.Ticker{}
+	setNewUpdateTicker := func(ticker *time.Ticker) {
+		if updateTicker.C != nil {
+			updateTicker.Stop()
+		}
+		updateTicker = ticker
+	}
+	// Set to nil before returning to ensure that the existing ticker can be GC.
+	defer setNewUpdateTicker(nil)
+
+	for {
+		c.updateTSOConnectionCtxs(ctx, dc, connectionCtxs)
+		select {
+		case <-ctx.Done():
+			log.Info("[tso] exit tso connection contexts updater", zap.String("dc-location", dc))
+			return
+		case <-c.option.enableTSOFollowerProxyCh:
+			// TODO: implement TSO Follower Proxy support for the Local TSO.
+			if dc != globalDCLocation {
+				continue
+			}
+			enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
+			log.Info("[tso] tso follower proxy status changed",
+				zap.String("dc-location", dc),
+				zap.Bool("enable", enableTSOFollowerProxy))
+			if enableTSOFollowerProxy && updateTicker.C == nil {
+				// Because the TSO Follower Proxy is enabled,
+				// the periodic check needs to be performed.
+				setNewUpdateTicker(time.NewTicker(memberUpdateInterval))
+			} else if !enableTSOFollowerProxy && updateTicker.C != nil {
+				// Because the TSO Follower Proxy is disabled,
+				// the periodic check needs to be turned off.
+				setNewUpdateTicker(&time.Ticker{})
+			} else {
+				// The status of TSO Follower Proxy does not change, and updateTSOConnectionCtxs is not triggered
+				continue
+			}
+		case <-updateTicker.C:
+			// Triggered periodically when the TSO Follower Proxy is enabled.
+		case <-c.updateTSOConnectionCtxsCh:
+			// Triggered by the leader/follower change.
 		}
 	}
 }
