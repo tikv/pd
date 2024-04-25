@@ -353,9 +353,9 @@ func (c *tsoClient) tryConnectToTSO(
 		url            string
 		cc             *grpc.ClientConn
 		updateAndClear = func(newURL string, connectionCtx *tsoConnectionContext) {
-			// Only store the connectionCtx if it does not exist before.
+			// Only store the `connectionCtx` if it does not exist before.
 			connectionCtxs.LoadOrStore(newURL, connectionCtx)
-			// Remove all other connection contexts.
+			// Remove all other `connectionCtx`s.
 			connectionCtxs.Range(func(url, cc any) bool {
 				if url.(string) != newURL {
 					cc.(*tsoConnectionContext).cancel()

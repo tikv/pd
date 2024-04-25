@@ -122,8 +122,8 @@ func (c *tsoClient) updateTSODispatcher() {
 		}
 		if _, exist := c.GetTSOAllocators().Load(dcLocation); !exist {
 			log.Info("[tso] delete unused tso dispatcher", zap.String("dc-location", dcLocation))
-			dispatcher.(*tsoDispatcher).close()
 			c.tsoDispatcher.Delete(dcLocation)
+			dispatcher.(*tsoDispatcher).close()
 		}
 		return true
 	})
@@ -335,7 +335,7 @@ func (c *tsoClient) handleDispatcher(
 		tbc.clear()
 		c.wg.Done()
 	}()
-	// Daemon goroutine to update the connectionCtxs periodically and handle the TSO Follower Proxy switch event.
+	// Daemon goroutine to update the connectionCtxs periodically and handle the `connectionCtxs` update event.
 	go func() {
 		var updateTicker = &time.Ticker{}
 		setNewUpdateTicker := func(ticker *time.Ticker) {
