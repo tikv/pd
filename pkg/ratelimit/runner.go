@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 )
 
@@ -53,6 +54,8 @@ type ConcurrentRunner struct {
 	pendingMu          sync.Mutex
 	stopChan           chan struct{}
 	wg                 sync.WaitGroup
+	failedTaskCount    prometheus.Counter
+	maxWaitingDuration prometheus.Gauge
 }
 
 // NewConcurrentRunner creates a new ConcurrentRunner.
@@ -62,6 +65,8 @@ func NewConcurrentRunner(name string, maxPendingDuration time.Duration) *Concurr
 		maxPendingDuration: maxPendingDuration,
 		taskChan:           make(chan *Task),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
+		failedTaskCount:    RunnerTaskFailedTasks.WithLabelValues(name),
+		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
 }
@@ -77,6 +82,7 @@ type TaskOpts struct {
 func (s *ConcurrentRunner) Start() {
 	s.stopChan = make(chan struct{})
 	s.wg.Add(1)
+	ticker := time.NewTicker(5 * time.Second)
 	go func() {
 		defer s.wg.Done()
 		for {
@@ -92,8 +98,19 @@ func (s *ConcurrentRunner) Start() {
 					go s.run(task.Ctx, task.f, nil)
 				}
 			case <-s.stopChan:
+				s.pendingMu.Lock()
+				s.pendingTasks = make([]*Task, 0, initialCapacity)
+				s.pendingMu.Unlock()
 				log.Info("stopping async task runner", zap.String("name", s.name))
 				return
+			case <-ticker.C:
+				maxDuration := time.Duration(0)
+				s.pendingMu.Lock()
+				if len(s.pendingTasks) > 0 {
+					maxDuration = time.Since(s.pendingTasks[0].submittedAt)
+				}
+				s.pendingMu.Unlock()
+				s.maxWaitingDuration.Set(maxDuration.Seconds())
 			}
 		}
 	}()
@@ -144,6 +161,7 @@ func (s *ConcurrentRunner) RunTask(ctx context.Context, opt TaskOpts, f func(con
 		if len(s.pendingTasks) > 0 {
 			maxWait := time.Since(s.pendingTasks[0].submittedAt)
 			if maxWait > s.maxPendingDuration {
+				s.failedTaskCount.Inc()
 				return ErrMaxWaitingTasksExceeded
 			}
 		}

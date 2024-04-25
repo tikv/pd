@@ -3655,7 +3655,8 @@ func TestInterval(t *testing.T) {
 func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
-		if res = stream.Recv().(*pdpb.RegionHeartbeatResponse); res != nil {
+		if r := stream.Recv(); r != nil {
+			res = r.(*pdpb.RegionHeartbeatResponse)
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddLearnerNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
@@ -3671,7 +3672,8 @@ func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream,
 func waitPromoteLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
-		if res = stream.Recv().(*pdpb.RegionHeartbeatResponse); res != nil {
+		if r := stream.Recv(); r != nil {
+			res = r.(*pdpb.RegionHeartbeatResponse)
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_AddNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
@@ -3688,7 +3690,8 @@ func waitPromoteLearner(re *require.Assertions, stream mockhbstream.HeartbeatStr
 func waitRemovePeer(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
-		if res = stream.Recv().(*pdpb.RegionHeartbeatResponse); res != nil {
+		if r := stream.Recv(); r != nil {
+			res = r.(*pdpb.RegionHeartbeatResponse)
 			return res.GetRegionId() == region.GetID() &&
 				res.GetChangePeer().GetChangeType() == eraftpb.ConfChangeType_RemoveNode &&
 				res.GetChangePeer().GetPeer().GetStoreId() == storeID
@@ -3704,7 +3707,8 @@ func waitRemovePeer(re *require.Assertions, stream mockhbstream.HeartbeatStream,
 func waitTransferLeader(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
-		if res = stream.Recv().(*pdpb.RegionHeartbeatResponse); res != nil {
+		if r := stream.Recv(); r != nil {
+			res = r.(*pdpb.RegionHeartbeatResponse)
 			if res.GetRegionId() == region.GetID() {
 				for _, peer := range append(res.GetTransferLeader().GetPeers(), res.GetTransferLeader().GetPeer()) {
 					if peer.GetStoreId() == storeID {
