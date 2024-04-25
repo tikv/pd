@@ -519,7 +519,6 @@ func (c *tsoClient) connectionCtxsUpdater(
 				// the periodic check needs to be turned off.
 				setNewUpdateTicker(&time.Ticker{})
 			} else {
-				// The status of TSO Follower Proxy does not change, and updateTSOConnectionCtxs is not triggered
 				continue
 			}
 		case <-updateTicker.C:
