@@ -222,7 +222,7 @@ func (c *tsoClient) tsoDispatcherCheckLoop() {
 }
 
 func (c *tsoClient) checkAllocator(
-	dispatcherCtx context.Context,
+	ctx context.Context,
 	forwardCancel context.CancelFunc,
 	dc, forwardedHostTrim, addr, url string,
 	updateAndClear func(newAddr string, connectionCtx *tsoConnectionContext)) {
@@ -245,7 +245,7 @@ func (c *tsoClient) checkAllocator(
 			healthCli = healthpb.NewHealthClient(cc)
 		}
 		if healthCli != nil {
-			healthCtx, healthCancel := context.WithTimeout(dispatcherCtx, c.option.timeout)
+			healthCtx, healthCancel := context.WithTimeout(ctx, c.option.timeout)
 			resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 			failpoint.Inject("unreachableNetwork", func() {
 				resp.Status = healthpb.HealthCheckResponse_UNKNOWN
@@ -253,7 +253,7 @@ func (c *tsoClient) checkAllocator(
 			healthCancel()
 			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 				// create a stream of the original allocator
-				cctx, cancel := context.WithCancel(dispatcherCtx)
+				cctx, cancel := context.WithCancel(ctx)
 				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
@@ -263,7 +263,7 @@ func (c *tsoClient) checkAllocator(
 			}
 		}
 		select {
-		case <-dispatcherCtx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			// To ensure we can get the latest allocator leader
