@@ -744,33 +744,26 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
-		taskRunner := ctx.TaskRunner
-		limiter := ctx.Limiter
+		logRunner := ctx.LogRunner
 		// print log asynchronously
 		debug, info := d, i
-		if taskRunner != nil {
+		if logRunner != nil {
 			debug = func(msg string, fields ...zap.Field) {
-				taskRunner.RunTask(
+				logRunner.RunTask(
 					ctx.Context,
-					ratelimit.TaskOpts{
-						TaskName: "Log",
-						Limit:    limiter,
-					},
 					func(_ context.Context) {
 						d(msg, fields...)
 					},
+					ratelimit.WithName("Log"),
 				)
 			}
 			info = func(msg string, fields ...zap.Field) {
-				taskRunner.RunTask(
+				logRunner.RunTask(
 					ctx.Context,
-					ratelimit.TaskOpts{
-						TaskName: "Log",
-						Limit:    limiter,
-					},
 					func(_ context.Context) {
 						i(msg, fields...)
 					},
+					ratelimit.WithName("Log"),
 				)
 			}
 		}
@@ -870,24 +863,6 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 		}
 		return
-	}
-}
-
-// RegionHeartbeatStageName is the name of the stage of the region heartbeat.
-const (
-	HandleStatsAsync        = "HandleStatsAsync"
-	ObserveRegionStatsAsync = "ObserveRegionStatsAsync"
-	UpdateSubTree           = "UpdateSubTree"
-	HandleOverlaps          = "HandleOverlaps"
-	CollectRegionStatsAsync = "CollectRegionStatsAsync"
-	SaveRegionToKV          = "SaveRegionToKV"
-)
-
-// ExtraTaskOpts returns the task options for the task.
-func ExtraTaskOpts(ctx *MetaProcessContext, name string) ratelimit.TaskOpts {
-	return ratelimit.TaskOpts{
-		TaskName: name,
-		Limit:    ctx.Limiter,
 	}
 }
 
