@@ -165,12 +165,14 @@ func newScatterRangeScheduler(opController *schedule.OperatorController, config 
 			&balanceLeaderSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
 			WithBalanceLeaderName("scatter-range-leader"),
 			WithBalanceLeaderCounter(scatterRangeLeaderCounter),
+			WithBalanceLeaderFilterCounterName("scatter-range-leader"),
 		),
 		balanceRegion: newBalanceRegionScheduler(
 			opController,
 			&balanceRegionSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
 			WithBalanceRegionName("scatter-range-region"),
 			WithBalanceRegionCounter(scatterRangeRegionCounter),
+			WithBalanceRegionFilterCounterName("scatter-range-region"),
 		),
 	}
 	return scheduler
