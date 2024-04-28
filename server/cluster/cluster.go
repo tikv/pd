@@ -107,7 +107,7 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	hbConcurrentRunner = "heartbeat-async-task-runner"
+	hbConcurrentRunner = "heartbeat-async"
 )
 
 // Server is the interface for cluster.

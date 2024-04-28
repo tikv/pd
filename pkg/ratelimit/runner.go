@@ -54,6 +54,7 @@ type ConcurrentRunner struct {
 	pendingMu          sync.Mutex
 	stopChan           chan struct{}
 	wg                 sync.WaitGroup
+	pendingTaskCount   map[string]int64
 	failedTaskCount    prometheus.Counter
 	maxWaitingDuration prometheus.Gauge
 }
@@ -66,6 +67,7 @@ func NewConcurrentRunner(name string, maxPendingDuration time.Duration) *Concurr
 		taskChan:           make(chan *Task),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		failedTaskCount:    RunnerTaskFailedTasks.WithLabelValues(name),
+		pendingTaskCount:   make(map[string]int64),
 		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
@@ -109,6 +111,9 @@ func (s *ConcurrentRunner) Start() {
 				if len(s.pendingTasks) > 0 {
 					maxDuration = time.Since(s.pendingTasks[0].submittedAt)
 				}
+				for name, cnt := range s.pendingTaskCount {
+					RunnerTaskPendingTasks.WithLabelValues(s.name, name).Set(float64(cnt))
+				}
 				s.pendingMu.Unlock()
 				s.maxWaitingDuration.Set(maxDuration.Seconds())
 			}
@@ -132,6 +137,7 @@ func (s *ConcurrentRunner) processPendingTasks() {
 		select {
 		case s.taskChan <- task:
 			s.pendingTasks = s.pendingTasks[1:]
+			s.pendingTaskCount[task.Opts.TaskName]--
 			return
 		default:
 			return
@@ -167,6 +173,7 @@ func (s *ConcurrentRunner) RunTask(ctx context.Context, opt TaskOpts, f func(con
 		}
 		task.submittedAt = time.Now()
 		s.pendingTasks = append(s.pendingTasks, task)
+		s.pendingTaskCount[opt.TaskName]++
 	}
 	return nil
 }

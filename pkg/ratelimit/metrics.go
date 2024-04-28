@@ -18,7 +18,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const nameStr = "runner_name"
+const (
+	nameStr = "runner_name"
+	taskStr = "task_type"
+)
 
 var (
 	RunnerTaskMaxWaitingDuration = prometheus.NewGaugeVec(
@@ -35,7 +38,7 @@ var (
 			Subsystem: "ratelimit",
 			Name:      "runner_task_pending_tasks",
 			Help:      "The number of pending tasks in the runner.",
-		}, []string{nameStr})
+		}, []string{nameStr, taskStr})
 	RunnerTaskFailedTasks = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
