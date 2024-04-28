@@ -1044,6 +1044,16 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				},
 			)
 		}
+		// region is not updated to the subtree.
+		if origin.GetRef() < 2 {
+			ctx.TaskRunner.RunTask(
+				ctx,
+				core.ExtraTaskOpts(ctx, core.UpdateSubTree),
+				func(_ context.Context) {
+					c.CheckAndPutSubTree(region)
+				},
+			)
+		}
 		return nil
 	}
 	failpoint.Inject("concurrentRegionHeartbeat", func() {

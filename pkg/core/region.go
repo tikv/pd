@@ -81,6 +81,8 @@ type RegionInfo struct {
 	buckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
+	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
+	ref atomic.Int32
 }
 
 // RegionSource is the source of region.
@@ -104,6 +106,21 @@ func (r *RegionInfo) LoadedFromStorage() bool {
 // Only used for test.
 func (r *RegionInfo) LoadedFromSync() bool {
 	return r.source == Sync
+}
+
+// IncRef increases the reference count.
+func (r *RegionInfo) IncRef() {
+	r.ref.Add(1)
+}
+
+// DecRef decreases the reference count.
+func (r *RegionInfo) DecRef() {
+	r.ref.Add(-1)
+}
+
+// GetRef returns the reference count.
+func (r *RegionInfo) GetRef() int32 {
+	return r.ref.Load()
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -928,7 +945,7 @@ type RegionsInfo struct {
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		tree:         newRegionTree(),
+		tree:         newRegionTreeWithCountRef(),
 		regions:      make(map[uint64]*regionItem),
 		subRegions:   make(map[uint64]*regionItem),
 		leaders:      make(map[uint64]*regionTree),
@@ -1117,10 +1134,14 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
 		store, ok := peersMap[storeID]
 		if !ok {
-			store = newRegionTree()
+			if !countRef {
+				store = newRegionTree()
+			} else {
+				store = newRegionTreeWithCountRef()
+			}
 			peersMap[storeID] = store
 		}
 		store.update(item, false)
@@ -1131,17 +1152,17 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
 			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item)
+			setPeer(r.leaders, storeID, item, true)
 		} else {
 			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item)
+			setPeer(r.followers, storeID, item, false)
 		}
 	}
 
 	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
 			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item)
+			setPeer(peersMap, storeID, item, false)
 		}
 	}
 	// Add to learners.
@@ -1309,10 +1330,14 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
 		store, ok := peersMap[storeID]
 		if !ok {
-			store = newRegionTree()
+			if !countRef {
+				store = newRegionTree()
+			} else {
+				store = newRegionTreeWithCountRef()
+			}
 			peersMap[storeID] = store
 		}
 		store.update(item, false)
@@ -1323,17 +1348,17 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
 			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item)
+			setPeer(r.leaders, storeID, item, true)
 		} else {
 			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item)
+			setPeer(r.followers, storeID, item, false)
 		}
 	}
 
 	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
 			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item)
+			setPeer(peersMap, storeID, item, false)
 		}
 	}
 	// Add to learners.

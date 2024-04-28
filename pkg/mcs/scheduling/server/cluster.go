@@ -615,6 +615,16 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 				},
 			)
 		}
+		// region is not updated to the subtree.
+		if origin.GetRef() < 2 {
+			ctx.TaskRunner.RunTask(
+				ctx,
+				core.ExtraTaskOpts(ctx, core.UpdateSubTree),
+				func(_ context.Context) {
+					c.CheckAndPutSubTree(region)
+				},
+			)
+		}
 		return nil
 	}
 	tracer.OnSaveCacheBegin()
