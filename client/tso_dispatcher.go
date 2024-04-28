@@ -108,7 +108,7 @@ func (c *tsoClient) updateTSODispatcher() {
 	// Set up the new TSO dispatcher and batch controller.
 	c.GetTSOAllocators().Range(func(dcLocationKey, _ any) bool {
 		dcLocation := dcLocationKey.(string)
-		if !c.checkTSODispatcher(dcLocation) {
+		if _, ok := c.getTSODispatcher(dcLocation); !ok {
 			c.createTSODispatcher(dcLocation)
 		}
 		return true
@@ -271,14 +271,6 @@ func (c *tsoClient) checkAllocator(
 			cc, u = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		}
 	}
-}
-
-func (c *tsoClient) checkTSODispatcher(dcLocation string) bool {
-	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
-	if !ok || dispatcher == nil {
-		return false
-	}
-	return true
 }
 
 func (c *tsoClient) createTSODispatcher(dcLocation string) {
@@ -479,11 +471,15 @@ tsoBatchLoop:
 }
 
 // updateTSOConnectionCtxs updates the `connectionCtxs` for the specified DC location regularly.
+// TODO: implement support for the Local TSO.
 func (c *tsoClient) connectionCtxsUpdater(
 	ctx context.Context,
 	dc string,
 	connectionCtxs *sync.Map,
 ) {
+	if dc != globalDCLocation {
+		return
+	}
 	log.Info("[tso] start tso connection contexts updater", zap.String("dc-location", dc))
 	var updateTicker = &time.Ticker{}
 	setNewUpdateTicker := func(ticker *time.Ticker) {
@@ -502,10 +498,6 @@ func (c *tsoClient) connectionCtxsUpdater(
 			log.Info("[tso] exit tso connection contexts updater", zap.String("dc-location", dc))
 			return
 		case <-c.option.enableTSOFollowerProxyCh:
-			// TODO: implement TSO Follower Proxy support for the Local TSO.
-			if dc != globalDCLocation {
-				continue
-			}
 			enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
 			log.Info("[tso] tso follower proxy status changed",
 				zap.String("dc-location", dc),

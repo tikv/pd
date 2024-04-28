@@ -180,7 +180,7 @@ func (c *tsoClient) getTSORequest(ctx context.Context, dcLocation string) *tsoRe
 
 func (c *tsoClient) getTSODispatcher(dcLocation string) (*tsoDispatcher, bool) {
 	dispatcher, ok := c.tsoDispatcher.Load(dcLocation)
-	if !ok {
+	if !ok || dispatcher == nil {
 		return nil, false
 	}
 	return dispatcher.(*tsoDispatcher), true
