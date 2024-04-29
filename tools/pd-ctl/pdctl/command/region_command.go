@@ -497,26 +497,8 @@ func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	storeID := args[0]
 	prefix := regionsStorePrefix + "/" + storeID
-	flag := cmd.Flag("type")
-	typ := 0
-	switch flag.Value.String() {
-	case "all":
-		typ = 0
-	case "leader":
-		typ = 1
-	case "follower":
-		typ = 2
-	case "learner":
-		typ = 3
-	case "witness":
-		typ = 4
-	case "pending":
-		typ = 5
-	default:
-		cmd.Println("unknown type")
-		return
-	}
-	prefix += "?type=" + strconv.Itoa(typ)
+	flagType := cmd.Flag("type")
+	prefix += "?type=" + flagType.Value.String()
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions with the given storeID: %s\n", err)

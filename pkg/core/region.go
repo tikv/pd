@@ -1369,21 +1369,21 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 }
 
 // SubTreeRegionType is the type of sub tree region.
-type SubTreeRegionType int
+type SubTreeRegionType string
 
 const (
 	// AllInSubTree is all sub trees.
-	AllInSubTree SubTreeRegionType = iota
+	AllInSubTree SubTreeRegionType = "all"
 	// LeaderInSubTree is the leader sub tree.
-	LeaderInSubTree
+	LeaderInSubTree SubTreeRegionType = "leader"
 	// FollowerInSubTree is the follower sub tree.
-	FollowerInSubTree
+	FollowerInSubTree SubTreeRegionType = "follower"
 	// LearnerInSubTree is the learner sub tree.
-	LearnerInSubTree
+	LearnerInSubTree SubTreeRegionType = "learner"
 	// WitnessInSubTree is the witness sub tree.
-	WitnessInSubTree
+	WitnessInSubTree SubTreeRegionType = "witness"
 	// PendingPeerInSubTree is the pending peer sub tree.
-	PendingPeerInSubTree
+	PendingPeerInSubTree SubTreeRegionType = "pending"
 )
 
 // GetStoreRegions gets all RegionInfo with a given storeID

@@ -219,11 +219,12 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// get type from query
-	typID, err := strconv.Atoi(r.URL.Query().Get("type"))
-	if err != nil {
-		typID = int(core.AllInSubTree)
+	typ := r.URL.Query().Get("type")
+	if len(typ) == 0 {
+		typ = string(core.AllInSubTree)
 	}
-	regions, err := rc.GetStoreRegionsByTypeInSubTree(uint64(id), core.SubTreeRegionType(typID))
+
+	regions, err := rc.GetStoreRegionsByTypeInSubTree(uint64(id), core.SubTreeRegionType(typ))
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
