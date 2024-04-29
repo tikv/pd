@@ -1371,23 +1371,23 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 // SubTreeRegionType is the type of sub tree region.
 type SubTreeRegionType int
 
-var (
+const (
 	// AllInSubTree is all sub trees.
-	AllInSubTree SubTreeRegionType = 0
+	AllInSubTree SubTreeRegionType = iota
 	// LeaderInSubTree is the leader sub tree.
-	LeaderInSubTree SubTreeRegionType = 1
+	LeaderInSubTree
 	// FollowerInSubTree is the follower sub tree.
-	FollowerInSubTree SubTreeRegionType = 2
+	FollowerInSubTree
 	// LearnerInSubTree is the learner sub tree.
-	LearnerInSubTree SubTreeRegionType = 3
+	LearnerInSubTree
 	// WitnessInSubTree is the witness sub tree.
-	WitnessInSubTree SubTreeRegionType = 4
+	WitnessInSubTree
 	// PendingPeerInSubTree is the pending peer sub tree.
-	PendingPeerInSubTree SubTreeRegionType = 5
+	PendingPeerInSubTree
 )
 
 // GetStoreRegions gets all RegionInfo with a given storeID
-func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTreeRegionType) []*RegionInfo {
+func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTreeRegionType) ([]*RegionInfo, error) {
 	r.st.RLock()
 	var regions []*RegionInfo
 	switch typ {
@@ -1413,10 +1413,13 @@ func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTree
 		}
 	case AllInSubTree:
 		r.st.RUnlock()
-		return r.GetStoreRegions(storeID)
+		return r.GetStoreRegions(storeID), nil
+	default:
+		return nil, errors.Errorf("unknown sub tree region type %v", typ)
 	}
+
 	r.st.RUnlock()
-	return regions
+	return regions, nil
 }
 
 // GetStoreLeaderRegionSize get total size of store's leader regions
