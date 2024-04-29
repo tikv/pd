@@ -1106,13 +1106,7 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 		}
 	}
 
-	if rangeChanged {
-		overlaps := r.getOverlapRegionFromSubTreeLocked(region)
-		for _, re := range overlaps {
-			r.removeRegionFromSubTreeLocked(re)
-		}
-	}
-
+	// update will remove overlaps
 	item := &regionItem{region}
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
