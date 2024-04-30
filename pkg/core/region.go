@@ -1541,6 +1541,60 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	return regions
 }
 
+// SubTreeRegionType is the type of sub tree region.
+type SubTreeRegionType string
+
+const (
+	// AllInSubTree is all sub trees.
+	AllInSubTree SubTreeRegionType = "all"
+	// LeaderInSubTree is the leader sub tree.
+	LeaderInSubTree SubTreeRegionType = "leader"
+	// FollowerInSubTree is the follower sub tree.
+	FollowerInSubTree SubTreeRegionType = "follower"
+	// LearnerInSubTree is the learner sub tree.
+	LearnerInSubTree SubTreeRegionType = "learner"
+	// WitnessInSubTree is the witness sub tree.
+	WitnessInSubTree SubTreeRegionType = "witness"
+	// PendingPeerInSubTree is the pending peer sub tree.
+	PendingPeerInSubTree SubTreeRegionType = "pending"
+)
+
+// GetStoreRegions gets all RegionInfo with a given storeID
+func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTreeRegionType) ([]*RegionInfo, error) {
+	r.st.RLock()
+	var regions []*RegionInfo
+	switch typ {
+	case LeaderInSubTree:
+		if leaders, ok := r.leaders[storeID]; ok {
+			regions = leaders.scanRanges()
+		}
+	case FollowerInSubTree:
+		if followers, ok := r.followers[storeID]; ok {
+			regions = followers.scanRanges()
+		}
+	case LearnerInSubTree:
+		if learners, ok := r.learners[storeID]; ok {
+			regions = learners.scanRanges()
+		}
+	case WitnessInSubTree:
+		if witnesses, ok := r.witnesses[storeID]; ok {
+			regions = witnesses.scanRanges()
+		}
+	case PendingPeerInSubTree:
+		if pendingPeers, ok := r.pendingPeers[storeID]; ok {
+			regions = pendingPeers.scanRanges()
+		}
+	case AllInSubTree:
+		r.st.RUnlock()
+		return r.GetStoreRegions(storeID), nil
+	default:
+		return nil, errors.Errorf("unknown sub tree region type %v", typ)
+	}
+
+	r.st.RUnlock()
+	return regions, nil
+}
+
 // GetStoreLeaderRegionSize get total size of store's leader regions
 func (r *RegionsInfo) GetStoreLeaderRegionSize(storeID uint64) int64 {
 	r.st.RLock()
