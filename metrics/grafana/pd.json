@@ -1218,7 +1218,6 @@
       },
       "yaxes": [
         {
-          "$$hashKey": "object:192",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -1227,7 +1226,6 @@
           "show": true
         },
         {
-          "$$hashKey": "object:193",
           "format": "short",
           "label": null,
           "logBase": 1,
@@ -11431,7 +11429,6 @@
           "renderer": "flot",
           "seriesOverrides": [
             {
-              "$$hashKey": "object:1147",
               "alias": "WaitRegionsLock",
               "bars": false,
               "lines": true,
@@ -11439,7 +11436,6 @@
               "stack": false
             },
             {
-              "$$hashKey": "object:1251",
               "alias": "WaitSubRegionsLock",
               "bars": false,
               "lines": true,
@@ -11486,14 +11482,12 @@
           },
           "yaxes": [
             {
-              "$$hashKey": "object:322",
               "format": "s",
               "logBase": 1,
               "min": "0",
               "show": true
             },
             {
-              "$$hashKey": "object:323",
               "format": "s",
               "logBase": 1,
               "show": true
@@ -11688,7 +11682,6 @@
           },
           "yaxes": [
             {
-              "$$hashKey": "object:505",
               "format": "opm",
               "label": null,
               "logBase": 1,
@@ -11697,7 +11690,6 @@
               "show": true
             },
             {
-              "$$hashKey": "object:506",
               "format": "s",
               "label": null,
               "logBase": 1,
@@ -11763,7 +11755,6 @@
           "renderer": "flot",
           "seriesOverrides": [
             {
-              "$$hashKey": "object:243",
               "alias": "/max-wait-duration.*/",
               "bars": true,
               "lines": false,
@@ -11816,7 +11807,6 @@
           },
           "yaxes": [
             {
-              "$$hashKey": "object:201",
               "decimals": null,
               "format": "opm",
               "label": "",
@@ -11826,7 +11816,6 @@
               "show": true
             },
             {
-              "$$hashKey": "object:202",
               "format": "s",
               "label": null,
               "logBase": 1,
