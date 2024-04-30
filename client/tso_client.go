@@ -127,6 +127,8 @@ func (c *tsoClient) setup() {
 }
 
 func (c *tsoClient) tsoDispatcherCheckLoop() {
+	log.Info("[tso] start tso dispatcher check loop")
+	defer log.Info("[tso] exit tso dispatcher check loop")
 	defer c.wg.Done()
 
 	loopCtx, loopCancel := context.WithCancel(c.ctx)
@@ -140,7 +142,6 @@ func (c *tsoClient) tsoDispatcherCheckLoop() {
 		case <-ticker.C:
 		case <-c.checkTSODispatcherCh:
 		case <-loopCtx.Done():
-			log.Info("[tso] exit tso dispatcher check loop")
 			return
 		}
 	}
