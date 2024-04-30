@@ -92,6 +92,13 @@ func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	}
 }
 
+// WithBalanceRegionFilterCounterName sets the filter counter name for the scheduler.
+func WithBalanceRegionFilterCounterName(name string) BalanceRegionCreateOption {
+	return func(s *balanceRegionScheduler) {
+		s.filterCounter.SetScope(name)
+	}
+}
+
 func (s *balanceRegionScheduler) GetName() string {
 	return s.conf.Name
 }
@@ -278,8 +285,8 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		op.FinishedCounters = append(op.FinishedCounters,
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 		)
-		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
-		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
+		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
+		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 		return op
 	}
 
