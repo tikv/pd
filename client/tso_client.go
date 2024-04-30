@@ -140,7 +140,7 @@ func (c *tsoClient) tsoDispatcherCheckLoop() {
 		case <-ticker.C:
 		case <-c.checkTSODispatcherCh:
 		case <-loopCtx.Done():
-			log.Info("exit tso dispatcher loop")
+			log.Info("[tso] exit tso dispatcher check loop")
 			return
 		}
 	}
@@ -151,14 +151,14 @@ func (c *tsoClient) close() {
 	if c == nil {
 		return
 	}
-	log.Info("closing tso client")
+	log.Info("[tso] closing tso client")
 
 	c.cancel()
 	c.wg.Wait()
 
-	log.Info("close tso client")
+	log.Info("[tso] close tso client")
 	c.closeTSODispatcher()
-	log.Info("tso client is closed")
+	log.Info("[tso] tso client is closed")
 }
 
 func (c *tsoClient) scheduleCheckTSODispatcher() {
@@ -225,14 +225,12 @@ func (c *tsoClient) GetTSOAllocatorServingURLByDCLocation(dcLocation string) (st
 	return url.(string), true
 }
 
-// GetTSOAllocatorClientConnByDCLocation returns the tso allocator grpc client connection
-// of the given dcLocation
+// GetTSOAllocatorClientConnByDCLocation returns the TSO allocator gRPC client connection of the given dcLocation.
 func (c *tsoClient) GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
 	url, ok := c.tsoAllocators.Load(dcLocation)
 	if !ok {
-		panic(fmt.Sprintf("the allocator leader in %s should exist", dcLocation))
+		log.Fatal("[tso] the allocator leader should exist", zap.String("dc-location", dcLocation))
 	}
-	// todo: if we support local tso forward, we should get or create client conns.
 	cc, ok := c.svcDiscovery.GetClientConns().Load(url)
 	if !ok {
 		return nil, url.(string)
