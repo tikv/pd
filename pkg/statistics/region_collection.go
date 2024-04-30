@@ -158,14 +158,14 @@ func (r *RegionStatistics) RegionStatsNeedUpdate(region *core.RegionInfo) bool {
 		region.IsOversized(int64(r.conf.GetRegionMaxSize()), int64(r.conf.GetRegionMaxKeys())) {
 		return true
 	}
-	// expected to be zero for below type
-	if r.IsRegionStatsType(regionID, PendingPeer) && len(region.GetPendingPeers()) == 0 {
+
+	if r.IsRegionStatsType(regionID, PendingPeer) != (len(region.GetPendingPeers()) != 0) {
 		return true
 	}
-	if r.IsRegionStatsType(regionID, DownPeer) && len(region.GetDownPeers()) == 0 {
+	if r.IsRegionStatsType(regionID, DownPeer) != (len(region.GetDownPeers()) != 0) {
 		return true
 	}
-	if r.IsRegionStatsType(regionID, LearnerPeer) && len(region.GetLearners()) == 0 {
+	if r.IsRegionStatsType(regionID, LearnerPeer) != (len(region.GetLearners()) != 0) {
 		return true
 	}
 
