@@ -116,6 +116,8 @@ func newTSODispatcher(
 }
 
 func (td *tsoDispatcher) watchTSDeadline() {
+	log.Info("[tso] start tso deadline watcher", zap.String("dc-location", td.dc))
+	defer log.Info("[tso] exit tso deadline watcher", zap.String("dc-location", td.dc))
 	for {
 		select {
 		case d := <-td.tsDeadlineCh:
