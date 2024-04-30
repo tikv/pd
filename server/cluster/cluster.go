@@ -1021,7 +1021,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			func(_ context.Context) {
 				cluster.HandleStatsAsync(c, region)
 			},
-			ratelimit.WithName(ratelimit.HandleStatsAsync),
+			ratelimit.WithTaskName(ratelimit.HandleStatsAsync),
 		)
 	}
 	tracer.OnAsyncHotStatsFinished()
@@ -1044,7 +1044,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
-				ratelimit.WithName(ratelimit.ObserveRegionStatsAsync),
+				ratelimit.WithTaskName(ratelimit.ObserveRegionStatsAsync),
 			)
 		}
 		// region is not updated to the subtree.
@@ -1081,7 +1081,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
-			ratelimit.WithName(ratelimit.UpdateSubTree),
+			ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 		)
 		tracer.OnUpdateSubTreeFinished()
 
@@ -1091,7 +1091,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
 				},
-				ratelimit.WithName(ratelimit.HandleOverlaps),
+				ratelimit.WithTaskName(ratelimit.HandleOverlaps),
 			)
 		}
 		regionUpdateCacheEventCounter.Inc()
@@ -1107,7 +1107,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			// We need to think of a better way to reduce this part of the cost in the future.
 			cluster.Collect(c, region, hasRegionStats)
 		},
-		ratelimit.WithName(ratelimit.CollectRegionStatsAsync),
+		ratelimit.WithTaskName(ratelimit.CollectRegionStatsAsync),
 	)
 
 	tracer.OnCollectRegionStatsFinished()
@@ -1136,7 +1136,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 					}
 					regionUpdateKVEventCounter.Inc()
 				},
-				ratelimit.WithName(ratelimit.SaveRegionToKV),
+				ratelimit.WithTaskName(ratelimit.SaveRegionToKV),
 			)
 		}
 	}

@@ -597,7 +597,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		func(_ context.Context) {
 			cluster.HandleStatsAsync(c, region)
 		},
-		ratelimit.WithName(ratelimit.HandleStatsAsync),
+		ratelimit.WithTaskName(ratelimit.HandleStatsAsync),
 	)
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
@@ -616,7 +616,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
-				ratelimit.WithName(ratelimit.ObserveRegionStatsAsync),
+				ratelimit.WithTaskName(ratelimit.ObserveRegionStatsAsync),
 			)
 		}
 		// region is not updated to the subtree.
@@ -649,7 +649,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
-			ratelimit.WithName(ratelimit.UpdateSubTree),
+			ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 		)
 		tracer.OnUpdateSubTreeFinished()
 		ctx.TaskRunner.RunTask(
@@ -657,7 +657,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			func(_ context.Context) {
 				cluster.HandleOverlaps(c, overlaps)
 			},
-			ratelimit.WithName(ratelimit.HandleOverlaps),
+			ratelimit.WithTaskName(ratelimit.HandleOverlaps),
 		)
 	}
 	tracer.OnSaveCacheFinished()
@@ -667,7 +667,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		func(_ context.Context) {
 			cluster.Collect(c, region, hasRegionStats)
 		},
-		ratelimit.WithName(ratelimit.CollectRegionStatsAsync),
+		ratelimit.WithTaskName(ratelimit.CollectRegionStatsAsync),
 	)
 	tracer.OnCollectRegionStatsFinished()
 	return nil

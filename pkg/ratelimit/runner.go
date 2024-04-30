@@ -92,8 +92,8 @@ type TaskOpts struct {
 // TaskOption configures TaskOp
 type TaskOption func(opts *TaskOpts)
 
-// WithName specify the name.
-func WithName(name string) TaskOption {
+// WithTaskName specify the task name.
+func WithTaskName(name string) TaskOption {
 	return func(opts *TaskOpts) { opts.TaskName = name }
 }
 

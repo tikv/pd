@@ -39,7 +39,7 @@ func TestConcurrentRunner(t *testing.T) {
 					defer wg.Done()
 					time.Sleep(100 * time.Millisecond)
 				},
-				WithName("test1"),
+				WithTaskName("test1"),
 			)
 			require.NoError(t, err)
 		}
@@ -59,7 +59,7 @@ func TestConcurrentRunner(t *testing.T) {
 					defer wg.Done()
 					time.Sleep(100 * time.Millisecond)
 				},
-				WithName("test2"),
+				WithTaskName("test2"),
 			)
 			if err != nil {
 				wg.Done()
