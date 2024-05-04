@@ -349,7 +349,9 @@ func (checker *healthyChecker) patrol(ctx context.Context) []string {
 	// See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
 	var wg sync.WaitGroup
 	count := 0
+	log.Info("patrol checker start")
 	checker.Range(func(key, value interface{}) bool {
+		log.Info("patrol checker", zap.String("key", key.(string)))
 		count++
 		return true
 	})
@@ -397,6 +399,7 @@ func (checker *healthyChecker) update(eps []string) {
 			}
 			continue
 		}
+		log.Info("will addChild", zap.String("ep", ep))
 		checker.addClient(ep, time.Now())
 	}
 }
@@ -407,6 +410,7 @@ func (checker *healthyChecker) addClient(ep string, lastHealth time.Time) {
 		log.Error("failed to create etcd healthy client", zap.Error(err))
 		return
 	}
+	log.Info("addChild", zap.String("ep", ep))
 	checker.Store(ep, &healthyClient{
 		Client:     client,
 		lastHealth: lastHealth,
@@ -422,12 +426,15 @@ func syncUrls(client *clientv3.Client) []string {
 		log.Error("failed to list members", errs.ZapError(err))
 		return []string{}
 	}
+	log.Info("client syncUrls get member list start", zap.Strings("client", client.Endpoints()))
 	var eps []string
 	for _, m := range mresp.Members {
 		if len(m.Name) != 0 && !m.IsLearner {
 			eps = append(eps, m.ClientURLs...)
 		}
+		log.Info("client member list", zap.String("name", m.Name), zap.Strings("ClientURLs", m.ClientURLs))
 	}
+	log.Info("client syncUrls get member list end")
 	return eps
 }
 
