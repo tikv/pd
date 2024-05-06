@@ -754,7 +754,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					func(_ context.Context) {
 						d(msg, fields...)
 					},
-					ratelimit.WithTaskName("Log"),
+					ratelimit.WithTaskName("DebugLog"),
 				)
 			}
 			info = func(msg string, fields ...zap.Field) {
@@ -763,7 +763,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					func(_ context.Context) {
 						i(msg, fields...)
 					},
-					ratelimit.WithTaskName("Log"),
+					ratelimit.WithTaskName("InfoLog"),
 				)
 			}
 		}
