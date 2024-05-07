@@ -218,7 +218,17 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	regions := rc.GetStoreRegions(uint64(id))
+	// get type from query
+	typ := r.URL.Query().Get("type")
+	if len(typ) == 0 {
+		typ = string(core.AllInSubTree)
+	}
+
+	regions, err := rc.GetStoreRegionsByTypeInSubTree(uint64(id), core.SubTreeRegionType(typ))
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	b, err := response.MarshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

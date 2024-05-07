@@ -69,6 +69,8 @@ type regionTree struct {
 	totalWriteKeysRate  float64
 	// count the number of regions that not loaded from storage.
 	notFromStorageRegionsCnt int
+	// count reference of RegionInfo
+	countRef bool
 }
 
 func newRegionTree() *regionTree {
@@ -78,6 +80,17 @@ func newRegionTree() *regionTree {
 		totalWriteBytesRate:      0,
 		totalWriteKeysRate:       0,
 		notFromStorageRegionsCnt: 0,
+	}
+}
+
+func newRegionTreeWithCountRef() *regionTree {
+	return &regionTree{
+		tree:                     btree.NewG[*regionItem](defaultBTreeDegree),
+		totalSize:                0,
+		totalWriteBytesRate:      0,
+		totalWriteKeysRate:       0,
+		notFromStorageRegionsCnt: 0,
+		countRef:                 true,
 	}
 }
 
@@ -140,6 +153,9 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 		t.tree.Delete(old)
 	}
 	t.tree.ReplaceOrInsert(item)
+	if t.countRef {
+		item.RegionInfo.IncRef()
+	}
 	result := make([]*RegionInfo, len(overlaps))
 	for i, overlap := range overlaps {
 		old := overlap.RegionInfo
@@ -154,6 +170,9 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 		t.totalWriteKeysRate -= regionWriteKeysRate
 		if !old.LoadedFromStorage() {
 			t.notFromStorageRegionsCnt--
+		}
+		if t.countRef {
+			old.DecRef()
 		}
 	}
 
@@ -180,6 +199,10 @@ func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	if !origin.LoadedFromStorage() && region.LoadedFromStorage() {
 		t.notFromStorageRegionsCnt--
 	}
+	if t.countRef {
+		origin.DecRef()
+		region.IncRef()
+	}
 }
 
 // remove removes a region if the region is in the tree.
@@ -199,6 +222,9 @@ func (t *regionTree) remove(region *RegionInfo) {
 	regionWriteBytesRate, regionWriteKeysRate := result.GetWriteRate()
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
+	if t.countRef {
+		result.RegionInfo.DecRef()
+	}
 	if !region.LoadedFromStorage() {
 		t.notFromStorageRegionsCnt--
 	}

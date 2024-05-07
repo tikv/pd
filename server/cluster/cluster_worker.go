@@ -39,16 +39,19 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
-	var runner ratelimit.Runner
-	runner = syncRunner
+
+	var taskRunner, logRunner ratelimit.Runner
+	taskRunner, logRunner = syncRunner, syncRunner
 	if c.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
-		runner = c.taskRunner
+		taskRunner = c.heartbeatRunnner
+		logRunner = c.logRunner
 	}
+
 	ctx := &core.MetaProcessContext{
 		Context:    c.ctx,
-		Limiter:    c.hbConcurrencyLimiter,
 		Tracer:     tracer,
-		TaskRunner: runner,
+		TaskRunner: taskRunner,
+		LogRunner:  logRunner,
 	}
 	tracer.Begin()
 	if err := c.processRegionHeartbeat(ctx, region); err != nil {

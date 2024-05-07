@@ -107,7 +107,8 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	hbConcurrentRunner = "heartbeat-async-task-runner"
+	heartbeatTaskRunner = "heartbeat-async-task-runner"
+	logTaskRunner       = "log-async-task-runner"
 )
 
 // Server is the interface for cluster.
@@ -172,8 +173,8 @@ type RaftCluster struct {
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
 
-	taskRunner           ratelimit.Runner
-	hbConcurrencyLimiter *ratelimit.ConcurrencyLimiter
+	heartbeatRunnner ratelimit.Runner
+	logRunner        ratelimit.Runner
 }
 
 // Status saves some state information.
@@ -190,15 +191,15 @@ type Status struct {
 func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
 	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:            ctx,
-		clusterID:            clusterID,
-		regionSyncer:         regionSyncer,
-		httpClient:           httpClient,
-		etcdClient:           etcdClient,
-		core:                 basicCluster,
-		storage:              storage,
-		taskRunner:           ratelimit.NewConcurrentRunner(hbConcurrentRunner, time.Minute),
-		hbConcurrencyLimiter: ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU() * 2)),
+		serverCtx:        ctx,
+		clusterID:        clusterID,
+		regionSyncer:     regionSyncer,
+		httpClient:       httpClient,
+		etcdClient:       etcdClient,
+		core:             basicCluster,
+		storage:          storage,
+		heartbeatRunnner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		logRunner:        ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
 }
 
@@ -356,7 +357,8 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.startGCTuner()
 
 	c.running = true
-	c.taskRunner.Start()
+	c.heartbeatRunnner.Start()
+	c.logRunner.Start()
 	return nil
 }
 
@@ -750,7 +752,8 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	c.taskRunner.Stop()
+	c.heartbeatRunnner.Stop()
+	c.logRunner.Stop()
 	c.Unlock()
 
 	c.wg.Wait()
@@ -1015,13 +1018,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		ctx.TaskRunner.RunTask(
 			ctx.Context,
-			ratelimit.TaskOpts{
-				TaskName: "HandleStatsAsync",
-				Limit:    ctx.Limiter,
-			},
 			func(_ context.Context) {
 				cluster.HandleStatsAsync(c, region)
 			},
+			ratelimit.WithTaskName(ratelimit.HandleStatsAsync),
 		)
 	}
 	tracer.OnAsyncHotStatsFinished()
@@ -1039,15 +1039,22 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
-				ratelimit.TaskOpts{
-					TaskName: "ObserveRegionStatsAsync",
-					Limit:    ctx.Limiter,
-				},
 				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
+				ratelimit.WithTaskName(ratelimit.ObserveRegionStatsAsync),
+			)
+		}
+		// region is not updated to the subtree.
+		if origin.GetRef() < 2 {
+			ctx.TaskRunner.RunTask(
+				ctx,
+				func(_ context.Context) {
+					c.CheckAndPutSubTree(region)
+				},
+				ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 			)
 		}
 		return nil
@@ -1065,20 +1072,26 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.core.AtomicCheckAndPutRegion(ctx, region); err != nil {
+		if overlaps, err = c.core.CheckAndPutRootTree(ctx, region); err != nil {
 			tracer.OnSaveCacheFinished()
 			return err
 		}
+		ctx.TaskRunner.RunTask(
+			ctx,
+			func(_ context.Context) {
+				c.CheckAndPutSubTree(region)
+			},
+			ratelimit.WithTaskName(ratelimit.UpdateSubTree),
+		)
+		tracer.OnUpdateSubTreeFinished()
+
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
-				ratelimit.TaskOpts{
-					TaskName: "HandleOverlaps",
-					Limit:    ctx.Limiter,
-				},
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
 				},
+				ratelimit.WithTaskName(ratelimit.HandleOverlaps),
 			)
 		}
 		regionUpdateCacheEventCounter.Inc()
@@ -1088,16 +1101,13 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	// handle region stats
 	ctx.TaskRunner.RunTask(
 		ctx.Context,
-		ratelimit.TaskOpts{
-			TaskName: "CollectRegionStatsAsync",
-			Limit:    ctx.Limiter,
-		},
 		func(_ context.Context) {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
 			// region stats needs to be collected in API mode.
 			// We need to think of a better way to reduce this part of the cost in the future.
 			cluster.Collect(c, region, hasRegionStats)
 		},
+		ratelimit.WithTaskName(ratelimit.CollectRegionStatsAsync),
 	)
 
 	tracer.OnCollectRegionStatsFinished()
@@ -1105,10 +1115,6 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if saveKV {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
-				ratelimit.TaskOpts{
-					TaskName: "SaveRegionToKV",
-					Limit:    ctx.Limiter,
-				},
 				func(_ context.Context) {
 					// If there are concurrent heartbeats from the same region, the last write will win even if
 					// writes to storage in the critical area. So don't use mutex to protect it.
@@ -1130,6 +1136,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 					}
 					regionUpdateKVEventCounter.Inc()
 				},
+				ratelimit.WithTaskName(ratelimit.SaveRegionToKV),
 			)
 		}
 	}
@@ -1201,6 +1208,11 @@ func (c *RaftCluster) GetTotalRegionCount() int {
 
 // GetStoreRegions returns all regions' information with a given storeID.
 func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
+	return c.core.GetStoreRegions(storeID)
+}
+
+// GetStoreRegions returns all regions' information with a given storeID.
+func (c *RaftCluster) GetStoreRegionsByType(storeID uint64) []*core.RegionInfo {
 	return c.core.GetStoreRegions(storeID)
 }
 

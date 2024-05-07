@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -246,6 +247,40 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 
 	close(quit)
 	wg.Wait()
+}
+
+func TestGetTSAfterTransferLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	re.NoError(err)
+	endpoints := runServer(re, cluster)
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	defer cluster.Destroy()
+
+	cli := setupCli(ctx, re, endpoints, pd.WithCustomTimeoutOption(10*time.Second))
+	defer cli.Close()
+
+	var leaderSwitched atomic.Bool
+	cli.GetServiceDiscovery().AddServingURLSwitchedCallback(func() {
+		leaderSwitched.Store(true)
+	})
+	err = cluster.GetServer(leader).ResignLeader()
+	re.NoError(err)
+	newLeader := cluster.WaitLeader()
+	re.NotEmpty(newLeader)
+	re.NotEqual(leader, newLeader)
+	leader = cluster.WaitLeader()
+	re.NotEmpty(leader)
+	err = cli.GetServiceDiscovery().CheckMemberChanged()
+	re.NoError(err)
+
+	testutil.Eventually(re, leaderSwitched.Load)
+	// The leader stream must be updated after the leader switch is sensed by the client.
+	_, _, err = cli.GetTS(context.TODO())
+	re.NoError(err)
 }
 
 func TestTSOAllocatorLeader(t *testing.T) {
