@@ -51,7 +51,7 @@ func NewTestSingleConfig() *embed.Config {
 }
 
 func genRandName() string {
-	return "test_etcd_" + strconv.FormatInt(time.Now().UnixNano()%10000, 10)
+	return "test_etcd_" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
 // NewTestEtcdCluster is used to create a etcd cluster for the unit test purpose.

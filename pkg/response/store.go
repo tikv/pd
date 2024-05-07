@@ -64,6 +64,7 @@ type StoreStatus struct {
 	RegionSize         int64              `json:"region_size"`
 	LearnerCount       int                `json:"learner_count,omitempty"`
 	WitnessCount       int                `json:"witness_count,omitempty"`
+	PendingPeerCount   int                `json:"pending_peer_count,omitempty"`
 	SlowScore          uint64             `json:"slow_score,omitempty"`
 	SlowTrend          *SlowTrend         `json:"slow_trend,omitempty"`
 	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
@@ -117,6 +118,7 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 			SlowTrend:          slowTrend,
 			SendingSnapCount:   store.GetSendingSnapCount(),
 			ReceivingSnapCount: store.GetReceivingSnapCount(),
+			PendingPeerCount:   store.GetPendingPeerCount(),
 			IsBusy:             store.IsBusy(),
 		},
 	}
