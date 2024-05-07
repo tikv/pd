@@ -623,10 +623,10 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		if origin.GetRef() < 2 {
 			ctx.TaskRunner.RunTask(
 				ctx,
-				core.ExtraTaskOpts(ctx, core.UpdateSubTree),
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
+				ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 			)
 		}
 		return nil

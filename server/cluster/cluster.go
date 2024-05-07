@@ -1051,10 +1051,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if origin.GetRef() < 2 {
 			ctx.TaskRunner.RunTask(
 				ctx,
-				core.ExtraTaskOpts(ctx, core.UpdateSubTree),
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
+				ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 			)
 		}
 		return nil
