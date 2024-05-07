@@ -178,7 +178,7 @@ func (c *Coordinator) PatrolRegions() {
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if c.isSchedulingHalted() {
+		if c.cluster.IsSchedulingHalted() {
 			continue
 		}
 
@@ -205,10 +205,6 @@ func (c *Coordinator) PatrolRegions() {
 			failpoint.Break()
 		})
 	}
-}
-
-func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
