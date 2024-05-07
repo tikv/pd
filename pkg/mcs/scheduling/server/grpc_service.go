@@ -275,7 +275,7 @@ func (s *Service) AskBatchSplit(ctx context.Context, request *schedulingpb.AskBa
 		}, nil
 	}
 
-	if c.persistConfig.IsSchedulingHalted() {
+	if c.IsSchedulingHalted() {
 		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
 	if !c.persistConfig.IsTikvRegionSplitEnabled() {

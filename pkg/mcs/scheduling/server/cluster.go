@@ -615,3 +615,10 @@ func (c *Cluster) DropCacheAllRegion() {
 func (c *Cluster) DropCacheRegion(id uint64) {
 	c.RemoveRegionIfExist(id)
 }
+
+// IsSchedulingHalted returns whether the scheduling is halted.
+// Currently, the microservice scheduling is halted when:
+//   - The `HaltScheduling` persist option is set to true.
+func (c *Cluster) IsSchedulingHalted() bool {
+	return c.persistConfig.IsSchedulingHalted()
+}
