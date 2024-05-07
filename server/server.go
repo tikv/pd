@@ -1043,6 +1043,7 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
+// This function is exported to be used by the API.
 func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -1061,6 +1062,8 @@ func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 			errs.ZapError(err))
 		return err
 	}
+	// Update the scheduling halt status at the same time.
+	s.persistOptions.SetSchedulingAllowanceStatus(cfg.HaltScheduling, "manually")
 	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
