@@ -196,23 +196,6 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 	}
 }
 
-<<<<<<< HEAD
-func newTestRegion(id uint64) *core.RegionInfo {
-	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
-	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
-}
-
-func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
-	re := require.New(t)
-	statistics.Denoising = false
-	statistics.HistorySampleDuration = 0
-	statisticsInterval = 0
-	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
-	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
-}
-
-=======
->>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
 func TestSplitIfRegionTooHot(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
@@ -401,12 +384,11 @@ func TestSplitBucketsByLoad(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
-=======
 func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	re := require.New(t)
 	statistics.Denoising = false
 	statisticsInterval = 0
+	statistics.HistorySampleDuration = 0
 	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
 	checkHotWriteRegionScheduleByteRateOnly(re, true /* enable placement rules */)
 	checkHotWriteRegionPlacement(re, true)
@@ -422,7 +404,6 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
 	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	tc.AddLabelsStore(1, 2, map[string]string{"zone": "z1", "host": "h1"})
@@ -466,7 +447,6 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	re.NotContains(ops[0].Step(1).String(), "transfer leader")
 }
 
->>>>>>> 33ae3b614 (scheduler: use move-hot-write-leader operator (#7852))
 func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlacementRules bool) {
 	cancel, opt, tc, oc := prepareSchedulersTest()
 	defer cancel()
