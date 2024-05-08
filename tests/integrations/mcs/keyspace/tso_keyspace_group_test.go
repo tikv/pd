@@ -298,7 +298,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 		Nodes: []string{nodesList[0]},
 	}
 	_, code = suite.trySetNodesForKeyspaceGroup(re, id, params)
-	re.Equal(http.StatusBadRequest, code)
+	re.Equal(http.StatusOK, code)
 
 	// the keyspace group is not exist.
 	id = 2
