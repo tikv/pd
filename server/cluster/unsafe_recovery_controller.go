@@ -474,7 +474,15 @@ func (u *unsafeRecoveryController) GetStage() unsafeRecoveryStage {
 	return u.stage
 }
 
+<<<<<<< HEAD:server/cluster/unsafe_recovery_controller.go
 func (u *unsafeRecoveryController) changeStage(stage unsafeRecoveryStage) {
+=======
+func (u *Controller) changeStage(stage stage) {
+	// If the running stage changes, update the scheduling allowance status to add or remove "online-unsafe-recovery" halt.
+	if running := isRunning(stage); running != isRunning(u.stage) {
+		u.cluster.GetSchedulerConfig().SetSchedulingAllowanceStatus(running, "online-unsafe-recovery")
+	}
+>>>>>>> 740f15e65 (*: individually check the scheduling halt for online unsafe recovery (#8147)):pkg/unsaferecovery/unsafe_recovery_controller.go
 	u.stage = stage
 
 	var output StageOutput

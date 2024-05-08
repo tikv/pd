@@ -43,8 +43,13 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
+<<<<<<< HEAD
 	if c.GetUnsafeRecoveryController().IsRunning() {
 		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+=======
+	if c.IsSchedulingHalted() {
+		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
+>>>>>>> 740f15e65 (*: individually check the scheduling halt for online unsafe recovery (#8147))
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
@@ -86,6 +91,7 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	return split, nil
 }
 
+<<<<<<< HEAD
 // ValidRequestRegion is used to decide if the region is valid.
 func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 	startKey := reqRegion.GetStartKey()
@@ -107,6 +113,12 @@ func (c *RaftCluster) ValidRequestRegion(reqRegion *metapb.Region) error {
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
 	if c.GetUnsafeRecoveryController().IsRunning() {
 		return nil, errs.ErrUnsafeRecoveryIsRunning.FastGenByArgs()
+=======
+// HandleAskBatchSplit handles the batch split request.
+func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
+	if c.IsSchedulingHalted() {
+		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
+>>>>>>> 740f15e65 (*: individually check the scheduling halt for online unsafe recovery (#8147))
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
 		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()

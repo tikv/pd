@@ -919,3 +919,88 @@ func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clien
 	}
 	return err
 }
+<<<<<<< HEAD
+=======
+
+var haltSchedulingStatus = schedulingAllowanceStatusGauge.WithLabelValues("halt-scheduling")
+
+// SetSchedulingAllowanceStatus sets the scheduling allowance status to help distinguish the source of the halt.
+func (*PersistOptions) SetSchedulingAllowanceStatus(halt bool, source string) {
+	if halt {
+		haltSchedulingStatus.Set(1)
+		schedulingAllowanceStatusGauge.WithLabelValues(source).Set(1)
+	} else {
+		haltSchedulingStatus.Set(0)
+		schedulingAllowanceStatusGauge.WithLabelValues(source).Set(0)
+	}
+}
+
+// SetHaltScheduling set HaltScheduling.
+func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
+	v := o.GetScheduleConfig().Clone()
+	v.HaltScheduling = halt
+	o.SetScheduleConfig(v)
+	o.SetSchedulingAllowanceStatus(halt, source)
+}
+
+// IsSchedulingHalted returns if PD scheduling is halted.
+func (o *PersistOptions) IsSchedulingHalted() bool {
+	if o == nil {
+		return false
+	}
+	return o.GetScheduleConfig().HaltScheduling
+}
+
+// GetRegionMaxSize returns the max region size in MB
+func (o *PersistOptions) GetRegionMaxSize() uint64 {
+	return o.GetStoreConfig().GetRegionMaxSize()
+}
+
+// GetRegionMaxKeys returns the max region keys
+func (o *PersistOptions) GetRegionMaxKeys() uint64 {
+	return o.GetStoreConfig().GetRegionMaxKeys()
+}
+
+// GetRegionSplitSize returns the region split size in MB
+func (o *PersistOptions) GetRegionSplitSize() uint64 {
+	return o.GetStoreConfig().GetRegionSplitSize()
+}
+
+// GetRegionSplitKeys returns the region split keys
+func (o *PersistOptions) GetRegionSplitKeys() uint64 {
+	return o.GetStoreConfig().GetRegionSplitKeys()
+}
+
+// CheckRegionSize return error if the smallest region's size is less than mergeSize
+func (o *PersistOptions) CheckRegionSize(size, mergeSize uint64) error {
+	return o.GetStoreConfig().CheckRegionSize(size, mergeSize)
+}
+
+// CheckRegionKeys return error if the smallest region's keys is less than mergeKeys
+func (o *PersistOptions) CheckRegionKeys(keys, mergeKeys uint64) error {
+	return o.GetStoreConfig().CheckRegionKeys(keys, mergeKeys)
+}
+
+// IsEnableRegionBucket return true if the region bucket is enabled.
+func (o *PersistOptions) IsEnableRegionBucket() bool {
+	return o.GetStoreConfig().IsEnableRegionBucket()
+}
+
+// IsRaftKV2 returns true if the raft kv is v2.
+func (o *PersistOptions) IsRaftKV2() bool {
+	return o.GetStoreConfig().IsRaftKV2()
+}
+
+// SetRegionBucketEnabled sets if the region bucket is enabled.
+// only used for test.
+func (o *PersistOptions) SetRegionBucketEnabled(enabled bool) {
+	cfg := o.GetStoreConfig().Clone()
+	cfg.SetRegionBucketEnabled(enabled)
+	o.SetStoreConfig(cfg)
+}
+
+// GetRegionBucketSize returns the region bucket size.
+func (o *PersistOptions) GetRegionBucketSize() uint64 {
+	return o.GetStoreConfig().GetRegionBucketSize()
+}
+>>>>>>> 740f15e65 (*: individually check the scheduling halt for online unsafe recovery (#8147))

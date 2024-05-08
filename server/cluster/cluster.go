@@ -809,6 +809,7 @@ func (c *RaftCluster) SetPDServerConfig(cfg *config.PDServerConfig) {
 	c.opt.SetPDServerConfig(cfg)
 }
 
+<<<<<<< HEAD
 // AddSuspectRegions adds regions to suspect list.
 func (c *RaftCluster) AddSuspectRegions(regionIDs ...uint64) {
 	c.coordinator.checkers.AddSuspectRegions(regionIDs...)
@@ -827,6 +828,14 @@ func (c *RaftCluster) GetHotStat() *statistics.HotStat {
 // RemoveSuspectRegion removes region from suspect list.
 func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 	c.coordinator.checkers.RemoveSuspectRegion(id)
+=======
+// IsSchedulingHalted returns whether the scheduling is halted.
+// Currently, the PD scheduling is halted when:
+//   - The `HaltScheduling` persist option is set to true.
+//   - Online unsafe recovery is running.
+func (c *RaftCluster) IsSchedulingHalted() bool {
+	return c.opt.IsSchedulingHalted() || c.unsafeRecoveryController.IsRunning()
+>>>>>>> 740f15e65 (*: individually check the scheduling halt for online unsafe recovery (#8147))
 }
 
 // GetUnsafeRecoveryController returns the unsafe recovery controller.
