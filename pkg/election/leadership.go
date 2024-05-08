@@ -93,7 +93,7 @@ func (ls *Leadership) getLease() *lease {
 	return l.(*lease)
 }
 
-func (ls *Leadership) setLease(lease *lease) {
+func (ls *Leadership) SetLease(lease *lease) {
 	ls.lease.Store(lease)
 }
 
@@ -156,7 +156,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 		client:  ls.client,
 		lease:   clientv3.NewLease(ls.client),
 	}
-	ls.setLease(newLease)
+	ls.SetLease(newLease)
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
 		var member pdpb.Member

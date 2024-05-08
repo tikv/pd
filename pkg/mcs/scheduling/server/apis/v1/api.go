@@ -29,6 +29,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
@@ -39,11 +40,14 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/unrolled/render"
+	"go.etcd.io/etcd/clientv3"
 )
 
 // APIPathPrefix is the prefix of the API path.
@@ -112,6 +116,7 @@ func NewService(srv *scheserver.Service) *Service {
 		rd:               createIndentRender(),
 	}
 	s.RegisterAdminRouter()
+	s.RegisterMemberRouter()
 	s.RegisterConfigRouter()
 	s.RegisterOperatorsRouter()
 	s.RegisterSchedulersRouter()
@@ -130,7 +135,13 @@ func (s *Service) RegisterAdminRouter() {
 	router.DELETE("cache/regions/:id", deleteRegionCacheByID)
 }
 
-// RegisterSchedulersRouter registers the router of the schedulers handler.
+// RegisterMemberRouter registers the router of the member handler.
+func (s *Service) RegisterMemberRouter() {
+	router := s.root.Group("member")
+	router.POST("/primary/transfer", transferPrimary)
+}
+
+// RegisterSchedulersRouter registers the router of the schedulers' handler.
 func (s *Service) RegisterSchedulersRouter() {
 	router := s.root.Group("schedulers")
 	router.GET("", getSchedulers)
@@ -257,6 +268,42 @@ func getConfig(c *gin.Context) {
 	cfg := svr.GetConfig()
 	cfg.Schedule.MaxMergeRegionKeys = cfg.Schedule.GetMaxMergeRegionKeys()
 	c.IndentedJSON(http.StatusOK, cfg)
+}
+
+func transferPrimary(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	if svr.IsServing() {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "now is primary")
+		return
+	}
+
+	newLease := election.NewLease(svr.GetClient(), "primary election")
+	if err := newLease.Grant(mcsutils.DefaultLeaderLease); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "newLease grant error")
+	}
+
+	// delete previous primary firstly
+	primaryKey := endpoint.SchedulingPrimaryPath(svr.GetClusterID())
+	deleteResp, err := kv.NewSlowLogTxn(svr.GetClient()).
+		Then(
+			clientv3.OpDelete(primaryKey),
+		).Commit()
+	if err != nil || !deleteResp.Succeeded {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "delete resp error")
+	}
+
+	memberValue := svr.GetParticipant()
+	memberValue.GetLeadership().SetLease(newLease)
+	putResp, err := kv.NewSlowLogTxn(svr.GetClient()).
+		Then(
+			clientv3.OpPut(primaryKey, memberValue.MemberValue(), clientv3.WithLease(newLease.ID.Load().(clientv3.LeaseID))),
+		).
+		Commit()
+	if err != nil || !putResp.Succeeded {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "put resp error")
+	}
+
+	c.IndentedJSON(http.StatusOK, "transfer submitted!")
 }
 
 // @Tags     admin

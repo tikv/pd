@@ -568,21 +568,40 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	log.Info("start to campaign the primary",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
-	if err := gta.am.member.CampaignLeader(gta.ctx, gta.am.leaderLease); err != nil {
-		if errors.Is(err, errs.ErrEtcdTxnConflict) {
-			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()))
-		} else if errors.Is(err, errs.ErrCheckCampaign) {
-			log.Info("campaign tso primary meets error due to pre-check campaign failed, the tso keyspace group may be in split",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()))
-		} else {
-			log.Error("campaign tso primary meets error due to etcd error",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()), errs.ZapError(err))
-		}
+
+	leader, _, err := gta.member.GetPersistentLeader()
+	if err != nil {
+		log.Error("getting TSO leader meets error", errs.ZapError(err))
+		time.Sleep(200 * time.Millisecond)
 		return
+	}
+	if leader != nil && !gta.member.IsSameLeader(leader) {
+		leader, ok := leader.(member.ElectionLeader)
+		if !ok {
+			log.Error("failed to get the leader", zap.Any("leader", leader))
+			return
+		}
+		log.Info("the TSO primary/leader is already elected", zap.Stringer("tso-primary", leader))
+		return
+	}
+
+	if leader == nil {
+		if err := gta.am.member.CampaignLeader(gta.ctx, gta.am.leaderLease); err != nil {
+			if errors.Is(err, errs.ErrEtcdTxnConflict) {
+				log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
+					logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
+					zap.String("campaign-tso-primary-name", gta.member.Name()))
+			} else if errors.Is(err, errs.ErrCheckCampaign) {
+				log.Info("campaign tso primary meets error due to pre-check campaign failed, the tso keyspace group may be in split",
+					logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
+					zap.String("campaign-tso-primary-name", gta.member.Name()))
+			} else {
+				log.Error("campaign tso primary meets error due to etcd error",
+					logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
+					zap.String("campaign-tso-primary-name", gta.member.Name()), errs.ZapError(err))
+			}
+			return
+		}
 	}
 
 	// Start keepalive the leadership and enable TSO service.
@@ -596,7 +615,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		gta.member.ResetLeader()
 	})
 
-	// maintain the the leadership, after this, TSO can be service.
+	// maintain the leadership, after this, TSO can be service.
 	gta.member.KeepLeader(ctx)
 	log.Info("campaign tso primary ok",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
@@ -634,6 +653,19 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	log.Info("tso primary is ready to serve",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("tso-primary-name", gta.member.Name()))
+
+	go func() {
+		log.Info("[primary] start to watch the primary", zap.Uint64("tso-primary", gta.member.GetLeaderID()))
+		_, revision, err := gta.member.GetPersistentLeader()
+		if err != nil {
+			log.Error("[primary] getting the leader meets error", errs.ZapError(err))
+			return
+		}
+		// Watch will keep looping and never return unless the primary/leader has changed.
+		gta.member.GetLeadership().Watch(gta.ctx, revision)
+		gta.member.UnsetLeader()
+		log.Info("[primary] the TSO primary has changed, try to re-campaign a primary")
+	}()
 
 	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
 	defer leaderTicker.Stop()

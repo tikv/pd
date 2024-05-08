@@ -48,6 +48,14 @@ type lease struct {
 	expireTime   atomic.Value
 }
 
+func NewLease(client *clientv3.Client, purpose string) *lease {
+	return &lease{
+		Purpose: purpose,
+		client:  client,
+		lease:   clientv3.NewLease(client),
+	}
+}
+
 // Grant uses `lease.Grant` to initialize the lease and expireTime.
 func (l *lease) Grant(leaseTimeout int64) error {
 	if l == nil {

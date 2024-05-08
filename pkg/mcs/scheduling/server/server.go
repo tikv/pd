@@ -128,6 +128,14 @@ func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
 }
 
+func (s *Server) GetClusterID() uint64 {
+	return s.clusterID
+}
+
+func (s *Server) GetParticipant() *member.Participant {
+	return s.participant
+}
+
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
 	if !logutil.IsLevelLegal(level) {
@@ -249,16 +257,33 @@ func (s *Server) primaryElectionLoop() {
 
 func (s *Server) campaignLeader() {
 	log.Info("start to campaign the primary/leader", zap.String("campaign-scheduling-primary-name", s.participant.Name()))
-	if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
-		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info("campaign scheduling primary meets error due to txn conflict, another server may campaign successfully",
-				zap.String("campaign-scheduling-primary-name", s.participant.Name()))
-		} else {
-			log.Error("campaign scheduling primary meets error due to etcd error",
-				zap.String("campaign-scheduling-primary-name", s.participant.Name()),
-				errs.ZapError(err))
-		}
+	leader, _, err := s.participant.GetPersistentLeader()
+	if err != nil {
+		log.Error("getting the leader meets error", errs.ZapError(err))
 		return
+	}
+	if leader != nil && !s.participant.IsSameLeader(leader) {
+		leader, ok := leader.(*schedulingpb.Participant)
+		if !ok {
+			log.Error("failed to get the leader", zap.Any("leader", leader))
+			return
+		}
+		log.Info("the scheduling primary/leader is already elected", zap.Stringer("scheduling-primary", leader))
+		return
+	}
+
+	if leader == nil {
+		if err := s.participant.CampaignLeader(s.Context(), s.cfg.LeaderLease); err != nil {
+			if err.Error() == errs.ErrEtcdTxnConflict.Error() {
+				log.Info("campaign scheduling primary meets error due to txn conflict, another server may campaign successfully",
+					zap.String("campaign-scheduling-primary-name", s.participant.Name()))
+			} else {
+				log.Error("campaign scheduling primary meets error due to etcd error",
+					zap.String("campaign-scheduling-primary-name", s.participant.Name()),
+					errs.ZapError(err))
+			}
+			return
+		}
 	}
 
 	// Start keepalive the leadership and enable Scheduling service.
@@ -289,6 +314,19 @@ func (s *Server) campaignLeader() {
 	s.participant.EnableLeader()
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
+
+	go func() {
+		log.Info("[primary] start to watch the primary", zap.Stringer("scheduling-primary", s.participant.GetLeader()))
+		_, revision, err := s.participant.GetPersistentLeader()
+		if err != nil {
+			log.Error("[primary] getting the leader meets error", errs.ZapError(err))
+			return
+		}
+		// Watch will keep looping and never return unless the primary/leader has changed.
+		s.participant.GetLeadership().Watch(s.serverLoopCtx, revision)
+		s.participant.UnsetLeader()
+		log.Info("[primary] the scheduling primary has changed, try to re-campaign a primary")
+	}()
 
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()

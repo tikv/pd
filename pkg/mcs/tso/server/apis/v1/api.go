@@ -25,14 +25,17 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/unrolled/render"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 )
 
@@ -94,6 +97,7 @@ func NewService(srv *tsoserver.Service) *Service {
 		rd:               createIndentRender(),
 	}
 	s.RegisterAdminRouter()
+	s.RegisterMemberRouter()
 	s.RegisterKeyspaceGroupRouter()
 	s.RegisterHealthRouter()
 	s.RegisterConfigRouter()
@@ -105,6 +109,12 @@ func (s *Service) RegisterAdminRouter() {
 	router := s.root.Group("admin")
 	router.POST("/reset-ts", ResetTS)
 	router.PUT("/log", changeLogLevel)
+}
+
+// RegisterMemberRouter registers the router of the member handler.
+func (s *Service) RegisterMemberRouter() {
+	router := s.root.Group("member")
+	router.POST("/primary/transfer", transferPrimary)
 }
 
 // RegisterKeyspaceGroupRouter registers the router of the TSO keyspace group handler.
@@ -139,6 +149,46 @@ func changeLogLevel(c *gin.Context) {
 	}
 	log.SetLevel(logutil.StringToZapLogLevel(level))
 	c.String(http.StatusOK, "The log level is updated.")
+}
+
+func transferPrimary(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	if svr.IsServing() {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "now is primary")
+		return
+	}
+
+	newLease := election.NewLease(svr.GetClient(), "transfer-primary")
+	if err := newLease.Grant(utils.DefaultLeaderLease); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "newLease grant error")
+	}
+
+	// delete previous primary firstly
+	tsoRootPath := endpoint.TSOSvcRootPath(svr.GetClusterID())
+	primaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, utils.DefaultKeyspaceGroupID)
+	deleteResp, err := kv.NewSlowLogTxn(svr.GetClient()).
+		Then(
+			clientv3.OpDelete(primaryKey),
+		).Commit()
+	if err != nil || !deleteResp.Succeeded {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "delete resp error")
+	}
+
+	memberValue, err := svr.GetMember(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+	memberValue.GetLeadership().SetLease(newLease)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "get tso member")
+	}
+	putResp, err := kv.NewSlowLogTxn(svr.GetClient()).
+		Then(
+			clientv3.OpPut(primaryKey, memberValue.MemberValue(), clientv3.WithLease(newLease.ID.Load().(clientv3.LeaseID))),
+		).
+		Commit()
+	if err != nil || !putResp.Succeeded {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "put resp error")
+	}
+
+	c.IndentedJSON(http.StatusOK, "transfer submitted!")
 }
 
 // ResetTSParams is the input json body params of ResetTS

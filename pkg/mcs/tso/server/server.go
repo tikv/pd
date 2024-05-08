@@ -121,6 +121,10 @@ func (s *Server) ServerLoopWgAdd(n int) {
 	s.serverLoopWg.Add(n)
 }
 
+func (s *Server) GetClusterID() uint64 {
+	return s.clusterID
+}
+
 // SetUpRestHandler sets up the REST handler.
 func (s *Server) SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup) {
 	return SetUpRestHandler(s.service)
