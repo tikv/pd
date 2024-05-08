@@ -1708,32 +1708,6 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 	return
 }
 
-func (bs *balanceSolver) createWriteOperator(region *core.RegionInfo, srcStoreID, dstStoreID uint64) (op *operator.Operator, typ string, err error) {
-	if region.GetStorePeer(dstStoreID) != nil {
-		typ = "transfer-leader"
-		op, err = operator.CreateTransferLeaderOperator(
-			"transfer-hot-write-leader",
-			bs,
-			region,
-			srcStoreID,
-			dstStoreID,
-			[]uint64{},
-			operator.OpHotRegion)
-	} else {
-		srcPeer := region.GetStorePeer(srcStoreID) // checked in `filterHotPeers`
-		dstPeer := &metapb.Peer{StoreId: dstStoreID, Role: srcPeer.Role}
-		typ = "move-peer"
-		op, err = operator.CreateMovePeerOperator(
-			"move-hot-write-peer",
-			bs,
-			region,
-			operator.OpHotRegion,
-			srcStoreID,
-			dstPeer)
-	}
-	return
-}
-
 func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, sourceLabel, targetLabel, typ, dim string) {
 	op.SetPriorityLevel(constant.High)
 	op.FinishedCounters = append(op.FinishedCounters,
