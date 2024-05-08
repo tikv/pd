@@ -152,6 +152,11 @@ func changeLogLevel(c *gin.Context) {
 }
 
 func transferPrimary(c *gin.Context) {
+	if len(c.Request.Header.Get(multiservicesapi.ServiceAllowDirectHandle)) == 0 {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, "please add `service-allow-direct-handle` in header")
+		return
+	}
+
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	if svr.IsServing() {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, "now is primary")
