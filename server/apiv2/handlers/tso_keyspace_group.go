@@ -453,11 +453,6 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "keyspace group does not exist")
 		return
 	}
-	// check if nodes is less than default replica count
-	if len(setParams.Nodes) < utils.DefaultKeyspaceGroupReplicaCount {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid num of nodes")
-		return
-	}
 	// check if node exists
 	for _, node := range setParams.Nodes {
 		if !manager.IsExistNode(node) {
