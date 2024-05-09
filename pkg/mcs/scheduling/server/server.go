@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -306,7 +307,7 @@ func (s *Server) campaignLeader() {
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
 	exitPrimary := make(chan struct{})
-	go s.primaryWatch(exitPrimary)
+	go s.primaryWatch(ctx, exitPrimary)
 
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -329,7 +330,7 @@ func (s *Server) campaignLeader() {
 	}
 }
 
-func (s *Server) primaryWatch(exitPrimary chan struct{}) {
+func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	_, revision, err := s.participant.GetPersistentLeader()
 	if err != nil {
 		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
@@ -341,10 +342,30 @@ func (s *Server) primaryWatch(exitPrimary chan struct{}) {
 	s.participant.GetLeadership().Watch(s.serverLoopCtx, revision+1)
 	s.participant.GetLeadership().SetLeaderWatch(false)
 
+	// only API update primary will set the expected leader
+	// check leader key whether deleted
+	leaderRaw, err := etcdutil.GetValue(s.participant.Client(), s.participant.GetLeaderPath())
+	if err != nil {
+		log.Error("[primary] get primary key error", zap.Error(err))
+		return
+	}
+	if leaderRaw == nil {
+		log.Info("[primary] leader key is deleted, the primary will step down")
+		return
+	}
+
 	utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
 
 	s.participant.UnsetLeader()
-	exitPrimary <- struct{}{}
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("[primary] exit the primary watch loop")
+			return
+		case exitPrimary <- struct{}{}:
+			return
+		}
+	}
 }
 
 // Close closes the server.

@@ -16,7 +16,6 @@ package utils
 
 import (
 	"context"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"net"
 	"net/http"
 	"os"
@@ -33,6 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -91,7 +91,7 @@ func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))).
 		Commit()
-	if err != nil && !resp.Succeeded {
+	if err != nil || !resp.Succeeded {
 		log.Error("change primary error", errs.ZapError(err))
 		return
 	}
@@ -99,13 +99,11 @@ func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 
 // SetExpectedPrimary sets the expected primary key when the current primary has exited.
 func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
-	// write a flag to indicate the current primary has exited
 	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
 	if err != nil {
 		log.Error("[primary] get primary key error", zap.Error(err))
 		return
 	}
-
 	// write a flag to indicate the current primary has exited
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(
@@ -113,7 +111,7 @@ func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
 			// indicate the current primary has exited
 			clientv3.OpDelete(leaderPath)).
 		Commit()
-	if err != nil && !resp.Succeeded {
+	if err != nil || !resp.Succeeded {
 		log.Error("change primary error", errs.ZapError(err))
 		return
 	}

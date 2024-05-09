@@ -64,7 +64,10 @@ type Leadership struct {
 	leaderKey   string
 	leaderValue string
 
-	LeaderWatch bool
+	leaderWatch struct {
+		syncutil.RWMutex
+		val bool
+	}
 
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
@@ -72,10 +75,6 @@ type Leadership struct {
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
-}
-
-func (ls *Leadership) SetLeaderWatch(val bool) {
-	ls.LeaderWatch = val
 }
 
 func (ls *Leadership) GetLeaderValue() string {
@@ -121,6 +120,20 @@ func (ls *Leadership) GetLeaderKey() string {
 		return ""
 	}
 	return ls.leaderKey
+}
+
+// SetLeaderWatch sets the leader watch flag.
+func (ls *Leadership) SetLeaderWatch(val bool) {
+	ls.leaderWatch.Lock()
+	ls.leaderWatch.val = val
+	ls.leaderWatch.Unlock()
+}
+
+// GetLeaderWatch gets the leader watch flag.
+func (ls *Leadership) GetLeaderWatch() bool {
+	ls.leaderWatch.RLock()
+	defer ls.leaderWatch.RUnlock()
+	return ls.leaderWatch.val
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
@@ -386,8 +399,8 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 					return
 				}
 				// only API update the leader key to transfer the leader will meet
-				if ev.Type == mvccpb.PUT && ls.LeaderWatch {
-					log.Info("[LeaderWatch] current leadership is updated", zap.Int64("watchRevision", revision),
+				if ev.Type == mvccpb.PUT && ls.GetLeaderWatch() {
+					log.Info("[LeaderWatch] current leadership is updated",
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
@@ -409,5 +422,5 @@ func (ls *Leadership) Reset() {
 	}
 	ls.keepAliveCancelFuncLock.Unlock()
 	ls.getLease().Close()
-	ls.LeaderWatch = false
+	ls.SetLeaderWatch(false)
 }

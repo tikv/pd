@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"runtime/trace"
 	"sync"
 	"sync/atomic"
@@ -647,7 +648,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		zap.String("tso-primary-name", gta.member.Name()))
 
 	exitPrimary := make(chan struct{})
-	go gta.primaryWatch(exitPrimary)
+	go gta.primaryWatch(ctx, exitPrimary)
 
 	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -672,7 +673,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	}
 }
 
-func (gta *GlobalTSOAllocator) primaryWatch(exitPrimary chan struct{}) {
+func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	_, revision, err := gta.member.GetPersistentLeader()
 	if err != nil {
 		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
@@ -686,10 +687,30 @@ func (gta *GlobalTSOAllocator) primaryWatch(exitPrimary chan struct{}) {
 	gta.member.GetLeadership().Watch(gta.ctx, revision+1)
 	gta.member.GetLeadership().SetLeaderWatch(false)
 
+	// only API update primary will set the expected leader
+	// check leader key whether deleted
+	leaderRaw, err := etcdutil.GetValue(gta.member.Client(), gta.member.GetLeaderPath())
+	if err != nil {
+		log.Error("[primary] get primary key error", zap.Error(err))
+		return
+	}
+	if leaderRaw == nil {
+		log.Info("[primary] leader key is deleted, the primary will step down")
+		return
+	}
+
 	mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
 
 	gta.member.UnsetLeader()
-	exitPrimary <- struct{}{}
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("[primary] exit the primary watch loop")
+			return
+		case exitPrimary <- struct{}{}:
+			return
+		}
+	}
 }
 
 func (gta *GlobalTSOAllocator) getMetrics() *tsoMetrics {
