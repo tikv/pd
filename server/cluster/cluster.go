@@ -1024,19 +1024,13 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		ctx.TaskRunner.RunTask(
-			ctx.Context,
-			ratelimit.HandleStatsAsync,
-			func(_ context.Context) {
-				cluster.HandleStatsAsync(c, region)
-			},
-		)
+		cluster.HandleStatsAsync(c, region)
 	}
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	saveKV, saveCache, needSync := regionGuide(ctx, region, origin)
+	saveKV, saveCache, needSync, metaUpdated := regionGuide(ctx, region, origin)
 	tracer.OnRegionGuideFinished()
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
@@ -1053,6 +1047,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
+				ratelimit.WithMetaUpdated(metaUpdated),
 			)
 		}
 		// region is not updated to the subtree.
@@ -1063,6 +1058,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
+				ratelimit.WithMetaUpdated(true),
 			)
 		}
 		return nil
@@ -1090,6 +1086,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
+			ratelimit.WithMetaUpdated(metaUpdated),
 		)
 		tracer.OnUpdateSubTreeFinished()
 
@@ -1100,6 +1097,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
 				},
+				ratelimit.WithMetaUpdated(metaUpdated),
 			)
 		}
 		regionUpdateCacheEventCounter.Inc()
@@ -1116,6 +1114,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			// We need to think of a better way to reduce this part of the cost in the future.
 			cluster.Collect(c, region, hasRegionStats)
 		},
+		ratelimit.WithMetaUpdated(metaUpdated),
 	)
 
 	tracer.OnCollectRegionStatsFinished()
@@ -1145,6 +1144,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 					}
 					regionUpdateKVEventCounter.Inc()
 				},
+				ratelimit.WithMetaUpdated(metaUpdated),
 			)
 		}
 	}

@@ -603,7 +603,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	_, saveCache, _ := core.GenerateRegionGuideFunc(true)(ctx, region, origin)
+	_, saveCache, _, metaUpdated := core.GenerateRegionGuideFunc(true)(ctx, region, origin)
 
 	if !saveCache {
 		// Due to some config changes need to update the region stats as well,

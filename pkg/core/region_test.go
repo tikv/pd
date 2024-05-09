@@ -363,7 +363,7 @@ func TestNeedSync(t *testing.T) {
 	for _, testCase := range testCases {
 		regionA := region.Clone(testCase.optionsA...)
 		regionB := region.Clone(testCase.optionsB...)
-		_, _, needSync := RegionGuide(ContextTODO(), regionA, regionB)
+		_, _, needSync, _ := RegionGuide(ContextTODO(), regionA, regionB)
 		re.Equal(testCase.needSync, needSync)
 	}
 }
@@ -980,7 +980,7 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 		regionsOld.AtomicCheckAndPutRegion(ctx, regionPendingItemA)
 		re.Equal(int32(2), regionPendingItemA.GetRef())
 		// check new item
-		saveKV, saveCache, needSync := regionGuide(ctx, regionItemA, regionPendingItemA)
+		saveKV, saveCache, needSync, _ := regionGuide(ctx, regionItemA, regionPendingItemA)
 		re.True(needSync)
 		re.True(saveCache)
 		re.False(saveKV)
@@ -1009,7 +1009,7 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 		re.Equal(int32(1), regionPendingItemB.GetRef())
 
 		// heartbeat again, no need updates root tree
-		saveKV, saveCache, needSync := regionGuide(ctx, regionItemB, regionItemB)
+		saveKV, saveCache, needSync, _ := regionGuide(ctx, regionItemB, regionItemB)
 		re.False(needSync)
 		re.False(saveCache)
 		re.False(saveKV)
