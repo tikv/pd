@@ -46,7 +46,7 @@ func IsSchedulerRegistered(name string) bool {
 type SchedulerConfigProvider interface {
 	SharedConfigProvider
 
-	IsSchedulingHalted() bool
+	SetSchedulingAllowanceStatus(bool, string)
 	GetStoresLimit() map[uint64]StoreLimitConfig
 
 	IsSchedulerDisabled(string) bool

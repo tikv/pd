@@ -493,12 +493,11 @@ func (u *Controller) GetStage() stage {
 }
 
 func (u *Controller) changeStage(stage stage) {
-	u.stage = stage
-	// Halt and resume the scheduling once the running state changed.
-	running := isRunning(stage)
-	if opt := u.cluster.GetSchedulerConfig(); opt.IsSchedulingHalted() != running {
-		opt.SetHaltScheduling(running, "online-unsafe-recovery")
+	// If the running stage changes, update the scheduling allowance status to add or remove "online-unsafe-recovery" halt.
+	if running := isRunning(stage); running != isRunning(u.stage) {
+		u.cluster.GetSchedulerConfig().SetSchedulingAllowanceStatus(running, "online-unsafe-recovery")
 	}
+	u.stage = stage
 
 	var output StageOutput
 	output.Time = time.Now().Format("2006-01-02 15:04:05.000")

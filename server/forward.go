@@ -264,7 +264,7 @@ func forwardRegionHeartbeatToScheduling(rc *cluster.RaftCluster, forwardStream s
 			return
 		}
 		// TODO: find a better way to halt scheduling immediately.
-		if rc.GetOpts().IsSchedulingHalted() {
+		if rc.IsSchedulingHalted() {
 			continue
 		}
 		// The error types defined for schedulingpb and pdpb are different, so we need to convert them.

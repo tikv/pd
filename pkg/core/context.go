@@ -25,7 +25,7 @@ type MetaProcessContext struct {
 	context.Context
 	Tracer     RegionHeartbeatProcessTracer
 	TaskRunner ratelimit.Runner
-	Limiter    *ratelimit.ConcurrencyLimiter
+	LogRunner  ratelimit.Runner
 }
 
 // NewMetaProcessContext creates a new MetaProcessContext.
@@ -35,6 +35,7 @@ func ContextTODO() *MetaProcessContext {
 		Context:    context.TODO(),
 		Tracer:     NewNoopHeartbeatProcessTracer(),
 		TaskRunner: ratelimit.NewSyncRunner(),
+		LogRunner:  ratelimit.NewSyncRunner(),
 		// Limit default is nil
 	}
 }

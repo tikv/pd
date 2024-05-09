@@ -81,6 +81,8 @@ type RegionInfo struct {
 	buckets unsafe.Pointer
 	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
 	source RegionSource
+	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
+	ref atomic.Int32
 }
 
 // RegionSource is the source of region.
@@ -104,6 +106,21 @@ func (r *RegionInfo) LoadedFromStorage() bool {
 // Only used for test.
 func (r *RegionInfo) LoadedFromSync() bool {
 	return r.source == Sync
+}
+
+// IncRef increases the reference count.
+func (r *RegionInfo) IncRef() {
+	r.ref.Add(1)
+}
+
+// DecRef decreases the reference count.
+func (r *RegionInfo) DecRef() {
+	r.ref.Add(-1)
+}
+
+// GetRef returns the reference count.
+func (r *RegionInfo) GetRef() int32 {
+	return r.ref.Load()
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
@@ -727,33 +744,26 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
-		taskRunner := ctx.TaskRunner
-		limiter := ctx.Limiter
+		logRunner := ctx.LogRunner
 		// print log asynchronously
 		debug, info := d, i
-		if taskRunner != nil {
+		if logRunner != nil {
 			debug = func(msg string, fields ...zap.Field) {
-				taskRunner.RunTask(
+				logRunner.RunTask(
 					ctx.Context,
-					ratelimit.TaskOpts{
-						TaskName: "Log",
-						Limit:    limiter,
-					},
 					func(_ context.Context) {
 						d(msg, fields...)
 					},
+					ratelimit.WithTaskName("DebugLog"),
 				)
 			}
 			info = func(msg string, fields ...zap.Field) {
-				taskRunner.RunTask(
+				logRunner.RunTask(
 					ctx.Context,
-					ratelimit.TaskOpts{
-						TaskName: "Log",
-						Limit:    limiter,
-					},
 					func(_ context.Context) {
 						i(msg, fields...)
 					},
+					ratelimit.WithTaskName("InfoLog"),
 				)
 			}
 		}
@@ -856,24 +866,6 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 }
 
-// RegionHeartbeatStageName is the name of the stage of the region heartbeat.
-const (
-	HandleStatsAsync        = "HandleStatsAsync"
-	ObserveRegionStatsAsync = "ObserveRegionStatsAsync"
-	UpdateSubTree           = "UpdateSubTree"
-	HandleOverlaps          = "HandleOverlaps"
-	CollectRegionStatsAsync = "CollectRegionStatsAsync"
-	SaveRegionToKV          = "SaveRegionToKV"
-)
-
-// ExtraTaskOpts returns the task options for the task.
-func ExtraTaskOpts(ctx *MetaProcessContext, name string) ratelimit.TaskOpts {
-	return ratelimit.TaskOpts{
-		TaskName: name,
-		Limit:    ctx.Limiter,
-	}
-}
-
 // RWLockStats is a read-write lock with statistics.
 type RWLockStats struct {
 	syncutil.RWMutex
@@ -928,7 +920,7 @@ type RegionsInfo struct {
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
 func NewRegionsInfo() *RegionsInfo {
 	return &RegionsInfo{
-		tree:         newRegionTree(),
+		tree:         newRegionTreeWithCountRef(),
 		regions:      make(map[uint64]*regionItem),
 		subRegions:   make(map[uint64]*regionItem),
 		leaders:      make(map[uint64]*regionTree),
@@ -1117,10 +1109,14 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
 		store, ok := peersMap[storeID]
 		if !ok {
-			store = newRegionTree()
+			if !countRef {
+				store = newRegionTree()
+			} else {
+				store = newRegionTreeWithCountRef()
+			}
 			peersMap[storeID] = store
 		}
 		store.update(item, false)
@@ -1131,17 +1127,17 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
 			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item)
+			setPeer(r.leaders, storeID, item, true)
 		} else {
 			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item)
+			setPeer(r.followers, storeID, item, false)
 		}
 	}
 
 	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
 			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item)
+			setPeer(peersMap, storeID, item, false)
 		}
 	}
 	// Add to learners.
@@ -1309,10 +1305,14 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 	r.subRegions[region.GetID()] = item
 	// It has been removed and all information needs to be updated again.
 	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem) {
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
 		store, ok := peersMap[storeID]
 		if !ok {
-			store = newRegionTree()
+			if !countRef {
+				store = newRegionTree()
+			} else {
+				store = newRegionTreeWithCountRef()
+			}
 			peersMap[storeID] = store
 		}
 		store.update(item, false)
@@ -1323,17 +1323,17 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
 			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item)
+			setPeer(r.leaders, storeID, item, true)
 		} else {
 			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item)
+			setPeer(r.followers, storeID, item, false)
 		}
 	}
 
 	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
 			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item)
+			setPeer(peersMap, storeID, item, false)
 		}
 	}
 	// Add to learners.
@@ -1539,6 +1539,60 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	}
 	// no need to consider witness, as it is already included in leaders, followers and learners
 	return regions
+}
+
+// SubTreeRegionType is the type of sub tree region.
+type SubTreeRegionType string
+
+const (
+	// AllInSubTree is all sub trees.
+	AllInSubTree SubTreeRegionType = "all"
+	// LeaderInSubTree is the leader sub tree.
+	LeaderInSubTree SubTreeRegionType = "leader"
+	// FollowerInSubTree is the follower sub tree.
+	FollowerInSubTree SubTreeRegionType = "follower"
+	// LearnerInSubTree is the learner sub tree.
+	LearnerInSubTree SubTreeRegionType = "learner"
+	// WitnessInSubTree is the witness sub tree.
+	WitnessInSubTree SubTreeRegionType = "witness"
+	// PendingPeerInSubTree is the pending peer sub tree.
+	PendingPeerInSubTree SubTreeRegionType = "pending"
+)
+
+// GetStoreRegions gets all RegionInfo with a given storeID
+func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTreeRegionType) ([]*RegionInfo, error) {
+	r.st.RLock()
+	var regions []*RegionInfo
+	switch typ {
+	case LeaderInSubTree:
+		if leaders, ok := r.leaders[storeID]; ok {
+			regions = leaders.scanRanges()
+		}
+	case FollowerInSubTree:
+		if followers, ok := r.followers[storeID]; ok {
+			regions = followers.scanRanges()
+		}
+	case LearnerInSubTree:
+		if learners, ok := r.learners[storeID]; ok {
+			regions = learners.scanRanges()
+		}
+	case WitnessInSubTree:
+		if witnesses, ok := r.witnesses[storeID]; ok {
+			regions = witnesses.scanRanges()
+		}
+	case PendingPeerInSubTree:
+		if pendingPeers, ok := r.pendingPeers[storeID]; ok {
+			regions = pendingPeers.scanRanges()
+		}
+	case AllInSubTree:
+		r.st.RUnlock()
+		return r.GetStoreRegions(storeID), nil
+	default:
+		return nil, errors.Errorf("unknown sub tree region type %v", typ)
+	}
+
+	r.st.RUnlock()
+	return regions, nil
 }
 
 // GetStoreLeaderRegionSize get total size of store's leader regions

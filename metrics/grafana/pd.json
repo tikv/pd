@@ -7907,7 +7907,7 @@
           "tableColumn": "",
           "targets": [
             {
-              "expr": "pd_checker_patrol_regions_time{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"} != 0",
+              "expr": "max(max(pd_checker_patrol_regions_time{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"})by(instance))",
               "legendFormat": "{{instance}}",
               "format": "time_series",
               "intervalFactor": 1,
