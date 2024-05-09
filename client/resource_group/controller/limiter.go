@@ -329,6 +329,8 @@ func (lim *Limiter) AvailableTokens(now time.Time) float64 {
 	return tokens
 }
 
+const reserveWarnLogInterval = 10 * time.Millisecond
+
 // reserveN is a helper method for Reserve.
 // maxFutureReserve specifies the maximum reservation wait duration allowed.
 // reserveN returns Reservation, not *Reservation.
@@ -374,6 +376,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
+<<<<<<< HEAD
 		log.Warn("[resource group controller] cannot reserve enough tokens",
 			zap.Duration("need-wait-duration", waitDuration),
 			zap.Duration("max-wait-duration", maxFutureReserve),
@@ -382,6 +385,21 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 			zap.Float64("request-tokens", n),
 			zap.Int64("burst", lim.burst),
 			zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
+=======
+		// print log if the limiter cannot reserve for a while.
+		if time.Since(lim.last) > reserveWarnLogInterval {
+			log.Warn("[resource group controller] cannot reserve enough tokens",
+				zap.Duration("need-wait-duration", waitDuration),
+				zap.Duration("max-wait-duration", maxFutureReserve),
+				zap.Float64("current-ltb-tokens", lim.tokens),
+				zap.Float64("current-ltb-rate", float64(lim.limit)),
+				zap.Float64("request-tokens", n),
+				zap.Float64("notify-threshold", lim.notifyThreshold),
+				zap.Bool("is-low-process", lim.isLowProcess),
+				zap.Int64("burst", lim.burst),
+				zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
+		}
+>>>>>>> a674e668f (controller: Reduce the frequency of printing logs (#8160))
 		lim.last = last
 		if lim.limit == 0 {
 			lim.notify()
