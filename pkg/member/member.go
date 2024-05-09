@@ -210,8 +210,8 @@ func (m *EmbeddedEtcdMember) PreCheckLeader() error {
 	return nil
 }
 
-// GetPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
-func (m *EmbeddedEtcdMember) GetPersistentLeader() (any, int64, error) {
+// getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
+func (m *EmbeddedEtcdMember) getPersistentLeader() (*pdpb.Member, int64, error) {
 	leader := &pdpb.Member{}
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
 	if err != nil {
@@ -233,17 +233,17 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 		return nil, true
 	}
 
-	leaderRaw, revision, err := m.GetPersistentLeader()
+	leader, revision, err := m.getPersistentLeader()
 	if err != nil {
 		log.Error("getting pd leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, true
 	}
-	if leaderRaw == nil {
+	if leader == nil {
 		// no leader yet
 		return nil, false
 	}
-	leader := leaderRaw.(*pdpb.Member)
+
 	if m.IsSameLeader(leader) {
 		// oh, we are already a PD leader, which indicates we may meet something wrong
 		// in previous CampaignLeader. We should delete the leadership and campaign again.

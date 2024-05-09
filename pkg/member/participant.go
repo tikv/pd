@@ -206,8 +206,8 @@ func (*Participant) PreCheckLeader() error {
 	return nil
 }
 
-// GetPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
-func (m *Participant) GetPersistentLeader() (any, int64, error) {
+// getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
+func (m *Participant) getPersistentLeader() (participant, int64, error) {
 	leader := NewParticipantByService(m.serviceName)
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
 	if err != nil {
@@ -229,18 +229,17 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 		return nil, true
 	}
 
-	leaderRaw, revision, err := m.GetPersistentLeader()
+	leader, revision, err := m.getPersistentLeader()
 	if err != nil {
 		log.Error("getting the leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, true
 	}
-	if leaderRaw == nil {
+	if leader == nil {
 		// no leader yet
 		return nil, false
 	}
 
-	leader := leaderRaw.(participant)
 	if m.IsSameLeader(leader) {
 		// oh, we are already the leader, which indicates we may meet something wrong
 		// in previous CampaignLeader. We should delete the leadership and campaign again.

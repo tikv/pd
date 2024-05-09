@@ -145,8 +145,6 @@ type ElectionMember interface {
 	GetDCLocationPath(id uint64) string
 	// PreCheckLeader does some pre-check before checking whether it's the leader.
 	PreCheckLeader() error
-	// GetPersistentLeader returns the persistent leader.
-	GetPersistentLeader() (any, int64, error)
 	// UnsetLeader unsets the member's leader.
 	UnsetLeader()
 }

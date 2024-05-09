@@ -75,8 +75,8 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 }
 
 // GetExpectedPrimary indicates API has changed the primary, ONLY SET VALUE BY API.
-func GetExpectedPrimary(keyPath string, client *clientv3.Client) string {
-	leader, err := etcdutil.GetValue(client, strings.Join([]string{keyPath, ExpectedPrimary}, "/"))
+func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
+	leader, err := etcdutil.GetValue(client, strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))
 	if err != nil {
 		log.Error("get expected primary key error", errs.ZapError(err))
 		return ""
@@ -86,7 +86,10 @@ func GetExpectedPrimary(keyPath string, client *clientv3.Client) string {
 }
 
 // RemoveExpectedPrimary removes the expected primary key.
+// - removed when campaign success
+// - removed when server is closed
 func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
+	log.Info("remove expected primary key", zap.String("leaderPath", leaderPath))
 	// remove expected leader key
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))).
@@ -99,6 +102,7 @@ func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 
 // SetExpectedPrimary sets the expected primary key when the current primary has exited.
 func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
+	log.Info("set expected primary key", zap.String("leaderPath", leaderPath))
 	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
 	if err != nil {
 		log.Error("[primary] get primary key error", zap.Error(err))

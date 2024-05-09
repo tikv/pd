@@ -124,8 +124,8 @@ func (ls *Leadership) SetLeaderWatch(val bool) {
 	ls.leaderWatch.Store(val)
 }
 
-// GetLeaderWatch gets the leader watch flag.
-func (ls *Leadership) GetLeaderWatch() bool {
+// IsLeader gets the leader watch flag.
+func (ls *Leadership) IsLeader() bool {
 	return ls.leaderWatch.Load()
 }
 
@@ -392,7 +392,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 					return
 				}
 				// only API update the leader key to transfer the leader will meet
-				if ev.Type == mvccpb.PUT && ls.GetLeaderWatch() {
+				if ev.Type == mvccpb.PUT && ls.IsLeader() {
 					log.Info("[LeaderWatch] current leadership is updated",
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return

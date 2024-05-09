@@ -18,7 +18,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"runtime/trace"
 	"sync"
 	"sync/atomic"
@@ -33,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -562,7 +562,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		}
 
 		// To make sure the expected leader(if exist) and primary are on the same server.
-		targetPrimary := mcsutils.GetExpectedPrimary(gta.member.GetLeaderPath(), gta.member.Client())
+		targetPrimary := mcsutils.GetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
 		if targetPrimary != "" && targetPrimary != gta.member.MemberValue() {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", gta.member.Name()),
@@ -675,8 +675,8 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 }
 
 func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
-	_, revision, err := gta.member.GetPersistentLeader()
-	if err != nil {
+	resp, err := etcdutil.EtcdKVGet(gta.member.GetLeadership().GetClient(), gta.member.GetLeaderPath())
+	if err != nil || resp == nil || len(resp.Kvs) == 0 {
 		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
 		return
 	}
@@ -685,31 +685,28 @@ func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary cha
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
 	// Watch will keep looping and never return unless the primary has changed.
 	gta.member.GetLeadership().SetLeaderWatch(true)
-	gta.member.GetLeadership().Watch(gta.ctx, revision+1)
+	gta.member.GetLeadership().Watch(gta.ctx, resp.Kvs[0].ModRevision+1)
 	gta.member.GetLeadership().SetLeaderWatch(false)
 
 	// only API update primary will set the expected leader
-	// check leader key whether deleted
-	leaderRaw, err := etcdutil.GetValue(gta.member.Client(), gta.member.GetLeaderPath())
+	curPrimary, err := etcdutil.GetValue(gta.member.Client(), gta.member.GetLeaderPath())
 	if err != nil {
-		log.Error("[primary] get primary key error", zap.Error(err))
-		return
-	}
-	if leaderRaw == nil {
-		log.Info("[primary] leader key is deleted, the primary will step down")
+		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
 		return
 	}
 
-	mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
+	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
+		mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
 
-	gta.member.UnsetLeader()
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("[primary] exit the primary watch loop")
-			return
-		case exitPrimary <- struct{}{}:
-			return
+		gta.member.UnsetLeader()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("[primary] exit the primary watch loop")
+				return
+			case exitPrimary <- struct{}{}:
+				return
+			}
 		}
 	}
 }

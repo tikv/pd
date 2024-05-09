@@ -249,7 +249,7 @@ func (s *Server) primaryElectionLoop() {
 		}
 
 		// To make sure the expected leader(if exist) and primary are on the same server.
-		expectedPrimary := utils.GetExpectedPrimary(s.participant.GetLeaderPath(), s.GetClient())
+		expectedPrimary := utils.GetExpectedPrimary(s.GetClient(), s.participant.GetLeaderPath())
 		if expectedPrimary != "" && expectedPrimary != s.participant.MemberValue() {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
@@ -332,39 +332,36 @@ func (s *Server) campaignLeader() {
 }
 
 func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
-	_, revision, err := s.participant.GetPersistentLeader()
-	if err != nil {
+	resp, err := etcdutil.EtcdKVGet(s.participant.GetLeadership().GetClient(), s.participant.GetLeaderPath())
+	if err != nil || resp == nil || len(resp.Kvs) == 0 {
 		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
 		return
 	}
 	log.Info("[primary] start to watch the primary", zap.Stringer("scheduling-primary", s.participant.GetLeader()))
 	// Watch will keep looping and never return unless the primary has changed.
 	s.participant.GetLeadership().SetLeaderWatch(true)
-	s.participant.GetLeadership().Watch(s.serverLoopCtx, revision+1)
+	s.participant.GetLeadership().Watch(s.serverLoopCtx, resp.Kvs[0].ModRevision+1)
 	s.participant.GetLeadership().SetLeaderWatch(false)
 
 	// only API update primary will set the expected leader
-	// check leader key whether deleted
-	leaderRaw, err := etcdutil.GetValue(s.participant.Client(), s.participant.GetLeaderPath())
+	curPrimary, err := etcdutil.GetValue(s.participant.Client(), s.participant.GetLeaderPath())
 	if err != nil {
-		log.Error("[primary] get primary key error", zap.Error(err))
+		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
 		return
 	}
-	if leaderRaw == nil {
-		log.Info("[primary] leader key is deleted, the primary will step down")
-		return
-	}
+	// only trigger by updating primary
+	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
+		utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
 
-	utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
-
-	s.participant.UnsetLeader()
-	defer log.Info("[primary] exit the primary watch loop")
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case exitPrimary <- struct{}{}:
-			return
+		s.participant.UnsetLeader()
+		defer log.Info("[primary] exit the primary watch loop")
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case exitPrimary <- struct{}{}:
+				return
+			}
 		}
 	}
 }
