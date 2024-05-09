@@ -64,10 +64,7 @@ type Leadership struct {
 	leaderKey   string
 	leaderValue string
 
-	leaderWatch struct {
-		syncutil.RWMutex
-		val bool
-	}
+	leaderWatch atomic.Bool
 
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
@@ -124,16 +121,12 @@ func (ls *Leadership) GetLeaderKey() string {
 
 // SetLeaderWatch sets the leader watch flag.
 func (ls *Leadership) SetLeaderWatch(val bool) {
-	ls.leaderWatch.Lock()
-	ls.leaderWatch.val = val
-	ls.leaderWatch.Unlock()
+	ls.leaderWatch.Store(val)
 }
 
 // GetLeaderWatch gets the leader watch flag.
 func (ls *Leadership) GetLeaderWatch() bool {
-	ls.leaderWatch.RLock()
-	defer ls.leaderWatch.RUnlock()
-	return ls.leaderWatch.val
+	return ls.leaderWatch.Load()
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.

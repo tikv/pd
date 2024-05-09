@@ -96,7 +96,7 @@ func TransferPrimary(c *gin.Context) {
 
 	if service := c.Param("service"); len(service) > 0 {
 		var input map[string]string
-		if err := c.Bind(&input); err != nil {
+		if err := c.BindJSON(&input); err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
 		}

@@ -250,11 +250,12 @@ func (s *Server) primaryElectionLoop() {
 
 		// To make sure the expected leader(if exist) and primary are on the same server.
 		expectedPrimary := utils.GetExpectedPrimary(s.participant.GetLeaderPath(), s.GetClient())
-		if expectedPrimary != "" && expectedPrimary != s.participant.GetLeadership().GetLeaderValue() {
+		if expectedPrimary != "" && expectedPrimary != s.participant.MemberValue() {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
 				zap.String("target-primary-id", expectedPrimary),
-				zap.Uint64("member-id", s.participant.ID()))
+				zap.Uint64("member-id", s.participant.ID()),
+				zap.String("cur-memberValue", s.participant.MemberValue()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -324,7 +325,7 @@ func (s *Server) campaignLeader() {
 			log.Info("server is closed")
 			return
 		case <-exitPrimary:
-			log.Info("no longer a primary/leader because primary have been updated, the scheduling primary/leader will step down")
+			log.Info("no longer a primary because primary have been updated, the scheduling primary will step down")
 			return
 		}
 	}
@@ -357,10 +358,10 @@ func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
 
 	s.participant.UnsetLeader()
+	defer log.Info("[primary] exit the primary watch loop")
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("[primary] exit the primary watch loop")
 			return
 		case exitPrimary <- struct{}{}:
 			return

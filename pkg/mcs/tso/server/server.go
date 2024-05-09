@@ -388,9 +388,6 @@ func (s *Server) startServer() (err error) {
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}
-	// Initialize the service ID with the member value of the primary of the default keyspace group.
-	memberValue, err := s.GetMember(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
-	s.serviceID.MemberValue = []byte(memberValue.MemberValue())
 
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.service = &Service{Server: s}

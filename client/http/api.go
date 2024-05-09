@@ -205,6 +205,11 @@ func MicroServicePrimary(service string) string {
 	return fmt.Sprintf("%s/primary/%s", microServicePrefix, service)
 }
 
+// MicroServicePrimaryTransfer returns the path of PD HTTP API to transfer the primary of microservice.
+func MicroServicePrimaryTransfer(service string) string {
+	return fmt.Sprintf("%s/primary/transfer/%s", microServicePrefix, service)
+}
+
 // GetUpdateKeyspaceConfigURL returns the path of PD HTTP API to update keyspace config.
 func GetUpdateKeyspaceConfigURL(keyspaceName string) string {
 	return fmt.Sprintf(KeyspaceConfig, keyspaceName)

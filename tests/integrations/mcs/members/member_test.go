@@ -17,6 +17,7 @@ package members_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	pdClient "github.com/tikv/pd/client/http"
@@ -35,6 +36,9 @@ type memberTestSuite struct {
 	server           *tests.TestServer
 	backendEndpoints string
 	dialClient       pdClient.Client
+
+	tsoNodes        map[string]bs.Server
+	schedulingNodes map[string]bs.Server
 }
 
 func TestMemberTestSuite(t *testing.T) {
@@ -65,6 +69,7 @@ func (suite *memberTestSuite) SetupTest() {
 		})
 	}
 	tests.WaitForPrimaryServing(re, nodes)
+	suite.tsoNodes = nodes
 
 	// Scheduling
 	nodes = make(map[string]bs.Server)
@@ -76,6 +81,7 @@ func (suite *memberTestSuite) SetupTest() {
 		})
 	}
 	tests.WaitForPrimaryServing(re, nodes)
+	suite.schedulingNodes = nodes
 
 	suite.cleanupFunc = append(suite.cleanupFunc, func() {
 		cancel()
@@ -112,4 +118,64 @@ func (suite *memberTestSuite) TestPrimary() {
 	primary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.NotEmpty(primary)
+}
+
+func (suite *memberTestSuite) TestTransferPrimary() {
+	re := suite.Require()
+	primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
+	re.NoError(err)
+	re.NotEmpty(primary)
+
+	supportedServices := []string{"tso", "scheduling"}
+	for _, service := range supportedServices {
+		var nodes map[string]bs.Server
+		switch service {
+		case "tso":
+			nodes = suite.tsoNodes
+		case "scheduling":
+			nodes = suite.schedulingNodes
+		}
+
+		// Test resign primary by random
+		primary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		re.NoError(err)
+		err = suite.dialClient.TransferMicroServicePrimary(suite.ctx, service, "")
+		re.NoError(err)
+
+		testutil.Eventually(re, func() bool {
+			for _, member := range nodes {
+				if member.GetAddr() != primary && member.IsServing() {
+					return true
+				}
+			}
+			return false
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		re.NoError(err)
+
+		// Test transfer primary to a specific node
+		var newPrimary string
+		for _, member := range nodes {
+			if member.GetAddr() != primary {
+				newPrimary = member.GetAddr()
+				break
+			}
+		}
+		err = suite.dialClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		re.NoError(err)
+
+		testutil.Eventually(re, func() bool {
+			return nodes[newPrimary].IsServing()
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		primary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		re.NoError(err)
+		re.Equal(primary, newPrimary)
+
+		// Test transfer primary to a non-exist node
+		newPrimary = "http://"
+		err = suite.dialClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		re.Error(err)
+	}
 }

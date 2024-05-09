@@ -563,11 +563,12 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 
 		// To make sure the expected leader(if exist) and primary are on the same server.
 		targetPrimary := mcsutils.GetExpectedPrimary(gta.member.GetLeaderPath(), gta.member.Client())
-		if targetPrimary != "" && targetPrimary != gta.member.GetLeadership().GetLeaderValue() {
+		if targetPrimary != "" && targetPrimary != gta.member.MemberValue() {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", gta.member.Name()),
 				zap.String("target-primary-id", targetPrimary),
-				zap.Uint64("member-id", gta.member.ID()))
+				zap.Uint64("member-id", gta.member.ID()),
+				zap.String("cur-memberValue", gta.member.MemberValue()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
