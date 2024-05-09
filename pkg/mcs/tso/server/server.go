@@ -380,6 +380,7 @@ func (s *Server) startServer() (err error) {
 		GitHash:        versioninfo.PDGitHash,
 		DeployPath:     deployPath,
 		StartTimestamp: s.StartTimestamp(),
+		Name:           s.Name(),
 	}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(), s.cfg.AdvertiseListenAddr,
@@ -387,6 +388,9 @@ func (s *Server) startServer() (err error) {
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}
+	// Initialize the service ID with the member value of the primary of the default keyspace group.
+	memberValue, err := s.GetMember(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+	s.serviceID.MemberValue = []byte(memberValue.MemberValue())
 
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.service = &Service{Server: s}

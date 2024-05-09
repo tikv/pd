@@ -23,11 +23,13 @@ import (
 
 // ServiceRegistryEntry is the registry entry of a service
 type ServiceRegistryEntry struct {
+	Name           string `json:"name"`
 	ServiceAddr    string `json:"service-addr"`
 	Version        string `json:"version"`
 	GitHash        string `json:"git-hash"`
 	DeployPath     string `json:"deploy-path"`
 	StartTimestamp int64  `json:"start-timestamp"`
+	MemberValue    []byte `json:"member-value"`
 }
 
 // Serialize this service registry entry

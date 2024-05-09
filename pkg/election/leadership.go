@@ -64,12 +64,22 @@ type Leadership struct {
 	leaderKey   string
 	leaderValue string
 
+	LeaderWatch bool
+
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
 	keepAliveCancelFuncLock syncutil.Mutex
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
+}
+
+func (ls *Leadership) SetLeaderWatch(val bool) {
+	ls.LeaderWatch = val
+}
+
+func (ls *Leadership) GetLeaderValue() string {
+	return ls.leaderValue
 }
 
 // NewLeadership creates a new Leadership.
@@ -375,6 +385,12 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
+				// only API update the leader key to transfer the leader will meet
+				if ev.Type == mvccpb.PUT && ls.LeaderWatch {
+					log.Info("[LeaderWatch] current leadership is updated", zap.Int64("watchRevision", revision),
+						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
+					return
+				}
 			}
 			revision = wresp.Header.Revision + 1
 		}
@@ -393,4 +409,5 @@ func (ls *Leadership) Reset() {
 	}
 	ls.keepAliveCancelFuncLock.Unlock()
 	ls.getLease().Close()
+	ls.LeaderWatch = false
 }

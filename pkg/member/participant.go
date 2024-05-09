@@ -154,8 +154,8 @@ func (m *Participant) setLeader(member participant) {
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
-// unsetLeader unsets the member's leader.
-func (m *Participant) unsetLeader() {
+// UnsetLeader unsets the member's leader.
+func (m *Participant) UnsetLeader() {
 	leader := NewParticipantByService(m.serviceName)
 	m.leader.Store(leader)
 	m.lastLeaderUpdatedTime.Store(time.Now())
@@ -164,6 +164,7 @@ func (m *Participant) unsetLeader() {
 // EnableLeader declares the member itself to be the leader.
 func (m *Participant) EnableLeader() {
 	m.setLeader(m.member)
+	utils.RemoveExpectedPrimary(m.client, m.GetLeaderPath())
 }
 
 // GetLeaderPath returns the path of the leader.
@@ -205,8 +206,8 @@ func (*Participant) PreCheckLeader() error {
 	return nil
 }
 
-// getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
-func (m *Participant) getPersistentLeader() (participant, int64, error) {
+// GetPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
+func (m *Participant) GetPersistentLeader() (any, int64, error) {
 	leader := NewParticipantByService(m.serviceName)
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
 	if err != nil {
@@ -228,17 +229,18 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 		return nil, true
 	}
 
-	leader, revision, err := m.getPersistentLeader()
+	leaderRaw, revision, err := m.GetPersistentLeader()
 	if err != nil {
 		log.Error("getting the leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, true
 	}
-	if leader == nil {
+	if leaderRaw == nil {
 		// no leader yet
 		return nil, false
 	}
 
+	leader := leaderRaw.(participant)
 	if m.IsSameLeader(leader) {
 		// oh, we are already the leader, which indicates we may meet something wrong
 		// in previous CampaignLeader. We should delete the leadership and campaign again.
@@ -264,14 +266,14 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 func (m *Participant) WatchLeader(ctx context.Context, leader participant, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(ctx, revision)
-	m.unsetLeader()
+	m.UnsetLeader()
 }
 
 // ResetLeader is used to reset the member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
 func (m *Participant) ResetLeader() {
 	m.leadership.Reset()
-	m.unsetLeader()
+	m.UnsetLeader()
 }
 
 // IsSameLeader checks whether a server is the leader itself.

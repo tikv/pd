@@ -16,6 +16,7 @@ package utils
 
 import (
 	"context"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"net"
 	"net/http"
 	"os"
@@ -51,6 +52,9 @@ const (
 	ClusterIDPath = "/pd/cluster_id"
 	// retryInterval is the interval to retry.
 	retryInterval = time.Second
+	// ExpectedPrimary is the path to store the expected primary
+	// ONLY SET VALUE BY API
+	ExpectedPrimary = "expected_primary"
 )
 
 // InitClusterID initializes the cluster ID.
@@ -68,6 +72,51 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 		}
 	}
 	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)
+}
+
+// GetExpectedPrimary indicates API has changed the primary, ONLY SET VALUE BY API.
+func GetExpectedPrimary(keyPath string, client *clientv3.Client) string {
+	leader, err := etcdutil.GetValue(client, strings.Join([]string{keyPath, ExpectedPrimary}, "/"))
+	if err != nil {
+		log.Error("get expected primary key error", errs.ZapError(err))
+		return ""
+	}
+
+	return string(leader)
+}
+
+// RemoveExpectedPrimary removes the expected primary key.
+func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
+	// remove expected leader key
+	resp, err := kv.NewSlowLogTxn(client).
+		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))).
+		Commit()
+	if err != nil && !resp.Succeeded {
+		log.Error("change primary error", errs.ZapError(err))
+		return
+	}
+}
+
+// SetExpectedPrimary sets the expected primary key when the current primary has exited.
+func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
+	// write a flag to indicate the current primary has exited
+	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
+	if err != nil {
+		log.Error("[primary] get primary key error", zap.Error(err))
+		return
+	}
+
+	// write a flag to indicate the current primary has exited
+	resp, err := kv.NewSlowLogTxn(client).
+		Then(
+			clientv3.OpPut(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"), string(leaderRaw)),
+			// indicate the current primary has exited
+			clientv3.OpDelete(leaderPath)).
+		Commit()
+	if err != nil && !resp.Succeeded {
+		log.Error("change primary error", errs.ZapError(err))
+		return
+	}
 }
 
 // PromHandler is a handler to get prometheus metrics.

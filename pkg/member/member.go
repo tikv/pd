@@ -148,8 +148,8 @@ func (m *EmbeddedEtcdMember) setLeader(member *pdpb.Member) {
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
-// unsetLeader unsets the member's PD leader.
-func (m *EmbeddedEtcdMember) unsetLeader() {
+// UnsetLeader unsets the member's PD leader.
+func (m *EmbeddedEtcdMember) UnsetLeader() {
 	m.leader.Store(&pdpb.Member{})
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
@@ -210,8 +210,8 @@ func (m *EmbeddedEtcdMember) PreCheckLeader() error {
 	return nil
 }
 
-// getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
-func (m *EmbeddedEtcdMember) getPersistentLeader() (*pdpb.Member, int64, error) {
+// GetPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
+func (m *EmbeddedEtcdMember) GetPersistentLeader() (any, int64, error) {
 	leader := &pdpb.Member{}
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
 	if err != nil {
@@ -233,17 +233,17 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 		return nil, true
 	}
 
-	leader, revision, err := m.getPersistentLeader()
+	leaderRaw, revision, err := m.GetPersistentLeader()
 	if err != nil {
 		log.Error("getting pd leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
 		return nil, true
 	}
-	if leader == nil {
+	if leaderRaw == nil {
 		// no leader yet
 		return nil, false
 	}
-
+	leader := leaderRaw.(*pdpb.Member)
 	if m.IsSameLeader(leader) {
 		// oh, we are already a PD leader, which indicates we may meet something wrong
 		// in previous CampaignLeader. We should delete the leadership and campaign again.
@@ -269,14 +269,14 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 func (m *EmbeddedEtcdMember) WatchLeader(ctx context.Context, leader *pdpb.Member, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(ctx, revision)
-	m.unsetLeader()
+	m.UnsetLeader()
 }
 
 // ResetLeader is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
 func (m *EmbeddedEtcdMember) ResetLeader() {
 	m.leadership.Reset()
-	m.unsetLeader()
+	m.UnsetLeader()
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
@@ -324,8 +324,8 @@ func (m *EmbeddedEtcdMember) GetEtcdLeader() uint64 {
 }
 
 // IsSameLeader checks whether a server is the leader itself.
-func (m *EmbeddedEtcdMember) IsSameLeader(leader *pdpb.Member) bool {
-	return leader.GetMemberId() == m.ID()
+func (m *EmbeddedEtcdMember) IsSameLeader(leader any) bool {
+	return leader.(*pdpb.Member).GetMemberId() == m.ID()
 }
 
 // InitMemberInfo initializes the member info.

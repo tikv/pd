@@ -560,6 +560,17 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
 		}
 
+		// To make sure the expected leader(if exist) and primary are on the same server.
+		targetPrimary := mcsutils.GetExpectedPrimary(gta.member.GetLeaderPath(), gta.member.Client())
+		if targetPrimary != "" && targetPrimary != gta.member.GetLeadership().GetLeaderValue() {
+			log.Info("skip campaigning of scheduling primary and check later",
+				zap.String("server-name", gta.member.Name()),
+				zap.String("target-primary-id", targetPrimary),
+				zap.Uint64("member-id", gta.member.ID()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		gta.campaignLeader()
 	}
 }
@@ -596,7 +607,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		gta.member.ResetLeader()
 	})
 
-	// maintain the the leadership, after this, TSO can be service.
+	// maintain the leadership, after this, TSO can be service.
 	gta.member.KeepLeader(ctx)
 	log.Info("campaign tso primary ok",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
@@ -635,6 +646,9 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("tso-primary-name", gta.member.Name()))
 
+	exitPrimary := make(chan struct{})
+	go gta.primaryWatch(exitPrimary)
+
 	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
@@ -651,8 +665,31 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 			log.Info("exit leader campaign",
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
 			return
+		case <-exitPrimary:
+			log.Info("no longer a primary because primary have been updated, the TSO primary/leader will step down")
+			return
 		}
 	}
+}
+
+func (gta *GlobalTSOAllocator) primaryWatch(exitPrimary chan struct{}) {
+	_, revision, err := gta.member.GetPersistentLeader()
+	if err != nil {
+		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
+		return
+	}
+	log.Info("[primary] start to watch the primary",
+		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
+		zap.String("campaign-tso-primary-name", gta.member.Name()))
+	// Watch will keep looping and never return unless the primary has changed.
+	gta.member.GetLeadership().SetLeaderWatch(true)
+	gta.member.GetLeadership().Watch(gta.ctx, revision+1)
+	gta.member.GetLeadership().SetLeaderWatch(false)
+
+	mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
+
+	gta.member.UnsetLeader()
+	exitPrimary <- struct{}{}
 }
 
 func (gta *GlobalTSOAllocator) getMetrics() *tsoMetrics {

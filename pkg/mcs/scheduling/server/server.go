@@ -128,6 +128,10 @@ func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
 }
 
+func (s *Server) GetParticipant() *member.Participant {
+	return s.participant
+}
+
 // SetLogLevel sets log level.
 func (s *Server) SetLogLevel(level string) error {
 	if !logutil.IsLevelLegal(level) {
@@ -243,6 +247,17 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("the scheduling primary has changed, try to re-campaign a primary")
 		}
 
+		// To make sure the expected leader(if exist) and primary are on the same server.
+		expectedPrimary := utils.GetExpectedPrimary(s.participant.GetLeaderPath(), s.GetClient())
+		if expectedPrimary != "" && expectedPrimary != s.participant.GetLeadership().GetLeaderValue() {
+			log.Info("skip campaigning of scheduling primary and check later",
+				zap.String("server-name", s.Name()),
+				zap.String("target-primary-id", expectedPrimary),
+				zap.Uint64("member-id", s.participant.ID()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		s.campaignLeader()
 	}
 }
@@ -290,6 +305,9 @@ func (s *Server) campaignLeader() {
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
+	exitPrimary := make(chan struct{})
+	go s.primaryWatch(exitPrimary)
+
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
@@ -304,8 +322,29 @@ func (s *Server) campaignLeader() {
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
 			return
+		case <-exitPrimary:
+			log.Info("no longer a primary/leader because primary have been updated, the scheduling primary/leader will step down")
+			return
 		}
 	}
+}
+
+func (s *Server) primaryWatch(exitPrimary chan struct{}) {
+	_, revision, err := s.participant.GetPersistentLeader()
+	if err != nil {
+		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
+		return
+	}
+	log.Info("[primary] start to watch the primary", zap.Stringer("scheduling-primary", s.participant.GetLeader()))
+	// Watch will keep looping and never return unless the primary has changed.
+	s.participant.GetLeadership().SetLeaderWatch(true)
+	s.participant.GetLeadership().Watch(s.serverLoopCtx, revision+1)
+	s.participant.GetLeadership().SetLeaderWatch(false)
+
+	utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
+
+	s.participant.UnsetLeader()
+	exitPrimary <- struct{}{}
 }
 
 // Close closes the server.
@@ -425,6 +464,7 @@ func (s *Server) startServer() (err error) {
 		GitHash:        versioninfo.PDGitHash,
 		DeployPath:     deployPath,
 		StartTimestamp: s.StartTimestamp(),
+		Name:           s.Name(),
 	}
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
@@ -436,6 +476,7 @@ func (s *Server) startServer() (err error) {
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
 	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
+	s.serviceID.MemberValue = []byte(s.participant.MemberValue())
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
