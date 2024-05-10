@@ -81,7 +81,8 @@ func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistr
 	return nil, errors.Errorf("unknown service name %s", serviceName)
 }
 
-func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimary string) error {
+// TransferPrimary transfers the primary of the specified service.
+func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimary string, keyspaceGroupID uint32) error {
 	log.Info("transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimary), zap.String("to", newPrimary))
 	entries, err := GetMSMembers(serviceName, client)
 	if err != nil {
@@ -89,23 +90,23 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 	}
 
 	// Do nothing when I am the only member of cluster.
-	if len(entries) == 1 && newPrimary == "" {
-		return errors.New("no valid follower to transfer primary")
+	if len(entries) == 1 {
+		return errors.New("no valid secondary to transfer primary")
 	}
 
 	var primaryIDs []string
-	var memberValues []string
+	var secondaryValues []string
 	for _, member := range entries {
 		if (newPrimary == "" && member.ServiceAddr != oldPrimary) || (newPrimary != "" && member.ServiceAddr == newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 			if string(member.MemberValue) == "" {
 				return errors.New("member value is empty")
 			}
-			memberValues = append(memberValues, string(member.MemberValue))
+			secondaryValues = append(secondaryValues, string(member.MemberValue))
 		}
 	}
 	if len(primaryIDs) == 0 {
-		return errors.New("no valid follower to transfer primary")
+		return errors.New("no valid secondary to transfer primary")
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -122,12 +123,12 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 		primaryKey = endpoint.SchedulingPrimaryPath(clusterID)
 	case utils.TSOServiceName:
 		tsoRootPath := endpoint.TSOSvcRootPath(clusterID)
-		primaryKey = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, utils.DefaultKeyspaceGroupID)
+		primaryKey = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
 	}
 
 	// update primary key to notify old primary server.
 	putResp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(primaryKey, memberValues[nextPrimaryID])).
+		Then(clientv3.OpPut(primaryKey, secondaryValues[nextPrimaryID])).
 		Commit()
 	if err != nil || !putResp.Succeeded {
 		return errors.Errorf("failed to write primary flag for %s", serviceName)

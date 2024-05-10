@@ -16,9 +16,11 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
@@ -101,16 +103,25 @@ func TransferPrimary(c *gin.Context) {
 			return
 		}
 
-		newPrimary := ""
+		newPrimary, keyspaceGroupID := "", utils.DefaultKeyspaceGroupID
 		if v, ok := input["new_primary"]; ok {
 			newPrimary = v
+		}
+
+		if v, ok := input["keyspace_group_id"]; ok {
+			keyspaceGroupIDRaw, err := strconv.ParseUint(v, 10, 32)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+				return
+			}
+			keyspaceGroupID = uint32(keyspaceGroupIDRaw)
 		}
 		oldPrimary, _ := svr.GetServicePrimaryAddr(c.Request.Context(), service)
 		if oldPrimary == newPrimary {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, "new primary is the same as the old one")
 			return
 		}
-		if err := discovery.TransferPrimary(svr.GetClient(), service, oldPrimary, newPrimary); err != nil {
+		if err := discovery.TransferPrimary(svr.GetClient(), service, oldPrimary, newPrimary, keyspaceGroupID); err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}

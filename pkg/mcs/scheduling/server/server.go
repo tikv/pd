@@ -355,13 +355,11 @@ func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 
 		s.participant.UnsetLeader()
 		defer log.Info("scheduling primary exit the primary watch loop")
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case exitPrimary <- struct{}{}:
-				return
-			}
+		select {
+		case <-ctx.Done():
+			return
+		case exitPrimary <- struct{}{}:
+			return
 		}
 	}
 }

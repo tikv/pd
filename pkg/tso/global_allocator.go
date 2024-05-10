@@ -668,7 +668,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
 			return
 		case <-exitPrimary:
-			log.Info("no longer a primary because primary have been updated, the TSO primary/leader will step down")
+			log.Info("no longer a primary because primary have been updated, the TSO primary will step down")
 			return
 		}
 	}
@@ -694,19 +694,17 @@ func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary cha
 		log.Error("tso primary getting the leader meets error", errs.ZapError(err))
 		return
 	}
-
+	// only trigger by updating primary
 	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
 		mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
 
 		gta.member.UnsetLeader()
 		defer log.Info("tso primary exit the primary watch loop")
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case exitPrimary <- struct{}{}:
-				return
-			}
+		select {
+		case <-ctx.Done():
+			return
+		case exitPrimary <- struct{}{}:
+			return
 		}
 	}
 }

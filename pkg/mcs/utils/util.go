@@ -76,18 +76,17 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 
 // GetExpectedPrimary indicates API has changed the primary, ONLY SET VALUE BY API.
 func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
-	leader, err := etcdutil.GetValue(client, strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))
+	primary, err := etcdutil.GetValue(client, strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))
 	if err != nil {
 		log.Error("get expected primary key error", errs.ZapError(err))
 		return ""
 	}
 
-	return string(leader)
+	return string(primary)
 }
 
 // RemoveExpectedPrimary removes the expected primary key.
-// - removed when campaign new primary success
-// - removed when old primary server is closed
+// - removed when campaign new primary successfully
 func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 	log.Info("remove expected primary key", zap.String("leaderPath", leaderPath))
 	// remove expected leader key
