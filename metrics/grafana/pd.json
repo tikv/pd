@@ -11656,7 +11656,7 @@
               "hide": false,
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{task_type}}_({{ runner_name}})",
+              "legendFormat": "{{task_type}}_({{runner_name}})",
               "refId": "A",
               "step": 4
             }
