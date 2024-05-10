@@ -86,8 +86,8 @@ func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
 }
 
 // RemoveExpectedPrimary removes the expected primary key.
-// - removed when campaign success
-// - removed when server is closed
+// - removed when campaign new primary success
+// - removed when old primary server is closed
 func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 	log.Info("remove expected primary key", zap.String("leaderPath", leaderPath))
 	// remove expected leader key
@@ -105,7 +105,7 @@ func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
 	log.Info("set expected primary key", zap.String("leaderPath", leaderPath))
 	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
 	if err != nil {
-		log.Error("[primary] get primary key error", zap.Error(err))
+		log.Error("get primary key error", zap.Error(err))
 		return
 	}
 	// write a flag to indicate the current primary has exited

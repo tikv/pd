@@ -677,10 +677,10 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	resp, err := etcdutil.EtcdKVGet(gta.member.GetLeadership().GetClient(), gta.member.GetLeaderPath())
 	if err != nil || resp == nil || len(resp.Kvs) == 0 {
-		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
+		log.Error("tso primary getting the primary meets error", errs.ZapError(err))
 		return
 	}
-	log.Info("[primary] start to watch the primary",
+	log.Info("tso primary start to watch the primary",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
 	// Watch will keep looping and never return unless the primary has changed.
@@ -691,7 +691,7 @@ func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary cha
 	// only API update primary will set the expected leader
 	curPrimary, err := etcdutil.GetValue(gta.member.Client(), gta.member.GetLeaderPath())
 	if err != nil {
-		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
+		log.Error("tso primary getting the leader meets error", errs.ZapError(err))
 		return
 	}
 
@@ -699,10 +699,10 @@ func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary cha
 		mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
 
 		gta.member.UnsetLeader()
+		defer log.Info("tso primary exit the primary watch loop")
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("[primary] exit the primary watch loop")
 				return
 			case exitPrimary <- struct{}{}:
 				return

@@ -17,7 +17,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -56,6 +55,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
@@ -334,10 +334,10 @@ func (s *Server) campaignLeader() {
 func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	resp, err := etcdutil.EtcdKVGet(s.participant.GetLeadership().GetClient(), s.participant.GetLeaderPath())
 	if err != nil || resp == nil || len(resp.Kvs) == 0 {
-		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
+		log.Error("scheduling primary getting the primary meets error", errs.ZapError(err))
 		return
 	}
-	log.Info("[primary] start to watch the primary", zap.Stringer("scheduling-primary", s.participant.GetLeader()))
+	log.Info("scheduling primary start to watch the primary", zap.Stringer("scheduling-primary", s.participant.GetLeader()))
 	// Watch will keep looping and never return unless the primary has changed.
 	s.participant.GetLeadership().SetLeaderWatch(true)
 	s.participant.GetLeadership().Watch(s.serverLoopCtx, resp.Kvs[0].ModRevision+1)
@@ -346,7 +346,7 @@ func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	// only API update primary will set the expected leader
 	curPrimary, err := etcdutil.GetValue(s.participant.Client(), s.participant.GetLeaderPath())
 	if err != nil {
-		log.Error("[primary] getting the leader meets error", errs.ZapError(err))
+		log.Error("scheduling primary getting the leader meets error", errs.ZapError(err))
 		return
 	}
 	// only trigger by updating primary
@@ -354,7 +354,7 @@ func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 		utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
 
 		s.participant.UnsetLeader()
-		defer log.Info("[primary] exit the primary watch loop")
+		defer log.Info("scheduling primary exit the primary watch loop")
 		for {
 			select {
 			case <-ctx.Done():
