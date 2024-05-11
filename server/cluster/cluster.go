@@ -107,8 +107,8 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	heartbeatTaskRunner = "heartbeat-async-task-runner"
-	logTaskRunner       = "log-async-task-runner"
+	heartbeatTaskRunner = "heartbeat-async"
+	logTaskRunner       = "log-async"
 )
 
 // Server is the interface for cluster.
@@ -841,6 +841,14 @@ func (c *RaftCluster) GetPDServerConfig() *config.PDServerConfig {
 // SetPDServerConfig sets the PD configuration.
 func (c *RaftCluster) SetPDServerConfig(cfg *config.PDServerConfig) {
 	c.opt.SetPDServerConfig(cfg)
+}
+
+// IsSchedulingHalted returns whether the scheduling is halted.
+// Currently, the PD scheduling is halted when:
+//   - The `HaltScheduling` persist option is set to true.
+//   - Online unsafe recovery is running.
+func (c *RaftCluster) IsSchedulingHalted() bool {
+	return c.opt.IsSchedulingHalted() || c.unsafeRecoveryController.IsRunning()
 }
 
 // GetUnsafeRecoveryController returns the unsafe recovery controller.
