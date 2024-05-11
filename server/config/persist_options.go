@@ -252,6 +252,13 @@ func (o *PersistOptions) SetSplitMergeInterval(splitMergeInterval time.Duration)
 	o.SetScheduleConfig(v)
 }
 
+// SetMaxStoreDownTime to set the max store down time. It's only used to test.
+func (o *PersistOptions) SetMaxStoreDownTime(time time.Duration) {
+	v := o.GetScheduleConfig().Clone()
+	v.MaxStoreDownTime = typeutil.NewDuration(time)
+	o.SetScheduleConfig(v)
+}
+
 // SetStoreLimit sets a store limit for a given type and rate.
 func (o *PersistOptions) SetStoreLimit(storeID uint64, typ storelimit.Type, ratePerMin float64) {
 	v := o.GetScheduleConfig().Clone()

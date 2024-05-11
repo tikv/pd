@@ -16,6 +16,7 @@ package placement
 
 import (
 	"encoding/hex"
+
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/codec"
@@ -34,7 +35,7 @@ func (s *testManagerSuite) SetUpTest(c *C) {
 	s.store = core.NewStorage(kv.NewMemoryKV())
 	var err error
 	s.manager = NewRuleManager(s.store, nil, nil)
-	err = s.manager.Initialize(3, []string{"zone", "rack", "host"})
+	err = s.manager.Initialize(3, []string{"zone", "rack", "host"}, "")
 	c.Assert(err, IsNil)
 }
 
@@ -111,7 +112,7 @@ func (s *testManagerSuite) TestSaveLoad(c *C) {
 	}
 
 	m2 := NewRuleManager(s.store, nil, nil)
-	err := m2.Initialize(3, []string{"no", "labels"})
+	err := m2.Initialize(3, []string{"no", "labels"}, "")
 	c.Assert(err, IsNil)
 	c.Assert(m2.GetAllRules(), HasLen, 3)
 	c.Assert(m2.GetRule("pd", "default").String(), Equals, rules[0].String())
@@ -126,7 +127,7 @@ func (s *testManagerSuite) TestSetAfterGet(c *C) {
 	s.manager.SetRule(rule)
 
 	m2 := NewRuleManager(s.store, nil, nil)
-	err := m2.Initialize(100, []string{})
+	err := m2.Initialize(100, []string{}, "")
 	c.Assert(err, IsNil)
 	rule = m2.GetRule("pd", "default")
 	c.Assert(rule.Count, Equals, 1)

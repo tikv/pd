@@ -620,13 +620,22 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(replicationCfg.MaxReplicas, Equals, expect)
 	}
 
-	checkLocaltionLabels := func(expect int) {
+	checkLocationLabels := func(expect int) {
 		args := []string{"-u", pdAddr, "config", "show", "replication"}
 		output, err := pdctl.ExecuteCommand(cmd, args...)
 		c.Assert(err, IsNil)
 		replicationCfg := config.ReplicationConfig{}
 		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
 		c.Assert(replicationCfg.LocationLabels, HasLen, expect)
+	}
+
+	checkIsolationLevel := func(expect string) {
+		args := []string{"-u", pdAddr, "config", "show", "replication"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		c.Assert(err, IsNil)
+		replicationCfg := config.ReplicationConfig{}
+		c.Assert(json.Unmarshal(output, &replicationCfg), IsNil)
+		c.Assert(replicationCfg.IsolationLevel, Equals, expect)
 	}
 
 	checkRuleCount := func(expect int) {
@@ -647,6 +656,15 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 		c.Assert(rule.LocationLabels, HasLen, expect)
 	}
 
+	checkRuleIsolationLevel := func(expect string) {
+		args := []string{"-u", pdAddr, "config", "placement-rules", "show", "--group", "pd", "--id", "default"}
+		output, err := pdctl.ExecuteCommand(cmd, args...)
+		c.Assert(err, IsNil)
+		rule := placement.Rule{}
+		c.Assert(json.Unmarshal(output, &rule), IsNil)
+		c.Assert(rule.IsolationLevel, Equals, expect)
+	}
+
 	// update successfully when placement rules is not enabled.
 	output, err := pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "2")
 	c.Assert(err, IsNil)
@@ -655,8 +673,13 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "zone,host")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
-	checkLocaltionLabels(2)
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "isolation-level", "zone")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	checkLocationLabels(2)
 	checkRuleLocationLabels(2)
+	checkIsolationLevel("zone")
+	checkRuleIsolationLevel("zone")
 
 	// update successfully when only one default rule exists.
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "enable")
@@ -669,11 +692,18 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	checkMaxReplicas(3)
 	checkRuleCount(3)
 
+	// We need to change isolation first because we will validate
+	// if the location label contains the isolation level when setting location labels.
+	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "isolation-level", "host")
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
 	output, err = pdctl.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "host")
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
-	checkLocaltionLabels(1)
+	checkLocationLabels(1)
 	checkRuleLocationLabels(1)
+	checkIsolationLevel("host")
+	checkRuleIsolationLevel("host")
 
 	// update unsuccessfully when many rule exists.
 	f, _ := os.CreateTemp("/tmp", "pd_tests")
@@ -703,8 +733,10 @@ func (s *configTestSuite) TestUpdateDefaultReplicaConfig(c *C) {
 	c.Assert(err, IsNil)
 	checkMaxReplicas(4)
 	checkRuleCount(4)
-	checkLocaltionLabels(1)
+	checkLocationLabels(1)
 	checkRuleLocationLabels(1)
+	checkIsolationLevel("host")
+	checkRuleIsolationLevel("host")
 }
 
 func (s *configTestSuite) TestPDServerConfig(c *C) {
