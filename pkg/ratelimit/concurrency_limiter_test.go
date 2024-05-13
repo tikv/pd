@@ -122,6 +122,6 @@ func TestConcurrencyLimiterAcquire(t *testing.T) {
 	}
 	wg.Wait()
 	// We should have 20 tasks running concurrently, so it should take at least 50ms to complete
-	require.Greater(t, time.Since(start).Milliseconds(), int64(50))
+	require.GreaterOrEqual(t, time.Since(start).Milliseconds(), int64(50))
 	require.Equal(t, int64(100), sum)
 }
