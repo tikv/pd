@@ -19,8 +19,9 @@ import (
 )
 
 const (
-	nameStr = "runner_name"
-	taskStr = "task_type"
+	nameStr     = "runner_name"
+	taskStr     = "task_type"
+	priorityStr = "priority"
 )
 
 var (
@@ -37,7 +38,7 @@ var (
 			Subsystem: "ratelimit",
 			Name:      "runner_pending_tasks",
 			Help:      "The number of pending tasks in the runner.",
-		}, []string{nameStr, taskStr})
+		}, []string{nameStr, priorityStr, taskStr})
 	RunnerFailedTasks = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
