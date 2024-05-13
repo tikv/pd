@@ -39,17 +39,18 @@ const initialCapacity = 100
 
 // Runner is the interface for running tasks.
 type Runner interface {
-	RunTask(ctx context.Context, f func(context.Context), opts ...TaskOption) error
+	RunTask(ctx context.Context, name string, f func(context.Context), opts ...TaskOption) error
 	Start()
 	Stop()
 }
 
 // Task is a task to be run.
 type Task struct {
-	Ctx         context.Context
-	Opts        *TaskOpts
-	f           func(context.Context)
+	ctx         context.Context
 	submittedAt time.Time
+	opts        *TaskOpts
+	f           func(context.Context)
+	name        string
 }
 
 // ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
@@ -86,18 +87,10 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 }
 
 // TaskOpts is the options for RunTask.
-type TaskOpts struct {
-	// TaskName is a human-readable name for the operation. TODO: metrics by name.
-	TaskName string
-}
+type TaskOpts struct{}
 
 // TaskOption configures TaskOp
 type TaskOption func(opts *TaskOpts)
-
-// WithTaskName specify the task name.
-func WithTaskName(name string) TaskOption {
-	return func(opts *TaskOpts) { opts.TaskName = name }
-}
 
 // Start starts the runner.
 func (cr *ConcurrentRunner) Start() {
@@ -114,9 +107,9 @@ func (cr *ConcurrentRunner) Start() {
 					if err != nil {
 						continue
 					}
-					go cr.run(task.Ctx, task.f, token)
+					go cr.run(task.ctx, task.f, token)
 				} else {
-					go cr.run(task.Ctx, task.f, nil)
+					go cr.run(task.ctx, task.f, nil)
 				}
 			case <-cr.stopChan:
 				cr.pendingMu.Lock()
@@ -156,7 +149,7 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 		select {
 		case cr.taskChan <- task:
 			cr.pendingTasks = cr.pendingTasks[1:]
-			cr.pendingTaskCount[task.Opts.TaskName]--
+			cr.pendingTaskCount[task.name]--
 			return
 		default:
 			return
@@ -171,15 +164,16 @@ func (cr *ConcurrentRunner) Stop() {
 }
 
 // RunTask runs the task asynchronously.
-func (cr *ConcurrentRunner) RunTask(ctx context.Context, f func(context.Context), opts ...TaskOption) error {
+func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(context.Context), opts ...TaskOption) error {
 	taskOpts := &TaskOpts{}
 	for _, opt := range opts {
 		opt(taskOpts)
 	}
 	task := &Task{
-		Ctx:  ctx,
+		ctx:  ctx,
+		name: name,
 		f:    f,
-		Opts: taskOpts,
+		opts: taskOpts,
 	}
 
 	cr.processPendingTasks()
@@ -197,7 +191,7 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, f func(context.Context)
 		}
 		task.submittedAt = time.Now()
 		cr.pendingTasks = append(cr.pendingTasks, task)
-		cr.pendingTaskCount[taskOpts.TaskName]++
+		cr.pendingTaskCount[task.name]++
 	}
 	return nil
 }
@@ -211,7 +205,7 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (*SyncRunner) RunTask(ctx context.Context, f func(context.Context), _ ...TaskOption) error {
+func (*SyncRunner) RunTask(ctx context.Context, _ string, f func(context.Context), _ ...TaskOption) error {
 	f(ctx)
 	return nil
 }

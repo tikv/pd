@@ -35,11 +35,11 @@ func TestConcurrentRunner(t *testing.T) {
 			wg.Add(1)
 			err := runner.RunTask(
 				context.Background(),
+				"test1",
 				func(context.Context) {
 					defer wg.Done()
 					time.Sleep(100 * time.Millisecond)
 				},
-				WithTaskName("test1"),
 			)
 			require.NoError(t, err)
 		}
@@ -55,11 +55,11 @@ func TestConcurrentRunner(t *testing.T) {
 			wg.Add(1)
 			err := runner.RunTask(
 				context.Background(),
+				"test2",
 				func(context.Context) {
 					defer wg.Done()
 					time.Sleep(100 * time.Millisecond)
 				},
-				WithTaskName("test2"),
 			)
 			if err != nil {
 				wg.Done()

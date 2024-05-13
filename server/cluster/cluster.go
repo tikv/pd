@@ -1026,10 +1026,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		ctx.TaskRunner.RunTask(
 			ctx.Context,
+			ratelimit.HandleStatsAsync,
 			func(_ context.Context) {
 				cluster.HandleStatsAsync(c, region)
 			},
-			ratelimit.WithTaskName(ratelimit.HandleStatsAsync),
 		)
 	}
 	tracer.OnAsyncHotStatsFinished()
@@ -1047,22 +1047,22 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
+				ratelimit.ObserveRegionStatsAsync,
 				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
-				ratelimit.WithTaskName(ratelimit.ObserveRegionStatsAsync),
 			)
 		}
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
 			ctx.TaskRunner.RunTask(
 				ctx,
+				ratelimit.UpdateSubTree,
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
-				ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 			)
 		}
 		return nil
@@ -1086,20 +1086,20 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 		ctx.TaskRunner.RunTask(
 			ctx,
+			ratelimit.UpdateSubTree,
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
-			ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 		)
 		tracer.OnUpdateSubTreeFinished()
 
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
+				ratelimit.HandleOverlaps,
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
 				},
-				ratelimit.WithTaskName(ratelimit.HandleOverlaps),
 			)
 		}
 		regionUpdateCacheEventCounter.Inc()
@@ -1109,13 +1109,13 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	// handle region stats
 	ctx.TaskRunner.RunTask(
 		ctx.Context,
+		ratelimit.CollectRegionStatsAsync,
 		func(_ context.Context) {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
 			// region stats needs to be collected in API mode.
 			// We need to think of a better way to reduce this part of the cost in the future.
 			cluster.Collect(c, region, hasRegionStats)
 		},
-		ratelimit.WithTaskName(ratelimit.CollectRegionStatsAsync),
 	)
 
 	tracer.OnCollectRegionStatsFinished()
@@ -1123,6 +1123,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if saveKV {
 			ctx.TaskRunner.RunTask(
 				ctx.Context,
+				ratelimit.SaveRegionToKV,
 				func(_ context.Context) {
 					// If there are concurrent heartbeats from the same region, the last write will win even if
 					// writes to storage in the critical area. So don't use mutex to protect it.
@@ -1144,7 +1145,6 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 					}
 					regionUpdateKVEventCounter.Inc()
 				},
-				ratelimit.WithTaskName(ratelimit.SaveRegionToKV),
 			)
 		}
 	}
