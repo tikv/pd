@@ -158,7 +158,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		var newPrimary string
 		for _, member := range nodes {
 			if member.GetAddr() != primary {
-				newPrimary = member.GetAddr()
+				newPrimary = member.Name()
 				break
 			}
 		}
