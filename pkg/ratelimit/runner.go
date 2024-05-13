@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/core/constant"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +36,7 @@ const (
 	SaveRegionToKV          = "SaveRegionToKV"
 )
 
-const initialCapacity = 100
+const initialCapacity = 10000
 
 // Runner is the interface for running tasks.
 type Runner interface {
@@ -88,16 +89,15 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 
 // TaskOpts is the options for RunTask.
 type TaskOpts struct {
-	// IsMetaUpdated indicates whether the meta is updated.
-	MetaUpdated bool
+	priority constant.PriorityLevel
 }
 
 // TaskOption configures TaskOp
 type TaskOption func(opts *TaskOpts)
 
-// WithMetaUpdated specify whether the meta is updated.
-func WithMetaUpdated(metaUpdated bool) TaskOption {
-	return func(opts *TaskOpts) { opts.MetaUpdated = metaUpdated }
+// WithPriority sets the priority of the task.
+func WithPriority(priority constant.PriorityLevel) TaskOption {
+	return func(opts *TaskOpts) { opts.priority = priority }
 }
 
 // Start starts the runner.
@@ -200,9 +200,16 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 	cr.processPendingTasks()
 	cr.pendingMu.Lock()
 	defer cr.pendingMu.Unlock()
-	if task.opts.MetaUpdated {
+	if task.opts.priority >= constant.High {
+		if len(cr.pendingHighPriorityTasks) > 0 {
+			maxWait := time.Since(cr.pendingHighPriorityTasks[0].submittedAt)
+			if maxWait > cr.maxPendingDuration {
+				RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+				return ErrMaxWaitingTasksExceeded
+			}
+		}
 		task.submittedAt = time.Now()
-		cr.pendingHighPriorityTasks = append(cr.pendingNormalPriorityTasks, task)
+		cr.pendingHighPriorityTasks = append(cr.pendingHighPriorityTasks, task)
 		cr.pendingTaskCount[task.name]++
 		return nil
 	}

@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
@@ -1030,7 +1031,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	saveKV, saveCache, needSync, metaUpdated := regionGuide(ctx, region, origin)
+	saveKV, saveCache, needSync, priority := regionGuide(ctx, region, origin)
 	tracer.OnRegionGuideFinished()
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
@@ -1047,7 +1048,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
-				ratelimit.WithMetaUpdated(metaUpdated),
+				ratelimit.WithPriority(priority),
 			)
 		}
 		// region is not updated to the subtree.
@@ -1058,7 +1059,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
-				ratelimit.WithMetaUpdated(true),
+				ratelimit.WithPriority(constant.High),
 			)
 		}
 		return nil
@@ -1086,7 +1087,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
-			ratelimit.WithMetaUpdated(metaUpdated),
+			ratelimit.WithPriority(priority),
 		)
 		tracer.OnUpdateSubTreeFinished()
 
@@ -1097,7 +1098,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
 				},
-				ratelimit.WithMetaUpdated(metaUpdated),
+				ratelimit.WithPriority(priority),
 			)
 		}
 		regionUpdateCacheEventCounter.Inc()
@@ -1114,7 +1115,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			// We need to think of a better way to reduce this part of the cost in the future.
 			cluster.Collect(c, region, hasRegionStats)
 		},
-		ratelimit.WithMetaUpdated(metaUpdated),
+		ratelimit.WithPriority(priority),
 	)
 
 	tracer.OnCollectRegionStatsFinished()
@@ -1144,7 +1145,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 					}
 					regionUpdateKVEventCounter.Inc()
 				},
-				ratelimit.WithMetaUpdated(metaUpdated),
+				ratelimit.WithPriority(priority),
 			)
 		}
 	}

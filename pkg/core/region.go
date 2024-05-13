@@ -35,6 +35,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -729,7 +730,7 @@ func (r *RegionInfo) isRegionRecreated() bool {
 
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync, metaUpdated bool)
+type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool, priority constant.PriorityLevel)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
@@ -742,7 +743,8 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync, metaUpdated bool) {
+	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool, priority constant.PriorityLevel) {
+		priority = constant.Medium
 		logRunner := ctx.LogRunner
 		// print log asynchronously
 		debug, info := d, i
@@ -772,7 +774,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			}
-			saveKV, saveCache, metaUpdated = true, true, true
+			saveKV, saveCache, priority = true, true, constant.High
 		} else {
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
@@ -785,7 +787,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-version", r.GetVersion()),
 					)
 				}
-				saveKV, saveCache, metaUpdated = true, true, true
+				saveKV, saveCache, priority = true, true, constant.High
 			}
 			if r.GetConfVer() > o.GetConfVer() {
 				if log.GetLevel() <= zap.InfoLevel {
@@ -796,7 +798,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-confver", r.GetConfVer()),
 					)
 				}
-				saveKV, saveCache, metaUpdated = true, true, true
+				saveKV, saveCache, priority = true, true, constant.High
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 				if origin.GetLeader().GetId() != 0 && log.GetLevel() <= zap.InfoLevel {
@@ -807,7 +809,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					)
 				}
 				// We check it first and do not return because the log is important for us to investigate,
-				saveCache, needSync, metaUpdated = true, true, true
+				saveCache, needSync, priority = true, true, constant.High
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true
