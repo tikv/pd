@@ -97,7 +97,7 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 	var primaryIDs []string
 	var secondaryValues []string
 	for _, member := range entries {
-		if (newPrimary == "" && member.ServiceAddr != oldPrimary) || (newPrimary != "" && member.ServiceAddr == newPrimary) {
+		if (newPrimary == "" && member.ServiceAddr != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 			if string(member.MemberValue) == "" {
 				return errors.New("member value is empty")
