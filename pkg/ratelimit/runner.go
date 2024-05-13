@@ -36,7 +36,10 @@ const (
 	SaveRegionToKV          = "SaveRegionToKV"
 )
 
-const initialCapacity = 10000
+const (
+	initialCapacity        = 10000
+	maxHighPriorityTaskNum = 20000000
+)
 
 // Runner is the interface for running tasks.
 type Runner interface {
@@ -197,12 +200,11 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 	cr.pendingMu.Lock()
 	defer cr.pendingMu.Unlock()
 	if task.priority >= constant.High {
-		if len(cr.pendingHighPriorityTasks) > 0 {
-			maxWait := time.Since(cr.pendingHighPriorityTasks[0].submittedAt)
-			if maxWait > cr.maxPendingDuration {
-				RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
-				return ErrMaxWaitingTasksExceeded
-			}
+		// We use the max task number to prevent the OOM issue.
+		// It occupies around 1.5GB memory when there is 20000000 pending task.
+		if len(cr.pendingHighPriorityTasks) > maxHighPriorityTaskNum {
+			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+			return ErrMaxWaitingTasksExceeded
 		}
 		task.submittedAt = time.Now()
 		cr.pendingHighPriorityTasks = append(cr.pendingHighPriorityTasks, task)
