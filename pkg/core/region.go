@@ -36,7 +36,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -751,19 +750,19 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			debug = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
 					ctx.Context,
+					"DebugLog",
 					func(_ context.Context) {
 						d(msg, fields...)
 					},
-					ratelimit.WithTaskName("DebugLog"),
 				)
 			}
 			info = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
 					ctx.Context,
+					"InfoLog",
 					func(_ context.Context) {
 						i(msg, fields...)
 					},
-					ratelimit.WithTaskName("InfoLog"),
 				)
 			}
 		}
