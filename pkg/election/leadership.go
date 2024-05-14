@@ -64,14 +64,14 @@ type Leadership struct {
 	leaderKey   string
 	leaderValue string
 
-	leaderWatch atomic.Bool
-
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
 	keepAliveCancelFuncLock syncutil.Mutex
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
+	// primaryWatch is ONLY set to true when the use `/ms/primary/transfer` API.
+	primaryWatch atomic.Bool
 }
 
 func (ls *Leadership) GetLeaderValue() string {
@@ -119,14 +119,14 @@ func (ls *Leadership) GetLeaderKey() string {
 	return ls.leaderKey
 }
 
-// SetLeaderWatch sets the leader watch flag.
-func (ls *Leadership) SetLeaderWatch(val bool) {
-	ls.leaderWatch.Store(val)
+// SetPrimaryWatch sets the primary watch flag.
+func (ls *Leadership) SetPrimaryWatch(val bool) {
+	ls.primaryWatch.Store(val)
 }
 
-// IsLeader gets the leader watch flag.
-func (ls *Leadership) IsLeader() bool {
-	return ls.leaderWatch.Load()
+// IsPrimary gets the primary watch flag.
+func (ls *Leadership) IsPrimary() bool {
+	return ls.primaryWatch.Load()
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
@@ -392,8 +392,8 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 					return
 				}
 				// only API update the leader key to transfer the primary will meet
-				if ev.Type == mvccpb.PUT && ls.IsLeader() {
-					log.Info("[PrimaryWatch] current leadership is updated",
+				if ev.Type == mvccpb.PUT && ls.IsPrimary() {
+					log.Info("current leadership is updated",
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
@@ -415,5 +415,5 @@ func (ls *Leadership) Reset() {
 	}
 	ls.keepAliveCancelFuncLock.Unlock()
 	ls.getLease().Close()
-	ls.SetLeaderWatch(false)
+	ls.SetPrimaryWatch(false)
 }

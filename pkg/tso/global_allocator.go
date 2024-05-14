@@ -684,17 +684,17 @@ func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary cha
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
 	// Watch will keep looping and never return unless the primary has changed.
-	gta.member.GetLeadership().SetLeaderWatch(true)
-	gta.member.GetLeadership().Watch(gta.ctx, resp.Kvs[0].ModRevision+1)
-	gta.member.GetLeadership().SetLeaderWatch(false)
+	gta.member.GetLeadership().SetPrimaryWatch(true)
+	gta.member.GetLeadership().Watch(ctx, resp.Kvs[0].ModRevision+1)
+	gta.member.GetLeadership().SetPrimaryWatch(false)
 
-	// only API update primary will set the expected leader
+	// only `/ms/primary/transfer` API update primary will set the expected primary
 	curPrimary, err := etcdutil.GetValue(gta.member.Client(), gta.member.GetLeaderPath())
 	if err != nil {
 		log.Error("tso primary getting the leader meets error", errs.ZapError(err))
 		return
 	}
-	// only trigger by updating primary
+	// `exitPrimary` only triggered by updating primary
 	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
 		mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
 

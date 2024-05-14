@@ -88,7 +88,7 @@ func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
 // RemoveExpectedPrimary removes the expected primary key.
 // - removed when campaign new primary successfully
 func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
-	log.Info("remove expected primary key", zap.String("leaderPath", leaderPath))
+	log.Info("remove expected primary key", zap.String("leader-path", leaderPath))
 	// remove expected leader key
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))).
@@ -101,7 +101,7 @@ func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 
 // SetExpectedPrimary sets the expected primary key when the current primary has exited.
 func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
-	log.Info("set expected primary key", zap.String("leaderPath", leaderPath))
+	log.Info("set expected primary key", zap.String("leader-path", leaderPath))
 	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
 	if err != nil {
 		log.Error("get primary key error", zap.Error(err))

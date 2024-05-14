@@ -255,7 +255,7 @@ func (s *Server) primaryElectionLoop() {
 				zap.String("server-name", s.Name()),
 				zap.String("target-primary-id", expectedPrimary),
 				zap.Uint64("member-id", s.participant.ID()),
-				zap.String("cur-memberValue", s.participant.MemberValue()))
+				zap.String("cur-member-value", s.participant.MemberValue()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
@@ -339,17 +339,17 @@ func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	}
 	log.Info("scheduling primary start to watch the primary", zap.Stringer("scheduling-primary", s.participant.GetLeader()))
 	// Watch will keep looping and never return unless the primary has changed.
-	s.participant.GetLeadership().SetLeaderWatch(true)
-	s.participant.GetLeadership().Watch(s.serverLoopCtx, resp.Kvs[0].ModRevision+1)
-	s.participant.GetLeadership().SetLeaderWatch(false)
+	s.participant.GetLeadership().SetPrimaryWatch(true)
+	s.participant.GetLeadership().Watch(ctx, resp.Kvs[0].ModRevision+1)
+	s.participant.GetLeadership().SetPrimaryWatch(false)
 
-	// only API update primary will set the expected leader
+	// only `/ms/primary/transfer` API update primary will set the expected primary
 	curPrimary, err := etcdutil.GetValue(s.participant.Client(), s.participant.GetLeaderPath())
 	if err != nil {
 		log.Error("scheduling primary getting the leader meets error", errs.ZapError(err))
 		return
 	}
-	// only trigger by updating primary
+	// `exitPrimary` only triggered by updating primary
 	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
 		utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
 
