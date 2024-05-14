@@ -195,7 +195,7 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 	for _, opt := range opts {
 		opt(task)
 	}
-
+	cr.processPendingTasks()
 	cr.pendingMu.Lock()
 	defer func() {
 		cr.pendingMu.Unlock()
