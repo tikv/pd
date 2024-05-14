@@ -156,7 +156,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	labels := make(map[string]any)
 	labels["testkey"] = "testvalue"
 	data, _ = json.Marshal(labels)
-	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
+	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?seconds=1", "application/json", bytes.NewBuffer(data))
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -164,7 +164,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 
 	re.Equal("Profile", resp.Header.Get("service-label"))
-	re.Equal("{\"force\":[\"true\"]}", resp.Header.Get("url-param"))
+	re.Equal("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
 	re.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
 	re.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
 	re.Equal("anonymous", resp.Header.Get("caller-id"))
@@ -182,7 +182,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 
 	header := mustRequestSuccess(re, leader.GetServer())
-	re.Equal("", header.Get("service-label"))
+	re.Equal("GetVersion", header.Get("service-label"))
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/addRequestInfoMiddleware"))
 }
