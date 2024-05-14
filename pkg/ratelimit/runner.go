@@ -196,11 +196,13 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 		opt(task)
 	}
 
-	cr.processPendingTasks()
 	cr.pendingMu.Lock()
-	defer cr.pendingMu.Unlock()
+	defer func() {
+		cr.pendingMu.Unlock()
+		cr.processPendingTasks()
+	}()
 	if task.priority >= constant.High {
-		// We use the max task number to prevent the OOM issue.
+		// We use the max task number to limit the memory usage.
 		// It occupies around 1.5GB memory when there is 20000000 pending task.
 		if len(cr.pendingHighPriorityTasks) > maxHighPriorityTaskNum {
 			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
