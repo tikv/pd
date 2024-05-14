@@ -325,7 +325,7 @@ func (s *Server) campaignLeader() {
 			log.Info("server is closed")
 			return
 		case <-exitPrimary:
-			log.Info("no longer a primary because primary have been updated, the scheduling primary will step down")
+			log.Info("no longer be primary because primary have been updated, the scheduling primary will step down")
 			return
 		}
 	}

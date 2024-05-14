@@ -126,12 +126,20 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 		primaryKey = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
 	}
 
+	// remove possible residual value
+	utils.RemoveExpectedPrimary(client, primaryKey)
+
+	// only give the primary lease to the new primary
+	grantResp, err := client.Grant(client.Ctx(), utils.DefaultLeaderLease)
+	if err != nil {
+		return errors.Errorf("failed to grant lease for %s, err: %v", serviceName, err)
+	}
 	// update primary key to notify old primary server.
 	putResp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(primaryKey, secondaryValues[nextPrimaryID])).
+		Then(clientv3.OpPut(primaryKey, secondaryValues[nextPrimaryID], clientv3.WithLease(grantResp.ID))).
 		Commit()
 	if err != nil || !putResp.Succeeded {
-		return errors.Errorf("failed to write primary flag for %s", serviceName)
+		return errors.Errorf("failed to write primary flag for %s, err: %v", serviceName, err)
 	}
 	return nil
 }

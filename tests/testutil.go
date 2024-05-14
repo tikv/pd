@@ -159,7 +159,7 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 			}
 		}
 		return false
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return primary
 }

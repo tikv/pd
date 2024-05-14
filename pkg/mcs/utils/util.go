@@ -87,6 +87,7 @@ func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
 
 // RemoveExpectedPrimary removes the expected primary key.
 // - removed when campaign new primary successfully
+// - removed when appoint new primary by API.
 func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 	log.Info("remove expected primary key", zap.String("leader-path", leaderPath))
 	// remove expected leader key
@@ -94,7 +95,7 @@ func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))).
 		Commit()
 	if err != nil || !resp.Succeeded {
-		log.Error("change primary error", errs.ZapError(err))
+		log.Error("change expected primary error", errs.ZapError(err))
 		return
 	}
 }
@@ -107,15 +108,20 @@ func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
 		log.Error("get primary key error", zap.Error(err))
 		return
 	}
+	grantResp, err := client.Grant(client.Ctx(), DefaultLeaderLease)
+	if err != nil {
+		log.Error("grant lease for expected primary error", errs.ZapError(err))
+		return
+	}
 	// write a flag to indicate the current primary has exited
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(
-			clientv3.OpPut(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"), string(leaderRaw)),
+			clientv3.OpPut(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"), string(leaderRaw), clientv3.WithLease(grantResp.ID)),
 			// indicate the current primary has exited
 			clientv3.OpDelete(leaderPath)).
 		Commit()
 	if err != nil || !resp.Succeeded {
-		log.Error("change primary error", errs.ZapError(err))
+		log.Error("change expected primary error", errs.ZapError(err))
 		return
 	}
 }

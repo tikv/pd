@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -157,6 +158,7 @@ func (m *EmbeddedEtcdMember) UnsetLeader() {
 // EnableLeader sets the member itself to a PD leader.
 func (m *EmbeddedEtcdMember) EnableLeader() {
 	m.setLeader(m.member)
+	utils.RemoveExpectedPrimary(m.client, m.GetLeaderPath())
 }
 
 // GetLeaderPath returns the path of the PD leader.

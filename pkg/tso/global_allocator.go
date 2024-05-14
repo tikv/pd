@@ -668,7 +668,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
 			return
 		case <-exitPrimary:
-			log.Info("no longer a primary because primary have been updated, the TSO primary will step down")
+			log.Info("no longer be primary because primary have been updated, the TSO primary will step down")
 			return
 		}
 	}
