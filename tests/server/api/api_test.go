@@ -373,6 +373,18 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
 	}
+
+	// reset rate limit
+	input = map[string]any{
+		"enable-rate-limit": "true",
+	}
+	data, err = json.Marshal(input)
+	re.NoError(err)
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	resp, err = dialClient.Do(req)
+	re.NoError(err)
+	resp.Body.Close()
+	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 }
 
 func (suite *middlewareTestSuite) TestSwaggerUrl() {
