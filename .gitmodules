@@ -1,0 +1,6 @@
+[submodule "deps/etcd"]
+	path = deps/etcd
+	url = https://github.com/qiongtubao/etcd.git
+[submodule "deps/grpc-go"]
+	path = deps/grpc-go
+	url = https://github.com/qiongtubao/grpc-go.git
