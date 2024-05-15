@@ -52,7 +52,7 @@ const (
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	// It takes about 1.3 minutes to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
+	// It takes about 1.3 minutes(1000000/128*10/60/1000) to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
 	patrolScanRegionLimit = 128
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
