@@ -370,7 +370,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 // issue #7992
 func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion() {
 	re := suite.Require()
-	opts := mockconfig.NewTestOptions()
+	opts := config.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(suite.ctx, cluster, stream)
@@ -457,7 +457,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 
 func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	re := suite.Require()
-	opts := mockconfig.NewTestOptions()
+	opts := config.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
 	controller := NewOperatorController(suite.ctx, cluster, stream)
