@@ -70,7 +70,7 @@ func (suite *operatorTestSuite) TestAddRemovePeer() {
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 	re := suite.Require()
-	pauseRuleChecker(re, cluster)
+	pauseAllCheckers(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -205,7 +205,7 @@ func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestClus
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	pauseRuleChecker(re, cluster)
+	pauseAllCheckers(re, cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
@@ -241,7 +241,7 @@ func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
 
 func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
-	pauseRuleChecker(re, cluster)
+	pauseAllCheckers(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -521,7 +521,7 @@ func (suite *operatorTestSuite) TestGetOperatorsAsObject() {
 
 func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestCluster) {
 	re := suite.Require()
-	pauseRuleChecker(re, cluster)
+	pauseAllCheckers(re, cluster)
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -642,7 +642,7 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	pauseRuleChecker(re, cluster)
+	pauseAllCheckers(re, cluster)
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
