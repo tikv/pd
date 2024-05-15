@@ -106,8 +106,8 @@ func (l *ConcurrencyLimiter) GetWaitingTasksNum() uint64 {
 	return l.waiting
 }
 
-// Acquire acquires a token from the limiter. which will block until a token is available or ctx is done, like Timeout.
-func (l *ConcurrencyLimiter) Acquire(ctx context.Context) (*TaskToken, error) {
+// AcquireToken acquires a token from the limiter. which will block until a token is available or ctx is done, like Timeout.
+func (l *ConcurrencyLimiter) AcquireToken(ctx context.Context) (*TaskToken, error) {
 	l.mu.Lock()
 	if l.current >= l.limit {
 		l.waiting++
@@ -129,27 +129,26 @@ func (l *ConcurrencyLimiter) Acquire(ctx context.Context) (*TaskToken, error) {
 		}
 	}
 	l.current++
-	token := &TaskToken{limiter: l}
+	token := &TaskToken{}
 	l.mu.Unlock()
 	return token, nil
+}
+
+// ReleaseToken releases the token.
+func (l *ConcurrencyLimiter) ReleaseToken(token *TaskToken) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if token.released {
+		return
+	}
+	token.released = true
+	l.current--
+	if len(l.queue) < int(l.limit) {
+		l.queue <- token
+	}
 }
 
 // TaskToken is a token that must be released after the task is done.
 type TaskToken struct {
 	released bool
-	limiter  *ConcurrencyLimiter
-}
-
-// Release releases the token.
-func (tt *TaskToken) Release() {
-	tt.limiter.mu.Lock()
-	defer tt.limiter.mu.Unlock()
-	if tt.released {
-		return
-	}
-	tt.released = true
-	tt.limiter.current--
-	if len(tt.limiter.queue) < int(tt.limiter.limit) {
-		tt.limiter.queue <- tt
-	}
 }
