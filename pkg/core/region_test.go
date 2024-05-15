@@ -551,44 +551,97 @@ func TestSetRegion(t *testing.T) {
 	re.Equal(float64(2), keysRate)
 }
 
-func TestShouldRemoveFromSubTree(t *testing.T) {
+func TestSubTreeIncrementalUpdate(t *testing.T) {
 	re := require.New(t)
 	peer1 := &metapb.Peer{StoreId: uint64(1), Id: uint64(1)}
 	peer2 := &metapb.Peer{StoreId: uint64(2), Id: uint64(2)}
 	peer3 := &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
 	peer4 := &metapb.Peer{StoreId: uint64(3), Id: uint64(3)}
-	region := NewRegionInfo(&metapb.Region{
-		Id:       uint64(1),
-		Peers:    []*metapb.Peer{peer1, peer2, peer4},
-		StartKey: []byte(fmt.Sprintf("%20d", 10)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
-	}, peer1)
-
 	origin := NewRegionInfo(&metapb.Region{
 		Id:       uint64(1),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
 	}, peer1)
-	re.True(region.peersEqualTo(origin))
-
+	region := NewRegionInfo(&metapb.Region{
+		Id:       uint64(1),
+		Peers:    []*metapb.Peer{peer1, peer2, peer4},
+		StartKey: []byte(fmt.Sprintf("%20d", 10)),
+		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
+	}, peer1)
+	// Nothing changed.
+	re.True(origin.peersEqualTo(region))
+	// Leader changed.
 	region.leader = peer2
-	re.False(region.peersEqualTo(origin))
-
+	re.False(origin.peersEqualTo(region))
+	leaderChanged, remove, add := origin.getLeaderChange(region)
+	re.True(leaderChanged)
+	re.Equal(peer1.GetStoreId(), remove)
+	re.Equal(peer2.GetStoreId(), add)
+	// Pending peer changed.
 	region.leader = peer1
 	region.pendingPeers = append(region.pendingPeers, peer4)
-	re.False(region.peersEqualTo(origin))
-
+	re.False(origin.peersEqualTo(region))
+	leaderChanged, _, _ = origin.getLeaderChange(region)
+	re.False(leaderChanged)
+	pendingPeerChanged, removes, adds := origin.getPendingPeerChange(region)
+	re.True(pendingPeerChanged)
+	re.Empty(removes)
+	re.Equal([]uint64{peer4.GetStoreId()}, adds)
+	// Learner changed.
 	region.pendingPeers = nil
 	region.learners = append(region.learners, peer2)
-	re.False(region.peersEqualTo(origin))
-
+	re.False(origin.peersEqualTo(region))
+	pendingPeerChanged, _, _ = origin.getPendingPeerChange(region)
+	re.False(pendingPeerChanged)
+	learnerChanged, removes, adds := origin.getLearnerChange(region)
+	re.True(learnerChanged)
+	re.Empty(removes)
+	re.Equal([]uint64{peer2.GetStoreId()}, adds)
+	// Nothing changed.
 	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
-	re.True(region.peersEqualTo(origin))
-
-	region.voters[2].StoreId = 4
+	re.True(origin.peersEqualTo(region))
+	learnerChanged, _, _ = origin.getLearnerChange(region)
+	re.False(learnerChanged)
+	// Follower changed - store ID changed.
+	peer4 = &metapb.Peer{StoreId: uint64(4), Id: uint64(3)}
+	region.voters[2] = peer4
 	re.False(region.peersEqualTo(origin))
+	followerChanged, removes, adds := origin.getFollowerChange(region)
+	re.True(followerChanged)
+	re.Equal([]uint64{peer3.GetStoreId()}, removes)
+	re.Equal([]uint64{peer4.GetStoreId()}, adds)
+	// Follower changed - peer ID changed.
+	peer4 = &metapb.Peer{StoreId: uint64(3), Id: uint64(4)}
+	region.voters[2] = peer4
+	re.False(region.peersEqualTo(origin))
+	followerChanged, removes, adds = origin.getFollowerChange(region)
+	re.True(followerChanged)
+	re.Equal([]uint64{peer3.GetStoreId()}, removes)
+	re.Equal([]uint64{peer4.GetStoreId()}, adds)
+	re.Equal(peer3.GetStoreId(), peer4.GetStoreId())
+	// Leader and follower changed at the same time.
+	region.leader = peer2
+	region.voters[2] = peer4
+	re.False(region.peersEqualTo(origin))
+	leaderChanged, remove, add = origin.getLeaderChange(region)
+	re.True(leaderChanged)
+	re.Equal(peer1.GetStoreId(), remove)
+	re.Equal(peer2.GetStoreId(), add)
+	followerChanged, removes, adds = origin.getFollowerChange(region)
+	re.True(followerChanged)
+	// sort the removes
+	re.Len(removes, 2)
+	for _, storeID := range []uint64{peer2.GetStoreId(), peer3.GetStoreId()} {
+		re.Contains(removes, storeID)
+	}
+	re.Len(adds, 2)
+	for _, storeID := range []uint64{peer1.GetStoreId(), peer4.GetStoreId()} {
+		re.Contains(adds, storeID)
+	}
+	// Same store ID with different peer ID.
+	re.Equal(peer3.GetStoreId(), peer4.GetStoreId())
 }
 
 func checkRegions(re *require.Assertions, regions *RegionsInfo) {

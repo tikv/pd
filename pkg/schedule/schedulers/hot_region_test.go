@@ -619,7 +619,7 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	for i := uint64(1); i <= 3; i++ {
 		r := tc.GetRegion(i)
 		tc.RemoveRegion(r)
-		tc.RemoveRegionFromSubTree(r)
+		tc.RemoveRegionFromSubTrees(r)
 	}
 	hb.Schedule(tc, false)
 	clearPendingInfluence(hb.(*hotScheduler))
@@ -1354,7 +1354,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	for i := uint64(1); i <= 3; i++ {
 		r := tc.GetRegion(i)
 		tc.RemoveRegion(r)
-		tc.RemoveRegionFromSubTree(r)
+		tc.RemoveRegionFromSubTrees(r)
 	}
 	hb.updateReadTime = time.Now().Add(-time.Second)
 	hb.Schedule(tc, false)

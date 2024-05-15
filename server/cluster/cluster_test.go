@@ -1873,7 +1873,7 @@ func Test(t *testing.T) {
 		checkRegions(re, cache, regions[0:(i+1)])
 
 		cache.RemoveRegion(region)
-		cache.RemoveRegionFromSubTree(region)
+		cache.RemoveRegionFromSubTrees(region)
 		re.Nil(cache.GetRegion(i))
 		re.Nil(cache.GetRegionByKey(regionKey))
 		checkRegions(re, cache, regions[0:i])
