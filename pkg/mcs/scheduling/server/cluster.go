@@ -55,7 +55,8 @@ type Cluster struct {
 	clusterID         uint64
 	running           atomic.Bool
 
-	heartbeatRunnner ratelimit.Runner
+	heartbeatRunner  ratelimit.Runner
+	statisticsRunner ratelimit.Runner
 	logRunner        ratelimit.Runner
 }
 
@@ -65,8 +66,9 @@ const (
 	collectWaitTime       = time.Minute
 
 	// heartbeat relative const
-	heartbeatTaskRunner = "heartbeat-task-runner"
-	logTaskRunner       = "log-task-runner"
+	heartbeatTaskRunner  = "heartbeat-task-runner"
+	statisticsTaskRunner = "statistics-task-runner"
+	logTaskRunner        = "log-task-runner"
 )
 
 var syncRunner = ratelimit.NewSyncRunner()
@@ -94,7 +96,8 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
 
-		heartbeatRunnner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		heartbeatRunner:  ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		statisticsRunner: ratelimit.NewConcurrentRunner(statisticsTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:        ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
@@ -532,7 +535,8 @@ func (c *Cluster) StartBackgroundJobs() {
 	go c.runUpdateStoreStats()
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
-	c.heartbeatRunnner.Start()
+	c.heartbeatRunner.Start()
+	c.statisticsRunner.Start()
 	c.logRunner.Start()
 	c.running.Store(true)
 }
@@ -544,7 +548,8 @@ func (c *Cluster) StopBackgroundJobs() {
 	}
 	c.running.Store(false)
 	c.coordinator.Stop()
-	c.heartbeatRunnner.Stop()
+	c.heartbeatRunner.Stop()
+	c.statisticsRunner.Stop()
 	c.logRunner.Stop()
 	c.cancel()
 	c.wg.Wait()
@@ -561,17 +566,18 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
-	var taskRunner, logRunner ratelimit.Runner
-	taskRunner, logRunner = syncRunner, syncRunner
+	var taskRunner, statisticsRunner, logRunner ratelimit.Runner
+	taskRunner, statisticsRunner, logRunner = syncRunner, syncRunner, syncRunner
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
-		taskRunner = c.heartbeatRunnner
+		taskRunner = c.heartbeatRunner
 		logRunner = c.logRunner
 	}
 	ctx := &core.MetaProcessContext{
-		Context:    c.ctx,
-		Tracer:     tracer,
-		TaskRunner: taskRunner,
-		LogRunner:  logRunner,
+		Context:          c.ctx,
+		Tracer:           tracer,
+		TaskRunner:       taskRunner,
+		StatisticsRunner: statisticsRunner,
+		LogRunner:        logRunner,
 	}
 	tracer.Begin()
 	if err := c.processRegionHeartbeat(ctx, region); err != nil {
