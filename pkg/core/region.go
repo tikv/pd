@@ -159,46 +159,33 @@ func classifyVoterAndLearner(region *RegionInfo) {
 	region.witnesses = witnesses
 }
 
-// peersEqualTo returns true when the peers are not changed, which may caused by: the region leader not changed,
-// peer transferred, new peer was created, learners changed, pendingPeers changed.
-func (r *RegionInfo) peersEqualTo(region *RegionInfo) bool {
-	return r.leader.GetId() == region.leader.GetId() &&
-		SortedPeersEqual(r.GetVoters(), region.GetVoters()) &&
-		SortedPeersEqual(r.GetLearners(), region.GetLearners()) &&
-		SortedPeersEqual(r.GetWitnesses(), region.GetWitnesses()) &&
-		SortedPeersEqual(r.GetPendingPeers(), region.GetPendingPeers())
-}
-
 func (r *RegionInfo) getLeaderChange(region *RegionInfo) (changed bool, remove uint64, add uint64) {
 	originLeader := r.GetLeader()
 	newLeader := region.GetLeader()
-	return originLeader.GetStoreId() != newLeader.GetStoreId() || originLeader.GetId() != newLeader.GetId(),
-		originLeader.GetStoreId(), newLeader.GetStoreId()
+	return originLeader.GetStoreId() != newLeader.GetStoreId(), originLeader.GetStoreId(), newLeader.GetStoreId()
 }
 
 func (r *RegionInfo) getFollowerChange(region *RegionInfo) (changed bool, removes []uint64, adds []uint64) {
 	var (
 		originFollowers                = r.GetFollowers()
-		originFollowerMap              = make(map[uint64]uint64 /* storeID -> PeerID */, len(originFollowers))
+		originFollowerMap              = make(map[uint64]struct{}, len(originFollowers))
 		newFollowers                   = region.GetFollowers()
-		newFollowerMap                 = make(map[uint64]uint64 /* Ditto */, len(newFollowers))
+		newFollowerMap                 = make(map[uint64]struct{}, len(newFollowers))
 		removedStoreIDs, addedStoreIDs []uint64
 	)
 	for _, follower := range originFollowers {
-		originFollowerMap[follower.GetStoreId()] = follower.GetId()
+		originFollowerMap[follower.GetStoreId()] = struct{}{}
 	}
 	// Find the added store IDs.
 	for _, follower := range newFollowers {
-		followerID := follower.GetId()
-		if peerID, ok := originFollowerMap[follower.GetStoreId()]; !ok || peerID != followerID {
+		if _, ok := originFollowerMap[follower.GetStoreId()]; !ok {
 			addedStoreIDs = append(addedStoreIDs, follower.GetStoreId())
 		}
-		newFollowerMap[follower.GetStoreId()] = followerID
+		newFollowerMap[follower.GetStoreId()] = struct{}{}
 	}
 	// Find the removed store IDs.
 	for _, follower := range originFollowers {
-		followerID := follower.GetId()
-		if peerID, ok := newFollowerMap[follower.GetStoreId()]; !ok || peerID != followerID {
+		if _, ok := newFollowerMap[follower.GetStoreId()]; !ok {
 			removedStoreIDs = append(removedStoreIDs, follower.GetStoreId())
 		}
 	}
@@ -208,26 +195,24 @@ func (r *RegionInfo) getFollowerChange(region *RegionInfo) (changed bool, remove
 func (r *RegionInfo) getLearnerChange(region *RegionInfo) (changed bool, removes []uint64, adds []uint64) {
 	var (
 		originLearners                 = r.GetLearners()
-		originLearnerMap               = make(map[uint64]uint64 /* storeID -> PeerID */, len(originLearners))
+		originLearnerMap               = make(map[uint64]struct{}, len(originLearners))
 		newLearners                    = region.GetLearners()
-		newLearnerMap                  = make(map[uint64]uint64 /* Ditto */, len(newLearners))
+		newLearnerMap                  = make(map[uint64]struct{}, len(newLearners))
 		removedStoreIDs, addedStoreIDs []uint64
 	)
 	for _, learner := range originLearners {
-		originLearnerMap[learner.GetStoreId()] = learner.GetId()
+		originLearnerMap[learner.GetStoreId()] = struct{}{}
 	}
 	// Find the added store IDs.
 	for _, learner := range newLearners {
-		learnerID := learner.GetId()
-		if peerID, ok := originLearnerMap[learner.GetStoreId()]; !ok || peerID != learnerID {
+		if _, ok := originLearnerMap[learner.GetStoreId()]; !ok {
 			addedStoreIDs = append(addedStoreIDs, learner.GetStoreId())
 		}
-		newLearnerMap[learner.GetStoreId()] = learnerID
+		newLearnerMap[learner.GetStoreId()] = struct{}{}
 	}
 	// Find the removed store IDs.
 	for _, learner := range originLearners {
-		learnerID := learner.GetId()
-		if peerID, ok := newLearnerMap[learner.GetStoreId()]; !ok || peerID != learnerID {
+		if _, ok := newLearnerMap[learner.GetStoreId()]; !ok {
 			removedStoreIDs = append(removedStoreIDs, learner.GetStoreId())
 		}
 	}
@@ -237,26 +222,24 @@ func (r *RegionInfo) getLearnerChange(region *RegionInfo) (changed bool, removes
 func (r *RegionInfo) getWitnessChange(region *RegionInfo) (changed bool, removes []uint64, adds []uint64) {
 	var (
 		originWitnesses                = r.GetWitnesses()
-		originWitnessMap               = make(map[uint64]uint64 /* storeID -> PeerID */, len(originWitnesses))
+		originWitnessMap               = make(map[uint64]struct{}, len(originWitnesses))
 		newWitnesses                   = region.GetWitnesses()
-		newWitnessMap                  = make(map[uint64]uint64 /* Ditto */, len(newWitnesses))
+		newWitnessMap                  = make(map[uint64]struct{}, len(newWitnesses))
 		removedStoreIDs, addedStoreIDs []uint64
 	)
 	for _, witness := range originWitnesses {
-		originWitnessMap[witness.GetStoreId()] = witness.GetId()
+		originWitnessMap[witness.GetStoreId()] = struct{}{}
 	}
 	// Find the added store IDs.
 	for _, witness := range newWitnesses {
-		witnessID := witness.GetId()
-		if peerID, ok := originWitnessMap[witness.GetStoreId()]; !ok || peerID != witnessID {
+		if _, ok := originWitnessMap[witness.GetStoreId()]; !ok {
 			addedStoreIDs = append(addedStoreIDs, witness.GetStoreId())
 		}
-		newWitnessMap[witness.GetStoreId()] = witnessID
+		newWitnessMap[witness.GetStoreId()] = struct{}{}
 	}
 	// Find the removed store IDs.
 	for _, witness := range originWitnesses {
-		witnessID := witness.GetId()
-		if peerID, ok := newWitnessMap[witness.GetStoreId()]; !ok || peerID != witnessID {
+		if _, ok := newWitnessMap[witness.GetStoreId()]; !ok {
 			removedStoreIDs = append(removedStoreIDs, witness.GetStoreId())
 		}
 	}
@@ -266,26 +249,24 @@ func (r *RegionInfo) getWitnessChange(region *RegionInfo) (changed bool, removes
 func (r *RegionInfo) getPendingPeerChange(region *RegionInfo) (changed bool, removes []uint64, adds []uint64) {
 	var (
 		originPendingPeers             = r.GetPendingPeers()
-		originPendingPeerMap           = make(map[uint64]uint64 /* storeID -> PeerID */, len(originPendingPeers))
+		originPendingPeerMap           = make(map[uint64]struct{}, len(originPendingPeers))
 		newPendingPeers                = region.GetPendingPeers()
-		newPendingPeerMap              = make(map[uint64]uint64 /* Ditto */, len(newPendingPeers))
+		newPendingPeerMap              = make(map[uint64]struct{}, len(newPendingPeers))
 		removedStoreIDs, addedStoreIDs []uint64
 	)
 	for _, pendingPeer := range originPendingPeers {
-		originPendingPeerMap[pendingPeer.GetStoreId()] = pendingPeer.GetId()
+		originPendingPeerMap[pendingPeer.GetStoreId()] = struct{}{}
 	}
 	// Find the added store IDs.
 	for _, pendingPeer := range newPendingPeers {
-		pendingPeerID := pendingPeer.GetId()
-		if peerID, ok := originPendingPeerMap[pendingPeer.GetStoreId()]; !ok || peerID != pendingPeerID {
+		if _, ok := originPendingPeerMap[pendingPeer.GetStoreId()]; !ok {
 			addedStoreIDs = append(addedStoreIDs, pendingPeer.GetStoreId())
 		}
-		newPendingPeerMap[pendingPeer.GetStoreId()] = pendingPeerID
+		newPendingPeerMap[pendingPeer.GetStoreId()] = struct{}{}
 	}
 	// Find the removed store IDs.
 	for _, pendingPeer := range originPendingPeers {
-		pendingPeerID := pendingPeer.GetId()
-		if peerID, ok := newPendingPeerMap[pendingPeer.GetStoreId()]; !ok || peerID != pendingPeerID {
+		if _, ok := newPendingPeerMap[pendingPeer.GetStoreId()]; !ok {
 			removedStoreIDs = append(removedStoreIDs, pendingPeer.GetStoreId())
 		}
 	}
@@ -1538,7 +1519,12 @@ func (r *RegionsInfo) updateRegionFromSubTreesLocked(origin, region *RegionInfo)
 	}
 	// Update the item to the latest region to ensure the consistency among all the subtrees.
 	item.RegionInfo = region
-	// Check and update the subtrees one by one.
+	// Since the subtrees maintain the mapping from the store ID to the regions, so we could only
+	// update those regions that have changed the peer stores. For example, if a region varies its
+	// leader from store 1 to store 2, then we will have the following changes:
+	//   - Remove the region from the leader subtree of store 1.
+	//   - Add the region to the leader subtree of store 2.
+	//   - Add the region to the follower subtree of store 1.
 	leaderChanged, remove, add := origin.getLeaderChange(region)
 	if leaderChanged {
 		r.leaders[remove].remove(origin)

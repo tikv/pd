@@ -569,11 +569,8 @@ func TestSubTreeIncrementalUpdate(t *testing.T) {
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
 	}, peer1)
-	// Nothing changed.
-	re.True(origin.peersEqualTo(region))
 	// Leader changed.
 	region.leader = peer2
-	re.False(origin.peersEqualTo(region))
 	leaderChanged, remove, add := origin.getLeaderChange(region)
 	re.True(leaderChanged)
 	re.Equal(peer1.GetStoreId(), remove)
@@ -581,7 +578,6 @@ func TestSubTreeIncrementalUpdate(t *testing.T) {
 	// Pending peer changed.
 	region.leader = peer1
 	region.pendingPeers = append(region.pendingPeers, peer4)
-	re.False(origin.peersEqualTo(region))
 	leaderChanged, _, _ = origin.getLeaderChange(region)
 	re.False(leaderChanged)
 	pendingPeerChanged, removes, adds := origin.getPendingPeerChange(region)
@@ -591,7 +587,6 @@ func TestSubTreeIncrementalUpdate(t *testing.T) {
 	// Learner changed.
 	region.pendingPeers = nil
 	region.learners = append(region.learners, peer2)
-	re.False(origin.peersEqualTo(region))
 	pendingPeerChanged, _, _ = origin.getPendingPeerChange(region)
 	re.False(pendingPeerChanged)
 	learnerChanged, removes, adds := origin.getLearnerChange(region)
@@ -601,13 +596,11 @@ func TestSubTreeIncrementalUpdate(t *testing.T) {
 	// Nothing changed.
 	origin.learners = append(origin.learners, peer2, peer3)
 	region.learners = append(region.learners, peer4)
-	re.True(origin.peersEqualTo(region))
 	learnerChanged, _, _ = origin.getLearnerChange(region)
 	re.False(learnerChanged)
 	// Follower changed - store ID changed.
 	peer4 = &metapb.Peer{StoreId: uint64(4), Id: uint64(3)}
 	region.voters[2] = peer4
-	re.False(region.peersEqualTo(origin))
 	followerChanged, removes, adds := origin.getFollowerChange(region)
 	re.True(followerChanged)
 	re.Equal([]uint64{peer3.GetStoreId()}, removes)
@@ -615,24 +608,22 @@ func TestSubTreeIncrementalUpdate(t *testing.T) {
 	// Follower changed - peer ID changed.
 	peer4 = &metapb.Peer{StoreId: uint64(3), Id: uint64(4)}
 	region.voters[2] = peer4
-	re.False(region.peersEqualTo(origin))
-	followerChanged, removes, adds = origin.getFollowerChange(region)
-	re.True(followerChanged)
-	re.Equal([]uint64{peer3.GetStoreId()}, removes)
-	re.Equal([]uint64{peer4.GetStoreId()}, adds)
-	re.Equal(peer3.GetStoreId(), peer4.GetStoreId())
+	followerChanged, _, _ = origin.getFollowerChange(region)
+	re.False(followerChanged)
 	// Leader and follower changed at the same time.
 	region.leader = peer2
+	peer4 = &metapb.Peer{StoreId: uint64(4), Id: uint64(3)}
 	region.voters[2] = peer4
-	re.False(region.peersEqualTo(origin))
 	leaderChanged, remove, add = origin.getLeaderChange(region)
 	re.True(leaderChanged)
 	re.Equal(peer1.GetStoreId(), remove)
 	re.Equal(peer2.GetStoreId(), add)
 	followerChanged, removes, adds = origin.getFollowerChange(region)
 	re.True(followerChanged)
-	// sort the removes
 	re.Len(removes, 2)
+	// Peer 1: leader -> follower
+	// Peer 2: follower -> leader
+	// Peer 3: store 3 -> store 4
 	for _, storeID := range []uint64{peer2.GetStoreId(), peer3.GetStoreId()} {
 		re.Contains(removes, storeID)
 	}
@@ -640,8 +631,6 @@ func TestSubTreeIncrementalUpdate(t *testing.T) {
 	for _, storeID := range []uint64{peer1.GetStoreId(), peer4.GetStoreId()} {
 		re.Contains(adds, storeID)
 	}
-	// Same store ID with different peer ID.
-	re.Equal(peer3.GetStoreId(), peer4.GetStoreId())
 }
 
 func checkRegions(re *require.Assertions, regions *RegionsInfo) {
