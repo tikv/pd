@@ -778,27 +778,24 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 	)
 }
 
-const keyLength = 100
-
-func randomBytes(n int) []byte {
-	bytes := make([]byte, n)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		panic(err)
-	}
-	return bytes
-}
+const (
+	peerNum   = 3
+	storeNum  = 10
+	keyLength = 100
+)
 
 func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 	var (
 		peers  []*metapb.Peer
 		leader *metapb.Peer
 	)
-	storeNum := 10
-	for i := 0; i < 3; i++ {
+	// Randomly select a peer as the leader.
+	leaderIdx := mrand.Intn(peerNum)
+	for i := 0; i < peerNum; i++ {
 		id, _ := idAllocator.Alloc()
-		p := &metapb.Peer{Id: id, StoreId: uint64(i%storeNum + 1)}
-		if i == 0 {
+		// Randomly distribute the peers to different stores.
+		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
+		if i == leaderIdx {
 			leader = p
 		}
 		peers = append(peers, p)
@@ -817,6 +814,15 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 	)
 }
 
+func randomBytes(n int) []byte {
+	bytes := make([]byte, n)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		panic(err)
+	}
+	return bytes
+}
+
 func BenchmarkAddRegion(b *testing.B) {
 	regions := NewRegionsInfo()
 	idAllocator := mockid.NewIDAllocator()
@@ -829,6 +835,54 @@ func BenchmarkAddRegion(b *testing.B) {
 		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
 		regions.UpdateSubTree(items[i], origin, overlaps, rangeChanged)
 	}
+}
+
+func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
+	idAllocator := mockid.NewIDAllocator()
+	for _, size := range []int{10, 100, 1000, 10000, 100000, 1000000, 10000000} {
+		regions := NewRegionsInfo()
+		items := generateRegionItems(idAllocator, size)
+		// Update the subtrees from an empty `*RegionsInfo`.
+		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for idx := range items {
+					regions.UpdateSubTreeOrderInsensitive(items[idx])
+				}
+			}
+		})
+
+		// Update the subtrees from a non-empty `*RegionsInfo` with the same regions,
+		// which means the regions are completely non-overlapped.
+		b.Run(fmt.Sprintf("from non-overlapped regions with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for idx := range items {
+					regions.UpdateSubTreeOrderInsensitive(items[idx])
+				}
+			}
+		})
+
+		// Update the subtrees from a non-empty `*RegionsInfo` with different regions,
+		// which means the regions are most likely overlapped.
+		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
+			items = generateRegionItems(idAllocator, size)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for idx := range items {
+					regions.UpdateSubTreeOrderInsensitive(items[idx])
+				}
+			}
+		})
+	}
+}
+
+func generateRegionItems(idAllocator *mockid.IDAllocator, size int) []*RegionInfo {
+	items := make([]*RegionInfo, size)
+	for i := 0; i < size; i++ {
+		items[i] = newRegionInfoIDRandom(idAllocator)
+	}
+	return items
 }
 
 func BenchmarkRegionFromHeartbeat(b *testing.B) {
