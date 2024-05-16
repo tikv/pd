@@ -52,7 +52,7 @@ const (
 	defaultEnableJointConsensus            = true
 	defaultEnableTiKVSplitRegion           = true
 	defaultEnableHeartbeatBreakdownMetrics = true
-	defaultEnableHeartbeatConcurrentRunner = false
+	defaultEnableHeartbeatConcurrentRunner = true
 	defaultEnableCrossTableMerge           = true
 	defaultEnableDiagnostic                = true
 	defaultStrictlyMatchLabel              = false

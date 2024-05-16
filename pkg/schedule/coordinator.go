@@ -188,7 +188,7 @@ func (c *Coordinator) PatrolRegions() {
 				quit = make(chan bool)
 				c.startPatrolRegionWorkers(workersCount, regionChan, quit, &wg)
 			}
-			if c.isSchedulingHalted() {
+			if c.cluster.IsSchedulingHalted() {
 				for len(regionChan) > 0 {
 					<-regionChan
 				}
@@ -287,10 +287,6 @@ func (c *Coordinator) checkRegions(startKey []byte, patrolScanRegionLimit int, r
 		key = region.GetEndKey()
 	}
 	return
-}
-
-func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkSuspectRegions(regionChan chan *core.RegionInfo) {

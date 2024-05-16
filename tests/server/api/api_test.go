@@ -156,7 +156,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	labels := make(map[string]any)
 	labels["testkey"] = "testvalue"
 	data, _ = json.Marshal(labels)
-	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
+	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?seconds=1", "application/json", bytes.NewBuffer(data))
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -164,7 +164,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 
 	re.Equal("Profile", resp.Header.Get("service-label"))
-	re.Equal("{\"force\":[\"true\"]}", resp.Header.Get("url-param"))
+	re.Equal("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
 	re.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
 	re.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
 	re.Equal("anonymous", resp.Header.Get("caller-id"))
@@ -182,7 +182,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 
 	header := mustRequestSuccess(re, leader.GetServer())
-	re.Equal("", header.Get("service-label"))
+	re.Equal("GetVersion", header.Get("service-label"))
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/addRequestInfoMiddleware"))
 }
@@ -373,6 +373,18 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
 	}
+
+	// reset rate limit
+	input = map[string]any{
+		"enable-rate-limit": "true",
+	}
+	data, err = json.Marshal(input)
+	re.NoError(err)
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	resp, err = dialClient.Do(req)
+	re.NoError(err)
+	resp.Body.Close()
+	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 }
 
 func (suite *middlewareTestSuite) TestSwaggerUrl() {
@@ -957,12 +969,19 @@ func TestPreparingProgress(t *testing.T) {
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 	}
-
-	for _, store := range stores {
+	// store 4 and store 5 are preparing state while store 1, store 2 and store 3 are state serving state
+	for _, store := range stores[:2] {
 		tests.MustPutStore(re, cluster, store)
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < core.InitClusterRegionThreshold; i++ {
 		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
+	}
+	testutil.Eventually(re, func() bool {
+		return leader.GetRaftCluster().GetTotalRegionCount() == core.InitClusterRegionThreshold
+	})
+	// to avoid forcing the store to the `serving` state with too few regions
+	for _, store := range stores[2:] {
+		tests.MustPutStore(re, cluster, store)
 	}
 	// no store preparing
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)

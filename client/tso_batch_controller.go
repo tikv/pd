@@ -139,9 +139,11 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffixBits uint32, err error) {
 	for i := 0; i < tbc.collectedRequestCount; i++ {
 		tsoReq := tbc.collectedRequests[i]
+		// Retrieve the request context before the request is done to trace without race.
+		requestCtx := tsoReq.requestCtx
 		tsoReq.physical, tsoReq.logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
-		defer trace.StartRegion(tsoReq.requestCtx, "pdclient.tsoReqDequeue").End() // nolint
 		tsoReq.tryDone(err)
+		trace.StartRegion(requestCtx, "pdclient.tsoReqDequeue").End()
 	}
 	// Prevent the finished requests from being processed again.
 	tbc.collectedRequestCount = 0

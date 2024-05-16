@@ -301,7 +301,7 @@ func (k *serviceModeKeeper) close() {
 		fallthrough
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		if k.tsoClient != nil {
-			k.tsoClient.Close()
+			k.tsoClient.close()
 		}
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 	}
@@ -651,11 +651,11 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
 	}
-	newTSOCli.Setup()
+	newTSOCli.setup()
 	// Replace the old TSO client.
 	oldTSOClient := c.tsoClient
 	c.tsoClient = newTSOCli
-	oldTSOClient.Close()
+	oldTSOClient.close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
 	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD service mode and

@@ -63,8 +63,8 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err = <-req.done:
-		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
 		defer req.pool.Put(req)
+		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
 		err = errors.WithStack(err)
 		if err != nil {
 			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
