@@ -826,10 +826,7 @@ func randomBytes(n int) []byte {
 func BenchmarkAddRegion(b *testing.B) {
 	regions := NewRegionsInfo()
 	idAllocator := mockid.NewIDAllocator()
-	var items []*RegionInfo
-	for i := 0; i < 10000000; i++ {
-		items = append(items, newRegionInfoIDRandom(idAllocator))
-	}
+	items := generateRegionItems(idAllocator, 10000000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
