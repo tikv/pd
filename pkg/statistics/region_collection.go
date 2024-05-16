@@ -32,7 +32,7 @@ type RegionInfoProvider interface {
 }
 
 // RegionStatisticType represents the type of the region's status.
-type RegionStatisticType uint32
+type RegionStatisticType uint16
 
 const emptyStatistic = RegionStatisticType(0)
 
@@ -81,7 +81,6 @@ var (
 
 // RegionInfoWithTS is used to record the extra timestamp status of a region.
 type RegionInfoWithTS struct {
-	id                   uint64
 	startMissVoterPeerTS int64
 	startDownPeerTS      int64
 }
@@ -91,7 +90,7 @@ type RegionStatistics struct {
 	syncutil.RWMutex
 	rip         RegionInfoProvider
 	conf        sc.CheckerConfigProvider
-	stats       map[RegionStatisticType]map[uint64]*RegionInfoWithTS
+	stats       map[RegionStatisticType]map[uint64]any
 	index       map[uint64]RegionStatisticType
 	ruleManager *placement.RuleManager
 }
@@ -106,11 +105,11 @@ func NewRegionStatistics(
 		rip:         rip,
 		conf:        conf,
 		ruleManager: ruleManager,
-		stats:       make(map[RegionStatisticType]map[uint64]*RegionInfoWithTS),
+		stats:       make(map[RegionStatisticType]map[uint64]any),
 		index:       make(map[uint64]RegionStatisticType),
 	}
 	for _, typ := range regionStatisticTypes {
-		r.stats[typ] = make(map[uint64]*RegionInfoWithTS)
+		r.stats[typ] = make(map[uint64]any)
 	}
 	return r
 }
@@ -207,14 +206,27 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			}
 		}
 	}
+
+	peers := region.GetPeers()
+	downPeers := region.GetDownPeers()
+	pendingPeers := region.GetPendingPeers()
+	learners := region.GetLearners()
+	voters := region.GetVoters()
+	regionSize := region.GetApproximateSize()
+	regionMaxSize := int64(r.conf.GetRegionMaxSize())
+	regionMaxKeys := int64(r.conf.GetRegionMaxKeys())
+	maxMergeRegionSize := int64(r.conf.GetMaxMergeRegionSize())
+	maxMergeRegionKeys := int64(r.conf.GetMaxMergeRegionKeys())
+	leaderIsWitness := region.GetLeader().GetIsWitness()
+
 	// Better to make sure once any of these conditions changes, it will trigger the heartbeat `save_cache`.
 	// Otherwise, the state may be out-of-date for a long time, which needs another way to apply the change ASAP.
 	// For example, see `RegionStatsNeedUpdate` above to know how `OversizedRegion` and `UndersizedRegion` are updated.
 	conditions := map[RegionStatisticType]bool{
-		MissPeer:    len(region.GetPeers()) < desiredReplicas,
-		ExtraPeer:   len(region.GetPeers()) > desiredReplicas,
-		DownPeer:    len(region.GetDownPeers()) > 0,
-		PendingPeer: len(region.GetPendingPeers()) > 0,
+		MissPeer:    len(peers) < desiredReplicas,
+		ExtraPeer:   len(peers) > desiredReplicas,
+		DownPeer:    len(downPeers) > 0,
+		PendingPeer: len(pendingPeers) > 0,
 		OfflinePeer: func() bool {
 			for _, store := range stores {
 				if store.IsRemoving() {
@@ -226,39 +238,40 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 			}
 			return false
 		}(),
-		LearnerPeer: len(region.GetLearners()) > 0,
-		EmptyRegion: region.GetApproximateSize() <= core.EmptyRegionApproximateSize,
-		OversizedRegion: region.IsOversized(
-			int64(r.conf.GetRegionMaxSize()),
-			int64(r.conf.GetRegionMaxKeys()),
-		),
-		UndersizedRegion: region.NeedMerge(
-			int64(r.conf.GetMaxMergeRegionSize()),
-			int64(r.conf.GetMaxMergeRegionKeys()),
-		),
-		WitnessLeader: region.GetLeader().GetIsWitness(),
+		LearnerPeer:      len(learners) > 0,
+		EmptyRegion:      regionSize <= core.EmptyRegionApproximateSize,
+		OversizedRegion:  region.IsOversized(regionMaxSize, regionMaxKeys),
+		UndersizedRegion: region.NeedMerge(maxMergeRegionSize, maxMergeRegionKeys),
+		WitnessLeader:    leaderIsWitness,
 	}
 	// Check if the region meets any of the conditions and update the corresponding info.
 	regionID := region.GetID()
 	for typ, c := range conditions {
 		if c {
 			info := r.stats[typ][regionID]
-			if info == nil {
-				info = &RegionInfoWithTS{id: regionID}
-			}
 			if typ == DownPeer {
-				if info.startDownPeerTS != 0 {
-					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.startDownPeerTS))
+				if info == nil {
+					info = &RegionInfoWithTS{}
+				}
+				if info.(*RegionInfoWithTS).startDownPeerTS != 0 {
+					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startDownPeerTS))
 				} else {
-					info.startDownPeerTS = time.Now().Unix()
+					info.(*RegionInfoWithTS).startDownPeerTS = time.Now().Unix()
 					logDownPeerWithNoDisconnectedStore(region, stores)
 				}
-			} else if typ == MissPeer && len(region.GetVoters()) < desiredVoters {
-				if info.startMissVoterPeerTS != 0 {
-					regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.startMissVoterPeerTS))
-				} else {
-					info.startMissVoterPeerTS = time.Now().Unix()
+			} else if typ == MissPeer {
+				if info == nil {
+					info = &RegionInfoWithTS{}
 				}
+				if len(voters) < desiredVoters {
+					if info.(*RegionInfoWithTS).startMissVoterPeerTS != 0 {
+						regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startMissVoterPeerTS))
+					} else {
+						info.(*RegionInfoWithTS).startMissVoterPeerTS = time.Now().Unix()
+					}
+				}
+			} else {
+				info = struct{}{}
 			}
 
 			r.stats[typ][regionID] = info
