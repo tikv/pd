@@ -22,7 +22,6 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/core/constant"
 	"go.uber.org/zap"
 )
 
@@ -37,8 +36,8 @@ const (
 )
 
 const (
-	initialCapacity        = 10000
-	maxHighPriorityTaskNum = 20000000
+	initialCapacity   = 10000
+	maxPendingTaskNum = 20000000
 )
 
 // Runner is the interface for running tasks.
@@ -54,7 +53,7 @@ type Task struct {
 	submittedAt time.Time
 	f           func(context.Context)
 	name        string
-	priority    constant.PriorityLevel
+	retained    bool
 }
 
 // ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
@@ -62,30 +61,28 @@ var ErrMaxWaitingTasksExceeded = errors.New("max waiting tasks exceeded")
 
 // ConcurrentRunner is a simple task runner that limits the number of concurrent tasks.
 type ConcurrentRunner struct {
-	name                       string
-	limiter                    *ConcurrencyLimiter
-	maxPendingDuration         time.Duration
-	taskChan                   chan *Task
-	pendingNormalPriorityTasks []*Task
-	pendingHighPriorityTasks   []*Task
-	pendingMu                  sync.Mutex
-	stopChan                   chan struct{}
-	wg                         sync.WaitGroup
-	pendingTaskCount           map[string]map[string]int64
-	maxWaitingDuration         prometheus.Gauge
+	name               string
+	limiter            *ConcurrencyLimiter
+	maxPendingDuration time.Duration
+	taskChan           chan *Task
+	pendingTasks       []*Task
+	pendingMu          sync.Mutex
+	stopChan           chan struct{}
+	wg                 sync.WaitGroup
+	pendingTaskCount   map[string]int64
+	maxWaitingDuration prometheus.Gauge
 }
 
 // NewConcurrentRunner creates a new ConcurrentRunner.
 func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDuration time.Duration) *ConcurrentRunner {
 	s := &ConcurrentRunner{
-		name:                       name,
-		limiter:                    limiter,
-		maxPendingDuration:         maxPendingDuration,
-		taskChan:                   make(chan *Task),
-		pendingNormalPriorityTasks: make([]*Task, 0, initialCapacity),
-		pendingHighPriorityTasks:   make([]*Task, 0, initialCapacity),
-		pendingTaskCount:           make(map[string]map[string]int64),
-		maxWaitingDuration:         RunnerTaskMaxWaitingDuration.WithLabelValues(name),
+		name:               name,
+		limiter:            limiter,
+		maxPendingDuration: maxPendingDuration,
+		taskChan:           make(chan *Task),
+		pendingTasks:       make([]*Task, 0, initialCapacity),
+		pendingTaskCount:   make(map[string]int64),
+		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
 }
@@ -93,9 +90,9 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 // TaskOption configures TaskOp
 type TaskOption func(opts *Task)
 
-// WithPriority sets the priority of the task.
-func WithPriority(priority constant.PriorityLevel) TaskOption {
-	return func(opts *Task) { opts.priority = priority }
+// WithRetained sets whether the task should be retained.
+func WithRetained(retained bool) TaskOption {
+	return func(opts *Task) { opts.retained = retained }
 }
 
 // Start starts the runner.
@@ -119,21 +116,18 @@ func (cr *ConcurrentRunner) Start() {
 				}
 			case <-cr.stopChan:
 				cr.pendingMu.Lock()
-				cr.pendingNormalPriorityTasks = make([]*Task, 0, initialCapacity)
-				cr.pendingHighPriorityTasks = make([]*Task, 0, initialCapacity)
+				cr.pendingTasks = make([]*Task, 0, initialCapacity)
 				cr.pendingMu.Unlock()
 				log.Info("stopping async task runner", zap.String("name", cr.name))
 				return
 			case <-ticker.C:
 				maxDuration := time.Duration(0)
 				cr.pendingMu.Lock()
-				if len(cr.pendingNormalPriorityTasks) > 0 {
-					maxDuration = time.Since(cr.pendingNormalPriorityTasks[0].submittedAt)
+				if len(cr.pendingTasks) > 0 {
+					maxDuration = time.Since(cr.pendingTasks[0].submittedAt)
 				}
-				for name, priorityMap := range cr.pendingTaskCount {
-					for priority, cnt := range priorityMap {
-						RunnerPendingTasks.WithLabelValues(cr.name, priority, name).Set(float64(cnt))
-					}
+				for taskName, cnt := range cr.pendingTaskCount {
+					RunnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
 				}
 				cr.pendingMu.Unlock()
 				cr.maxWaitingDuration.Set(maxDuration.Seconds())
@@ -156,22 +150,12 @@ func (cr *ConcurrentRunner) run(task *Task, token *TaskToken) {
 func (cr *ConcurrentRunner) processPendingTasks() {
 	cr.pendingMu.Lock()
 	defer cr.pendingMu.Unlock()
-	if len(cr.pendingHighPriorityTasks) > 0 {
-		task := cr.pendingHighPriorityTasks[0]
+	if len(cr.pendingTasks) > 0 {
+		task := cr.pendingTasks[0]
 		select {
 		case cr.taskChan <- task:
-			cr.pendingHighPriorityTasks = cr.pendingHighPriorityTasks[1:]
-			cr.pendingTaskCount[task.priority.String()][task.name]--
-		default:
-		}
-		return
-	}
-	if len(cr.pendingNormalPriorityTasks) > 0 {
-		task := cr.pendingNormalPriorityTasks[0]
-		select {
-		case cr.taskChan <- task:
-			cr.pendingNormalPriorityTasks = cr.pendingNormalPriorityTasks[1:]
-			cr.pendingTaskCount[task.priority.String()][task.name]--
+			cr.pendingTasks = cr.pendingTasks[1:]
+			cr.pendingTaskCount[task.name]--
 		default:
 		}
 		return
@@ -187,10 +171,9 @@ func (cr *ConcurrentRunner) Stop() {
 // RunTask runs the task asynchronously.
 func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(context.Context), opts ...TaskOption) error {
 	task := &Task{
-		ctx:      ctx,
-		name:     name,
-		f:        f,
-		priority: constant.Medium,
+		ctx:  ctx,
+		name: name,
+		f:    f,
 	}
 	for _, opt := range opts {
 		opt(task)
@@ -201,35 +184,26 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 		cr.pendingMu.Unlock()
 		cr.processPendingTasks()
 	}()
-	if task.priority >= constant.High {
+
+	pendingTaskNum := len(cr.pendingTasks)
+	if pendingTaskNum > 0 {
+		if !task.retained {
+			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
+			if maxWait > cr.maxPendingDuration {
+				RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+				return ErrMaxWaitingTasksExceeded
+			}
+		}
 		// We use the max task number to limit the memory usage.
 		// It occupies around 1.5GB memory when there is 20000000 pending task.
-		if len(cr.pendingHighPriorityTasks) > maxHighPriorityTaskNum {
-			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
-			return ErrMaxWaitingTasksExceeded
-		}
-		task.submittedAt = time.Now()
-		cr.pendingHighPriorityTasks = append(cr.pendingHighPriorityTasks, task)
-		if _, ok := cr.pendingTaskCount[task.priority.String()]; !ok {
-			cr.pendingTaskCount[task.priority.String()] = make(map[string]int64)
-		}
-		cr.pendingTaskCount[task.priority.String()][task.name]++
-		return nil
-	}
-
-	if len(cr.pendingNormalPriorityTasks) > 0 {
-		maxWait := time.Since(cr.pendingNormalPriorityTasks[0].submittedAt)
-		if maxWait > cr.maxPendingDuration {
+		if len(cr.pendingTasks) > maxPendingTaskNum {
 			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 			return ErrMaxWaitingTasksExceeded
 		}
 	}
 	task.submittedAt = time.Now()
-	cr.pendingNormalPriorityTasks = append(cr.pendingNormalPriorityTasks, task)
-	if _, ok := cr.pendingTaskCount[task.priority.String()]; !ok {
-		cr.pendingTaskCount[task.priority.String()] = make(map[string]int64)
-	}
-	cr.pendingTaskCount[task.priority.String()][task.name]++
+	cr.pendingTasks = append(cr.pendingTasks, task)
+	cr.pendingTaskCount[task.name]++
 	return nil
 }
 

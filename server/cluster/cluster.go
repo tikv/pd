@@ -35,7 +35,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
@@ -1036,7 +1035,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	saveKV, saveCache, needSync, priority := regionGuide(ctx, region, origin)
+	saveKV, saveCache, needSync, retained := regionGuide(ctx, region, origin)
 	tracer.OnRegionGuideFinished()
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
@@ -1063,7 +1062,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
-				ratelimit.WithPriority(constant.High),
+				ratelimit.WithRetained(true),
 			)
 		}
 		return nil
@@ -1091,7 +1090,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
-			ratelimit.WithPriority(priority),
+			ratelimit.WithRetained(retained),
 		)
 		tracer.OnUpdateSubTreeFinished()
 
@@ -1147,7 +1146,6 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 					}
 					regionUpdateKVEventCounter.Inc()
 				},
-				ratelimit.WithPriority(priority),
 			)
 		}
 	}
