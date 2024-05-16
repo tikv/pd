@@ -11656,7 +11656,7 @@
               "hide": false,
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "{{task_type}}_({{runner_name}})",
+              "legendFormat": "{{task_type}}_{{runner_name}}",
               "refId": "A",
               "step": 4
             }
@@ -11773,7 +11773,7 @@
               "hide": false,
               "interval": "",
               "intervalFactor": 2,
-              "legendFormat": "failed-tasks-({{runner_name}})",
+              "legendFormat": "failed-tasks-{{runner_name}}",
               "refId": "A",
               "step": 4
             },
@@ -11782,7 +11782,7 @@
               "expr": "pd_ratelimit_runner_task_max_waiting_duration_seconds{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}",
               "hide": false,
               "interval": "",
-              "legendFormat": "max-wait-duration-({{runner_name}})",
+              "legendFormat": "max-wait-duration-{{runner_name}}",
               "refId": "B"
             }
           ],
