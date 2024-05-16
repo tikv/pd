@@ -51,6 +51,7 @@ const (
 	maxLoadConfigRetries       = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
+	patrolRegionChanLen      = 1024
 
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
@@ -160,7 +161,7 @@ func (c *Coordinator) PatrolRegions() {
 	defer ticker.Stop()
 
 	workersCount := c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency()
-	regionChan := make(chan *core.RegionInfo, c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency())
+	regionChan := make(chan *core.RegionInfo, patrolRegionChanLen)
 	quit := make(chan bool)
 	var wg sync.WaitGroup
 	c.startPatrolRegionWorkers(workersCount, regionChan, quit, &wg)
@@ -205,25 +206,18 @@ func (c *Coordinator) PatrolRegions() {
 			c.checkWaitingRegions(regionChan)
 
 			c.waitDrainRegionChan(regionChan)
-			regions = c.cluster.ScanRegions(key, nil, c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency())
+			key, regions = c.checkRegions(key, c.cluster.GetCheckerConfig().GetPatrolRegionBatchLimit(), regionChan)
 			if len(regions) == 0 {
 				continue
 			}
 			// Updates the label level isolation statistics.
 			c.cluster.UpdateRegionsLabelLevelStats(regions)
 			if len(key) == 0 {
-				// Resets the scan key.
-				key = nil
 				dur := time.Since(start)
 				patrolCheckRegionsGauge.Set(dur.Seconds())
 				c.setPatrolRegionsDuration(dur)
 				start = time.Now()
 			}
-			for _, region := range regions {
-				regionChan <- region
-				key = region.GetEndKey()
-			}
-
 			failpoint.Inject("break-patrol", func() {
 				failpoint.Break()
 			})
@@ -243,8 +237,10 @@ func (c *Coordinator) startPatrolRegionWorkers(workers int, regionChan <-chan *c
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func() {
+			defer logutil.LogPanic()
 			defer wg.Done()
 			for {
+				patrolCheckRegionsChanLenGauge.Set(float64(len(regionChan)))
 				select {
 				case region, ok := <-regionChan:
 					if ok {
@@ -261,7 +257,6 @@ func (c *Coordinator) startPatrolRegionWorkers(workers int, regionChan <-chan *c
 // waitDrainRegionChan is used to drain the regionChan.
 // It is used to avoid duplicated regions in the regionChan from different sources.
 func (c *Coordinator) waitDrainRegionChan(regionChan chan *core.RegionInfo) {
-	patrolCheckRegionsChanLenGauge.Set(float64(len(regionChan)))
 	if len(regionChan) == 0 {
 		return
 	}
@@ -277,6 +272,21 @@ func (c *Coordinator) waitDrainRegionChan(regionChan chan *core.RegionInfo) {
 			}
 		}
 	}
+}
+
+func (c *Coordinator) checkRegions(startKey []byte, patrolScanRegionLimit int, regionChan chan *core.RegionInfo) (key []byte, regions []*core.RegionInfo) {
+	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
+	if len(regions) == 0 {
+		// Resets the scan key.
+		key = nil
+		return
+	}
+
+	for _, region := range regions {
+		regionChan <- region
+		key = region.GetEndKey()
+	}
+	return
 }
 
 func (c *Coordinator) isSchedulingHalted() bool {

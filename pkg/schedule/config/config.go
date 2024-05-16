@@ -382,7 +382,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("store-limit-version") {
 		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
 	}
-	if !meta.IsDefined("patrol-region-concurrency") {
+	if !meta.IsDefined("patrol-worker-count") {
 		configutil.AdjustUint64(&c.PatrolRegionConcurrency, defaultPatrolRegionConcurrency)
 	}
 
