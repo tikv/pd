@@ -367,6 +367,134 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	suite.False(next)
 }
 
+// issue #7992
+func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion() {
+	re := suite.Require()
+	opts := config.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewOperatorController(suite.ctx, cluster, stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(source)
+	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(target)
+
+	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	re.NoError(err)
+	re.Len(ops, 2)
+	re.Equal(2, controller.AddWaitingOperator(ops...))
+	// Change next push time to now, it's used to make test case faster.
+	controller.opNotifierQueue[0].time = time.Now()
+
+	// first poll gets source region op.
+	r, next := controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, source)
+
+	// second poll gets target region op.
+	controller.opNotifierQueue[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, target)
+
+	// third poll removes the two merge-region ops.
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Len(controller.opNotifierQueue, 1)
+	re.Len(controller.operators, 1)
+	re.Empty(controller.wop.ListOperator())
+	re.NotNil(controller.opRecords.Get(101))
+
+	// fourth poll removes target region op from opNotifierQueue
+	controller.opNotifierQueue[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, target)
+	re.Len(controller.opNotifierQueue, 1)
+	delete(controller.operators, 101)
+	delete(controller.operators, 102)
+	_ = heap.Pop(&controller.opNotifierQueue).(*operatorWithTime)
+	re.Len(controller.opNotifierQueue, 0)
+
+	// Add the two ops to waiting operators again.
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
+	controller.opRecords.ttl.Remove(101)
+	controller.opRecords.ttl.Remove(102)
+	ops, err = operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	re.NoError(err)
+	re.Equal(2, controller.AddWaitingOperator(ops...))
+	re.Len(controller.opNotifierQueue, 2)
+	// change the target RegionEpoch
+	// first poll gets source region from opNotifierQueue
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	controller.opNotifierQueue[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, source)
+
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Len(controller.opNotifierQueue, 1)
+	re.Len(controller.operators, 1)
+	re.Empty(controller.wop.ListOperator())
+	re.NotNil(controller.opRecords.Get(102))
+
+	controller.opNotifierQueue[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, source)
+	re.Len(controller.opNotifierQueue, 1)
+}
+
+func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
+	re := suite.Require()
+	opts := config.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewOperatorController(suite.ctx, cluster, stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(source)
+	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(target)
+
+	ops, err := operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
+	re.NoError(err)
+	re.Len(ops, 2)
+
+	// check successfully
+	r, reason := controller.checkOperatorLightly(ops[0])
+	re.Empty(reason)
+	re.Equal(r, source)
+
+	// check failed because of region disappeared
+	cluster.RemoveRegion(target)
+	r, reason = controller.checkOperatorLightly(ops[1])
+	re.Nil(r)
+	re.Equal(reason, operator.RegionNotFound)
+
+	// check failed because of verions of region epoch changed
+	cluster.PutRegion(target)
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	r, reason = controller.checkOperatorLightly(ops[0])
+	re.Nil(r)
+	re.Equal(reason, operator.EpochNotMatch)
+}
+
 func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
