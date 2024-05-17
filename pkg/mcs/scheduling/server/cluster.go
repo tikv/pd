@@ -569,6 +569,7 @@ func (c *Cluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	taskRunner, statisticsRunner, logRunner = syncRunner, syncRunner, syncRunner
 	if c.persistConfig.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
 		taskRunner = c.heartbeatRunner
+		statisticsRunner = c.statisticsRunner
 		logRunner = c.logRunner
 	}
 	ctx := &core.MetaProcessContext{
