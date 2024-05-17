@@ -88,8 +88,7 @@ const modulePath = "github.com/tikv/pd"
 
 var (
 	// runtime
-	p                int
-	buildParallel    int
+	parallel         int
 	workDir          string
 	coverFileTempDir string
 	// arguments
@@ -101,6 +100,7 @@ var (
 
 func main() {
 	race = handleFlag("--race")
+	parallelStr := stripFlag("--parallel")
 	junitFile = stripFlag("--junitfile")
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDir = stripFlag("--ignore")
@@ -115,10 +115,17 @@ func main() {
 		defer os.RemoveAll(coverFileTempDir)
 	}
 
-	// Get the correct count of CPU if it's in docker.
-	p = runtime.GOMAXPROCS(0)
-	// We use 2 * p for `go build` to make it faster.
-	buildParallel = p * 2
+	if parallelStr == "" {
+		// Get the correct count of CPU if it's in docker.
+		parallel = runtime.GOMAXPROCS(0)
+	} else {
+		var err error
+		parallel, err = strconv.Atoi(parallelStr)
+		if err != nil {
+			fmt.Println("parse parallel error", err)
+			return
+		}
+	}
 	var err error
 	workDir, err = os.Getwd()
 	if err != nil {
@@ -327,12 +334,12 @@ func cmdRun(args ...string) bool {
 		}
 	}
 
-	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", buildParallel, len(tasks), time.Since(start))
+	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
 
 	taskCh := make(chan task, 100)
-	works := make([]numa, p)
+	works := make([]numa, parallel)
 	var wg sync.WaitGroup
-	for i := 0; i < p; i++ {
+	for i := 0; i < parallel; i++ {
 		wg.Add(1)
 		go works[i].worker(&wg, taskCh)
 	}
@@ -374,7 +381,7 @@ func cmdRun(args ...string) bool {
 
 // stripFlag strip the '--flag xxx' from the command line os.Args
 // Example of the os.Args changes
-// Before: ut run pkg TestXXX --coverprofile xxx --junitfile yyy
+// Before: ut run pkg TestXXX --coverprofile xxx --junitfile yyy --parallel 16
 // After: ut run pkg TestXXX
 // The value of the flag is returned.
 func stripFlag(flag string) string {
@@ -610,7 +617,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
 	if strings.Contains(fn, "Suite") {
-		args = append(args, "-test.cpu", fmt.Sprint(p/2))
+		args = append(args, "-test.cpu", fmt.Sprint(parallel/2))
 	} else {
 		args = append(args, "-test.cpu", "1")
 	}
@@ -670,7 +677,8 @@ func buildTestBinaryMulti(pkgs []string) error {
 		packages = append(packages, path.Join(modulePath, pkg))
 	}
 
-	p := strconv.Itoa(buildParallel)
+	// We use 2 * parallel for `go build` to make it faster.
+	p := strconv.Itoa(parallel * 2)
 	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
 	if coverProfile != "" {
 		coverpkg := "./..."
