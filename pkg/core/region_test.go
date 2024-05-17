@@ -1021,3 +1021,12 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 		re.Equal(int32(2), item.GetRef())
 	}
 }
+
+func TestCheckAndPutSubTree(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	regions.CheckAndPutSubTree(region)
+	// should failed to put because the root tree is missing
+	re.Equal(0, regions.tree.length())
+}

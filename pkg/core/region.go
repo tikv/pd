@@ -1041,10 +1041,10 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 // Usually used with CheckAndPutRootTree together.
 func (r *RegionsInfo) CheckAndPutSubTree(region *RegionInfo) {
 	// new region get from root tree again
-	var newRegion *RegionInfo
-	newRegion = r.GetRegion(region.GetID())
+	newRegion := r.GetRegion(region.GetID())
 	if newRegion == nil {
-		newRegion = region
+		// Make sure there is this region in the root tree, so as to ensure the correctness of reference count
+		return
 	}
 	r.UpdateSubTreeOrderInsensitive(newRegion)
 }
