@@ -103,13 +103,13 @@ func (cr *ConcurrentRunner) Start() {
 			select {
 			case task := <-cr.taskChan:
 				if cr.limiter != nil {
-					token, err := cr.limiter.Acquire(context.Background())
+					token, err := cr.limiter.AcquireToken(context.Background())
 					if err != nil {
 						continue
 					}
-					go cr.run(task.ctx, task.f, token)
+					go cr.run(task, token)
 				} else {
-					go cr.run(task.ctx, task.f, nil)
+					go cr.run(task, nil)
 				}
 			case <-cr.stopChan:
 				cr.pendingMu.Lock()
@@ -133,10 +133,10 @@ func (cr *ConcurrentRunner) Start() {
 	}()
 }
 
-func (cr *ConcurrentRunner) run(ctx context.Context, task func(context.Context), token *TaskToken) {
-	task(ctx)
+func (cr *ConcurrentRunner) run(task *Task, token *TaskToken) {
+	task.f(task.ctx)
 	if token != nil {
-		token.Release()
+		cr.limiter.ReleaseToken(token)
 		cr.processPendingTasks()
 	}
 }

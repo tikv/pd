@@ -969,12 +969,19 @@ func TestPreparingProgress(t *testing.T) {
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 	}
-
-	for _, store := range stores {
+	// store 4 and store 5 are preparing state while store 1, store 2 and store 3 are state serving state
+	for _, store := range stores[:2] {
 		tests.MustPutStore(re, cluster, store)
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < core.InitClusterRegionThreshold; i++ {
 		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
+	}
+	testutil.Eventually(re, func() bool {
+		return leader.GetRaftCluster().GetTotalRegionCount() == core.InitClusterRegionThreshold
+	})
+	// to avoid forcing the store to the `serving` state with too few regions
+	for _, store := range stores[2:] {
+		tests.MustPutStore(re, cluster, store)
 	}
 	// no store preparing
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
