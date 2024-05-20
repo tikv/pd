@@ -227,7 +227,8 @@ failpoint-disable: install-tools
 
 ut: pd-ut
 	@$(FAILPOINT_ENABLE)
-	./bin/pd-ut run --race
+	# only run unit tests
+	./bin/pd-ut run --ignore tests --race
 	@$(CLEAN_UT_BINARY)
 	@$(FAILPOINT_DISABLE)
 
