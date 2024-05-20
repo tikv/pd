@@ -84,8 +84,10 @@ go tool cover --func=xxx`
 	return true
 }
 
-var modulePath = "github.com/tikv/pd"
-var integrationsTestPath = "tests/integrations"
+var (
+	modulePath           = "github.com/tikv/pd"
+	integrationsTestPath = "tests/integrations"
+)
 
 var (
 	// runtime
