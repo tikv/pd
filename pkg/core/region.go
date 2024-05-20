@@ -914,6 +914,8 @@ type RegionsInfo struct {
 	learners     map[uint64]*regionTree // storeID -> sub regionTree
 	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
+	// This tree is used to check the overlaps among all the subtrees.
+	overlapTree *regionTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -927,6 +929,7 @@ func NewRegionsInfo() *RegionsInfo {
 		learners:     make(map[uint64]*regionTree),
 		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
+		overlapTree:  newRegionTree(),
 	}
 }
 
@@ -1041,10 +1044,10 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 // Usually used with CheckAndPutRootTree together.
 func (r *RegionsInfo) CheckAndPutSubTree(region *RegionInfo) {
 	// new region get from root tree again
-	var newRegion *RegionInfo
-	newRegion = r.GetRegion(region.GetID())
+	newRegion := r.GetRegion(region.GetID())
 	if newRegion == nil {
-		newRegion = region
+		// Make sure there is this region in the root tree, so as to ensure the correctness of reference count
+		return
 	}
 	r.UpdateSubTreeOrderInsensitive(newRegion)
 }
@@ -1066,48 +1069,68 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 		origin = originItem.RegionInfo
 	}
 	rangeChanged := true
-
 	if origin != nil {
+		rangeChanged = !origin.rangeEqualsTo(region)
+		if r.preUpdateSubTreeLocked(rangeChanged, !origin.peersEqualTo(region), true, origin, region) {
+			return
+		}
+	}
+	r.updateSubTreeLocked(rangeChanged, nil, region)
+}
+
+func (r *RegionsInfo) preUpdateSubTreeLocked(
+	rangeChanged, peerChanged, orderInsensitive bool,
+	origin, region *RegionInfo,
+) (done bool) {
+	if orderInsensitive {
 		re := region.GetRegionEpoch()
 		oe := origin.GetRegionEpoch()
 		isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
 		if (isTermBehind || re.GetVersion() < oe.GetVersion() || re.GetConfVer() < oe.GetConfVer()) && !region.isRegionRecreated() {
 			// Region meta is stale, skip.
-			return
-		}
-		rangeChanged = !origin.rangeEqualsTo(region)
-
-		if rangeChanged || !origin.peersEqualTo(region) {
-			// If the range or peers have changed, the sub regionTree needs to be cleaned up.
-			// TODO: Improve performance by deleting only the different peers.
-			r.removeRegionFromSubTreeLocked(origin)
-		} else {
-			// The region tree and the subtree update is not atomic and the region tree is updated first.
-			// If there are two thread needs to update region tree,
-			// t1: thread-A  update region tree
-			// 										t2: thread-B: update region tree again
-			//										t3: thread-B: update subtree
-			// t4: thread-A: update region subtree
-			// to keep region tree consistent with subtree, we need to drop this update.
-			if tree, ok := r.subRegions[region.GetID()]; ok {
-				r.updateSubTreeStat(origin, region)
-				tree.RegionInfo = region
-			}
-			return
+			return true
 		}
 	}
+	if rangeChanged || peerChanged {
+		// If the range or peers have changed, clean up the subtrees before updating them.
+		// TODO: improve performance by deleting only the different peers.
+		r.removeRegionFromSubTreeLocked(origin)
+	} else {
+		// The region tree and the subtree update is not atomic and the region tree is updated first.
+		// If there are two thread needs to update region tree,
+		// t1: thread-A  update region tree
+		// 										t2: thread-B: update region tree again
+		//										t3: thread-B: update subtree
+		// t4: thread-A: update region subtree
+		// to keep region tree consistent with subtree, we need to drop this update.
+		if tree, ok := r.subRegions[region.GetID()]; ok {
+			r.updateSubTreeStat(origin, region)
+			tree.RegionInfo = region
+		}
+		return true
+	}
+	return false
+}
 
+func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionInfo, region *RegionInfo) {
 	if rangeChanged {
-		overlaps := r.getOverlapRegionFromSubTreeLocked(region)
-		for _, re := range overlaps {
-			r.removeRegionFromSubTreeLocked(re)
+		// TODO: only perform the remove operation on the overlapped peer.
+		if len(overlaps) == 0 {
+			// If the range has changed but the overlapped regions are not provided, collect them by `[]*regionItem`.
+			for _, item := range r.getOverlapRegionFromOverlapTreeLocked(region) {
+				r.removeRegionFromSubTreeLocked(item.RegionInfo)
+			}
+		} else {
+			// Remove all provided overlapped regions from the subtrees.
+			for _, overlap := range overlaps {
+				r.removeRegionFromSubTreeLocked(overlap)
+			}
 		}
 	}
-
+	// Reinsert the region into all subtrees.
 	item := &regionItem{region}
 	r.subRegions[region.GetID()] = item
-	// It has been removed and all information needs to be updated again.
-	// Set peers then.
+	r.overlapTree.update(item, false)
 	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
 		store, ok := peersMap[storeID]
 		if !ok {
@@ -1147,29 +1170,8 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 	setPeers(r.pendingPeers, region.GetPendingPeers())
 }
 
-func (r *RegionsInfo) getOverlapRegionFromSubTreeLocked(region *RegionInfo) []*RegionInfo {
-	it := &regionItem{RegionInfo: region}
-	overlaps := make([]*RegionInfo, 0)
-	overlapsMap := make(map[uint64]struct{})
-	collectFromItemSlice := func(peersMap map[uint64]*regionTree, storeID uint64) {
-		if tree, ok := peersMap[storeID]; ok {
-			items := tree.overlaps(it)
-			for _, item := range items {
-				if _, ok := overlapsMap[item.GetID()]; !ok {
-					overlapsMap[item.GetID()] = struct{}{}
-					overlaps = append(overlaps, item.RegionInfo)
-				}
-			}
-		}
-	}
-	for _, peer := range region.GetMeta().GetPeers() {
-		storeID := peer.GetStoreId()
-		collectFromItemSlice(r.leaders, storeID)
-		collectFromItemSlice(r.followers, storeID)
-		collectFromItemSlice(r.learners, storeID)
-		collectFromItemSlice(r.witnesses, storeID)
-	}
-	return overlaps
+func (r *RegionsInfo) getOverlapRegionFromOverlapTreeLocked(region *RegionInfo) []*regionItem {
+	return r.overlapTree.overlaps(&regionItem{RegionInfo: region})
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
@@ -1275,72 +1277,11 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
-		if rangeChanged || !origin.peersEqualTo(region) {
-			// If the range or peers have changed, the sub regionTree needs to be cleaned up.
-			// TODO: Improve performance by deleting only the different peers.
-			r.removeRegionFromSubTreeLocked(origin)
-		} else {
-			// The region tree and the subtree update is not atomic and the region tree is updated first.
-			// If there are two thread needs to update region tree,
-			// t1: thread-A  update region tree
-			// 										t2: thread-B: update region tree again
-			//										t3: thread-B: update subtree
-			// t4: thread-A: update region subtree
-			// to keep region tree consistent with subtree, we need to drop this update.
-			if tree, ok := r.subRegions[region.GetID()]; ok {
-				r.updateSubTreeStat(origin, region)
-				tree.RegionInfo = region
-			}
+		if r.preUpdateSubTreeLocked(rangeChanged, !origin.peersEqualTo(region), false, origin, region) {
 			return
 		}
 	}
-	if rangeChanged {
-		for _, re := range overlaps {
-			r.removeRegionFromSubTreeLocked(re)
-		}
-	}
-
-	item := &regionItem{region}
-	r.subRegions[region.GetID()] = item
-	// It has been removed and all information needs to be updated again.
-	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
-		store, ok := peersMap[storeID]
-		if !ok {
-			if !countRef {
-				store = newRegionTree()
-			} else {
-				store = newRegionTreeWithCountRef()
-			}
-			peersMap[storeID] = store
-		}
-		store.update(item, false)
-	}
-
-	// Add to leaders and followers.
-	for _, peer := range region.GetVoters() {
-		storeID := peer.GetStoreId()
-		if peer.GetId() == region.leader.GetId() {
-			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item, true)
-		} else {
-			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item, false)
-		}
-	}
-
-	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
-		for _, peer := range peers {
-			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item, false)
-		}
-	}
-	// Add to learners.
-	setPeers(r.learners, region.GetLearners())
-	// Add to witnesses.
-	setPeers(r.witnesses, region.GetWitnesses())
-	// Add to PendingPeers
-	setPeers(r.pendingPeers, region.GetPendingPeers())
+	r.updateSubTreeLocked(rangeChanged, overlaps, region)
 }
 
 func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) {
@@ -1404,6 +1345,7 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.learners = make(map[uint64]*regionTree)
 	r.witnesses = make(map[uint64]*regionTree)
 	r.pendingPeers = make(map[uint64]*regionTree)
+	r.overlapTree = newRegionTree()
 }
 
 // RemoveRegionFromSubTree removes RegionInfo from regionSubTrees
@@ -1416,7 +1358,6 @@ func (r *RegionsInfo) RemoveRegionFromSubTree(region *RegionInfo) {
 
 // removeRegionFromSubTreeLocked removes RegionInfo from regionSubTrees
 func (r *RegionsInfo) removeRegionFromSubTreeLocked(region *RegionInfo) {
-	// Remove from leaders and followers.
 	for _, peer := range region.GetMeta().GetPeers() {
 		storeID := peer.GetStoreId()
 		r.leaders[storeID].remove(region)
@@ -1425,6 +1366,7 @@ func (r *RegionsInfo) removeRegionFromSubTreeLocked(region *RegionInfo) {
 		r.witnesses[storeID].remove(region)
 		r.pendingPeers[storeID].remove(region)
 	}
+	r.overlapTree.remove(region)
 	delete(r.subRegions, region.GetMeta().GetId())
 }
 
