@@ -594,10 +594,10 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 
 	ctx.TaskRunner.RunTask(
 		ctx,
+		ratelimit.HandleStatsAsync,
 		func(_ context.Context) {
 			cluster.HandleStatsAsync(c, region)
 		},
-		ratelimit.WithTaskName(ratelimit.HandleStatsAsync),
 	)
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
@@ -611,22 +611,22 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.TaskRunner.RunTask(
 				ctx,
+				ratelimit.ObserveRegionStatsAsync,
 				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
-				ratelimit.WithTaskName(ratelimit.ObserveRegionStatsAsync),
 			)
 		}
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
 			ctx.TaskRunner.RunTask(
 				ctx,
+				ratelimit.UpdateSubTree,
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
-				ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 			)
 		}
 		return nil
@@ -646,28 +646,28 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		}
 		ctx.TaskRunner.RunTask(
 			ctx,
+			ratelimit.UpdateSubTree,
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
-			ratelimit.WithTaskName(ratelimit.UpdateSubTree),
 		)
 		tracer.OnUpdateSubTreeFinished()
 		ctx.TaskRunner.RunTask(
 			ctx,
+			ratelimit.HandleOverlaps,
 			func(_ context.Context) {
 				cluster.HandleOverlaps(c, overlaps)
 			},
-			ratelimit.WithTaskName(ratelimit.HandleOverlaps),
 		)
 	}
 	tracer.OnSaveCacheFinished()
 	// handle region stats
 	ctx.TaskRunner.RunTask(
 		ctx,
+		ratelimit.CollectRegionStatsAsync,
 		func(_ context.Context) {
 			cluster.Collect(c, region, hasRegionStats)
 		},
-		ratelimit.WithTaskName(ratelimit.CollectRegionStatsAsync),
 	)
 	tracer.OnCollectRegionStatsFinished()
 	return nil
@@ -691,4 +691,11 @@ func (c *Cluster) DropCacheAllRegion() {
 // DropCacheRegion removes a region from the cache.
 func (c *Cluster) DropCacheRegion(id uint64) {
 	c.RemoveRegionIfExist(id)
+}
+
+// IsSchedulingHalted returns whether the scheduling is halted.
+// Currently, the microservice scheduling is halted when:
+//   - The `HaltScheduling` persist option is set to true.
+func (c *Cluster) IsSchedulingHalted() bool {
+	return c.persistConfig.IsSchedulingHalted()
 }

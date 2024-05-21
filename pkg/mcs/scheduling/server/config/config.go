@@ -683,6 +683,10 @@ func (o *PersistConfig) SetSplitMergeInterval(splitMergeInterval time.Duration) 
 	o.SetScheduleConfig(v)
 }
 
+// SetSchedulingAllowanceStatus sets the scheduling allowance status to help distinguish the source of the halt.
+// TODO: support this metrics for the scheduling service in the future.
+func (*PersistConfig) SetSchedulingAllowanceStatus(bool, string) {}
+
 // SetHaltScheduling set HaltScheduling.
 func (o *PersistConfig) SetHaltScheduling(halt bool, _ string) {
 	v := o.GetScheduleConfig().Clone()

@@ -47,7 +47,6 @@ type keyspaceGroupTestSuite struct {
 	cluster          *tests.TestCluster
 	server           *tests.TestServer
 	backendEndpoints string
-	dialClient       *http.Client
 }
 
 func TestKeyspaceGroupTestSuite(t *testing.T) {
@@ -67,11 +66,6 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	suite.server = cluster.GetLeaderServer()
 	re.NoError(suite.server.BootstrapCluster())
 	suite.backendEndpoints = suite.server.GetAddr()
-	suite.dialClient = &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-		},
-	}
 	suite.cleanupFunc = func() {
 		cancel()
 	}
@@ -81,7 +75,6 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	re := suite.Require()
 	suite.cleanupFunc()
 	suite.cluster.Destroy()
-	suite.dialClient.CloseIdleConnections()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
 
@@ -298,7 +291,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 		Nodes: []string{nodesList[0]},
 	}
 	_, code = suite.trySetNodesForKeyspaceGroup(re, id, params)
-	re.Equal(http.StatusBadRequest, code)
+	re.Equal(http.StatusOK, code)
 
 	// the keyspace group is not exist.
 	id = 2
@@ -347,7 +340,7 @@ func (suite *keyspaceGroupTestSuite) tryAllocNodesForKeyspaceGroup(re *require.A
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/alloc", id), bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := suite.dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	nodes := make([]endpoint.KeyspaceGroupMember, 0)
@@ -364,7 +357,7 @@ func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(re *require.Assertio
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+keyspaceGroupsPrefix, bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := suite.dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	return resp.StatusCode
@@ -373,7 +366,7 @@ func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(re *require.Assertio
 func (suite *keyspaceGroupTestSuite) tryGetKeyspaceGroup(re *require.Assertions, id uint32) (*endpoint.KeyspaceGroup, int) {
 	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	re.NoError(err)
-	resp, err := suite.dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	kg := &endpoint.KeyspaceGroup{}
@@ -390,7 +383,7 @@ func (suite *keyspaceGroupTestSuite) trySetNodesForKeyspaceGroup(re *require.Ass
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPatch, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := suite.dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

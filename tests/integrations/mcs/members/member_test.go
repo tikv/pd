@@ -36,7 +36,7 @@ type memberTestSuite struct {
 	cluster          *tests.TestCluster
 	server           *tests.TestServer
 	backendEndpoints string
-	dialClient       pdClient.Client
+	pdClient         pdClient.Client
 
 	tsoNodes        map[string]bs.Server
 	schedulingNodes map[string]bs.Server
@@ -58,7 +58,7 @@ func (suite *memberTestSuite) SetupTest() {
 	suite.server = cluster.GetLeaderServer()
 	re.NoError(suite.server.BootstrapCluster())
 	suite.backendEndpoints = suite.server.GetAddr()
-	suite.dialClient = pdClient.NewClient("mcs-member-test", []string{suite.server.GetAddr()})
+	suite.pdClient = pdClient.NewClient("mcs-member-test", []string{suite.server.GetAddr()})
 
 	// TSO
 	nodes := make(map[string]bs.Server)
@@ -93,37 +93,37 @@ func (suite *memberTestSuite) TearDownTest() {
 	for _, cleanup := range suite.cleanupFunc {
 		cleanup()
 	}
-	if suite.dialClient != nil {
-		suite.dialClient.Close()
+	if suite.pdClient != nil {
+		suite.pdClient.Close()
 	}
 	suite.cluster.Destroy()
 }
 
 func (suite *memberTestSuite) TestMembers() {
 	re := suite.Require()
-	members, err := suite.dialClient.GetMicroServiceMembers(suite.ctx, "tso")
+	members, err := suite.pdClient.GetMicroServiceMembers(suite.ctx, "tso")
 	re.NoError(err)
 	re.Len(members, 3)
 
-	members, err = suite.dialClient.GetMicroServiceMembers(suite.ctx, "scheduling")
+	members, err = suite.pdClient.GetMicroServiceMembers(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.Len(members, 3)
 }
 
 func (suite *memberTestSuite) TestPrimary() {
 	re := suite.Require()
-	primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	primary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, "scheduling")
+	primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.NotEmpty(primary)
 }
 
 func (suite *memberTestSuite) TestCampaignPrimaryWhileServerClose() {
 	re := suite.Require()
-	primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
@@ -137,7 +137,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryWhileServerClose() {
 			nodes = suite.schedulingNodes
 		}
 
-		primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Close old and new primary to mock campaign primary
@@ -151,7 +151,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryWhileServerClose() {
 		tests.WaitForPrimaryServing(re, nodes)
 
 		// primary should be different with before
-		onlyPrimary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		onlyPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(primary, onlyPrimary)
 	}
@@ -159,7 +159,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryWhileServerClose() {
 
 func (suite *memberTestSuite) TestTransferPrimary() {
 	re := suite.Require()
-	primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
@@ -174,9 +174,9 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		}
 
 		// Test resign primary by random
-		primary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
-		err = suite.dialClient.TransferMicroServicePrimary(suite.ctx, service, "")
+		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, "")
 		re.NoError(err)
 
 		testutil.Eventually(re, func() bool {
@@ -188,7 +188,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			return false
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-		primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Test transfer primary to a specific node
@@ -199,27 +199,27 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 				break
 			}
 		}
-		err = suite.dialClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
 		re.NoError(err)
 
 		testutil.Eventually(re, func() bool {
 			return nodes[newPrimary].IsServing()
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-		primary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.Equal(primary, newPrimary)
 
 		// Test transfer primary to a non-exist node
 		newPrimary = "http://"
-		err = suite.dialClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
 		re.Error(err)
 	}
 }
 
 func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 	re := suite.Require()
-	primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
@@ -233,7 +233,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 			nodes = suite.schedulingNodes
 		}
 
-		primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Test transfer primary to a specific node
@@ -244,11 +244,11 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 				break
 			}
 		}
-		err = suite.dialClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
 		re.NoError(err)
 
 		tests.WaitForPrimaryServing(re, nodes)
-		newPrimary, err = suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		newPrimary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(primary, newPrimary)
 
@@ -257,7 +257,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		nodes[newPrimary].Close()
 		tests.WaitForPrimaryServing(re, nodes)
 		// Primary should be different with before
-		onlyPrimary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		onlyPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(primary, onlyPrimary)
 		re.NotEqual(newPrimary, onlyPrimary)
@@ -266,7 +266,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 
 func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 	re := suite.Require()
-	primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
@@ -280,7 +280,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 			nodes = suite.schedulingNodes
 		}
 
-		primary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Test transfer primary to a specific node
@@ -293,7 +293,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		}
 		// Mock the new primary can not grant leader which means the lease will expire
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", newPrimary)))
-		err = suite.dialClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
 		re.NoError(err)
 
 		// Wait for the old primary exit and new primary campaign
@@ -310,7 +310,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 
 		tests.WaitForPrimaryServing(re, nodes)
 		// Primary should be different with before
-		onlyPrimary, err := suite.dialClient.GetMicroServicePrimary(suite.ctx, service)
+		onlyPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(newPrimary, onlyPrimary)
 	}

@@ -117,6 +117,13 @@ func WithWaitRetryTimes(times int) ResourceControlCreateOption {
 	}
 }
 
+// WithDegradedModeWaitDuration is the option to set the wait duration for degraded mode.
+func WithDegradedModeWaitDuration(d time.Duration) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.DegradedModeWaitDuration = d
+	}
+}
+
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
