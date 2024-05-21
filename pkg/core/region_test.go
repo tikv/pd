@@ -657,7 +657,7 @@ func BenchmarkRandomRegion(b *testing.B) {
 	b.Run("random region", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			regions.RandLeaderRegion(1, nil)
+			regions.randLeaderRegion(1, nil)
 		}
 	})
 	b.Run("random regions", func(b *testing.B) {

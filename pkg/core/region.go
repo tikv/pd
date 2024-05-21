@@ -1673,13 +1673,6 @@ func (r *RegionsInfo) GetStoreWitnessCount(storeID uint64) int {
 	return r.witnesses[storeID].length()
 }
 
-// RandPendingRegion randomly gets a store's region with a pending peer.
-func (r *RegionsInfo) RandPendingRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.pendingPeers[storeID].RandomRegion(ranges)
-}
-
 // RandPendingRegions randomly gets a store's n regions with a pending peer.
 func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
@@ -1687,11 +1680,10 @@ func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*R
 	return r.pendingPeers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandLeaderRegion randomly gets a store's leader region.
-func (r *RegionsInfo) RandLeaderRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.leaders[storeID].RandomRegion(ranges)
+	return r.leaders[storeID].randomRegion(ranges)
 }
 
 // RandLeaderRegions randomly gets a store's n leader regions.
@@ -1701,13 +1693,6 @@ func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []KeyRange) []*Re
 	return r.leaders[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandFollowerRegion randomly gets a store's follower region.
-func (r *RegionsInfo) RandFollowerRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.followers[storeID].RandomRegion(ranges)
-}
-
 // RandFollowerRegions randomly gets a store's n follower regions.
 func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
@@ -1715,25 +1700,11 @@ func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*
 	return r.followers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandLearnerRegion randomly gets a store's learner region.
-func (r *RegionsInfo) RandLearnerRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.learners[storeID].RandomRegion(ranges)
-}
-
 // RandLearnerRegions randomly gets a store's n learner regions.
 func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
-}
-
-// RandWitnessRegion randomly gets a store's witness region.
-func (r *RegionsInfo) RandWitnessRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.witnesses[storeID].RandomRegion(ranges)
 }
 
 // RandWitnessRegions randomly gets a store's n witness regions.

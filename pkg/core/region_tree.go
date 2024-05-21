@@ -328,8 +328,7 @@ func (t *regionTree) getAdjacentItem(item *regionItem) (prev *regionItem, next *
 	return prev, next
 }
 
-// RandomRegion returns a random region within the given ranges.
-func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
+func (t *regionTree) randomRegion(ranges []KeyRange) *RegionInfo {
 	regions := t.RandomRegions(1, ranges)
 	if len(regions) == 0 {
 		return nil
