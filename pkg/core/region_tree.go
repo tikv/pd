@@ -328,62 +328,76 @@ func (t *regionTree) getAdjacentItem(item *regionItem) (prev *regionItem, next *
 	return prev, next
 }
 
-// RandomRegion is used to get a random region within ranges.
+// RandomRegion returns a random region within the given ranges.
 func (t *regionTree) RandomRegion(ranges []KeyRange) *RegionInfo {
-	if t.length() == 0 {
+	regions := t.RandomRegions(1, ranges)
+	if len(regions) == 0 {
 		return nil
 	}
+	return regions[0]
+}
 
+// RandomRegions get n random regions within the given ranges.
+func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
+	if t.length() == 0 || n < 1 {
+		return nil
+	}
 	if len(ranges) == 0 {
 		ranges = []KeyRange{NewKeyRange("", "")}
 	}
-
-	for _, i := range rand.Perm(len(ranges)) {
-		var endIndex int
-		startKey, endKey := ranges[i].StartKey, ranges[i].EndKey
-		startRegion, startIndex := t.tree.GetWithIndex(&regionItem{RegionInfo: &RegionInfo{meta: &metapb.Region{StartKey: startKey}}})
-
-		if len(endKey) != 0 {
-			_, endIndex = t.tree.GetWithIndex(&regionItem{RegionInfo: &RegionInfo{meta: &metapb.Region{StartKey: endKey}}})
-		} else {
-			endIndex = t.tree.Len()
-		}
-
-		// Consider that the item in the tree may not be continuous,
-		// we need to check if the previous item contains the key.
-		if startIndex != 0 && startRegion == nil && t.tree.GetAt(startIndex-1).Contains(startKey) {
-			startIndex--
-		}
-
-		if endIndex <= startIndex {
-			if len(endKey) > 0 && bytes.Compare(startKey, endKey) > 0 {
-				log.Error("wrong range keys",
-					logutil.ZapRedactString("start-key", string(HexRegionKey(startKey))),
-					logutil.ZapRedactString("end-key", string(HexRegionKey(endKey))),
-					errs.ZapError(errs.ErrWrongRangeKeys))
+	var (
+		startKey, endKey              []byte
+		startIndex, endIndex, randIdx int
+		startItem                     *regionItem
+		pivotItem                     = &regionItem{&RegionInfo{meta: &metapb.Region{}}}
+		region                        *RegionInfo
+		regions                       = make([]*RegionInfo, 0, n)
+		rangeNum, curLen              = len(ranges), len(regions)
+	)
+	// Keep retrying until we get enough regions.
+	for curLen < n {
+		// Shuffle the ranges to increase the randomness.
+		rand.Shuffle(rangeNum, func(i, j int) {
+			ranges[i], ranges[j] = ranges[j], ranges[i]
+		})
+		for _, r := range ranges {
+			startKey, endKey = r.StartKey, r.EndKey
+			pivotItem.meta.StartKey = startKey
+			startItem, startIndex = t.tree.GetWithIndex(pivotItem)
+			if len(endKey) != 0 {
+				pivotItem.meta.StartKey = endKey
+				_, endIndex = t.tree.GetWithIndex(pivotItem)
+			} else {
+				endIndex = t.tree.Len()
 			}
-			continue
+			// Consider that the item in the tree may not be continuous,
+			// we need to check if the previous item contains the key.
+			if startIndex != 0 && startItem == nil && t.tree.GetAt(startIndex-1).Contains(startKey) {
+				startIndex--
+			}
+			if endIndex <= startIndex {
+				if len(endKey) > 0 && bytes.Compare(startKey, endKey) > 0 {
+					log.Error("wrong range keys",
+						logutil.ZapRedactString("start-key", string(HexRegionKey(startKey))),
+						logutil.ZapRedactString("end-key", string(HexRegionKey(endKey))),
+						errs.ZapError(errs.ErrWrongRangeKeys))
+				}
+				continue
+			}
+
+			randIdx = rand.Intn(endIndex-startIndex) + startIndex
+			region = t.tree.GetAt(randIdx).RegionInfo
+			if curLen < n && region.isInvolved(startKey, endKey) {
+				regions = append(regions, region)
+				curLen++
+			} else if curLen == n {
+				return regions
+			}
 		}
-		index := rand.Intn(endIndex-startIndex) + startIndex
-		region := t.tree.GetAt(index).RegionInfo
-		if region.isInvolved(startKey, endKey) {
-			return region
-		}
-	}
-
-	return nil
-}
-
-func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
-	if t.length() == 0 {
-		return nil
-	}
-
-	regions := make([]*RegionInfo, 0, n)
-
-	for i := 0; i < n; i++ {
-		if region := t.RandomRegion(ranges); region != nil {
-			regions = append(regions, region)
+		// No region found in the given ranges, directly break.
+		// This is to avoid infinite loop.
+		if len(regions) == 0 {
+			break
 		}
 	}
 	return regions

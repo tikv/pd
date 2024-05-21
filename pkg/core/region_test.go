@@ -654,10 +654,18 @@ func BenchmarkRandomRegion(b *testing.B) {
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		regions.RandLeaderRegion(1, nil)
-	}
+	b.Run("random region", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			regions.RandLeaderRegion(1, nil)
+		}
+	})
+	b.Run("random regions", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			regions.RandLeaderRegions(1, nil)
+		}
+	})
 }
 
 func BenchmarkRandomSetRegion(b *testing.B) {

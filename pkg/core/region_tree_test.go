@@ -281,6 +281,8 @@ func TestRandomRegion(t *testing.T) {
 	updateNewItem(tree, regionA)
 	ra := tree.RandomRegion([]KeyRange{NewKeyRange("", "")})
 	re.Equal(regionA, ra)
+	ra2 := tree.RandomRegions(2, []KeyRange{NewKeyRange("", "")})
+	re.Equal([]*RegionInfo{regionA, regionA}, ra2)
 
 	regionB := NewTestRegionInfo(2, 2, []byte("g"), []byte("n"))
 	regionC := NewTestRegionInfo(3, 3, []byte("n"), []byte("t"))
