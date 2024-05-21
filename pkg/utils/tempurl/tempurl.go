@@ -79,11 +79,14 @@ func getFromUT() string {
 		return ""
 	}
 
-	resp, err := http.Get(addr)
+	req, err := http.NewRequest(http.MethodGet, addr, nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return ""
 	}
-
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
