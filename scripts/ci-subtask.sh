@@ -9,11 +9,11 @@ integrations_dir=$(pwd)/tests/integrations
 case $1 in
     1)
         # unit tests ignore `tests`
-        ./bin/pd-ut run --race --ignore tests --coverprofile $ROOT_PATH_COV  || exit 1
+        ./bin/pd-ut run --race --ignore tests --coverprofile $ROOT_PATH_COV || exit 1
         ;;
     2)
         # unit tests only in `tests`
-        ./bin/pd-ut run tests --race --coverprofile $ROOT_PATH_COV  || exit 1
+        ./bin/pd-ut run tests --race --coverprofile $ROOT_PATH_COV || exit 1
         ;;
     3)
         # tools tests
@@ -21,15 +21,16 @@ case $1 in
         ;;
     4)
         # integration test client
-        cd ./client && make ci-test-job && cat covprofile >> $ROOT_PATH_COV  || exit 1
-        cd $integrations_dir && make ci-test-job test_name=client && cat ./client/covprofile >> $ROOT_PATH_COV || exit 1
+        ./bin/pd-ut it run client --race --coverprofile $ROOT_PATH_COV || exit 1
+        # client tests
+        cd ./client && make ci-test-job && cat covprofile >> $ROOT_PATH_COV || exit 1
         ;;
     5)
         # integration test tso
-        cd $integrations_dir && make ci-test-job test_name=tso && cat ./tso/covprofile >> $ROOT_PATH_COV || exit 1
+        ./bin/pd-ut it run tso --race --coverprofile $ROOT_PATH_COV || exit 1
         ;;
     6)
         # integration test mcs
-        cd $integrations_dir && make ci-test-job test_name=mcs && cat ./mcs/covprofile >> $ROOT_PATH_COV || exit 1
+        ./bin/pd-ut it run mcs --race --coverprofile $ROOT_PATH_COV || exit 1
         ;;
 esac

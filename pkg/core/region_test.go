@@ -1081,3 +1081,18 @@ func TestCheckAndPutSubTree(t *testing.T) {
 	// should failed to put because the root tree is missing
 	re.Equal(0, regions.tree.length())
 }
+
+func TestCntRefAfterResetRegionCache(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	// Put the region first.
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	regions.CheckAndPutRegion(region)
+	re.Equal(int32(2), region.GetRef())
+	regions.ResetRegionCache()
+	// Put the region after reset.
+	region = NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	re.Zero(region.GetRef())
+	regions.CheckAndPutRegion(region)
+	re.Equal(int32(2), region.GetRef())
+}

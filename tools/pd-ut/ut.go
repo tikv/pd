@@ -84,7 +84,10 @@ go tool cover --func=xxx`
 	return true
 }
 
-const modulePath = "github.com/tikv/pd"
+var (
+	modulePath           = "github.com/tikv/pd"
+	integrationsTestPath = "tests/integrations"
+)
 
 var (
 	// runtime
@@ -146,6 +149,18 @@ func main() {
 			isSucceed = cmdBuild(os.Args[2:]...)
 		case "run":
 			isSucceed = cmdRun(os.Args[2:]...)
+		case "it":
+			// run integration tests
+			if len(os.Args) >= 3 {
+				modulePath = path.Join(modulePath, integrationsTestPath)
+				workDir = path.Join(workDir, integrationsTestPath)
+				switch os.Args[2] {
+				case "run":
+					isSucceed = cmdRun(os.Args[3:]...)
+				default:
+					isSucceed = usage()
+				}
+			}
 		default:
 			isSucceed = usage()
 		}
@@ -635,7 +650,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 }
 
 func skipDIR(pkg string) bool {
-	skipDir := []string{"bin", "cmd", "realcluster", "tests/integrations"}
+	skipDir := []string{"bin", "cmd", "realcluster"}
 	if ignoreDir != "" {
 		skipDir = append(skipDir, ignoreDir)
 	}
@@ -652,6 +667,11 @@ func generateBuildCache() error {
 	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=tso_function_test,deadlock")
 	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s/tools/pd-ut/go-compile-without-link.sh", workDir)
 	cmd.Dir = fmt.Sprintf("%s/cmd/pd-server", workDir)
+	if strings.Contains(workDir, integrationsTestPath) {
+		cmd.Dir = fmt.Sprintf("%s/cmd/pd-server", workDir[:strings.LastIndex(workDir, integrationsTestPath)])
+		goCompileWithoutLink = fmt.Sprintf("-toolexec=%s/tools/pd-ut/go-compile-without-link.sh",
+			workDir[:strings.LastIndex(workDir, integrationsTestPath)])
+	}
 	cmd.Args = append(cmd.Args, goCompileWithoutLink)
 
 	cmd.Stdout = os.Stdout
@@ -671,7 +691,11 @@ func buildTestBinaryMulti(pkgs []string) error {
 	}
 
 	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
+	// workPath just like `/data/nvme0n1/husharp/proj/pd/tests/integrations`
 	xprogPath := path.Join(workDir, "bin/xprog")
+	if strings.Contains(workDir, integrationsTestPath) {
+		xprogPath = path.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin/xprog")
+	}
 	packages := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {
 		packages = append(packages, path.Join(modulePath, pkg))
@@ -682,6 +706,9 @@ func buildTestBinaryMulti(pkgs []string) error {
 	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
 	if coverProfile != "" {
 		coverpkg := "./..."
+		if strings.Contains(workDir, integrationsTestPath) {
+			coverpkg = "../../..."
+		}
 		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverpkg))
 	}
 	cmd.Args = append(cmd.Args, packages...)
