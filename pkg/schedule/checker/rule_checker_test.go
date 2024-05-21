@@ -2107,7 +2107,7 @@ func (suite *ruleCheckerTestSuite) TestIssue7808() {
 		},
 	})
 	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	err = suite.ruleManager.DeleteRule("pd", "default")
 	re.NoError(err)
 	suite.cluster.SetStoreDown(1)
 	region := suite.cluster.GetRegion(1)
