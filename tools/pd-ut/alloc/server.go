@@ -16,18 +16,26 @@ package alloc
 
 import (
 	"errors"
+	"flag"
+	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/log"
-	flag "github.com/spf13/pflag"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"go.uber.org/zap"
 )
 
 var statusAddress = flag.String("status-addr", "0.0.0.0:20180", "status address")
 
 func RunHTTPServer() *http.Server {
+	err := os.Setenv(tempurl.AllocURLFromUT, fmt.Sprintf("http://%s/alloc", *statusAddress))
+	if err != nil {
+		fmt.Println(err)
+	}
+
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
 	engine.Use(gin.Recovery())

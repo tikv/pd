@@ -19,6 +19,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/pingcap/log"
@@ -32,7 +33,7 @@ var (
 )
 
 // reference: /pd/tools/pd-ut/alloc/server.go
-const utAllocURL = "http://0.0.0.0:20180/alloc"
+const AllocURLFromUT = "allocURLFromUT"
 
 // Alloc allocates a local URL for testing.
 func Alloc() string {
@@ -73,7 +74,12 @@ func tryAllocTestURL() string {
 }
 
 func getFromUT() string {
-	resp, err := http.Get(utAllocURL)
+	addr := os.Getenv(AllocURLFromUT)
+	if addr == "" {
+		return ""
+	}
+
+	resp, err := http.Get(addr)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		return ""
 	}
