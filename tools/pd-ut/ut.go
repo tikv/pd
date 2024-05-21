@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -31,6 +32,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tikv/pd/tools/pd-ut/alloc"
+	"go.uber.org/zap"
 
 	// Set the correct value when it runs inside docker.
 	_ "go.uber.org/automaxprocs"
@@ -127,6 +131,13 @@ func main() {
 	if err != nil {
 		fmt.Println("os.Getwd() error", err)
 	}
+
+	srv := alloc.RunHTTPServer()
+	defer func() {
+		if err := srv.Shutdown(context.Background()); err != nil {
+			log.Fatal("server shutdown error", zap.Error(err))
+		}
+	}()
 
 	var isSucceed bool
 	// run all tests
@@ -684,7 +695,7 @@ func buildTestBinaryMulti(pkgs []string) error {
 	}
 
 	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
-	// workPath just like `/data/nvme0n1/husharp/proj/pd/tests/integrations`
+	// workPath just like `/pd/tests/integrations`
 	xprogPath := path.Join(workDir, "bin/xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
 		xprogPath = path.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin/xprog")

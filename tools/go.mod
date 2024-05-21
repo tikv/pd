@@ -9,6 +9,7 @@ replace (
 
 require (
 	github.com/BurntSushi/toml v0.3.1
+	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e
 	github.com/coreos/go-semver v0.3.1
 	github.com/docker/go-units v0.4.0
@@ -64,7 +65,6 @@ require (
 	github.com/bitly/go-simplejson v0.5.0 // indirect
 	github.com/breeswish/gin-jwt/v2 v2.6.4-jwt-patch // indirect
 	github.com/bytedance/sonic v1.9.1 // indirect
-	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5 // indirect
 	github.com/cenkalti/backoff/v4 v4.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
