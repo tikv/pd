@@ -263,51 +263,52 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	regionID := region.GetID()
 	for i := 0; i < len(regionStatisticTypes); i++ {
 		condition := RegionStatisticType(1 << i)
-		if conditions&condition != 0 {
-			info := r.stats[condition][regionID]
-			// The condition is met
-			switch condition {
-			case MissPeer:
-				if info == nil {
-					info = &RegionInfoWithTS{}
-				}
-				if len(voters) < desiredVoters {
-					if info.(*RegionInfoWithTS).startMissVoterPeerTS != 0 {
-						regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startMissVoterPeerTS))
-					} else {
-						info.(*RegionInfoWithTS).startMissVoterPeerTS = time.Now().Unix()
-					}
-				}
-			case DownPeer:
-				if info == nil {
-					info = &RegionInfoWithTS{}
-				}
-				if info.(*RegionInfoWithTS).startDownPeerTS != 0 {
-					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startDownPeerTS))
-				} else {
-					info.(*RegionInfoWithTS).startDownPeerTS = time.Now().Unix()
-					logDownPeerWithNoDisconnectedStore(region, stores)
-				}
-			case ExtraPeer:
-				fallthrough
-			case PendingPeer:
-				fallthrough
-			case OfflinePeer:
-				fallthrough
-			case LearnerPeer:
-				fallthrough
-			case EmptyRegion:
-				fallthrough
-			case OversizedRegion:
-				fallthrough
-			case UndersizedRegion:
-				fallthrough
-			case WitnessLeader:
-				info = struct{}{}
-			}
-			r.stats[condition][regionID] = info
-			peerTypeIndex |= condition
+		if conditions&condition == 0 {
+			continue
 		}
+		info := r.stats[condition][regionID]
+		// The condition is met
+		switch condition {
+		case MissPeer:
+			if info == nil {
+				info = &RegionInfoWithTS{}
+			}
+			if len(voters) < desiredVoters {
+				if info.(*RegionInfoWithTS).startMissVoterPeerTS != 0 {
+					regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startMissVoterPeerTS))
+				} else {
+					info.(*RegionInfoWithTS).startMissVoterPeerTS = time.Now().Unix()
+				}
+			}
+		case DownPeer:
+			if info == nil {
+				info = &RegionInfoWithTS{}
+			}
+			if info.(*RegionInfoWithTS).startDownPeerTS != 0 {
+				regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startDownPeerTS))
+			} else {
+				info.(*RegionInfoWithTS).startDownPeerTS = time.Now().Unix()
+				logDownPeerWithNoDisconnectedStore(region, stores)
+			}
+		case ExtraPeer:
+			fallthrough
+		case PendingPeer:
+			fallthrough
+		case OfflinePeer:
+			fallthrough
+		case LearnerPeer:
+			fallthrough
+		case EmptyRegion:
+			fallthrough
+		case OversizedRegion:
+			fallthrough
+		case UndersizedRegion:
+			fallthrough
+		case WitnessLeader:
+			info = struct{}{}
+		}
+		r.stats[condition][regionID] = info
+		peerTypeIndex |= condition
 	}
 	// Remove the info if any of the conditions are not met any more.
 	if oldIndex, ok := r.index[regionID]; ok && oldIndex > emptyStatistic {
