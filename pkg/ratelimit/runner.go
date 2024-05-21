@@ -53,7 +53,8 @@ type Task struct {
 	submittedAt time.Time
 	f           func(context.Context)
 	name        string
-	retained    bool
+	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
+	retained bool
 }
 
 // ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
