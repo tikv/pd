@@ -929,7 +929,7 @@ func NewRegionsInfo() *RegionsInfo {
 		learners:     make(map[uint64]*regionTree),
 		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
-		overlapTree:  newRegionTree(),
+		overlapTree:  newRegionTreeWithCountRef(),
 	}
 }
 
@@ -1131,42 +1131,31 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 	item := &regionItem{region}
 	r.subRegions[region.GetID()] = item
 	r.overlapTree.update(item, false)
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
+	// Add leaders and followers.
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64) {
 		store, ok := peersMap[storeID]
 		if !ok {
-			if !countRef {
-				store = newRegionTree()
-			} else {
-				store = newRegionTreeWithCountRef()
-			}
+			store = newRegionTree()
 			peersMap[storeID] = store
 		}
 		store.update(item, false)
 	}
-
-	// Add to leaders and followers.
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
-			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item, true)
+			setPeer(r.leaders, storeID)
 		} else {
-			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item, false)
+			setPeer(r.followers, storeID)
 		}
 	}
-
+	// Add other peers.
 	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
-			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item, false)
+			setPeer(peersMap, peer.GetStoreId())
 		}
 	}
-	// Add to learners.
 	setPeers(r.learners, region.GetLearners())
-	// Add to witnesses.
 	setPeers(r.witnesses, region.GetWitnesses())
-	// Add to PendingPeers
 	setPeers(r.pendingPeers, region.GetPendingPeers())
 }
 
@@ -1335,7 +1324,7 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
-	r.tree = newRegionTree()
+	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
 	r.t.Unlock()
 	r.st.Lock()
@@ -1345,7 +1334,7 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.learners = make(map[uint64]*regionTree)
 	r.witnesses = make(map[uint64]*regionTree)
 	r.pendingPeers = make(map[uint64]*regionTree)
-	r.overlapTree = newRegionTree()
+	r.overlapTree = newRegionTreeWithCountRef()
 }
 
 // RemoveRegionFromSubTree removes RegionInfo from regionSubTrees
