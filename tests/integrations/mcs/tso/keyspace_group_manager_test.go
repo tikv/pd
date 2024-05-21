@@ -16,7 +16,6 @@ package tso
 
 import (
 	"context"
-	"github.com/tikv/pd/pkg/mock/mockid"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -33,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/member"
+	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
