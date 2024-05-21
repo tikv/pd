@@ -42,13 +42,6 @@ const (
 	tsoKeyspaceGroupsPrefix = "/tso/api/v1/keyspace-groups"
 )
 
-// dialClient used to dial http request.
-var dialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
-
 type tsoAPITestSuite struct {
 	suite.Suite
 	ctx              context.Context
@@ -110,13 +103,13 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 
 	// Test reset ts
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
-	err := testutil.CheckPostJSON(dialClient, url, input,
+	err := testutil.CheckPostJSON(tests.TestDialClient, url, input,
 		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
 	re.NoError(err)
 
 	// Test reset ts with invalid tso
 	input = []byte(`{}`)
-	err = testutil.CheckPostJSON(dialClient, url, input,
+	err = testutil.CheckPostJSON(tests.TestDialClient, url, input,
 		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
 	re.NoError(err)
 }
@@ -124,7 +117,7 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+tsoKeyspaceGroupsPrefix+"/members", http.NoBody)
 	re.NoError(err)
-	httpResp, err := dialClient.Do(httpReq)
+	httpResp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer httpResp.Body.Close()
 	data, err := io.ReadAll(httpResp.Body)
@@ -177,14 +170,14 @@ func TestTSOServerStartFirst(t *testing.T) {
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, addr+"/pd/api/v2/tso/keyspace-groups/0/split", bytes.NewBuffer(jsonBody))
 	re.NoError(err)
-	httpResp, err := dialClient.Do(httpReq)
+	httpResp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer httpResp.Body.Close()
 	re.Equal(http.StatusOK, httpResp.StatusCode)
 
 	httpReq, err = http.NewRequest(http.MethodGet, addr+"/pd/api/v2/tso/keyspace-groups/0", http.NoBody)
 	re.NoError(err)
-	httpResp, err = dialClient.Do(httpReq)
+	httpResp, err = tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	data, err := io.ReadAll(httpResp.Body)
 	re.NoError(err)
@@ -219,20 +212,20 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 
 	// Test /operators, it should not forward when there is no scheduling server.
 	var slice []string
-	err = testutil.ReadGetJSON(re, dialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
+	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
 		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
 	re.NoError(err)
 	re.Empty(slice)
 
 	// Test admin/reset-ts, it should forward to tso server.
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
-	err = testutil.CheckPostJSON(dialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
 	re.NoError(err)
 
 	// If close tso server, it should try forward to tso server, but return error in api mode.
 	ttc.Destroy()
-	err = testutil.CheckPostJSON(dialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
+	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))
 	re.NoError(err)
 }
@@ -241,7 +234,7 @@ func (suite *tsoAPITestSuite) TestMetrics() {
 	re := suite.Require()
 
 	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	resp, err := http.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/metrics")
+	resp, err := tests.TestDialClient.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/metrics")
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -254,7 +247,7 @@ func (suite *tsoAPITestSuite) TestStatus() {
 	re := suite.Require()
 
 	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	resp, err := http.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/status")
+	resp, err := tests.TestDialClient.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/status")
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -271,7 +264,7 @@ func (suite *tsoAPITestSuite) TestConfig() {
 	re := suite.Require()
 
 	primary := suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	resp, err := http.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/tso/api/v1/config")
+	resp, err := tests.TestDialClient.Get(primary.GetConfig().GetAdvertiseListenAddr() + "/tso/api/v1/config")
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
