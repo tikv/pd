@@ -107,8 +107,9 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	heartbeatTaskRunner = "heartbeat-async"
-	logTaskRunner       = "log-async"
+	heartbeatTaskRunner  = "heartbeat-async"
+	statisticsTaskRunner = "statistics-async"
+	logTaskRunner        = "log-async"
 )
 
 // Server is the interface for cluster.
@@ -173,8 +174,12 @@ type RaftCluster struct {
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
 
-	heartbeatRunnner ratelimit.Runner
-	logRunner        ratelimit.Runner
+	// heartbeatRunner is used to process the subtree update task asynchronously.
+	heartbeatRunner ratelimit.Runner
+	// miscRunner is used to process the statistics and persistent tasks asynchronously.
+	miscRunner ratelimit.Runner
+	// logRunner is used to process the log asynchronously.
+	logRunner ratelimit.Runner
 }
 
 // Status saves some state information.
@@ -191,15 +196,16 @@ type Status struct {
 func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
 	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:        ctx,
-		clusterID:        clusterID,
-		regionSyncer:     regionSyncer,
-		httpClient:       httpClient,
-		etcdClient:       etcdClient,
-		core:             basicCluster,
-		storage:          storage,
-		heartbeatRunnner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		logRunner:        ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		serverCtx:       ctx,
+		clusterID:       clusterID,
+		regionSyncer:    regionSyncer,
+		httpClient:      httpClient,
+		etcdClient:      etcdClient,
+		core:            basicCluster,
+		storage:         storage,
+		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		miscRunner:      ratelimit.NewConcurrentRunner(statisticsTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
 }
 
@@ -357,7 +363,8 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.startGCTuner()
 
 	c.running = true
-	c.heartbeatRunnner.Start()
+	c.heartbeatRunner.Start()
+	c.miscRunner.Start()
 	c.logRunner.Start()
 	return nil
 }
@@ -752,7 +759,8 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	c.heartbeatRunnner.Stop()
+	c.heartbeatRunner.Stop()
+	c.miscRunner.Stop()
 	c.logRunner.Stop()
 	c.Unlock()
 
@@ -1024,19 +1032,13 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-		ctx.TaskRunner.RunTask(
-			ctx.Context,
-			ratelimit.HandleStatsAsync,
-			func(_ context.Context) {
-				cluster.HandleStatsAsync(c, region)
-			},
-		)
+		cluster.HandleStatsAsync(c, region)
 	}
 	tracer.OnAsyncHotStatsFinished()
 	hasRegionStats := c.regionStats != nil
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	saveKV, saveCache, needSync := regionGuide(ctx, region, origin)
+	saveKV, saveCache, needSync, retained := regionGuide(ctx, region, origin)
 	tracer.OnRegionGuideFinished()
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
@@ -1045,7 +1047,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// region stats needs to be collected in API mode.
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			ctx.TaskRunner.RunTask(
+			ctx.MiscRunner.RunTask(
 				ctx.Context,
 				ratelimit.ObserveRegionStatsAsync,
 				func(_ context.Context) {
@@ -1063,6 +1065,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
+				ratelimit.WithRetained(true),
 			)
 		}
 		return nil
@@ -1090,11 +1093,12 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
+			ratelimit.WithRetained(retained),
 		)
 		tracer.OnUpdateSubTreeFinished()
 
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-			ctx.TaskRunner.RunTask(
+			ctx.MiscRunner.RunTask(
 				ctx.Context,
 				ratelimit.HandleOverlaps,
 				func(_ context.Context) {
@@ -1107,7 +1111,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 
 	tracer.OnSaveCacheFinished()
 	// handle region stats
-	ctx.TaskRunner.RunTask(
+	ctx.MiscRunner.RunTask(
 		ctx.Context,
 		ratelimit.CollectRegionStatsAsync,
 		func(_ context.Context) {
@@ -1121,7 +1125,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
 		if saveKV {
-			ctx.TaskRunner.RunTask(
+			ctx.MiscRunner.RunTask(
 				ctx.Context,
 				ratelimit.SaveRegionToKV,
 				func(_ context.Context) {
