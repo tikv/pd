@@ -118,18 +118,21 @@ func main() {
 		defer os.RemoveAll(coverFileTempDir)
 	}
 
+	var err error
+	procs := runtime.GOMAXPROCS(0)
 	if parallelStr == "" {
 		// Get the correct count of CPU if it's in docker.
-		parallel = runtime.GOMAXPROCS(0)
+		parallel = procs
 	} else {
-		var err error
 		parallel, err = strconv.Atoi(parallelStr)
 		if err != nil {
 			fmt.Println("parse parallel error", err)
 			return
 		}
+		if parallel > procs {
+			fmt.Printf("Recommend to set parallel be same as the GOMAXPROCS=%d\n", procs)
+		}
 	}
-	var err error
 	workDir, err = os.Getwd()
 	if err != nil {
 		fmt.Println("os.Getwd() error", err)
