@@ -289,7 +289,7 @@ func TestMoveLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 3)
+	cluster, err := tests.NewTestCluster(ctx, 5)
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -298,7 +298,7 @@ func TestMoveLeader(t *testing.T) {
 	cluster.WaitLeader()
 
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(5)
 	for _, s := range cluster.GetServers() {
 		go func(s *tests.TestServer) {
 			defer wg.Done()
