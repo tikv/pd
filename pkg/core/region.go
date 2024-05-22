@@ -1680,10 +1680,11 @@ func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*R
 	return r.pendingPeers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+// This function is used for test only.
+func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []KeyRange) {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.leaders[storeID].randomRegion(ranges)
+	_ = r.leaders[storeID].randomRegion(ranges)
 }
 
 // RandLeaderRegions randomly gets a store's n leader regions.
