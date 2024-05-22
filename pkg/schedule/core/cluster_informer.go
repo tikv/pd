@@ -43,6 +43,7 @@ type SchedulerCluster interface {
 	GetSchedulerConfig() sc.SchedulerConfigProvider
 	GetRegionLabeler() *labeler.RegionLabeler
 	GetStoreConfig() sc.StoreConfigProvider
+	IsSchedulingHalted() bool
 }
 
 // CheckerCluster is an aggregate interface that wraps multiple interfaces
