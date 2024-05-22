@@ -145,10 +145,6 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	c.adjustLog(configMetaData.Child("log"))
 	c.Security.Encryption.Adjust()
 
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = utils.DefaultLogFormat
-	}
-
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
 
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
@@ -161,6 +157,8 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
 }
 
 // GetListenAddr returns the ListenAddr

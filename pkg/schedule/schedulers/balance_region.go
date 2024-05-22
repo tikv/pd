@@ -91,6 +91,13 @@ func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	}
 }
 
+// WithBalanceRegionFilterCounterName sets the filter counter name for the scheduler.
+func WithBalanceRegionFilterCounterName(name string) BalanceRegionCreateOption {
+	return func(s *balanceRegionScheduler) {
+		s.filterCounter.SetScope(name)
+	}
+}
+
 func (s *balanceRegionScheduler) GetName() string {
 	return s.conf.Name
 }
