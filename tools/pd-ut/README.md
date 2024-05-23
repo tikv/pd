@@ -63,4 +63,8 @@ pd-ut run --junitfile xxx
 
 // test with race flag
 pd-ut run --race
+
+// test with coverprofile
+pd-ut run --coverprofile xxx
+go tool cover --func=xxx
 ```
