@@ -811,3 +811,22 @@ func (suite *httpClientTestSuite) checkUpdateKeyspaceGCManagementType(mode mode,
 	re.True(ok)
 	re.Equal(expectGCManagementType, val)
 }
+
+func (suite *httpClientTestSuite) TestGetHealthStatus() {
+	suite.RunTestInTwoModes(suite.checkGetHealthStatus)
+}
+
+func (suite *httpClientTestSuite) checkGetHealthStatus(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	healths, err := client.GetHealthStatus(env.ctx)
+	re.NoError(err)
+	re.Len(healths, 2)
+	sort.Slice(healths, func(i, j int) bool {
+		return healths[i].Name < healths[j].Name
+	})
+	re.Equal("pd1", healths[0].Name)
+	re.Equal("pd2", healths[1].Name)
+	re.Equal(true, healths[0].Health && healths[1].Health)
+}
