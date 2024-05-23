@@ -828,5 +828,5 @@ func (suite *httpClientTestSuite) checkGetHealthStatus(mode mode, client pd.Clie
 	})
 	re.Equal("pd1", healths[0].Name)
 	re.Equal("pd2", healths[1].Name)
-	re.Equal(true, healths[0].Health && healths[1].Health)
+	re.True(healths[0].Health && healths[1].Health)
 }
