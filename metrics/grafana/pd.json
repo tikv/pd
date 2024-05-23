@@ -11248,7 +11248,7 @@
             },
             {
               "exemplar": true,
-              "expr": "rate(pd_scheduler_handle_region_heartbeat_duration_seconds_sum{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[1m]) / rate(pd_scheduler_handle_region_heartbeat_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[1m])",
+              "expr": "sum(rate(pd_scheduler_handle_region_heartbeat_duration_seconds_sum{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[1m])) / sum(rate(pd_scheduler_handle_region_heartbeat_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", store=~\"$store\"}[1m]))",
               "hide": false,
               "interval": "",
               "legendFormat": "avg",
