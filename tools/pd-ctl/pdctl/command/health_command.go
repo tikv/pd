@@ -15,8 +15,6 @@
 package command
 
 import (
-	"context"
-
 	"github.com/spf13/cobra"
 )
 
@@ -24,7 +22,7 @@ import (
 func NewHealthCommand() *cobra.Command {
 	m := &cobra.Command{
 		Use:               "health",
-		Short:             "show all node's health information of the pd cluster",
+		Short:             "show all node's health information of the PD cluster",
 		PersistentPreRunE: requirePDClient,
 		Run:               showHealthCommandFunc,
 	}

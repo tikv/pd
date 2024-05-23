@@ -342,7 +342,7 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 func (c *client) GetHealthStatus(ctx context.Context) ([]Health, error) {
 	var healths []Health
 	err := c.request(ctx, newRequestInfo().
-		WithName(getHealthName).
+		WithName(getHealthStatusName).
 		WithURI(health).
 		WithMethod(http.MethodGet).
 		WithResp(&healths))
