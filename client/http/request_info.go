@@ -39,6 +39,7 @@ const (
 	getStoresName                           = "GetStores"
 	getStoreName                            = "GetStore"
 	setStoreLabelsName                      = "SetStoreLabels"
+	getHealthName                           = "GetHealth"
 	getConfigName                           = "GetConfig"
 	setConfigName                           = "SetConfig"
 	getScheduleConfigName                   = "GetScheduleConfig"
