@@ -338,6 +338,7 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 		WithBody(jsonInput))
 }
 
+// GetHealthStatus gets the health status of the cluster.
 func (c *client) GetHealthStatus(ctx context.Context) ([]Health, error) {
 	var healths []Health
 	err := c.request(ctx, newRequestInfo().

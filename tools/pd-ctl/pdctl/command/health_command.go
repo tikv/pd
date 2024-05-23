@@ -32,7 +32,7 @@ func NewHealthCommand() *cobra.Command {
 }
 
 func showHealthCommandFunc(cmd *cobra.Command, _ []string) {
-	health, err := PDCli.GetHealthStatus(context.Background())
+	health, err := PDCli.GetHealthStatus(cmd.Context())
 	if err != nil {
 		cmd.Println(err)
 		return
