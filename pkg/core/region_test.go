@@ -668,18 +668,33 @@ func BenchmarkRandomRegion(b *testing.B) {
 			}
 		})
 		ranges := []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
-			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
 		}
-		b.Run(fmt.Sprintf("random region given ranges with size %d", size), func(b *testing.B) {
+		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
-		b.Run(fmt.Sprintf("random regions given ranges with size %d", size), func(b *testing.B) {
+		b.Run(fmt.Sprintf("random regions single range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.RandLeaderRegions(1, ranges)
+			}
+		})
+		ranges = []KeyRange{
+			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
+			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
+			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
+			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+		}
+		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.randLeaderRegion(1, ranges)
+			}
+		})
+		b.Run(fmt.Sprintf("random regions multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				regions.RandLeaderRegions(1, ranges)

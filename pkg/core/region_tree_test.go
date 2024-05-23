@@ -281,7 +281,11 @@ func TestRandomRegion(t *testing.T) {
 	updateNewItem(tree, regionA)
 	ra := tree.randomRegion([]KeyRange{NewKeyRange("", "")})
 	re.Equal(regionA, ra)
+	ra = tree.randomRegion(nil)
+	re.Equal(regionA, ra)
 	ra2 := tree.RandomRegions(2, []KeyRange{NewKeyRange("", "")})
+	re.Equal([]*RegionInfo{regionA, regionA}, ra2)
+	ra2 = tree.RandomRegions(2, nil)
 	re.Equal([]*RegionInfo{regionA, regionA}, ra2)
 
 	regionB := NewTestRegionInfo(2, 2, []byte("g"), []byte("n"))
@@ -307,6 +311,7 @@ func TestRandomRegion(t *testing.T) {
 	rf = tree.randomRegion([]KeyRange{NewKeyRange("z", "")})
 	re.Nil(rf)
 
+	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, nil)
 	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []KeyRange{NewKeyRange("", "")})
 	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB}, []KeyRange{NewKeyRange("", "n")})
 	checkRandomRegion(re, tree, []*RegionInfo{regionC, regionD}, []KeyRange{NewKeyRange("n", "")})
@@ -356,6 +361,7 @@ func TestRandomRegionDiscontinuous(t *testing.T) {
 	rd := tree.randomRegion([]KeyRange{NewKeyRange("", "b")})
 	re.Equal(regionD, rd)
 
+	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, nil)
 	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []KeyRange{NewKeyRange("", "")})
 }
 
