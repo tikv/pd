@@ -358,13 +358,13 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 				startIndex, endIndex = 0, treeLen
 				return false
 			}
-			if startKeyLen > 0 {
-				pivotItem.meta.StartKey = startKey
-				startItem, startIndex = t.tree.GetWithIndex(pivotItem)
-			}
+			pivotItem.meta.StartKey = startKey
+			startItem, startIndex = t.tree.GetWithIndex(pivotItem)
 			if endKeyLen > 0 {
 				pivotItem.meta.StartKey = endKey
 				_, endIndex = t.tree.GetWithIndex(pivotItem)
+			} else {
+				endIndex = treeLen
 			}
 			// Consider that the item in the tree may not be continuous,
 			// we need to check if the previous item contains the key.
