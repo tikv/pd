@@ -352,7 +352,7 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 		// according to the `startKey` and `endKey` and check if the range is invalid
 		// to skip the iteration.
 		// TODO: maybe we could cache the `startIndex` and `endIndex` for each range.
-		setAndCheckStartEndIndices = func() bool {
+		setAndCheckStartEndIndices = func() (skip bool) {
 			startKeyLen, endKeyLen := len(startKey), len(endKey)
 			if startKeyLen == 0 && endKeyLen == 0 {
 				startIndex, endIndex = 0, treeLen
