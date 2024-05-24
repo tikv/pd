@@ -339,20 +339,28 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 	}
 	// Pre-allocate the variables to reduce the temporary memory allocations.
 	var (
-		startKey, endKey                []byte
-		startIndex, endIndex, randIndex int
-		startItem                       *regionItem
-		pivotItem                       = &regionItem{&RegionInfo{meta: &metapb.Region{}}}
-		region                          *RegionInfo
-		regions                         = make([]*RegionInfo, 0, n)
-		rangeLen, curLen                = len(ranges), len(regions)
+		startKey, endKey []byte
+		// By default, we set the `startIndex` and `endIndex` to the whole tree range.
+		startIndex, endIndex = 0, treeLen
+		randIndex            int
+		startItem            *regionItem
+		pivotItem            = &regionItem{&RegionInfo{meta: &metapb.Region{}}}
+		region               *RegionInfo
+		regions              = make([]*RegionInfo, 0, n)
+		rangeLen, curLen     = len(ranges), len(regions)
 		// setStartEndIndices is a helper function to set `startIndex` and `endIndex`
-		// according to the `startKey` and `endKey`.
+		// according to the `startKey` and `endKey` and check if the range is invalid
+		// to skip the iteration.
 		// TODO: maybe we could cache the `startIndex` and `endIndex` for each range.
-		setStartEndIndices = func() {
+		setAndCheckStartEndIndices = func() (skip bool) {
+			startKeyLen, endKeyLen := len(startKey), len(endKey)
+			if startKeyLen == 0 && endKeyLen == 0 {
+				startIndex, endIndex = 0, treeLen
+				return false
+			}
 			pivotItem.meta.StartKey = startKey
 			startItem, startIndex = t.tree.GetWithIndex(pivotItem)
-			if len(endKey) != 0 {
+			if endKeyLen > 0 {
 				pivotItem.meta.StartKey = endKey
 				_, endIndex = t.tree.GetWithIndex(pivotItem)
 			} else {
@@ -366,13 +374,27 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 					startIndex--
 				}
 			}
+			// Check whether the `startIndex` and `endIndex` are valid.
+			if endIndex <= startIndex {
+				if endKeyLen > 0 && bytes.Compare(startKey, endKey) > 0 {
+					log.Error("wrong range keys",
+						logutil.ZapRedactString("start-key", string(HexRegionKey(startKey))),
+						logutil.ZapRedactString("end-key", string(HexRegionKey(endKey))),
+						errs.ZapError(errs.ErrWrongRangeKeys))
+				}
+				return true
+			}
+			return false
 		}
 	)
-	// If no ranges specified, select randomly from the whole tree.
-	// This is a fast path to reduce the unnecessary iterations.
-	if rangeLen == 0 {
-		startKey, endKey = []byte(""), []byte("")
-		setStartEndIndices()
+	// This is a fast path to reduce the unnecessary iterations when we only have one range.
+	if rangeLen <= 1 {
+		if rangeLen == 1 {
+			startKey, endKey = ranges[0].StartKey, ranges[0].EndKey
+			if setAndCheckStartEndIndices() {
+				return regions
+			}
+		}
 		for curLen < n {
 			randIndex = rand.Intn(endIndex-startIndex) + startIndex
 			region = t.tree.GetAt(randIndex).RegionInfo
@@ -393,14 +415,7 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 		// Shuffle the ranges to increase the randomness.
 		for _, i := range rand.Perm(rangeLen) {
 			startKey, endKey = ranges[i].StartKey, ranges[i].EndKey
-			setStartEndIndices()
-			if endIndex <= startIndex {
-				if len(endKey) > 0 && bytes.Compare(startKey, endKey) > 0 {
-					log.Error("wrong range keys",
-						logutil.ZapRedactString("start-key", string(HexRegionKey(startKey))),
-						logutil.ZapRedactString("end-key", string(HexRegionKey(endKey))),
-						errs.ZapError(errs.ErrWrongRangeKeys))
-				}
+			if setAndCheckStartEndIndices() {
 				continue
 			}
 
