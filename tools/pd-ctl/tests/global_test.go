@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
@@ -30,31 +29,30 @@ import (
 	"github.com/tikv/pd/server"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
-	"go.uber.org/zap"
 )
 
 func TestSendAndGetComponent(t *testing.T) {
 	re := require.New(t)
 	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
+		// check pd http sdk api
 		mux.HandleFunc("/pd/api/v1/cluster", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
-			for k := range r.Header {
-				log.Info("header", zap.String("key", k))
-			}
-			log.Info("caller id", zap.String("caller-id", callerID))
 			re.Equal(command.PDControlCallerID, callerID)
 			cluster := &metapb.Cluster{Id: 1}
 			clusterBytes, err := json.Marshal(cluster)
 			re.NoError(err)
 			w.Write(clusterBytes)
 		})
+		// check http client api
+		// TODO: remove this comment after replacing dialClient with the PD HTTP client completely.
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
-			for k := range r.Header {
-				log.Info("header", zap.String("key", k))
-			}
-			log.Info("caller id", zap.String("caller-id", callerID))
+			re.Equal(command.PDControlCallerID, callerID)
+			fmt.Fprint(w, callerID)
+		})
+		mux.HandleFunc("/pd/api/v1/stores", func(w http.ResponseWriter, r *http.Request) {
+			callerID := apiutil.GetCallerIDOnHTTP(r)
 			re.Equal(command.PDControlCallerID, callerID)
 			fmt.Fprint(w, callerID)
 		})
@@ -77,15 +75,20 @@ func TestSendAndGetComponent(t *testing.T) {
 	}()
 
 	cmd := cmd.GetRootCmd()
-	args := []string{"-u", pdAddr, "health"}
+	args := []string{"-u", pdAddr, "cluster"}
 	output, err := ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
-
-	args = []string{"-u", pdAddr, "cluster"}
-	output, err = ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Equal(fmt.Sprintf("%s\n", `{
   "id": 1
 }`), string(output))
+
+	args = []string{"-u", pdAddr, "health"}
+	output, err = ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
+
+	args = []string{"-u", pdAddr, "store"}
+	output, err = ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
 }
