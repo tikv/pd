@@ -39,7 +39,7 @@ func TestSendAndGetComponent(t *testing.T) {
 	re := require.New(t)
 	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
-		mux.HandleFunc("/pd/api/v1/cluster", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("/pd/api/v1/cluster", func(w http.ResponseWriter, _ *http.Request) {
 			cluster := &metapb.Cluster{
 				Id: 0,
 			}
