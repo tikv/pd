@@ -663,11 +663,6 @@ func (o *PersistOptions) GetPatrolRegionConcurrency() int {
 	return int(o.GetScheduleConfig().PatrolRegionConcurrency)
 }
 
-// GetPatrolRegionBatchLimit returns the region count of the patrol.
-func (o *PersistOptions) GetPatrolRegionBatchLimit() int {
-	return int(o.GetScheduleConfig().PatrolRegionBatchLimit)
-}
-
 // GetStoresLimit gets the stores' limit.
 func (o *PersistOptions) GetStoresLimit() map[uint64]sc.StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit

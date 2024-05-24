@@ -401,11 +401,6 @@ func (o *PersistConfig) GetPatrolRegionConcurrency() int {
 	return int(o.GetScheduleConfig().PatrolRegionConcurrency)
 }
 
-// GetPatrolRegionBatchLimit returns the region count of the patrol.
-func (o *PersistConfig) GetPatrolRegionBatchLimit() int {
-	return int(o.GetScheduleConfig().PatrolRegionBatchLimit)
-}
-
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
 func (o *PersistConfig) GetMaxMovableHotPeerSize() int64 {
 	return o.GetScheduleConfig().MaxMovableHotPeerSize

@@ -51,7 +51,12 @@ const (
 	maxLoadConfigRetries       = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
+
+	// For 1,024,000 regions, patrolScanRegionLimit is 1000, which is max(patrolScanRegionMinLimit, 1000000/patrolRegionPatition)
+	// It takes about 10s to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
+	patrolScanRegionMinLimit = 128
 	patrolRegionChanLen      = 1024
+	patrolRegionPatition     = 1024
 
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
@@ -173,6 +178,7 @@ func (c *Coordinator) PatrolRegions() {
 
 	log.Info("coordinator starts patrol regions")
 	start := time.Now()
+	patrolScanRegionLimit := c.getPatrolScanRegionLimit()
 	var (
 		key     []byte
 		regions []*core.RegionInfo
@@ -211,7 +217,7 @@ func (c *Coordinator) PatrolRegions() {
 			c.checkWaitingRegions(regionChan)
 
 			c.waitDrainRegionChan(regionChan)
-			key, regions = c.checkRegions(key, c.cluster.GetCheckerConfig().GetPatrolRegionBatchLimit(), regionChan)
+			key, regions = c.checkRegions(key, patrolScanRegionLimit, regionChan)
 			if len(regions) == 0 {
 				continue
 			}
@@ -222,6 +228,7 @@ func (c *Coordinator) PatrolRegions() {
 				patrolCheckRegionsGauge.Set(dur.Seconds())
 				c.setPatrolRegionsDuration(dur)
 				start = time.Now()
+				patrolScanRegionLimit = c.getPatrolScanRegionLimit()
 			}
 			failpoint.Inject("break-patrol", func() {
 				failpoint.Return()
@@ -233,6 +240,10 @@ func (c *Coordinator) PatrolRegions() {
 			return
 		}
 	}
+}
+
+func (c *Coordinator) getPatrolScanRegionLimit() int {
+	return max(patrolScanRegionMinLimit, c.cluster.GetTotalRegionCount()/patrolRegionPatition)
 }
 
 func (c *Coordinator) startPatrolRegionWorkers(workers int, regionChan <-chan *core.RegionInfo, quit <-chan bool, wg *sync.WaitGroup) {

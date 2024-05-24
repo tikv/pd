@@ -63,7 +63,6 @@ type SchedulerConfigProvider interface {
 	GetMaxMovableHotPeerSize() int64
 	IsTraceRegionFlow() bool
 	GetPatrolRegionConcurrency() int
-	GetPatrolRegionBatchLimit() int
 
 	GetTolerantSizeRatio() float64
 	GetLeaderSchedulePolicy() constant.SchedulePolicy
@@ -120,7 +119,6 @@ type SharedConfigProvider interface {
 	SetHaltScheduling(bool, string)
 	GetHotRegionCacheHitsThreshold() int
 	GetPatrolRegionConcurrency() int
-	GetPatrolRegionBatchLimit() int
 
 	// for test purpose
 	SetPlacementRuleEnabled(bool)

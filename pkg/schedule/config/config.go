@@ -64,7 +64,6 @@ const (
 	defaultLeaderSchedulePolicy      = "count"
 	defaultStoreLimitVersion         = "v1"
 	defaultPatrolRegionConcurrency   = 1
-	defaultPatrolRegionBatchLimit    = 128
 	// DefaultSplitMergeInterval is the default value of config split merge interval.
 	DefaultSplitMergeInterval      = time.Hour
 	defaultSwitchWitnessInterval   = time.Hour
@@ -310,9 +309,6 @@ type ScheduleConfig struct {
 
 	// PatrolRegionConcurrency is the number of workers to patrol region.
 	PatrolRegionConcurrency uint64 `toml:"patrol-worker-count" json:"patrol-worker-count"`
-
-	// PatrolRegionBatchLimit is the number of regions to patrol in one batch.
-	PatrolRegionBatchLimit uint64 `toml:"patrol-region-batch-limit" json:"patrol-region-batch-limit"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -384,10 +380,6 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("patrol-worker-count") {
 		configutil.AdjustUint64(&c.PatrolRegionConcurrency, defaultPatrolRegionConcurrency)
-	}
-
-	if !meta.IsDefined("patrol-region-batch-limit") {
-		configutil.AdjustUint64(&c.PatrolRegionBatchLimit, defaultPatrolRegionBatchLimit)
 	}
 
 	if !meta.IsDefined("enable-joint-consensus") {
