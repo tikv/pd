@@ -442,8 +442,7 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			utils.RegionWriteKeys:     0,
 			utils.RegionWriteQueryNum: 0,
 		}
-		peerInfo := core.NewPeerInfo(peer, loads, interval)
-		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
+		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(region, loads))
 	}
 
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.

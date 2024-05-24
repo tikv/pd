@@ -894,16 +894,7 @@ func (mc *Cluster) CheckRegionRead(region *core.RegionInfo) []*statistics.HotPee
 	items := make([]*statistics.HotPeerStat, 0)
 	expiredItems := mc.HotCache.ExpiredReadItems(region)
 	items = append(items, expiredItems...)
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-		item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
-		if item != nil {
-			items = append(items, item)
-		}
-	}
-	return items
+	return append(items, mc.HotCache.CheckReadPeerSync(region, nil)...)
 }
 
 // CheckRegionWrite checks region write info with all peers
@@ -911,16 +902,7 @@ func (mc *Cluster) CheckRegionWrite(region *core.RegionInfo) []*statistics.HotPe
 	items := make([]*statistics.HotPeerStat, 0)
 	expiredItems := mc.HotCache.ExpiredWriteItems(region)
 	items = append(items, expiredItems...)
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-		item := mc.HotCache.CheckWritePeerSync(peerInfo, region)
-		if item != nil {
-			items = append(items, item)
-		}
-	}
-	return items
+	return append(items, mc.HotCache.CheckWritePeerSync(region, nil)...)
 }
 
 // CheckRegionLeaderRead checks region read info with leader peer
@@ -928,15 +910,7 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 	items := make([]*statistics.HotPeerStat, 0)
 	expiredItems := mc.HotCache.ExpiredReadItems(region)
 	items = append(items, expiredItems...)
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	peer := region.GetLeader()
-	peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-	item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
-	if item != nil {
-		items = append(items, item)
-	}
-	return items
+	return append(items, mc.HotCache.CheckReadPeerSync(region, nil)...)
 }
 
 // ObserveRegionsStats records the current stores stats from region stats.

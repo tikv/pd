@@ -26,21 +26,21 @@ type FlowItemTask interface {
 }
 
 type checkPeerTask struct {
-	peerInfo   *core.PeerInfo
 	regionInfo *core.RegionInfo
+	loads      []float64
 }
 
 // NewCheckPeerTask creates task to update peerInfo
-func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) FlowItemTask {
+func NewCheckPeerTask(regionInfo *core.RegionInfo, loads []float64) FlowItemTask {
 	return &checkPeerTask{
-		peerInfo:   peerInfo,
 		regionInfo: regionInfo,
+		loads:      loads,
 	}
 }
 
 func (t *checkPeerTask) runTask(cache *hotPeerCache) {
-	stat := cache.checkPeerFlow(t.peerInfo, t.regionInfo)
-	if stat != nil {
+	stats := cache.checkPeerFlow(t.regionInfo, t.regionInfo.GetPeers(), t.loads)
+	for _, stat := range stats {
 		cache.updateStat(stat)
 	}
 }

@@ -174,58 +174,69 @@ func (f *hotPeerCache) collectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 // checkPeerFlow checks the flow information of a peer.
 // Notice: checkPeerFlow couldn't be used concurrently.
 // checkPeerFlow will update oldItem's rollingLoads into newItem, thus we should use write lock here.
-func (f *hotPeerCache) checkPeerFlow(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
-	interval := peer.GetInterval()
+func (f *hotPeerCache) checkPeerFlow(region *core.RegionInfo, peers []*metapb.Peer, deltaLoads []float64) []*HotPeerStat {
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	if Denoising && interval < HotRegionReportMinInterval { // for test or simulator purpose
 		return nil
 	}
-	storeID := peer.GetStoreId()
-	deltaLoads := peer.GetLoads()
+
+	if deltaLoads == nil {
+		deltaLoads = region.GetLoads()
+	}
 	f.collectPeerMetrics(deltaLoads, interval) // update metrics
 	regionID := region.GetID()
-	oldItem := f.getOldHotPeerStat(regionID, storeID)
 
-	// check whether the peer is allowed to be inherited
-	source := utils.Direct
-	if oldItem == nil {
-		for _, storeID := range f.getAllStoreIDs(region) {
-			oldItem = f.getOldHotPeerStat(regionID, storeID)
-			if oldItem != nil && oldItem.allowInherited {
-				source = utils.Inherit
-				break
+	var stats []*HotPeerStat
+	for _, peer := range peers {
+		storeID := peer.GetStoreId()
+		oldItem := f.getOldHotPeerStat(regionID, storeID)
+
+		// check whether the peer is allowed to be inherited
+		source := utils.Direct
+		if oldItem == nil {
+			for _, storeID := range f.getAllStoreIDs(region) {
+				oldItem = f.getOldHotPeerStat(regionID, storeID)
+				if oldItem != nil && oldItem.allowInherited {
+					source = utils.Inherit
+					break
+				}
 			}
 		}
-	}
+		// check new item whether is hot
+		if oldItem == nil {
+			regionStats := f.kind.RegionStats()
+			thresholds := f.calcHotThresholds(storeID)
+			isHot := slice.AnyOf(regionStats, func(i int) bool {
+				return deltaLoads[regionStats[i]]/float64(interval) >= thresholds[i]
+			})
+			if !isHot {
+				continue
+			}
+		}
 
-	// check new item whether is hot
-	if oldItem == nil {
-		regionStats := f.kind.RegionStats()
-		thresholds := f.calcHotThresholds(storeID)
-		isHot := slice.AnyOf(regionStats, func(i int) bool {
-			return deltaLoads[regionStats[i]]/float64(interval) >= thresholds[i]
-		})
-		if !isHot {
-			return nil
+		newItem := &HotPeerStat{
+			StoreID:    storeID,
+			RegionID:   regionID,
+			Loads:      f.kind.GetLoadRatesFromPeer(peer, deltaLoads, interval),
+			isLeader:   region.GetLeader().GetStoreId() == storeID,
+			actionType: utils.Update,
+			stores:     make([]uint64, len(peers)),
+		}
+		for i, peer := range peers {
+			newItem.stores[i] = peer.GetStoreId()
+		}
+		if oldItem == nil {
+			if stat := f.updateNewHotPeerStat(newItem, deltaLoads, time.Duration(interval)*time.Second); stat != nil {
+				stats = append(stats, stat)
+			}
+			continue
+		}
+		if stat := f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, source); stat != nil {
+			stats = append(stats, stat)
 		}
 	}
-
-	peers := region.GetPeers()
-	newItem := &HotPeerStat{
-		StoreID:    storeID,
-		RegionID:   regionID,
-		Loads:      f.kind.GetLoadRatesFromPeer(peer),
-		isLeader:   region.GetLeader().GetStoreId() == storeID,
-		actionType: utils.Update,
-		stores:     make([]uint64, len(peers)),
-	}
-	for i, peer := range peers {
-		newItem.stores[i] = peer.GetStoreId()
-	}
-
-	if oldItem == nil {
-		return f.updateNewHotPeerStat(newItem, deltaLoads, time.Duration(interval)*time.Second)
-	}
-	return f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, source)
+	return stats
 }
 
 // checkColdPeer checks the collect the un-heartbeat peer and maintain it.

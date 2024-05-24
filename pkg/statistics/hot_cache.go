@@ -172,14 +172,14 @@ func (w *HotCache) Update(item *HotPeerStat, kind utils.RWType) {
 
 // CheckWritePeerSync checks the write status, returns update items.
 // This is used for mockcluster, for test purpose.
-func (w *HotCache) CheckWritePeerSync(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
-	return w.writeCache.checkPeerFlow(peer, region)
+func (w *HotCache) CheckWritePeerSync(region *core.RegionInfo, loads []float64) []*HotPeerStat {
+	return w.writeCache.checkPeerFlow(region, region.GetPeers(), loads)
 }
 
 // CheckReadPeerSync checks the read status, returns update items.
 // This is used for mockcluster, for test purpose.
-func (w *HotCache) CheckReadPeerSync(peer *core.PeerInfo, region *core.RegionInfo) *HotPeerStat {
-	return w.readCache.checkPeerFlow(peer, region)
+func (w *HotCache) CheckReadPeerSync(region *core.RegionInfo, loads []float64) []*HotPeerStat {
+	return w.readCache.checkPeerFlow(region, region.GetPeers(), loads)
 }
 
 // ExpiredReadItems returns the read items which are already expired.

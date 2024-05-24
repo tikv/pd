@@ -15,7 +15,7 @@
 package utils
 
 import (
-	"github.com/tikv/pd/pkg/core"
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 const (
@@ -231,9 +231,7 @@ func (rw RWType) DefaultAntiCount() int {
 }
 
 // GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.
-func (rw RWType) GetLoadRatesFromPeer(peer *core.PeerInfo) []float64 {
-	deltaLoads := peer.GetLoads()
-	interval := peer.GetInterval()
+func (rw RWType) GetLoadRatesFromPeer(peer *metapb.Peer, deltaLoads []float64, interval uint64) []float64 {
 	loads := make([]float64, DimLen)
 	for dim, k := range rw.RegionStats() {
 		loads[dim] = deltaLoads[k] / float64(interval)
