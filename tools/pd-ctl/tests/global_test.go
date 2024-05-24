@@ -16,10 +16,12 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -27,22 +29,33 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 	"go.uber.org/zap"
 )
-
-const pdControlCallerID = "pd-ctl"
 
 func TestSendAndGetComponent(t *testing.T) {
 	re := require.New(t)
 	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/api/v1/cluster", func(w http.ResponseWriter, r *http.Request) {
+			callerID := apiutil.GetCallerIDOnHTTP(r)
+			for k := range r.Header {
+				log.Info("header", zap.String("key", k))
+			}
+			log.Info("caller id", zap.String("caller-id", callerID))
+			re.Equal(command.PDControlCallerID, callerID)
+			cluster := &metapb.Cluster{Id: 1}
+			clusterBytes, err := json.Marshal(cluster)
+			re.NoError(err)
+			w.Write(clusterBytes)
+		})
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
 			for k := range r.Header {
 				log.Info("header", zap.String("key", k))
 			}
 			log.Info("caller id", zap.String("caller-id", callerID))
-			re.Equal(pdControlCallerID, callerID)
+			re.Equal(command.PDControlCallerID, callerID)
 			fmt.Fprint(w, callerID)
 		})
 		info := apiutil.APIServiceGroup{
@@ -67,5 +80,12 @@ func TestSendAndGetComponent(t *testing.T) {
 	args := []string{"-u", pdAddr, "health"}
 	output, err := ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Equal(fmt.Sprintf("%s\n", pdControlCallerID), string(output))
+	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
+
+	args = []string{"-u", pdAddr, "cluster"}
+	output, err = ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(fmt.Sprintf("%s\n", `{
+  "id": 1
+}`), string(output))
 }
