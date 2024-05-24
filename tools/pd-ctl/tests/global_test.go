@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
-	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
@@ -43,8 +42,9 @@ func TestSendAndGetComponent(t *testing.T) {
 			cluster := &metapb.Cluster{
 				Id: 0,
 			}
-			var rd render.Render
-			rd.JSON(w, http.StatusOK, cluster)
+			clusterBytes, err := json.Marshal(cluster)
+			re.NoError(err)
+			w.Write(clusterBytes)
 		})
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
