@@ -21,12 +21,13 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
 
-func newLabelNotMatch1() *Case {
+func newLabelNotMatch1(config *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"host"}
 
@@ -88,7 +89,7 @@ func newLabelNotMatch1() *Case {
 	return &simCase
 }
 
-func newLabelIsolation1() *Case {
+func newLabelIsolation1(config *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"host"}
 
@@ -154,7 +155,7 @@ func newLabelIsolation1() *Case {
 	return &simCase
 }
 
-func newLabelIsolation2() *Case {
+func newLabelIsolation2(config *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"dc", "zone", "host"}
 

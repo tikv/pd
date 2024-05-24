@@ -15,12 +15,14 @@
 package cases
 
 import (
+	"math/rand"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 // Store is used to simulate tikv.
@@ -86,7 +88,7 @@ func (a *idAllocator) GetID() uint64 {
 var IDAllocator idAllocator
 
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
-var CaseMap = map[string]func() *Case{
+var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"balance-leader":            newBalanceLeader,
 	"redundant-balance-region":  newRedundantBalanceRegion,
 	"add-nodes":                 newAddNodes,
@@ -106,43 +108,27 @@ var CaseMap = map[string]func() *Case{
 }
 
 // NewCase creates a new case.
-func NewCase(name string) *Case {
+func NewCase(name string, simConfig *config.SimConfig) *Case {
 	if f, ok := CaseMap[name]; ok {
-		return f()
+		return f(simConfig)
 	}
 	return nil
 }
 
-func leaderAndRegionIsUniform(leaderCount, regionCount, regionNum int, threshold float64) bool {
-	return isUniform(leaderCount, regionNum/3, threshold) && isUniform(regionCount, regionNum, threshold)
-}
-
-func isUniform(count, meanCount int, threshold float64) bool {
+func isUniform(count, meanCount int) bool {
+	threshold := 0.05
 	maxCount := int((1.0 + threshold) * float64(meanCount))
 	minCount := int((1.0 - threshold) * float64(meanCount))
 	return minCount <= count && count <= maxCount
 }
 
-func getStoreNum() int {
-	storeNum := simutil.CaseConfigure.StoreNum
-	if storeNum < 3 {
-		simutil.Logger.Fatal("store num should be larger than or equal to 3")
+func getNoEmptyStoreNum(storeNum int, replica int) int {
+	noEmptyStoreNum := rand.Intn(storeNum)
+	if noEmptyStoreNum < replica {
+		return replica
 	}
-	return storeNum
-}
-
-func getRegionNum() int {
-	regionNum := simutil.CaseConfigure.RegionNum
-	if regionNum <= 0 {
-		simutil.Logger.Fatal("region num should be larger than 0")
-	}
-	return regionNum
-}
-
-func getNoEmptyStoreNum(storeNum int, noEmptyRatio float64) uint64 {
-	noEmptyStoreNum := uint64(float64(storeNum) * noEmptyRatio)
-	if noEmptyStoreNum < 3 || noEmptyStoreNum == uint64(storeNum) {
-		noEmptyStoreNum = 3
+	if noEmptyStoreNum == storeNum {
+		return storeNum - 1
 	}
 	return noEmptyStoreNum
 }

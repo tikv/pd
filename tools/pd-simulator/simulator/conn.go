@@ -17,6 +17,7 @@ package simulator
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/config"
 )
 
 // Connection records the information of connection among nodes.
@@ -26,7 +27,7 @@ type Connection struct {
 }
 
 // NewConnection creates nodes according to the configuration and returns the connection among nodes.
-func NewConnection(simCase *cases.Case, pdAddr string, storeConfig *SimConfig) (*Connection, error) {
+func NewConnection(simCase *cases.Case, pdAddr string, storeConfig *config.SimConfig) (*Connection, error) {
 	conn := &Connection{
 		pdAddr: pdAddr,
 		Nodes:  make(map[uint64]*Node),

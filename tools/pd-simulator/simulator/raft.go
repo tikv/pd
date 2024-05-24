@@ -22,6 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
@@ -34,12 +35,12 @@ type RaftEngine struct {
 	regionChange      map[uint64][]uint64
 	regionSplitSize   int64
 	regionSplitKeys   int64
-	storeConfig       *SimConfig
+	storeConfig       *config.SimConfig
 	useTiDBEncodedKey bool
 }
 
 // NewRaftEngine creates the initialized raft with the configuration.
-func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *SimConfig) *RaftEngine {
+func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimConfig) *RaftEngine {
 	r := &RaftEngine{
 		regionsInfo:     core.NewRegionsInfo(),
 		conn:            conn,

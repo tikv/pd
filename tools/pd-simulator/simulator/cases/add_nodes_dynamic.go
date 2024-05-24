@@ -15,24 +15,22 @@
 package cases
 
 import (
-	"math/rand"
-
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newAddNodesDynamic() *Case {
+func newAddNodesDynamic(config *sc.SimConfig) *Case {
 	var simCase Case
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-	noEmptyRatio := rand.Float64() // the ratio of noEmpty store to total store
-	noEmptyStoreNum := getNoEmptyStoreNum(storeNum, noEmptyRatio)
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	noEmptyStoreNum := getNoEmptyStoreNum(totalStore, replica)
 
-	for i := 1; i <= int(noEmptyStoreNum); i++ {
+	for i := 0; i < noEmptyStoreNum; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
@@ -40,15 +38,17 @@ func newAddNodesDynamic() *Case {
 	}
 
 	var ids []uint64
-	for i := 1; i <= storeNum-int(noEmptyStoreNum); i++ {
+	for i := 0; i < totalStore-noEmptyStoreNum; i++ {
 		ids = append(ids, IDAllocator.nextID())
 	}
 
-	for i := 0; i < regionNum*storeNum/3; i++ {
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i)%noEmptyStoreNum + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+1)%noEmptyStoreNum + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64(i+2)%noEmptyStoreNum + 1},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      IDAllocator.nextID(),
+				StoreId: uint64((i+j)%noEmptyStoreNum + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -59,11 +59,11 @@ func newAddNodesDynamic() *Case {
 		})
 	}
 
-	numNodes := int(noEmptyStoreNum)
+	currentStoreCount := noEmptyStoreNum
 	e := &AddNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
-		if tick%100 == 0 && numNodes < storeNum {
-			numNodes++
+		if tick%100 == 0 && currentStoreCount < totalStore {
+			currentStoreCount++
 			nodeID := ids[0]
 			ids = append(ids[:0], ids[1:]...)
 			return nodeID
@@ -72,21 +72,21 @@ func newAddNodesDynamic() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		res := numNodes == storeNum
-		leaderCounts := make([]int, 0, numNodes)
-		regionCounts := make([]int, 0, numNodes)
-		for i := 1; i <= numNodes; i++ {
-			leaderCount := regions.GetStoreLeaderCount(uint64(i))
-			regionCount := regions.GetStoreRegionCount(uint64(i))
-			leaderCounts = append(leaderCounts, leaderCount)
-			regionCounts = append(regionCounts, regionCount)
-			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum, threshold)
+		if currentStoreCount != totalStore {
+			return false
 		}
-
-		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))
-		return res
+		for i := 1; i <= currentStoreCount; i++ {
+			leaderCount := regions.GetStoreLeaderCount(uint64(i))
+			peerCount := regions.GetStoreRegionCount(uint64(i))
+			if !isUniform(leaderCount, totalRegion/totalStore) {
+				return false
+			}
+			if !isUniform(peerCount, totalRegion*replica/totalStore) {
+				return false
+			}
+		}
+		return true
 	}
 	return &simCase
 }

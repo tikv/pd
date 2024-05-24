@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package simulator
+package config
 
 import (
 	"fmt"
@@ -53,9 +53,12 @@ const (
 
 // SimConfig is the simulator configuration.
 type SimConfig struct {
-	// tick
-	CaseName        string            `toml:"case-name"`
-	SimTickInterval typeutil.Duration `toml:"sim-tick-interval"`
+	// Simulator
+	CaseName                    string            `toml:"case-name"`
+	TotalStore                  int               `toml:"total-store"`
+	TotalRegion                 int               `toml:"total-region"`
+	EnableTransferRegionCounter bool              `toml:"enable-transfer-region-counter"`
+	SimTickInterval             typeutil.Duration `toml:"sim-tick-interval"`
 	// store
 	StoreIOMBPerSecond int64       `toml:"store-io-per-second"`
 	StoreVersion       string      `toml:"store-version"`
@@ -118,7 +121,7 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 
 	return sc.ServerConfig.Adjust(meta, false)
 }
-func (sc *SimConfig) speed() uint64 {
+func (sc *SimConfig) Speed() uint64 {
 	return uint64(time.Second / sc.SimTickInterval.Duration)
 }
 

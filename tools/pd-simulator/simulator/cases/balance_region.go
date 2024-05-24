@@ -19,21 +19,18 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newRedundantBalanceRegion() *Case {
+func newRedundantBalanceRegion(config *sc.SimConfig) *Case {
 	var simCase Case
 
-	storeNum := simutil.CaseConfigure.StoreNum
-	regionNum := simutil.CaseConfigure.RegionNum
-	if storeNum == 0 || regionNum == 0 {
-		storeNum, regionNum = 6, 4000
-	}
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
 
-	for i := 0; i < storeNum; i++ {
+	for i := 0; i < totalStore; i++ {
 		s := &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
@@ -44,11 +41,13 @@ func newRedundantBalanceRegion() *Case {
 		simCase.Stores = append(simCase.Stores, s)
 	}
 
-	for i := 0; i < regionNum; i++ {
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum + 1)},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      IDAllocator.nextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -57,30 +56,26 @@ func newRedundantBalanceRegion() *Case {
 		})
 	}
 
-	storesLastUpdateTime := make([]int64, storeNum+1)
-	storeLastAvailable := make([]uint64, storeNum+1)
+	storesLastUpdateTime := make([]int64, totalStore+1)
+	storeLastAvailable := make([]uint64, totalStore+1)
 	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
-		res := true
 		curTime := time.Now().Unix()
-		storesAvailable := make([]uint64, 0, storeNum+1)
-		for i := 1; i <= storeNum; i++ {
+		for i := 1; i <= totalStore; i++ {
 			available := stats[i].GetAvailable()
-			storesAvailable = append(storesAvailable, available)
 			if curTime-storesLastUpdateTime[i] > 60 {
 				if storeLastAvailable[i] != available {
-					res = false
+					return false
 				}
 				if stats[i].ToCompactionSize != 0 {
-					res = false
+					return false
 				}
 				storesLastUpdateTime[i] = curTime
 				storeLastAvailable[i] = available
 			} else {
-				res = false
+				return false
 			}
 		}
-		simutil.Logger.Info("current counts", zap.Uint64s("storesAvailable", storesAvailable))
-		return res
+		return true
 	}
 	return &simCase
 }

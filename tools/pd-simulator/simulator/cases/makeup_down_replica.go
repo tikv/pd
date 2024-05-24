@@ -18,27 +18,31 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newMakeupDownReplicas() *Case {
+func newMakeupDownReplicas(config *sc.SimConfig) *Case {
 	var simCase Case
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-	noEmptyStoreNum := storeNum - 1
-	for i := 1; i <= storeNum; i++ {
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+
+	noEmptyStoreNum := totalStore - 1
+	for i := 0; i < totalStore; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64((i)%storeNum) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum) + 1},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      IDAllocator.nextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -49,7 +53,7 @@ func newMakeupDownReplicas() *Case {
 		})
 	}
 
-	numNodes := storeNum
+	numNodes := totalStore
 	down := false
 	e := &DeleteNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
@@ -65,31 +69,16 @@ func newMakeupDownReplicas() *Case {
 	simCase.Events = []EventDescriptor{e}
 
 	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		sum := 0
-		regionCounts := make([]int, 0, storeNum)
-		for i := 1; i <= storeNum; i++ {
-			regionCount := regions.GetStoreRegionCount(uint64(i))
-			regionCounts = append(regionCounts, regionCount)
-			sum += regionCount
-		}
-		simutil.Logger.Info("current region counts", zap.Ints("region", regionCounts))
-
-		if down && sum < storeNum*regionNum {
-			// only need to print once
-			down = false
-			simutil.Logger.Error("making up replicas don't start immediately")
+		if !down {
 			return false
 		}
-
-		res := true
-		threshold := 0.05
-		for index, regionCount := range regionCounts {
-			if index == 0 { // storeId == 1
-				continue
+		for i := 1; i <= totalStore; i++ {
+			peerCount := regions.GetStoreRegionCount(uint64(i))
+			if isUniform(peerCount, replica*totalRegion/noEmptyStoreNum) {
+				return false
 			}
-			res = res && isUniform(regionCount, storeNum*regionNum/noEmptyStoreNum, threshold)
 		}
-		return res
+		return true
 	}
 	return &simCase
 }
