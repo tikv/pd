@@ -16,7 +16,6 @@ package cache
 
 import (
 	"github.com/tikv/pd/pkg/btree"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // defaultDegree default btree degree, the depth is h<log(degree)(capacity+1)/2
@@ -27,7 +26,6 @@ type PriorityQueue struct {
 	items    map[uint64]*Entry
 	btree    *btree.BTreeG[*Entry]
 	capacity int
-	mutex    syncutil.RWMutex
 }
 
 // NewPriorityQueue construct of priority queue
@@ -46,8 +44,6 @@ type PriorityQueueItem interface {
 
 // Put put value with priority into queue
 func (pq *PriorityQueue) Put(priority int, value PriorityQueueItem) bool {
-	pq.mutex.Lock()
-	defer pq.mutex.Unlock()
 	id := value.ID()
 	entry, ok := pq.items[id]
 	if !ok {
@@ -58,9 +54,7 @@ func (pq *PriorityQueue) Put(priority int, value PriorityQueueItem) bool {
 			if !found || !min.Less(entry) {
 				return false
 			}
-			pq.mutex.Unlock()
 			pq.Remove(min.Value.ID())
-			pq.mutex.Lock()
 		}
 	} else if entry.Priority != priority { // delete before update
 		pq.btree.Delete(entry)
@@ -74,13 +68,10 @@ func (pq *PriorityQueue) Put(priority int, value PriorityQueueItem) bool {
 
 // Get find entry by id from queue
 func (pq *PriorityQueue) Get(id uint64) *Entry {
-	pq.mutex.RLock()
-	defer pq.mutex.RUnlock()
 	return pq.items[id]
 }
 
 // peek return the highest priority entry
-// It is used test only
 func (pq *PriorityQueue) peek() *Entry {
 	if max, ok := pq.btree.Max(); ok {
 		return max
@@ -98,8 +89,6 @@ func (pq *PriorityQueue) tail() *Entry {
 
 // Elems return all elements in queue
 func (pq *PriorityQueue) Elems() []*Entry {
-	pq.mutex.RLock()
-	defer pq.mutex.RUnlock()
 	rs := make([]*Entry, pq.Len())
 	count := 0
 	pq.btree.Descend(func(i *Entry) bool {
@@ -112,8 +101,6 @@ func (pq *PriorityQueue) Elems() []*Entry {
 
 // Remove remove value from queue
 func (pq *PriorityQueue) Remove(id uint64) {
-	pq.mutex.Lock()
-	defer pq.mutex.Unlock()
 	if v, ok := pq.items[id]; ok {
 		pq.btree.Delete(v)
 		delete(pq.items, id)

@@ -2833,6 +2833,7 @@ func TestCheckCache(t *testing.T) {
 		cfg.ReplicaScheduleLimit = 0
 	}, nil, nil, re)
 	defer cleanup()
+	oc := co.GetOperatorController()
 
 	re.NoError(tc.addRegionStore(1, 0))
 	re.NoError(tc.addRegionStore(2, 0))
@@ -2845,6 +2846,7 @@ func TestCheckCache(t *testing.T) {
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
+	re.Empty(oc.GetOperators())
 	re.Len(co.GetCheckerController().GetWaitingRegions(), 1)
 
 	// cancel the replica-schedule-limit restriction
@@ -2853,7 +2855,6 @@ func TestCheckCache(t *testing.T) {
 	tc.SetScheduleConfig(cfg)
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
-	oc := co.GetOperatorController()
 	re.Len(oc.GetOperators(), 1)
 	re.Empty(co.GetCheckerController().GetWaitingRegions())
 

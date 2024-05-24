@@ -22,6 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // the default value of priority queue size
@@ -29,6 +30,7 @@ const defaultPriorityQueueSize = 1280
 
 // PriorityInspector ensures high priority region should run first
 type PriorityInspector struct {
+	syncutil.Mutex
 	cluster sche.CheckerCluster
 	conf    config.CheckerConfigProvider
 	queue   *cache.PriorityQueue
@@ -99,6 +101,8 @@ func (p *PriorityInspector) inspectRegionInReplica(region *core.RegionInfo) (mak
 // it will remove if region's priority equal 0
 // it's Attempt will increase if region's priority equal last
 func (p *PriorityInspector) addOrRemoveRegion(priority int, regionID uint64) {
+	p.Lock()
+	defer p.Unlock()
 	if priority < 0 {
 		if entry := p.queue.Get(regionID); entry != nil && entry.Priority == priority {
 			e := entry.Value.(*RegionPriorityEntry)
@@ -116,6 +120,9 @@ func (p *PriorityInspector) addOrRemoveRegion(priority int, regionID uint64) {
 
 // GetPriorityRegions returns all regions in priority queue that needs rerun
 func (p *PriorityInspector) GetPriorityRegions() (ids []uint64) {
+	// we modify the queue entry in this function, so we need to lock it
+	p.Lock()
+	defer p.Unlock()
 	entries := p.queue.Elems()
 	for _, e := range entries {
 		re := e.Value.(*RegionPriorityEntry)
@@ -130,5 +137,7 @@ func (p *PriorityInspector) GetPriorityRegions() (ids []uint64) {
 
 // RemovePriorityRegion removes priority region from priority queue
 func (p *PriorityInspector) RemovePriorityRegion(regionID uint64) {
+	p.Lock()
+	defer p.Unlock()
 	p.queue.Remove(regionID)
 }

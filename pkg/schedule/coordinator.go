@@ -160,10 +160,15 @@ func (c *Coordinator) PatrolRegions() {
 	ticker := time.NewTicker(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 	defer ticker.Stop()
 
-	workersCount := c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency()
 	regionChan := make(chan *core.RegionInfo, patrolRegionChanLen)
 	quit := make(chan bool)
 	var wg sync.WaitGroup
+	defer func() {
+		close(regionChan)
+		close(quit)
+		wg.Wait()
+	}()
+	workersCount := c.cluster.GetCheckerConfig().GetPatrolRegionConcurrency()
 	c.startPatrolRegionWorkers(workersCount, regionChan, quit, &wg)
 
 	log.Info("coordinator starts patrol regions")
@@ -219,15 +224,12 @@ func (c *Coordinator) PatrolRegions() {
 				start = time.Now()
 			}
 			failpoint.Inject("break-patrol", func() {
-				failpoint.Break()
+				failpoint.Return()
 			})
 		case <-c.ctx.Done():
 			patrolCheckRegionsGauge.Set(0)
 			c.setPatrolRegionsDuration(0)
 			log.Info("patrol regions has been stopped")
-			close(regionChan)
-			close(quit)
-			wg.Wait()
 			return
 		}
 	}
