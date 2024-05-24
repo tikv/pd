@@ -17,6 +17,7 @@ package statistics
 import (
 	"context"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 )
 
@@ -27,19 +28,23 @@ type FlowItemTask interface {
 
 type checkPeerTask struct {
 	regionInfo *core.RegionInfo
+	peers      []*metapb.Peer
 	loads      []float64
+	interval   uint64
 }
 
 // NewCheckPeerTask creates task to update peerInfo
-func NewCheckPeerTask(regionInfo *core.RegionInfo, loads []float64) FlowItemTask {
+func NewCheckPeerTask(regionInfo *core.RegionInfo, peers []*metapb.Peer, loads []float64, interval uint64) FlowItemTask {
 	return &checkPeerTask{
 		regionInfo: regionInfo,
+		peers:      peers,
 		loads:      loads,
+		interval:   interval,
 	}
 }
 
 func (t *checkPeerTask) runTask(cache *hotPeerCache) {
-	stats := cache.checkPeerFlow(t.regionInfo, t.regionInfo.GetPeers(), t.loads)
+	stats := cache.checkPeerFlow(t.regionInfo, t.peers, t.loads, t.interval)
 	for _, stat := range stats {
 		cache.updateStat(stat)
 	}

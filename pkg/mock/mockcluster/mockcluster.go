@@ -894,7 +894,9 @@ func (mc *Cluster) CheckRegionRead(region *core.RegionInfo) []*statistics.HotPee
 	items := make([]*statistics.HotPeerStat, 0)
 	expiredItems := mc.HotCache.ExpiredReadItems(region)
 	items = append(items, expiredItems...)
-	return append(items, mc.HotCache.CheckReadPeerSync(region, nil)...)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	return append(items, mc.HotCache.CheckReadPeerSync(region, region.GetPeers(), region.GetLoads(), interval)...)
 }
 
 // CheckRegionWrite checks region write info with all peers
@@ -902,7 +904,9 @@ func (mc *Cluster) CheckRegionWrite(region *core.RegionInfo) []*statistics.HotPe
 	items := make([]*statistics.HotPeerStat, 0)
 	expiredItems := mc.HotCache.ExpiredWriteItems(region)
 	items = append(items, expiredItems...)
-	return append(items, mc.HotCache.CheckWritePeerSync(region, nil)...)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	return append(items, mc.HotCache.CheckWritePeerSync(region, region.GetPeers(), region.GetLoads(), interval)...)
 }
 
 // CheckRegionLeaderRead checks region read info with leader peer
@@ -910,7 +914,9 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 	items := make([]*statistics.HotPeerStat, 0)
 	expiredItems := mc.HotCache.ExpiredReadItems(region)
 	items = append(items, expiredItems...)
-	return append(items, mc.HotCache.CheckReadPeerSync(region, nil)...)
+	reportInterval := region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	return append(items, mc.HotCache.CheckReadPeerSync(region, []*metapb.Peer{region.GetLeader()}, region.GetLoads(), interval)...)
 }
 
 // ObserveRegionsStats records the current stores stats from region stats.

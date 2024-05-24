@@ -17,6 +17,7 @@ package statistics
 import (
 	"context"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/smallnest/chanx"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -172,14 +173,14 @@ func (w *HotCache) Update(item *HotPeerStat, kind utils.RWType) {
 
 // CheckWritePeerSync checks the write status, returns update items.
 // This is used for mockcluster, for test purpose.
-func (w *HotCache) CheckWritePeerSync(region *core.RegionInfo, loads []float64) []*HotPeerStat {
-	return w.writeCache.checkPeerFlow(region, region.GetPeers(), loads)
+func (w *HotCache) CheckWritePeerSync(region *core.RegionInfo, peers []*metapb.Peer, loads []float64, interval uint64) []*HotPeerStat {
+	return w.writeCache.checkPeerFlow(region, peers, loads, interval)
 }
 
 // CheckReadPeerSync checks the read status, returns update items.
 // This is used for mockcluster, for test purpose.
-func (w *HotCache) CheckReadPeerSync(region *core.RegionInfo, loads []float64) []*HotPeerStat {
-	return w.readCache.checkPeerFlow(region, region.GetPeers(), loads)
+func (w *HotCache) CheckReadPeerSync(region *core.RegionInfo, peers []*metapb.Peer, loads []float64, interval uint64) []*HotPeerStat {
+	return w.readCache.checkPeerFlow(region, peers, loads, interval)
 }
 
 // ExpiredReadItems returns the read items which are already expired.

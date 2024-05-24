@@ -959,7 +959,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				utils.RegionWriteKeys:     0,
 				utils.RegionWriteQueryNum: 0,
 			}
-			c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(region, loads))
+			c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(region, []*metapb.Peer{peer}, loads, interval))
 		}
 	}
 	for _, stat := range stats.GetSnapshotStats() {

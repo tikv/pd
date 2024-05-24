@@ -174,19 +174,15 @@ func (f *hotPeerCache) collectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 // checkPeerFlow checks the flow information of a peer.
 // Notice: checkPeerFlow couldn't be used concurrently.
 // checkPeerFlow will update oldItem's rollingLoads into newItem, thus we should use write lock here.
-func (f *hotPeerCache) checkPeerFlow(region *core.RegionInfo, peers []*metapb.Peer, deltaLoads []float64) []*HotPeerStat {
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+func (f *hotPeerCache) checkPeerFlow(region *core.RegionInfo, peers []*metapb.Peer, deltaLoads []float64, interval uint64) []*HotPeerStat {
 	if Denoising && interval < HotRegionReportMinInterval { // for test or simulator purpose
 		return nil
 	}
 
-	if deltaLoads == nil {
-		deltaLoads = region.GetLoads()
-	}
 	f.collectPeerMetrics(deltaLoads, interval) // update metrics
 	regionID := region.GetID()
 
+	regionPeers := region.GetPeers()
 	var stats []*HotPeerStat
 	for _, peer := range peers {
 		storeID := peer.GetStoreId()
@@ -218,12 +214,12 @@ func (f *hotPeerCache) checkPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 		newItem := &HotPeerStat{
 			StoreID:    storeID,
 			RegionID:   regionID,
-			Loads:      f.kind.GetLoadRatesFromPeer(peer, deltaLoads, interval),
+			Loads:      f.kind.GetLoadRates(deltaLoads, interval),
 			isLeader:   region.GetLeader().GetStoreId() == storeID,
 			actionType: utils.Update,
-			stores:     make([]uint64, len(peers)),
+			stores:     make([]uint64, len(regionPeers)),
 		}
-		for i, peer := range peers {
+		for i, peer := range regionPeers {
 			newItem.stores[i] = peer.GetStoreId()
 		}
 		if oldItem == nil {
