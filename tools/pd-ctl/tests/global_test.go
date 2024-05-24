@@ -16,26 +16,36 @@ package tests
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"net/http"
 	"testing"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	cmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
+	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
-const pdControlCallerID = "pd-ctl"
+const pdControlCallerID = "pd-http-client"
 
 func TestSendAndGetComponent(t *testing.T) {
 	re := require.New(t)
 	handler := func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
 		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/api/v1/cluster", func(w http.ResponseWriter, r *http.Request) {
+			cluster := &metapb.Cluster{
+				Id: 0,
+			}
+			var rd render.Render
+			rd.JSON(w, http.StatusOK, cluster)
+		})
 		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
 			for k := range r.Header {
@@ -43,7 +53,14 @@ func TestSendAndGetComponent(t *testing.T) {
 			}
 			log.Info("caller id", zap.String("caller-id", callerID))
 			re.Equal(pdControlCallerID, callerID)
-			fmt.Fprint(w, callerID)
+			healths := []api.Health{
+				{
+					Name: "test",
+				},
+			}
+			healthsBytes, err := json.Marshal(healths)
+			re.NoError(err)
+			w.Write(healthsBytes)
 		})
 		info := apiutil.APIServiceGroup{
 			IsCore: true,
@@ -67,5 +84,13 @@ func TestSendAndGetComponent(t *testing.T) {
 	args := []string{"-u", pdAddr, "health"}
 	output, err := ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Equal(fmt.Sprintf("%s\n", pdControlCallerID), string(output))
+	re.Equal(`[
+  {
+    "name": "test",
+    "member_id": 0,
+    "client_urls": null,
+    "health": false
+  }
+]
+`, string(output))
 }
