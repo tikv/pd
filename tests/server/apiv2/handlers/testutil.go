@@ -34,13 +34,6 @@ const (
 	keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
 )
 
-// dialClient used to dial http request.
-var dialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
-
 func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, token, limit string) *handlers.LoadAllKeyspacesResponse {
 	// Construct load range request.
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspacesPrefix, http.NoBody)
@@ -50,7 +43,7 @@ func sendLoadRangeRequest(re *require.Assertions, server *tests.TestServer, toke
 	query.Add("limit", limit)
 	httpReq.URL.RawQuery = query.Encode()
 	// Send request.
-	httpResp, err := dialClient.Do(httpReq)
+	httpResp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer httpResp.Body.Close()
 	re.Equal(http.StatusOK, httpResp.StatusCode)
@@ -67,7 +60,7 @@ func sendUpdateStateRequest(re *require.Assertions, server *tests.TestServer, na
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPut, server.GetAddr()+keyspacesPrefix+"/"+name+"/state", bytes.NewBuffer(data))
 	re.NoError(err)
-	httpResp, err := dialClient.Do(httpReq)
+	httpResp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer httpResp.Body.Close()
 	if httpResp.StatusCode != http.StatusOK {
@@ -86,7 +79,7 @@ func MustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix, bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -110,7 +103,7 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPatch, server.GetAddr()+keyspacesPrefix+"/"+name+"/config", bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -122,7 +115,7 @@ func mustUpdateKeyspaceConfig(re *require.Assertions, server *tests.TestServer, 
 }
 
 func mustLoadKeyspaces(re *require.Assertions, server *tests.TestServer, name string) *keyspacepb.KeyspaceMeta {
-	resp, err := dialClient.Get(server.GetAddr() + keyspacesPrefix + "/" + name)
+	resp, err := tests.TestDialClient.Get(server.GetAddr() + keyspacesPrefix + "/" + name)
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -143,7 +136,7 @@ func MustLoadKeyspaceGroups(re *require.Assertions, server *tests.TestServer, to
 	query.Add("limit", limit)
 	httpReq.URL.RawQuery = query.Encode()
 	// Send request.
-	httpResp, err := dialClient.Do(httpReq)
+	httpResp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer httpResp.Body.Close()
 	data, err := io.ReadAll(httpResp.Body)
@@ -159,7 +152,7 @@ func tryCreateKeyspaceGroup(re *require.Assertions, server *tests.TestServer, re
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix, bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)
@@ -184,7 +177,7 @@ func MustLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer,
 func TryLoadKeyspaceGroupByID(re *require.Assertions, server *tests.TestServer, id uint32) (*endpoint.KeyspaceGroup, int) {
 	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -214,7 +207,7 @@ func FailCreateKeyspaceGroupWithCode(re *require.Assertions, server *tests.TestS
 func MustDeleteKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id uint32) {
 	httpReq, err := http.NewRequest(http.MethodDelete, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -229,7 +222,7 @@ func MustSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id
 	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/split", id), bytes.NewBuffer(data))
 	re.NoError(err)
 	// Send request.
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)
@@ -245,7 +238,7 @@ func MustFinishSplitKeyspaceGroup(re *require.Assertions, server *tests.TestServ
 			return false
 		}
 		// Send request.
-		resp, err := dialClient.Do(httpReq)
+		resp, err := tests.TestDialClient.Do(httpReq)
 		if err != nil {
 			return false
 		}
@@ -270,7 +263,7 @@ func MustMergeKeyspaceGroup(re *require.Assertions, server *tests.TestServer, id
 	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/merge", id), bytes.NewBuffer(data))
 	re.NoError(err)
 	// Send request.
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)

@@ -66,7 +66,7 @@ func TestReconnect(t *testing.T) {
 	re.NotEmpty(leader)
 	for name, s := range cluster.GetServers() {
 		if name != leader {
-			res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+			res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 			re.NoError(err)
 			res.Body.Close()
 			re.Equal(http.StatusOK, res.StatusCode)
@@ -83,7 +83,7 @@ func TestReconnect(t *testing.T) {
 	for name, s := range cluster.GetServers() {
 		if name != leader {
 			testutil.Eventually(re, func() bool {
-				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				re.NoError(err)
 				defer res.Body.Close()
 				return res.StatusCode == http.StatusOK
@@ -98,7 +98,7 @@ func TestReconnect(t *testing.T) {
 	for name, s := range cluster.GetServers() {
 		if name != leader && name != newLeader {
 			testutil.Eventually(re, func() bool {
-				res, err := http.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
+				res, err := tests.TestDialClient.Get(s.GetConfig().AdvertiseClientUrls + "/pd/api/v1/version")
 				re.NoError(err)
 				defer res.Body.Close()
 				return res.StatusCode == http.StatusServiceUnavailable
@@ -148,7 +148,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	data, err := json.Marshal(input)
 	re.NoError(err)
 	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, err := dialClient.Do(req)
+	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
@@ -156,7 +156,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	labels := make(map[string]any)
 	labels["testkey"] = "testvalue"
 	data, _ = json.Marshal(labels)
-	resp, err = dialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?force=true", "application/json", bytes.NewBuffer(data))
+	resp, err = tests.TestDialClient.Post(leader.GetAddr()+"/pd/api/v1/debug/pprof/profile?seconds=1", "application/json", bytes.NewBuffer(data))
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -164,7 +164,7 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 
 	re.Equal("Profile", resp.Header.Get("service-label"))
-	re.Equal("{\"force\":[\"true\"]}", resp.Header.Get("url-param"))
+	re.Equal("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
 	re.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
 	re.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
 	re.Equal("anonymous", resp.Header.Get("caller-id"))
@@ -176,13 +176,13 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	data, err = json.Marshal(input)
 	re.NoError(err)
 	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
 	re.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 
 	header := mustRequestSuccess(re, leader.GetServer())
-	re.Equal("", header.Get("service-label"))
+	re.Equal("GetVersion", header.Get("service-label"))
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/addRequestInfoMiddleware"))
 }
@@ -199,7 +199,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	}
 	data, _ := json.Marshal(input)
 	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, _ := dialClient.Do(req)
+	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
@@ -219,14 +219,14 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	data, err := json.Marshal(input)
 	re.NoError(err)
 	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, err := dialClient.Do(req)
+	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 
 	// returns StatusOK when no rate-limit config
 	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -240,7 +240,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	jsonBody, err := json.Marshal(input)
 	re.NoError(err)
 	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config/rate-limit", bytes.NewBuffer(jsonBody))
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -249,7 +249,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-		resp, err = dialClient.Do(req)
+		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -266,7 +266,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	time.Sleep(time.Second * 2)
 	for i := 0; i < 2; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-		resp, err = dialClient.Do(req)
+		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -283,7 +283,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	time.Sleep(time.Second)
 	for i := 0; i < 2; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-		resp, err = dialClient.Do(req)
+		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -310,7 +310,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-		resp, err = dialClient.Do(req)
+		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -327,7 +327,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	time.Sleep(time.Second * 2)
 	for i := 0; i < 2; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-		resp, err = dialClient.Do(req)
+		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -344,7 +344,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	time.Sleep(time.Second)
 	for i := 0; i < 2; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-		resp, err = dialClient.Do(req)
+		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
 		data, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -359,20 +359,32 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	data, err = json.Marshal(input)
 	re.NoError(err)
 	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
 	re.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 
 	for i := 0; i < 3; i++ {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-		resp, err = dialClient.Do(req)
+		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
 		_, err = io.ReadAll(resp.Body)
 		resp.Body.Close()
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
 	}
+
+	// reset rate limit
+	input = map[string]any{
+		"enable-rate-limit": "true",
+	}
+	data, err = json.Marshal(input)
+	re.NoError(err)
+	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
+	resp, err = tests.TestDialClient.Do(req)
+	re.NoError(err)
+	resp.Body.Close()
+	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 }
 
 func (suite *middlewareTestSuite) TestSwaggerUrl() {
@@ -380,7 +392,7 @@ func (suite *middlewareTestSuite) TestSwaggerUrl() {
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
 	req, _ := http.NewRequest(http.MethodGet, leader.GetAddr()+"/swagger/ui/index", http.NoBody)
-	resp, err := dialClient.Do(req)
+	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	re.Equal(http.StatusNotFound, resp.StatusCode)
 	resp.Body.Close()
@@ -396,20 +408,20 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	data, err := json.Marshal(input)
 	re.NoError(err)
 	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, err := dialClient.Do(req)
+	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 	timeUnix := time.Now().Unix() - 20
 	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	re.NoError(err)
 
 	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", http.NoBody)
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
 	content, _ := io.ReadAll(resp.Body)
@@ -428,14 +440,14 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 
 	timeUnix = time.Now().Unix() - 20
 	req, _ = http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", leader.GetAddr(), timeUnix), http.NoBody)
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
 	re.NoError(err)
 
 	req, _ = http.NewRequest(http.MethodGet, leader.GetAddr()+"/metrics", http.NoBody)
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
 	content, _ = io.ReadAll(resp.Body)
@@ -448,7 +460,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	data, err = json.Marshal(input)
 	re.NoError(err)
 	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
 	re.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
@@ -466,13 +478,13 @@ func (suite *middlewareTestSuite) TestAuditLocalLogBackend() {
 	data, err := json.Marshal(input)
 	re.NoError(err)
 	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, err := dialClient.Do(req)
+	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	resp.Body.Close()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsAuditEnabled())
 
 	req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
-	resp, err = dialClient.Do(req)
+	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	_, err = io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -494,7 +506,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	}
 	data, _ := json.Marshal(input)
 	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, _ := dialClient.Do(req)
+	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
@@ -516,7 +528,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	}
 	data, _ := json.Marshal(input)
 	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, _ := dialClient.Do(req)
+	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
@@ -538,7 +550,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	}
 	data, _ := json.Marshal(input)
 	req, _ := http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/service-middleware/config", bytes.NewBuffer(data))
-	resp, _ := dialClient.Do(req)
+	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
@@ -551,7 +563,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 func doTestRequestWithLogAudit(srv *tests.TestServer) {
 	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/pd/api/v1/admin/cache/regions", srv.GetAddr()), http.NoBody)
 	req.Header.Set(apiutil.XCallerIDHeader, "test")
-	resp, _ := dialClient.Do(req)
+	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 }
 
@@ -559,7 +571,7 @@ func doTestRequestWithPrometheus(srv *tests.TestServer) {
 	timeUnix := time.Now().Unix() - 20
 	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/trend?from=%d", srv.GetAddr(), timeUnix), http.NoBody)
 	req.Header.Set(apiutil.XCallerIDHeader, "test")
-	resp, _ := dialClient.Do(req)
+	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 }
 
@@ -623,7 +635,7 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	re.NoError(err)
 	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
-	resp, err := dialClient.Do(request)
+	resp, err := tests.TestDialClient.Do(request)
 	re.NoError(err)
 	re.Equal("", resp.Header.Get(apiutil.PDRedirectorHeader))
 	defer resp.Body.Close()
@@ -648,7 +660,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 	// Request to follower without redirectorHeader is OK.
 	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	re.NoError(err)
-	resp, err := dialClient.Do(request)
+	resp, err := tests.TestDialClient.Do(request)
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -658,7 +670,7 @@ func (suite *redirectorTestSuite) TestNotLeader() {
 	// Request to follower with redirectorHeader will fail.
 	request.RequestURI = ""
 	request.Header.Set(apiutil.PDRedirectorHeader, "pd")
-	resp1, err := dialClient.Do(request)
+	resp1, err := tests.TestDialClient.Do(request)
 	re.NoError(err)
 	defer resp1.Body.Close()
 	re.NotEqual(http.StatusOK, resp1.StatusCode)
@@ -677,7 +689,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 	addr := follower.GetAddr() + "/pd/api/v1/regions"
 	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
 	re.NoError(err)
-	resp, err := dialClient.Do(request)
+	resp, err := tests.TestDialClient.Do(request)
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
@@ -689,7 +701,7 @@ func (suite *redirectorTestSuite) TestXForwardedFor() {
 }
 
 func mustRequestSuccess(re *require.Assertions, s *server.Server) http.Header {
-	resp, err := dialClient.Get(s.GetAddr() + "/pd/api/v1/version")
+	resp, err := tests.TestDialClient.Get(s.GetAddr() + "/pd/api/v1/version")
 	re.NoError(err)
 	defer resp.Body.Close()
 	_, err = io.ReadAll(resp.Body)
@@ -783,7 +795,7 @@ func TestRemovingProgress(t *testing.T) {
 			}
 			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=removing"
 			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
-			resp, err := dialClient.Do(req)
+			resp, err := tests.TestDialClient.Do(req)
 			re.NoError(err)
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
@@ -807,7 +819,7 @@ func TestRemovingProgress(t *testing.T) {
 		}
 		url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=removing"
 		req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
-		resp, err := dialClient.Do(req)
+		resp, err := tests.TestDialClient.Do(req)
 		re.NoError(err)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
@@ -957,12 +969,19 @@ func TestPreparingProgress(t *testing.T) {
 			StartTimestamp: time.Now().UnixNano() - 100,
 		},
 	}
-
-	for _, store := range stores {
+	// store 4 and store 5 are preparing state while store 1, store 2 and store 3 are state serving state
+	for _, store := range stores[:2] {
 		tests.MustPutStore(re, cluster, store)
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < core.InitClusterRegionThreshold; i++ {
 		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
+	}
+	testutil.Eventually(re, func() bool {
+		return leader.GetRaftCluster().GetTotalRegionCount() == core.InitClusterRegionThreshold
+	})
+	// to avoid forcing the store to the `serving` state with too few regions
+	for _, store := range stores[2:] {
+		tests.MustPutStore(re, cluster, store)
 	}
 	// no store preparing
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
@@ -977,7 +996,7 @@ func TestPreparingProgress(t *testing.T) {
 			}
 			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
 			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
-			resp, err := dialClient.Do(req)
+			resp, err := tests.TestDialClient.Do(req)
 			re.NoError(err)
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusNotFound {
@@ -1002,7 +1021,7 @@ func TestPreparingProgress(t *testing.T) {
 		}
 		url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
 		req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
-		resp, err := dialClient.Do(req)
+		resp, err := tests.TestDialClient.Do(req)
 		re.NoError(err)
 		defer resp.Body.Close()
 		output, err := io.ReadAll(resp.Body)
@@ -1059,7 +1078,7 @@ func TestPreparingProgress(t *testing.T) {
 
 func sendRequest(re *require.Assertions, url string, method string, statusCode int) []byte {
 	req, _ := http.NewRequest(method, url, http.NoBody)
-	resp, err := dialClient.Do(req)
+	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	re.Equal(statusCode, resp.StatusCode)
 	output, err := io.ReadAll(resp.Body)

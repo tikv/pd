@@ -18,7 +18,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-const nameStr = "runner_name"
+const (
+	nameStr = "runner_name"
+	taskStr = "task_type"
+)
 
 var (
 	RunnerTaskMaxWaitingDuration = prometheus.NewGaugeVec(
@@ -28,25 +31,41 @@ var (
 			Name:      "runner_task_max_waiting_duration_seconds",
 			Help:      "The duration of tasks waiting in the runner.",
 		}, []string{nameStr})
-
-	RunnerTaskPendingTasks = prometheus.NewGaugeVec(
+	RunnerPendingTasks = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "ratelimit",
-			Name:      "runner_task_pending_tasks",
+			Name:      "runner_pending_tasks",
 			Help:      "The number of pending tasks in the runner.",
-		}, []string{nameStr})
-	RunnerTaskFailedTasks = prometheus.NewCounterVec(
+		}, []string{nameStr, taskStr})
+	RunnerFailedTasks = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "ratelimit",
-			Name:      "runner_task_failed_tasks_total",
+			Name:      "runner_failed_tasks_total",
 			Help:      "The number of failed tasks in the runner.",
-		}, []string{nameStr})
+		}, []string{nameStr, taskStr})
+	RunnerSucceededTasks = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "ratelimit",
+			Name:      "runner_success_tasks_total",
+			Help:      "The number of tasks in the runner.",
+		}, []string{nameStr, taskStr})
+	RunnerTaskExecutionDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "ratelimit",
+			Name:      "runner_task_execution_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of finished tasks.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		}, []string{nameStr, taskStr})
 )
 
 func init() {
 	prometheus.MustRegister(RunnerTaskMaxWaitingDuration)
-	prometheus.MustRegister(RunnerTaskPendingTasks)
-	prometheus.MustRegister(RunnerTaskFailedTasks)
+	prometheus.MustRegister(RunnerPendingTasks)
+	prometheus.MustRegister(RunnerFailedTasks)
+	prometheus.MustRegister(RunnerTaskExecutionDuration)
+	prometheus.MustRegister(RunnerSucceededTasks)
 }

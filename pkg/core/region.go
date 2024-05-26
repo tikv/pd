@@ -36,7 +36,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -728,9 +727,14 @@ func (r *RegionInfo) isRegionRecreated() bool {
 	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
+func (r *RegionInfo) Contains(key []byte) bool {
+	start, end := r.GetStartKey(), r.GetEndKey()
+	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
+type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync, retained bool)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
@@ -743,7 +747,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
+	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync, retained bool) {
 		logRunner := ctx.LogRunner
 		// print log asynchronously
 		debug, info := d, i
@@ -751,19 +755,19 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			debug = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
 					ctx.Context,
+					"DebugLog",
 					func(_ context.Context) {
 						d(msg, fields...)
 					},
-					ratelimit.WithTaskName("DebugLog"),
 				)
 			}
 			info = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
 					ctx.Context,
+					"InfoLog",
 					func(_ context.Context) {
 						i(msg, fields...)
 					},
-					ratelimit.WithTaskName("InfoLog"),
 				)
 			}
 		}
@@ -773,7 +777,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			}
-			saveKV, saveCache = true, true
+			saveKV, saveCache, retained = true, true, true
 		} else {
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
@@ -786,7 +790,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-version", r.GetVersion()),
 					)
 				}
-				saveKV, saveCache = true, true
+				saveKV, saveCache, retained = true, true, true
 			}
 			if r.GetConfVer() > o.GetConfVer() {
 				if log.GetLevel() <= zap.InfoLevel {
@@ -797,7 +801,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-confver", r.GetConfVer()),
 					)
 				}
-				saveKV, saveCache = true, true
+				saveKV, saveCache, retained = true, true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 				if origin.GetLeader().GetId() != 0 && log.GetLevel() <= zap.InfoLevel {
@@ -915,6 +919,8 @@ type RegionsInfo struct {
 	learners     map[uint64]*regionTree // storeID -> sub regionTree
 	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
 	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
+	// This tree is used to check the overlaps among all the subtrees.
+	overlapTree *regionTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers
@@ -928,6 +934,7 @@ func NewRegionsInfo() *RegionsInfo {
 		learners:     make(map[uint64]*regionTree),
 		witnesses:    make(map[uint64]*regionTree),
 		pendingPeers: make(map[uint64]*regionTree),
+		overlapTree:  newRegionTreeWithCountRef(),
 	}
 }
 
@@ -1042,10 +1049,10 @@ func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *Regio
 // Usually used with CheckAndPutRootTree together.
 func (r *RegionsInfo) CheckAndPutSubTree(region *RegionInfo) {
 	// new region get from root tree again
-	var newRegion *RegionInfo
-	newRegion = r.GetRegion(region.GetID())
+	newRegion := r.GetRegion(region.GetID())
 	if newRegion == nil {
-		newRegion = region
+		// Make sure there is this region in the root tree, so as to ensure the correctness of reference count
+		return
 	}
 	r.UpdateSubTreeOrderInsensitive(newRegion)
 }
@@ -1067,110 +1074,98 @@ func (r *RegionsInfo) UpdateSubTreeOrderInsensitive(region *RegionInfo) {
 		origin = originItem.RegionInfo
 	}
 	rangeChanged := true
-
 	if origin != nil {
+		rangeChanged = !origin.rangeEqualsTo(region)
+		if r.preUpdateSubTreeLocked(rangeChanged, !origin.peersEqualTo(region), true, origin, region) {
+			return
+		}
+	}
+	r.updateSubTreeLocked(rangeChanged, nil, region)
+}
+
+func (r *RegionsInfo) preUpdateSubTreeLocked(
+	rangeChanged, peerChanged, orderInsensitive bool,
+	origin, region *RegionInfo,
+) (done bool) {
+	if orderInsensitive {
 		re := region.GetRegionEpoch()
 		oe := origin.GetRegionEpoch()
 		isTermBehind := region.GetTerm() > 0 && region.GetTerm() < origin.GetTerm()
 		if (isTermBehind || re.GetVersion() < oe.GetVersion() || re.GetConfVer() < oe.GetConfVer()) && !region.isRegionRecreated() {
 			// Region meta is stale, skip.
-			return
-		}
-		rangeChanged = !origin.rangeEqualsTo(region)
-
-		if rangeChanged || !origin.peersEqualTo(region) {
-			// If the range or peers have changed, the sub regionTree needs to be cleaned up.
-			// TODO: Improve performance by deleting only the different peers.
-			r.removeRegionFromSubTreeLocked(origin)
-		} else {
-			// The region tree and the subtree update is not atomic and the region tree is updated first.
-			// If there are two thread needs to update region tree,
-			// t1: thread-A  update region tree
-			// 										t2: thread-B: update region tree again
-			//										t3: thread-B: update subtree
-			// t4: thread-A: update region subtree
-			// to keep region tree consistent with subtree, we need to drop this update.
-			if tree, ok := r.subRegions[region.GetID()]; ok {
-				r.updateSubTreeStat(origin, region)
-				tree.RegionInfo = region
-			}
-			return
+			return true
 		}
 	}
+	if rangeChanged || peerChanged {
+		// If the range or peers have changed, clean up the subtrees before updating them.
+		// TODO: improve performance by deleting only the different peers.
+		r.removeRegionFromSubTreeLocked(origin)
+	} else {
+		// The region tree and the subtree update is not atomic and the region tree is updated first.
+		// If there are two thread needs to update region tree,
+		// t1: thread-A  update region tree
+		// 										t2: thread-B: update region tree again
+		//										t3: thread-B: update subtree
+		// t4: thread-A: update region subtree
+		// to keep region tree consistent with subtree, we need to drop this update.
+		if tree, ok := r.subRegions[region.GetID()]; ok {
+			r.updateSubTreeStat(origin, region)
+			tree.RegionInfo = region
+		}
+		return true
+	}
+	return false
+}
 
+func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionInfo, region *RegionInfo) {
 	if rangeChanged {
-		overlaps := r.getOverlapRegionFromSubTreeLocked(region)
-		for _, re := range overlaps {
-			r.removeRegionFromSubTreeLocked(re)
+		// TODO: only perform the remove operation on the overlapped peer.
+		if len(overlaps) == 0 {
+			// If the range has changed but the overlapped regions are not provided, collect them by `[]*regionItem`.
+			for _, item := range r.getOverlapRegionFromOverlapTreeLocked(region) {
+				r.removeRegionFromSubTreeLocked(item.RegionInfo)
+			}
+		} else {
+			// Remove all provided overlapped regions from the subtrees.
+			for _, overlap := range overlaps {
+				r.removeRegionFromSubTreeLocked(overlap)
+			}
 		}
 	}
-
+	// Reinsert the region into all subtrees.
 	item := &regionItem{region}
 	r.subRegions[region.GetID()] = item
-	// It has been removed and all information needs to be updated again.
-	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
+	r.overlapTree.update(item, false)
+	// Add leaders and followers.
+	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64) {
 		store, ok := peersMap[storeID]
 		if !ok {
-			if !countRef {
-				store = newRegionTree()
-			} else {
-				store = newRegionTreeWithCountRef()
-			}
+			store = newRegionTree()
 			peersMap[storeID] = store
 		}
 		store.update(item, false)
 	}
-
-	// Add to leaders and followers.
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
 		if peer.GetId() == region.leader.GetId() {
-			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item, true)
+			setPeer(r.leaders, storeID)
 		} else {
-			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item, false)
+			setPeer(r.followers, storeID)
 		}
 	}
-
+	// Add other peers.
 	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
 		for _, peer := range peers {
-			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item, false)
+			setPeer(peersMap, peer.GetStoreId())
 		}
 	}
-	// Add to learners.
 	setPeers(r.learners, region.GetLearners())
-	// Add to witnesses.
 	setPeers(r.witnesses, region.GetWitnesses())
-	// Add to PendingPeers
 	setPeers(r.pendingPeers, region.GetPendingPeers())
 }
 
-func (r *RegionsInfo) getOverlapRegionFromSubTreeLocked(region *RegionInfo) []*RegionInfo {
-	it := &regionItem{RegionInfo: region}
-	overlaps := make([]*RegionInfo, 0)
-	overlapsMap := make(map[uint64]struct{})
-	collectFromItemSlice := func(peersMap map[uint64]*regionTree, storeID uint64) {
-		if tree, ok := peersMap[storeID]; ok {
-			items := tree.overlaps(it)
-			for _, item := range items {
-				if _, ok := overlapsMap[item.GetID()]; !ok {
-					overlapsMap[item.GetID()] = struct{}{}
-					overlaps = append(overlaps, item.RegionInfo)
-				}
-			}
-		}
-	}
-	for _, peer := range region.GetMeta().GetPeers() {
-		storeID := peer.GetStoreId()
-		collectFromItemSlice(r.leaders, storeID)
-		collectFromItemSlice(r.followers, storeID)
-		collectFromItemSlice(r.learners, storeID)
-		collectFromItemSlice(r.witnesses, storeID)
-	}
-	return overlaps
+func (r *RegionsInfo) getOverlapRegionFromOverlapTreeLocked(region *RegionInfo) []*regionItem {
+	return r.overlapTree.overlaps(&regionItem{RegionInfo: region})
 }
 
 // GetRelevantRegions returns the relevant regions for a given region.
@@ -1276,72 +1271,11 @@ func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*Regi
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
-		if rangeChanged || !origin.peersEqualTo(region) {
-			// If the range or peers have changed, the sub regionTree needs to be cleaned up.
-			// TODO: Improve performance by deleting only the different peers.
-			r.removeRegionFromSubTreeLocked(origin)
-		} else {
-			// The region tree and the subtree update is not atomic and the region tree is updated first.
-			// If there are two thread needs to update region tree,
-			// t1: thread-A  update region tree
-			// 										t2: thread-B: update region tree again
-			//										t3: thread-B: update subtree
-			// t4: thread-A: update region subtree
-			// to keep region tree consistent with subtree, we need to drop this update.
-			if tree, ok := r.subRegions[region.GetID()]; ok {
-				r.updateSubTreeStat(origin, region)
-				tree.RegionInfo = region
-			}
+		if r.preUpdateSubTreeLocked(rangeChanged, !origin.peersEqualTo(region), false, origin, region) {
 			return
 		}
 	}
-	if rangeChanged {
-		for _, re := range overlaps {
-			r.removeRegionFromSubTreeLocked(re)
-		}
-	}
-
-	item := &regionItem{region}
-	r.subRegions[region.GetID()] = item
-	// It has been removed and all information needs to be updated again.
-	// Set peers then.
-	setPeer := func(peersMap map[uint64]*regionTree, storeID uint64, item *regionItem, countRef bool) {
-		store, ok := peersMap[storeID]
-		if !ok {
-			if !countRef {
-				store = newRegionTree()
-			} else {
-				store = newRegionTreeWithCountRef()
-			}
-			peersMap[storeID] = store
-		}
-		store.update(item, false)
-	}
-
-	// Add to leaders and followers.
-	for _, peer := range region.GetVoters() {
-		storeID := peer.GetStoreId()
-		if peer.GetId() == region.leader.GetId() {
-			// Add leader peer to leaders.
-			setPeer(r.leaders, storeID, item, true)
-		} else {
-			// Add follower peer to followers.
-			setPeer(r.followers, storeID, item, false)
-		}
-	}
-
-	setPeers := func(peersMap map[uint64]*regionTree, peers []*metapb.Peer) {
-		for _, peer := range peers {
-			storeID := peer.GetStoreId()
-			setPeer(peersMap, storeID, item, false)
-		}
-	}
-	// Add to learners.
-	setPeers(r.learners, region.GetLearners())
-	// Add to witnesses.
-	setPeers(r.witnesses, region.GetWitnesses())
-	// Add to PendingPeers
-	setPeers(r.pendingPeers, region.GetPendingPeers())
+	r.updateSubTreeLocked(rangeChanged, overlaps, region)
 }
 
 func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) {
@@ -1395,7 +1329,7 @@ func (r *RegionsInfo) RemoveRegion(region *RegionInfo) {
 // ResetRegionCache resets the regions info.
 func (r *RegionsInfo) ResetRegionCache() {
 	r.t.Lock()
-	r.tree = newRegionTree()
+	r.tree = newRegionTreeWithCountRef()
 	r.regions = make(map[uint64]*regionItem)
 	r.t.Unlock()
 	r.st.Lock()
@@ -1405,6 +1339,7 @@ func (r *RegionsInfo) ResetRegionCache() {
 	r.learners = make(map[uint64]*regionTree)
 	r.witnesses = make(map[uint64]*regionTree)
 	r.pendingPeers = make(map[uint64]*regionTree)
+	r.overlapTree = newRegionTreeWithCountRef()
 }
 
 // RemoveRegionFromSubTree removes RegionInfo from regionSubTrees
@@ -1417,7 +1352,6 @@ func (r *RegionsInfo) RemoveRegionFromSubTree(region *RegionInfo) {
 
 // removeRegionFromSubTreeLocked removes RegionInfo from regionSubTrees
 func (r *RegionsInfo) removeRegionFromSubTreeLocked(region *RegionInfo) {
-	// Remove from leaders and followers.
 	for _, peer := range region.GetMeta().GetPeers() {
 		storeID := peer.GetStoreId()
 		r.leaders[storeID].remove(region)
@@ -1426,6 +1360,7 @@ func (r *RegionsInfo) removeRegionFromSubTreeLocked(region *RegionInfo) {
 		r.witnesses[storeID].remove(region)
 		r.pendingPeers[storeID].remove(region)
 	}
+	r.overlapTree.remove(region)
 	delete(r.subRegions, region.GetMeta().GetId())
 }
 
@@ -1743,13 +1678,6 @@ func (r *RegionsInfo) GetStoreWitnessCount(storeID uint64) int {
 	return r.witnesses[storeID].length()
 }
 
-// RandPendingRegion randomly gets a store's region with a pending peer.
-func (r *RegionsInfo) RandPendingRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.pendingPeers[storeID].RandomRegion(ranges)
-}
-
 // RandPendingRegions randomly gets a store's n regions with a pending peer.
 func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
@@ -1757,11 +1685,11 @@ func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*R
 	return r.pendingPeers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandLeaderRegion randomly gets a store's leader region.
-func (r *RegionsInfo) RandLeaderRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+// This function is used for test only.
+func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []KeyRange) {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.leaders[storeID].RandomRegion(ranges)
+	_ = r.leaders[storeID].randomRegion(ranges)
 }
 
 // RandLeaderRegions randomly gets a store's n leader regions.
@@ -1771,13 +1699,6 @@ func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []KeyRange) []*Re
 	return r.leaders[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandFollowerRegion randomly gets a store's follower region.
-func (r *RegionsInfo) RandFollowerRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.followers[storeID].RandomRegion(ranges)
-}
-
 // RandFollowerRegions randomly gets a store's n follower regions.
 func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
@@ -1785,25 +1706,11 @@ func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*
 	return r.followers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandLearnerRegion randomly gets a store's learner region.
-func (r *RegionsInfo) RandLearnerRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.learners[storeID].RandomRegion(ranges)
-}
-
 // RandLearnerRegions randomly gets a store's n learner regions.
 func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
-}
-
-// RandWitnessRegion randomly gets a store's witness region.
-func (r *RegionsInfo) RandWitnessRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.witnesses[storeID].RandomRegion(ranges)
 }
 
 // RandWitnessRegions randomly gets a store's n witness regions.

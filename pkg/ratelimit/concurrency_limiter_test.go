@@ -68,17 +68,17 @@ func TestConcurrencyLimiter2(t *testing.T) {
 	defer cancel()
 
 	// Acquire two tokens
-	token1, err := limiter.Acquire(ctx)
+	token1, err := limiter.AcquireToken(ctx)
 	require.NoError(t, err, "Failed to acquire token")
 
-	token2, err := limiter.Acquire(ctx)
+	token2, err := limiter.AcquireToken(ctx)
 	require.NoError(t, err, "Failed to acquire token")
 
 	require.Equal(t, limit, limiter.GetRunningTasksNum(), "Expected running tasks to be 2")
 
 	// Try to acquire third token, it should not be able to acquire immediately due to limit
 	go func() {
-		_, err := limiter.Acquire(ctx)
+		_, err := limiter.AcquireToken(ctx)
 		require.NoError(t, err, "Failed to acquire token")
 	}()
 
@@ -86,13 +86,13 @@ func TestConcurrencyLimiter2(t *testing.T) {
 	require.Equal(t, uint64(1), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 1")
 
 	// Release a token
-	token1.Release()
+	limiter.ReleaseToken(token1)
 	time.Sleep(100 * time.Millisecond) // Give some time for the goroutine to run
 	require.Equal(t, uint64(2), limiter.GetRunningTasksNum(), "Expected running tasks to be 2")
 	require.Equal(t, uint64(0), limiter.GetWaitingTasksNum(), "Expected waiting tasks to be 0")
 
 	// Release the second token
-	token2.Release()
+	limiter.ReleaseToken(token2)
 	time.Sleep(100 * time.Millisecond) // Give some time for the goroutine to run
 	require.Equal(t, uint64(1), limiter.GetRunningTasksNum(), "Expected running tasks to be 1")
 }
@@ -109,12 +109,12 @@ func TestConcurrencyLimiterAcquire(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		go func(i int) {
 			defer wg.Done()
-			token, err := limiter.Acquire(ctx)
+			token, err := limiter.AcquireToken(ctx)
 			if err != nil {
 				fmt.Printf("Task %d failed to acquire: %v\n", i, err)
 				return
 			}
-			defer token.Release()
+			defer limiter.ReleaseToken(token)
 			// simulate takes some time
 			time.Sleep(10 * time.Millisecond)
 			atomic.AddInt64(&sum, 1)
@@ -122,6 +122,6 @@ func TestConcurrencyLimiterAcquire(t *testing.T) {
 	}
 	wg.Wait()
 	// We should have 20 tasks running concurrently, so it should take at least 50ms to complete
-	require.Greater(t, time.Since(start).Milliseconds(), int64(50))
+	require.GreaterOrEqual(t, time.Since(start).Milliseconds(), int64(50))
 	require.Equal(t, int64(100), sum)
 }
