@@ -179,13 +179,6 @@ func (f *hotPeerCache) checkPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 		return nil
 	}
 
-	if peers == nil {
-		peers = region.GetPeers()
-		deltaLoads = region.GetWriteLoads()
-		reportInterval := region.GetInterval()
-		interval = reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	}
-
 	f.collectPeerMetrics(deltaLoads, interval) // update metrics
 	regionID := region.GetID()
 

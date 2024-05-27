@@ -62,7 +62,9 @@ func NewCheckWritePeerTask(region *core.RegionInfo) FlowItemTask {
 }
 
 func (t *checkWritePeerTask) runTask(cache *hotPeerCache) {
-	stats := cache.checkPeerFlow(t.region, nil, nil, 0)
+	reportInterval := t.region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	stats := cache.checkPeerFlow(t.region, t.region.GetPeers(), t.region.GetWriteLoads(), interval)
 	for _, stat := range stats {
 		cache.updateStat(stat)
 	}
