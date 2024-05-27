@@ -396,7 +396,7 @@ func (o *PersistConfig) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
-// GetPatrolRegionConcurrency  returns the worker count of the patrol.
+// GetPatrolRegionConcurrency returns the worker count of the patrol.
 func (o *PersistConfig) GetPatrolRegionConcurrency() int {
 	return int(o.GetScheduleConfig().PatrolRegionConcurrency)
 }
