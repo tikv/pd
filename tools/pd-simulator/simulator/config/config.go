@@ -31,8 +31,11 @@ import (
 )
 
 const (
-	// tick
-	defaultSimTickInterval = 100 * time.Millisecond
+	// simulator
+	defaultSimTickInterval             = 100 * time.Millisecond
+	defaultTotalStore                  = 3
+	defaultTotalRegion                 = 1000
+	defaultEnableTransferRegionCounter = false
 	// store
 	defaultStoreIOMBPerSecond = 40
 	defaultStoreHeartbeat     = 10 * time.Second
@@ -102,6 +105,9 @@ func NewSimConfig(serverLogLevel string) *SimConfig {
 // Adjust is used to adjust configurations
 func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
+	configutil.AdjustInt(&sc.TotalStore, defaultTotalStore)
+	configutil.AdjustInt(&sc.TotalRegion, defaultTotalRegion)
+	configutil.AdjustBool(&sc.EnableTransferRegionCounter, defaultEnableTransferRegionCounter)
 	configutil.AdjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
 	configutil.AdjustString(&sc.StoreVersion, versioninfo.PDReleaseVersion)
 	configutil.AdjustDuration(&sc.RaftStore.RegionHeartBeatInterval, defaultRegionHeartbeat)

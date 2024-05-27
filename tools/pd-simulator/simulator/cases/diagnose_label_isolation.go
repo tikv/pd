@@ -27,7 +27,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func newLabelNotMatch1(config *sc.SimConfig) *Case {
+func newLabelNotMatch1(_ *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"host"}
 
@@ -89,7 +89,7 @@ func newLabelNotMatch1(config *sc.SimConfig) *Case {
 	return &simCase
 }
 
-func newLabelIsolation1(config *sc.SimConfig) *Case {
+func newLabelIsolation1(_ *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"host"}
 
@@ -155,7 +155,7 @@ func newLabelIsolation1(config *sc.SimConfig) *Case {
 	return &simCase
 }
 
-func newLabelIsolation2(config *sc.SimConfig) *Case {
+func newLabelIsolation2(_ *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"dc", "zone", "host"}
 

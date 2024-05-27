@@ -27,7 +27,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func newRule1(config *sc.SimConfig) *Case {
+func newRule1(_ *sc.SimConfig) *Case {
 	var simCase Case
 
 	simCase.Rules = make([]*placement.Rule, 0)
@@ -127,7 +127,7 @@ func newRule1(config *sc.SimConfig) *Case {
 	return &simCase
 }
 
-func newRule2(config *sc.SimConfig) *Case {
+func newRule2(_ *sc.SimConfig) *Case {
 	var simCase Case
 
 	simCase.Rules = make([]*placement.Rule, 0)
