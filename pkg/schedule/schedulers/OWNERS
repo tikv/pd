@@ -4,4 +4,4 @@ options:
 filters:
   "(OWNERS|hot_region_config\\.go)$":
     approvers:
-      - sig-critical-approvers
+      - sig-critical-approvers-config
