@@ -4,4 +4,4 @@ options:
 filters:
   "(OWNERS|(config|store_config)\\.go)$":
     approvers:
-      - sig-critical-approvers
+      - sig-critical-approvers-config
