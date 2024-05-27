@@ -4,4 +4,4 @@ options:
 filters:
   "(OWNERS|config\\.toml)$":
     approvers:
-      - sig-critical-approvers
+      - sig-critical-approvers-config
