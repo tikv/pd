@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
@@ -81,6 +82,15 @@ type Limiter struct {
 	isLowProcess bool
 	// remainingNotifyTimes is used to limit notify when the speed limit is already set.
 	remainingNotifyTimes int
+	name                 string
+
+	// metrics
+	metrics *limiterMetricsCollection
+}
+
+// limiterMetricsCollection is a collection of metrics for a limiter.
+type limiterMetricsCollection struct {
+	lowTokenNotifyCounter prometheus.Counter
 }
 
 // Limit returns the maximum overall event rate.
@@ -224,6 +234,23 @@ func (lim *Limiter) SetupNotificationThreshold(threshold float64) {
 	lim.notifyThreshold = threshold
 }
 
+// SetName sets the name of the limiter.
+func (lim *Limiter) SetName(name string) *Limiter {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.name = name
+	return lim
+}
+
+func (lim *Limiter) SetupMetrics() *Limiter {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.metrics = &limiterMetricsCollection{
+		lowTokenNotifyCounter: lowTokenRequestNotifyCounter.WithLabelValues(lim.name),
+	}
+	return lim
+}
+
 // notify tries to send a non-blocking notification on notifyCh and disables
 // further notifications (until the next Reconfigure or StartNotification).
 func (lim *Limiter) notify() {
@@ -234,6 +261,9 @@ func (lim *Limiter) notify() {
 	lim.isLowProcess = true
 	select {
 	case lim.lowTokensNotifyChan <- struct{}{}:
+		if lim.metrics != nil {
+			lim.metrics.lowTokenNotifyCounter.Inc()
+		}
 	default:
 	}
 }
