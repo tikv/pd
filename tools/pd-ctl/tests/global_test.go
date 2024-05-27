@@ -45,6 +45,7 @@ func TestSendAndGetComponent(t *testing.T) {
 			w.Write(clusterBytes)
 		})
 		// check http client api
+		// TODO: remove this comment after replacing dialClient with the PD HTTP client completely.
 		mux.HandleFunc("/pd/api/v1/stores", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
 			re.Equal(command.PDControlCallerID, callerID)
