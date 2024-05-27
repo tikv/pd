@@ -16,7 +16,6 @@ package statistics
 
 import (
 	"context"
-	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
@@ -25,18 +24,6 @@ import (
 // FlowItemTask indicates the task in flowItem queue
 type FlowItemTask interface {
 	runTask(cache *hotPeerCache)
-}
-
-var checkWritePeerTaskPool = sync.Pool{
-	New: func() interface{} {
-		return &checkWritePeerTask{}
-	},
-}
-
-var checkExpiredTaskPool = sync.Pool{
-	New: func() interface{} {
-		return &checkExpiredTask{}
-	},
 }
 
 type checkReadPeerTask struct {
@@ -64,22 +51,21 @@ func (t *checkReadPeerTask) runTask(cache *hotPeerCache) {
 }
 
 type checkWritePeerTask struct {
-	regionInfo *core.RegionInfo
+	region *core.RegionInfo
 }
 
 // NewCheckWritePeerTask creates task to update peerInfo
-func NewCheckWritePeerTask(regionInfo *core.RegionInfo) FlowItemTask {
-	task := checkWritePeerTaskPool.Get().(*checkWritePeerTask)
-	task.regionInfo = regionInfo
-	return task
+func NewCheckWritePeerTask(region *core.RegionInfo) FlowItemTask {
+	return &checkWritePeerTask{
+		region: region,
+	}
 }
 
 func (t *checkWritePeerTask) runTask(cache *hotPeerCache) {
-	stats := cache.checkPeerFlow(t.regionInfo, nil, nil, 0)
+	stats := cache.checkPeerFlow(t.region, nil, nil, 0)
 	for _, stat := range stats {
 		cache.updateStat(stat)
 	}
-	checkWritePeerTaskPool.Put(t)
 }
 
 type checkExpiredTask struct {
@@ -88,9 +74,9 @@ type checkExpiredTask struct {
 
 // NewCheckExpiredItemTask creates task to collect expired items
 func NewCheckExpiredItemTask(region *core.RegionInfo) FlowItemTask {
-	task := checkExpiredTaskPool.Get().(*checkExpiredTask)
-	task.region = region
-	return task
+	return &checkExpiredTask{
+		region: region,
+	}
 }
 
 func (t *checkExpiredTask) runTask(cache *hotPeerCache) {
@@ -98,7 +84,6 @@ func (t *checkExpiredTask) runTask(cache *hotPeerCache) {
 	for _, stat := range expiredStats {
 		cache.updateStat(stat)
 	}
-	checkExpiredTaskPool.Put(t)
 }
 
 type collectUnReportedPeerTask struct {
