@@ -62,7 +62,6 @@ type SchedulerConfigProvider interface {
 	GetHotRegionCacheHitsThreshold() int
 	GetMaxMovableHotPeerSize() int64
 	IsTraceRegionFlow() bool
-	GetPatrolRegionConcurrency() int
 
 	GetTolerantSizeRatio() float64
 	GetLeaderSchedulePolicy() constant.SchedulePolicy
@@ -89,6 +88,7 @@ type CheckerConfigProvider interface {
 	GetIsolationLevel() string
 	GetSplitMergeInterval() time.Duration
 	GetPatrolRegionInterval() time.Duration
+	GetPatrolRegionConcurrency() int
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
 	GetReplicaScheduleLimit() uint64
@@ -118,7 +118,6 @@ type SharedConfigProvider interface {
 	IsPlacementRulesCacheEnabled() bool
 	SetHaltScheduling(bool, string)
 	GetHotRegionCacheHitsThreshold() int
-	GetPatrolRegionConcurrency() int
 
 	// for test purpose
 	SetPlacementRuleEnabled(bool)

@@ -52,11 +52,11 @@ const (
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	// For 1,024,000 regions, patrolScanRegionLimit is 1000, which is max(patrolScanRegionMinLimit, 1000000/patrolRegionPatition)
+	// For 1,024,000 regions, patrolScanRegionLimit is 1000, which is max(patrolScanRegionMinLimit, 1000000/patrolRegionPartition)
 	// It takes about 10s to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
 	patrolScanRegionMinLimit = 128
 	patrolRegionChanLen      = 1024
-	patrolRegionPatition     = 1024
+	patrolRegionPartition    = 1024
 
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
@@ -243,7 +243,7 @@ func (c *Coordinator) PatrolRegions() {
 }
 
 func (c *Coordinator) getPatrolScanRegionLimit() int {
-	return max(patrolScanRegionMinLimit, c.cluster.GetTotalRegionCount()/patrolRegionPatition)
+	return max(patrolScanRegionMinLimit, c.cluster.GetTotalRegionCount()/patrolRegionPartition)
 }
 
 func (c *Coordinator) startPatrolRegionWorkers(workers int, regionChan <-chan *core.RegionInfo, quit <-chan bool, wg *sync.WaitGroup) {
