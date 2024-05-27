@@ -4,4 +4,4 @@ options:
 filters:
   "(OWNERS|tlsconfig\\.go)$":
     approvers:
-      - sig-critical-approvers
+      - sig-critical-approvers-config
