@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,29 +11,32 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//go:build linux
+// +build linux
 
-package command
+package alloc
 
 import (
-	"github.com/spf13/cobra"
+	"github.com/cakturk/go-netstat/netstat"
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
-// NewHealthCommand return a health subcommand of rootCmd
-func NewHealthCommand() *cobra.Command {
-	m := &cobra.Command{
-		Use:               "health",
-		Short:             "show all node's health information of the PD cluster",
-		PersistentPreRunE: requirePDClient,
-		Run:               showHealthCommandFunc,
+func environmentCheck(addr string) bool {
+	valid, err := checkAddr(addr[len("http://"):])
+	if err != nil {
+		log.Error("check port status failed", zap.Error(err))
+		return false
 	}
-	return m
+	return valid
 }
 
-func showHealthCommandFunc(cmd *cobra.Command, _ []string) {
-	health, err := PDCli.GetHealthStatus(cmd.Context())
+func checkAddr(addr string) (bool, error) {
+	tabs, err := netstat.TCPSocks(func(s *netstat.SockTabEntry) bool {
+		return s.RemoteAddr.String() == addr || s.LocalAddr.String() == addr
+	})
 	if err != nil {
-		cmd.Println(err)
-		return
+		return false, err
 	}
-	jsonPrint(cmd, health)
+	return len(tabs) < 1, nil
 }

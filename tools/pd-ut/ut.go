@@ -16,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -31,6 +32,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tikv/pd/tools/pd-ut/alloc"
+	"go.uber.org/zap"
 
 	// Set the correct value when it runs inside docker.
 	_ "go.uber.org/automaxprocs"
@@ -91,8 +95,7 @@ var (
 
 var (
 	// runtime
-	p                int
-	buildParallel    int
+	parallel         int
 	workDir          string
 	coverFileTempDir string
 	// arguments
@@ -104,6 +107,7 @@ var (
 
 func main() {
 	race = handleFlag("--race")
+	parallelStr := stripFlag("--parallel")
 	junitFile = stripFlag("--junitfile")
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDir = stripFlag("--ignore")
@@ -118,15 +122,32 @@ func main() {
 		defer os.RemoveAll(coverFileTempDir)
 	}
 
-	// Get the correct count of CPU if it's in docker.
-	p = runtime.GOMAXPROCS(0)
-	// We use 2 * p for `go build` to make it faster.
-	buildParallel = p * 2
 	var err error
+	procs := runtime.GOMAXPROCS(0)
+	if parallelStr == "" {
+		// Get the correct count of CPU if it's in docker.
+		parallel = procs
+	} else {
+		parallel, err = strconv.Atoi(parallelStr)
+		if err != nil {
+			fmt.Println("parse parallel error", err)
+			return
+		}
+		if parallel > procs {
+			fmt.Printf("Recommend to set parallel be same as the GOMAXPROCS=%d\n", procs)
+		}
+	}
 	workDir, err = os.Getwd()
 	if err != nil {
 		fmt.Println("os.Getwd() error", err)
 	}
+
+	srv := alloc.RunHTTPServer()
+	defer func() {
+		if err := srv.Shutdown(context.Background()); err != nil {
+			log.Fatal("server shutdown error", zap.Error(err))
+		}
+	}()
 
 	var isSucceed bool
 	// run all tests
@@ -342,12 +363,12 @@ func cmdRun(args ...string) bool {
 		}
 	}
 
-	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", buildParallel, len(tasks), time.Since(start))
+	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
 
 	taskCh := make(chan task, 100)
-	works := make([]numa, p)
+	works := make([]numa, parallel)
 	var wg sync.WaitGroup
-	for i := 0; i < p; i++ {
+	for i := 0; i < parallel; i++ {
 		wg.Add(1)
 		go works[i].worker(&wg, taskCh)
 	}
@@ -389,7 +410,7 @@ func cmdRun(args ...string) bool {
 
 // stripFlag strip the '--flag xxx' from the command line os.Args
 // Example of the os.Args changes
-// Before: ut run pkg TestXXX --coverprofile xxx --junitfile yyy
+// Before: ut run pkg TestXXX --coverprofile xxx --junitfile yyy --parallel 16
 // After: ut run pkg TestXXX
 // The value of the flag is returned.
 func stripFlag(flag string) string {
@@ -625,7 +646,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
 	if strings.Contains(fn, "Suite") {
-		args = append(args, "-test.cpu", fmt.Sprint(p/2))
+		args = append(args, "-test.cpu", fmt.Sprint(parallel/2))
 	} else {
 		args = append(args, "-test.cpu", "1")
 	}
@@ -684,7 +705,7 @@ func buildTestBinaryMulti(pkgs []string) error {
 	}
 
 	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
-	// workPath just like `/data/nvme0n1/husharp/proj/pd/tests/integrations`
+	// workPath just like `/pd/tests/integrations`
 	xprogPath := path.Join(workDir, "bin/xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
 		xprogPath = path.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin/xprog")
@@ -694,7 +715,8 @@ func buildTestBinaryMulti(pkgs []string) error {
 		packages = append(packages, path.Join(modulePath, pkg))
 	}
 
-	p := strconv.Itoa(buildParallel)
+	// We use 2 * parallel for `go build` to make it faster.
+	p := strconv.Itoa(parallel * 2)
 	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
 	if coverProfile != "" {
 		coverpkg := "./..."

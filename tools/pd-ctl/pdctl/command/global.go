@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	pdControlCallerID = "pd-ctl"
+	PDControlCallerID = "pd-ctl"
 	clusterPrefix     = "pd/api/v1/cluster"
 )
 
@@ -107,7 +107,7 @@ func initNewPDClient(cmd *cobra.Command, opts ...pd.ClientOption) error {
 	if PDCli != nil {
 		PDCli.Close()
 	}
-	PDCli = pd.NewClient(pdControlCallerID, getEndpoints(cmd), opts...)
+	PDCli = pd.NewClient(PDControlCallerID, getEndpoints(cmd), opts...).WithCallerID(PDControlCallerID)
 	return nil
 }
 
@@ -122,7 +122,7 @@ func initNewPDClientWithTLS(cmd *cobra.Command, caPath, certPath, keyPath string
 
 // TODO: replace dialClient with the PD HTTP client completely.
 var dialClient = &http.Client{
-	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, pdControlCallerID),
+	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, PDControlCallerID),
 }
 
 // RequireHTTPSClient creates a HTTPS client if the related flags are set
@@ -153,7 +153,7 @@ func initHTTPSClient(caPath, certPath, keyPath string) error {
 	}
 	dialClient = &http.Client{
 		Transport: apiutil.NewCallerIDRoundTripper(
-			&http.Transport{TLSClientConfig: tlsConfig}, pdControlCallerID),
+			&http.Transport{TLSClientConfig: tlsConfig}, PDControlCallerID),
 	}
 	return nil
 }
