@@ -17,6 +17,7 @@ package statistics
 import (
 	"context"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 )
 
@@ -25,22 +26,46 @@ type FlowItemTask interface {
 	runTask(cache *hotPeerCache)
 }
 
-type checkPeerTask struct {
-	peerInfo   *core.PeerInfo
+type checkReadPeerTask struct {
 	regionInfo *core.RegionInfo
+	peers      []*metapb.Peer
+	loads      []float64
+	interval   uint64
 }
 
-// NewCheckPeerTask creates task to update peerInfo
-func NewCheckPeerTask(peerInfo *core.PeerInfo, regionInfo *core.RegionInfo) FlowItemTask {
-	return &checkPeerTask{
-		peerInfo:   peerInfo,
+// NewCheckReadPeerTask creates task to update peerInfo
+func NewCheckReadPeerTask(regionInfo *core.RegionInfo, peers []*metapb.Peer, loads []float64, interval uint64) FlowItemTask {
+	return &checkReadPeerTask{
 		regionInfo: regionInfo,
+		peers:      peers,
+		loads:      loads,
+		interval:   interval,
 	}
 }
 
-func (t *checkPeerTask) runTask(cache *hotPeerCache) {
-	stat := cache.checkPeerFlow(t.peerInfo, t.regionInfo)
-	if stat != nil {
+func (t *checkReadPeerTask) runTask(cache *hotPeerCache) {
+	stats := cache.checkPeerFlow(t.regionInfo, t.peers, t.loads, t.interval)
+	for _, stat := range stats {
+		cache.updateStat(stat)
+	}
+}
+
+type checkWritePeerTask struct {
+	region *core.RegionInfo
+}
+
+// NewCheckWritePeerTask creates task to update peerInfo
+func NewCheckWritePeerTask(region *core.RegionInfo) FlowItemTask {
+	return &checkWritePeerTask{
+		region: region,
+	}
+}
+
+func (t *checkWritePeerTask) runTask(cache *hotPeerCache) {
+	reportInterval := t.region.GetInterval()
+	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+	stats := cache.checkPeerFlow(t.region, t.region.GetPeers(), t.region.GetWriteLoads(), interval)
+	for _, stat := range stats {
 		cache.updateStat(stat)
 	}
 }

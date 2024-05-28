@@ -886,14 +886,7 @@ func (mc *Cluster) CheckRegionRead(region *core.RegionInfo) []*statistics.HotPee
 	items = append(items, expiredItems...)
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-		item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
-		if item != nil {
-			items = append(items, item)
-		}
-	}
-	return items
+	return append(items, mc.HotCache.CheckReadPeerSync(region, region.GetPeers(), region.GetLoads(), interval)...)
 }
 
 // CheckRegionWrite checks region write info with all peers
@@ -903,14 +896,7 @@ func (mc *Cluster) CheckRegionWrite(region *core.RegionInfo) []*statistics.HotPe
 	items = append(items, expiredItems...)
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-		item := mc.HotCache.CheckWritePeerSync(peerInfo, region)
-		if item != nil {
-			items = append(items, item)
-		}
-	}
-	return items
+	return append(items, mc.HotCache.CheckWritePeerSync(region, region.GetPeers(), region.GetLoads(), interval)...)
 }
 
 // CheckRegionLeaderRead checks region read info with leader peer
@@ -920,13 +906,7 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 	items = append(items, expiredItems...)
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	peer := region.GetLeader()
-	peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-	item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
-	if item != nil {
-		items = append(items, item)
-	}
-	return items
+	return append(items, mc.HotCache.CheckReadPeerSync(region, []*metapb.Peer{region.GetLeader()}, region.GetLoads(), interval)...)
 }
 
 // ObserveRegionsStats records the current stores stats from region stats.

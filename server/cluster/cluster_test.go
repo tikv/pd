@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -3729,4 +3730,35 @@ func waitNoResponse(re *require.Assertions, stream mockhbstream.HeartbeatStream)
 		res := stream.Recv()
 		return res == nil
 	})
+}
+
+func BenchmarkHandleStatsAsync(b *testing.B) {
+	// Setup: create a new instance of Cluster
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, _ := newTestScheduleConfig()
+	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	c.coordinator = schedule.NewCoordinator(ctx, c, nil)
+	c.SetPrepared()
+	region := core.NewRegionInfo(&metapb.Region{
+		Id: 1,
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		StartKey: []byte{byte(2)},
+		EndKey:   []byte{byte(3)},
+		Peers:    []*metapb.Peer{{Id: 11, StoreId: uint64(1)}},
+	}, nil,
+		core.SetApproximateSize(10),
+		core.SetReportInterval(0, 10),
+	)
+
+	// Reset timer after setup
+	b.ResetTimer()
+	// Run HandleStatsAsync b.N times
+	for i := 0; i < b.N; i++ {
+		cluster.HandleStatsAsync(c, region)
+	}
 }
