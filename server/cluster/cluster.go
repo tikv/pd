@@ -958,7 +958,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				utils.RegionWriteKeys:     0,
 				utils.RegionWriteQueryNum: 0,
 			}
-			c.hotStat.CheckReadAsync(statistics.NewCheckReadPeerTask(region, []*metapb.Peer{peer}, loads, interval))
+			checkReadPeerTask := func(cache *statistics.HotPeerCache) {
+				stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
+				for _, stat := range stats {
+					cache.UpdateStat(stat)
+				}
+			}
+			c.hotStat.CheckReadAsync(checkReadPeerTask)
 		}
 	}
 	for _, stat := range stats.GetSnapshotStats() {
@@ -981,7 +987,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
-		c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
+		collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
+			stats := cache.CheckColdPeer(storeID, regions, interval)
+			for _, stat := range stats {
+				cache.UpdateStat(stat)
+			}
+		}
+		c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
 	}
 	return nil
 }
