@@ -2035,14 +2035,14 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string
 		return
 	}
 	c.progressManager.UpdateProgress(progressName, current, remaining, isInc, opts...)
-	process, ls, cs, err := c.progressManager.Status(progressName)
+	progress, leftSeconds, currentSpeed, err := c.progressManager.Status(progressName)
 	if err != nil {
 		log.Error("get progress status failed", zap.String("progress", progressName), zap.Float64("remaining", remaining), errs.ZapError(err))
 		return
 	}
-	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
-	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(cs)
-	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
+	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(progress)
+	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(leftSeconds)
+	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(currentSpeed)
 }
 
 func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string) {
