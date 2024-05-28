@@ -568,3 +568,10 @@ func (c *Cluster) processRegionHeartbeat(region *core.RegionInfo) error {
 func (c *Cluster) IsPrepared() bool {
 	return c.coordinator.GetPrepareChecker().IsPrepared()
 }
+
+// IsSchedulingHalted returns whether the scheduling is halted.
+// Currently, the microservice scheduling is halted when:
+//   - The `HaltScheduling` persist option is set to true.
+func (c *Cluster) IsSchedulingHalted() bool {
+	return c.persistConfig.IsSchedulingHalted()
+}

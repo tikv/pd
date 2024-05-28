@@ -920,6 +920,14 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 	c.coordinator.GetCheckerController().RemoveSuspectRegion(id)
 }
 
+// IsSchedulingHalted returns whether the scheduling is halted.
+// Currently, the PD scheduling is halted when:
+//   - The `HaltScheduling` persist option is set to true.
+//   - Online unsafe recovery is running.
+func (c *RaftCluster) IsSchedulingHalted() bool {
+	return c.opt.IsSchedulingHalted() || c.unsafeRecoveryController.IsRunning()
+}
+
 // GetUnsafeRecoveryController returns the unsafe recovery controller.
 func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 	return c.unsafeRecoveryController
