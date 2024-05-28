@@ -375,7 +375,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 		cache.updateStat(newItem[0])
 		newItem = cache.checkPeerFlow(region, []*metapb.Peer{peer}, deltaLoads, interval)
 	}
-	re.Less(newItem[0].HotDegree, 0)
+	re.Negative(newItem[0].HotDegree)
 	re.Equal(0, newItem[0].AntiCount)
 	re.Equal(utils.Remove, newItem[0].actionType)
 }
