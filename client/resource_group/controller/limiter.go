@@ -116,7 +116,7 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 
 // NewLimiterWithCfg returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- struct{}) *Limiter {
+func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- struct{}) *Limiter {
 	lim := &Limiter{
 		limit:               Limit(cfg.NewRate),
 		last:                now,
@@ -124,6 +124,9 @@ func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensN
 		burst:               cfg.NewBurst,
 		notifyThreshold:     cfg.NotifyThreshold,
 		lowTokensNotifyChan: lowTokensNotifyChan,
+	}
+	lim.metrics = &limiterMetricsCollection{
+		lowTokenNotifyCounter: lowTokenRequestNotifyCounter.WithLabelValues(lim.name),
 	}
 	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim
@@ -239,15 +242,6 @@ func (lim *Limiter) SetName(name string) *Limiter {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	lim.name = name
-	return lim
-}
-
-func (lim *Limiter) SetupMetrics() *Limiter {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
-	lim.metrics = &limiterMetricsCollection{
-		lowTokenNotifyCounter: lowTokenRequestNotifyCounter.WithLabelValues(lim.name),
-	}
 	return lim
 }
 
