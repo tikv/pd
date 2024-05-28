@@ -118,6 +118,7 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 // bursts of at most b tokens.
 func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- struct{}) *Limiter {
 	lim := &Limiter{
+		name:                name,
 		limit:               Limit(cfg.NewRate),
 		last:                now,
 		tokens:              cfg.NewTokens,
