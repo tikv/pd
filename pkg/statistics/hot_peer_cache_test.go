@@ -327,7 +327,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	utils.MinHotThresholds[utils.RegionReadKeys] = 1.0
 	utils.MinHotThresholds[utils.RegionReadQueryNum] = 1.0
 	newItem = cache.checkPeerFlow(region, []*metapb.Peer{peer}, deltaLoads, interval)
-	re.Nil(newItem)
+	re.Empty(newItem)
 
 	// new peer, interval is less than report interval
 	interval = 4
