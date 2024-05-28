@@ -183,7 +183,7 @@ func (f *hotPeerCache) checkPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 	regionID := region.GetID()
 
 	regionPeers := region.GetPeers()
-	var stats []*HotPeerStat
+	stats := make([]*HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
 		storeID := peer.GetStoreId()
 		oldItem := f.getOldHotPeerStat(regionID, storeID)
@@ -223,14 +223,10 @@ func (f *hotPeerCache) checkPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 			newItem.stores[i] = peer.GetStoreId()
 		}
 		if oldItem == nil {
-			if stat := f.updateNewHotPeerStat(newItem, deltaLoads, time.Duration(interval)*time.Second); stat != nil {
-				stats = append(stats, stat)
-			}
+			stats = append(stats, f.updateNewHotPeerStat(newItem, deltaLoads, time.Duration(interval)*time.Second))
 			continue
 		}
-		if stat := f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, source); stat != nil {
-			stats = append(stats, stat)
-		}
+		stats = append(stats, f.updateHotPeerStat(region, newItem, oldItem, deltaLoads, time.Duration(interval)*time.Second, source))
 	}
 	return stats
 }
