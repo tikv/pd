@@ -43,7 +43,7 @@ func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
 		return nil
 	}
 
-	return bc.StoresInfo.GetStore(region.GetLeader().GetStoreId())
+	return bc.GetStore(region.GetLeader().GetStoreId())
 }
 
 func (bc *BasicCluster) getWriteRate(

@@ -702,26 +702,26 @@ func (s *StoresInfo) GetStoreIDs() []uint64 {
 func (s *StoresInfo) GetFollowerStores(region *RegionInfo) []*StoreInfo {
 	s.RLock()
 	defer s.RUnlock()
-	var Stores []*StoreInfo
+	var stores []*StoreInfo
 	for id := range region.GetFollowers() {
 		if store, ok := s.stores[id]; ok && store != nil {
-			Stores = append(Stores, store)
+			stores = append(stores, store)
 		}
 	}
-	return Stores
+	return stores
 }
 
 // GetRegionStores returns all Stores that contains the region's peer.
 func (s *StoresInfo) GetRegionStores(region *RegionInfo) []*StoreInfo {
 	s.RLock()
 	defer s.RUnlock()
-	var Stores []*StoreInfo
+	var stores []*StoreInfo
 	for id := range region.GetStoreIDs() {
 		if store, ok := s.stores[id]; ok && store != nil {
-			Stores = append(Stores, store)
+			stores = append(stores, store)
 		}
 	}
-	return Stores
+	return stores
 }
 
 // GetLeaderStore returns all Stores that contains the region's leader peer.
@@ -745,13 +745,13 @@ func (s *StoresInfo) GetStoreCount() int {
 func (s *StoresInfo) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
 	s.RLock()
 	defer s.RUnlock()
-	var Stores []*StoreInfo
+	var stores []*StoreInfo
 	for id := range region.GetNonWitnessVoters() {
 		if store, ok := s.stores[id]; ok && store != nil {
-			Stores = append(Stores, store)
+			stores = append(stores, store)
 		}
 	}
-	return Stores
+	return stores
 }
 
 /* Stores write operations */
