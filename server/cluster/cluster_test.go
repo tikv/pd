@@ -3793,30 +3793,34 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
 	downPeers := []*pdpb.PeerStats{{Peer: peers[1], DownSeconds: 100}, {Peer: peers[2], DownSeconds: 100}}
 	pendingPeers := []*metapb.Peer{peers[1], peers[2]}
-	request := &pdpb.RegionHeartbeatRequest{
-		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
-		Leader:          peers[0],
-		DownPeers:       downPeers,
-		PendingPeers:    pendingPeers,
-		BytesWritten:    10,
-		BytesRead:       20,
-		KeysWritten:     100,
-		KeysRead:        200,
-		ApproximateSize: 30 * units.MiB,
-		ApproximateKeys: 300,
-		Interval:        interval,
-		QueryStats:      queryStats,
-		Term:            1,
-		CpuUsage:        100,
-	}
 
+	var requests []*pdpb.RegionHeartbeatRequest
+	for i := 0; i < 1000000; i++ {
+		request := &pdpb.RegionHeartbeatRequest{
+			Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}},
+			Leader:          peers[0],
+			DownPeers:       downPeers,
+			PendingPeers:    pendingPeers,
+			BytesWritten:    10,
+			BytesRead:       20,
+			KeysWritten:     100,
+			KeysRead:        200,
+			ApproximateSize: 30 * units.MiB,
+			ApproximateKeys: 300,
+			Interval:        interval,
+			QueryStats:      queryStats,
+			Term:            1,
+			CpuUsage:        100,
+		}
+		requests = append(requests, request)
+	}
 	flowRoundDivisor := opt.GetPDServerConfig().FlowRoundByDigit
 
 	// Reset timer after setup
 	b.ResetTimer()
 	// Run HandleRegionHeartbeat b.N times
 	for i := 0; i < b.N; i++ {
-		region := core.RegionFromHeartbeat(request, flowRoundDivisor)
+		region := core.RegionFromHeartbeat(requests[i], flowRoundDivisor)
 		c.HandleRegionHeartbeat(region)
 	}
 }
