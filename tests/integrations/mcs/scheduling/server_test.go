@@ -310,7 +310,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
 	// Add a store_id to the evict-leader-scheduler through the API server.
-	err = suite.pdLeader.GetServer().GetRaftCluster().PutStore(
+	err = suite.pdLeader.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
 			Address:       "mock://2",

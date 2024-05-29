@@ -50,6 +50,7 @@ type Client interface {
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	SetStoreLabels(context.Context, int64, map[string]string) error
+	GetHealthStatus(context.Context) ([]Health, error)
 	/* Config-related interfaces */
 	GetConfig(context.Context) (map[string]any, error)
 	SetConfig(context.Context, map[string]any, ...float64) error
@@ -335,6 +336,20 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 		WithURI(LabelByStoreID(storeID)).
 		WithMethod(http.MethodPost).
 		WithBody(jsonInput))
+}
+
+// GetHealthStatus gets the health status of the cluster.
+func (c *client) GetHealthStatus(ctx context.Context) ([]Health, error) {
+	var healths []Health
+	err := c.request(ctx, newRequestInfo().
+		WithName(getHealthStatusName).
+		WithURI(health).
+		WithMethod(http.MethodGet).
+		WithResp(&healths))
+	if err != nil {
+		return nil, err
+	}
+	return healths, nil
 }
 
 // GetConfig gets the configurations.

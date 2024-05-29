@@ -46,11 +46,6 @@ func TestSendAndGetComponent(t *testing.T) {
 		})
 		// check http client api
 		// TODO: remove this comment after replacing dialClient with the PD HTTP client completely.
-		mux.HandleFunc("/pd/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-			callerID := apiutil.GetCallerIDOnHTTP(r)
-			re.Equal(command.PDControlCallerID, callerID)
-			fmt.Fprint(w, callerID)
-		})
 		mux.HandleFunc("/pd/api/v1/stores", func(w http.ResponseWriter, r *http.Request) {
 			callerID := apiutil.GetCallerIDOnHTTP(r)
 			re.Equal(command.PDControlCallerID, callerID)
@@ -81,11 +76,6 @@ func TestSendAndGetComponent(t *testing.T) {
 	re.Equal(fmt.Sprintf("%s\n", `{
   "id": 1
 }`), string(output))
-
-	args = []string{"-u", pdAddr, "health"}
-	output, err = ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.Equal(fmt.Sprintf("%s\n", command.PDControlCallerID), string(output))
 
 	args = []string{"-u", pdAddr, "store"}
 	output, err = ExecuteCommand(cmd, args...)

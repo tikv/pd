@@ -174,11 +174,11 @@ func (suite *httpClientTestSuite) checkMeta(mode mode, client pd.Client) {
 	re.Equal("INPROGRESS", state)
 	regionStats, err := client.GetRegionStatusByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), false)
 	re.NoError(err)
-	re.Greater(regionStats.Count, 0)
+	re.Positive(regionStats.Count)
 	re.NotEmpty(regionStats.StoreLeaderCount)
 	regionStats, err = client.GetRegionStatusByKeyRange(env.ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), true)
 	re.NoError(err)
-	re.Greater(regionStats.Count, 0)
+	re.Positive(regionStats.Count)
 	re.Empty(regionStats.StoreLeaderCount)
 	hotReadRegions, err := client.GetHotReadRegions(env.ctx)
 	re.NoError(err)
@@ -810,4 +810,23 @@ func (suite *httpClientTestSuite) checkUpdateKeyspaceGCManagementType(mode mode,
 	// Check it can get expect key and value in keyspace meta config.
 	re.True(ok)
 	re.Equal(expectGCManagementType, val)
+}
+
+func (suite *httpClientTestSuite) TestGetHealthStatus() {
+	suite.RunTestInTwoModes(suite.checkGetHealthStatus)
+}
+
+func (suite *httpClientTestSuite) checkGetHealthStatus(mode mode, client pd.Client) {
+	re := suite.Require()
+	env := suite.env[mode]
+
+	healths, err := client.GetHealthStatus(env.ctx)
+	re.NoError(err)
+	re.Len(healths, 2)
+	sort.Slice(healths, func(i, j int) bool {
+		return healths[i].Name < healths[j].Name
+	})
+	re.Equal("pd1", healths[0].Name)
+	re.Equal("pd2", healths[1].Name)
+	re.True(healths[0].Health && healths[1].Health)
 }
