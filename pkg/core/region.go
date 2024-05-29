@@ -124,7 +124,6 @@ func (r *RegionInfo) GetRef() int32 {
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
 func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCreateOption) *RegionInfo {
-	sort.Sort(peerSlice(region.GetPeers()))
 	regionInfo := &RegionInfo{
 		meta:   region,
 		leader: leader,
@@ -138,7 +137,6 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 
 // classifyVoterAndLearner sorts out voter and learner from peers into different slice.
 func classifyVoterAndLearner(region *RegionInfo) {
-	// Reset slices
 	region.learners = make([]*metapb.Peer, 0, 1)
 	region.voters = make([]*metapb.Peer, 0, len(region.meta.Peers))
 	region.witnesses = make([]*metapb.Peer, 0, 1)
@@ -152,6 +150,9 @@ func classifyVoterAndLearner(region *RegionInfo) {
 			region.witnesses = append(region.witnesses, p)
 		}
 	}
+	sort.Sort(peerSlice(region.learners))
+	sort.Sort(peerSlice(region.voters))
+	sort.Sort(peerSlice(region.witnesses))
 }
 
 // peersEqualTo returns true when the peers are not changed, which may caused by: the region leader not changed,
@@ -217,7 +218,6 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor int)
 	if heartbeat.GetApproximateSize() > 0 && regionSize < EmptyRegionApproximateSize {
 		regionSize = EmptyRegionApproximateSize
 	}
-	sort.Sort(peerSlice(heartbeat.GetRegion().GetPeers()))
 
 	region := &RegionInfo{
 		term:             heartbeat.GetTerm(),
