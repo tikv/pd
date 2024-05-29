@@ -42,12 +42,20 @@ const (
 	httpsScheme          = "https"
 	networkErrorStatus   = "network error"
 
-	defaultMembersInfoUpdateInterval = time.Minute
-	defaultTimeout                   = 30 * time.Second
+	defaultTimeout = 30 * time.Second
 )
 
 // respHandleFunc is the function to handle the HTTP response.
 type respHandleFunc func(resp *http.Response, res any) error
+
+type clientInnerOption func(ci *clientInner)
+
+// withInnerTimeout configures the inner client with the given timeout config.
+func withInnerTimeout(dur time.Duration) clientInnerOption {
+	return func(c *clientInner) {
+		c.timeout = dur
+	}
+}
 
 // clientInner is the inner implementation of the PD HTTP client, which contains some fundamental fields.
 // It is wrapped by the `client` struct to make sure the inner implementation won't be exposed and could
@@ -63,6 +71,7 @@ type clientInner struct {
 	source  string
 	tlsConf *tls.Config
 	cli     *http.Client
+	timeout time.Duration
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
@@ -71,13 +80,22 @@ type clientInner struct {
 }
 
 func newClientInner(ctx context.Context, cancel context.CancelFunc, source string) *clientInner {
-	return &clientInner{ctx: ctx, cancel: cancel, source: source}
+	return &clientInner{ctx: ctx, cancel: cancel, source: source, timeout: defaultTimeout}
+}
+
+func (ci *clientInner) clone(opts ...clientInnerOption) *clientInner {
+	newCi := &clientInner{ctx: ci.ctx, cancel: ci.cancel, source: ci.source, timeout: ci.timeout}
+	for _, op := range opts {
+		op(newCi)
+	}
+	newCi.init(ci.sd)
+	return newCi
 }
 
 func (ci *clientInner) init(sd pd.ServiceDiscovery) {
 	// Init the HTTP client if it's not configured.
 	if ci.cli == nil {
-		ci.cli = &http.Client{Timeout: defaultTimeout}
+		ci.cli = &http.Client{Timeout: ci.timeout}
 		if ci.tlsConf != nil {
 			transport := http.DefaultTransport.(*http.Transport).Clone()
 			transport.TLSClientConfig = ci.tlsConf
@@ -265,6 +283,13 @@ func WithHTTPClient(cli *http.Client) ClientOption {
 	}
 }
 
+// WithTimeout configures the client with the given timeout config.
+func WithTimeout(dur time.Duration) ClientOption {
+	return func(c *client) {
+		c.inner.timeout = dur
+	}
+}
+
 // WithTLSConfig configures the client with the given TLS config.
 // This option won't work if the client is configured with WithHTTPClient.
 func WithTLSConfig(tlsConf *tls.Config) ClientOption {
@@ -349,6 +374,13 @@ func (c *client) WithRespHandler(
 func (c *client) WithBackoffer(bo *retry.Backoffer) Client {
 	newClient := *c
 	newClient.bo = bo
+	return &newClient
+}
+
+// WithTimeout sets and returns a new client with a new `http.Client` whose timeout is the given one.
+func (c *client) WithTimeout(dur time.Duration) Client {
+	newClient := *c
+	newClient.inner = c.inner.clone(withInnerTimeout(dur))
 	return &newClient
 }
 
