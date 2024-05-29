@@ -120,10 +120,23 @@ func (ci *clientInner) requestWithRetry(
 	headerOpts ...HeaderOption,
 ) error {
 	var (
+		serverURL  string
+		isLeader   bool
 		statusCode int
 		err        error
+		logFields  = append(reqInfo.logFields(),
+			zap.String("source", ci.source),
+			zap.String("server-url", serverURL),
+			zap.Bool("is-leader", isLeader),
+			zap.Int("status-code", statusCode),
+			zap.Error(err))
 	)
 	execFunc := func() error {
+		defer func() {
+			// Handle some special status codes to increase the success rate of the following requests.
+			ci.handleHTTPStatusCode(statusCode)
+			log.Debug("[pd] http request finished", logFields...)
+		}()
 		// It will try to send the request to the PD leader first and then try to send the request to the other PD followers.
 		clients := ci.sd.GetAllServiceClients()
 		if len(clients) == 0 {
@@ -131,17 +144,17 @@ func (ci *clientInner) requestWithRetry(
 		}
 		skipNum := 0
 		for _, cli := range clients {
-			url := cli.GetURL()
-			if reqInfo.targetURL != "" && reqInfo.targetURL != url {
+			serverURL = cli.GetURL()
+			isLeader = cli.IsConnectedToLeader()
+			if len(reqInfo.targetURL) > 0 && reqInfo.targetURL != serverURL {
 				skipNum++
 				continue
 			}
-			statusCode, err = ci.doRequest(ctx, url, reqInfo, headerOpts...)
+			statusCode, err = ci.doRequest(ctx, serverURL, reqInfo, headerOpts...)
 			if err == nil || noNeedRetry(statusCode) {
 				return err
 			}
-			log.Debug("[pd] request url failed",
-				zap.String("source", ci.source), zap.Bool("is-leader", cli.IsConnectedToLeader()), zap.String("url", url), zap.Error(err))
+			log.Debug("[pd] http request url failed", logFields...)
 		}
 		if skipNum == len(clients) {
 			return errs.ErrClientNoTargetMember
@@ -153,11 +166,19 @@ func (ci *clientInner) requestWithRetry(
 	}
 	// Copy a new backoffer for each request.
 	bo := *reqInfo.bo
-	// Backoffer also needs to check the status code to determine whether to retry.
+	// Set the retryable checker for the backoffer.
 	bo.SetRetryableChecker(func(err error) bool {
+		// Backoffer also needs to check the status code to determine whether to retry.
 		return err != nil && !noNeedRetry(statusCode)
 	})
 	return bo.Exec(ctx, execFunc)
+}
+
+func (ci *clientInner) handleHTTPStatusCode(code int) {
+	// If the status code is 503, it indicates that there may be PD leader/follower changes.
+	if code == http.StatusServiceUnavailable {
+		ci.sd.ScheduleCheckMemberChanged()
+	}
 }
 
 func noNeedRetry(statusCode int) bool {
@@ -168,26 +189,21 @@ func noNeedRetry(statusCode int) bool {
 
 func (ci *clientInner) doRequest(
 	ctx context.Context,
-	url string, reqInfo *requestInfo,
+	serverURL string, reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
 ) (int, error) {
 	var (
-		source      = ci.source
 		callerID    = reqInfo.callerID
 		name        = reqInfo.name
 		method      = reqInfo.method
 		body        = reqInfo.body
 		res         = reqInfo.res
 		respHandler = reqInfo.respHandler
+		url         = reqInfo.getURL(serverURL)
+		logFields   = append(reqInfo.logFields(),
+			zap.String("source", ci.source),
+			zap.String("url", url))
 	)
-	url = reqInfo.getURL(url)
-	logFields := []zap.Field{
-		zap.String("source", source),
-		zap.String("name", name),
-		zap.String("url", url),
-		zap.String("method", method),
-		zap.String("caller-id", callerID),
-	}
 	log.Debug("[pd] request the http url", logFields...)
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(body))
 	if err != nil {
