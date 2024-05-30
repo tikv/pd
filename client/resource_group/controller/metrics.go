@@ -21,15 +21,9 @@ const (
 	requestSubsystem      = "request"
 	tokenRequestSubsystem = "token_request"
 
-<<<<<<< HEAD
-	resourceGroupNameLabel = "name"
-=======
-	// TODO: remove old label in 8.x
 	resourceGroupNameLabel    = "name"
 	newResourceGroupNameLabel = "resource_group"
-
-	errType = "type"
->>>>>>> b7d8b9406 (controller: fix error retry and add more metrics (#8219))
+	errType                   = "type"
 )
 
 var (
@@ -65,11 +59,7 @@ var (
 			Subsystem: requestSubsystem,
 			Name:      "fail",
 			Help:      "Counter of failed request.",
-<<<<<<< HEAD
-		}, []string{resourceGroupNameLabel})
-=======
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, errType})
->>>>>>> b7d8b9406 (controller: fix error retry and add more metrics (#8219))
+		}, []string{resourceGroupNameLabel, errType})
 
 	requestRetryCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -94,10 +84,7 @@ var (
 			Subsystem: tokenRequestSubsystem,
 			Name:      "resource_group",
 			Help:      "Counter of token request by every resource group.",
-<<<<<<< HEAD
 		}, []string{resourceGroupNameLabel})
-=======
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 
 	lowTokenRequestNotifyCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -106,7 +93,6 @@ var (
 			Name:      "low_token_notified",
 			Help:      "Counter of low token request.",
 		}, []string{newResourceGroupNameLabel})
->>>>>>> b7d8b9406 (controller: fix error retry and add more metrics (#8219))
 )
 
 var (

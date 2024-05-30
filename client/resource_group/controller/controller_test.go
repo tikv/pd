@@ -123,7 +123,7 @@ func TestResourceGroupThrottledError(t *testing.T) {
 		writeBytes: 10000000,
 	}
 	// The group is throttled
-	_, _, _, _, err := gc.onRequestWait(context.TODO(), req)
+	_, _, err := gc.onRequestWait(context.TODO(), req)
 	re.Error(err)
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
 }

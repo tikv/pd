@@ -634,18 +634,18 @@ type groupMetricsCollection struct {
 	tokenRequestCounter               prometheus.Counter
 }
 
-func initMetrics(oldName, name string) *groupMetricsCollection {
+func initMetrics(name string) *groupMetricsCollection {
 	const (
 		otherType     = "others"
 		throttledType = "throttled"
 	)
 	return &groupMetricsCollection{
-		successfulRequestDuration:         successfulRequestDuration.WithLabelValues(oldName, name),
-		failedLimitReserveDuration:        failedLimitReserveDuration.WithLabelValues(oldName, name),
-		failedRequestCounterWithOthers:    failedRequestCounter.WithLabelValues(oldName, name, otherType),
-		failedRequestCounterWithThrottled: failedRequestCounter.WithLabelValues(oldName, name, throttledType),
-		requestRetryCounter:               requestRetryCounter.WithLabelValues(oldName, name),
-		tokenRequestCounter:               resourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
+		successfulRequestDuration:         successfulRequestDuration.WithLabelValues(name),
+		failedLimitReserveDuration:        failedLimitReserveDuration.WithLabelValues(name),
+		failedRequestCounterWithOthers:    failedRequestCounter.WithLabelValues(name, otherType),
+		failedRequestCounterWithThrottled: failedRequestCounter.WithLabelValues(name, throttledType),
+		requestRetryCounter:               requestRetryCounter.WithLabelValues(name),
+		tokenRequestCounter:               resourceGroupTokenRequestCounter.WithLabelValues(name),
 	}
 }
 
@@ -689,25 +689,13 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
-	ms := initMetrics(group.Name, group.Name)
+	ms := initMetrics(group.Name)
 	gc := &groupCostController{
-<<<<<<< HEAD
-		meta:                       group,
-		name:                       group.Name,
-		mainCfg:                    mainCfg,
-		mode:                       group.GetMode(),
-		successfulRequestDuration:  successfulRequestDuration.WithLabelValues(group.Name),
-		failedLimitReserveDuration: failedLimitReserveDuration.WithLabelValues(group.Name),
-		failedRequestCounter:       failedRequestCounter.WithLabelValues(group.Name),
-		requestRetryCounter:        requestRetryCounter.WithLabelValues(group.Name),
-		tokenRequestCounter:        resourceGroupTokenRequestCounter.WithLabelValues(group.Name),
-=======
 		meta:    group,
 		name:    group.Name,
 		mainCfg: mainCfg,
 		mode:    group.GetMode(),
 		metrics: ms,
->>>>>>> b7d8b9406 (controller: fix error retry and add more metrics (#8219))
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
@@ -1219,14 +1207,8 @@ func (gc *groupCostController) onRequestWait(
 					break retryLoop
 				}
 			}
-<<<<<<< HEAD
-			gc.requestRetryCounter.Inc()
-			time.Sleep(retryInterval)
-=======
 			gc.metrics.requestRetryCounter.Inc()
-			time.Sleep(gc.mainCfg.WaitRetryInterval)
-			waitDuration += gc.mainCfg.WaitRetryInterval
->>>>>>> b7d8b9406 (controller: fix error retry and add more metrics (#8219))
+			time.Sleep(retryInterval)
 		}
 		if err != nil {
 			if errs.ErrClientResourceGroupThrottled.Equal(err) {
@@ -1243,12 +1225,7 @@ func (gc *groupCostController) onRequestWait(
 			})
 			return nil, nil, err
 		}
-<<<<<<< HEAD
-		gc.successfulRequestDuration.Observe(d.Seconds())
-=======
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
-		waitDuration += d
->>>>>>> b7d8b9406 (controller: fix error retry and add more metrics (#8219))
 	}
 
 	gc.mu.Lock()
