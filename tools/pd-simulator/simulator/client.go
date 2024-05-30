@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -45,7 +46,7 @@ type Client interface {
 	PutStore(ctx context.Context, store *metapb.Store) error
 	StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error
 	RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error
-	PutPDConfig(*PDConfig) error
+	PutPDConfig(*sc.PDConfig) error
 
 	Close()
 }
@@ -316,7 +317,7 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	return nil
 }
 
-func (c *client) PutPDConfig(config *PDConfig) error {
+func (c *client) PutPDConfig(config *sc.PDConfig) error {
 	if len(config.PlacementRules) > 0 {
 		path := fmt.Sprintf("%s/%s/config/rules/batch", c.url, httpPrefix)
 		ruleOps := make([]*placement.RuleOp, 0)

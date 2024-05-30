@@ -20,28 +20,31 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newDeleteNodes() *Case {
+func newDeleteNodes(config *sc.SimConfig) *Case {
 	var simCase Case
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-	noEmptyStoreNum := storeNum - 1
-	for i := 1; i <= storeNum; i++ {
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	noEmptyStoreNum := totalStore - 1
+	for i := 1; i <= totalStore; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
 
-	for i := 0; i < regionNum*storeNum/3; i++ {
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum) + 1},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      IDAllocator.nextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -57,12 +60,12 @@ func newDeleteNodes() *Case {
 		ids = append(ids, store.ID)
 	}
 
-	numNodes := storeNum
+	currentStoreCount := totalStore
 	e := &DeleteNodesDescriptor{}
 	e.Step = func(tick int64) uint64 {
-		if numNodes > noEmptyStoreNum && tick%100 == 0 {
-			idx := rand.Intn(numNodes)
-			numNodes--
+		if currentStoreCount > noEmptyStoreNum && tick%100 == 0 {
+			idx := rand.Intn(currentStoreCount)
+			currentStoreCount--
 			nodeID := ids[idx]
 			ids = append(ids[:idx], ids[idx+1:]...)
 			return nodeID
@@ -71,21 +74,21 @@ func newDeleteNodes() *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		res := numNodes == noEmptyStoreNum
-		leaderCounts := make([]int, 0, numNodes)
-		regionCounts := make([]int, 0, numNodes)
+		if currentStoreCount != noEmptyStoreNum {
+			return false
+		}
 		for _, i := range ids {
 			leaderCount := regions.GetStoreLeaderCount(i)
-			regionCount := regions.GetStoreRegionCount(i)
-			leaderCounts = append(leaderCounts, leaderCount)
-			regionCounts = append(regionCounts, regionCount)
-			res = res && leaderAndRegionIsUniform(leaderCount, regionCount, regionNum*storeNum/noEmptyStoreNum, threshold)
+			peerCount := regions.GetStoreRegionCount(i)
+			if !isUniform(leaderCount, totalRegion/noEmptyStoreNum) {
+				return false
+			}
+			if !isUniform(peerCount, totalRegion*replica/noEmptyStoreNum) {
+				return false
+			}
 		}
-
-		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts), zap.Ints("region", regionCounts))
-		return res
+		return true
 	}
 	return &simCase
 }

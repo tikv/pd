@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
@@ -57,7 +58,7 @@ type Node struct {
 }
 
 // NewNode returns a Node.
-func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
+func NewNode(s *cases.Store, pdAddr string, config *sc.SimConfig) (*Node, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &metapb.Store{
 		Id:      s.ID,
@@ -93,7 +94,7 @@ func NewNode(s *cases.Store, pdAddr string, config *SimConfig) (*Node, error) {
 		cancel()
 		return nil, err
 	}
-	ratio := config.speed()
+	ratio := config.Speed()
 	speed := config.StoreIOMBPerSecond * units.MiB * int64(ratio)
 	return &Node{
 		Store:                    store,
