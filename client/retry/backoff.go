@@ -47,7 +47,7 @@ type Backoffer struct {
 	// total defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
 	total time.Duration
 	// retryableChecker is used to check if the error is retryable.
-	// If it's not set, it will use `defaultRetryableChecker` to retry on all non-nil errors.
+	// If it's not set, it will always retry unconditionally no matter what the error is.
 	retryableChecker func(err error) bool
 	// logInterval defines the log interval for retrying.
 	logInterval time.Duration
@@ -73,16 +73,15 @@ func (bo *Backoffer) Exec(
 	for {
 		err = fn()
 		bo.attempt++
-		if !bo.isRetryable(err) {
+		if err == nil || !bo.isRetryable(err) {
 			break
 		}
 		currentInterval := bo.nextInterval()
 		bo.nextLogTime += currentInterval
-		if err != nil {
-			if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
-				bo.nextLogTime %= bo.logInterval
-				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
-			}
+		if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
+			bo.nextLogTime %= bo.logInterval
+			log.Warn("[pd.backoffer] exec fn failed and retrying",
+				zap.String("fn-name", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
 		}
 		if after == nil {
 			after = time.NewTimer(currentInterval)
@@ -147,13 +146,9 @@ func (bo *Backoffer) SetRetryableChecker(checker func(err error) bool, overwrite
 
 func (bo *Backoffer) isRetryable(err error) bool {
 	if bo.retryableChecker == nil {
-		return defaultRetryableChecker(err)
+		return true
 	}
 	return bo.retryableChecker(err)
-}
-
-func defaultRetryableChecker(err error) bool {
-	return err != nil
 }
 
 // nextInterval for now use the `exponentialInterval`.

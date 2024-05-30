@@ -170,10 +170,10 @@ func TestBackofferWithLog(t *testing.T) {
 	// 10 + 20 + 40 + 80(log) + 100(log) * 9 >= 1000, so log ten times.
 	re.Len(ms, 10)
 	// 10 + 20 + 40 + 80 + 100 * 9, 13 times retry.
-	rfc := `["call PD API failed and retrying"] [api=testFn] [retry-time=13] [error=test]`
+	rfc := `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=13] [error=test]`
 	re.Contains(ms[len(ms)-1], rfc)
 	// 10 + 20 + 40 + 80(log), 4 times retry.
-	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=4] [error=test]`
+	rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=4] [error=test]`
 	re.Contains(ms[0], rfc)
 
 	err = bo.Exec(ctx, testFn)
@@ -181,9 +181,9 @@ func TestBackofferWithLog(t *testing.T) {
 
 	ms = lg.Messages()
 	re.Len(ms, 20)
-	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=13] [error=test]`
+	rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=13] [error=test]`
 	re.Contains(ms[len(ms)-1], rfc)
-	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=4] [error=test]`
+	rfc = `["[pd.backoffer] exec fn failed and retrying"] [fn-name=testFn] [retry-time=4] [error=test]`
 	re.Contains(ms[len1], rfc)
 }
 
