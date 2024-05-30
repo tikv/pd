@@ -330,20 +330,26 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 5)
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
+	// first time campaign leader
 	cluster.WaitLeader()
 	leader := cluster.GetLeader()
 	re.NotEmpty(cluster.GetLeader())
 
-	for i := 0; i < 3; i++ {
+	// need to prevent 3 times campaign leader in 5 min
+	for i := 0; i < 2; i++ {
 		cluster.GetLeaderServer().ResetPDLeader()
 		cluster.WaitLeader()
+		re.Equal(leader, cluster.GetLeader())
 	}
+	// check for the 4th time
+	cluster.GetLeaderServer().ResetPDLeader()
+	cluster.WaitLeader()
 	// PD leader should be different from before because etcd leader changed.
 	re.NotEmpty(cluster.GetLeader())
 	re.NotEqual(leader, cluster.GetLeader())
