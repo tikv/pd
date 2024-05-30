@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -87,23 +88,63 @@ func TestBackoffer(t *testing.T) {
 		return expectedErr
 	})
 	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
-	re.ErrorContains(err, "test; test; test; test")
+	re.ErrorContains(err, "test")
 	re.ErrorIs(err, expectedErr)
 	re.Equal(4, execCount)
+	re.True(isBackofferReset(bo))
+
+	// Test the error returned.
+	execCount = 0
+	err = bo.Exec(ctx, func() error {
+		execCount++
+		return fmt.Errorf("test %d", execCount)
+	})
+	re.Error(err)
+	re.Equal("test 4", err.Error())
+	re.Equal(4, execCount)
+	re.True(isBackofferReset(bo))
+	execCount = 0
+	err = bo.Exec(ctx, func() error {
+		if execCount == 1 {
+			return nil
+		}
+		execCount++
+		return expectedErr
+	})
+	re.Equal(1, execCount)
+	re.NoError(err)
 	re.True(isBackofferReset(bo))
 
 	// Test the retryable checker.
 	execCount = 0
 	bo = InitialBackoffer(base, max, total)
-	bo.SetRetryableChecker(func(error) bool {
+	retryableChecker := func(error) bool {
 		return execCount < 2
-	})
-	err = bo.Exec(ctx, func() error {
+	}
+	bo.SetRetryableChecker(retryableChecker, false)
+	execFunc := func() error {
 		execCount++
-		return nil
-	})
-	re.NoError(err)
+		return expectedErr
+	}
+	err = bo.Exec(ctx, execFunc)
+	re.ErrorIs(err, expectedErr)
 	re.Equal(2, execCount)
+	re.True(isBackofferReset(bo))
+	// Test the retryable checker with overwrite.
+	execCount = 0
+	retryableChecker = func(error) bool {
+		return execCount < 4
+	}
+	bo.SetRetryableChecker(retryableChecker, false)
+	err = bo.Exec(ctx, execFunc)
+	re.ErrorIs(err, expectedErr)
+	re.Equal(2, execCount)
+	re.True(isBackofferReset(bo))
+	execCount = 0
+	bo.SetRetryableChecker(retryableChecker, true)
+	err = bo.Exec(ctx, execFunc)
+	re.ErrorIs(err, expectedErr)
+	re.Equal(4, execCount)
 	re.True(isBackofferReset(bo))
 }
 
@@ -135,7 +176,6 @@ func TestBackofferWithLog(t *testing.T) {
 	rfc = `["call PD API failed and retrying"] [api=testFn] [retry-time=4] [error=test]`
 	re.Contains(ms[0], rfc)
 
-	bo.resetBackoff()
 	err = bo.Exec(ctx, testFn)
 	re.ErrorIs(err, errTest)
 
