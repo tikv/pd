@@ -498,19 +498,19 @@ func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestClust
 	apiServer := cluster.GetLeaderServer().GetServer()
 	schedulingServer := cluster.GetSchedulingPrimaryServer()
 	re.Equal(3, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
-	re.Equal(3, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
+	re.Equal(3, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}))
 
 	addr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/admin/cache/region", addr)
 	err := testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "30"), testutil.StatusOK(re))
 	re.NoError(err)
 	re.Equal(2, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
-	re.Equal(2, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
+	re.Equal(2, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}))
 
 	err = testutil.CheckDelete(tests.TestDialClient, urlPrefix+"s", testutil.StatusOK(re))
 	re.NoError(err)
 	re.Equal(0, schedulingServer.GetCluster().GetRegionCount([]byte{}, []byte{}))
-	re.Equal(0, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count)
+	re.Equal(0, apiServer.GetRaftCluster().GetRegionCount([]byte{}, []byte{}))
 }
 
 func (suite *apiTestSuite) TestFollowerForward() {

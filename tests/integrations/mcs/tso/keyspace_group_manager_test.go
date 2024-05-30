@@ -300,7 +300,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupSplit() {
 	// Check the split TSO from keyspace group `newID` now.
 	splitTS, err := suite.requestTSO(re, 222, newID)
 	re.NoError(err)
-	re.Greater(tsoutil.CompareTimestamp(&splitTS, &ts), 0)
+	re.Positive(tsoutil.CompareTimestamp(&splitTS, &ts))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
@@ -636,7 +636,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMerge() {
 		}
 		return err == nil && tsoutil.CompareTimestamp(&mergedTS, &pdpb.Timestamp{}) > 0
 	}, testutil.WithTickInterval(5*time.Second), testutil.WithWaitFor(time.Minute))
-	re.Greater(tsoutil.CompareTimestamp(&mergedTS, &ts), 0)
+	re.Positive(tsoutil.CompareTimestamp(&mergedTS, &ts))
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) TestTSOKeyspaceGroupMergeClient() {
