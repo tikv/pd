@@ -124,18 +124,20 @@ func (ci *clientInner) requestWithRetry(
 		isLeader   bool
 		statusCode int
 		err        error
-		logFields  = append(reqInfo.logFields(),
-			zap.String("source", ci.source),
-			zap.String("server-url", serverURL),
-			zap.Bool("is-leader", isLeader),
-			zap.Int("status-code", statusCode),
-			zap.Error(err))
+		logFields  = append(reqInfo.logFields(), zap.String("source", ci.source))
 	)
 	execFunc := func() error {
 		defer func() {
-			// Handle some special status codes and errors to increase the success rate of the following requests.
-			ci.handleHTTPStatusCodeAndErr(statusCode, err)
-			log.Debug("[pd] http request finished", logFields...)
+			// - If the status code is 503, it indicates that there may be PD leader/follower changes.
+			// - If the error message contains the leader/primary change information, it indicates that there may be PD leader/primary change.
+			if statusCode == http.StatusServiceUnavailable || errs.IsLeaderChange(err) {
+				ci.sd.ScheduleCheckMemberChanged()
+			}
+			log.Info("[pd] http request finished", append(logFields,
+				zap.String("server-url", serverURL),
+				zap.Bool("is-leader", isLeader),
+				zap.Int("status-code", statusCode),
+				zap.Error(err))...)
 		}()
 		// It will try to send the request to the PD leader first and then try to send the request to the other PD followers.
 		clients := ci.sd.GetAllServiceClients()
@@ -154,7 +156,11 @@ func (ci *clientInner) requestWithRetry(
 			if err == nil || noNeedRetry(statusCode) {
 				return err
 			}
-			log.Debug("[pd] http request url failed", logFields...)
+			log.Info("[pd] http request url failed", append(logFields,
+				zap.String("server-url", serverURL),
+				zap.Bool("is-leader", isLeader),
+				zap.Int("status-code", statusCode),
+				zap.Error(err))...)
 		}
 		if skipNum == len(clients) {
 			return errs.ErrClientNoTargetMember
@@ -172,14 +178,6 @@ func (ci *clientInner) requestWithRetry(
 		return err != nil && !noNeedRetry(statusCode)
 	}, false)
 	return bo.Exec(ctx, execFunc)
-}
-
-func (ci *clientInner) handleHTTPStatusCodeAndErr(code int, err error) {
-	// - If the status code is 503, it indicates that there may be PD leader/follower changes.
-	// - If the error message contains the leader/primary change information, it indicates that there may be PD leader/primary change.
-	if code == http.StatusServiceUnavailable || errs.IsLeaderChange(err) {
-		ci.sd.ScheduleCheckMemberChanged()
-	}
 }
 
 func noNeedRetry(statusCode int) bool {
@@ -245,11 +243,14 @@ func (ci *clientInner) doRequest(
 		if readErr != nil {
 			logFields = append(logFields, zap.NamedError("read-body-error", err))
 		} else {
+			bs = bytes.TrimSpace(bs)
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
 
 		log.Error("[pd] request failed with a non-200 status", logFields...)
-		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s'", resp.Status)
+		return resp.StatusCode, errors.Errorf(
+			"request pd http api failed with status: '%s', body: '%s'", resp.Status, bs,
+		)
 	}
 
 	if res == nil {

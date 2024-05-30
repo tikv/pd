@@ -22,8 +22,11 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// IsLeaderChange will determine whether there is a leader change.
+// IsLeaderChange will determine whether there is a leader/primary change.
 func IsLeaderChange(err error) bool {
+	if err == nil {
+		return false
+	}
 	if err == ErrClientTSOStreamClosed {
 		return true
 	}

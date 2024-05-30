@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -756,4 +757,44 @@ func (suite *httpClientTestSuite) TestGetHealthStatus() {
 	re.Equal("pd1", healths[0].Name)
 	re.Equal("pd2", healths[1].Name)
 	re.True(healths[0].Health && healths[1].Health)
+}
+
+func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		bo := retry.InitialBackoffer(100*time.Millisecond, time.Second, 0)
+		client := suite.client.WithBackoffer(bo)
+		for {
+			healths, err := client.GetHealthStatus(ctx)
+			if err != nil && strings.Contains(err.Error(), "context canceled") {
+				return
+			}
+			re.NoError(err)
+			re.Len(healths, 2)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}()
+
+	leader := suite.cluster.GetLeaderServer()
+	re.NotNil(leader)
+	for i := 0; i < 3; i++ {
+		leader.ResignLeader()
+		re.NotEmpty(suite.cluster.WaitLeader())
+		leader = suite.cluster.GetLeaderServer()
+		re.NotNil(leader)
+	}
+
+	// Cancel the context to stop the goroutine.
+	cancel()
+	wg.Wait()
 }

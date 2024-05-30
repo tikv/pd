@@ -24,11 +24,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
-
-const maxRecordErrorCount = 20
 
 // Option is used to customize the backoffer.
 type Option func(*Backoffer)
@@ -69,18 +66,13 @@ func (bo *Backoffer) Exec(
 ) error {
 	defer bo.resetBackoff()
 	var (
-		allErrors error
-		err       error
-		after     *time.Timer
+		err   error
+		after *time.Timer
 	)
 	fnName := getFunctionName(fn)
 	for {
 		err = fn()
 		bo.attempt++
-		if bo.attempt < maxRecordErrorCount {
-			// multierr.Append will ignore nil error.
-			allErrors = multierr.Append(allErrors, err)
-		}
 		if !bo.isRetryable(err) {
 			break
 		}
@@ -100,7 +92,7 @@ func (bo *Backoffer) Exec(
 		select {
 		case <-ctx.Done():
 			after.Stop()
-			return multierr.Append(allErrors, errors.Trace(ctx.Err()))
+			return errors.Trace(ctx.Err())
 		case <-after.C:
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
@@ -115,7 +107,7 @@ func (bo *Backoffer) Exec(
 			}
 		}
 	}
-	return allErrors
+	return err
 }
 
 // InitialBackoffer make the initial state for retrying.

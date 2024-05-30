@@ -161,10 +161,10 @@ func (ri *requestInfo) getURL(addr string) string {
 
 func (ri *requestInfo) logFields() []zap.Field {
 	return []zap.Field{
-		zap.String("callerID", ri.callerID),
+		zap.String("caller-id", ri.callerID),
 		zap.String("name", ri.name),
 		zap.String("uri", ri.uri),
 		zap.String("method", ri.method),
-		zap.String("targetURL", ri.targetURL),
+		zap.String("target-url", ri.targetURL),
 	}
 }

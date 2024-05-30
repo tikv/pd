@@ -87,7 +87,7 @@ func TestBackoffer(t *testing.T) {
 		return expectedErr
 	})
 	re.InDelta(total, time.Since(start), float64(250*time.Millisecond))
-	re.ErrorContains(err, "test; test; test; test")
+	re.ErrorContains(err, "test")
 	re.ErrorIs(err, expectedErr)
 	re.Equal(4, execCount)
 	re.True(isBackofferReset(bo))
