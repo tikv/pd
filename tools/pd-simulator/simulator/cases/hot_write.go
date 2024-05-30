@@ -15,34 +15,34 @@
 package cases
 
 import (
-	"math/rand"
-
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newHotWrite() *Case {
+func newHotWrite(config *sc.SimConfig) *Case {
 	var simCase Case
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
 	// Initialize the cluster
-	for i := 1; i <= storeNum; i++ {
+	for i := 0; i < totalStore; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
-		storeIDs := rand.Perm(storeNum)
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      IDAllocator.nextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -55,7 +55,7 @@ func newHotWrite() *Case {
 
 	// Events description
 	// select regions on store 1 as hot write regions.
-	selectStoreNum := storeNum
+	selectStoreNum := totalStore
 	writeFlow := make(map[uint64]int64, selectStoreNum)
 	for _, r := range simCase.Regions {
 		if r.Leader.GetStoreId() == 1 {
@@ -74,8 +74,8 @@ func newHotWrite() *Case {
 
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		leaderCount := make([]int, storeNum)
-		peerCount := make([]int, storeNum)
+		leaderCount := make([]int, totalStore)
+		peerCount := make([]int, totalStore)
 		for id := range writeFlow {
 			region := regions.GetRegion(id)
 			leaderCount[int(region.GetLeader().GetStoreId()-1)]++
@@ -83,7 +83,6 @@ func newHotWrite() *Case {
 				peerCount[int(p.GetStoreId()-1)]++
 			}
 		}
-		simutil.Logger.Info("current hot region counts", zap.Reflect("leader", leaderCount), zap.Reflect("peer", peerCount))
 
 		// check count diff <= 2.
 		var minLeader, maxLeader, minPeer, maxPeer int

@@ -363,7 +363,7 @@ func TestNeedSync(t *testing.T) {
 	for _, testCase := range testCases {
 		regionA := region.Clone(testCase.optionsA...)
 		regionB := region.Clone(testCase.optionsB...)
-		_, _, needSync := RegionGuide(ContextTODO(), regionA, regionB)
+		_, _, needSync, _ := RegionGuide(ContextTODO(), regionA, regionB)
 		re.Equal(testCase.needSync, needSync)
 	}
 }
@@ -642,21 +642,64 @@ func BenchmarkUpdateBuckets(b *testing.B) {
 }
 
 func BenchmarkRandomRegion(b *testing.B) {
-	regions := NewRegionsInfo()
-	for i := 0; i < 5000000; i++ {
-		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
-		region := NewRegionInfo(&metapb.Region{
-			Id:       uint64(i + 1),
-			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
-		}, peer)
-		origin, overlaps, rangeChanged := regions.SetRegion(region)
-		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		regions.RandLeaderRegion(1, nil)
+	for _, size := range []int{10, 100, 1000, 10000, 100000, 1000000, 10000000} {
+		regions := NewRegionsInfo()
+		for i := 0; i < size; i++ {
+			peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+			region := NewRegionInfo(&metapb.Region{
+				Id:       uint64(i + 1),
+				Peers:    []*metapb.Peer{peer},
+				StartKey: []byte(fmt.Sprintf("%20d", i)),
+				EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			}, peer)
+			origin, overlaps, rangeChanged := regions.SetRegion(region)
+			regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+		}
+		b.Run(fmt.Sprintf("random region whole range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.randLeaderRegion(1, nil)
+			}
+		})
+		b.Run(fmt.Sprintf("random regions whole range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.RandLeaderRegions(1, nil)
+			}
+		})
+		ranges := []KeyRange{
+			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
+		}
+		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.randLeaderRegion(1, ranges)
+			}
+		})
+		b.Run(fmt.Sprintf("random regions single range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.RandLeaderRegions(1, ranges)
+			}
+		})
+		ranges = []KeyRange{
+			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
+			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
+			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
+			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+		}
+		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.randLeaderRegion(1, ranges)
+			}
+		})
+		b.Run(fmt.Sprintf("random regions multiple ranges with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.RandLeaderRegions(1, ranges)
+			}
+		})
 	}
 }
 
@@ -1031,7 +1074,7 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 		regionsOld.AtomicCheckAndPutRegion(ctx, regionPendingItemA)
 		re.Equal(int32(2), regionPendingItemA.GetRef())
 		// check new item
-		saveKV, saveCache, needSync := regionGuide(ctx, regionItemA, regionPendingItemA)
+		saveKV, saveCache, needSync, _ := regionGuide(ctx, regionItemA, regionPendingItemA)
 		re.True(needSync)
 		re.True(saveCache)
 		re.False(saveKV)
@@ -1060,7 +1103,7 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 		re.Equal(int32(1), regionPendingItemB.GetRef())
 
 		// heartbeat again, no need updates root tree
-		saveKV, saveCache, needSync := regionGuide(ctx, regionItemB, regionItemB)
+		saveKV, saveCache, needSync, _ := regionGuide(ctx, regionItemB, regionItemB)
 		re.False(needSync)
 		re.False(saveCache)
 		re.False(saveKV)

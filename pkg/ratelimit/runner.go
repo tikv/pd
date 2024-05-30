@@ -35,7 +35,10 @@ const (
 	SaveRegionToKV          = "SaveRegionToKV"
 )
 
-const initialCapacity = 100
+const (
+	initialCapacity   = 10000
+	maxPendingTaskNum = 20000000
+)
 
 // Runner is the interface for running tasks.
 type Runner interface {
@@ -48,9 +51,10 @@ type Runner interface {
 type Task struct {
 	ctx         context.Context
 	submittedAt time.Time
-	opts        *TaskOpts
 	f           func(context.Context)
 	name        string
+	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
+	retained bool
 }
 
 // ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
@@ -67,7 +71,6 @@ type ConcurrentRunner struct {
 	stopChan           chan struct{}
 	wg                 sync.WaitGroup
 	pendingTaskCount   map[string]int64
-	failedTaskCount    prometheus.Counter
 	maxWaitingDuration prometheus.Gauge
 }
 
@@ -79,18 +82,19 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		maxPendingDuration: maxPendingDuration,
 		taskChan:           make(chan *Task),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
-		failedTaskCount:    RunnerTaskFailedTasks.WithLabelValues(name),
 		pendingTaskCount:   make(map[string]int64),
 		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
 }
 
-// TaskOpts is the options for RunTask.
-type TaskOpts struct{}
-
 // TaskOption configures TaskOp
-type TaskOption func(opts *TaskOpts)
+type TaskOption func(opts *Task)
+
+// WithRetained sets whether the task should be retained.
+func WithRetained(retained bool) TaskOption {
+	return func(opts *Task) { opts.retained = retained }
+}
 
 // Start starts the runner.
 func (cr *ConcurrentRunner) Start() {
@@ -123,8 +127,8 @@ func (cr *ConcurrentRunner) Start() {
 				if len(cr.pendingTasks) > 0 {
 					maxDuration = time.Since(cr.pendingTasks[0].submittedAt)
 				}
-				for name, cnt := range cr.pendingTaskCount {
-					RunnerTaskPendingTasks.WithLabelValues(cr.name, name).Set(float64(cnt))
+				for taskName, cnt := range cr.pendingTaskCount {
+					RunnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
 				}
 				cr.pendingMu.Unlock()
 				cr.maxWaitingDuration.Set(maxDuration.Seconds())
@@ -134,26 +138,28 @@ func (cr *ConcurrentRunner) Start() {
 }
 
 func (cr *ConcurrentRunner) run(task *Task, token *TaskToken) {
+	start := time.Now()
 	task.f(task.ctx)
 	if token != nil {
 		cr.limiter.ReleaseToken(token)
 		cr.processPendingTasks()
 	}
+	RunnerTaskExecutionDuration.WithLabelValues(cr.name, task.name).Observe(time.Since(start).Seconds())
+	RunnerSucceededTasks.WithLabelValues(cr.name, task.name).Inc()
 }
 
 func (cr *ConcurrentRunner) processPendingTasks() {
 	cr.pendingMu.Lock()
 	defer cr.pendingMu.Unlock()
-	for len(cr.pendingTasks) > 0 {
+	if len(cr.pendingTasks) > 0 {
 		task := cr.pendingTasks[0]
 		select {
 		case cr.taskChan <- task:
 			cr.pendingTasks = cr.pendingTasks[1:]
 			cr.pendingTaskCount[task.name]--
-			return
 		default:
-			return
 		}
+		return
 	}
 }
 
@@ -165,34 +171,40 @@ func (cr *ConcurrentRunner) Stop() {
 
 // RunTask runs the task asynchronously.
 func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(context.Context), opts ...TaskOption) error {
-	taskOpts := &TaskOpts{}
-	for _, opt := range opts {
-		opt(taskOpts)
-	}
 	task := &Task{
 		ctx:  ctx,
 		name: name,
 		f:    f,
-		opts: taskOpts,
 	}
-
+	for _, opt := range opts {
+		opt(task)
+	}
 	cr.processPendingTasks()
-	select {
-	case cr.taskChan <- task:
-	default:
-		cr.pendingMu.Lock()
-		defer cr.pendingMu.Unlock()
-		if len(cr.pendingTasks) > 0 {
+	cr.pendingMu.Lock()
+	defer func() {
+		cr.pendingMu.Unlock()
+		cr.processPendingTasks()
+	}()
+
+	pendingTaskNum := len(cr.pendingTasks)
+	if pendingTaskNum > 0 {
+		if !task.retained {
 			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
 			if maxWait > cr.maxPendingDuration {
-				cr.failedTaskCount.Inc()
+				RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 				return ErrMaxWaitingTasksExceeded
 			}
 		}
-		task.submittedAt = time.Now()
-		cr.pendingTasks = append(cr.pendingTasks, task)
-		cr.pendingTaskCount[task.name]++
+		// We use the max task number to limit the memory usage.
+		// It occupies around 1.5GB memory when there is 20000000 pending task.
+		if len(cr.pendingTasks) > maxPendingTaskNum {
+			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+			return ErrMaxWaitingTasksExceeded
+		}
 	}
+	task.submittedAt = time.Now()
+	cr.pendingTasks = append(cr.pendingTasks, task)
+	cr.pendingTaskCount[task.name]++
 	return nil
 }
 

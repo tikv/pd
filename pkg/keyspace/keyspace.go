@@ -343,20 +343,20 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		for {
 			select {
 			case <-ticker.C:
-				regionsInfo := manager.cluster.GetBasicCluster().RegionsInfo
-				region := regionsInfo.GetRegionByKey(rawLeftBound)
+				c := manager.cluster.GetBasicCluster()
+				region := c.GetRegionByKey(rawLeftBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), rawLeftBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(rawRightBound)
+				region = c.GetRegionByKey(rawRightBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), rawRightBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(txnLeftBound)
+				region = c.GetRegionByKey(txnLeftBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), txnLeftBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(txnRightBound)
+				region = c.GetRegionByKey(txnRightBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), txnRightBound) {
 					continue
 				}

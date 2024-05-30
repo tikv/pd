@@ -727,9 +727,14 @@ func (r *RegionInfo) isRegionRecreated() bool {
 	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
+func (r *RegionInfo) Contains(key []byte) bool {
+	start, end := r.GetStartKey(), r.GetEndKey()
+	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
+}
+
 // RegionGuideFunc is a function that determines which follow-up operations need to be performed based on the origin
 // and new region information.
-type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool)
+type RegionGuideFunc func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync, retained bool)
 
 // GenerateRegionGuideFunc is used to generate a RegionGuideFunc. Control the log output by specifying the log function.
 // nil means do not print the log.
@@ -742,7 +747,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 	}
 	// Save to storage if meta is updated.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
-	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync bool) {
+	return func(ctx *MetaProcessContext, region, origin *RegionInfo) (saveKV, saveCache, needSync, retained bool) {
 		logRunner := ctx.LogRunner
 		// print log asynchronously
 		debug, info := d, i
@@ -772,7 +777,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					zap.Uint64("region-id", region.GetID()),
 					logutil.ZapRedactStringer("meta-region", RegionToHexMeta(region.GetMeta())))
 			}
-			saveKV, saveCache = true, true
+			saveKV, saveCache, retained = true, true, true
 		} else {
 			r := region.GetRegionEpoch()
 			o := origin.GetRegionEpoch()
@@ -785,7 +790,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-version", r.GetVersion()),
 					)
 				}
-				saveKV, saveCache = true, true
+				saveKV, saveCache, retained = true, true, true
 			}
 			if r.GetConfVer() > o.GetConfVer() {
 				if log.GetLevel() <= zap.InfoLevel {
@@ -796,7 +801,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 						zap.Uint64("new-confver", r.GetConfVer()),
 					)
 				}
-				saveKV, saveCache = true, true
+				saveKV, saveCache, retained = true, true, true
 			}
 			if region.GetLeader().GetId() != origin.GetLeader().GetId() {
 				if origin.GetLeader().GetId() != 0 && log.GetLevel() <= zap.InfoLevel {
@@ -1673,13 +1678,6 @@ func (r *RegionsInfo) GetStoreWitnessCount(storeID uint64) int {
 	return r.witnesses[storeID].length()
 }
 
-// RandPendingRegion randomly gets a store's region with a pending peer.
-func (r *RegionsInfo) RandPendingRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.pendingPeers[storeID].RandomRegion(ranges)
-}
-
 // RandPendingRegions randomly gets a store's n regions with a pending peer.
 func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
@@ -1687,11 +1685,11 @@ func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*R
 	return r.pendingPeers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandLeaderRegion randomly gets a store's leader region.
-func (r *RegionsInfo) RandLeaderRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
+// This function is used for test only.
+func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []KeyRange) {
 	r.st.RLock()
 	defer r.st.RUnlock()
-	return r.leaders[storeID].RandomRegion(ranges)
+	_ = r.leaders[storeID].randomRegion(ranges)
 }
 
 // RandLeaderRegions randomly gets a store's n leader regions.
@@ -1701,13 +1699,6 @@ func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []KeyRange) []*Re
 	return r.leaders[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandFollowerRegion randomly gets a store's follower region.
-func (r *RegionsInfo) RandFollowerRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.followers[storeID].RandomRegion(ranges)
-}
-
 // RandFollowerRegions randomly gets a store's n follower regions.
 func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
@@ -1715,25 +1706,11 @@ func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*
 	return r.followers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
-// RandLearnerRegion randomly gets a store's learner region.
-func (r *RegionsInfo) RandLearnerRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.learners[storeID].RandomRegion(ranges)
-}
-
 // RandLearnerRegions randomly gets a store's n learner regions.
 func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
-}
-
-// RandWitnessRegion randomly gets a store's witness region.
-func (r *RegionsInfo) RandWitnessRegion(storeID uint64, ranges []KeyRange) *RegionInfo {
-	r.st.RLock()
-	defer r.st.RUnlock()
-	return r.witnesses[storeID].RandomRegion(ranges)
 }
 
 // RandWitnessRegions randomly gets a store's n witness regions.

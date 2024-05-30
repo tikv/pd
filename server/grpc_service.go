@@ -826,7 +826,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		}, nil
 	}
 
-	if err := rc.PutStore(store); err != nil {
+	if err := rc.PutMetaStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil

@@ -222,61 +222,93 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	// Better to make sure once any of these conditions changes, it will trigger the heartbeat `save_cache`.
 	// Otherwise, the state may be out-of-date for a long time, which needs another way to apply the change ASAP.
 	// For example, see `RegionStatsNeedUpdate` above to know how `OversizedRegion` and `UndersizedRegion` are updated.
-	conditions := map[RegionStatisticType]bool{
-		MissPeer:    len(peers) < desiredReplicas,
-		ExtraPeer:   len(peers) > desiredReplicas,
-		DownPeer:    len(downPeers) > 0,
-		PendingPeer: len(pendingPeers) > 0,
-		OfflinePeer: func() bool {
-			for _, store := range stores {
-				if store.IsRemoving() {
-					peer := region.GetStorePeer(store.GetID())
-					if peer != nil {
-						return true
-					}
-				}
+	var conditions RegionStatisticType
+	if len(peers) < desiredReplicas {
+		conditions |= MissPeer
+	}
+	if len(peers) > desiredReplicas {
+		conditions |= ExtraPeer
+	}
+	if len(downPeers) > 0 {
+		conditions |= DownPeer
+	}
+	if len(pendingPeers) > 0 {
+		conditions |= PendingPeer
+	}
+	for _, store := range stores {
+		if store.IsRemoving() {
+			peer := region.GetStorePeer(store.GetID())
+			if peer != nil {
+				conditions |= OfflinePeer
+				break
 			}
-			return false
-		}(),
-		LearnerPeer:      len(learners) > 0,
-		EmptyRegion:      regionSize <= core.EmptyRegionApproximateSize,
-		OversizedRegion:  region.IsOversized(regionMaxSize, regionMaxKeys),
-		UndersizedRegion: region.NeedMerge(maxMergeRegionSize, maxMergeRegionKeys),
-		WitnessLeader:    leaderIsWitness,
+		}
+	}
+	if len(learners) > 0 {
+		conditions |= LearnerPeer
+	}
+	if regionSize <= core.EmptyRegionApproximateSize {
+		conditions |= EmptyRegion
+	}
+	if region.IsOversized(regionMaxSize, regionMaxKeys) {
+		conditions |= OversizedRegion
+	}
+	if region.NeedMerge(maxMergeRegionSize, maxMergeRegionKeys) {
+		conditions |= UndersizedRegion
+	}
+	if leaderIsWitness {
+		conditions |= WitnessLeader
 	}
 	// Check if the region meets any of the conditions and update the corresponding info.
 	regionID := region.GetID()
-	for typ, c := range conditions {
-		if c {
-			info := r.stats[typ][regionID]
-			if typ == DownPeer {
-				if info == nil {
-					info = &RegionInfoWithTS{}
-				}
-				if info.(*RegionInfoWithTS).startDownPeerTS != 0 {
-					regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startDownPeerTS))
-				} else {
-					info.(*RegionInfoWithTS).startDownPeerTS = time.Now().Unix()
-					logDownPeerWithNoDisconnectedStore(region, stores)
-				}
-			} else if typ == MissPeer {
-				if info == nil {
-					info = &RegionInfoWithTS{}
-				}
-				if len(voters) < desiredVoters {
-					if info.(*RegionInfoWithTS).startMissVoterPeerTS != 0 {
-						regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startMissVoterPeerTS))
-					} else {
-						info.(*RegionInfoWithTS).startMissVoterPeerTS = time.Now().Unix()
-					}
-				}
-			} else {
-				info = struct{}{}
-			}
-
-			r.stats[typ][regionID] = info
-			peerTypeIndex |= typ
+	for i := 0; i < len(regionStatisticTypes); i++ {
+		condition := RegionStatisticType(1 << i)
+		if conditions&condition == 0 {
+			continue
 		}
+		info := r.stats[condition][regionID]
+		// The condition is met
+		switch condition {
+		case MissPeer:
+			if info == nil {
+				info = &RegionInfoWithTS{}
+			}
+			if len(voters) < desiredVoters {
+				if info.(*RegionInfoWithTS).startMissVoterPeerTS != 0 {
+					regionMissVoterPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startMissVoterPeerTS))
+				} else {
+					info.(*RegionInfoWithTS).startMissVoterPeerTS = time.Now().Unix()
+				}
+			}
+		case DownPeer:
+			if info == nil {
+				info = &RegionInfoWithTS{}
+			}
+			if info.(*RegionInfoWithTS).startDownPeerTS != 0 {
+				regionDownPeerDuration.Observe(float64(time.Now().Unix() - info.(*RegionInfoWithTS).startDownPeerTS))
+			} else {
+				info.(*RegionInfoWithTS).startDownPeerTS = time.Now().Unix()
+				logDownPeerWithNoDisconnectedStore(region, stores)
+			}
+		case ExtraPeer:
+			fallthrough
+		case PendingPeer:
+			fallthrough
+		case OfflinePeer:
+			fallthrough
+		case LearnerPeer:
+			fallthrough
+		case EmptyRegion:
+			fallthrough
+		case OversizedRegion:
+			fallthrough
+		case UndersizedRegion:
+			fallthrough
+		case WitnessLeader:
+			info = struct{}{}
+		}
+		r.stats[condition][regionID] = info
+		peerTypeIndex |= condition
 	}
 	// Remove the info if any of the conditions are not met any more.
 	if oldIndex, ok := r.index[regionID]; ok && oldIndex > emptyStatistic {

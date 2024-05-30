@@ -14,10 +14,6 @@
 
 package utils
 
-import (
-	"github.com/tikv/pd/pkg/core"
-)
-
 const (
 	// BytePriority indicates hot-region-scheduler prefer byte dim
 	BytePriority = "byte"
@@ -230,10 +226,8 @@ func (rw RWType) DefaultAntiCount() int {
 	}
 }
 
-// GetLoadRatesFromPeer gets the load rates of the read or write type from PeerInfo.
-func (rw RWType) GetLoadRatesFromPeer(peer *core.PeerInfo) []float64 {
-	deltaLoads := peer.GetLoads()
-	interval := peer.GetInterval()
+// GetLoadRates gets the load rates of the read or write type.
+func (rw RWType) GetLoadRates(deltaLoads []float64, interval uint64) []float64 {
 	loads := make([]float64, DimLen)
 	for dim, k := range rw.RegionStats() {
 		loads[dim] = deltaLoads[k] / float64(interval)

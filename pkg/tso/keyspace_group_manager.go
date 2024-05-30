@@ -1440,7 +1440,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
 	failpoint.Inject("fastGroupSplitPatroller", func() {
-		patrolInterval = time.Second
+		patrolInterval = 3 * time.Second
 	})
 	ticker := time.NewTicker(patrolInterval)
 	defer ticker.Stop()

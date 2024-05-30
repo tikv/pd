@@ -407,7 +407,7 @@ func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster)
 func checkRegionCount(re *require.Assertions, cluster *tests.TestCluster, count uint64) {
 	leader := cluster.GetLeaderServer()
 	tu.Eventually(re, func() bool {
-		return leader.GetRaftCluster().GetRegionCount([]byte{}, []byte{}).Count == int(count)
+		return leader.GetRaftCluster().GetRegionCount([]byte{}, []byte{}) == int(count)
 	})
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 		tu.Eventually(re, func() bool {

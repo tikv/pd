@@ -212,7 +212,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						Tracer:     core.NewNoopHeartbeatProcessTracer(),
 						// no limit for followers.
 					}
-					saveKV, _, _ := regionGuide(ctx, region, origin)
+					saveKV, _, _, _ := regionGuide(ctx, region, origin)
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {

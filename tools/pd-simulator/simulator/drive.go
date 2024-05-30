@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.etcd.io/etcd/clientv3"
@@ -42,17 +43,17 @@ type Driver struct {
 	eventRunner *EventRunner
 	raftEngine  *RaftEngine
 	conn        *Connection
-	simConfig   *SimConfig
-	pdConfig    *PDConfig
+	simConfig   *config.SimConfig
+	pdConfig    *config.PDConfig
 }
 
 // NewDriver returns a driver.
-func NewDriver(pdAddr string, caseName string, simConfig *SimConfig) (*Driver, error) {
-	simCase := cases.NewCase(caseName)
+func NewDriver(pdAddr string, caseName string, simConfig *config.SimConfig) (*Driver, error) {
+	simCase := cases.NewCase(caseName, simConfig)
 	if simCase == nil {
 		return nil, errors.Errorf("failed to create case %s", caseName)
 	}
-	pdConfig := &PDConfig{}
+	pdConfig := &config.PDConfig{}
 	pdConfig.PlacementRules = simCase.Rules
 	pdConfig.LocationLabels = simCase.Labels
 	return &Driver{
