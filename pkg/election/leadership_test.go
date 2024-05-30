@@ -271,21 +271,24 @@ func TestCampaignTimes(t *testing.T) {
 
 	// all the campaign times are within the timeout.
 	campaignTimesRecordTimeout = 10 * time.Second
+	defer func() {
+		campaignTimesRecordTimeout = 5 * time.Minute
+	}()
 	for i := 0; i < 3; i++ {
 		leadership.AddCampaignTimes()
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 	}
 	re.Equal(3, leadership.GetCampaignTimesNum())
 
 	// only the last 2 records are valid.
-	campaignTimesRecordTimeout = 2 * time.Second
+	campaignTimesRecordTimeout = 200 * time.Millisecond
 	for i := 0; i < 3; i++ {
 		leadership.AddCampaignTimes()
-		time.Sleep(time.Second)
+		time.Sleep(100 * time.Millisecond)
 	}
 	re.Equal(2, leadership.GetCampaignTimesNum())
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(200 * time.Millisecond)
 	// need to wait for the next addCampaignTimes to update the campaign time.
 	re.Equal(2, leadership.GetCampaignTimesNum())
 	// check campaign leader frequency.
