@@ -133,8 +133,8 @@ func (ci *clientInner) requestWithRetry(
 	)
 	execFunc := func() error {
 		defer func() {
-			// Handle some special status codes to increase the success rate of the following requests.
-			ci.handleHTTPStatusCode(statusCode)
+			// Handle some special status codes and errors to increase the success rate of the following requests.
+			ci.handleHTTPStatusCodeAndErr(statusCode, err)
 			log.Debug("[pd] http request finished", logFields...)
 		}()
 		// It will try to send the request to the PD leader first and then try to send the request to the other PD followers.
@@ -174,9 +174,10 @@ func (ci *clientInner) requestWithRetry(
 	return bo.Exec(ctx, execFunc)
 }
 
-func (ci *clientInner) handleHTTPStatusCode(code int) {
-	// If the status code is 503, it indicates that there may be PD leader/follower changes.
-	if code == http.StatusServiceUnavailable {
+func (ci *clientInner) handleHTTPStatusCodeAndErr(code int, err error) {
+	// - If the status code is 503, it indicates that there may be PD leader/follower changes.
+	// - If the error message contains the leader/primary change information, it indicates that there may be PD leader/primary change.
+	if code == http.StatusServiceUnavailable || errs.IsLeaderChange(err) {
 		ci.sd.ScheduleCheckMemberChanged()
 	}
 }

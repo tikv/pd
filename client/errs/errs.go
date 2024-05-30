@@ -15,10 +15,24 @@
 package errs
 
 import (
+	"strings"
+
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+// IsLeaderChange will determine whether there is a leader change.
+func IsLeaderChange(err error) bool {
+	if err == ErrClientTSOStreamClosed {
+		return true
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, NotLeaderErr) ||
+		strings.Contains(errMsg, MismatchLeaderErr) ||
+		strings.Contains(errMsg, NotServedErr) ||
+		strings.Contains(errMsg, NotPrimaryErr)
+}
 
 // ZapError is used to make the log output easier.
 func ZapError(err error, causeError ...error) zap.Field {

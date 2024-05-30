@@ -35,6 +35,10 @@ const (
 	NotServedErr = "is not served"
 	// RetryTimeoutErr indicates the server is busy.
 	RetryTimeoutErr = "retry timeout"
+	// NotPrimaryErr indicates the non-primary member received the requests which should be received by primary.
+	// Note: keep the same as the ones defined on the server side, because the client side checks if an error message
+	// contains this string to judge whether the primary is changed.
+	NotPrimaryErr = "is not primary"
 )
 
 // client errors
