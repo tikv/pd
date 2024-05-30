@@ -40,7 +40,7 @@ func newImportData(config *sc.SimConfig) *Case {
 	// Initialize the cluster
 	for i := 0; i < totalStore; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
@@ -49,12 +49,12 @@ func newImportData(config *sc.SimConfig) *Case {
 		peers := make([]*metapb.Peer, 0, replica)
 		for j := 0; j < replica; j++ {
 			peers = append(peers, &metapb.Peer{
-				Id:      simutil.IDAllocator.NextID(),
+				Id:      IDAllocator.nextID(),
 				StoreId: uint64((i+j)%totalStore + 1),
 			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   32 * units.MiB,
@@ -83,7 +83,7 @@ func newImportData(config *sc.SimConfig) *Case {
 	checkCount := uint64(0)
 	var newRegionCount [][3]int
 	var allRegionCount [][3]int
-	simCase.Checker = func(_ []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
 		leaderTotal := 0

@@ -65,7 +65,7 @@ func newRule1(_ *sc.SimConfig) *Case {
 
 	storeNum, regionNum := 9, 300
 	for i := 0; i < storeNum; i++ {
-		id := simutil.IDAllocator.NextID()
+		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
 			Status: metapb.StoreState_Up,
@@ -83,15 +83,15 @@ func newRule1(_ *sc.SimConfig) *Case {
 
 	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%(storeNum-5) + 5)},
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%(storeNum-5) + 5)},
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+2)%(storeNum-5) + 5)},
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+3)%(storeNum-5) + 5)},
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%(storeNum-5) + 1)},
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(9), Role: metapb.PeerRole_Learner},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i%(storeNum-5) + 5)},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%(storeNum-5) + 5)},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%(storeNum-5) + 5)},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+3)%(storeNum-5) + 5)},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i%(storeNum-5) + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64(9), Role: metapb.PeerRole_Learner},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -101,14 +101,8 @@ func newRule1(_ *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
-		storeNum := 0
-		for _, store := range stores {
-			if store.NodeState != metapb.NodeState_Removed {
-				storeNum++
-			}
-		}
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
 		for i := 1; i <= storeNum; i++ {
@@ -156,7 +150,7 @@ func newRule2(_ *sc.SimConfig) *Case {
 
 	storeNum, regionNum := 6, 300
 	for i := 0; i < storeNum; i++ {
-		id := simutil.IDAllocator.NextID()
+		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
 			Status: metapb.StoreState_Up,
@@ -171,12 +165,12 @@ func newRule2(_ *sc.SimConfig) *Case {
 
 	for i := 0; i < regionNum; i++ {
 		peers := []*metapb.Peer{
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64(i%storeNum + 1)},
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+1)%storeNum + 1)},
-			{Id: simutil.IDAllocator.NextID(), StoreId: uint64((i+2)%storeNum + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
+			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum + 1)},
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -186,14 +180,8 @@ func newRule2(_ *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
-		storeNum := 0
-		for _, store := range stores {
-			if store.NodeState != metapb.NodeState_Removed {
-				storeNum++
-			}
-		}
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
 		for i := 1; i <= storeNum; i++ {

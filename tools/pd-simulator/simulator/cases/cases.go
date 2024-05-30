@@ -15,8 +15,6 @@
 package cases
 
 import (
-	"math/rand"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -47,7 +45,7 @@ type Region struct {
 }
 
 // CheckerFunc checks if the scheduler is finished.
-type CheckerFunc func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) bool
+type CheckerFunc func(*core.RegionsInfo, []info.StoreStats) bool
 
 // Case represents a test suite for simulator.
 type Case struct {
@@ -63,10 +61,34 @@ type Case struct {
 	Labels  typeutil.StringSlice
 }
 
+// IDAllocator is used to alloc unique ID.
+type idAllocator struct {
+	id uint64
+}
+
+// nextID gets the next unique ID.
+func (a *idAllocator) nextID() uint64 {
+	a.id++
+	return a.id
+}
+
+// ResetID resets the IDAllocator.
+func (a *idAllocator) ResetID() {
+	a.id = 0
+}
+
+// GetID gets the current ID.
+func (a *idAllocator) GetID() uint64 {
+	return a.id
+}
+
+// IDAllocator is used to alloc unique ID.
+var IDAllocator idAllocator
+
 // CaseMap is a mapping of the cases to the their corresponding initialize functions.
 var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"balance-leader":            newBalanceLeader,
-	"balance-region":            newBalanceRegion,
+	"redundant-balance-region":  newRedundantBalanceRegion,
 	"region-split":              newRegionSplit,
 	"region-merge":              newRegionMerge,
 	"hot-read":                  newHotRead,
@@ -93,15 +115,4 @@ func isUniform(count, meanCount int) bool {
 	maxCount := int((1.0 + threshold) * float64(meanCount))
 	minCount := int((1.0 - threshold) * float64(meanCount))
 	return minCount <= count && count <= maxCount
-}
-
-func getNoEmptyStoreNum(storeNum int, replica int) int {
-	noEmptyStoreNum := rand.Intn(storeNum)
-	if noEmptyStoreNum < replica {
-		return replica
-	}
-	if noEmptyStoreNum == storeNum {
-		return storeNum - 1
-	}
-	return noEmptyStoreNum
 }
