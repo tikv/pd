@@ -34,10 +34,11 @@ import (
 )
 
 const (
-	defaultCampaignTimesSlot   = 10
-	watchLoopUnhealthyTimeout  = 60 * time.Second
-	campaignTimesRecordTimeout = 5 * time.Minute
+	defaultCampaignTimesSlot  = 10
+	watchLoopUnhealthyTimeout = 60 * time.Second
 )
+
+var campaignTimesRecordTimeout = 5 * time.Minute
 
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
@@ -114,6 +115,7 @@ func (ls *Leadership) GetLeaderKey() string {
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
+// Need to make sure `AddCampaignTimes` is called before this function.
 func (ls *Leadership) GetCampaignTimesNum() int {
 	if ls == nil {
 		return 0
