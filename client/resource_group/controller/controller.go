@@ -1246,15 +1246,9 @@ func (gc *groupCostController) onRequestWait(
 					break retryLoop
 				}
 			}
-<<<<<<< HEAD
-			gc.requestRetryCounter.Inc()
+			gc.metrics.requestRetryCounter.Inc()
 			time.Sleep(retryInterval)
 			waitDuration += retryInterval
-=======
-			gc.metrics.requestRetryCounter.Inc()
-			time.Sleep(gc.mainCfg.WaitRetryInterval)
-			waitDuration += gc.mainCfg.WaitRetryInterval
->>>>>>> b7d8b9406 (controller: fix error retry and add more metrics (#8219))
 		}
 		if err != nil {
 			if errs.ErrClientResourceGroupThrottled.Equal(err) {
