@@ -168,7 +168,7 @@ func (e *ReadFlowOnRegion) Run(raft *RaftEngine, tickCount int64) bool {
 type AddNode struct{}
 
 // Run implements the event interface.
-func (e *AddNode) Run(raft *RaftEngine, tickCount int64) bool {
+func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 	config := raft.storeConfig
 	nodes := raft.conn.getNodes()
 	id, err := nodes[0].client.AllocID(context.TODO())
@@ -203,7 +203,7 @@ func (e *AddNode) Run(raft *RaftEngine, tickCount int64) bool {
 type DownNode struct{}
 
 // Run implements the event interface.
-func (e *DownNode) Run(raft *RaftEngine, tickCount int64) bool {
+func (*DownNode) Run(raft *RaftEngine, _ int64) bool {
 	nodes := raft.conn.getNodes()
 	if len(nodes) == 0 {
 		simutil.Logger.Error("can not find any node")

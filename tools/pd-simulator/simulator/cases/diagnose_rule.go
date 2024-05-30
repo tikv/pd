@@ -101,7 +101,7 @@ func newRule1(_ *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		storeNum := 0
 		for _, store := range stores {
@@ -186,7 +186,7 @@ func newRule2(_ *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		storeNum := 0
 		for _, store := range stores {

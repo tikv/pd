@@ -83,7 +83,7 @@ func newImportData(config *sc.SimConfig) *Case {
 	checkCount := uint64(0)
 	var newRegionCount [][3]int
 	var allRegionCount [][3]int
-	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
 		leaderTotal := 0
