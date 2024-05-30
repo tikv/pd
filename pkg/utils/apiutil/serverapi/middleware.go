@@ -208,8 +208,14 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		w.Header().Add(apiutil.XForwardedToMicroServiceHeader, "true")
 	} else if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) == 0 {
 		leader := h.waitForLeader(r)
+		// The leader has not been elected yet.
 		if leader == nil {
 			http.Error(w, "no leader", http.StatusServiceUnavailable)
+			return
+		}
+		// If the leader is the current server now, we can handle the request directly.
+		if h.s.GetMember().IsLeader() || leader.GetName() == h.s.Name() {
+			next(w, r)
 			return
 		}
 		clientUrls = leader.GetClientUrls()
