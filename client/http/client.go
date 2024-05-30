@@ -166,11 +166,11 @@ func (ci *clientInner) requestWithRetry(
 	}
 	// Copy a new backoffer for each request.
 	bo := *reqInfo.bo
-	// Set the retryable checker for the backoffer.
+	// Set the retryable checker for the backoffer if it's not set.
 	bo.SetRetryableChecker(func(err error) bool {
 		// Backoffer also needs to check the status code to determine whether to retry.
 		return err != nil && !noNeedRetry(statusCode)
-	})
+	}, false)
 	return bo.Exec(ctx, execFunc)
 }
 

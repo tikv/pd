@@ -95,15 +95,33 @@ func TestBackoffer(t *testing.T) {
 	// Test the retryable checker.
 	execCount = 0
 	bo = InitialBackoffer(base, max, total)
-	bo.SetRetryableChecker(func(error) bool {
+	retryableChecker := func(error) bool {
 		return execCount < 2
-	})
-	err = bo.Exec(ctx, func() error {
+	}
+	bo.SetRetryableChecker(retryableChecker, false)
+	execFunc := func() error {
 		execCount++
 		return nil
-	})
+	}
+	err = bo.Exec(ctx, execFunc)
 	re.NoError(err)
 	re.Equal(2, execCount)
+	re.True(isBackofferReset(bo))
+	// Test the retryable checker with overwrite.
+	execCount = 0
+	retryableChecker = func(error) bool {
+		return execCount < 4
+	}
+	bo.SetRetryableChecker(retryableChecker, false)
+	err = bo.Exec(ctx, execFunc)
+	re.NoError(err)
+	re.Equal(2, execCount)
+	re.True(isBackofferReset(bo))
+	execCount = 0
+	bo.SetRetryableChecker(retryableChecker, true)
+	err = bo.Exec(ctx, execFunc)
+	re.NoError(err)
+	re.Equal(4, execCount)
 	re.True(isBackofferReset(bo))
 }
 
