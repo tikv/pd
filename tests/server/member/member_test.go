@@ -342,6 +342,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		cluster.GetServers()[cluster.GetLeader()].ResetPDLeader()
 		cluster.WaitLeader()
+		re.Equal(leader, cluster.GetLeader())
 	}
 	// check for the 4th time.
 	cluster.GetLeaderServer().ResetPDLeader()
