@@ -76,4 +76,37 @@ func TestConcurrentRunner(t *testing.T) {
 		}
 		wg.Wait()
 	})
+
+	t.Run("Duplicated", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		runner.Start()
+		defer runner.Stop()
+		for i := 1; i < 11; i++ {
+			regionID := uint64(i)
+			if i == 10 {
+				regionID = 4
+			}
+			err := runner.RunTask(
+				context.Background(),
+				regionID,
+				"test2",
+				func(context.Context) {
+					time.Sleep(time.Second)
+				},
+			)
+			require.NoError(t, err)
+			time.Sleep(1 * time.Millisecond)
+		}
+
+		var updatedSubmitted, lastSubmitted time.Time
+		for i := 0; i < 7; i++ {
+			task := runner.pendingTasks.Front().Value.(*Task)
+			lastSubmitted = task.submittedAt
+			if task.regionID == 4 {
+				updatedSubmitted = lastSubmitted
+			}
+			runner.pendingTasks.Remove(runner.pendingTasks.Front())
+		}
+		require.Greater(t, updatedSubmitted, lastSubmitted)
+	})
 }
