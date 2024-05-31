@@ -52,3 +52,13 @@ func (c *Connection) nodeHealth(storeID uint64) bool {
 
 	return n.GetNodeState() == metapb.NodeState_Preparing || n.GetNodeState() == metapb.NodeState_Serving
 }
+
+func (c *Connection) getNodes() []*Node {
+	var nodes []*Node
+	for _, n := range c.Nodes {
+		if n.GetNodeState() != metapb.NodeState_Removed {
+			nodes = append(nodes, n)
+		}
+	}
+	return nodes
+}

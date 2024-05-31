@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -26,7 +24,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	flag "github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
@@ -95,8 +92,7 @@ func main() {
 
 func run(simCase string, simConfig *sc.SimConfig) {
 	if *pdAddr != "" {
-		go runHTTPServer()
-		simStart(*pdAddr, simCase, simConfig)
+		simStart(*pdAddr, *statusAddress, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
 		err := local.Run()
@@ -109,26 +105,8 @@ func run(simCase string, simConfig *sc.SimConfig) {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		simStart(local.GetAddr(), simCase, simConfig, clean)
+		simStart(local.GetAddr(), "", simCase, simConfig, clean)
 	}
-}
-
-func runHTTPServer() {
-	http.Handle("/metrics", promhttp.Handler())
-	// profile API
-	http.HandleFunc("/pprof/profile", pprof.Profile)
-	http.HandleFunc("/pprof/trace", pprof.Trace)
-	http.HandleFunc("/pprof/symbol", pprof.Symbol)
-	http.Handle("/pprof/heap", pprof.Handler("heap"))
-	http.Handle("/pprof/mutex", pprof.Handler("mutex"))
-	http.Handle("/pprof/allocs", pprof.Handler("allocs"))
-	http.Handle("/pprof/block", pprof.Handler("block"))
-	http.Handle("/pprof/goroutine", pprof.Handler("goroutine"))
-	server := &http.Server{
-		Addr:              *statusAddress,
-		ReadHeaderTimeout: 3 * time.Second,
-	}
-	server.ListenAndServe()
 }
 
 // NewSingleServer creates a pd server for simulator.
@@ -157,9 +135,9 @@ func cleanServer(cfg *config.Config) {
 	os.RemoveAll(cfg.DataDir)
 }
 
-func simStart(pdAddr string, simCase string, simConfig *sc.SimConfig, clean ...testutil.CleanupFunc) {
+func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimConfig, clean ...testutil.CleanupFunc) {
 	start := time.Now()
-	driver, err := simulator.NewDriver(pdAddr, simCase, simConfig)
+	driver, err := simulator.NewDriver(pdAddr, statusAddress, simCase, simConfig)
 	if err != nil {
 		simutil.Logger.Fatal("create driver error", zap.Error(err))
 	}

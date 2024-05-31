@@ -15,8 +15,6 @@
 package cases
 
 import (
-	"math/rand"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -91,9 +89,6 @@ var IDAllocator idAllocator
 var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"balance-leader":            newBalanceLeader,
 	"redundant-balance-region":  newRedundantBalanceRegion,
-	"add-nodes":                 newAddNodes,
-	"add-nodes-dynamic":         newAddNodesDynamic,
-	"delete-nodes":              newDeleteNodes,
 	"region-split":              newRegionSplit,
 	"region-merge":              newRegionMerge,
 	"hot-read":                  newHotRead,
@@ -120,15 +115,4 @@ func isUniform(count, meanCount int) bool {
 	maxCount := int((1.0 + threshold) * float64(meanCount))
 	minCount := int((1.0 - threshold) * float64(meanCount))
 	return minCount <= count && count <= maxCount
-}
-
-func getNoEmptyStoreNum(storeNum int, replica int) int {
-	noEmptyStoreNum := rand.Intn(storeNum)
-	if noEmptyStoreNum < replica {
-		return replica
-	}
-	if noEmptyStoreNum == storeNum {
-		return storeNum - 1
-	}
-	return noEmptyStoreNum
 }
