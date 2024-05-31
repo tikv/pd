@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -46,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
+	"github.com/tikv/pd/tools/pd-heartbeat-bench/metrics"
 	"go.etcd.io/etcd/pkg/report"
 	"go.uber.org/zap"
 )
@@ -482,6 +484,7 @@ func main() {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
+	metrics.InitMetric2Collect(cfg.MetricsAddr)
 	maxVersion = cfg.InitEpochVer
 	options := config.NewOptions(cfg)
 	// let PD have enough time to start
@@ -532,6 +535,7 @@ func main() {
 		select {
 		case <-heartbeatTicker.C:
 			if cfg.Round != 0 && regions.updateRound > cfg.Round {
+				metrics.OutputConclusion()
 				exit(0)
 			}
 			rep := newReport(cfg)
@@ -544,6 +548,7 @@ func main() {
 				wg.Add(1)
 				go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
 			}
+			go metrics.CollectMetrics(regions.updateRound, 1*time.Second)
 			wg.Wait()
 
 			since := time.Since(startTime).Seconds()
@@ -559,6 +564,7 @@ func main() {
 				zap.Uint64("max-epoch-version", maxVersion),
 			)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
+			metrics.CollectRegionAndStoreStats(&stats, &since)
 			regions.update(cfg, options)
 			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
 		case <-resolvedTSTicker.C:
@@ -689,6 +695,22 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 
 		c.IndentedJSON(http.StatusOK, output)
 	})
+	engine.GET("metrics_collect", func(c *gin.Context) {
+		second := c.Query("second")
+		if second == "" {
+			c.String(http.StatusBadRequest, "missing second")
+			return
+		}
+		secondInt, err := strconv.Atoi(second)
+		if err != nil {
+			c.String(http.StatusBadRequest, "invalid second")
+			return
+		}
+		metrics.InitMetric2Collect(cfg.MetricsAddr)
+		metrics.CollectMetrics(metrics.WarmUpRound, time.Duration(secondInt)*time.Second)
+		c.IndentedJSON(http.StatusOK, "Successfully collect metrics")
+	})
+
 	engine.Run(cfg.StatusAddr)
 }
 
