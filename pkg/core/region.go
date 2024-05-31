@@ -16,7 +16,6 @@ package core
 
 import (
 	"bytes"
-	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -754,20 +753,18 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 		if logRunner != nil {
 			debug = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
-					ctx.Context,
 					region.GetID(),
 					"DebugLog",
-					func(_ context.Context) {
+					func() {
 						d(msg, fields...)
 					},
 				)
 			}
 			info = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
-					ctx.Context,
 					region.GetID(),
 					"InfoLog",
-					func(_ context.Context) {
+					func() {
 						i(msg, fields...)
 					},
 				)

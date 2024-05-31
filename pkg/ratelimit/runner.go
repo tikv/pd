@@ -44,17 +44,16 @@ const (
 
 // Runner is the interface for running tasks.
 type Runner interface {
-	RunTask(ctx context.Context, regionID uint64, name string, f func(context.Context), opts ...TaskOption) error
+	RunTask(regionID uint64, name string, f func(), opts ...TaskOption) error
 	Start()
 	Stop()
 }
 
 // Task is a task to be run.
 type Task struct {
-	ctx         context.Context
 	regionID    uint64
 	submittedAt time.Time
-	f           func(context.Context)
+	f           func()
 	name        string
 	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
 	retained bool
@@ -72,7 +71,7 @@ type ConcurrentRunner struct {
 	pendingMu          sync.Mutex
 	stopChan           chan struct{}
 	wg                 sync.WaitGroup
-	pendingTaskCount   map[string]int64
+	pendingTaskCount   map[string]int
 	pendingTasks       *list.List
 	pendingRegionTasks map[string]*list.Element
 	maxWaitingDuration prometheus.Gauge
@@ -86,7 +85,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		maxPendingDuration: maxPendingDuration,
 		taskChan:           make(chan *Task),
 		pendingTasks:       list.New(),
-		pendingTaskCount:   make(map[string]int64),
+		pendingTaskCount:   make(map[string]int),
 		pendingRegionTasks: make(map[string]*list.Element),
 		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
@@ -145,7 +144,7 @@ func (cr *ConcurrentRunner) Start() {
 
 func (cr *ConcurrentRunner) run(task *Task, token *TaskToken) {
 	start := time.Now()
-	task.f(task.ctx)
+	task.f()
 	if token != nil {
 		cr.limiter.ReleaseToken(token)
 		cr.processPendingTasks()
@@ -177,9 +176,8 @@ func (cr *ConcurrentRunner) Stop() {
 }
 
 // RunTask runs the task asynchronously.
-func (cr *ConcurrentRunner) RunTask(ctx context.Context, regionID uint64, name string, f func(context.Context), opts ...TaskOption) error {
+func (cr *ConcurrentRunner) RunTask(regionID uint64, name string, f func(), opts ...TaskOption) error {
 	task := &Task{
-		ctx:         ctx,
 		regionID:    regionID,
 		name:        name,
 		f:           f,
@@ -234,8 +232,8 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (*SyncRunner) RunTask(ctx context.Context, _ uint64, _ string, f func(context.Context), _ ...TaskOption) error {
-	f(ctx)
+func (*SyncRunner) RunTask(_ uint64, _ string, f func(), _ ...TaskOption) error {
+	f()
 	return nil
 }
 

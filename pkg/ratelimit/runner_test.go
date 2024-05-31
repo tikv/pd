@@ -15,7 +15,6 @@
 package ratelimit
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -34,10 +33,9 @@ func TestConcurrentRunner(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			wg.Add(1)
 			err := runner.RunTask(
-				context.Background(),
 				uint64(i),
 				"test1",
-				func(context.Context) {
+				func() {
 					defer wg.Done()
 					time.Sleep(100 * time.Millisecond)
 				},
@@ -55,10 +53,9 @@ func TestConcurrentRunner(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			wg.Add(1)
 			err := runner.RunTask(
-				context.Background(),
 				uint64(i),
 				"test2",
-				func(context.Context) {
+				func() {
 					defer wg.Done()
 					time.Sleep(100 * time.Millisecond)
 				},
@@ -87,10 +84,9 @@ func TestConcurrentRunner(t *testing.T) {
 				regionID = 4
 			}
 			err := runner.RunTask(
-				context.Background(),
 				regionID,
 				"test2",
-				func(context.Context) {
+				func() {
 					time.Sleep(time.Second)
 				},
 			)
