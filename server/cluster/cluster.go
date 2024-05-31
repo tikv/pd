@@ -1038,6 +1038,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	saveKV, saveCache, needSync, retained := regionGuide(ctx, region, origin)
 	tracer.OnRegionGuideFinished()
+	regionID := region.GetID()
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
@@ -1047,6 +1048,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.MiscRunner.RunTask(
 				ctx.Context,
+				regionID,
 				ratelimit.ObserveRegionStatsAsync,
 				func(_ context.Context) {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1059,6 +1061,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if origin.GetRef() < 2 {
 			ctx.TaskRunner.RunTask(
 				ctx,
+				regionID,
 				ratelimit.UpdateSubTree,
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
@@ -1087,6 +1090,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 		ctx.TaskRunner.RunTask(
 			ctx,
+			regionID,
 			ratelimit.UpdateSubTree,
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
@@ -1098,6 +1102,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 			ctx.MiscRunner.RunTask(
 				ctx.Context,
+				regionID,
 				ratelimit.HandleOverlaps,
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
@@ -1111,6 +1116,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	// handle region stats
 	ctx.MiscRunner.RunTask(
 		ctx.Context,
+		regionID,
 		ratelimit.CollectRegionStatsAsync,
 		func(_ context.Context) {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
@@ -1125,6 +1131,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		if saveKV {
 			ctx.MiscRunner.RunTask(
 				ctx.Context,
+				regionID,
 				ratelimit.SaveRegionToKV,
 				func(_ context.Context) {
 					// If there are concurrent heartbeats from the same region, the last write will win even if

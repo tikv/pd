@@ -35,6 +35,7 @@ func TestConcurrentRunner(t *testing.T) {
 			wg.Add(1)
 			err := runner.RunTask(
 				context.Background(),
+				uint64(i),
 				"test1",
 				func(context.Context) {
 					defer wg.Done()
@@ -55,6 +56,7 @@ func TestConcurrentRunner(t *testing.T) {
 			wg.Add(1)
 			err := runner.RunTask(
 				context.Background(),
+				uint64(i),
 				"test2",
 				func(context.Context) {
 					defer wg.Done()

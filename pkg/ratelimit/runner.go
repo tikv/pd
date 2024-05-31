@@ -15,8 +15,10 @@
 package ratelimit
 
 import (
+	"container/list"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -42,7 +44,7 @@ const (
 
 // Runner is the interface for running tasks.
 type Runner interface {
-	RunTask(ctx context.Context, name string, f func(context.Context), opts ...TaskOption) error
+	RunTask(ctx context.Context, regionID uint64, name string, f func(context.Context), opts ...TaskOption) error
 	Start()
 	Stop()
 }
@@ -50,6 +52,7 @@ type Runner interface {
 // Task is a task to be run.
 type Task struct {
 	ctx         context.Context
+	regionID    uint64
 	submittedAt time.Time
 	f           func(context.Context)
 	name        string
@@ -66,11 +69,12 @@ type ConcurrentRunner struct {
 	limiter            *ConcurrencyLimiter
 	maxPendingDuration time.Duration
 	taskChan           chan *Task
-	pendingTasks       []*Task
 	pendingMu          sync.Mutex
 	stopChan           chan struct{}
 	wg                 sync.WaitGroup
 	pendingTaskCount   map[string]int64
+	pendingTasks       *list.List
+	pendingRegionTasks map[string]*list.Element
 	maxWaitingDuration prometheus.Gauge
 }
 
@@ -81,8 +85,9 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		limiter:            limiter,
 		maxPendingDuration: maxPendingDuration,
 		taskChan:           make(chan *Task),
-		pendingTasks:       make([]*Task, 0, initialCapacity),
+		pendingTasks:       list.New(),
 		pendingTaskCount:   make(map[string]int64),
+		pendingRegionTasks: make(map[string]*list.Element),
 		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
@@ -101,6 +106,7 @@ func (cr *ConcurrentRunner) Start() {
 	cr.stopChan = make(chan struct{})
 	cr.wg.Add(1)
 	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 	go func() {
 		defer cr.wg.Done()
 		for {
@@ -117,15 +123,15 @@ func (cr *ConcurrentRunner) Start() {
 				}
 			case <-cr.stopChan:
 				cr.pendingMu.Lock()
-				cr.pendingTasks = make([]*Task, 0, initialCapacity)
+				cr.pendingTasks = list.New()
 				cr.pendingMu.Unlock()
 				log.Info("stopping async task runner", zap.String("name", cr.name))
 				return
 			case <-ticker.C:
 				maxDuration := time.Duration(0)
 				cr.pendingMu.Lock()
-				if len(cr.pendingTasks) > 0 {
-					maxDuration = time.Since(cr.pendingTasks[0].submittedAt)
+				if cr.pendingTasks.Len() > 0 {
+					maxDuration = time.Since(cr.pendingTasks.Front().Value.(*Task).submittedAt)
 				}
 				for taskName, cnt := range cr.pendingTaskCount {
 					RunnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
@@ -151,12 +157,13 @@ func (cr *ConcurrentRunner) run(task *Task, token *TaskToken) {
 func (cr *ConcurrentRunner) processPendingTasks() {
 	cr.pendingMu.Lock()
 	defer cr.pendingMu.Unlock()
-	if len(cr.pendingTasks) > 0 {
-		task := cr.pendingTasks[0]
+	if cr.pendingTasks.Len() > 0 {
+		task := cr.pendingTasks.Front().Value.(*Task)
 		select {
 		case cr.taskChan <- task:
-			cr.pendingTasks = cr.pendingTasks[1:]
+			cr.pendingTasks.Remove(cr.pendingTasks.Front())
 			cr.pendingTaskCount[task.name]--
+			delete(cr.pendingRegionTasks, fmt.Sprintf("%d-%s", task.regionID, task.name))
 		default:
 		}
 		return
@@ -170,11 +177,13 @@ func (cr *ConcurrentRunner) Stop() {
 }
 
 // RunTask runs the task asynchronously.
-func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(context.Context), opts ...TaskOption) error {
+func (cr *ConcurrentRunner) RunTask(ctx context.Context, regionID uint64, name string, f func(context.Context), opts ...TaskOption) error {
 	task := &Task{
-		ctx:  ctx,
-		name: name,
-		f:    f,
+		ctx:         ctx,
+		regionID:    regionID,
+		name:        name,
+		f:           f,
+		submittedAt: time.Now(),
 	}
 	for _, opt := range opts {
 		opt(task)
@@ -186,10 +195,18 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 		cr.processPendingTasks()
 	}()
 
-	pendingTaskNum := len(cr.pendingTasks)
+	pendingTaskNum := cr.pendingTasks.Len()
+	taskID := fmt.Sprintf("%d-%s", regionID, name)
 	if pendingTaskNum > 0 {
+		if element, ok := cr.pendingRegionTasks[taskID]; ok {
+			// Update the task in pendingTasks
+			element.Value = task
+			// Update the task in pendingRegionTasks
+			cr.pendingRegionTasks[taskID] = element
+			return nil
+		}
 		if !task.retained {
-			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
+			maxWait := time.Since(cr.pendingTasks.Front().Value.(*Task).submittedAt)
 			if maxWait > cr.maxPendingDuration {
 				RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 				return ErrMaxWaitingTasksExceeded
@@ -197,13 +214,13 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 		}
 		// We use the max task number to limit the memory usage.
 		// It occupies around 1.5GB memory when there is 20000000 pending task.
-		if len(cr.pendingTasks) > maxPendingTaskNum {
+		if pendingTaskNum > maxPendingTaskNum {
 			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 			return ErrMaxWaitingTasksExceeded
 		}
 	}
-	task.submittedAt = time.Now()
-	cr.pendingTasks = append(cr.pendingTasks, task)
+	element := cr.pendingTasks.PushBack(task)
+	cr.pendingRegionTasks[taskID] = element
 	cr.pendingTaskCount[task.name]++
 	return nil
 }
@@ -217,7 +234,7 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (*SyncRunner) RunTask(ctx context.Context, _ string, f func(context.Context), _ ...TaskOption) error {
+func (*SyncRunner) RunTask(ctx context.Context, _ uint64, _ string, f func(context.Context), _ ...TaskOption) error {
 	f(ctx)
 	return nil
 }
