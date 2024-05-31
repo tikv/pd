@@ -26,6 +26,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/errs"
 )
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
@@ -111,4 +112,18 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
 	}
+}
+
+func TestResourceGroupThrottledError(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	gc.initRunState()
+	req := &TestRequestInfo{
+		isWrite:    true,
+		writeBytes: 10000000,
+	}
+	// The group is throttled
+	_, _, err := gc.onRequestWait(context.TODO(), req)
+	re.Error(err)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
 }
