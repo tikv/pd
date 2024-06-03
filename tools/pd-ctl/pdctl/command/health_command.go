@@ -21,10 +21,10 @@ import (
 // NewHealthCommand return a health subcommand of rootCmd
 func NewHealthCommand() *cobra.Command {
 	m := &cobra.Command{
-		Use:               "health",
-		Short:             "show all node's health information of the PD cluster",
-		PersistentPreRunE: requirePDClient,
-		Run:               showHealthCommandFunc,
+		Use:     "health",
+		Short:   "show all node's health information of the PD cluster",
+		PreRunE: requirePDClient,
+		Run:     showHealthCommandFunc,
 	}
 	return m
 }
