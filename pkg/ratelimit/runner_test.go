@@ -15,6 +15,7 @@
 package ratelimit
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestConcurrentRunner(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 			wg.Add(1)
 			err := runner.RunTask(
-				uint64(i),
+				fmt.Sprintf("%d-%s", i, "test1"),
 				"test1",
 				func() {
 					defer wg.Done()
@@ -53,7 +54,7 @@ func TestConcurrentRunner(t *testing.T) {
 		for i := 0; i < 10; i++ {
 			wg.Add(1)
 			err := runner.RunTask(
-				uint64(i),
+				fmt.Sprintf("%d-%s", i, "test2"),
 				"test2",
 				func() {
 					defer wg.Done()
@@ -84,8 +85,8 @@ func TestConcurrentRunner(t *testing.T) {
 				regionID = 4
 			}
 			err := runner.RunTask(
-				regionID,
-				"test2",
+				fmt.Sprintf("%d-%s", regionID, "test3"),
+				"test3",
 				func() {
 					time.Sleep(time.Second)
 				},

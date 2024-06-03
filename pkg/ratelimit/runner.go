@@ -17,7 +17,6 @@ package ratelimit
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -43,14 +42,14 @@ const (
 
 // Runner is the interface for running tasks.
 type Runner interface {
-	RunTask(regionID uint64, name string, f func(), opts ...TaskOption) error
+	RunTask(id, name string, f func(), opts ...TaskOption) error
 	Start()
 	Stop()
 }
 
 // Task is a task to be run.
 type Task struct {
-	regionID    uint64
+	id          string
 	submittedAt time.Time
 	f           func()
 	name        string
@@ -161,7 +160,7 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 		case cr.taskChan <- task:
 			cr.pendingTasks = cr.pendingTasks[1:]
 			cr.pendingTaskCount[task.name]--
-			delete(cr.pendingRegionTasks, fmt.Sprintf("%d-%s", task.regionID, task.name))
+			delete(cr.pendingRegionTasks, task.id)
 		default:
 		}
 		return
@@ -175,9 +174,9 @@ func (cr *ConcurrentRunner) Stop() {
 }
 
 // RunTask runs the task asynchronously.
-func (cr *ConcurrentRunner) RunTask(regionID uint64, name string, f func(), opts ...TaskOption) error {
+func (cr *ConcurrentRunner) RunTask(id, name string, f func(), opts ...TaskOption) error {
 	task := &Task{
-		regionID:    regionID,
+		id:          id,
 		name:        name,
 		f:           f,
 		submittedAt: time.Now(),
@@ -193,9 +192,8 @@ func (cr *ConcurrentRunner) RunTask(regionID uint64, name string, f func(), opts
 	}()
 
 	pendingTaskNum := len(cr.pendingTasks)
-	taskID := fmt.Sprintf("%d-%s", regionID, name)
 	if pendingTaskNum > 0 {
-		if t, ok := cr.pendingRegionTasks[taskID]; ok {
+		if t, ok := cr.pendingRegionTasks[task.id]; ok {
 			t.f = f
 			t.submittedAt = time.Now()
 			return nil
@@ -207,15 +205,13 @@ func (cr *ConcurrentRunner) RunTask(regionID uint64, name string, f func(), opts
 				return ErrMaxWaitingTasksExceeded
 			}
 		}
-		// We use the max task number to limit the memory usage.
-		// It occupies around 1.5GB memory when there is 20000000 pending task.
 		if pendingTaskNum > maxPendingTaskNum {
 			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 			return ErrMaxWaitingTasksExceeded
 		}
 	}
 	cr.pendingTasks = append(cr.pendingTasks, task)
-	cr.pendingRegionTasks[taskID] = task
+	cr.pendingRegionTasks[task.id] = task
 	cr.pendingTaskCount[task.name]++
 	return nil
 }
@@ -229,7 +225,7 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (*SyncRunner) RunTask(_ uint64, _ string, f func(), _ ...TaskOption) error {
+func (*SyncRunner) RunTask(_, _ string, f func(), _ ...TaskOption) error {
 	f()
 	return nil
 }

@@ -1047,7 +1047,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.MiscRunner.RunTask(
-				regionID,
+				fmt.Sprintf("%d-%s", regionID, ratelimit.ObserveRegionStatsAsync),
 				ratelimit.ObserveRegionStatsAsync,
 				func() {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
@@ -1059,7 +1059,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
 			ctx.TaskRunner.RunTask(
-				regionID,
+				fmt.Sprintf("%d-%s", regionID, ratelimit.UpdateSubTree),
 				ratelimit.UpdateSubTree,
 				func() {
 					c.CheckAndPutSubTree(region)
@@ -1087,7 +1087,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			return err
 		}
 		ctx.TaskRunner.RunTask(
-			regionID,
+			fmt.Sprintf("%d-%s", regionID, ratelimit.UpdateSubTree),
 			ratelimit.UpdateSubTree,
 			func() {
 				c.CheckAndPutSubTree(region)
@@ -1098,7 +1098,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 			ctx.MiscRunner.RunTask(
-				regionID,
+				fmt.Sprintf("%d-%s", regionID, ratelimit.HandleOverlaps),
 				ratelimit.HandleOverlaps,
 				func() {
 					cluster.HandleOverlaps(c, overlaps)
@@ -1111,7 +1111,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	tracer.OnSaveCacheFinished()
 	// handle region stats
 	ctx.MiscRunner.RunTask(
-		regionID,
+		fmt.Sprintf("%d-%s", regionID, ratelimit.CollectRegionStatsAsync),
 		ratelimit.CollectRegionStatsAsync,
 		func() {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
@@ -1125,7 +1125,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	if c.storage != nil {
 		if saveKV {
 			ctx.MiscRunner.RunTask(
-				regionID,
+				fmt.Sprintf("%d-%s", regionID, ratelimit.SaveRegionToKV),
 				ratelimit.SaveRegionToKV,
 				func() {
 					// If there are concurrent heartbeats from the same region, the last write will win even if

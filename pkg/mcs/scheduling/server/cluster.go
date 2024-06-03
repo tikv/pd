@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -613,7 +614,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.TaskRunner.RunTask(
-				regionID,
+				fmt.Sprintf("%d-%s", regionID, ratelimit.ObserveRegionStatsAsync),
 				ratelimit.ObserveRegionStatsAsync,
 				func() {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
@@ -625,7 +626,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
 			ctx.TaskRunner.RunTask(
-				regionID,
+				fmt.Sprintf("%d-%s", regionID, ratelimit.UpdateSubTree),
 				ratelimit.UpdateSubTree,
 				func() {
 					c.CheckAndPutSubTree(region)
@@ -649,7 +650,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			return err
 		}
 		ctx.TaskRunner.RunTask(
-			regionID,
+			fmt.Sprintf("%d-%s", regionID, ratelimit.UpdateSubTree),
 			ratelimit.UpdateSubTree,
 			func() {
 				c.CheckAndPutSubTree(region)
@@ -658,7 +659,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		)
 		tracer.OnUpdateSubTreeFinished()
 		ctx.TaskRunner.RunTask(
-			regionID,
+			fmt.Sprintf("%d-%s", regionID, ratelimit.HandleOverlaps),
 			ratelimit.HandleOverlaps,
 			func() {
 				cluster.HandleOverlaps(c, overlaps)
@@ -668,7 +669,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 	tracer.OnSaveCacheFinished()
 	// handle region stats
 	ctx.TaskRunner.RunTask(
-		regionID,
+		fmt.Sprintf("%d-%s", regionID, ratelimit.CollectRegionStatsAsync),
 		ratelimit.CollectRegionStatsAsync,
 		func() {
 			cluster.Collect(c, region, hasRegionStats)
