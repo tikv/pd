@@ -19,10 +19,10 @@ import "github.com/spf13/cobra"
 // NewClusterCommand return a cluster subcommand of rootCmd
 func NewClusterCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "cluster",
-		Short:   "show the cluster information",
-		PreRunE: requirePDClient,
-		Run:     showClusterCommandFunc,
+		Use:               "cluster",
+		Short:             "show the cluster information",
+		PersistentPreRunE: requirePDClient,
+		Run:               showClusterCommandFunc,
 	}
 	cmd.AddCommand(NewClusterStatusCommand())
 	return cmd
