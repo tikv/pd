@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package simulator
+package config
 
 import (
 	"fmt"
@@ -31,8 +31,11 @@ import (
 )
 
 const (
-	// tick
-	defaultSimTickInterval = 100 * time.Millisecond
+	// simulator
+	defaultSimTickInterval             = 100 * time.Millisecond
+	defaultTotalStore                  = 3
+	defaultTotalRegion                 = 1000
+	defaultEnableTransferRegionCounter = false
 	// store
 	defaultStoreIOMBPerSecond = 40
 	defaultStoreHeartbeat     = 10 * time.Second
@@ -53,9 +56,12 @@ const (
 
 // SimConfig is the simulator configuration.
 type SimConfig struct {
-	// tick
-	CaseName        string            `toml:"case-name"`
-	SimTickInterval typeutil.Duration `toml:"sim-tick-interval"`
+	// Simulator
+	CaseName                    string            `toml:"case-name"`
+	TotalStore                  int               `toml:"total-store"`
+	TotalRegion                 int               `toml:"total-region"`
+	EnableTransferRegionCounter bool              `toml:"enable-transfer-region-counter"`
+	SimTickInterval             typeutil.Duration `toml:"sim-tick-interval"`
 	// store
 	StoreIOMBPerSecond int64       `toml:"store-io-per-second"`
 	StoreVersion       string      `toml:"store-version"`
@@ -99,6 +105,9 @@ func NewSimConfig(serverLogLevel string) *SimConfig {
 // Adjust is used to adjust configurations
 func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
+	configutil.AdjustInt(&sc.TotalStore, defaultTotalStore)
+	configutil.AdjustInt(&sc.TotalRegion, defaultTotalRegion)
+	configutil.AdjustBool(&sc.EnableTransferRegionCounter, defaultEnableTransferRegionCounter)
 	configutil.AdjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
 	configutil.AdjustString(&sc.StoreVersion, versioninfo.PDReleaseVersion)
 	configutil.AdjustDuration(&sc.RaftStore.RegionHeartBeatInterval, defaultRegionHeartbeat)
@@ -118,7 +127,7 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 
 	return sc.ServerConfig.Adjust(meta, false)
 }
-func (sc *SimConfig) speed() uint64 {
+func (sc *SimConfig) Speed() uint64 {
 	return uint64(time.Second / sc.SimTickInterval.Duration)
 }
 

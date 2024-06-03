@@ -21,12 +21,13 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
 
-func newRule1() *Case {
+func newRule1(_ *sc.SimConfig) *Case {
 	var simCase Case
 
 	simCase.Rules = make([]*placement.Rule, 0)
@@ -126,7 +127,7 @@ func newRule1() *Case {
 	return &simCase
 }
 
-func newRule2() *Case {
+func newRule2(_ *sc.SimConfig) *Case {
 	var simCase Case
 
 	simCase.Rules = make([]*placement.Rule, 0)

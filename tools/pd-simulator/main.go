@@ -17,8 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -26,7 +24,6 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	flag "github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
@@ -38,21 +35,19 @@ import (
 	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"github.com/tikv/pd/tools/pd-simulator/simulator"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
 
 var (
-	pdAddr                      = flag.String("pd-endpoints", "", "pd address")
-	configFile                  = flag.String("config", "conf/simconfig.toml", "config file")
-	caseName                    = flag.String("case", "", "case name")
-	serverLogLevel              = flag.String("serverLog", "info", "pd server log level")
-	simLogLevel                 = flag.String("simLog", "info", "simulator log level")
-	simLogFile                  = flag.String("log-file", "", "simulator log file")
-	regionNum                   = flag.Int("regionNum", 0, "regionNum of one store")
-	storeNum                    = flag.Int("storeNum", 0, "storeNum")
-	enableTransferRegionCounter = flag.Bool("enableTransferRegionCounter", false, "enableTransferRegionCounter")
-	statusAddress               = flag.String("status-addr", "0.0.0.0:20180", "status address")
+	pdAddr         = flag.String("pd-endpoints", "", "pd address")
+	configFile     = flag.String("config", "conf/simconfig.toml", "config file")
+	caseName       = flag.String("case", "", "case name")
+	serverLogLevel = flag.String("serverLog", "info", "pd server log level")
+	simLogLevel    = flag.String("simLog", "info", "simulator log level")
+	simLogFile     = flag.String("log-file", "", "simulator log file")
+	statusAddress  = flag.String("status-addr", "0.0.0.0:20180", "status address")
 )
 
 func main() {
@@ -63,14 +58,12 @@ func main() {
 	flag.Parse()
 
 	simutil.InitLogger(*simLogLevel, *simLogFile)
-	simutil.InitCaseConfig(*storeNum, *regionNum, *enableTransferRegionCounter)
 	statistics.Denoising = false
-	if simutil.CaseConfigure.EnableTransferRegionCounter {
-		analysis.GetTransferCounter().Init(simutil.CaseConfigure.StoreNum, simutil.CaseConfigure.RegionNum)
-	}
-
 	schedulers.Register() // register schedulers, which is needed by simConfig.Adjust
-	simConfig := simulator.NewSimConfig(*serverLogLevel)
+	simConfig := sc.NewSimConfig(*serverLogLevel)
+	if simConfig.EnableTransferRegionCounter {
+		analysis.GetTransferCounter().Init(simConfig.TotalStore, simConfig.TotalRegion)
+	}
 	var meta toml.MetaData
 	var err error
 	if *configFile != "" {
@@ -97,10 +90,9 @@ func main() {
 	}
 }
 
-func run(simCase string, simConfig *simulator.SimConfig) {
+func run(simCase string, simConfig *sc.SimConfig) {
 	if *pdAddr != "" {
-		go runHTTPServer()
-		simStart(*pdAddr, simCase, simConfig)
+		simStart(*pdAddr, *statusAddress, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
 		err := local.Run()
@@ -113,30 +105,12 @@ func run(simCase string, simConfig *simulator.SimConfig) {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		simStart(local.GetAddr(), simCase, simConfig, clean)
+		simStart(local.GetAddr(), "", simCase, simConfig, clean)
 	}
-}
-
-func runHTTPServer() {
-	http.Handle("/metrics", promhttp.Handler())
-	// profile API
-	http.HandleFunc("/pprof/profile", pprof.Profile)
-	http.HandleFunc("/pprof/trace", pprof.Trace)
-	http.HandleFunc("/pprof/symbol", pprof.Symbol)
-	http.Handle("/pprof/heap", pprof.Handler("heap"))
-	http.Handle("/pprof/mutex", pprof.Handler("mutex"))
-	http.Handle("/pprof/allocs", pprof.Handler("allocs"))
-	http.Handle("/pprof/block", pprof.Handler("block"))
-	http.Handle("/pprof/goroutine", pprof.Handler("goroutine"))
-	server := &http.Server{
-		Addr:              *statusAddress,
-		ReadHeaderTimeout: 3 * time.Second,
-	}
-	server.ListenAndServe()
 }
 
 // NewSingleServer creates a pd server for simulator.
-func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, testutil.CleanupFunc) {
+func NewSingleServer(ctx context.Context, simConfig *sc.SimConfig) (*server.Server, testutil.CleanupFunc) {
 	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps)
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
@@ -161,9 +135,9 @@ func cleanServer(cfg *config.Config) {
 	os.RemoveAll(cfg.DataDir)
 }
 
-func simStart(pdAddr string, simCase string, simConfig *simulator.SimConfig, clean ...testutil.CleanupFunc) {
+func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimConfig, clean ...testutil.CleanupFunc) {
 	start := time.Now()
-	driver, err := simulator.NewDriver(pdAddr, simCase, simConfig)
+	driver, err := simulator.NewDriver(pdAddr, statusAddress, simCase, simConfig)
 	if err != nil {
 		simutil.Logger.Fatal("create driver error", zap.Error(err))
 	}

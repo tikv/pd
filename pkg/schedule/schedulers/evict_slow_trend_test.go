@@ -105,7 +105,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrendBasicFuncs() {
 	re.Equal(slowCandidate{}, es2.conf.evictCandidate)
 	es2.conf.markCandidateRecovered()
 	lastCapturedCandidate = es2.conf.lastCapturedCandidate()
-	re.Greater(lastCapturedCandidate.recoverTS.Compare(recoverTS), 0)
+	re.Positive(lastCapturedCandidate.recoverTS.Compare(recoverTS))
 	re.Equal(lastCapturedCandidate.storeID, store.GetID())
 
 	// Test capture another store 2

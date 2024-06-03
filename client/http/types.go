@@ -661,3 +661,12 @@ func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
 		return keyspacepb.KeyspaceState(0), fmt.Errorf("invalid KeyspaceState string: %s", str)
 	}
 }
+
+// Health reflects the cluster's health.
+// NOTE: This type is moved from `server/api/health.go`, maybe move them to the same place later.
+type Health struct {
+	Name       string   `json:"name"`
+	MemberID   uint64   `json:"member_id"`
+	ClientUrls []string `json:"client_urls"`
+	Health     bool     `json:"health"`
+}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
@@ -68,9 +69,9 @@ const (
 	collectWaitTime       = time.Minute
 
 	// heartbeat relative const
-	heartbeatTaskRunner  = "heartbeat-task-runner"
-	statisticsTaskRunner = "statistics-task-runner"
-	logTaskRunner        = "log-task-runner"
+	heartbeatTaskRunner = "heartbeat-task-runner"
+	miscTaskRunner      = "misc-task-runner"
+	logTaskRunner       = "log-task-runner"
 )
 
 var syncRunner = ratelimit.NewSyncRunner()
@@ -99,7 +100,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		checkMembershipCh: checkMembershipCh,
 
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		miscRunner:      ratelimit.NewConcurrentRunner(statisticsTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
 	c.coordinator = schedule.NewCoordinator(ctx, c, hbStreams)
@@ -442,8 +443,7 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			utils.RegionWriteKeys:     0,
 			utils.RegionWriteQueryNum: 0,
 		}
-		peerInfo := core.NewPeerInfo(peer, loads, interval)
-		c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
+		c.hotStat.CheckReadAsync(statistics.NewCheckReadPeerTask(region, []*metapb.Peer{peer}, loads, interval))
 	}
 
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
@@ -521,7 +521,7 @@ func (c *Cluster) collectMetrics() {
 	// collect hot cache metrics
 	c.hotStat.CollectMetrics()
 	// collect the lock metrics
-	c.RegionsInfo.CollectWaitLockMetrics()
+	c.CollectWaitLockMetrics()
 }
 
 func resetMetrics() {
@@ -686,16 +686,6 @@ func (c *Cluster) IsPrepared() bool {
 // SetPrepared set the prepare check to prepared. Only for test purpose.
 func (c *Cluster) SetPrepared() {
 	c.coordinator.GetPrepareChecker().SetPrepared()
-}
-
-// DropCacheAllRegion removes all cached regions.
-func (c *Cluster) DropCacheAllRegion() {
-	c.ResetRegionCache()
-}
-
-// DropCacheRegion removes a region from the cache.
-func (c *Cluster) DropCacheRegion(id uint64) {
-	c.RemoveRegionIfExist(id)
 }
 
 // IsSchedulingHalted returns whether the scheduling is halted.
