@@ -88,7 +88,7 @@ type CheckerConfigProvider interface {
 	GetIsolationLevel() string
 	GetSplitMergeInterval() time.Duration
 	GetPatrolRegionInterval() time.Duration
-	GetPatrolRegionConcurrency() int
+	GetPatrolRegionWorkerCount() int
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
 	GetReplicaScheduleLimit() uint64

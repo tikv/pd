@@ -63,7 +63,7 @@ const (
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
 	defaultStoreLimitVersion         = "v1"
-	defaultPatrolRegionConcurrency   = 1
+	defaultPatrolRegionWorkerCount   = 1
 	// DefaultSplitMergeInterval is the default value of config split merge interval.
 	DefaultSplitMergeInterval      = time.Hour
 	defaultSwitchWitnessInterval   = time.Hour
@@ -307,8 +307,8 @@ type ScheduleConfig struct {
 	// and any other scheduling configs will be ignored.
 	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
 
-	// PatrolRegionConcurrency is the number of workers to patrol region.
-	PatrolRegionConcurrency uint64 `toml:"patrol-worker-count" json:"patrol-worker-count"`
+	// PatrolRegionWorkerCount is the number of workers to patrol region.
+	PatrolRegionWorkerCount int `toml:"patrol-region-worker-count" json:"patrol-region-worker-count"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -379,7 +379,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
 	}
 	if !meta.IsDefined("patrol-worker-count") {
-		configutil.AdjustUint64(&c.PatrolRegionConcurrency, defaultPatrolRegionConcurrency)
+		configutil.AdjustInt(&c.PatrolRegionWorkerCount, defaultPatrolRegionWorkerCount)
 	}
 
 	if !meta.IsDefined("enable-joint-consensus") {

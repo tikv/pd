@@ -40,19 +40,10 @@ var (
 			Name:      "patrol_regions_time",
 			Help:      "Time spent of patrol checks region.",
 		})
-
-	patrolCheckRegionsChanLenGauge = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "checker",
-			Name:      "patrol_regions_chan_len",
-			Help:      "Time channel length of patrol checks region.",
-		})
 )
 
 func init() {
 	prometheus.MustRegister(hotSpotStatusGauge)
 	prometheus.MustRegister(regionListGauge)
 	prometheus.MustRegister(patrolCheckRegionsGauge)
-	prometheus.MustRegister(patrolCheckRegionsChanLenGauge)
 }
