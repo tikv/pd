@@ -1294,6 +1294,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 		if r == nil {
 			return false
 		}
+		region.Leader = peers[0]
 		return reflect.DeepEqual(region, r.Meta) &&
 			reflect.DeepEqual(peers[0], r.Leader) &&
 			r.Buckets == nil
@@ -1375,6 +1376,7 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			re.NoError(err)
 			if i > 0 && i < regionLen {
+				regions[i-1].Leader = peers[0]
 				return reflect.DeepEqual(peers[0], r.Leader) &&
 					reflect.DeepEqual(regions[i-1], r.Meta)
 			}
@@ -1416,6 +1418,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 	})
 
 	// Set leader of region3 to nil.
+	regions[3].Leader = nil
 	region3 := core.NewRegionInfo(regions[3])
 	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
 
@@ -1437,6 +1440,9 @@ func (suite *clientTestSuite) TestScanRegions() {
 		t.Log("scanRegions", scanRegions)
 		t.Log("expect", expect)
 		for i := range expect {
+			if scanRegions[i].Meta.GetId() != region3.GetID() {
+				expect[i].Leader = expect[i].Peers[0]
+			}
 			re.Equal(expect[i], scanRegions[i].Meta)
 
 			if scanRegions[i].Meta.GetId() == region3.GetID() {
@@ -1487,6 +1493,7 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 		if r == nil {
 			return false
 		}
+		region.Leader = peers[0]
 		return reflect.DeepEqual(region, r.Meta) &&
 			reflect.DeepEqual(peers[0], r.Leader)
 	})

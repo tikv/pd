@@ -306,7 +306,7 @@ func TestRegionNoLeader(t *testing.T) {
 			{Id: 6, StoreId: 3}},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}
-	r := core.NewRegionInfo(metaRegion, nil)
+	r := core.NewRegionInfo(metaRegion)
 
 	cluster.GetLeaderServer().GetRaftCluster().GetBasicCluster().SetRegion(r)
 
