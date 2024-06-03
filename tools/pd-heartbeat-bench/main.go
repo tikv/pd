@@ -484,7 +484,6 @@ func main() {
 		log.Fatal("initialize logger error", zap.Error(err))
 	}
 
-	metrics.InitMetric2Collect(cfg.MetricsAddr)
 	maxVersion = cfg.InitEpochVer
 	options := config.NewOptions(cfg)
 	// let PD have enough time to start
@@ -531,11 +530,11 @@ func main() {
 	defer heartbeatTicker.Stop()
 	var resolvedTSTicker = time.NewTicker(time.Second)
 	defer resolvedTSTicker.Stop()
+	withMetric := metrics.InitMetric2Collect(cfg.MetricsAddr)
 	for {
 		select {
 		case <-heartbeatTicker.C:
 			if cfg.Round != 0 && regions.updateRound > cfg.Round {
-				metrics.OutputConclusion()
 				exit(0)
 			}
 			rep := newReport(cfg)
@@ -548,21 +547,17 @@ func main() {
 				wg.Add(1)
 				go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
 			}
-			go metrics.CollectMetrics(regions.updateRound, 1*time.Second)
+			if withMetric {
+				metrics.CollectMetrics(regions.updateRound, time.Second)
+			}
 			wg.Wait()
 
 			since := time.Since(startTime).Seconds()
 			close(rep.Results())
 			regions.result(cfg.RegionCount, since)
 			stats := <-r
-			log.Info("region heartbeat stats", zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
-				zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
-				zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
-				zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
-				zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
-				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
-				zap.Uint64("max-epoch-version", maxVersion),
-			)
+			log.Info("region heartbeat stats",
+				metrics.RegionFields(stats, zap.Uint64("max-epoch-version", maxVersion))...)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
 			metrics.CollectRegionAndStoreStats(&stats, &since)
 			regions.update(cfg, options)
@@ -600,6 +595,7 @@ func main() {
 }
 
 func exit(code int) {
+	metrics.OutputConclusion()
 	os.Exit(code)
 }
 
@@ -695,7 +691,7 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 
 		c.IndentedJSON(http.StatusOK, output)
 	})
-	engine.GET("metrics_collect", func(c *gin.Context) {
+	engine.GET("metrics-collect", func(c *gin.Context) {
 		second := c.Query("second")
 		if second == "" {
 			c.String(http.StatusBadRequest, "missing second")
@@ -706,7 +702,6 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 			c.String(http.StatusBadRequest, "invalid second")
 			return
 		}
-		metrics.InitMetric2Collect(cfg.MetricsAddr)
 		metrics.CollectMetrics(metrics.WarmUpRound, time.Duration(secondInt)*time.Second)
 		c.IndentedJSON(http.StatusOK, "Successfully collect metrics")
 	})
