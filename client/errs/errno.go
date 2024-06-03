@@ -25,7 +25,7 @@ const (
 	// NoLeaderErr indicates there is no leader in the cluster currently.
 	NoLeaderErr = "no leader"
 	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
-	NotLeaderErr = "is not leader"
+	NotLeaderErr = "not leader"
 	// MismatchLeaderErr indicates the non-leader member received the requests which should be received by leader.
 	MismatchLeaderErr = "mismatch leader id"
 	// NotServedErr indicates an tso node/pod received the requests for the keyspace groups which are not served by it.
@@ -33,7 +33,7 @@ const (
 	// RetryTimeoutErr indicates the server is busy.
 	RetryTimeoutErr = "retry timeout"
 	// NotPrimaryErr indicates the non-primary member received the requests which should be received by primary.
-	NotPrimaryErr = "is not primary"
+	NotPrimaryErr = "not primary"
 )
 
 // client errors

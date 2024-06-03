@@ -210,7 +210,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		leader := h.waitForLeader(r)
 		// The leader has not been elected yet.
 		if leader == nil {
-			http.Error(w, "no leader", http.StatusServiceUnavailable)
+			http.Error(w, errs.ErrRedirectNoLeader.FastGenByArgs().Error(), http.StatusServiceUnavailable)
 			return
 		}
 		// If the leader is the current server now, we can handle the request directly.

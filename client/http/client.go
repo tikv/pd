@@ -128,8 +128,8 @@ func (ci *clientInner) requestWithRetry(
 	)
 	execFunc := func() error {
 		defer func() {
-			// - If the status code is 503, it indicates that there may be PD leader/follower changes.
-			// - If the error message contains the leader/primary change information, it indicates that there may be PD leader/primary change.
+			// If the status code is 503, it indicates that there may be PD leader/follower changes.
+			// If the error message contains the leader/primary change information, it indicates that there may be PD leader/primary change.
 			if statusCode == http.StatusServiceUnavailable || errs.IsLeaderChange(err) {
 				ci.sd.ScheduleCheckMemberChanged()
 			}
@@ -243,6 +243,8 @@ func (ci *clientInner) doRequest(
 		if readErr != nil {
 			logFields = append(logFields, zap.NamedError("read-body-error", err))
 		} else {
+			// API server will return a JSON body containing the detailed error message
+			// when the status code is not `http.StatusOK` 200.
 			bs = bytes.TrimSpace(bs)
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
