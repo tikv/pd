@@ -112,7 +112,7 @@ func TestLeaveJointState(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers}, testCase.Peers[0])
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers, Leader: testCase.Peers[0]})
 		op := jsc.Check(region)
 		checkSteps(re, op, testCase.OpSteps)
 	}

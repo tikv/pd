@@ -37,7 +37,7 @@ func TestGetLoads(t *testing.T) {
 		Prewrite:               13,
 		Commit:                 14,
 	}
-	regionA := core.NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{}}, nil,
+	regionA := core.NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{}},
 		core.SetReadBytes(1),
 		core.SetReadKeys(2),
 		core.SetWrittenBytes(3),

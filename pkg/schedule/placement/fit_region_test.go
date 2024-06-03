@@ -100,8 +100,8 @@ func mockRegion(votersNum, learnerNums int) *core.RegionInfo {
 				ConfVer: 0,
 				Version: 0,
 			},
+			Leader: &metapb.Peer{Id: 1, StoreId: 1},
 		},
-		&metapb.Peer{Id: 1, StoreId: 1},
 	)
 	return region
 }

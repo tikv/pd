@@ -21,7 +21,6 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
@@ -178,19 +177,14 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				stats := resp.GetRegionStats()
 				regions := resp.GetRegions()
 				buckets := resp.GetBuckets()
-				regionLeaders := resp.GetRegionLeaders()
 				hasStats := len(stats) == len(regions)
 				hasBuckets := len(buckets) == len(regions)
 				for i, r := range regions {
 					var (
-						region       *core.RegionInfo
-						regionLeader *metapb.Peer
+						region *core.RegionInfo
 					)
-					if len(regionLeaders) > i && regionLeaders[i].GetId() != 0 {
-						regionLeader = regionLeaders[i]
-					}
 					if hasStats {
-						region = core.NewRegionInfo(r, regionLeader,
+						region = core.NewRegionInfo(r,
 							core.SetWrittenBytes(stats[i].BytesWritten),
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
@@ -198,7 +192,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 							core.SetSource(core.Sync),
 						)
 					} else {
-						region = core.NewRegionInfo(r, regionLeader, core.SetSource(core.Sync))
+						region = core.NewRegionInfo(r, core.SetSource(core.Sync))
 					}
 
 					origin, _, err := bc.PreCheckPutRegion(region)

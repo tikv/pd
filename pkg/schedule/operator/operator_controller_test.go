@@ -853,8 +853,8 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 			StartKey: start,
 			EndKey:   end,
 			Peers:    prs,
+			Leader:   &metapb.Peer{Id: leader[0], StoreId: leader[1]},
 		},
-		&metapb.Peer{Id: leader[0], StoreId: leader[1]},
 		core.SetApproximateSize(size),
 		core.SetApproximateKeys(keys),
 	)

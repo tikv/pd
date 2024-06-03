@@ -64,7 +64,7 @@ func (suite *operatorBuilderTestSuite) TearDownTest() {
 func (suite *operatorBuilderTestSuite) TestNewBuilder() {
 	re := suite.Require()
 	peers := []*metapb.Peer{{Id: 11, StoreId: 1}, {Id: 12, StoreId: 2, Role: metapb.PeerRole_Learner}}
-	region := core.NewRegionInfo(&metapb.Region{Id: 42, Peers: peers}, peers[0])
+	region := core.NewRegionInfo(&metapb.Region{Id: 42, Peers: peers, Leader: peers[0]})
 	builder := NewBuilder("test", suite.cluster, region)
 	re.NoError(builder.err)
 	re.Len(builder.originPeers, 2)
@@ -86,7 +86,7 @@ func (suite *operatorBuilderTestSuite) newBuilder() *Builder {
 		{Id: 12, StoreId: 2},
 		{Id: 13, StoreId: 3, Role: metapb.PeerRole_Learner},
 	}
-	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[0])
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers, Leader: peers[0]})
 	return NewBuilder("test", suite.cluster, region)
 }
 
@@ -539,7 +539,7 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
-		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.originPeers}, testCase.originPeers[0])
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.originPeers, Leader: testCase.originPeers[0]})
 		builder := NewBuilder("test", suite.cluster, region)
 		builder.useJointConsensus = testCase.useJointConsensus
 		m := make(map[uint64]*metapb.Peer)
@@ -595,23 +595,23 @@ func (suite *operatorBuilderTestSuite) TestTargetUnhealthyPeer() {
 	re := suite.Require()
 	p := &metapb.Peer{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}
 	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
-		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
+		p}, Leader: &metapb.Peer{Id: 1, StoreId: 1}}, core.WithPendingPeers([]*metapb.Peer{p}))
 	builder := NewBuilder("test", suite.cluster, region)
 	builder.PromoteLearner(2)
 	re.Error(builder.err)
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
-		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
+		p}, Leader: &metapb.Peer{Id: 1, StoreId: 1}}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.PromoteLearner(2)
 	re.Error(builder.err)
 	p = &metapb.Peer{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
-		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithPendingPeers([]*metapb.Peer{p}))
+		p}, Leader: &metapb.Peer{Id: 1, StoreId: 1}}, core.WithPendingPeers([]*metapb.Peer{p}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.SetLeader(2)
 	re.Error(builder.err)
 	region = core.NewRegionInfo(&metapb.Region{Id: 1, Peers: []*metapb.Peer{{Id: 1, StoreId: 1},
-		p}}, &metapb.Peer{Id: 1, StoreId: 1}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
+		p}, Leader: &metapb.Peer{Id: 1, StoreId: 1}}, core.WithDownPeers([]*pdpb.PeerStats{{Peer: p}}))
 	builder = NewBuilder("test", suite.cluster, region)
 	builder.SetLeader(2)
 	re.Error(builder.err)

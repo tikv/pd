@@ -137,7 +137,7 @@ func newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, vote
 			EndKey:      []byte(endKey),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: confVer, Version: ver},
 			Peers:       peers,
+			Leader:      leader,
 		},
-		leader,
 	)
 }

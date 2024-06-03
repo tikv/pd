@@ -48,17 +48,12 @@ func TestValidRequestRegion(t *testing.T) {
 	rc := leaderServer.GetRaftCluster()
 
 	r1 := core.NewRegionInfo(&metapb.Region{
-		Id:       1,
-		StartKey: []byte(""),
-		EndKey:   []byte("a"),
-		Peers: []*metapb.Peer{{
-			Id:      1,
-			StoreId: 1,
-		}},
+		Id:          1,
+		StartKey:    []byte(""),
+		EndKey:      []byte("a"),
+		Peers:       []*metapb.Peer{{Id: 1, StoreId: 1}},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
-	}, &metapb.Peer{
-		Id:      1,
-		StoreId: 1,
+		Leader:      &metapb.Peer{Id: 1, StoreId: 1},
 	})
 	err = rc.HandleRegionHeartbeat(r1)
 	re.NoError(err)

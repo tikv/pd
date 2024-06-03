@@ -1995,7 +1995,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 					"region %d not found"),
 			}, nil
 		}
-		region = core.NewRegionInfo(request.GetRegion(), request.GetLeader())
+		region = core.NewRegionInfo(request.GetRegion(), core.WithLeader(request.GetLeader()))
 	}
 
 	op, err := rc.GetRegionScatterer().Scatter(region, request.GetGroup(), request.GetSkipStoreLimit())

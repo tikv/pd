@@ -1328,17 +1328,17 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	peers1 := []*metapb.Peer{
 		{Id: 102, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 103, StoreId: 2, Role: metapb.PeerRole_Voter}}
-	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}}, peers1[0],
+	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers1, RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1}, Leader: peers1[0]},
 		core.WithStartKey([]byte("abc")), core.WithEndKey([]byte("def"))))
 	peers2 := []*metapb.Peer{
 		{Id: 104, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 105, StoreId: 2, Role: metapb.PeerRole_Learner}}
-	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers2, RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}, peers2[0],
+	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers2, RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}, Leader: peers2[0]},
 		core.WithStartKey([]byte("ghi")), core.WithEndKey([]byte("jkl"))))
 	peers3 := []*metapb.Peer{
 		{Id: 106, StoreId: 1, Role: metapb.PeerRole_Voter},
 		{Id: 107, StoreId: 2, Role: metapb.PeerRole_Learner}}
-	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 3, Peers: peers3, RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 3}}, peers3[0],
+	regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: 3, Peers: peers3, RegionEpoch: &metapb.RegionEpoch{ConfVer: 3, Version: 3}, Leader: peers3[0]},
 		core.WithStartKey([]byte("mno")), core.WithEndKey([]byte("pqr"))))
 	for _, rg := range regions {
 		tests.MustPutRegionInfo(re, cluster, rg)

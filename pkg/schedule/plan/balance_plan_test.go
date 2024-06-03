@@ -82,28 +82,28 @@ func (suite *balanceSchedulerPlanAnalyzeTestSuite) SetupSuite() {
 		core.NewRegionInfo(
 			&metapb.Region{
 				Id: 1,
-			},
-			&metapb.Peer{
-				Id:      1,
-				StoreId: 1,
+				Leader: &metapb.Peer{
+					Id:      1,
+					StoreId: 1,
+				},
 			},
 		),
 		core.NewRegionInfo(
 			&metapb.Region{
 				Id: 2,
-			},
-			&metapb.Peer{
-				Id:      2,
-				StoreId: 2,
+				Leader: &metapb.Peer{
+					Id:      2,
+					StoreId: 2,
+				},
 			},
 		),
 		core.NewRegionInfo(
 			&metapb.Region{
 				Id: 3,
-			},
-			&metapb.Peer{
-				Id:      3,
-				StoreId: 3,
+				Leader: &metapb.Peer{
+					Id:      3,
+					StoreId: 3,
+				},
 			},
 		),
 	}

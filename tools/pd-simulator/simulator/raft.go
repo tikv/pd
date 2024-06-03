@@ -62,6 +62,7 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimCo
 			Id:          region.ID,
 			Peers:       region.Peers,
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+			Leader:      region.Leader,
 		}
 		if i > 0 {
 			meta.StartKey = []byte(splitKeys[i-1])
@@ -72,7 +73,6 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimCo
 		regionSize := storeConfig.Coprocessor.RegionSplitSize
 		regionInfo := core.NewRegionInfo(
 			meta,
-			region.Leader,
 			core.SetApproximateSize(int64(regionSize)),
 			core.SetApproximateKeys(int64(storeConfig.Coprocessor.RegionSplitKey)),
 		)

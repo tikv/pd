@@ -96,7 +96,7 @@ func WithLearners(learners []*metapb.Peer) RegionCreateOption {
 // WithLeader sets the leader for the region.
 func WithLeader(leader *metapb.Peer) RegionCreateOption {
 	return func(region *RegionInfo) {
-		region.leader = leader
+		region.meta.Leader = leader
 	}
 }
 

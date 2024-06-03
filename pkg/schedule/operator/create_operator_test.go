@@ -136,12 +136,14 @@ func (suite *createOperatorTestSuite) TestCreateSplitRegionOperator() {
 	}
 
 	for _, testCase := range testCases {
-		region := core.NewRegionInfo(&metapb.Region{
-			Id:       1,
-			StartKey: testCase.startKey,
-			EndKey:   testCase.endKey,
-			Peers:    testCase.originPeers,
-		}, testCase.originPeers[0])
+		region := core.NewRegionInfo(
+			&metapb.Region{
+				Id:       1,
+				StartKey: testCase.startKey,
+				EndKey:   testCase.endKey,
+				Peers:    testCase.originPeers,
+				Leader:   testCase.originPeers[0],
+			})
 		op, err := CreateSplitRegionOperator("test", region, 0, testCase.policy, testCase.keys)
 		if testCase.expectedError {
 			re.Error(err)
@@ -291,8 +293,8 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 	}
 
 	for _, testCase := range testCases {
-		source := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.sourcePeers}, testCase.sourcePeers[0])
-		target := core.NewRegionInfo(&metapb.Region{Id: 86, Peers: testCase.targetPeers}, testCase.targetPeers[0])
+		source := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.sourcePeers, Leader: testCase.sourcePeers[0]})
+		target := core.NewRegionInfo(&metapb.Region{Id: 86, Peers: testCase.targetPeers, Leader: testCase.targetPeers[0]})
 		ops, err := CreateMergeRegionOperator("test", suite.cluster, source, target, 0)
 		if testCase.expectedError {
 			re.Error(err)
@@ -422,7 +424,7 @@ func (suite *createOperatorTestSuite) TestCreateTransferLeaderOperator() {
 		},
 	}
 	for _, testCase := range testCases {
-		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.originPeers}, testCase.originPeers[0])
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.originPeers, Leader: testCase.originPeers[0]})
 		op, err := CreateTransferLeaderOperator("test", suite.cluster, region, testCase.targetLeaderStoreID, []uint64{}, 0)
 
 		if testCase.isErr {
@@ -594,7 +596,7 @@ func (suite *createOperatorTestSuite) TestCreateLeaveJointStateOperator() {
 			}
 		}
 
-		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.originPeers}, testCase.originPeers[0])
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.originPeers, Leader: testCase.originPeers[0]})
 		op, err := CreateLeaveJointStateOperator("test", suite.cluster, region)
 		if len(testCase.steps) == 0 {
 			re.Error(err)
@@ -933,7 +935,7 @@ func (suite *createOperatorTestSuite) TestCreateMoveRegionOperator() {
 	}
 	for _, testCase := range testCases {
 		suite.T().Log((testCase.name))
-		region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: testCase.originPeers}, testCase.originPeers[0])
+		region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: testCase.originPeers, Leader: testCase.originPeers[0]})
 		op, err := CreateMoveRegionOperator("test", suite.cluster, region, OpAdmin, testCase.targetPeerRoles)
 
 		if testCase.expectedError == nil {
@@ -1109,7 +1111,7 @@ func (suite *createOperatorTestSuite) TestMoveRegionWithoutJointConsensus() {
 	suite.cluster.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
-		region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: testCase.originPeers}, testCase.originPeers[0])
+		region := core.NewRegionInfo(&metapb.Region{Id: 10, Peers: testCase.originPeers, Leader: testCase.originPeers[0]})
 		op, err := CreateMoveRegionOperator("test", suite.cluster, region, OpAdmin, testCase.targetPeerRoles)
 
 		if testCase.expectedError == nil {
@@ -1184,7 +1186,7 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 		{Id: 4, StoreId: 4, Role: metapb.PeerRole_IncomingVoter},
 	}
 
-	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: originPeers, StartKey: []byte("a"), EndKey: []byte("c")}, originPeers[0])
+	region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: originPeers, StartKey: []byte("a"), EndKey: []byte("c"), Leader: originPeers[0]})
 	op, err := CreateLeaveJointStateOperator("test", cluster, region)
 	re.NoError(err)
 	re.Equal(OpLeader, op.Kind())
@@ -1239,7 +1241,7 @@ func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 	}
 
 	for _, testCase := range testCases {
-		region := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.originPeers}, testCase.originPeers[0])
+		region := core.NewRegionInfo(&metapb.Region{Id: 68, Peers: testCase.originPeers, Leader: testCase.originPeers[0]})
 		op, err := CreateNonWitnessPeerOperator("test", suite.cluster, region, testCase.originPeers[1])
 		re.NoError(err)
 		re.NotNil(op)

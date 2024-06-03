@@ -976,6 +976,7 @@ func createRegionForRuleFit(startKey, endKey []byte,
 		StartKey: startKey,
 		EndKey:   endKey,
 		Peers:    copyPeers,
-	}, copyLeader, config...)
+		Leader:   copyLeader,
+	}, config...)
 	return cloneRegion
 }

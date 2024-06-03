@@ -43,7 +43,7 @@ func TestIsRegionHealthy(t *testing.T) {
 	}
 
 	region := func(peers []*metapb.Peer, opts ...core.RegionCreateOption) *core.RegionInfo {
-		return core.NewRegionInfo(&metapb.Region{Peers: peers}, peers[0], opts...)
+		return core.NewRegionInfo(&metapb.Region{Peers: peers, Leader: peers[0]}, opts...)
 	}
 
 	type testCase struct {

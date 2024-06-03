@@ -53,9 +53,10 @@ func TestSplitBucket(t *testing.T) {
 			Peers:    peers,
 			StartKey: []byte(fmt.Sprintf("%20d", i*10+1)),
 			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
+			Leader:   peers[0],
 		}
 
-		region := core.NewRegionInfo(metaRegion, peers[0], core.SetApproximateSize(600))
+		region := core.NewRegionInfo(metaRegion, core.SetApproximateSize(600))
 		tc.PutRegion(region)
 	}
 

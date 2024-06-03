@@ -288,7 +288,8 @@ func TestShuffleRegionRole(t *testing.T) {
 		Id:          1,
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 		Peers:       peers,
-	}, peers[0])
+		Leader:      peers[0],
+	})
 	tc.PutRegion(region)
 
 	sl, err := CreateScheduler(ShuffleRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(ShuffleRegionType, []string{"", ""}))

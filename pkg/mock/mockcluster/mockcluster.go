@@ -790,11 +790,12 @@ func (mc *Cluster) PutRegionStores(id uint64, stores ...uint64) {
 		Id:       id,
 		StartKey: []byte(strconv.FormatUint(id, 10)),
 		EndKey:   []byte(strconv.FormatUint(id+1, 10)),
+		Leader:   &metapb.Peer{StoreId: stores[0]},
 	}
 	for _, s := range stores {
 		meta.Peers = append(meta.Peers, &metapb.Peer{StoreId: s})
 	}
-	mc.PutRegion(core.NewRegionInfo(meta, &metapb.Peer{StoreId: stores[0]}))
+	mc.PutRegion(core.NewRegionInfo(meta))
 }
 
 // PutStoreWithLabels mocks method.
@@ -820,6 +821,7 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 	if leaderStoreID != 0 {
 		leader, _ = mc.AllocPeer(leaderStoreID)
 		region.Peers = append(region.Peers, leader)
+		region.Leader = leader
 	}
 	for _, storeID := range followerStoreIDs {
 		peer, _ := mc.AllocPeer(storeID)
@@ -830,7 +832,7 @@ func (mc *Cluster) MockRegionInfo(regionID uint64, leaderStoreID uint64,
 		peer.Role = metapb.PeerRole_Learner
 		region.Peers = append(region.Peers, peer)
 	}
-	return core.NewRegionInfo(region, leader)
+	return core.NewRegionInfo(region)
 }
 
 // SetStoreLabel set the labels to the target store

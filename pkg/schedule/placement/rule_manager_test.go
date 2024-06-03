@@ -241,7 +241,7 @@ func TestKeys(t *testing.T) {
 		{{"11", "33"}},
 	}
 	for _, keys := range regionKeys {
-		region := core.NewRegionInfo(&metapb.Region{StartKey: dhex(keys[0][0]), EndKey: dhex(keys[0][1])}, nil)
+		region := core.NewRegionInfo(&metapb.Region{StartKey: dhex(keys[0][0]), EndKey: dhex(keys[0][1])})
 		rules := manager.GetRulesForApplyRegion(region)
 		re.Len(rules, len(keys)-1)
 		for i := range rules {
@@ -456,19 +456,20 @@ func TestCacheManager(t *testing.T) {
 	rules := addExtraRules(0)
 	re.NoError(manager.SetRules(rules))
 	stores := makeStores()
-
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1111, Role: metapb.PeerRole_Voter},
+		{Id: 12, StoreId: 2111, Role: metapb.PeerRole_Voter},
+		{Id: 13, StoreId: 3111, Role: metapb.PeerRole_Voter},
+	}
 	regionMeta := &metapb.Region{
 		Id:          1,
 		StartKey:    []byte(""),
 		EndKey:      []byte(""),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 0, Version: 0},
-		Peers: []*metapb.Peer{
-			{Id: 11, StoreId: 1111, Role: metapb.PeerRole_Voter},
-			{Id: 12, StoreId: 2111, Role: metapb.PeerRole_Voter},
-			{Id: 13, StoreId: 3111, Role: metapb.PeerRole_Voter},
-		},
+		Peers:       peers,
+		Leader:      peers[0],
 	}
-	region := core.NewRegionInfo(regionMeta, regionMeta.Peers[0])
+	region := core.NewRegionInfo(regionMeta)
 	fit := manager.FitRegion(stores, region)
 	manager.SetRegionFitCache(region, fit)
 	// bestFit is not stored when the total number of hits is insufficient.
@@ -488,7 +489,7 @@ func TestCacheManager(t *testing.T) {
 	re.NotNil(cache.bestFit)
 	// Cache invalidation after change
 	regionMeta.Peers[2] = &metapb.Peer{Id: 14, StoreId: 4111, Role: metapb.PeerRole_Voter}
-	region = core.NewRegionInfo(regionMeta, regionMeta.Peers[0])
+	region = core.NewRegionInfo(regionMeta)
 	re.False(manager.IsRegionFitCached(stores, region))
 }
 

@@ -61,7 +61,6 @@ type RegionInfo struct {
 	learners          []*metapb.Peer
 	witnesses         []*metapb.Peer
 	voters            []*metapb.Peer
-	leader            *metapb.Peer
 	downPeers         []*pdpb.PeerStats
 	pendingPeers      []*metapb.Peer
 	cpuUsage          uint64
@@ -123,10 +122,9 @@ func (r *RegionInfo) GetRef() int32 {
 }
 
 // NewRegionInfo creates RegionInfo with region's meta and leader peer.
-func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCreateOption) *RegionInfo {
+func NewRegionInfo(region *metapb.Region, opts ...RegionCreateOption) *RegionInfo {
 	regionInfo := &RegionInfo{
-		meta:   region,
-		leader: leader,
+		meta: region,
 	}
 	for _, opt := range opts {
 		opt(regionInfo)
@@ -162,7 +160,7 @@ func classifyVoterAndLearner(region *RegionInfo) {
 // peersEqualTo returns true when the peers are not changed, which may caused by: the region leader not changed,
 // peer transferred, new peer was created, learners changed, pendingPeers changed.
 func (r *RegionInfo) peersEqualTo(region *RegionInfo) bool {
-	return r.leader.GetId() == region.leader.GetId() &&
+	return r.GetLeader().GetId() == region.GetLeader().GetId() &&
 		SortedPeersEqual(r.GetVoters(), region.GetVoters()) &&
 		SortedPeersEqual(r.GetLearners(), region.GetLearners()) &&
 		SortedPeersEqual(r.GetWitnesses(), region.GetWitnesses()) &&
@@ -226,7 +224,6 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateO
 	region := &RegionInfo{
 		term:            heartbeat.GetTerm(),
 		meta:            heartbeat.GetRegion(),
-		leader:          heartbeat.GetLeader(),
 		downPeers:       heartbeat.GetDownPeers(),
 		pendingPeers:    heartbeat.GetPendingPeers(),
 		writtenBytes:    heartbeat.GetBytesWritten(),
@@ -239,6 +236,7 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateO
 		queryStats:      heartbeat.GetQueryStats(),
 		source:          Heartbeat,
 	}
+	region.meta.Leader = heartbeat.GetLeader()
 
 	// scheduling service doesn't need the following fields.
 	if h, ok := heartbeat.(*pdpb.RegionHeartbeatRequest); ok {
@@ -298,7 +296,6 @@ func (r *RegionInfo) Clone(opts ...RegionCreateOption) *RegionInfo {
 	region := &RegionInfo{
 		term:              r.term,
 		meta:              typeutil.DeepClone(r.meta, RegionFactory),
-		leader:            typeutil.DeepClone(r.leader, RegionPeerFactory),
 		downPeers:         downPeers,
 		pendingPeers:      pendingPeers,
 		cpuUsage:          r.cpuUsage,
@@ -477,7 +474,7 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 	peers := r.GetVoters()
 	followers := make(map[uint64]*metapb.Peer, len(peers))
 	for _, peer := range peers {
-		if r.leader == nil || r.leader.GetId() != peer.GetId() {
+		if r.GetLeader() == nil || r.GetLeader().GetId() != peer.GetId() {
 			followers[peer.GetStoreId()] = peer
 		}
 	}
@@ -487,7 +484,7 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 // GetFollower randomly returns a follow peer.
 func (r *RegionInfo) GetFollower() *metapb.Peer {
 	for _, peer := range r.GetVoters() {
-		if r.leader == nil || r.leader.GetId() != peer.GetId() {
+		if r.GetLeader() == nil || r.GetLeader().GetId() != peer.GetId() {
 			return peer
 		}
 	}
@@ -680,7 +677,7 @@ func (r *RegionInfo) GetWriteRate() (bytesRate, keysRate float64) {
 
 // GetLeader returns the leader of the region.
 func (r *RegionInfo) GetLeader() *metapb.Peer {
-	return r.leader
+	return r.meta.Leader
 }
 
 // GetStartKey returns the start key of the region.
@@ -812,7 +809,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 					)
 				}
 				// We check it first and do not return because the log is important for us to investigate,
-				saveCache, needSync = true, true
+				saveKV, saveCache, needSync = true, true, true
 			}
 			if len(region.GetPeers()) != len(origin.GetPeers()) {
 				saveKV, saveCache = true, true
@@ -1147,7 +1144,7 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 	}
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
-		if peer.GetId() == region.leader.GetId() {
+		if peer.GetId() == region.GetLeader().GetId() {
 			setPeer(r.leaders, storeID)
 		} else {
 			setPeer(r.followers, storeID)
@@ -1286,7 +1283,7 @@ func (r *RegionsInfo) updateSubTreeStat(origin *RegionInfo, region *RegionInfo) 
 	}
 	for _, peer := range region.GetVoters() {
 		storeID := peer.GetStoreId()
-		if peer.GetId() == region.leader.GetId() {
+		if peer.GetId() == region.GetLeader().GetId() {
 			updatePeerStat(r.leaders, storeID)
 		} else {
 			updatePeerStat(r.followers, storeID)
@@ -2170,7 +2167,7 @@ func MergeRegions(regions []*RegionInfo) []*RegionInfo {
 			region.meta.RegionEpoch = right.GetRegionEpoch()
 		}
 		region.meta.RegionEpoch.Version++
-		region.leader = left.leader
+		region.meta.Leader = left.GetLeader()
 		results = append(results, region)
 	}
 	return results
@@ -2188,6 +2185,7 @@ func NewTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...Regi
 		EndKey:      end,
 		Peers:       []*metapb.Peer{leader},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Leader:      leader,
 	}
-	return NewRegionInfo(metaRegion, leader, opts...)
+	return NewRegionInfo(metaRegion, opts...)
 }

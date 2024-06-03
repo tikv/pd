@@ -571,7 +571,7 @@ func (suite *operatorStepTestSuite) TestSwitchToWitness() {
 func (suite *operatorStepTestSuite) check(re *require.Assertions, step OpStep, desc string, testCases []testCase) {
 	re.Equal(desc, step.String())
 	for _, testCase := range testCases {
-		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers}, testCase.Peers[0])
+		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.Peers, Leader: testCase.Peers[0]})
 		re.Equal(testCase.ConfVerChanged, step.ConfVerChanged(region))
 		re.Equal(testCase.IsFinish, step.IsFinish(region))
 		err := step.CheckInProgress(suite.cluster.GetBasicCluster(), suite.cluster.GetSharedConfig(), region)

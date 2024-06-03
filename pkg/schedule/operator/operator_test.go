@@ -81,7 +81,8 @@ func newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core
 			leader = peer
 		}
 	}
-	regionInfo := core.NewRegionInfo(&region, leader, core.SetApproximateSize(50), core.SetApproximateKeys(50))
+	region.Leader = leader
+	regionInfo := core.NewRegionInfo(&region, core.SetApproximateSize(50), core.SetApproximateKeys(50))
 	return regionInfo
 }
 

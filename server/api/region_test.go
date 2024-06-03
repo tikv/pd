@@ -180,7 +180,7 @@ func (suite *regionTestSuite) TestRegionCheck() {
 
 func (suite *regionTestSuite) TestRegions() {
 	re := suite.Require()
-	r := response.NewAPIRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}, nil))
+	r := response.NewAPIRegionInfo(core.NewRegionInfo(&metapb.Region{Id: 1}))
 	re.Nil(r.Leader.Peer)
 	re.Empty(r.Leader.RoleName)
 
@@ -523,47 +523,47 @@ func (suite *getRegionRangeHolesTestSuite) TestRegionRangeHoles() {
 
 func TestRegionsInfoMarshal(t *testing.T) {
 	re := require.New(t)
-	regionWithNilPeer := core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1})
+	regionWithNilPeer := core.NewRegionInfo(&metapb.Region{Id: 1, Leader: &metapb.Peer{Id: 1}})
 	core.SetPeers([]*metapb.Peer{{Id: 2}, nil})(regionWithNilPeer)
 	cases := [][]*core.RegionInfo{
 		{},
 		{
 			// leader is nil
-			core.NewRegionInfo(&metapb.Region{Id: 1}, nil),
+			core.NewRegionInfo(&metapb.Region{Id: 1}),
 			// Peers is empty
-			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+			core.NewRegionInfo(&metapb.Region{Id: 1, Leader: &metapb.Peer{Id: 1}},
 				core.SetPeers([]*metapb.Peer{})),
 			// There is nil peer in peers.
 			regionWithNilPeer,
 		},
 		{
 			// PendingPeers is empty
-			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+			core.NewRegionInfo(&metapb.Region{Id: 1, Leader: &metapb.Peer{Id: 1}},
 				core.WithPendingPeers([]*metapb.Peer{})),
 			// There is nil peer in peers.
-			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+			core.NewRegionInfo(&metapb.Region{Id: 1, Leader: &metapb.Peer{Id: 1}},
 				core.WithPendingPeers([]*metapb.Peer{nil})),
 		},
 		{
 			// DownPeers is empty
-			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+			core.NewRegionInfo(&metapb.Region{Id: 1, Leader: &metapb.Peer{Id: 1}},
 				core.WithDownPeers([]*pdpb.PeerStats{})),
 			// There is nil peer in peers.
-			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+			core.NewRegionInfo(&metapb.Region{Id: 1, Leader: &metapb.Peer{Id: 1}},
 				core.WithDownPeers([]*pdpb.PeerStats{{Peer: nil}})),
 		},
 		{
 			// Buckets is nil
-			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+			core.NewRegionInfo(&metapb.Region{Id: 1, Leader: &metapb.Peer{Id: 1}},
 				core.SetBuckets(nil)),
 			// Buckets is empty
-			core.NewRegionInfo(&metapb.Region{Id: 1}, &metapb.Peer{Id: 1},
+			core.NewRegionInfo(&metapb.Region{Id: 1, Leader: &metapb.Peer{Id: 1}},
 				core.SetBuckets(&metapb.Buckets{})),
 		},
 		{
 			core.NewRegionInfo(&metapb.Region{Id: 1, StartKey: []byte{}, EndKey: []byte{},
-				RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}},
-				&metapb.Peer{Id: 1}, core.SetCPUUsage(10),
+				RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}, Leader: &metapb.Peer{Id: 1}},
+				core.SetCPUUsage(10),
 				core.SetApproximateKeys(10), core.SetApproximateSize(10),
 				core.SetWrittenBytes(10), core.SetReadBytes(10),
 				core.SetReadKeys(10), core.SetWrittenKeys(10)),

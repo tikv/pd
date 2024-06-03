@@ -628,8 +628,9 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 		StartKey:    []byte{byte(1)},
 		EndKey:      []byte{byte(1 + 1)},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+		Leader:      leader,
 	}
-	region := core.NewRegionInfo(regionMeta, leader, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: utils.RegionHeartBeatReportInterval}),
+	region := core.NewRegionInfo(regionMeta, core.WithInterval(&pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: utils.RegionHeartBeatReportInterval}),
 		core.SetWrittenBytes(30000*10),
 		core.SetWrittenKeys(300000*10))
 	err = cluster.processRegionHeartbeat(core.ContextTODO(), region)
@@ -1152,8 +1153,9 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 		Peers:    peers,
 		StartKey: []byte{byte(1)},
 		EndKey:   []byte{byte(2)},
+		Leader:   peers[0],
 	}
-	r := core.NewRegionInfo(region, peers[0])
+	r := core.NewRegionInfo(region)
 	re.NoError(cluster.putRegion(r))
 
 	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r})
@@ -1201,7 +1203,7 @@ func TestHeartbeatSplit(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	// 1: [nil, nil)
-	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
+	region1 := core.NewRegionInfo(&metapb.Region{Id: 1, RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}})
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region1))
 	checkRegion(re, cluster.GetRegionByKey([]byte("foo")), region1)
 
@@ -1210,7 +1212,7 @@ func TestHeartbeatSplit(t *testing.T) {
 		core.WithStartKey([]byte("m")),
 		core.WithIncVersion(),
 	)
-	region2 := core.NewRegionInfo(&metapb.Region{Id: 2, EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
+	region2 := core.NewRegionInfo(&metapb.Region{Id: 2, EndKey: []byte("m"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}})
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region2))
 	checkRegion(re, cluster.GetRegionByKey([]byte("a")), region2)
 	// [m, nil) is missing before r1's heartbeat.
@@ -1224,7 +1226,7 @@ func TestHeartbeatSplit(t *testing.T) {
 		core.WithStartKey([]byte("q")),
 		core.WithIncVersion(),
 	)
-	region3 := core.NewRegionInfo(&metapb.Region{Id: 3, StartKey: []byte("m"), EndKey: []byte("q"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}}, nil)
+	region3 := core.NewRegionInfo(&metapb.Region{Id: 3, StartKey: []byte("m"), EndKey: []byte("q"), RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1}})
 	re.NoError(cluster.processRegionHeartbeat(core.ContextTODO(), region1))
 	checkRegion(re, cluster.GetRegionByKey([]byte("z")), region1)
 	checkRegion(re, cluster.GetRegionByKey([]byte("a")), region2)
@@ -1317,7 +1319,9 @@ func TestOfflineAndMerge(t *testing.T) {
 			EndKey:      []byte{},
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 			Id:          1,
-			Peers:       peers}, peers[0])
+			Peers:       peers,
+			Leader:      peers[0],
+		})
 	regions := []*core.RegionInfo{origin}
 
 	// store 1: up -> offline
@@ -1525,11 +1529,11 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 			StoreId: 4,
 		},
 	}
-	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3]}, peers[0], core.WithPendingPeers(peers[1:3]))
+	origin := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[:3], Leader: peers[0]}, core.WithPendingPeers(peers[1:3]))
 	re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), origin))
 	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 1, 1, 0}, tc.RaftCluster, re)
-	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:]}, peers[1], core.WithPendingPeers(peers[3:4]))
+	newRegion := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers[1:], Leader: peers[1]}, core.WithPendingPeers(peers[3:4]))
 	re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
 	time.Sleep(50 * time.Millisecond)
 	checkPendingPeerCount([]int{0, 0, 0, 1}, tc.RaftCluster, re)
@@ -2192,8 +2196,9 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 			StartKey:    []byte{byte(i)},
 			EndKey:      []byte{byte(i + 1)},
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
+			Leader:      peers[0],
 		}
-		regions = append(regions, core.NewRegionInfo(region, peers[0], core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
+		regions = append(regions, core.NewRegionInfo(region, core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
 	}
 	return regions
 }
@@ -2331,11 +2336,12 @@ func (c *testCluster) addLeaderRegion(regionID uint64, leaderStoreID uint64, fol
 	region := newTestRegionMeta(regionID)
 	leader, _ := c.AllocPeer(leaderStoreID)
 	region.Peers = []*metapb.Peer{leader}
+	region.Leader = leader
 	for _, followerStoreID := range followerStoreIDs {
 		peer, _ := c.AllocPeer(followerStoreID)
 		region.Peers = append(region.Peers, peer)
 	}
-	regionInfo := core.NewRegionInfo(region, leader, core.SetApproximateSize(10), core.SetApproximateKeys(10))
+	regionInfo := core.NewRegionInfo(region, core.SetApproximateSize(10), core.SetApproximateKeys(10))
 	return c.putRegion(regionInfo)
 }
 
@@ -2393,7 +2399,7 @@ func (c *testCluster) LoadRegion(regionID uint64, followerStoreIDs ...uint64) er
 		peer, _ := c.AllocPeer(id)
 		region.Peers = append(region.Peers, peer)
 	}
-	return c.putRegion(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
+	return c.putRegion(core.NewRegionInfo(region, core.SetSource(core.Storage)))
 }
 
 func TestBasic(t *testing.T) {
@@ -2735,7 +2741,6 @@ func TestMergeRegionCancelOneOperator(t *testing.T) {
 			StartKey: []byte(""),
 			EndKey:   []byte("a"),
 		},
-		nil,
 	)
 	target := core.NewRegionInfo(
 		&metapb.Region{
@@ -2743,7 +2748,6 @@ func TestMergeRegionCancelOneOperator(t *testing.T) {
 			StartKey: []byte("a"),
 			EndKey:   []byte("t"),
 		},
-		nil,
 	)
 	re.NoError(tc.putRegion(source))
 	re.NoError(tc.putRegion(target))
@@ -2964,7 +2968,7 @@ func TestShouldRun(t *testing.T) {
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
-	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
+	newRegion := core.NewRegionInfo(nr, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
 	re.Equal(7, tc.GetClusterNotFromStorageRegionsCnt())
 }
@@ -3007,7 +3011,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 		re.Equal(testCase.ShouldRun, co.ShouldRun())
 	}
 	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
-	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
+	newRegion := core.NewRegionInfo(nr, core.SetSource(core.Heartbeat))
 	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
 	re.Equal(9, tc.GetClusterNotFromStorageRegionsCnt())
 
@@ -3750,7 +3754,7 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 		StartKey: []byte{byte(2)},
 		EndKey:   []byte{byte(3)},
 		Peers:    []*metapb.Peer{{Id: 11, StoreId: uint64(1)}},
-	}, nil,
+	},
 		core.SetApproximateSize(10),
 		core.SetReportInterval(0, 10),
 	)

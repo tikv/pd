@@ -107,12 +107,16 @@ func TestRuleFitFilter(t *testing.T) {
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone"})
 	testCluster.SetEnablePlacementRules(true)
-	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
-		{StoreId: 1, Id: 1},
-		{StoreId: 3, Id: 3},
-		{StoreId: 5, Id: 5},
-		{StoreId: 7, Id: 7, IsWitness: true},
-	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Peers: []*metapb.Peer{
+				{StoreId: 1, Id: 1},
+				{StoreId: 3, Id: 3},
+				{StoreId: 5, Id: 5},
+				{StoreId: 7, Id: 7, IsWitness: true},
+			},
+			Leader: &metapb.Peer{StoreId: 1, Id: 1},
+		})
 
 	testCases := []struct {
 		storeID     uint64
@@ -212,13 +216,17 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	for _, store := range stores {
 		testCluster.AddLabelsStore(store.storeID, store.regionCount, store.labels)
 	}
-	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
-		{StoreId: 1, Id: 1},
-		{StoreId: 2, Id: 2},
-		{StoreId: 3, Id: 3},
-		{StoreId: 5, Id: 4},
-		{StoreId: 6, Id: 5},
-	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Peers: []*metapb.Peer{
+				{StoreId: 1, Id: 1},
+				{StoreId: 2, Id: 2},
+				{StoreId: 3, Id: 3},
+				{StoreId: 5, Id: 4},
+				{StoreId: 6, Id: 5},
+			},
+			Leader: &metapb.Peer{StoreId: 1, Id: 1},
+		})
 	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
 	re.Equal(plan.StatusText(plan.StatusStoreNotMatchRule), leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).String())
 }
@@ -374,30 +382,42 @@ func TestIsolationFilter(t *testing.T) {
 		targetRes      []plan.StatusCode
 	}{
 		{
-			core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
-				{Id: 1, StoreId: 1},
-				{Id: 2, StoreId: 6},
-			}}, &metapb.Peer{StoreId: 1, Id: 1}),
+			core.NewRegionInfo(
+				&metapb.Region{
+					Peers: []*metapb.Peer{
+						{Id: 1, StoreId: 1},
+						{Id: 2, StoreId: 6},
+					},
+					Leader: &metapb.Peer{StoreId: 1, Id: 1},
+				}),
 			"zone",
 			[]plan.StatusCode{plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK},
 			[]plan.StatusCode{plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusOK},
 		},
 		{
-			core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
-				{Id: 1, StoreId: 1},
-				{Id: 2, StoreId: 4},
-				{Id: 3, StoreId: 7},
-			}}, &metapb.Peer{StoreId: 1, Id: 1}),
+			core.NewRegionInfo(
+				&metapb.Region{
+					Peers: []*metapb.Peer{
+						{Id: 1, StoreId: 1},
+						{Id: 2, StoreId: 4},
+						{Id: 3, StoreId: 7},
+					},
+					Leader: &metapb.Peer{StoreId: 1, Id: 1},
+				}),
 			"rack",
 			[]plan.StatusCode{plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK},
 			[]plan.StatusCode{plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusOK, plan.StatusOK, plan.StatusStoreNotMatchIsolation},
 		},
 		{
-			core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
-				{Id: 1, StoreId: 1},
-				{Id: 2, StoreId: 4},
-				{Id: 3, StoreId: 6},
-			}}, &metapb.Peer{StoreId: 1, Id: 1}),
+			core.NewRegionInfo(
+				&metapb.Region{
+					Peers: []*metapb.Peer{
+						{Id: 1, StoreId: 1},
+						{Id: 2, StoreId: 4},
+						{Id: 3, StoreId: 6},
+					},
+					Leader: &metapb.Peer{StoreId: 1, Id: 1},
+				}),
 			"host",
 			[]plan.StatusCode{plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK, plan.StatusOK},
 			[]plan.StatusCode{plan.StatusStoreNotMatchIsolation, plan.StatusStoreNotMatchIsolation, plan.StatusOK, plan.StatusStoreNotMatchIsolation, plan.StatusOK, plan.StatusStoreNotMatchIsolation, plan.StatusOK},
@@ -427,11 +447,15 @@ func TestPlacementGuard(t *testing.T) {
 	testCluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})
 	testCluster.AddLabelsStore(4, 1, map[string]string{"zone": "z2"})
 	testCluster.AddLabelsStore(5, 1, map[string]string{"zone": "z3"})
-	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
-		{StoreId: 1, Id: 1},
-		{StoreId: 3, Id: 3},
-		{StoreId: 5, Id: 5},
-	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	region := core.NewRegionInfo(
+		&metapb.Region{
+			Peers: []*metapb.Peer{
+				{StoreId: 1, Id: 1},
+				{StoreId: 3, Id: 3},
+				{StoreId: 5, Id: 5},
+			},
+			Leader: &metapb.Peer{StoreId: 1, Id: 1},
+		})
 	store := testCluster.GetStore(1)
 
 	re.IsType(NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store),
@@ -485,8 +509,8 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 				{Id: 108, StoreId: 4},
 			},
 			RegionEpoch: epoch,
+			Leader:      &metapb.Peer{Id: 108, StoreId: 4},
 		},
-		&metapb.Peer{Id: 108, StoreId: 4},
 		core.SetApproximateSize(50),
 		core.SetApproximateKeys(20),
 	)

@@ -1416,15 +1416,17 @@ func (suite *clientTestSuite) TestScanRegions() {
 	})
 
 	// Set leader of region3 to nil.
-	region3 := core.NewRegionInfo(regions[3], nil)
+	region3 := core.NewRegionInfo(regions[3])
 	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region3)
 
 	// Add down peer for region4.
-	region4 := core.NewRegionInfo(regions[4], regions[4].Peers[0], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
+	regions[4].Leader = regions[4].Peers[0]
+	region4 := core.NewRegionInfo(regions[4], core.WithDownPeers([]*pdpb.PeerStats{{Peer: regions[4].Peers[1]}}))
 	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region4)
 
 	// Add pending peers for region5.
-	region5 := core.NewRegionInfo(regions[5], regions[5].Peers[0], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
+	regions[5].Leader = regions[5].Peers[0]
+	region5 := core.NewRegionInfo(regions[5], core.WithPendingPeers([]*metapb.Peer{regions[5].Peers[1], regions[5].Peers[2]}))
 	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region5)
 
 	t := suite.T()
