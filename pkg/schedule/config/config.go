@@ -64,6 +64,8 @@ const (
 	defaultLeaderSchedulePolicy      = "count"
 	defaultStoreLimitVersion         = "v1"
 	defaultPatrolRegionWorkerCount   = 1
+	maxPatrolRegionWorkerCount       = 8
+
 	// DefaultSplitMergeInterval is the default value of config split merge interval.
 	DefaultSplitMergeInterval      = time.Hour
 	defaultSwitchWitnessInterval   = time.Hour
@@ -378,7 +380,7 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("store-limit-version") {
 		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
 	}
-	if !meta.IsDefined("patrol-worker-count") {
+	if !meta.IsDefined("patrol-region-worker-count") {
 		configutil.AdjustInt(&c.PatrolRegionWorkerCount, defaultPatrolRegionWorkerCount)
 	}
 
@@ -524,6 +526,9 @@ func (c *ScheduleConfig) Validate() error {
 	}
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
 		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
+	}
+	if c.PatrolRegionWorkerCount > maxPatrolRegionWorkerCount {
+		return errors.Errorf("patrol-region-worker-count should be less than or equal to %d", maxPatrolRegionWorkerCount)
 	}
 	return nil
 }
