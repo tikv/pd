@@ -216,6 +216,12 @@ func (*DownNode) Run(raft *RaftEngine, _ int64) bool {
 		return false
 	}
 	delete(raft.conn.Nodes, node.Id)
+	// delete store
+	err := PDHTTPClient.DeleteStore(context.Background(), node.Id)
+	if err != nil {
+		simutil.Logger.Error("put store failed", zap.Uint64("node-id", node.Id), zap.Error(err))
+		return false
+	}
 	node.Stop()
 
 	regions := raft.GetRegions()

@@ -19,6 +19,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
@@ -30,15 +31,15 @@ import (
 func newRule1(_ *sc.SimConfig) *Case {
 	var simCase Case
 
-	simCase.Rules = make([]*placement.Rule, 0)
-	simCase.Rules = append(simCase.Rules, &placement.Rule{
+	simCase.Rules = make([]*pdHttp.Rule, 0)
+	simCase.Rules = append(simCase.Rules, &pdHttp.Rule{
 		GroupID:     "test1",
 		ID:          "test1",
 		StartKeyHex: "",
 		EndKeyHex:   "",
-		Role:        placement.Learner,
+		Role:        pdHttp.Learner,
 		Count:       1,
-		LabelConstraints: []placement.LabelConstraint{
+		LabelConstraints: []pdHttp.LabelConstraint{
 			{
 				Key:    "region",
 				Op:     "in",
@@ -46,14 +47,14 @@ func newRule1(_ *sc.SimConfig) *Case {
 			},
 		},
 		LocationLabels: []string{"host"},
-	}, &placement.Rule{
+	}, &pdHttp.Rule{
 		GroupID:     placement.DefaultGroupID,
 		ID:          placement.DefaultRuleID,
 		StartKeyHex: "",
 		EndKeyHex:   "",
-		Role:        placement.Voter,
+		Role:        pdHttp.Voter,
 		Count:       5,
-		LabelConstraints: []placement.LabelConstraint{
+		LabelConstraints: []pdHttp.LabelConstraint{
 			{
 				Key:    "region",
 				Op:     "in",
@@ -130,16 +131,16 @@ func newRule1(_ *sc.SimConfig) *Case {
 func newRule2(_ *sc.SimConfig) *Case {
 	var simCase Case
 
-	simCase.Rules = make([]*placement.Rule, 0)
+	simCase.Rules = make([]*pdHttp.Rule, 0)
 	simCase.Rules = append(simCase.Rules,
-		&placement.Rule{
+		&pdHttp.Rule{
 			GroupID:     "test1",
 			ID:          "test1",
 			StartKeyHex: "",
 			EndKeyHex:   "",
-			Role:        placement.Leader,
+			Role:        pdHttp.Leader,
 			Count:       1,
-			LabelConstraints: []placement.LabelConstraint{
+			LabelConstraints: []pdHttp.LabelConstraint{
 				{
 					Key:    "region",
 					Op:     "in",
