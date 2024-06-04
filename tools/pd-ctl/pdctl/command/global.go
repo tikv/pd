@@ -135,15 +135,6 @@ func RequireHTTPSClient(cmd *cobra.Command, _ []string) error {
 	if err != nil || tlsConfig == nil {
 		return err
 	}
-	err = initHTTPSClient(tlsConfig)
-	if err != nil {
-		cmd.Println(err)
-		return err
-	}
-	return nil
-}
-
-func initHTTPSClient(tlsConfig *tls.Config) error {
 	dialClient = &http.Client{
 		Transport: apiutil.NewCallerIDRoundTripper(
 			&http.Transport{TLSClientConfig: tlsConfig}, PDControlCallerID),
