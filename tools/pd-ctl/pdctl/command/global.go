@@ -62,11 +62,6 @@ func requirePDClient(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if tlsConfig != nil {
-		if err = initHTTPSClient(tlsConfig); err != nil {
-			return err
-		}
-	}
 
 	return initNewPDClient(cmd, pd.WithTLSConfig(tlsConfig))
 }
