@@ -343,6 +343,21 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	output, err = tests.ExecuteCommand(cmd, argsInvalid...)
 	re.NoError(err)
 	re.Contains(string(output), "is invalid")
+
+	// config set patrol-region-worker-count
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "8"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
+	// the max value of patrol-region-worker-count is 8 and the min value is 1
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "9"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "0"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
 }
 
 func (suite *configTestSuite) TestConfigForwardControl() {

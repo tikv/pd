@@ -527,8 +527,8 @@ func (c *ScheduleConfig) Validate() error {
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
 		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}
-	if c.PatrolRegionWorkerCount > maxPatrolRegionWorkerCount {
-		return errors.Errorf("patrol-region-worker-count should be less than or equal to %d", maxPatrolRegionWorkerCount)
+	if c.PatrolRegionWorkerCount > maxPatrolRegionWorkerCount || c.PatrolRegionWorkerCount < 1 {
+		return errors.Errorf("patrol-region-worker-count should be between 1 and %d", maxPatrolRegionWorkerCount)
 	}
 	return nil
 }
