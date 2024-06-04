@@ -240,7 +240,9 @@ func (c *Coordinator) PatrolRegions() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	c.patrolRegionContext.init(c.ctx, c.cluster)
+	ctx, cancel := context.WithCancel(c.ctx)
+	defer cancel()
+	c.patrolRegionContext.init(ctx, c.cluster)
 	defer c.patrolRegionContext.stop()
 
 	ticker := time.NewTicker(c.patrolRegionContext.interval)
@@ -290,6 +292,7 @@ func (c *Coordinator) PatrolRegions() {
 				c.patrolRegionContext.updateScanLimit(c.cluster)
 			}
 			failpoint.Inject("break-patrol", func() {
+				time.Sleep(3 * time.Second) // ensure the regions are handled by the workers
 				failpoint.Return()
 			})
 		case <-c.ctx.Done():

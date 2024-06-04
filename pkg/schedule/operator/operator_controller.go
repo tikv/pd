@@ -963,7 +963,7 @@ func (oc *Controller) ExceedStoreLimit(ops ...*Operator) bool {
 			if stepCost == 0 {
 				continue
 			}
-			limiter := oc.getOrCreateStoreLimit(storeID, v) // is thread safe
+			limiter := oc.getOrCreateStoreLimit(storeID, v)
 			if limiter == nil {
 				return false
 			}
