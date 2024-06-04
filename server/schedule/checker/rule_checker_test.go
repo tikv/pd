@@ -1965,7 +1965,7 @@ func (suite *ruleCheckerTestSuite) TestIssue7808() {
 		},
 	})
 	re.NoError(err)
-	err = suite.ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	err = suite.ruleManager.DeleteRule("pd", "default")
 	re.NoError(err)
 	suite.cluster.SetStoreDown(1)
 	region := suite.cluster.GetRegion(1)
@@ -1976,6 +1976,6 @@ func (suite *ruleCheckerTestSuite) TestIssue7808() {
 	suite.cluster.PutRegion(region)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
 	re.NotNil(op)
-	re.Equal("fast-replace-rule-down-peer", op.Desc())
-	re.Contains(op.Brief(), "mv peer: store [1] to [2]")
+	re.Equal("replace-rule-down-peer", op.Desc())
+	re.Contains(op.String(), "mv peer: store [1] to [2]")
 }
