@@ -136,7 +136,11 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	existed := false
 	for _, m := range listResp.Members {
 		if len(m.Name) == 0 {
-			return errors.New("there is a member that has not joined successfully")
+			log.Error("there is an abnormal joined member in the current member list",
+				zap.Uint64("id", m.ID),
+				zap.Strings("peer-urls", m.PeerURLs),
+				zap.Strings("client-urls", m.ClientURLs))
+			return errors.Errorf("there is a member %d that has not joined successfully", m.ID)
 		}
 		if m.Name == cfg.Name {
 			existed = true
@@ -184,7 +188,11 @@ func PrepareJoinCluster(cfg *config.Config) error {
 				listSucc = true
 			}
 			if len(n) == 0 {
-				return errors.New("there is a member that has not joined successfully")
+				log.Error("there is an abnormal joined member in the current member list",
+					zap.Uint64("id", memb.ID),
+					zap.Strings("peer-urls", memb.PeerURLs),
+					zap.Strings("client-urls", memb.ClientURLs))
+				return errors.Errorf("there is a member %d that has not joined successfully", memb.ID)
 			}
 			for _, m := range memb.PeerURLs {
 				pds = append(pds, fmt.Sprintf("%s=%s", n, m))
