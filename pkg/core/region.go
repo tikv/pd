@@ -750,10 +750,11 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 		logRunner := ctx.LogRunner
 		// print log asynchronously
 		debug, info := d, i
+		regionID := region.GetID()
 		if logRunner != nil {
 			debug = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
-					fmt.Sprintf("%d-%s", region.GetID(), "DebugLog"),
+					regionID,
 					"DebugLog",
 					func() {
 						d(msg, fields...)
@@ -762,7 +763,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 			}
 			info = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
-					fmt.Sprintf("%d-%s", region.GetID(), "InfoLog"),
+					regionID,
 					"InfoLog",
 					func() {
 						i(msg, fields...)

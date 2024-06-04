@@ -42,14 +42,14 @@ const (
 
 // Runner is the interface for running tasks.
 type Runner interface {
-	RunTask(id, name string, f func(), opts ...TaskOption) error
+	RunTask(id uint64, name string, f func(), opts ...TaskOption) error
 	Start()
 	Stop()
 }
 
 // Task is a task to be run.
 type Task struct {
-	id          string
+	id          uint64
 	submittedAt time.Time
 	f           func()
 	name        string
@@ -61,6 +61,12 @@ type Task struct {
 var ErrMaxWaitingTasksExceeded = errors.New("max waiting tasks exceeded")
 
 // ConcurrentRunner is a simple task runner that limits the number of concurrent tasks.
+
+type taskID struct {
+	id   uint64
+	name string
+}
+
 type ConcurrentRunner struct {
 	name               string
 	limiter            *ConcurrencyLimiter
@@ -71,7 +77,7 @@ type ConcurrentRunner struct {
 	wg                 sync.WaitGroup
 	pendingTaskCount   map[string]int
 	pendingTasks       []*Task
-	pendingRegionTasks map[string]*Task
+	existTasks         map[taskID]*Task
 	maxWaitingDuration prometheus.Gauge
 }
 
@@ -84,7 +90,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		taskChan:           make(chan *Task),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		pendingTaskCount:   make(map[string]int),
-		pendingRegionTasks: make(map[string]*Task),
+		existTasks:         make(map[taskID]*Task),
 		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
@@ -160,7 +166,7 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 		case cr.taskChan <- task:
 			cr.pendingTasks = cr.pendingTasks[1:]
 			cr.pendingTaskCount[task.name]--
-			delete(cr.pendingRegionTasks, task.id)
+			delete(cr.existTasks, taskID{id: task.id, name: task.name})
 		default:
 		}
 		return
@@ -174,7 +180,7 @@ func (cr *ConcurrentRunner) Stop() {
 }
 
 // RunTask runs the task asynchronously.
-func (cr *ConcurrentRunner) RunTask(id, name string, f func(), opts ...TaskOption) error {
+func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(), opts ...TaskOption) error {
 	task := &Task{
 		id:          id,
 		name:        name,
@@ -192,8 +198,11 @@ func (cr *ConcurrentRunner) RunTask(id, name string, f func(), opts ...TaskOptio
 	}()
 
 	pendingTaskNum := len(cr.pendingTasks)
+	tid := taskID{task.id, task.name}
 	if pendingTaskNum > 0 {
-		if t, ok := cr.pendingRegionTasks[task.id]; ok {
+		// Here we use a map to find the task with the same ID.
+		// Then replace the old task with the new one.
+		if t, ok := cr.existTasks[tid]; ok {
 			t.f = f
 			t.submittedAt = time.Now()
 			return nil
@@ -211,7 +220,7 @@ func (cr *ConcurrentRunner) RunTask(id, name string, f func(), opts ...TaskOptio
 		}
 	}
 	cr.pendingTasks = append(cr.pendingTasks, task)
-	cr.pendingRegionTasks[task.id] = task
+	cr.existTasks[tid] = task
 	cr.pendingTaskCount[task.name]++
 	return nil
 }
@@ -225,7 +234,7 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (*SyncRunner) RunTask(_, _ string, f func(), _ ...TaskOption) error {
+func (*SyncRunner) RunTask(_ uint64, _ string, f func(), _ ...TaskOption) error {
 	f()
 	return nil
 }
