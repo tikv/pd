@@ -955,3 +955,43 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 	// Although store 3 does not exist in PD, PD can also send op to TiKV.
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
 }
+
+func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
+	re := require.New(t)
+	opt := mockconfig.NewTestOptions()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	regionNum := 10000
+	limit := 16000000.0
+	storeID := uint64(2)
+	for i := 1; i < 4; i++ {
+		tc.AddRegionStore(uint64(i), 100)
+		tc.SetStoreLimit(uint64(i), storelimit.AddPeer, limit)
+	}
+	for i := 1; i < regionNum; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+
+	var wg sync.WaitGroup
+	for i := 1; i < 10; i++ {
+		wg.Add(1)
+		go func(i uint64) {
+			defer wg.Done()
+			for j := 1; j < 10; j++ {
+				regionID := uint64(j) + i*100
+				op := NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), OpRegion, AddPeer{ToStore: storeID, PeerID: regionID})
+				re.True(oc.AddOperator(op))
+				if i%2 == 0 {
+					tc.SetStoreLimit(storeID, storelimit.AddPeer, limit)
+				} else {
+					tc.SetStoreLimit(storeID, storelimit.AddPeer, limit-float64(j))
+				}
+			}
+		}(uint64(i))
+	}
+	wg.Wait()
+}
