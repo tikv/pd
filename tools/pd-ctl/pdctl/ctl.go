@@ -30,6 +30,7 @@ import (
 
 func init() {
 	cobra.EnablePrefixMatching = true
+	cobra.EnableTraverseRunHooks = true
 }
 
 // GetRootCmd is exposed for integration tests. But it can be embedded into another suite, too.
