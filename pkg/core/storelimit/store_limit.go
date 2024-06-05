@@ -129,15 +129,15 @@ func (l *StoreRateLimit) Reset(rate float64, typ Type) {
 
 // limit the operators of a store
 type limit struct {
-	syncutil.RWMutex
-	limiter    *ratelimit.RateLimiter
-	ratePerSec float64
+	limiter         *ratelimit.RateLimiter
+	ratePerSecMutex syncutil.RWMutex
+	ratePerSec      float64
 }
 
 // Reset resets the rate limit.
 func (l *limit) Reset(ratePerSec float64) {
-	l.Lock()
-	defer l.Unlock()
+	l.ratePerSecMutex.Lock()
+	defer l.ratePerSecMutex.Unlock()
 	if l.ratePerSec == ratePerSec {
 		return
 	}
@@ -159,8 +159,8 @@ func (l *limit) Reset(ratePerSec float64) {
 // Available returns the number of available tokens
 // It returns true if the rate per second is zero.
 func (l *limit) Available(n int64) bool {
-	l.RLock()
-	defer l.RUnlock()
+	l.ratePerSecMutex.RLock()
+	defer l.ratePerSecMutex.RUnlock()
 	if l.ratePerSec == 0 {
 		return true
 	}
@@ -170,8 +170,8 @@ func (l *limit) Available(n int64) bool {
 
 // Take takes count tokens from the bucket without blocking.
 func (l *limit) Take(count int64) bool {
-	l.RLock()
-	defer l.RUnlock()
+	l.ratePerSecMutex.RLock()
+	defer l.ratePerSecMutex.RUnlock()
 	if l.ratePerSec == 0 {
 		return true
 	}
@@ -179,7 +179,7 @@ func (l *limit) Take(count int64) bool {
 }
 
 func (l *limit) GetRatePerSec() float64 {
-	l.RLock()
-	defer l.RUnlock()
+	l.ratePerSecMutex.RLock()
+	defer l.ratePerSecMutex.RUnlock()
 	return l.ratePerSec
 }
