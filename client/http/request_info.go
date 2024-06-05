@@ -39,6 +39,7 @@ const (
 	getRegionStatusByKeyRangeName           = "GetRegionStatusByKeyRange"
 	getStoresName                           = "GetStores"
 	getStoreName                            = "GetStore"
+	deleteStoreName                         = "DeleteStore"
 	setStoreLabelsName                      = "SetStoreLabels"
 	getHealthStatusName                     = "GetHealthStatus"
 	getConfigName                           = "GetConfig"

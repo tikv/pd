@@ -72,6 +72,7 @@ func NewNode(s *cases.Store, pdAddr string, config *sc.SimConfig) (*Node, error)
 			StoreId:   s.ID,
 			Capacity:  uint64(config.RaftStore.Capacity),
 			StartTime: uint32(time.Now().Unix()),
+			Available: uint64(config.RaftStore.Capacity),
 		},
 	}
 	tag := fmt.Sprintf("store %d", s.ID)
