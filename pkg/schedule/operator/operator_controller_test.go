@@ -965,17 +965,18 @@ func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false /* no need to run */)
 	oc := NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
-	regionNum := 10000
-	limit := 16000000.0
+	regionNum := 1000
+	limit := 1600.0
 	storeID := uint64(2)
 	for i := 1; i < 4; i++ {
-		tc.AddRegionStore(uint64(i), 100)
+		tc.AddRegionStore(uint64(i), regionNum)
 		tc.SetStoreLimit(uint64(i), storelimit.AddPeer, limit)
 	}
-	for i := 1; i < regionNum; i++ {
-		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	for i := 1; i <= regionNum; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 3, 4)
 	}
 
+	// Add operator and set store limit concurrently
 	var wg sync.WaitGroup
 	for i := 1; i < 10; i++ {
 		wg.Add(1)
@@ -985,11 +986,7 @@ func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 				regionID := uint64(j) + i*100
 				op := NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), OpRegion, AddPeer{ToStore: storeID, PeerID: regionID})
 				re.True(oc.AddOperator(op))
-				if i%2 == 0 {
-					tc.SetStoreLimit(storeID, storelimit.AddPeer, limit)
-				} else {
-					tc.SetStoreLimit(storeID, storelimit.AddPeer, limit-float64(j))
-				}
+				tc.SetStoreLimit(storeID, storelimit.AddPeer, limit-float64(j)) // every goroutine set a different limit
 			}
 		}(uint64(i))
 	}
