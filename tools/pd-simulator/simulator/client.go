@@ -16,6 +16,7 @@ package simulator
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -365,4 +366,10 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId: c.clusterID,
 	}
+}
+
+func ChooseToHaltPDSchedule(halt bool) {
+	PDHTTPClient.SetConfig(context.Background(), map[string]any{
+		"schedule.halt-scheduling": strconv.FormatBool(halt),
+	})
 }
