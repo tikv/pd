@@ -92,13 +92,14 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// decode hex if query has params with hex format
-	err = apiutil.ParseHexKeys(r.URL.Query().Get("format"), &key)
+	params := []string{key}
+	params, err = apiutil.ParseHexKeys(r.URL.Query().Get("format"), params)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	regionInfo := rc.GetRegionByKey([]byte(key))
+	regionInfo := rc.GetRegionByKey([]byte(params[0]))
 	b, err := response.MarshalRegionInfoJSON(r.Context(), regionInfo)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -169,11 +170,10 @@ func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 // @Router   /regions/key [get]
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	startKey := r.URL.Query().Get("key")
-	endKey := r.URL.Query().Get("end_key")
-
+	var err error
 	// decode hex if query has params with hex format
-	err := apiutil.ParseHexKeys(r.URL.Query().Get("format"), &startKey, &endKey)
+	params := []string{r.URL.Query().Get("key"), r.URL.Query().Get("end_key")}
+	params, err = apiutil.ParseHexKeys(r.URL.Query().Get("format"), params)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -185,7 +185,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	regions := rc.ScanRegions([]byte(startKey), []byte(endKey), limit)
+	regions := rc.ScanRegions([]byte(params[0]), []byte(params[1]), limit)
 	b, err := response.MarshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

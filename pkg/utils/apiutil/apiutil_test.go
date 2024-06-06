@@ -204,3 +204,21 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 		re.Equal(testCase.port, port, "case %d", idx)
 	}
 }
+
+func TestParseHexKeys(t *testing.T) {
+	re := require.New(t)
+	hexKeys := []string{"", "67", "0001020304050607", "08090a0b0c0d0e0f", "f0f1f2f3f4f5f6f7"}
+	parseKeys, err := ParseHexKeys("hex", hexKeys)
+	re.NoError(err)
+	re.Equal(parseKeys, []string{"", "g", "\x00\x01\x02\x03\x04\x05\x06\x07", "\x08\t\n\x0b\x0c\r\x0e\x0f", "\xf0\xf1\xf2\xf3\xf4\xf5\xf6\xf7"})
+	// Test for other format
+	hexKeys = []string{"hello"}
+	parseKeys, err = ParseHexKeys("other", hexKeys)
+	re.NoError(err)
+	re.Equal(parseKeys, []string{"hello"})
+	// Test for wrong keys
+	hexKeys = []string{"world"}
+	parseKeys, err = ParseHexKeys("hex", hexKeys)
+	re.Error(err)
+	re.Equal(parseKeys, []string{"world"})
+}

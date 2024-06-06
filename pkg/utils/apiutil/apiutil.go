@@ -337,19 +337,19 @@ func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 }
 
 // ParseHexKeys decodes hexadecimal keys to bytes if the format is "hex".
-func ParseHexKeys(format string, keys ...*string) error {
+func ParseHexKeys(format string, keys []string) (hexStrings []string, err error) {
 	if format != "hex" {
-		return nil
+		return keys, nil
 	}
 
 	for _, key := range keys {
-		keyBytes, err := hex.DecodeString(*key)
+		keyBytes, err := hex.DecodeString(key)
 		if err != nil {
-			return err
+			return keys, err
 		}
-		*key = string(keyBytes)
+		hexStrings = append(hexStrings, string(keyBytes))
 	}
-	return nil
+	return hexStrings, nil
 }
 
 // ReadJSON reads a JSON data from r and then closes it.
