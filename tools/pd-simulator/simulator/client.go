@@ -37,12 +37,12 @@ import (
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
-	GetClusterID(ctx context.Context) uint64
-	AllocID(ctx context.Context) (uint64, error)
-	Bootstrap(ctx context.Context, store *metapb.Store, region *metapb.Region) error
-	PutStore(ctx context.Context, store *metapb.Store) error
-	StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error
-	RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error
+	GetClusterID(context.Context) uint64
+	AllocID(context.Context) (uint64, error)
+	Bootstrap(context.Context, *metapb.Store, *metapb.Region) error
+	PutStore(context.Context, *metapb.Store) error
+	StoreHeartbeat(context.Context, *pdpb.StoreStats) error
+	RegionHeartbeat(context.Context, *core.RegionInfo) error
 	PutPDConfig(*sc.PDConfig) error
 
 	Close()

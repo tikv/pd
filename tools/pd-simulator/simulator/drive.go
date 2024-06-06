@@ -49,6 +49,10 @@ type Driver struct {
 	conn          *Connection
 	simConfig     *config.SimConfig
 	pdConfig      *config.PDConfig
+
+	regionTickc chan int64
+	storeTickc  chan int64
+	tickc       chan struct{}
 }
 
 // NewDriver returns a driver.
@@ -66,6 +70,9 @@ func NewDriver(pdAddr, statusAddress, caseName string, simConfig *config.SimConf
 		simCase:       simCase,
 		simConfig:     simConfig,
 		pdConfig:      pdConfig,
+		tickc:         make(chan struct{}, 1),
+		regionTickc:   make(chan int64, 1),
+		storeTickc:    make(chan int64, 1),
 	}, nil
 }
 
@@ -147,28 +154,89 @@ func (d *Driver) Prepare() error {
 // Tick invokes nodes' Tick.
 func (d *Driver) Tick() {
 	d.tickCount++
-	d.raftEngine.stepRegions()
-	d.eventRunner.Tick(d.tickCount)
-	for _, n := range d.conn.Nodes {
-		n.reportRegionChange()
-		d.wg.Add(1)
-		go n.Tick(&d.wg)
+	go func() {
+		d.tickc <- struct{}{}
+	}()
+	go func() {
+		d.regionTickc <- d.tickCount
+	}()
+	go func() {
+		d.storeTickc <- d.tickCount
+	}()
+}
+
+func (d *Driver) StepRegions(ctx context.Context) {
+	for {
+		select {
+		case <-d.tickc:
+			d.raftEngine.stepRegions()
+			d.eventRunner.Tick(d.tickCount)
+			for _, n := range d.conn.Nodes {
+				n.reportRegionChange()
+				d.wg.Add(1)
+				go n.Tick(&d.wg)
+			}
+			d.wg.Wait()
+		case <-ctx.Done():
+			return
+		}
 	}
-	d.wg.Wait()
+}
+
+func (d *Driver) StoresHeartbeat(ctx context.Context) {
+	config := d.raftEngine.storeConfig
+	storeInterval := uint64(config.RaftStore.StoreHeartBeatInterval.Duration / config.SimTickInterval.Duration)
+	var wg sync.WaitGroup
+	for {
+		select {
+		case tick := <-d.storeTickc:
+			if uint64(tick)%storeInterval == 0 {
+				for _, n := range d.conn.Nodes {
+					wg.Add(1)
+					go n.storeHeartBeat(&wg)
+				}
+				wg.Wait()
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+var schedule sync.Once
+
+func (d *Driver) RegionsHeartbeat(ctx context.Context) {
+	config := d.raftEngine.storeConfig
+	regionInterval := uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
+	var wg sync.WaitGroup
+	// simulator don't need any schedulers util all regions send their heartbeat.
+	ChooseToHaltPDSchedule(true)
+	for {
+		select {
+		case tick := <-d.regionTickc:
+			if uint64(tick)%regionInterval == 0 {
+				for _, n := range d.conn.Nodes {
+					wg.Add(1)
+					go n.regionHeartBeat(&wg)
+				}
+				wg.Wait()
+				schedule.Do(func() {
+					ChooseToHaltPDSchedule(false)
+				})
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	length := uint64(len(d.conn.Nodes) + 1)
-	for index := range d.conn.Nodes {
-		if index >= length {
-			length = index + 1
-		}
+	var stats []info.StoreStats
+	for _, n := range d.conn.Nodes {
+		stats = append(stats, *n.stats)
 	}
-	stats := make([]info.StoreStats, length)
-	for index, node := range d.conn.Nodes {
-		stats[index] = *node.stats
-	}
+
 	return d.simCase.Checker(d.raftEngine.regionsInfo, stats)
 }
 
