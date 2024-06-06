@@ -154,6 +154,8 @@ func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimCon
 	tick := time.NewTicker(tickInterval)
 	defer tick.Stop()
 	sc := make(chan os.Signal, 1)
+	// halt scheduling
+	simulator.ChooseToHaltPDSchedule(true)
 	signal.Notify(sc,
 		syscall.SIGHUP,
 		syscall.SIGINT,
