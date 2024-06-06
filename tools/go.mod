@@ -3,6 +3,7 @@ module github.com/tikv/pd/tools
 go 1.21
 
 replace (
+	github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20240605160713-4dfe4594d6ca
 	github.com/tikv/pd => ../
 	github.com/tikv/pd/client => ../client
 )

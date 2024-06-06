@@ -26,6 +26,7 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
@@ -1811,4 +1812,170 @@ func TestExternalTimestamp(t *testing.T) {
 		re.Equal(1, tsoutil.CompareTimestampUint64(unexpectedTS, currentGlobalTS))
 		re.Equal(ts, resp4.GetTimestamp())
 	}
+}
+
+func TestManuallyChangePeer(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+
+	// Prepare stores & regions.
+	region := &metapb.Region{
+		Id:       10,
+		StartKey: []byte("abc"),
+		EndKey:   []byte("xyz"),
+		Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1},
+			{Id: 102, StoreId: 2},
+			{Id: 103, StoreId: 3},
+		},
+	}
+
+	// To put region.
+	regionInfo := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+
+	stores := []*pdpb.PutStoreRequest{
+		{
+			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      1,
+				Address: "mock-1",
+				Version: "8.1.0",
+			},
+		},
+		{
+			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      2,
+				Address: "mock-2",
+				Version: "8.1.0",
+			},
+		},
+		{
+			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      3,
+				Address: "mock-3",
+				Version: "8.1.0",
+			},
+		},
+	}
+
+	// To put stores.
+	svr := &server.GrpcServer{Server: leaderServer.GetServer()}
+	for _, store := range stores {
+		resp, err := svr.PutStore(context.Background(), store)
+		re.NoError(err)
+		re.Nil(resp.GetHeader().GetError())
+	}
+
+	// Build request to manually change peer.
+	// Remove peer.
+	req1 := &pdpb.ChangePeerRequest{
+		Header:   testutil.NewRequestHeader(clusterID),
+		RegionId: 0,
+		ChangePeer: &pdpb.ChangePeer{
+			ChangeType: eraftpb.ConfChangeType_RemoveNode,
+			Peer:       region.Peers[2],
+		},
+	}
+	re.Equal(uint64(0), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+	// Invalid region id.
+	_, err1 := grpcPDClient.ManuallyChangePeer(context.Background(), req1)
+	re.NoError(err1)
+	re.Equal(uint64(0), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+	req1.RegionId = region.Id
+	_, err2 := grpcPDClient.ManuallyChangePeer(context.Background(), req1)
+	re.NoError(err2)
+	re.Equal(uint64(1), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+	rc.GetOperatorController().RemoveOperators()
+	re.Equal(uint64(0), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+
+	// Add extra stores.
+	stores = []*pdpb.PutStoreRequest{
+		{
+			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			Store: &metapb.Store{
+				Id:            4,
+				Address:       "mock-4",
+				Version:       "8.1.0",
+				State:         metapb.StoreState_Up,
+				NodeState:     metapb.NodeState_Serving,
+				LastHeartbeat: time.Now().UnixNano(),
+			},
+		},
+		{
+			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			Store: &metapb.Store{
+				Id:            5,
+				Address:       "mock-5",
+				Version:       "8.1.0",
+				State:         metapb.StoreState_Up,
+				NodeState:     metapb.NodeState_Serving,
+				LastHeartbeat: time.Now().UnixNano(),
+			},
+		},
+	}
+	for _, store := range stores {
+		resp, err := svr.PutStore(context.Background(), store)
+		re.NoError(err)
+		re.Nil(resp.GetHeader().GetError())
+	}
+
+	// Add peer.
+	req2 := &pdpb.ChangePeerRequest{
+		Header:   testutil.NewRequestHeader(clusterID),
+		RegionId: region.Id,
+		ChangePeerV2: &pdpb.ChangePeerV2{
+			Changes: []*pdpb.ChangePeer{
+				{
+					ChangeType: eraftpb.ConfChangeType_AddNode,
+					Peer: &metapb.Peer{
+						Id:      104,
+						StoreId: 4,
+					},
+				},
+			},
+		},
+	}
+	_, err3 := grpcPDClient.ManuallyChangePeer(context.Background(), req2)
+	re.NoError(err3)
+	re.Equal(uint64(1), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+	rc.GetOperatorController().RemoveOperators()
+	re.Equal(uint64(0), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+
+	// Add learner with ChangePeerV2.
+	req3 := &pdpb.ChangePeerRequest{
+		Header:   testutil.NewRequestHeader(clusterID),
+		RegionId: region.Id,
+		ChangePeerV2: &pdpb.ChangePeerV2{
+			Changes: []*pdpb.ChangePeer{
+				{
+					ChangeType: eraftpb.ConfChangeType_AddLearnerNode,
+					Peer: &metapb.Peer{
+						Id:      105,
+						StoreId: 5,
+					},
+				},
+			},
+		},
+	}
+	_, err4 := grpcPDClient.ManuallyChangePeer(context.Background(), req3)
+	re.NoError(err4)
+	re.Equal(uint64(1), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -132,6 +133,11 @@ type RPCClient interface {
 	GetExternalTimestamp(ctx context.Context) (uint64, error)
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
+
+	// ManuallyChangePeer manually changes the peer of a region.
+	ManuallyChangePeer(ctx context.Context, regionID uint64, changeType eraftpb.ConfChangeType, peer *metapb.Peer) error
+	// ManuallyChangeMultiPeers manually changes multi peers of a region.
+	ManuallyChangeMultiPeers(ctx context.Context, regionID uint64, changeTypes map[uint64]eraftpb.ConfChangeType, peers []*metapb.Peer) error
 
 	// TSOClient is the TSO client.
 	TSOClient
@@ -1599,4 +1605,61 @@ func (c *client) GetTSOAllocators() *sync.Map {
 		return nil
 	}
 	return tsoClient.GetTSOAllocators()
+}
+
+func (c *client) ManuallyChangePeer(ctx context.Context, regionID uint64, changeType eraftpb.ConfChangeType, peer *metapb.Peer) error {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		return errs.ErrClientGetProtoClient
+	}
+	resp, err := protoClient.ManuallyChangePeer(ctx, &pdpb.ChangePeerRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+		ChangePeer: &pdpb.ChangePeer{
+			ChangeType: changeType,
+			Peer:       peer,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	resErr := resp.GetHeader().GetError()
+	if resErr != nil {
+		return errors.Errorf("[pd]" + resErr.Message)
+	}
+	return nil
+}
+
+func (c *client) ManuallyChangeMultiPeers(ctx context.Context, regionID uint64, changeTypes map[uint64]eraftpb.ConfChangeType, peers []*metapb.Peer) error {
+	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
+	protoClient, ctx := c.getClientAndContext(ctx)
+	if protoClient == nil {
+		return errs.ErrClientGetProtoClient
+	}
+
+	changes := make([]*pdpb.ChangePeer, 0, len(peers))
+	for _, peer := range peers {
+		changes = append(changes, &pdpb.ChangePeer{
+			ChangeType: changeTypes[peer.Id],
+			Peer:       peer,
+		})
+	}
+	resp, err := protoClient.ManuallyChangePeer(ctx, &pdpb.ChangePeerRequest{
+		Header:   c.requestHeader(),
+		RegionId: regionID,
+		ChangePeerV2: &pdpb.ChangePeerV2{
+			Changes: changes,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	resErr := resp.GetHeader().GetError()
+	if resErr != nil {
+		return errors.Errorf("[pd]" + resErr.Message)
+	}
+	return nil
 }

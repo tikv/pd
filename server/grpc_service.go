@@ -29,6 +29,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
@@ -2997,6 +2998,78 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 	return &pdpb.GetExternalTimestampResponse{
 		Header:    s.header(),
 		Timestamp: timestamp,
+	}, nil
+}
+
+// ManuallyChangePeer implements gRPC PDServer.
+func (s *GrpcServer) ManuallyChangePeer(ctx context.Context, request *pdpb.ChangePeerRequest) (*pdpb.ChangePeerResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if done, err := limiter.Allow(fName); err == nil {
+			defer done()
+		} else {
+			return &pdpb.ChangePeerResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
+		}
+	}
+
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return &pdpb.ChangePeerResponse{
+			Header: s.invalidValue(err.Error()),
+		}, nil
+	}
+
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).ManuallyChangePeer(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.ChangePeerResponse), nil
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.ChangePeerResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	var err error
+	operations := make(map[uint64]eraftpb.ConfChangeType)
+
+	regionID := request.GetRegionId()
+	changePeer := request.GetChangePeer()
+	changePeerV2 := request.GetChangePeerV2()
+	if changePeer != nil {
+		storeID := changePeer.GetPeer().GetStoreId()
+		operations[storeID] = changePeer.GetChangeType()
+	} else if changePeerV2 != nil {
+		for _, change := range changePeerV2.GetChanges() {
+			storeID := change.GetPeer().GetStoreId()
+			operations[storeID] = change.GetChangeType()
+		}
+	}
+	// Add add/remove peer operator to change peer
+	for storeID, changeType := range operations {
+		switch changeType {
+		case eraftpb.ConfChangeType_AddNode:
+			err = s.GetHandler().AddAddPeerOperator(regionID, storeID)
+		case eraftpb.ConfChangeType_RemoveNode:
+			err = s.GetHandler().AddRemovePeerOperator(regionID, storeID)
+		case eraftpb.ConfChangeType_AddLearnerNode:
+			err = s.GetHandler().AddAddLearnerOperator(regionID, storeID)
+		}
+		if err != nil {
+			log.Error("failed to add peer operator",
+				zap.Uint64("region-id", regionID), zap.Uint64("store-id", storeID), zap.String("type", changeType.String()), zap.String("error", err.Error()))
+		} else {
+			log.Info("added peer operator successfully",
+				zap.Uint64("region-id", regionID), zap.Uint64("store-id", storeID), zap.String("type", changeType.String()))
+		}
+	}
+	return &pdpb.ChangePeerResponse{
+		Header: s.header(),
 	}, nil
 }
 
