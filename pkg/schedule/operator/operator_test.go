@@ -17,6 +17,7 @@ package operator
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -573,4 +574,28 @@ func (suite *operatorTestSuite) TestToJSONObject() {
 	suite.True(op.CheckTimeout())
 	obj = op.ToJSONObject()
 	suite.Equal(TIMEOUT, obj.Status)
+}
+
+func TestOperatorCheckConcurrently(t *testing.T) {
+	re := require.New(t)
+	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	// addPeer1, transferLeader1, removePeer3
+	steps := []OpStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 3, ToStore: 1},
+		RemovePeer{FromStore: 3},
+	}
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpLeader|OpRegion, steps...)
+	re.Equal(constant.Urgent, op.GetPriorityLevel())
+	checkSteps(re, op, steps)
+	op.Start()
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			re.Nil(op.Check(region))
+		}()
+	}
+	wg.Wait()
 }
