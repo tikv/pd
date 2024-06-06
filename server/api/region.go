@@ -176,6 +176,25 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey := r.URL.Query().Get("key")
 	endKey := r.URL.Query().Get("end_key")
+
+	// decode hex if query has params with hex format
+	formatStr := r.URL.Query().Get("format")
+	if formatStr == "hex" {
+		keyBytes, err := hex.DecodeString(startKey)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		startKey = string(keyBytes)
+
+		keyBytes, err = hex.DecodeString(endKey)
+		if err != nil {
+			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		endKey = string(keyBytes)
+	}
+
 	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"))
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
