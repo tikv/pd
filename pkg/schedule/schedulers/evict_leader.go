@@ -141,6 +141,12 @@ func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []c
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
+func (conf *evictLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
+	conf.Lock()
+	defer conf.Unlock()
+	conf.resetStoreLocked(id, keyRange)
+}
+
 func (conf *evictLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -210,7 +216,9 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRange, batch int) error {
 	conf.Lock()
 	defer conf.Unlock()
-	conf.StoreIDWithRanges[id] = newRanges
+	if id != 0 {
+		conf.StoreIDWithRanges[id] = newRanges
+	}
 	conf.Batch = batch
 	err := conf.persistLocked()
 	if err != nil {
@@ -221,28 +229,34 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRa
 
 func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 	conf.Lock()
-	defer conf.Lock()
 	keyRanges := conf.StoreIDWithRanges[id]
 	succ, last := conf.removeStoreLocked(id)
 	var resp any
-	if succ {
-		err := conf.persistLocked()
-		if err != nil {
-			conf.resetStoreLocked(id, keyRanges)
-			return resp, err
-		}
-		if last {
-			if err := conf.removeSchedulerCb(EvictLeaderName); err != nil {
-				if !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-					conf.resetStoreLocked(id, keyRanges)
-				}
-				return resp, err
-			}
-			resp = lastStoreDeleteInfo
-		}
+
+	if !succ {
+		conf.Unlock()
+		return resp, errs.ErrScheduleConfigNotExist.FastGenByArgs()
+	}
+
+	err := conf.persistLocked()
+	if err != nil {
+		conf.resetStoreLocked(id, keyRanges)
+		conf.Unlock()
+		return resp, err
+	}
+	if !last {
+		conf.Unlock()
 		return resp, nil
 	}
-	return resp, errs.ErrScheduleConfigNotExist.FastGenByArgs()
+	conf.Unlock()
+	if err := conf.removeSchedulerCb(EvictLeaderName); err != nil {
+		if !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			conf.resetStore(id, keyRanges)
+		}
+		return resp, err
+	}
+	resp = lastStoreDeleteInfo
+	return resp, nil
 }
 
 type evictLeaderScheduler struct {
@@ -431,12 +445,14 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	batch, ok := input["batch"].(float64)
+	batch := handler.config.getBatch()
+	batchFloat, ok := input["batch"].(float64)
 	if ok {
-		if batch < 0 || batch > 10 {
-			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [0, 10")
+		if batchFloat < 0 || batchFloat > 10 {
+			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [0, 10]")
 			return
 		}
+		batch = (int)(batchFloat)
 	}
 
 	ranges, ok := (input["ranges"]).([]string)
@@ -449,15 +465,13 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		ranges = handler.config.getRanges(id)
 	}
 
-	if len(ranges) != 0 {
-		newRanges, err = getKeyRanges(ranges)
-		if err != nil {
-			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
+	newRanges, err = getKeyRanges(ranges)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 
-	err = handler.config.update(id, newRanges, int(batch))
+	err = handler.config.update(id, newRanges, batch)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -480,7 +494,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 
 	resp, err := handler.config.delete(id)
 	if err != nil {
-		if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+		if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) || errors.ErrorEqual(err, errs.ErrScheduleConfigNotExist.FastGenByArgs()) {
 			handler.rd.JSON(w, http.StatusNotFound, err.Error())
 		} else {
 			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -488,11 +502,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if resp != nil {
-		handler.rd.JSON(w, http.StatusOK, resp)
-		return
-	}
-	handler.rd.JSON(w, http.StatusNotFound, err.Error())
+	handler.rd.JSON(w, http.StatusOK, resp)
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
