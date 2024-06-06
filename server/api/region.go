@@ -16,7 +16,6 @@ package api
 
 import (
 	"container/heap"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -93,14 +92,10 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// decode hex if query has params with hex format
-	formatStr := r.URL.Query().Get("format")
-	if formatStr == "hex" {
-		keyBytes, err := hex.DecodeString(key)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		key = string(keyBytes)
+	err = apiutil.ParseHexKeys(r.URL.Query().Get("format"), &key)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	regionInfo := rc.GetRegionByKey([]byte(key))
@@ -178,21 +173,10 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	endKey := r.URL.Query().Get("end_key")
 
 	// decode hex if query has params with hex format
-	formatStr := r.URL.Query().Get("format")
-	if formatStr == "hex" {
-		keyBytes, err := hex.DecodeString(startKey)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		startKey = string(keyBytes)
-
-		keyBytes, err = hex.DecodeString(endKey)
-		if err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		endKey = string(keyBytes)
+	err := apiutil.ParseHexKeys(r.URL.Query().Get("format"), &startKey, &endKey)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"))
