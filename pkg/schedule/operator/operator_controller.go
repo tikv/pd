@@ -438,8 +438,13 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 			operatorCounter.WithLabelValues(op.Desc(), "unexpected-status").Inc()
 			return false, NotInCreateStatus
 		}
+<<<<<<< HEAD
 		if !isPromoting && oc.wopStatus.ops[op.Desc()] >= oc.config.GetSchedulerMaxWaitingOperator() {
 			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.ops[op.Desc()]), zap.String("desc", op.Desc()), zap.Uint64("max", oc.config.GetSchedulerMaxWaitingOperator()))
+=======
+		if !isPromoting && oc.wopStatus.getCount(op.Desc()) >= oc.config.GetSchedulerMaxWaitingOperator() {
+			log.Debug("exceed max return false", zap.Uint64("waiting", oc.wopStatus.getCount(op.Desc())), zap.String("desc", op.Desc()), zap.Uint64("max", oc.config.GetSchedulerMaxWaitingOperator()))
+>>>>>>> e767c012f (schedule: fix datarace in `operator.check` (#8264))
 			operatorCounter.WithLabelValues(op.Desc(), "exceed-max-waiting").Inc()
 			return false, ExceedWaitLimit
 		}
