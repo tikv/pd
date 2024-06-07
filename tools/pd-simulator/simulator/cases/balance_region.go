@@ -61,7 +61,7 @@ func newRedundantBalanceRegion(config *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make(map[uint64]int64, totalStore)
 	storeLastAvailable := make(map[uint64]uint64, totalStore)
-	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
 		for _, store := range stores {
 			if store.NodeState == metapb.NodeState_Removed {
 				delete(allStores, store.GetId())

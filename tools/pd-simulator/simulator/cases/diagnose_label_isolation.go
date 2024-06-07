@@ -67,7 +67,7 @@ func newLabelNotMatch1(_ *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make(map[uint64]int64, storeNum+1)
 	storeLastAvailable := make(map[uint64]uint64, storeNum+1)
-	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
 		for _, store := range stores {
 			if store.NodeState == metapb.NodeState_Removed {
 				delete(allStores, store.GetId())
@@ -142,7 +142,7 @@ func newLabelIsolation1(_ *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make(map[uint64]int64, storeNum)
 	storeLastAvailable := make(map[uint64]uint64, storeNum)
-	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
 		for _, store := range stores {
 			if store.NodeState == metapb.NodeState_Removed {
 				delete(allStores, store.GetId())
@@ -211,7 +211,7 @@ func newLabelIsolation2(_ *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make(map[uint64]int64, storeNum)
 	storeLastAvailable := make(map[uint64]uint64, storeNum)
-	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
 		for _, store := range stores {
 			if store.NodeState == metapb.NodeState_Removed {
 				delete(allStores, store.GetId())
