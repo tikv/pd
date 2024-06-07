@@ -415,7 +415,7 @@ func (a *addPeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *
 		pendingPeers := append(region.GetPendingPeers(), a.peer)
 		return region.Clone(core.WithAddPeer(a.peer), core.WithIncConfVer(), core.WithPendingPeers(pendingPeers)), false
 	}
-	speed := engine.storeConfig.speed()
+	speed := engine.storeConfig.Speed()
 	// Step 2: Process Snapshot
 	if !processSnapshot(sendNode, a.sendingStat, speed) {
 		return nil, false
