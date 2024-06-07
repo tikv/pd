@@ -172,6 +172,8 @@ func (n *Node) stepTask() {
 	}
 }
 
+var schedulerCheck sync.Once
+
 func (n *Node) stepHeartBeat() {
 	config := n.raftEngine.storeConfig
 
@@ -182,6 +184,7 @@ func (n *Node) stepHeartBeat() {
 	period = uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
 	if n.tick%period == 0 {
 		n.regionHeartBeat()
+		schedulerCheck.Do(func() { ChooseToHaltPDSchedule(false) })
 	}
 }
 
