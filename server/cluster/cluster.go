@@ -1491,21 +1491,22 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()),
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
-	err := c.putStoreLocked(newStore)
-	if err == nil {
-		regionSize := float64(c.core.GetStoreRegionSize(storeID))
-		c.resetProgress(storeID, store.GetAddress())
-		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
-		// record the current store limit in memory
-		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
-			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
-			storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
-		}
-		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
-		// And considering the store state has changed, RemoveStore is actually successful.
-		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+
+	if err := c.putStoreLocked(newStore); err != nil {
+		return err
 	}
-	return err
+	regionSize := float64(c.core.GetStoreRegionSize(storeID))
+	c.resetProgress(storeID, store.GetAddress())
+	c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
+	// record the current store limit in memory
+	c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
+		storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
+		storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
+	}
+	// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
+	// And considering the store state has changed, RemoveStore is actually successful.
+	_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+	return nil
 }
 
 func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
