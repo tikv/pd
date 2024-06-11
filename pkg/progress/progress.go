@@ -240,5 +240,4 @@ func (m *Manager) Status(progressName string) (progress, leftSeconds, currentSpe
 		leftSeconds = math.MaxFloat64
 	}
 	return
-
 }
