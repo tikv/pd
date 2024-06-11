@@ -475,6 +475,8 @@ loop:
 			continue
 		}
 
+		// If we have schedule, reset interval to the minimal interval.
+		s.nextInterval = s.Scheduler.GetMinInterval()
 		for _, op := range ops {
 			labelMgr := s.cluster.GetRegionLabeler()
 			if labelMgr == nil {
@@ -489,9 +491,6 @@ loop:
 				continue loop
 			}
 		}
-
-		// If we have schedule, reset interval to the minimal interval.
-		s.nextInterval = s.Scheduler.GetMinInterval()
 		return ops
 	}
 	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
