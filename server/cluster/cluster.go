@@ -1840,8 +1840,8 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string
 		return
 	}
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(progress)
-	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(leftSeconds)
-	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(currentSpeed)
+	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(currentSpeed)
+	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(leftSeconds)
 }
 
 func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string) {
