@@ -107,9 +107,9 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	heartbeatTaskRunner  = "heartbeat-async"
-	statisticsTaskRunner = "statistics-async"
-	logTaskRunner        = "log-async"
+	heartbeatTaskRunner = "heartbeat-async"
+	miscTaskRunner      = "misc-async"
+	logTaskRunner       = "log-async"
 )
 
 // Server is the interface for cluster.
@@ -143,6 +143,8 @@ type RaftCluster struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 
+	*core.BasicCluster // cached cluster info
+
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
@@ -159,7 +161,6 @@ type RaftCluster struct {
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
 	clusterID uint64
 	id        id.Allocator
-	core      *core.BasicCluster // cached cluster info
 	opt       *config.PersistOptions
 	limiter   *StoreLimiter
 	*schedulingController
@@ -201,10 +202,10 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.Ba
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
 		etcdClient:      etcdClient,
-		core:            basicCluster,
+		BasicCluster:    basicCluster,
 		storage:         storage,
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		miscRunner:      ratelimit.NewConcurrentRunner(statisticsTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
 }
@@ -251,10 +252,10 @@ func (c *RaftCluster) LoadClusterStatus() (*Status, error) {
 }
 
 func (c *RaftCluster) isInitialized() bool {
-	if c.core.GetTotalRegionCount() > 1 {
+	if c.GetTotalRegionCount() > 1 {
 		return true
 	}
-	region := c.core.GetRegionByKey(nil)
+	region := c.GetRegionByKey(nil)
 	return region != nil &&
 		len(region.GetVoters()) >= int(c.opt.GetReplicationConfig().MaxReplicas) &&
 		len(region.GetPendingPeers()) == 0
@@ -295,7 +296,7 @@ func (c *RaftCluster) InitCluster(
 			return err
 		}
 	}
-	c.schedulingController = newSchedulingController(c.ctx, c.core, c.opt, c.ruleManager)
+	c.schedulingController = newSchedulingController(c.ctx, c.BasicCluster, c.opt, c.ruleManager)
 	return nil
 }
 
@@ -644,9 +645,9 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		return nil, nil
 	}
 
-	c.core.ResetStores()
+	c.ResetStores()
 	start := time.Now()
-	if err := c.storage.LoadStores(c.core.PutStore); err != nil {
+	if err := c.storage.LoadStores(c.PutStore); err != nil {
 		return nil, err
 	}
 	log.Info("load stores",
@@ -657,11 +658,11 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 	start = time.Now()
 
 	// used to load region from kv storage to cache storage.
-	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.core.CheckAndPutRegion); err != nil {
+	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.CheckAndPutRegion); err != nil {
 		return nil, err
 	}
 	log.Info("load regions",
-		zap.Int("count", c.core.GetTotalRegionCount()),
+		zap.Int("count", c.GetTotalRegionCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
 
@@ -729,7 +730,7 @@ func (c *RaftCluster) runUpdateStoreStats() {
 		case <-ticker.C:
 			// Update related stores.
 			start := time.Now()
-			c.core.UpdateAllStoreStatus()
+			c.UpdateAllStoreStatus()
 			updateStoreStatsGauge.Set(time.Since(start).Seconds())
 		}
 	}
@@ -868,8 +869,6 @@ func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest, resp *pdpb.StoreHeartbeatResponse) error {
 	stats := heartbeat.GetStats()
 	storeID := stats.GetStoreId()
-	c.Lock()
-	defer c.Unlock()
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)
@@ -917,10 +916,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
 		}
 	}
-	if store := c.core.GetStore(storeID); store != nil {
+	if store := c.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}
-	c.core.PutStore(newStore)
+	c.PutStore(newStore)
 	var (
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
@@ -959,8 +958,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				utils.RegionWriteKeys:     0,
 				utils.RegionWriteQueryNum: 0,
 			}
-			peerInfo := core.NewPeerInfo(peer, loads, interval)
-			c.hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
+			c.hotStat.CheckReadAsync(statistics.NewCheckReadPeerTask(region, []*metapb.Peer{peer}, loads, interval))
 		}
 	}
 	for _, stat := range stats.GetSnapshotStats() {
@@ -990,7 +988,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 
 // processReportBuckets update the bucket information.
 func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
-	region := c.core.GetRegion(buckets.GetRegionId())
+	region := c.GetRegion(buckets.GetRegionId())
 	if region == nil {
 		regionCacheMissCounter.Inc()
 		return errors.Errorf("region %v not found", buckets.GetRegionId())
@@ -1023,7 +1021,7 @@ var syncRunner = ratelimit.NewSyncRunner()
 // processRegionHeartbeat updates the region information.
 func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *core.RegionInfo) error {
 	tracer := ctx.Tracer
-	origin, _, err := c.core.PreCheckPutRegion(region)
+	origin, _, err := c.PreCheckPutRegion(region)
 	tracer.OnPreCheckFinished()
 	if err != nil {
 		return err
@@ -1083,7 +1081,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// check its validation again here.
 		//
 		// However, it can't solve the race condition of concurrent heartbeats from the same region.
-		if overlaps, err = c.core.CheckAndPutRootTree(ctx, region); err != nil {
+		if overlaps, err = c.CheckAndPutRootTree(ctx, region); err != nil {
 			tracer.OnSaveCacheFinished()
 			return err
 		}
@@ -1174,158 +1172,7 @@ func (c *RaftCluster) putMetaLocked(meta *metapb.Cluster) error {
 
 // GetBasicCluster returns the basic cluster.
 func (c *RaftCluster) GetBasicCluster() *core.BasicCluster {
-	return c.core
-}
-
-// GetRegionByKey gets regionInfo by region key from cluster.
-func (c *RaftCluster) GetRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.GetRegionByKey(regionKey)
-}
-
-// GetPrevRegionByKey gets previous region and leader peer by the region key from cluster.
-func (c *RaftCluster) GetPrevRegionByKey(regionKey []byte) *core.RegionInfo {
-	return c.core.GetPrevRegionByKey(regionKey)
-}
-
-// ScanRegions scans region with start key, until the region contains endKey, or
-// total number greater than limit.
-func (c *RaftCluster) ScanRegions(startKey, endKey []byte, limit int) []*core.RegionInfo {
-	return c.core.ScanRegions(startKey, endKey, limit)
-}
-
-// GetRegion searches for a region by ID.
-func (c *RaftCluster) GetRegion(regionID uint64) *core.RegionInfo {
-	return c.core.GetRegion(regionID)
-}
-
-// GetMetaRegions gets regions from cluster.
-func (c *RaftCluster) GetMetaRegions() []*metapb.Region {
-	return c.core.GetMetaRegions()
-}
-
-// GetRegions returns all regions' information in detail.
-func (c *RaftCluster) GetRegions() []*core.RegionInfo {
-	return c.core.GetRegions()
-}
-
-// ValidRegion is used to decide if the region is valid.
-func (c *RaftCluster) ValidRegion(region *metapb.Region) error {
-	return c.core.ValidRegion(region)
-}
-
-// GetTotalRegionCount returns total count of regions
-func (c *RaftCluster) GetTotalRegionCount() int {
-	return c.core.GetTotalRegionCount()
-}
-
-// GetStoreRegions returns all regions' information with a given storeID.
-func (c *RaftCluster) GetStoreRegions(storeID uint64) []*core.RegionInfo {
-	return c.core.GetStoreRegions(storeID)
-}
-
-// GetStoreRegions returns all regions' information with a given storeID.
-func (c *RaftCluster) GetStoreRegionsByType(storeID uint64) []*core.RegionInfo {
-	return c.core.GetStoreRegions(storeID)
-}
-
-// RandLeaderRegions returns some random regions that has leader on the store.
-func (c *RaftCluster) RandLeaderRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandLeaderRegions(storeID, ranges)
-}
-
-// RandFollowerRegions returns some random regions that has a follower on the store.
-func (c *RaftCluster) RandFollowerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandFollowerRegions(storeID, ranges)
-}
-
-// RandPendingRegions returns some random regions that has a pending peer on the store.
-func (c *RaftCluster) RandPendingRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandPendingRegions(storeID, ranges)
-}
-
-// RandLearnerRegions returns some random regions that has a learner peer on the store.
-func (c *RaftCluster) RandLearnerRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandLearnerRegions(storeID, ranges)
-}
-
-// RandWitnessRegions returns some random regions that has a witness peer on the store.
-func (c *RaftCluster) RandWitnessRegions(storeID uint64, ranges []core.KeyRange) []*core.RegionInfo {
-	return c.core.RandWitnessRegions(storeID, ranges)
-}
-
-// GetLeaderStore returns all stores that contains the region's leader peer.
-func (c *RaftCluster) GetLeaderStore(region *core.RegionInfo) *core.StoreInfo {
-	return c.core.GetLeaderStore(region)
-}
-
-// GetNonWitnessVoterStores returns all stores that contains the region's non-witness voter peer.
-func (c *RaftCluster) GetNonWitnessVoterStores(region *core.RegionInfo) []*core.StoreInfo {
-	return c.core.GetNonWitnessVoterStores(region)
-}
-
-// GetFollowerStores returns all stores that contains the region's follower peer.
-func (c *RaftCluster) GetFollowerStores(region *core.RegionInfo) []*core.StoreInfo {
-	return c.core.GetFollowerStores(region)
-}
-
-// GetRegionStores returns all stores that contains the region's peer.
-func (c *RaftCluster) GetRegionStores(region *core.RegionInfo) []*core.StoreInfo {
-	return c.core.GetRegionStores(region)
-}
-
-// GetStoreCount returns the count of stores.
-func (c *RaftCluster) GetStoreCount() int {
-	return c.core.GetStoreCount()
-}
-
-// GetStoreRegionCount returns the number of regions for a given store.
-func (c *RaftCluster) GetStoreRegionCount(storeID uint64) int {
-	return c.core.GetStoreRegionCount(storeID)
-}
-
-// GetAverageRegionSize returns the average region approximate size.
-func (c *RaftCluster) GetAverageRegionSize() int64 {
-	return c.core.GetAverageRegionSize()
-}
-
-// DropCacheRegion removes a region from the cache.
-func (c *RaftCluster) DropCacheRegion(id uint64) {
-	c.core.RemoveRegionIfExist(id)
-}
-
-// DropCacheAllRegion removes all regions from the cache.
-func (c *RaftCluster) DropCacheAllRegion() {
-	c.core.ResetRegionCache()
-}
-
-// GetMetaStores gets stores from cluster.
-func (c *RaftCluster) GetMetaStores() []*metapb.Store {
-	return c.core.GetMetaStores()
-}
-
-// GetStores returns all stores in the cluster.
-func (c *RaftCluster) GetStores() []*core.StoreInfo {
-	return c.core.GetStores()
-}
-
-// GetLeaderStoreByRegionID returns the leader store of the given region.
-func (c *RaftCluster) GetLeaderStoreByRegionID(regionID uint64) *core.StoreInfo {
-	return c.core.GetLeaderStoreByRegionID(regionID)
-}
-
-// GetStore gets store from cluster.
-func (c *RaftCluster) GetStore(storeID uint64) *core.StoreInfo {
-	return c.core.GetStore(storeID)
-}
-
-// GetAdjacentRegions returns regions' information that are adjacent with the specific region ID.
-func (c *RaftCluster) GetAdjacentRegions(region *core.RegionInfo) (*core.RegionInfo, *core.RegionInfo) {
-	return c.core.GetAdjacentRegions(region)
-}
-
-// GetRangeHoles returns all range holes, i.e the key ranges without any region info.
-func (c *RaftCluster) GetRangeHoles() [][]string {
-	return c.core.GetRangeHoles()
+	return c.BasicCluster
 }
 
 // UpdateStoreLabels updates a store's location labels
@@ -1361,8 +1208,8 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 	return c.putStoreImpl(newStore, true)
 }
 
-// PutStore puts a store.
-func (c *RaftCluster) PutStore(store *metapb.Store) error {
+// PutMetaStore puts a store.
+func (c *RaftCluster) PutMetaStore(store *metapb.Store) error {
 	if err := c.putStoreImpl(store, false); err != nil {
 		return err
 	}
@@ -1375,9 +1222,6 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 // If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
 // If 'force' is false, the store's labels will merge into those labels which already existed in the store.
 func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
-	c.Lock()
-	defer c.Unlock()
-
 	if store.GetId() == 0 {
 		return errors.Errorf("invalid put store %v", store)
 	}
@@ -1419,7 +1263,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	if err := c.checkStoreLabels(s); err != nil {
 		return err
 	}
-	return c.putStoreLocked(s)
+	return c.setStore(s)
 }
 
 func (c *RaftCluster) checkStoreVersion(store *metapb.Store) error {
@@ -1464,9 +1308,6 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 // RemoveStore marks a store as offline in cluster.
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) error {
-	c.Lock()
-	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1492,10 +1333,10 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.String("store-address", newStore.GetAddress()),
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
 
-	if err := c.putStoreLocked(newStore); err != nil {
+	if err := c.setStore(newStore); err != nil {
 		return err
 	}
-	regionSize := float64(c.core.GetStoreRegionSize(storeID))
+	regionSize := float64(c.GetStoreRegionSize(storeID))
 	c.resetProgress(storeID, store.GetAddress())
 	c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
 	// record the current store limit in memory
@@ -1557,9 +1398,6 @@ func (c *RaftCluster) getUpStores() []uint64 {
 // BuryStore marks a store as tombstone in cluster.
 // If forceBury is false, the store should be offlined and emptied before calling this func.
 func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
-	c.Lock()
-	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1584,8 +1422,8 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		zap.String("store-address", newStore.GetAddress()),
 		zap.String("state", store.GetState().String()),
 		zap.Bool("physically-destroyed", store.IsPhysicallyDestroyed()))
-	err := c.putStoreLocked(newStore)
-	c.onStoreVersionChangeLocked()
+	err := c.setStore(newStore)
+	c.OnStoreVersionChange()
 	if err == nil {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
@@ -1599,40 +1437,6 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		}
 	}
 	return err
-}
-
-// PauseLeaderTransfer prevents the store from been selected as source or
-// target store of TransferLeader.
-func (c *RaftCluster) PauseLeaderTransfer(storeID uint64) error {
-	return c.core.PauseLeaderTransfer(storeID)
-}
-
-// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
-// as source or target of TransferLeader again.
-func (c *RaftCluster) ResumeLeaderTransfer(storeID uint64) {
-	c.core.ResumeLeaderTransfer(storeID)
-}
-
-// SlowStoreEvicted marks a store as a slow store and prevents transferring
-// leader to the store
-func (c *RaftCluster) SlowStoreEvicted(storeID uint64) error {
-	return c.core.SlowStoreEvicted(storeID)
-}
-
-// SlowTrendEvicted marks a store as a slow store by trend and prevents transferring
-// leader to the store
-func (c *RaftCluster) SlowTrendEvicted(storeID uint64) error {
-	return c.core.SlowTrendEvicted(storeID)
-}
-
-// SlowTrendRecovered cleans the evicted by slow trend state of a store.
-func (c *RaftCluster) SlowTrendRecovered(storeID uint64) {
-	c.core.SlowTrendRecovered(storeID)
-}
-
-// SlowStoreRecovered cleans the evicted state of a store.
-func (c *RaftCluster) SlowStoreRecovered(storeID uint64) {
-	c.core.SlowStoreRecovered(storeID)
 }
 
 // NeedAwakenAllRegionsInStore checks whether we should do AwakenRegions operation.
@@ -1666,9 +1470,6 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 
 // UpStore up a store from offline
 func (c *RaftCluster) UpStore(storeID uint64) error {
-	c.Lock()
-	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1699,7 +1500,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	log.Warn("store has been up",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
-	err := c.putStoreLocked(newStore)
+	err := c.setStore(newStore)
 	if err == nil {
 		if exist {
 			// persist the store limit
@@ -1713,9 +1514,6 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 
 // ReadyToServe change store's node state to Serving.
 func (c *RaftCluster) ReadyToServe(storeID uint64) error {
-	c.Lock()
-	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1737,7 +1535,7 @@ func (c *RaftCluster) ReadyToServe(storeID uint64) error {
 	log.Info("store has changed to serving",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
-	err := c.putStoreLocked(newStore)
+	err := c.setStore(newStore)
 	if err == nil {
 		c.resetProgress(storeID, store.GetAddress())
 	}
@@ -1760,16 +1558,16 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		core.SetRegionWeight(regionWeight),
 	)
 
-	return c.putStoreLocked(newStore)
+	return c.setStore(newStore)
 }
 
-func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
+func (c *RaftCluster) setStore(store *core.StoreInfo) error {
 	if c.storage != nil {
 		if err := c.storage.SaveStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}
-	c.core.PutStore(store)
+	c.PutStore(store)
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		c.updateStoreStatistics(store.GetID(), store.IsSlow())
 	}
@@ -1835,11 +1633,11 @@ func (c *RaftCluster) checkStores() {
 
 		offlineStore := store.GetMeta()
 		id := offlineStore.GetId()
-		regionSize := c.core.GetStoreRegionSize(id)
+		regionSize := c.GetStoreRegionSize(id)
 		if c.IsPrepared() {
 			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
 		}
-		regionCount := c.core.GetStoreRegionCount(id)
+		regionCount := c.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
 		if regionCount == 0 {
 			if err := c.BuryStore(id, false); err != nil {
@@ -1867,7 +1665,7 @@ func (c *RaftCluster) checkStores() {
 func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
 	start := time.Now()
 	if !c.opt.IsPlacementRulesEnabled() {
-		regionSize := c.core.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())
+		regionSize := c.GetRegionSizeByRange([]byte(""), []byte("")) * int64(c.opt.GetMaxReplicas())
 		weight := getStoreTopoWeight(store, stores, c.opt.GetLocationLabels(), c.opt.GetMaxReplicas())
 		return float64(regionSize) * weight * 0.9
 	}
@@ -1907,7 +1705,7 @@ func (c *RaftCluster) calculateRange(stores []*core.StoreInfo, store *core.Store
 				matchStores = append(matchStores, s)
 			}
 		}
-		regionSize := c.core.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
+		regionSize := c.GetRegionSizeByRange(startKey, endKey) * int64(rule.Count)
 		weight := getStoreTopoWeight(store, matchStores, rule.LocationLabels, rule.Count)
 		storeSize += float64(regionSize) * weight
 		log.Debug("calculate range result",
@@ -2073,13 +1871,10 @@ func encodePreparingProgressKey(storeID uint64) string {
 
 // RemoveTombStoneRecords removes the tombStone Records.
 func (c *RaftCluster) RemoveTombStoneRecords() error {
-	c.Lock()
-	defer c.Unlock()
-
 	var failedStores []uint64
 	for _, store := range c.GetStores() {
 		if store.IsRemoved() {
-			if c.core.GetStoreRegionCount(store.GetID()) > 0 {
+			if c.GetStoreRegionCount(store.GetID()) > 0 {
 				log.Warn("skip removing tombstone", zap.Stringer("store", store.GetMeta()))
 				failedStores = append(failedStores, store.GetID())
 				continue
@@ -2117,7 +1912,7 @@ func (c *RaftCluster) deleteStore(store *core.StoreInfo) error {
 			return err
 		}
 	}
-	c.core.DeleteStore(store)
+	c.DeleteStore(store)
 	return nil
 }
 
@@ -2158,12 +1953,6 @@ func (c *RaftCluster) resetProgressIndicator() {
 
 // OnStoreVersionChange changes the version of the cluster when needed.
 func (c *RaftCluster) OnStoreVersionChange() {
-	c.RLock()
-	defer c.RUnlock()
-	c.onStoreVersionChangeLocked()
-}
-
-func (c *RaftCluster) onStoreVersionChangeLocked() {
 	var minVersion *semver.Version
 	stores := c.GetStores()
 	for _, s := range stores {
@@ -2221,13 +2010,13 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 
 // GetRegionStatsByRange returns region statistics from cluster.
 func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte) *statistics.RegionStats {
-	return statistics.GetRegionStats(c.core.ScanRegions(startKey, endKey, -1))
+	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1))
 }
 
-// GetRegionCount returns the number of regions in the range.
-func (c *RaftCluster) GetRegionCount(startKey, endKey []byte) *statistics.RegionStats {
+// GetRegionStatsCount returns the number of regions in the range.
+func (c *RaftCluster) GetRegionStatsCount(startKey, endKey []byte) *statistics.RegionStats {
 	stats := &statistics.RegionStats{}
-	stats.Count = c.core.GetRegionCount(startKey, endKey)
+	stats.Count = c.GetRegionCount(startKey, endKey)
 	return stats
 }
 
@@ -2239,7 +2028,7 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 			return err
 		}
 	}
-	c.core.PutRegion(region)
+	c.PutRegion(region)
 	return nil
 }
 
@@ -2294,7 +2083,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	cfg := c.opt.GetScheduleConfig().Clone()
 	for _, limitType := range storelimit.TypeNameValue {
-		c.core.ResetStoreLimit(storeID, limitType)
+		c.ResetStoreLimit(storeID, limitType)
 	}
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)
@@ -2314,16 +2103,13 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 
 // SetMinResolvedTS sets up a store with min resolved ts.
 func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
-	c.Lock()
-	defer c.Unlock()
-
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
 	newStore := store.Clone(core.SetMinResolvedTS(minResolvedTS))
-	c.core.PutStore(newStore)
+	c.PutStore(newStore)
 	return nil
 }
 

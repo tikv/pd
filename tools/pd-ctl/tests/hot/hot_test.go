@@ -188,11 +188,10 @@ func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 					Id:      100 + regionIDCounter,
 					StoreId: hotStoreID,
 				}
-				peerInfo := core.NewPeerInfo(leader, loads, reportInterval)
 				region := core.NewRegionInfo(&metapb.Region{
 					Id: hotRegionID,
 				}, leader)
-				hotStat.CheckReadAsync(statistics.NewCheckPeerTask(peerInfo, region))
+				hotStat.CheckReadAsync(statistics.NewCheckReadPeerTask(region, []*metapb.Peer{leader}, loads, reportInterval))
 				testutil.Eventually(re, func() bool {
 					hotPeerStat := getHotPeerStat(utils.Read, hotRegionID, hotStoreID)
 					return hotPeerStat != nil

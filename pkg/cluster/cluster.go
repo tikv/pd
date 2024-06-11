@@ -35,12 +35,7 @@ type Cluster interface {
 func HandleStatsAsync(c Cluster, region *core.RegionInfo) {
 	c.GetHotStat().CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
 	c.GetHotStat().CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
-	reportInterval := region.GetInterval()
-	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetWriteLoads(), interval)
-		c.GetHotStat().CheckWriteAsync(statistics.NewCheckPeerTask(peerInfo, region))
-	}
+	c.GetHotStat().CheckWriteAsync(statistics.NewCheckWritePeerTask(region))
 	c.GetCoordinator().GetSchedulersController().CheckTransferWitnessLeader(region)
 }
 

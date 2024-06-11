@@ -515,7 +515,7 @@ func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Contex
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
 			c.run.currentRequests = append(c.run.currentRequests, request)
-			gc.tokenRequestCounter.Inc()
+			gc.metrics.tokenRequestCounter.Inc()
 		}
 		return true
 	})
@@ -632,13 +632,9 @@ type groupCostController struct {
 	calculators    []ResourceCalculator
 	handleRespFunc func(*rmpb.TokenBucketResponse)
 
-	successfulRequestDuration  prometheus.Observer
-	failedLimitReserveDuration prometheus.Observer
-	requestRetryCounter        prometheus.Counter
-	failedRequestCounter       prometheus.Counter
-	tokenRequestCounter        prometheus.Counter
-
-	mu struct {
+	// metrics
+	metrics *groupMetricsCollection
+	mu      struct {
 		sync.Mutex
 		consumption   *rmpb.Consumption
 		storeCounter  map[uint64]*rmpb.Consumption
@@ -685,6 +681,30 @@ type groupCostController struct {
 	tombstone bool
 }
 
+type groupMetricsCollection struct {
+	successfulRequestDuration         prometheus.Observer
+	failedLimitReserveDuration        prometheus.Observer
+	requestRetryCounter               prometheus.Counter
+	failedRequestCounterWithOthers    prometheus.Counter
+	failedRequestCounterWithThrottled prometheus.Counter
+	tokenRequestCounter               prometheus.Counter
+}
+
+func initMetrics(oldName, name string) *groupMetricsCollection {
+	const (
+		otherType     = "others"
+		throttledType = "throttled"
+	)
+	return &groupMetricsCollection{
+		successfulRequestDuration:         successfulRequestDuration.WithLabelValues(oldName, name),
+		failedLimitReserveDuration:        failedLimitReserveDuration.WithLabelValues(oldName, name),
+		failedRequestCounterWithOthers:    failedRequestCounter.WithLabelValues(oldName, name, otherType),
+		failedRequestCounterWithThrottled: failedRequestCounter.WithLabelValues(oldName, name, throttledType),
+		requestRetryCounter:               requestRetryCounter.WithLabelValues(oldName, name),
+		tokenRequestCounter:               resourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
+	}
+}
+
 type tokenCounter struct {
 	getTokenBucketFunc func() *rmpb.TokenBucket
 
@@ -725,16 +745,13 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
+	ms := initMetrics(group.Name, group.Name)
 	gc := &groupCostController{
-		meta:                       group,
-		name:                       group.Name,
-		mainCfg:                    mainCfg,
-		mode:                       group.GetMode(),
-		successfulRequestDuration:  successfulRequestDuration.WithLabelValues(group.Name, group.Name),
-		failedLimitReserveDuration: failedLimitReserveDuration.WithLabelValues(group.Name, group.Name),
-		failedRequestCounter:       failedRequestCounter.WithLabelValues(group.Name, group.Name),
-		requestRetryCounter:        requestRetryCounter.WithLabelValues(group.Name, group.Name),
-		tokenRequestCounter:        resourceGroupTokenRequestCounter.WithLabelValues(group.Name, group.Name),
+		meta:    group,
+		name:    group.Name,
+		mainCfg: mainCfg,
+		mode:    group.GetMode(),
+		metrics: ms,
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
@@ -789,7 +806,7 @@ func (gc *groupCostController) initRunState() {
 	case rmpb.GroupMode_RUMode:
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitLimitTypeList {
-			limiter := NewLimiterWithCfg(now, cfgFunc(getRUTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
+			limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(getRUTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
 			counter := &tokenCounter{
 				limiter:     limiter,
 				avgRUPerSec: 0,
@@ -803,7 +820,7 @@ func (gc *groupCostController) initRunState() {
 	case rmpb.GroupMode_RawMode:
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceLimitTypeList {
-			limiter := NewLimiterWithCfg(now, cfgFunc(getRawResourceTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
+			limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(getRawResourceTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
 			counter := &tokenCounter{
 				limiter:     limiter,
 				avgRUPerSec: 0,
@@ -1233,7 +1250,7 @@ func (gc *groupCostController) onRequestWait(
 						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v))
 					}
 				}
-				if d, err = WaitReservations(ctx, now, res); err == nil {
+				if d, err = WaitReservations(ctx, now, res); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
 					break retryLoop
 				}
 			case rmpb.GroupMode_RUMode:
@@ -1243,18 +1260,20 @@ func (gc *groupCostController) onRequestWait(
 						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v))
 					}
 				}
-				if d, err = WaitReservations(ctx, now, res); err == nil {
+				if d, err = WaitReservations(ctx, now, res); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
 					break retryLoop
 				}
 			}
-			gc.requestRetryCounter.Inc()
+			gc.metrics.requestRetryCounter.Inc()
 			time.Sleep(gc.mainCfg.WaitRetryInterval)
 			waitDuration += gc.mainCfg.WaitRetryInterval
 		}
 		if err != nil {
-			gc.failedRequestCounter.Inc()
-			if d.Seconds() > 0 {
-				gc.failedLimitReserveDuration.Observe(d.Seconds())
+			if errs.ErrClientResourceGroupThrottled.Equal(err) {
+				gc.metrics.failedRequestCounterWithThrottled.Inc()
+				gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
+			} else {
+				gc.metrics.failedRequestCounterWithOthers.Inc()
 			}
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
@@ -1264,7 +1283,7 @@ func (gc *groupCostController) onRequestWait(
 			})
 			return nil, nil, waitDuration, 0, err
 		}
-		gc.successfulRequestDuration.Observe(d.Seconds())
+		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
 	}
 
