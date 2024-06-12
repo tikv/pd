@@ -251,10 +251,10 @@ func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) error {
 	return nil
 }
 
-func (m *ModeManager) drSwitchToAsync(availableStores []uint64) {
+func (m *ModeManager) drSwitchToAsync(availableStores []uint64) error {
 	m.Lock()
 	defer m.Unlock()
-	_ = m.drSwitchToAsyncWithLock(availableStores)
+	return m.drSwitchToAsyncWithLock(availableStores)
 }
 
 func (m *ModeManager) drSwitchToAsyncWithLock(availableStores []uint64) error {

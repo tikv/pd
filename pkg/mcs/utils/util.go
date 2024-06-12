@@ -267,7 +267,7 @@ func StopHTTPServer(s server) {
 	go func() {
 		defer close(ch)
 		if err := s.GetHTTPServer().Shutdown(ctx); err != nil {
-			log.Warn("http server graceful shutdown failed", errs.ZapError(err))
+			log.Error("http server graceful shutdown failed", errs.ZapError(err))
 		}
 	}()
 

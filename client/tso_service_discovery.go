@@ -369,7 +369,7 @@ func (c *tsoServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlo
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
-			log.Error("[tso] failed to call callback", errs.ZapError(err))
+			log.Error("[tso] failed to call back when tso global service url update", zap.String("url", url), errs.ZapError(err))
 		}
 	}
 	c.globalAllocPrimariesUpdatedCb = callback
