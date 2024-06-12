@@ -15,38 +15,38 @@
 package cases
 
 import (
-	"math/rand"
-
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newHotRead() *Case {
+func newHotRead(config *sc.SimConfig) *Case {
 	var simCase Case
-
-	storeNum, regionNum := getStoreNum(), getRegionNum()
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
 
 	// Initialize the cluster
-	for i := 1; i <= storeNum; i++ {
+	for i := 0; i < totalStore; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
-		storeIDs := rand.Perm(storeNum)
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      simutil.IDAllocator.NextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -56,7 +56,7 @@ func newHotRead() *Case {
 
 	// Events description
 	// select regions on store 1 as hot read regions.
-	selectRegionNum := 4 * storeNum
+	selectRegionNum := 4 * totalStore
 	readFlow := make(map[uint64]int64, selectRegionNum)
 	for _, r := range simCase.Regions {
 		if r.Leader.GetStoreId() == 1 {
@@ -73,12 +73,11 @@ func newHotRead() *Case {
 	simCase.Events = []EventDescriptor{e}
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		leaderCount := make([]int, storeNum)
+		leaderCount := make([]int, totalStore)
 		for id := range readFlow {
 			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
 			leaderCount[int(leaderStore-1)]++
 		}
-		simutil.Logger.Info("current hot region counts", zap.Reflect("hot-region", leaderCount))
 
 		// check count diff < 2.
 		var min, max int

@@ -1431,17 +1431,6 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 	return resp, nil
 }
 
-// IsLeaderChange will determine whether there is a leader change.
-func IsLeaderChange(err error) bool {
-	if err == errs.ErrClientTSOStreamClosed {
-		return true
-	}
-	errMsg := err.Error()
-	return strings.Contains(errMsg, errs.NotLeaderErr) ||
-		strings.Contains(errMsg, errs.MismatchLeaderErr) ||
-		strings.Contains(errMsg, errs.NotServedErr)
-}
-
 const (
 	httpSchemePrefix  = "http://"
 	httpsSchemePrefix = "https://"

@@ -49,7 +49,9 @@ type Client interface {
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
+	DeleteStore(context.Context, uint64) error
 	SetStoreLabels(context.Context, int64, map[string]string) error
+	GetHealthStatus(context.Context) ([]Health, error)
 	/* Config-related interfaces */
 	GetConfig(context.Context) (map[string]any, error)
 	SetConfig(context.Context, map[string]any, ...float64) error
@@ -337,6 +339,20 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 		WithBody(jsonInput))
 }
 
+// GetHealthStatus gets the health status of the cluster.
+func (c *client) GetHealthStatus(ctx context.Context) ([]Health, error) {
+	var healths []Health
+	err := c.request(ctx, newRequestInfo().
+		WithName(getHealthStatusName).
+		WithURI(health).
+		WithMethod(http.MethodGet).
+		WithResp(&healths))
+	if err != nil {
+		return nil, err
+	}
+	return healths, nil
+}
+
 // GetConfig gets the configurations.
 func (c *client) GetConfig(ctx context.Context) (map[string]any, error) {
 	var config map[string]any
@@ -423,6 +439,14 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*StoreInfo, erro
 		return nil, err
 	}
 	return &store, nil
+}
+
+// DeleteStore deletes the store by ID.
+func (c *client) DeleteStore(ctx context.Context, storeID uint64) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteStoreName).
+		WithURI(StoreByID(storeID)).
+		WithMethod(http.MethodDelete))
 }
 
 // GetClusterVersion gets the cluster version.

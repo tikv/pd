@@ -1980,7 +1980,7 @@ func makeStores() placement.StoreSet {
 				if zone == 1 && host == 1 {
 					labels["type"] = "read"
 				}
-				stores.SetStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now), core.SetStoreState(metapb.StoreState_Up)))
+				stores.PutStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now), core.SetStoreState(metapb.StoreState_Up)))
 			}
 		}
 	}

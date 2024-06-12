@@ -601,7 +601,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline, getTestDeployPath(storeID))
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	err = rc.PutStore(store)
+	err = rc.PutMetaStore(store)
 	re.NoError(err)
 	re.NotNil(tc)
 	rc.Stop()
@@ -662,7 +662,7 @@ func TestNotLeader(t *testing.T) {
 	grpcStatus, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Unavailable, grpcStatus.Code())
-	re.Equal("not leader", grpcStatus.Message())
+	re.ErrorContains(server.ErrNotLeader, grpcStatus.Message())
 }
 
 func TestStoreVersionChange(t *testing.T) {
