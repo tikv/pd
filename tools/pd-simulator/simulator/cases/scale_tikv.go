@@ -1,4 +1,4 @@
-// Copyright 2018 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,20 +17,22 @@ package cases
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
-func newScaleInOut() *Case {
+func newScaleInOut(config *sc.SimConfig) *Case {
 	var simCase Case
 
-	storeNum := simutil.CaseConfigure.StoreNum
-	regionNum := simutil.CaseConfigure.RegionNum
-	if storeNum == 0 || regionNum == 0 {
-		storeNum, regionNum = 6, 4000
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	if totalStore == 0 || totalRegion == 0 {
+		totalStore, totalRegion = 6, 4000
 	}
 
-	for i := 0; i < storeNum; i++ {
+	for i := 0; i < totalStore; i++ {
 		s := &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
@@ -41,11 +43,13 @@ func newScaleInOut() *Case {
 		simCase.Stores = append(simCase.Stores, s)
 	}
 
-	for i := 0; i < regionNum; i++ {
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum + 1)},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      simutil.IDAllocator.NextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -54,11 +58,11 @@ func newScaleInOut() *Case {
 		})
 	}
 
-	scaleInTick := int64(regionNum * 3 / storeNum)
+	scaleInTick := int64(totalRegion * 3 / totalStore)
 	addEvent := &AddNodesDescriptor{}
 	addEvent.Step = func(tick int64) uint64 {
 		if tick == scaleInTick {
-			return uint64(storeNum + 1)
+			return uint64(totalStore + 1)
 		}
 		return 0
 	}
@@ -66,13 +70,13 @@ func newScaleInOut() *Case {
 	removeEvent := &DeleteNodesDescriptor{}
 	removeEvent.Step = func(tick int64) uint64 {
 		if tick == scaleInTick*2 {
-			return uint64(storeNum + 1)
+			return uint64(totalStore + 1)
 		}
 		return 0
 	}
 	simCase.Events = []EventDescriptor{addEvent, removeEvent}
 
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ *core.RegionsInfo, _ []info.StoreStats) bool {
 		return false
 	}
 	return &simCase
