@@ -805,7 +805,9 @@ func (c *pdServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLoca
 func (c *pdServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
-		callback(url)
+		if err := callback(url); err != nil {
+			log.Error("[tso] failed to call callback", errs.ZapError(err))
+		}
 	}
 	c.tsoGlobalAllocLeaderUpdatedCb = callback
 }

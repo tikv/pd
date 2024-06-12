@@ -319,7 +319,9 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		// If the stream is nil or the leader has changed, try to reconnect.
 		if toReconnect {
 			connection.reset()
-			c.tryResourceManagerConnect(dispatcherCtx, &connection)
+			if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
+				log.Error("[resource_manager] try connect leader failed", errs.ZapError(err))
+			}
 			log.Info("[resource_manager] token leader may change, try to reconnect the stream")
 			stream, streamCtx = connection.stream, connection.ctx
 		}

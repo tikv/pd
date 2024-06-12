@@ -87,8 +87,7 @@ func TestStatus(t *testing.T) {
 		},
 	}, rep.GetReplicationStatus())
 
-	err = rep.drSwitchToAsync(nil)
-	re.NoError(err)
+	rep.drSwitchToAsync(nil)
 	re.Equal(&pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,
 		DrAutoSync: &pb.DRAutoSync{

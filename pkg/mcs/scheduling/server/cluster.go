@@ -612,7 +612,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			ctx.TaskRunner.RunTask(
+			if err := ctx.TaskRunner.RunTask(
 				ctx,
 				ratelimit.ObserveRegionStatsAsync,
 				func(_ context.Context) {
@@ -620,18 +620,22 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
-			)
+			); err != nil {
+				log.Warn("run task failed", zap.String("name", ratelimit.ObserveRegionStatsAsync), zap.Error(err))
+			}
 		}
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
-			ctx.TaskRunner.RunTask(
+			if err := ctx.TaskRunner.RunTask(
 				ctx,
 				ratelimit.UpdateSubTree,
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
 				ratelimit.WithRetained(true),
-			)
+			); err != nil {
+				log.Warn("run task failed", zap.String("name", ratelimit.UpdateSubTree), zap.Error(err))
+			}
 		}
 		return nil
 	}
@@ -648,32 +652,38 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			tracer.OnSaveCacheFinished()
 			return err
 		}
-		ctx.TaskRunner.RunTask(
+		if err := ctx.TaskRunner.RunTask(
 			ctx,
 			ratelimit.UpdateSubTree,
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
 			ratelimit.WithRetained(retained),
-		)
+		); err != nil {
+			log.Warn("run task failed", zap.String("name", ratelimit.UpdateSubTree), zap.Error(err))
+		}
 		tracer.OnUpdateSubTreeFinished()
-		ctx.TaskRunner.RunTask(
+		if err := ctx.TaskRunner.RunTask(
 			ctx,
 			ratelimit.HandleOverlaps,
 			func(_ context.Context) {
 				cluster.HandleOverlaps(c, overlaps)
 			},
-		)
+		); err != nil {
+			log.Warn("run task failed", zap.String("name", ratelimit.HandleOverlaps), zap.Error(err))
+		}
 	}
 	tracer.OnSaveCacheFinished()
 	// handle region stats
-	ctx.TaskRunner.RunTask(
+	if err := ctx.TaskRunner.RunTask(
 		ctx,
 		ratelimit.CollectRegionStatsAsync,
 		func(_ context.Context) {
 			cluster.Collect(c, region, hasRegionStats)
 		},
-	)
+	); err != nil {
+		log.Warn("run task failed", zap.String("name", ratelimit.CollectRegionStatsAsync), zap.Error(err))
+	}
 	tracer.OnCollectRegionStatsFinished()
 	return nil
 }

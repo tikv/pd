@@ -14,7 +14,6 @@ linters:
     - testifylint
     - gofmt
     - revive
-  disable:
     - errcheck
 linters-settings:
   gocritic:
@@ -199,3 +198,14 @@ linters-settings:
         severity: warning
         disabled: false
         exclude: [""]
+issues:
+  exclude-rules:
+    - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
+      linters:
+        - errcheck
+    - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
+      linters:
+        - errcheck
+    - path: (pkg/schedule/labeler/labeler.go|pkg/mcs/tso/server/config.go|pkg/tso/admin.go|pkg/mcs/tso/server/grpc_service.go|pkg/schedule/schedulers/split_bucket.go|server/api/plugin_disable.go|server/api/plugin_disable.go|server/api/operator.go|server/api/region.go|pkg/schedule/schedulers/balance_leader.go|pkg/mcs/resourcemanager/server/server.go|pkg/mcs/scheduling/server/grpc_service.go|pkg/mcs/resourcemanager/server/.*\.go|plugin/scheduler_example/evict_leader.go|server/api/.*\.go|pkg/replication/replication_mode.go|pkg/mcs/scheduling/server/server.go|pkg/storage/endpoint/gc_safe_point.go|server/.*\.go|pkg/schedule/schedulers/.*\.go|pkg/schedule/placement/rule.go|pkg/mcs/utils/util.go|pkg/keyspace/tso_keyspace_group.go|pkg/tso/allocator_manager.go|pkg/core/store_stats.go|pkg/autoscaling/handler.go|pkg/core/store_stats.go|pkg/keyspace/keyspace.go|pkg/storage/hot_region_storage.go|pkg/syncer/server.go)
+      linters:
+        - errcheck
