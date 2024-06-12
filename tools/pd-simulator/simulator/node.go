@@ -72,6 +72,7 @@ func NewNode(s *cases.Store, pdAddr string, config *sc.SimConfig) (*Node, error)
 			StoreId:   s.ID,
 			Capacity:  uint64(config.RaftStore.Capacity),
 			StartTime: uint32(time.Now().Unix()),
+			Available: uint64(config.RaftStore.Capacity),
 		},
 	}
 	tag := fmt.Sprintf("store %d", s.ID)
@@ -171,6 +172,8 @@ func (n *Node) stepTask() {
 	}
 }
 
+var schedulerCheck sync.Once
+
 func (n *Node) stepHeartBeat() {
 	config := n.raftEngine.storeConfig
 
@@ -181,6 +184,7 @@ func (n *Node) stepHeartBeat() {
 	period = uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
 	if n.tick%period == 0 {
 		n.regionHeartBeat()
+		schedulerCheck.Do(func() { ChooseToHaltPDSchedule(false) })
 	}
 }
 

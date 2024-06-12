@@ -16,8 +16,8 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
@@ -57,7 +57,7 @@ type Case struct {
 	TableNumber     int
 
 	Checker CheckerFunc // To check the schedule is finished.
-	Rules   []*placement.Rule
+	Rules   []*pdHttp.Rule
 	Labels  typeutil.StringSlice
 }
 

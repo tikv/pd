@@ -25,6 +25,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
 	flag "github.com/spf13/pflag"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -92,6 +93,7 @@ func main() {
 
 func run(simCase string, simConfig *sc.SimConfig) {
 	if *pdAddr != "" {
+		simulator.PDHTTPClient = pdHttp.NewClient("pd-simulator", []string{*pdAddr})
 		simStart(*pdAddr, *statusAddress, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
@@ -105,6 +107,7 @@ func run(simCase string, simConfig *sc.SimConfig) {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
+		simulator.PDHTTPClient = pdHttp.NewClient("pd-simulator", []string{local.GetAddr()})
 		simStart(local.GetAddr(), "", simCase, simConfig, clean)
 	}
 }
@@ -151,6 +154,8 @@ func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimCon
 	tick := time.NewTicker(tickInterval)
 	defer tick.Stop()
 	sc := make(chan os.Signal, 1)
+	// halt scheduling
+	simulator.ChooseToHaltPDSchedule(true)
 	signal.Notify(sc,
 		syscall.SIGHUP,
 		syscall.SIGINT,
@@ -183,6 +188,9 @@ EXIT:
 		analysis.GetTransferCounter().PrintResult()
 	}
 
+	if simulator.PDHTTPClient != nil {
+		simulator.PDHTTPClient.Close()
+	}
 	if simResult != "OK" {
 		os.Exit(1)
 	}

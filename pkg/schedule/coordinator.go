@@ -292,7 +292,7 @@ func (c *Coordinator) PatrolRegions() {
 				c.patrolRegionContext.updateScanLimit(c.cluster)
 			}
 			failpoint.Inject("break-patrol", func() {
-				time.Sleep(3 * time.Second) // ensure the regions are handled by the workers
+				time.Sleep(100 * time.Millisecond) // ensure the regions are handled by the workers
 				failpoint.Return()
 			})
 		case <-c.ctx.Done():

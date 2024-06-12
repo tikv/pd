@@ -303,7 +303,7 @@ tsoBatchLoop:
 			cancel()
 			stream = nil
 			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
-			if IsLeaderChange(err) {
+			if errs.IsLeaderChange(err) {
 				if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
 					select {
 					case <-ctx.Done():

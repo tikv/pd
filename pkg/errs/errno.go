@@ -195,10 +195,11 @@ var (
 
 // apiutil errors
 var (
-	ErrRedirect       = errors.Normalize("redirect failed", errors.RFCCodeText("PD:apiutil:ErrRedirect"))
-	ErrOptionNotExist = errors.Normalize("the option %s does not exist", errors.RFCCodeText("PD:apiutil:ErrOptionNotExist"))
-	// ErrRedirectToNotLeader is the error message for redirect to not leader.
-	ErrRedirectToNotLeader = errors.Normalize("redirect to not leader", errors.RFCCodeText("PD:apiutil:ErrRedirectToNotLeader"))
+	ErrRedirect             = errors.Normalize("redirect failed", errors.RFCCodeText("PD:apiutil:ErrRedirect"))
+	ErrOptionNotExist       = errors.Normalize("the option %s does not exist", errors.RFCCodeText("PD:apiutil:ErrOptionNotExist"))
+	ErrRedirectNoLeader     = errors.Normalize("redirect finds no leader", errors.RFCCodeText("PD:apiutil:ErrRedirectNoLeader"))
+	ErrRedirectToNotLeader  = errors.Normalize("redirect to not leader", errors.RFCCodeText("PD:apiutil:ErrRedirectToNotLeader"))
+	ErrRedirectToNotPrimary = errors.Normalize("redirect to not primary", errors.RFCCodeText("PD:apiutil:ErrRedirectToNotPrimary"))
 )
 
 // grpcutil errors
