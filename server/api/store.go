@@ -305,6 +305,10 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 // @Router   /store/{id}/limit [post]
 func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
+	if version := rc.GetScheduleConfig().StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support set limit", version))
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -405,6 +409,11 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores/limit [post]
 func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
+	cfg := h.GetScheduleConfig()
+	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support get limit", version))
+		return
+	}
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -485,7 +494,12 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores/limit [get]
 func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
-	limits := h.GetScheduleConfig().StoreLimit
+	cfg := h.GetScheduleConfig()
+	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support get limit", version))
+		return
+	}
+	limits := cfg.StoreLimit
 	includeTombstone := false
 	var err error
 	if includeStr := r.URL.Query().Get("include_tombstone"); includeStr != "" {
