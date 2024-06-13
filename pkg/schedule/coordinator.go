@@ -151,13 +151,13 @@ func (c *Coordinator) IsPendingRegion(region uint64) bool {
 
 // PatrolRegionContext is used to store the context of patrol regions.
 type PatrolRegionContext struct {
+	syncutil.RWMutex
 	// config
 	interval    time.Duration
 	workerCount int
 	scanLimit   int
 	// status
 	patrolRoundStartTime time.Time
-	durationLock         syncutil.RWMutex
 	duration             time.Duration
 	// workers
 	workersCtx    context.Context
@@ -183,8 +183,40 @@ func (p *PatrolRegionContext) stop() {
 	p.wg.Wait()
 }
 
-func (p *PatrolRegionContext) updateScanLimit(cluster sche.ClusterInformer) {
-	p.scanLimit = calculateScanLimit(cluster)
+func (p *PatrolRegionContext) getWorkerCount() int {
+	p.RLock()
+	defer p.RUnlock()
+	return p.workerCount
+}
+
+func (p *PatrolRegionContext) setWorkerCount(count int) {
+	p.Lock()
+	defer p.Unlock()
+	p.workerCount = count
+}
+
+func (p *PatrolRegionContext) getInterval() time.Duration {
+	p.RLock()
+	defer p.RUnlock()
+	return p.interval
+}
+
+func (p *PatrolRegionContext) setInterval(interval time.Duration) {
+	p.Lock()
+	defer p.Unlock()
+	p.interval = interval
+}
+
+func (p *PatrolRegionContext) getScanLimit() int {
+	p.RLock()
+	defer p.RUnlock()
+	return p.scanLimit
+}
+
+func (p *PatrolRegionContext) setScanLimit(limit int) {
+	p.Lock()
+	defer p.Unlock()
+	p.scanLimit = limit
 }
 
 func calculateScanLimit(cluster sche.ClusterInformer) int {
@@ -192,21 +224,21 @@ func calculateScanLimit(cluster sche.ClusterInformer) int {
 }
 
 func (p *PatrolRegionContext) getPatrolRegionsDuration() time.Duration {
-	p.durationLock.RLock()
-	defer p.durationLock.RUnlock()
+	p.RLock()
+	defer p.RUnlock()
 	return p.duration
 }
 
 func (p *PatrolRegionContext) setPatrolRegionsDuration(dur time.Duration) {
-	p.durationLock.Lock()
-	defer p.durationLock.Unlock()
+	p.Lock()
+	defer p.Unlock()
 	p.duration = dur
 }
 
 func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Coordinator) {
-	for i := 0; i < p.workerCount; i++ {
+	for i := 0; i < p.getWorkerCount(); i++ {
 		p.wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer logutil.LogPanic()
 			defer p.wg.Done()
 			for {
@@ -215,14 +247,14 @@ func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Coordinator) {
 					if ok {
 						c.tryAddOperators(region)
 					} else {
-						log.Debug("region channel is closed")
+						log.Debug("region channel is closed", zap.Int("worker-id", i))
 					}
 				case <-p.workersCtx.Done():
-					log.Debug("region worker is closed")
+					log.Debug("region worker is closed", zap.Int("worker-id", i))
 					return
 				}
 			}
-		}()
+		}(i)
 	}
 }
 
@@ -245,7 +277,7 @@ func (c *Coordinator) PatrolRegions() {
 	c.patrolRegionContext.init(ctx, c.cluster)
 	defer c.patrolRegionContext.stop()
 
-	ticker := time.NewTicker(c.patrolRegionContext.interval)
+	ticker := time.NewTicker(c.patrolRegionContext.getInterval())
 	defer ticker.Stop()
 
 	c.patrolRegionContext.startPatrolRegionWorkers(c)
@@ -289,7 +321,7 @@ func (c *Coordinator) PatrolRegions() {
 			// Update metrics if a full scan is done.
 			if len(key) == 0 {
 				c.patrolRegionContext.roundUpdate()
-				c.patrolRegionContext.updateScanLimit(c.cluster)
+				c.patrolRegionContext.setScanLimit(calculateScanLimit(c.cluster))
 			}
 			failpoint.Inject("break-patrol", func() {
 				time.Sleep(100 * time.Millisecond) // ensure the regions are handled by the workers
@@ -307,19 +339,19 @@ func (c *Coordinator) PatrolRegions() {
 func (c *Coordinator) updateTickerIfNeeded(ticker *time.Ticker) {
 	// Note: we reset the ticker here to support updating configuration dynamically.
 	newInterval := c.cluster.GetCheckerConfig().GetPatrolRegionInterval()
-	if c.patrolRegionContext.interval != newInterval {
-		c.patrolRegionContext.interval = newInterval
+	if c.patrolRegionContext.getInterval() != newInterval {
+		c.patrolRegionContext.setInterval(newInterval)
 		ticker.Reset(newInterval)
 	}
 }
 
 func (c *Coordinator) updatePatrolWorkersIfNeeded() {
 	newWorkersCount := c.cluster.GetCheckerConfig().GetPatrolRegionWorkerCount()
-	if c.patrolRegionContext.workerCount != newWorkersCount {
+	if c.patrolRegionContext.getWorkerCount() != newWorkersCount {
 		log.Info("coordinator starts patrol regions with new workers count",
-			zap.Int("old-workers-count", c.patrolRegionContext.workerCount),
+			zap.Int("old-workers-count", c.patrolRegionContext.getWorkerCount()),
 			zap.Int("new-workers-count", newWorkersCount))
-		c.patrolRegionContext.workerCount = newWorkersCount
+		c.patrolRegionContext.setWorkerCount(newWorkersCount)
 		// Stop the old workers and start the new workers.
 		c.patrolRegionContext.workersCancel()
 		c.wg.Wait()
@@ -329,7 +361,7 @@ func (c *Coordinator) updatePatrolWorkersIfNeeded() {
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
-	regions = c.cluster.ScanRegions(startKey, nil, c.patrolRegionContext.scanLimit)
+	regions = c.cluster.ScanRegions(startKey, nil, c.patrolRegionContext.getScanLimit())
 	if len(regions) == 0 {
 		// Resets the scan key.
 		key = nil
