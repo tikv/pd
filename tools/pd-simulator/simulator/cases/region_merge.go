@@ -20,6 +20,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 func newRegionMerge(config *sc.SimConfig) *Case {
@@ -30,7 +31,7 @@ func newRegionMerge(config *sc.SimConfig) *Case {
 
 	for i := 0; i < totalStore; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
@@ -39,12 +40,12 @@ func newRegionMerge(config *sc.SimConfig) *Case {
 		peers := make([]*metapb.Peer, 0, replica)
 		for j := 0; j < replica; j++ {
 			peers = append(peers, &metapb.Peer{
-				Id:      IDAllocator.nextID(),
+				Id:      simutil.IDAllocator.NextID(),
 				StoreId: uint64((i+j)%totalStore + 1),
 			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   10 * units.MiB,

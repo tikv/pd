@@ -21,8 +21,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/docker/go-units"
+	pdHttp "github.com/tikv/pd/client/http"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -133,6 +133,6 @@ func (sc *SimConfig) Speed() uint64 {
 
 // PDConfig saves some config which may be changed in PD.
 type PDConfig struct {
-	PlacementRules []*placement.Rule
+	PlacementRules []*pdHttp.Rule
 	LocationLabels typeutil.StringSlice
 }

@@ -16,9 +16,19 @@ error = '''
 redirect failed
 '''
 
+["PD:apiutil:ErrRedirectNoLeader"]
+error = '''
+redirect finds no leader
+'''
+
 ["PD:apiutil:ErrRedirectToNotLeader"]
 error = '''
 redirect to not leader
+'''
+
+["PD:apiutil:ErrRedirectToNotPrimary"]
+error = '''
+redirect to not primary
 '''
 
 ["PD:autoscaling:ErrEmptyMetricsResponse"]

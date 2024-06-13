@@ -24,11 +24,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
-
-const maxRecordErrorCount = 20
 
 // Option is used to customize the backoffer.
 type Option func(*Backoffer)
@@ -50,7 +47,7 @@ type Backoffer struct {
 	// total defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
 	total time.Duration
 	// retryableChecker is used to check if the error is retryable.
-	// By default, all errors are retryable.
+	// If it's not set, it will always retry unconditionally no matter what the error is.
 	retryableChecker func(err error) bool
 	// logInterval defines the log interval for retrying.
 	logInterval time.Duration
@@ -69,28 +66,22 @@ func (bo *Backoffer) Exec(
 ) error {
 	defer bo.resetBackoff()
 	var (
-		allErrors error
-		err       error
-		after     *time.Timer
+		err   error
+		after *time.Timer
 	)
 	fnName := getFunctionName(fn)
 	for {
 		err = fn()
 		bo.attempt++
-		if bo.attempt < maxRecordErrorCount {
-			// multierr.Append will ignore nil error.
-			allErrors = multierr.Append(allErrors, err)
-		}
-		if !bo.isRetryable(err) {
+		if err == nil || !bo.isRetryable(err) {
 			break
 		}
 		currentInterval := bo.nextInterval()
 		bo.nextLogTime += currentInterval
-		if err != nil {
-			if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
-				bo.nextLogTime %= bo.logInterval
-				log.Warn("call PD API failed and retrying", zap.String("api", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
-			}
+		if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
+			bo.nextLogTime %= bo.logInterval
+			log.Warn("[pd.backoffer] exec fn failed and retrying",
+				zap.String("fn-name", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
 		}
 		if after == nil {
 			after = time.NewTimer(currentInterval)
@@ -100,7 +91,7 @@ func (bo *Backoffer) Exec(
 		select {
 		case <-ctx.Done():
 			after.Stop()
-			return multierr.Append(allErrors, errors.Trace(ctx.Err()))
+			return errors.Trace(ctx.Err())
 		case <-after.C:
 			failpoint.Inject("backOffExecute", func() {
 				testBackOffExecuteFlag = true
@@ -115,7 +106,7 @@ func (bo *Backoffer) Exec(
 			}
 		}
 	}
-	return allErrors
+	return err
 }
 
 // InitialBackoffer make the initial state for retrying.
@@ -132,12 +123,9 @@ func InitialBackoffer(base, max, total time.Duration, opts ...Option) *Backoffer
 		total = base
 	}
 	bo := &Backoffer{
-		base:  base,
-		max:   max,
-		total: total,
-		retryableChecker: func(err error) bool {
-			return err != nil
-		},
+		base:         base,
+		max:          max,
+		total:        total,
 		next:         base,
 		currentTotal: 0,
 		attempt:      0,
@@ -148,8 +136,11 @@ func InitialBackoffer(base, max, total time.Duration, opts ...Option) *Backoffer
 	return bo
 }
 
-// SetRetryableChecker sets the retryable checker.
-func (bo *Backoffer) SetRetryableChecker(checker func(err error) bool) {
+// SetRetryableChecker sets the retryable checker, `overwrite` flag is used to indicate whether to overwrite the existing checker.
+func (bo *Backoffer) SetRetryableChecker(checker func(err error) bool, overwrite bool) {
+	if !overwrite && bo.retryableChecker != nil {
+		return
+	}
 	bo.retryableChecker = checker
 }
 

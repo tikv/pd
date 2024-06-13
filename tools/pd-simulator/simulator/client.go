@@ -15,11 +15,8 @@
 package simulator
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,8 +24,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
@@ -54,12 +51,12 @@ type Client interface {
 const (
 	pdTimeout             = time.Second
 	maxInitClusterRetries = 100
-	httpPrefix            = "pd/api/v1"
 )
 
 var (
 	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
 	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
+	PDHTTPClient         pdHttp.Client
 )
 
 type client struct {
@@ -67,7 +64,6 @@ type client struct {
 	tag        string
 	clusterID  uint64
 	clientConn *grpc.ClientConn
-	httpClient *http.Client
 
 	reportRegionHeartbeatCh  chan *core.RegionInfo
 	receiveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
@@ -88,7 +84,6 @@ func NewClient(pdAddr string, tag string) (Client, <-chan *pdpb.RegionHeartbeatR
 		ctx:                      ctx,
 		cancel:                   cancel,
 		tag:                      tag,
-		httpClient:               &http.Client{},
 	}
 	cc, err := c.createConn()
 	if err != nil {
@@ -319,46 +314,27 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 
 func (c *client) PutPDConfig(config *sc.PDConfig) error {
 	if len(config.PlacementRules) > 0 {
-		path := fmt.Sprintf("%s/%s/config/rules/batch", c.url, httpPrefix)
-		ruleOps := make([]*placement.RuleOp, 0)
+		ruleOps := make([]*pdHttp.RuleOp, 0)
 		for _, rule := range config.PlacementRules {
-			ruleOps = append(ruleOps, &placement.RuleOp{
+			ruleOps = append(ruleOps, &pdHttp.RuleOp{
 				Rule:   rule,
-				Action: placement.RuleOpAdd,
+				Action: pdHttp.RuleOpAdd,
 			})
 		}
-		content, _ := json.Marshal(ruleOps)
-		req, err := http.NewRequest(http.MethodPost, path, bytes.NewBuffer(content))
-		req.Header.Add("Content-Type", "application/json")
+		err := PDHTTPClient.SetPlacementRuleInBatch(c.ctx, ruleOps)
 		if err != nil {
 			return err
 		}
-		res, err := c.httpClient.Do(req)
-		if err != nil {
-			return err
-		}
-		defer res.Body.Close()
-		simutil.Logger.Info("add placement rule success", zap.String("rules", string(content)))
+		simutil.Logger.Info("add placement rule success", zap.Any("rules", config.PlacementRules))
 	}
 	if len(config.LocationLabels) > 0 {
-		path := fmt.Sprintf("%s/%s/config", c.url, httpPrefix)
 		data := make(map[string]any)
 		data["location-labels"] = config.LocationLabels
-		content, err := json.Marshal(data)
+		err := PDHTTPClient.SetConfig(c.ctx, data)
 		if err != nil {
 			return err
 		}
-		req, err := http.NewRequest(http.MethodPost, path, bytes.NewBuffer(content))
-		req.Header.Add("Content-Type", "application/json")
-		if err != nil {
-			return err
-		}
-		res, err := c.httpClient.Do(req)
-		if err != nil {
-			return err
-		}
-		defer res.Body.Close()
-		simutil.Logger.Info("add location labels success", zap.String("labels", string(content)))
+		simutil.Logger.Info("add location labels success", zap.Any("labels", config.LocationLabels))
 	}
 	return nil
 }
@@ -390,4 +366,10 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId: c.clusterID,
 	}
+}
+
+func ChooseToHaltPDSchedule(halt bool) {
+	PDHTTPClient.SetConfig(context.Background(), map[string]any{
+		"schedule.halt-scheduling": strconv.FormatBool(halt),
+	})
 }
