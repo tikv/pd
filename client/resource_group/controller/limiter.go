@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
@@ -81,6 +82,15 @@ type Limiter struct {
 	isLowProcess bool
 	// remainingNotifyTimes is used to limit notify when the speed limit is already set.
 	remainingNotifyTimes int
+	name                 string
+
+	// metrics
+	metrics *limiterMetricsCollection
+}
+
+// limiterMetricsCollection is a collection of metrics for a limiter.
+type limiterMetricsCollection struct {
+	lowTokenNotifyCounter prometheus.Counter
 }
 
 // Limit returns the maximum overall event rate.
@@ -106,14 +116,18 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 
 // NewLimiterWithCfg returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- struct{}) *Limiter {
+func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- struct{}) *Limiter {
 	lim := &Limiter{
+		name:                name,
 		limit:               Limit(cfg.NewRate),
 		last:                now,
 		tokens:              cfg.NewTokens,
 		burst:               cfg.NewBurst,
 		notifyThreshold:     cfg.NotifyThreshold,
 		lowTokensNotifyChan: lowTokensNotifyChan,
+	}
+	lim.metrics = &limiterMetricsCollection{
+		lowTokenNotifyCounter: lowTokenRequestNotifyCounter.WithLabelValues(lim.name),
 	}
 	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim
@@ -224,6 +238,14 @@ func (lim *Limiter) SetupNotificationThreshold(threshold float64) {
 	lim.notifyThreshold = threshold
 }
 
+// SetName sets the name of the limiter.
+func (lim *Limiter) SetName(name string) *Limiter {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.name = name
+	return lim
+}
+
 // notify tries to send a non-blocking notification on notifyCh and disables
 // further notifications (until the next Reconfigure or StartNotification).
 func (lim *Limiter) notify() {
@@ -234,6 +256,9 @@ func (lim *Limiter) notify() {
 	lim.isLowProcess = true
 	select {
 	case lim.lowTokensNotifyChan <- struct{}{}:
+		if lim.metrics != nil {
+			lim.metrics.lowTokenNotifyCounter.Inc()
+		}
 	default:
 	}
 }

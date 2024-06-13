@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/testutil"
 	"google.golang.org/grpc"
@@ -205,7 +206,7 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.NotNil(leaderConn)
 
 	_, err := pb.NewGreeterClient(followerConn).SayHello(suite.ctx, &pb.HelloRequest{Name: "pd"})
-	re.ErrorContains(err, "not leader")
+	re.ErrorContains(err, errs.NotLeaderErr)
 	resp, err := pb.NewGreeterClient(leaderConn).SayHello(suite.ctx, &pb.HelloRequest{Name: "pd"})
 	re.NoError(err)
 	re.Equal("Hello pd", resp.GetMessage())

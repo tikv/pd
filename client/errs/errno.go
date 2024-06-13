@@ -20,21 +20,20 @@ import (
 	"github.com/pingcap/errors"
 )
 
+// Note: keep the same as the ones defined on the server side to ensure the client can use them correctly.
 const (
+	// NoLeaderErr indicates there is no leader in the cluster currently.
+	NoLeaderErr = "no leader"
 	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
-	// Note: keep the same as the ones defined on the server side, because the client side checks if an error message
-	// contains this string to judge whether the leader is changed.
-	NotLeaderErr = "is not leader"
+	NotLeaderErr = "not leader"
 	// MismatchLeaderErr indicates the non-leader member received the requests which should be received by leader.
-	// Note: keep the same as the ones defined on the server side, because the client side checks if an error message
-	// contains this string to judge whether the leader is changed.
 	MismatchLeaderErr = "mismatch leader id"
 	// NotServedErr indicates an tso node/pod received the requests for the keyspace groups which are not served by it.
-	// Note: keep the same as the ones defined on the server side, because the client side checks if an error message
-	// contains this string to judge whether the leader is changed.
 	NotServedErr = "is not served"
 	// RetryTimeoutErr indicates the server is busy.
 	RetryTimeoutErr = "retry timeout"
+	// NotPrimaryErr indicates the non-primary member received the requests which should be received by primary.
+	NotPrimaryErr = "not primary"
 )
 
 // client errors

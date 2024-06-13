@@ -662,7 +662,7 @@ func TestNotLeader(t *testing.T) {
 	grpcStatus, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Unavailable, grpcStatus.Code())
-	re.Equal("not leader", grpcStatus.Message())
+	re.ErrorContains(server.ErrNotLeader, grpcStatus.Message())
 }
 
 func TestStoreVersionChange(t *testing.T) {

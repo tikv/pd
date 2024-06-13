@@ -49,6 +49,7 @@ type Client interface {
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
+	DeleteStore(context.Context, uint64) error
 	SetStoreLabels(context.Context, int64, map[string]string) error
 	GetHealthStatus(context.Context) ([]Health, error)
 	/* Config-related interfaces */
@@ -438,6 +439,14 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*StoreInfo, erro
 		return nil, err
 	}
 	return &store, nil
+}
+
+// DeleteStore deletes the store by ID.
+func (c *client) DeleteStore(ctx context.Context, storeID uint64) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteStoreName).
+		WithURI(StoreByID(storeID)).
+		WithMethod(http.MethodDelete))
 }
 
 // GetClusterVersion gets the cluster version.

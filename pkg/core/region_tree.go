@@ -272,7 +272,7 @@ func (t *regionTree) find(item *regionItem) *regionItem {
 // until f return false
 func (t *regionTree) scanRange(startKey []byte, f func(*RegionInfo) bool) {
 	region := &RegionInfo{meta: &metapb.Region{StartKey: startKey}}
-	// find if there is a region with key range [s, d), s < startKey < d
+	// find if there is a region with key range [s, d), s <= startKey < d
 	fn := func(item *regionItem) bool {
 		r := item
 		return f(r.RegionInfo)
