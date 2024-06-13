@@ -104,7 +104,7 @@ func (t *regionTree) notFromStorageRegionsCount() int {
 }
 
 // GetOverlaps returns the range items that has some intersections with the given items.
-func (t *regionTree) overlaps(item *regionItem) []*regionItem {
+func (t *regionTree) overlaps(item *regionItem) []*RegionInfo {
 	// note that Find() gets the last item that is less or equal than the item.
 	// in the case: |_______a_______|_____b_____|___c___|
 	// new item is     |______d______|
@@ -116,12 +116,12 @@ func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 		result = item
 	}
 	endKey := item.GetEndKey()
-	var overlaps []*regionItem
+	var overlaps []*RegionInfo
 	t.tree.AscendGreaterOrEqual(result, func(i *regionItem) bool {
 		if len(endKey) > 0 && bytes.Compare(endKey, i.GetStartKey()) <= 0 {
 			return false
 		}
-		overlaps = append(overlaps, i)
+		overlaps = append(overlaps, i.RegionInfo)
 		return true
 	})
 	return overlaps
@@ -130,7 +130,7 @@ func (t *regionTree) overlaps(item *regionItem) []*regionItem {
 // update updates the tree with the region.
 // It finds and deletes all the overlapped regions first, and then
 // insert the region.
-func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*regionItem) []*RegionInfo {
+func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*RegionInfo) []*RegionInfo {
 	region := item.RegionInfo
 	t.totalSize += region.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
@@ -145,7 +145,7 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 	}
 
 	for _, old := range overlaps {
-		t.tree.Delete(old)
+		t.tree.Delete(&regionItem{RegionInfo: old})
 	}
 	t.tree.ReplaceOrInsert(item)
 	if t.countRef {
@@ -153,7 +153,7 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 	}
 	result := make([]*RegionInfo, len(overlaps))
 	for i, overlap := range overlaps {
-		old := overlap.RegionInfo
+		old := overlap
 		result[i] = old
 		log.Debug("overlapping region",
 			zap.Uint64("region-id", old.GetID()),
@@ -174,7 +174,7 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*re
 	return result
 }
 
-// updateStat is used to update statistics when regionItem.RegionInfo is directly replaced.
+// updateStat is used to update statistics when RegionInfo is directly replaced.
 func (t *regionTree) updateStat(origin *RegionInfo, region *RegionInfo) {
 	t.totalSize += region.approximateSize
 	regionWriteBytesRate, regionWriteKeysRate := region.GetWriteRate()
