@@ -432,8 +432,8 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		id        uint64
 		newRanges []core.KeyRange
 	)
-	idFloat, ok1 := input["store_id"].(float64)
-	if ok1 {
+	idFloat, inputHasStoreID := input["store_id"].(float64)
+	if inputHasStoreID {
 		id = (uint64)(idFloat)
 		exist, err = handler.config.pauseLeaderTransferIfStoreNotExist(id)
 		if err != nil {
@@ -454,7 +454,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
-		if !ok1 {
+		if !inputHasStoreID {
 			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
