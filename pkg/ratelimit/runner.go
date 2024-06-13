@@ -60,8 +60,6 @@ type Task struct {
 // ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
 var ErrMaxWaitingTasksExceeded = errors.New("max waiting tasks exceeded")
 
-// ConcurrentRunner is a simple task runner that limits the number of concurrent tasks.
-
 type taskID struct {
 	id   uint64
 	name string
