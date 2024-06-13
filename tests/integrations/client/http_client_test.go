@@ -21,10 +21,12 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/require"
@@ -79,6 +81,15 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	leaderServer := cluster.GetLeaderServer()
 
 	err = leaderServer.BootstrapCluster()
+	// Add 2 more stores to the cluster.
+	for i := 2; i <= 4; i++ {
+		tests.MustPutStore(re, cluster, &metapb.Store{
+			Id:            uint64(i),
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		})
+	}
 	re.NoError(err)
 	for _, region := range []*core.RegionInfo{
 		core.NewTestRegionInfo(10, 1, []byte("a1"), []byte("a2")),
@@ -164,29 +175,29 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Empty(regionStats.StoreLeaderCount)
 	hotReadRegions, err := client.GetHotReadRegions(ctx)
 	re.NoError(err)
-	re.Len(hotReadRegions.AsPeer, 1)
-	re.Len(hotReadRegions.AsLeader, 1)
+	re.Len(hotReadRegions.AsPeer, 4)
+	re.Len(hotReadRegions.AsLeader, 4)
 	hotWriteRegions, err := client.GetHotWriteRegions(ctx)
 	re.NoError(err)
-	re.Len(hotWriteRegions.AsPeer, 1)
-	re.Len(hotWriteRegions.AsLeader, 1)
+	re.Len(hotWriteRegions.AsPeer, 4)
+	re.Len(hotWriteRegions.AsLeader, 4)
 	historyHorRegions, err := client.GetHistoryHotRegions(ctx, &pd.HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
 	})
 	re.NoError(err)
 	re.Empty(historyHorRegions.HistoryHotRegion)
-	store, err := client.GetStores(ctx)
+	stores, err := client.GetStores(ctx)
 	re.NoError(err)
-	re.Equal(1, store.Count)
-	re.Len(store.Stores, 1)
-	storeID := uint64(store.Stores[0].Store.ID) // TODO: why type is different?
+	re.Equal(4, stores.Count)
+	re.Len(stores.Stores, 4)
+	storeID := uint64(stores.Stores[0].Store.ID) // TODO: why type is different?
 	store2, err := client.GetStore(ctx, storeID)
 	re.NoError(err)
 	re.EqualValues(storeID, store2.Store.ID)
 	version, err := client.GetClusterVersion(ctx)
 	re.NoError(err)
-	re.Equal("0.0.0", version)
+	re.Equal("1.0.0", version)
 	rgs, _ := client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a"), []byte("a1")), 100)
 	re.Equal(int64(0), rgs.Count)
 	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), 100)
@@ -195,6 +206,12 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Equal(int64(1), rgs.Count)
 	rgs, _ = client.GetRegionsByKeyRange(ctx, pd.NewKeyRange([]byte(""), []byte("")), 100)
 	re.Equal(int64(2), rgs.Count)
+	// store 2 origin status:offline
+	err = client.DeleteStore(ctx, 2)
+	re.NoError(err)
+	store2, err = client.GetStore(ctx, 2)
+	re.NoError(err)
+	re.Equal(int64(metapb.StoreState_Offline), store2.Store.State)
 }
 
 func (suite *httpClientTestSuite) TestGetMinResolvedTSByStoresIDs() {
@@ -531,14 +548,15 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	defer cancel()
 	schedulers, err := client.GetSchedulers(ctx)
 	re.NoError(err)
-	re.Empty(schedulers)
+	const schedulerName = "evict-leader-scheduler"
+	re.NotContains(schedulers, schedulerName)
 
-	err = client.CreateScheduler(ctx, "evict-leader-scheduler", 1)
+	err = client.CreateScheduler(ctx, schedulerName, 1)
 	re.NoError(err)
 	schedulers, err = client.GetSchedulers(ctx)
 	re.NoError(err)
-	re.Len(schedulers, 1)
-	err = client.SetSchedulerDelay(ctx, "evict-leader-scheduler", 100)
+	re.Contains(schedulers, schedulerName)
+	err = client.SetSchedulerDelay(ctx, schedulerName, 100)
 	re.NoError(err)
 	err = client.SetSchedulerDelay(ctx, "not-exist", 100)
 	re.ErrorContains(err, "500 Internal Server Error") // TODO: should return friendly error message
@@ -756,4 +774,44 @@ func (suite *httpClientTestSuite) TestGetHealthStatus() {
 	re.Equal("pd1", healths[0].Name)
 	re.Equal("pd2", healths[1].Name)
 	re.True(healths[0].Health && healths[1].Health)
+}
+
+func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		bo := retry.InitialBackoffer(100*time.Millisecond, time.Second, 0)
+		client := suite.client.WithBackoffer(bo)
+		for {
+			healths, err := client.GetHealthStatus(ctx)
+			if err != nil && strings.Contains(err.Error(), "context canceled") {
+				return
+			}
+			re.NoError(err)
+			re.Len(healths, 2)
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}()
+
+	leader := suite.cluster.GetLeaderServer()
+	re.NotNil(leader)
+	for i := 0; i < 3; i++ {
+		leader.ResignLeader()
+		re.NotEmpty(suite.cluster.WaitLeader())
+		leader = suite.cluster.GetLeaderServer()
+		re.NotNil(leader)
+	}
+
+	// Cancel the context to stop the goroutine.
+	cancel()
+	wg.Wait()
 }
