@@ -250,9 +250,10 @@ func MustPutRegion(re *require.Assertions, cluster *TestCluster, regionID, store
 		EndKey:      end,
 		Peers:       []*metapb.Peer{leader},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Leader:      leader,
 	}
 	opts = append(opts, core.SetSource(core.Heartbeat))
-	r := core.NewRegionInfo(metaRegion, leader, opts...)
+	r := core.NewRegionInfo(metaRegion, opts...)
 	MustPutRegionInfo(re, cluster, r)
 	return r
 }
@@ -424,6 +425,11 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
 	regions := make([]*core.RegionInfo, 0, regionLen)
 	for i := 0; i < regionLen; i++ {
+		peers := []*metapb.Peer{
+			{Id: allocator.alloc(), StoreId: uint64(1)},
+			{Id: allocator.alloc(), StoreId: uint64(2)},
+			{Id: allocator.alloc(), StoreId: uint64(3)},
+		}
 		r := &metapb.Region{
 			Id: allocator.alloc(),
 			RegionEpoch: &metapb.RegionEpoch{
@@ -432,13 +438,10 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 			},
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
-			Peers: []*metapb.Peer{
-				{Id: allocator.alloc(), StoreId: uint64(1)},
-				{Id: allocator.alloc(), StoreId: uint64(2)},
-				{Id: allocator.alloc(), StoreId: uint64(3)},
-			},
+			Peers:    peers,
+			Leader:   peers[0],
 		}
-		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
+		region := core.NewRegionInfo(r, core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.
 		if i < regionLen/2 {
 			buckets := &metapb.Buckets{

@@ -27,7 +27,7 @@ func TestBufferSize(t *testing.T) {
 	re := require.New(t)
 	var regions []*core.RegionInfo
 	for i := 0; i <= 100; i++ {
-		regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: uint64(i)}, nil))
+		regions = append(regions, core.NewRegionInfo(&metapb.Region{Id: uint64(i)}))
 	}
 
 	// size equals 1

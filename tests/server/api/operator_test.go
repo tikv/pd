@@ -96,8 +96,9 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 		},
 		StartKey: []byte("a"),
 		EndKey:   []byte("b"),
+		Leader:   peer1,
 	}
-	regionInfo := core.NewRegionInfo(region, peer1)
+	regionInfo := core.NewRegionInfo(region)
 	tests.MustPutRegionInfo(re, cluster, regionInfo)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
@@ -272,8 +273,9 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		},
 		StartKey: []byte("a"),
 		EndKey:   []byte("b"),
+		Leader:   peer1,
 	}
-	tests.MustPutRegionInfo(re, cluster, core.NewRegionInfo(region, peer1))
+	tests.MustPutRegionInfo(re, cluster, core.NewRegionInfo(region))
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	regionURL := fmt.Sprintf("%s/operators/%d", urlPrefix, region.GetId())
@@ -588,8 +590,9 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 		},
 		StartKey: []byte("d"),
 		EndKey:   []byte(""),
+		Leader:   peer1,
 	}
-	regionInfo := core.NewRegionInfo(region, peer1)
+	regionInfo := core.NewRegionInfo(region)
 	tests.MustPutRegionInfo(re, cluster, regionInfo)
 	err = tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/operators", urlPrefix), []byte(`{"name":"add-peer", "region_id": 40, "store_id": 3}`), tu.StatusOK(re))
 	re.NoError(err)

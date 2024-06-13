@@ -46,7 +46,8 @@ func TestPromoteLearner(t *testing.T) {
 				{Id: 102, StoreId: 2},
 				{Id: 103, StoreId: 3, Role: metapb.PeerRole_Learner},
 			},
-		}, &metapb.Peer{Id: 101, StoreId: 1})
+			Leader: &metapb.Peer{Id: 101, StoreId: 1},
+		})
 	op := lc.Check(region)
 	re.NotNil(op)
 	re.Equal("promote-learner", op.Desc())

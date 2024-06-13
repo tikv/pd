@@ -108,7 +108,7 @@ func (suite *replicaCheckerTestSuite) TestReplacePendingPeer() {
 			StoreId: 3,
 		},
 	}
-	r := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers}, peers[1], core.WithPendingPeers(peers[0:1]))
+	r := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: peers, Leader: peers[1]}, core.WithPendingPeers(peers[0:1]))
 	suite.cluster.PutRegion(r)
 	op := suite.rc.Check(r)
 	re.NotNil(op)
@@ -134,7 +134,7 @@ func (suite *replicaCheckerTestSuite) TestReplaceOfflinePeer() {
 			StoreId: 3,
 		},
 	}
-	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
+	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers, Leader: peers[0]})
 	suite.cluster.PutRegion(r)
 	op := suite.rc.Check(r)
 	re.NotNil(op)
@@ -153,7 +153,7 @@ func (suite *replicaCheckerTestSuite) TestOfflineWithOneReplica() {
 			StoreId: 1,
 		},
 	}
-	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
+	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers, Leader: peers[0]})
 	suite.cluster.PutRegion(r)
 	op := suite.rc.Check(r)
 	re.NotNil(op)
@@ -192,7 +192,7 @@ func (suite *replicaCheckerTestSuite) downPeerAndCheck(re *require.Assertions, a
 			StoreId: 4,
 		},
 	}
-	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers}, peers[0])
+	r := core.NewRegionInfo(&metapb.Region{Id: 2, Peers: peers, Leader: peers[0]})
 	suite.cluster.PutRegion(r)
 	suite.cluster.SetStoreDown(downStoreID)
 	downPeer := &pdpb.PeerStats{

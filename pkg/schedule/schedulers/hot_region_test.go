@@ -75,7 +75,7 @@ func clearPendingInfluence(h *hotScheduler) {
 
 func newTestRegion(id uint64) *core.RegionInfo {
 	peers := []*metapb.Peer{{Id: id*100 + 1, StoreId: 1}, {Id: id*100 + 2, StoreId: 2}, {Id: id*100 + 3, StoreId: 3}}
-	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers}, peers[0])
+	return core.NewRegionInfo(&metapb.Region{Id: id, Peers: peers, Leader: peers[0]})
 }
 
 func TestUpgrade(t *testing.T) {

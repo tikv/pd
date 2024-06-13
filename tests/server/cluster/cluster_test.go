@@ -119,20 +119,21 @@ func TestDamagedRegion(t *testing.T) {
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
-
+	peers := []*metapb.Peer{
+		{Id: 101, StoreId: 1},
+		{Id: 102, StoreId: 2},
+		{Id: 103, StoreId: 3},
+	}
 	region := &metapb.Region{
 		Id:       10,
 		StartKey: []byte("abc"),
 		EndKey:   []byte("xyz"),
-		Peers: []*metapb.Peer{
-			{Id: 101, StoreId: 1},
-			{Id: 102, StoreId: 2},
-			{Id: 103, StoreId: 3},
-		},
+		Peers:    peers,
+		Leader:   peers[0],
 	}
 
 	// To put region.
-	regionInfo := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(30))
+	regionInfo := core.NewRegionInfo(region, core.SetApproximateSize(30))
 	err = tc.HandleRegionHeartbeat(regionInfo)
 	re.NoError(err)
 
@@ -200,20 +201,22 @@ func TestRegionStatistics(t *testing.T) {
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 
+	peers := []*metapb.Peer{
+		{Id: 101, StoreId: 1},
+		{Id: 102, StoreId: 2},
+		{Id: 103, StoreId: 3},
+		{Id: 104, StoreId: 4, Role: metapb.PeerRole_Learner},
+	}
 	region := &metapb.Region{
 		Id:       10,
 		StartKey: []byte("abc"),
 		EndKey:   []byte("xyz"),
-		Peers: []*metapb.Peer{
-			{Id: 101, StoreId: 1},
-			{Id: 102, StoreId: 2},
-			{Id: 103, StoreId: 3},
-			{Id: 104, StoreId: 4, Role: metapb.PeerRole_Learner},
-		},
+		Peers:    peers,
+		Leader:   peers[0],
 	}
 
 	// To put region.
-	regionInfo := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(0))
+	regionInfo := core.NewRegionInfo(region, core.SetApproximateSize(0))
 	err = tc.HandleRegionHeartbeat(regionInfo)
 	re.NoError(err)
 	regions := rc.GetRegionStatsByType(statistics.LearnerPeer)
@@ -291,24 +294,25 @@ func TestStaleRegion(t *testing.T) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
-
+	peers := []*metapb.Peer{
+		{Id: 101, StoreId: 1},
+		{Id: 102, StoreId: 2},
+		{Id: 103, StoreId: 3},
+	}
 	region := &metapb.Region{
 		Id:       10,
 		StartKey: []byte("abc"),
 		EndKey:   []byte("xyz"),
-		Peers: []*metapb.Peer{
-			{Id: 101, StoreId: 1},
-			{Id: 102, StoreId: 2},
-			{Id: 103, StoreId: 3},
-		},
+		Peers:    peers,
 		RegionEpoch: &metapb.RegionEpoch{
 			ConfVer: 10,
 			Version: 10,
 		},
+		Leader: peers[0],
 	}
 
 	// To put region.
-	regionInfoA := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(30))
+	regionInfoA := core.NewRegionInfo(region, core.SetApproximateSize(30))
 	err = tc.HandleRegionHeartbeat(regionInfoA)
 	re.NoError(err)
 	regionInfoA = regionInfoA.Clone(core.WithIncConfVer(), core.WithIncVersion())
@@ -346,8 +350,9 @@ func TestGetPutConfig(t *testing.T) {
 	// Get region by id.
 	regionByID := getRegionByID(re, clusterID, grpcPDClient, region.GetId())
 	re.Equal(regionByID, region)
+	region.Leader = region.Peers[0]
 
-	r := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(30))
+	r := core.NewRegionInfo(region, core.SetApproximateSize(30))
 	err = tc.HandleRegionHeartbeat(r)
 	re.NoError(err)
 
@@ -792,15 +797,17 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		re.NoError(err)
 		regionID, err := id.Alloc()
 		re.NoError(err)
+		peers := []*metapb.Peer{{Id: peerID, StoreId: stores[0].GetId()}}
 		region := &metapb.Region{
 			Id:       regionID,
 			StartKey: []byte(fmt.Sprintf("%5d", i)),
 			EndKey:   []byte(fmt.Sprintf("%5d", i+1)),
-			Peers:    []*metapb.Peer{{Id: peerID, StoreId: stores[0].GetId()}},
+			Peers:    peers,
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: initEpochConfVer,
 				Version: initEpochVersion,
 			},
+			Leader: peers[0],
 		}
 		if i == 0 {
 			region.StartKey = []byte("")
@@ -811,7 +818,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+			err := rc.HandleRegionHeartbeat(core.NewRegionInfo(region))
 			re.NoError(err)
 		}()
 	}
@@ -1160,6 +1167,7 @@ func TestOfflineStoreLimit(t *testing.T) {
 		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 	}
 	for i := uint64(1); i <= 2; i++ {
+		peers := []*metapb.Peer{{Id: i + 10, StoreId: i}}
 		r := &metapb.Region{
 			Id: i,
 			RegionEpoch: &metapb.RegionEpoch{
@@ -1168,9 +1176,10 @@ func TestOfflineStoreLimit(t *testing.T) {
 			},
 			StartKey: []byte{byte(i + 1)},
 			EndKey:   []byte{byte(i + 2)},
-			Peers:    []*metapb.Peer{{Id: i + 10, StoreId: i}},
+			Peers:    peers,
+			Leader:   peers[0],
 		}
-		region := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
+		region := core.NewRegionInfo(r, core.SetApproximateSize(10))
 
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
@@ -1245,6 +1254,7 @@ func TestUpgradeStoreLimit(t *testing.T) {
 	resp, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
+	peers := []*metapb.Peer{{Id: 11, StoreId: uint64(1)}}
 	r := &metapb.Region{
 		Id: 1,
 		RegionEpoch: &metapb.RegionEpoch{
@@ -1253,9 +1263,10 @@ func TestUpgradeStoreLimit(t *testing.T) {
 		},
 		StartKey: []byte{byte(2)},
 		EndKey:   []byte{byte(3)},
-		Peers:    []*metapb.Peer{{Id: 11, StoreId: uint64(1)}},
+		Peers:    peers,
+		Leader:   peers[0],
 	}
-	region := core.NewRegionInfo(r, r.Peers[0], core.SetApproximateSize(10))
+	region := core.NewRegionInfo(r, core.SetApproximateSize(10))
 
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
@@ -1339,15 +1350,45 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	re.NoError(err)
 
 	// Transfer leader
-	regionReq.Term = 6
-	regionReq.Leader = peers[1]
+	regionReq = &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Region: &metapb.Region{
+			Id:       1,
+			Peers:    peers,
+			StartKey: []byte{byte(2)},
+			EndKey:   []byte{byte(3)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 2,
+				Version: 1,
+			},
+		},
+		Leader:          peers[1],
+		Term:            6,
+		ApproximateSize: 10,
+	}
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 
 	// issue #3379
-	regionReq.KeysWritten = uint64(18446744073709551615)  // -1
-	regionReq.BytesWritten = uint64(18446744073709550602) // -1024
+	regionReq = &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Region: &metapb.Region{
+			Id:       1,
+			Peers:    peers,
+			StartKey: []byte{byte(2)},
+			EndKey:   []byte{byte(3)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 2,
+				Version: 1,
+			},
+		},
+		Leader:          peers[1],
+		Term:            6,
+		ApproximateSize: 10,
+		KeysWritten:     uint64(18446744073709551615), // -1
+		BytesWritten:    uint64(18446744073709550602), // -1024
+	}
 	region = core.RegionFromHeartbeat(regionReq)
 	re.Equal(uint64(0), region.GetKeysWritten())
 	re.Equal(uint64(0), region.GetBytesWritten())
@@ -1355,15 +1396,44 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	re.NoError(err)
 
 	// Stale heartbeat, update check should fail
-	regionReq.Term = 5
-	regionReq.Leader = peers[0]
+	regionReq = &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Region: &metapb.Region{
+			Id:       1,
+			Peers:    peers,
+			StartKey: []byte{byte(2)},
+			EndKey:   []byte{byte(3)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 2,
+				Version: 1,
+			},
+		},
+		Leader:          peers[0],
+		Term:            5,
+		ApproximateSize: 10,
+	}
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
 	re.Error(err)
 
 	// Allow regions that are created by unsafe recover to send a heartbeat, even though they
 	// are considered "stale" because their conf ver and version are both equal to 1.
-	regionReq.Region.RegionEpoch.ConfVer = 1
+	regionReq = &pdpb.RegionHeartbeatRequest{
+		Header: testutil.NewRequestHeader(clusterID),
+		Region: &metapb.Region{
+			Id:       1,
+			Peers:    peers,
+			StartKey: []byte{byte(2)},
+			EndKey:   []byte{byte(3)},
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+		},
+		Leader:          peers[0],
+		Term:            5,
+		ApproximateSize: 10,
+	}
 	region = core.RegionFromHeartbeat(regionReq)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
@@ -1490,13 +1560,15 @@ func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.
 		re.NoError(err)
 		peerID, err := id.Alloc()
 		re.NoError(err)
+		peers := []*metapb.Peer{{Id: peerID, StoreId: storeID}}
 		region := &metapb.Region{
 			Id:       regionID,
-			Peers:    []*metapb.Peer{{Id: peerID, StoreId: storeID}},
+			Peers:    peers,
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
+			Leader:   peers[0],
 		}
-		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0], core.SetSource(core.Heartbeat)))
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, core.SetSource(core.Heartbeat)))
 	}
 
 	time.Sleep(50 * time.Millisecond)

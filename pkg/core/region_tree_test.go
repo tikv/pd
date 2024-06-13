@@ -37,15 +37,16 @@ func TestRegionInfo(t *testing.T) {
 		peers = append(peers, p)
 	}
 	region := &metapb.Region{
-		Peers: peers,
+		Peers:  peers,
+		Leader: peers[0],
 	}
 	downPeer, pendingPeer := peers[0], peers[1]
 
 	info := NewRegionInfo(
 		region,
-		peers[0],
 		WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer}}),
-		WithPendingPeers([]*metapb.Peer{pendingPeer}))
+		WithPendingPeers([]*metapb.Peer{pendingPeer}),
+	)
 
 	r := info.Clone()
 	re.Equal(info, r)

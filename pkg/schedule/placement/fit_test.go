@@ -72,7 +72,8 @@ func makeRegion(def string) *core.RegionInfo {
 			leader = peer
 		}
 	}
-	return core.NewRegionInfo(&regionMeta, leader)
+	regionMeta.Leader = leader
+	return core.NewRegionInfo(&regionMeta)
 }
 
 // example: "3/voter/zone=zone1+zone2,rack=rack2/zone,rack,host"

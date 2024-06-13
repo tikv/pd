@@ -481,13 +481,15 @@ func (suite *APIServerForwardTestSuite) addRegions() {
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	rc := leader.GetServer().GetRaftCluster()
 	for i := 0; i < 3; i++ {
+		peers := []*metapb.Peer{{Id: uint64(i*4 + 2), StoreId: uint64(i*4 + 3)}}
 		region := &metapb.Region{
 			Id:       uint64(i*4 + 1),
-			Peers:    []*metapb.Peer{{Id: uint64(i*4 + 2), StoreId: uint64(i*4 + 3)}},
+			Peers:    peers,
 			StartKey: []byte{byte(i)},
 			EndKey:   []byte{byte(i + 1)},
+			Leader:   peers[0],
 		}
-		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region))
 	}
 }
 

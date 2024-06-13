@@ -111,28 +111,30 @@ func TestSortedEqual(t *testing.T) {
 			false,
 		},
 	}
-	meta := &metapb.Region{
-		Id: 100,
-		Peers: []*metapb.Peer{
-			{
-				Id:      1,
-				StoreId: 10,
-			},
-			{
-				Id:      3,
-				StoreId: 30,
-			},
-			{
-				Id:      2,
-				StoreId: 20,
-				Role:    metapb.PeerRole_Learner,
-			},
-			{
-				Id:      4,
-				StoreId: 40,
-				Role:    metapb.PeerRole_IncomingVoter,
-			},
+	peers := []*metapb.Peer{
+		{
+			Id:      1,
+			StoreId: 10,
 		},
+		{
+			Id:      3,
+			StoreId: 30,
+		},
+		{
+			Id:      2,
+			StoreId: 20,
+			Role:    metapb.PeerRole_Learner,
+		},
+		{
+			Id:      4,
+			StoreId: 40,
+			Role:    metapb.PeerRole_IncomingVoter,
+		},
+	}
+	meta := &metapb.Region{
+		Id:     100,
+		Peers:  peers,
+		Leader: peers[0],
 	}
 	pickPeers := func(ids []int) []*metapb.Peer {
 		peers := make([]*metapb.Peer, 0, len(ids))
@@ -150,8 +152,8 @@ func TestSortedEqual(t *testing.T) {
 	}
 	// test NewRegionInfo
 	for _, testCase := range testCases {
-		regionA := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(testCase.idsA)}, nil)
-		regionB := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(testCase.idsB)}, nil)
+		regionA := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(testCase.idsA)})
+		regionB := NewRegionInfo(&metapb.Region{Id: 100, Peers: pickPeers(testCase.idsB)})
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 	}
@@ -175,7 +177,7 @@ func TestSortedEqual(t *testing.T) {
 	}
 
 	// test Clone
-	region := NewRegionInfo(meta, meta.Peers[0])
+	region := NewRegionInfo(meta)
 	for _, testCase := range testCases {
 		downPeersA := pickPeerStats(testCase.idsA)
 		downPeersB := pickPeerStats(testCase.idsB)
@@ -208,10 +210,10 @@ func TestInherit(t *testing.T) {
 	for _, testCase := range testCases {
 		var origin *RegionInfo
 		if testCase.originExists {
-			origin = NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			origin = NewRegionInfo(&metapb.Region{Id: 100})
 			origin.approximateSize = int64(testCase.originSize)
 		}
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		r := NewRegionInfo(&metapb.Region{Id: 100})
 		r.approximateSize = int64(testCase.size)
 		r.Inherit(origin, false)
 		re.Equal(int64(testCase.expect), r.approximateSize)
@@ -228,13 +230,13 @@ func TestInherit(t *testing.T) {
 		{&metapb.Buckets{RegionId: 100, Version: 2}, nil},
 	}
 	for _, d := range data {
-		origin := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetBuckets(d.originBuckets))
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+		origin := NewRegionInfo(&metapb.Region{Id: 100}, SetBuckets(d.originBuckets))
+		r := NewRegionInfo(&metapb.Region{Id: 100})
 		r.Inherit(origin, true)
 		re.Equal(d.originBuckets, r.GetBuckets())
 		// region will not inherit bucket keys.
 		if origin.GetBuckets() != nil {
-			newRegion := NewRegionInfo(&metapb.Region{Id: 100}, nil)
+			newRegion := NewRegionInfo(&metapb.Region{Id: 100})
 			newRegion.Inherit(origin, false)
 			re.NotEqual(d.originBuckets, newRegion.GetBuckets())
 		}
@@ -258,7 +260,7 @@ func TestRegionRoundingFlow(t *testing.T) {
 		{252623, math.MinInt64, 252623},
 	}
 	for _, testCase := range testCases {
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, WithFlowRoundByDigit(testCase.digit))
+		r := NewRegionInfo(&metapb.Region{Id: 100}, WithFlowRoundByDigit(testCase.digit))
 		r.readBytes = testCase.flow
 		r.writtenBytes = testCase.flow
 		re.Equal(testCase.expect, r.GetRoundBytesRead())
@@ -284,7 +286,7 @@ func TestRegionWriteRate(t *testing.T) {
 		{10, 3, 500, 0, 0},
 	}
 	for _, testCase := range testCases {
-		r := NewRegionInfo(&metapb.Region{Id: 100}, nil, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(0, testCase.interval))
+		r := NewRegionInfo(&metapb.Region{Id: 100}, SetWrittenBytes(testCase.bytes), SetWrittenKeys(testCase.keys), SetReportInterval(0, testCase.interval))
 		bytesRate, keysRate := r.GetWriteRate()
 		re.Equal(testCase.expectBytesRate, bytesRate)
 		re.Equal(testCase.expectKeysRate, keysRate)
@@ -294,18 +296,20 @@ func TestRegionWriteRate(t *testing.T) {
 func TestNeedSync(t *testing.T) {
 	re := require.New(t)
 	RegionGuide := GenerateRegionGuideFunc(false)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
+		{Id: 13, StoreId: 1, Role: metapb.PeerRole_Voter},
+	}
 	meta := &metapb.Region{
 		Id:          1000,
 		StartKey:    []byte("a"),
 		EndKey:      []byte("z"),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
-		Peers: []*metapb.Peer{
-			{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 12, StoreId: 1, Role: metapb.PeerRole_Voter},
-			{Id: 13, StoreId: 1, Role: metapb.PeerRole_Voter},
-		},
+		Peers:       peers,
+		Leader:      peers[0],
 	}
-	region := NewRegionInfo(meta, meta.Peers[0])
+	region := NewRegionInfo(meta)
 
 	testCases := []struct {
 		optionsA []RegionCreateOption
@@ -438,15 +442,15 @@ func TestRegionKey(t *testing.T) {
 		re.Contains(s, test.expect)
 
 		// start key changed
-		origin := NewRegionInfo(&metapb.Region{EndKey: []byte(got)}, nil)
-		region := NewRegionInfo(&metapb.Region{StartKey: []byte(got), EndKey: []byte(got)}, nil)
+		origin := NewRegionInfo(&metapb.Region{EndKey: []byte(got)})
+		region := NewRegionInfo(&metapb.Region{StartKey: []byte(got), EndKey: []byte(got)})
 		s = DiffRegionKeyInfo(origin, region)
 		re.Regexp(".*StartKey Changed.*", s)
 		re.Contains(s, test.expect)
 
 		// end key changed
-		origin = NewRegionInfo(&metapb.Region{StartKey: []byte(got)}, nil)
-		region = NewRegionInfo(&metapb.Region{StartKey: []byte(got), EndKey: []byte(got)}, nil)
+		origin = NewRegionInfo(&metapb.Region{StartKey: []byte(got)})
+		region = NewRegionInfo(&metapb.Region{StartKey: []byte(got), EndKey: []byte(got)})
 		s = DiffRegionKeyInfo(origin, region)
 		re.Regexp(".*EndKey Changed.*", s)
 		re.Contains(s, test.expect)
@@ -480,7 +484,8 @@ func TestSetRegion(t *testing.T) {
 			Peers:    []*metapb.Peer{peer1, peer2, peer3},
 			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
 			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
-		}, peer1)
+			Leader:   peer1,
+		})
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
@@ -493,7 +498,8 @@ func TestSetRegion(t *testing.T) {
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
 		StartKey: []byte(fmt.Sprintf("%20d", 184)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
-	}, peer1)
+		Leader:   peer1,
+	})
 	region.pendingPeers = append(region.pendingPeers, peer3)
 	origin, overlaps, rangeChanged := regions.SetRegion(region)
 	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -511,7 +517,8 @@ func TestSetRegion(t *testing.T) {
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
 		StartKey: []byte(fmt.Sprintf("%20d", 184)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
-	}, peer1)
+		Leader:   peer1,
+	})
 	region.pendingPeers = append(region.pendingPeers, peer3)
 	origin, overlaps, rangeChanged = regions.SetRegion(region)
 	regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -562,20 +569,22 @@ func TestShouldRemoveFromSubTree(t *testing.T) {
 		Peers:    []*metapb.Peer{peer1, peer2, peer4},
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
-	}, peer1)
+		Leader:   peer1,
+	})
 
 	origin := NewRegionInfo(&metapb.Region{
 		Id:       uint64(1),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
 		StartKey: []byte(fmt.Sprintf("%20d", 10)),
 		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
-	}, peer1)
+		Leader:   peer1,
+	})
 	re.True(region.peersEqualTo(origin))
 
-	region.leader = peer2
+	region.meta.Leader = peer2
 	re.False(region.peersEqualTo(origin))
 
-	region.leader = peer1
+	region.meta.Leader = peer1
 	region.pendingPeers = append(region.pendingPeers, peer4)
 	re.False(region.peersEqualTo(origin))
 
@@ -598,7 +607,7 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 	witnessMap := make(map[uint64]uint64)
 	pendingPeerMap := make(map[uint64]uint64)
 	for _, item := range regions.GetRegions() {
-		leaderMap[item.leader.StoreId]++
+		leaderMap[item.meta.Leader.StoreId]++
 		for _, follower := range item.GetFollowers() {
 			followerMap[follower.StoreId]++
 		}
@@ -651,7 +660,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 				Peers:    []*metapb.Peer{peer},
 				StartKey: []byte(fmt.Sprintf("%20d", i)),
 				EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
-			}, peer)
+				Leader:   peer,
+			})
 			origin, overlaps, rangeChanged := regions.SetRegion(region)
 			regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		}
@@ -713,7 +723,8 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 			Peers:    []*metapb.Peer{peer},
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
-		}, peer)
+			Leader:   peer,
+		})
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		items = append(items, region)
@@ -742,7 +753,8 @@ func TestGetRegionSizeByRange(t *testing.T) {
 			Peers:    []*metapb.Peer{peer},
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   endKey,
-		}, peer, SetApproximateSize(10))
+			Leader:   peer,
+		}, SetApproximateSize(10))
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 	}
@@ -766,7 +778,8 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 			Peers:    []*metapb.Peer{peer},
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
-		}, peer, SetApproximateSize(10))
+			Leader:   peer,
+		}, SetApproximateSize(10))
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		items = append(items, region)
@@ -796,7 +809,8 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 			Peers:    []*metapb.Peer{peer},
 			StartKey: []byte(fmt.Sprintf("%20d", i)),
 			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
-		}, peer)
+			Leader:   peer,
+		})
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
 		items = append(items, region)
@@ -850,8 +864,8 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 			StartKey: randomBytes(keyLength),
 			EndKey:   randomBytes(keyLength),
 			Peers:    peers,
+			Leader:   leader,
 		},
-		leader,
 		SetApproximateSize(10),
 		SetApproximateKeys(10),
 	)
@@ -1032,8 +1046,8 @@ func generateTestRegions(count int, storeNum int) []*RegionInfo {
 			StartKey:    []byte(fmt.Sprintf("%20d", i*10)),
 			EndKey:      []byte(fmt.Sprintf("%20d", (i+1)*10)),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
+			Leader:      peer1,
 		},
-			peer1,
 			SetApproximateKeys(10),
 			SetApproximateSize(10))
 		items = append(items, region)
@@ -1056,8 +1070,8 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 		StartKey:    []byte(fmt.Sprintf("%20d", i*10)),
 		EndKey:      []byte(fmt.Sprintf("%20d", (i+1)*10)),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
+		Leader:      peer1,
 	},
-		peer1,
 		SetApproximateKeys(10),
 		SetApproximateSize(10),
 	)

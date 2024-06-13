@@ -970,8 +970,8 @@ func checkBalanceRegionSchedule2(re *require.Assertions, enablePlacementRules bo
 				{Id: 101, StoreId: 1},
 				{Id: 102, StoreId: 2},
 			},
+			Leader: &metapb.Peer{Id: 101, StoreId: 1},
 		},
-		&metapb.Peer{Id: 101, StoreId: 1},
 		core.SetApproximateSize(1),
 		core.SetApproximateKeys(1),
 	)
@@ -985,8 +985,8 @@ func checkBalanceRegionSchedule2(re *require.Assertions, enablePlacementRules bo
 				{Id: 104, StoreId: 4},
 				{Id: 105, StoreId: 3},
 			},
+			Leader: &metapb.Peer{Id: 104, StoreId: 4},
 		},
-		&metapb.Peer{Id: 104, StoreId: 4},
 		core.SetApproximateSize(200),
 		core.SetApproximateKeys(200),
 	)
@@ -1177,8 +1177,8 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 				{Id: 7, StoreId: 3},
 				{Id: 8, StoreId: 4},
 			},
+			Leader: &metapb.Peer{Id: 7, StoreId: 3},
 		},
-		&metapb.Peer{Id: 7, StoreId: 3},
 		core.SetApproximateSize(1),
 		core.SetApproximateKeys(1),
 	)
@@ -1265,16 +1265,15 @@ func checkScatterRangeBalance(re *require.Assertions, enablePlacementRules bool)
 			Peers:    peers,
 			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
 			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
+			Leader:   peers[rand.Intn(4)%3],
 		})
 		id += 4
 	}
 	// empty region case
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
-		leader := rand.Intn(4) % 3
 		regionInfo := core.NewRegionInfo(
 			meta,
-			meta.Peers[leader],
 			core.SetApproximateKeys(1),
 			core.SetApproximateSize(1),
 		)
@@ -1335,16 +1334,15 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 			Peers:    peers,
 			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
 			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
+			Leader:   peers[rand.Intn(4)%3],
 		})
 		id += 4
 	}
 
 	regions[49].EndKey = []byte("")
 	for _, meta := range regions {
-		leader := rand.Intn(4) % 3
 		regionInfo := core.NewRegionInfo(
 			meta,
-			meta.Peers[leader],
 			core.SetApproximateKeys(96),
 			core.SetApproximateSize(96),
 		)
@@ -1427,12 +1425,16 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 			{Id: id + 2, StoreId: 2},
 			{Id: id + 3, StoreId: 3},
 		}
-		regions = append(regions, &metapb.Region{
+		region := &metapb.Region{
 			Id:       id + 4,
 			Peers:    peers,
 			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
 			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
-		})
+		}
+		if region.Id < 8 {
+			region.Leader = region.Peers[0]
+		}
+		regions = append(regions, region)
 		id += 4
 	}
 	// empty case
@@ -1441,13 +1443,8 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 	// To simulate server prepared,
 	// store 1 contains 8 leader region peers and leaders of 2 regions are unknown yet.
 	for _, meta := range regions {
-		var leader *metapb.Peer
-		if meta.Id < 8 {
-			leader = meta.Peers[0]
-		}
 		regionInfo := core.NewRegionInfo(
 			meta,
-			leader,
 			core.SetApproximateKeys(96),
 			core.SetApproximateSize(96),
 		)

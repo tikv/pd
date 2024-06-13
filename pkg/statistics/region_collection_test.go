@@ -62,10 +62,10 @@ func TestRegionStatistics(t *testing.T) {
 
 	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	stores[3] = store3
-	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
-	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
-	region1 := core.NewRegionInfo(r1, peers[0])
-	region2 := core.NewRegionInfo(r2, peers[0])
+	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb"), Leader: peers[0]}
+	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd"), Leader: peers[0]}
+	region1 := core.NewRegionInfo(r1)
+	region2 := core.NewRegionInfo(r2)
 	regionStats := NewRegionStatistics(nil, opt, manager)
 	regionStats.Observe(region1, stores)
 	re.Len(regionStats.stats[ExtraPeer], 1)
@@ -143,14 +143,14 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 		s := core.NewStoreInfo(m)
 		stores = append(stores, s)
 	}
-	r2 := &metapb.Region{Id: 0, Peers: peers[0:1], StartKey: []byte("aa"), EndKey: []byte("bb")}
-	r3 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("ee"), EndKey: []byte("ff")}
-	r4 := &metapb.Region{Id: 2, Peers: peers[0:3], StartKey: []byte("gg"), EndKey: []byte("hh")}
-	r5 := &metapb.Region{Id: 0, Peers: peers[2:], StartKey: []byte("aa"), EndKey: []byte("bb")}
-	region2 := core.NewRegionInfo(r2, peers[0])
-	region3 := core.NewRegionInfo(r3, peers[0])
-	region4 := core.NewRegionInfo(r4, peers[0])
-	region5 := core.NewRegionInfo(r5, peers[4])
+	r2 := &metapb.Region{Id: 0, Peers: peers[0:1], StartKey: []byte("aa"), EndKey: []byte("bb"), Leader: peers[0]}
+	r3 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("ee"), EndKey: []byte("ff"), Leader: peers[0]}
+	r4 := &metapb.Region{Id: 2, Peers: peers[0:3], StartKey: []byte("gg"), EndKey: []byte("hh"), Leader: peers[0]}
+	r5 := &metapb.Region{Id: 0, Peers: peers[2:], StartKey: []byte("aa"), EndKey: []byte("bb"), Leader: peers[4]}
+	region2 := core.NewRegionInfo(r2)
+	region3 := core.NewRegionInfo(r3)
+	region4 := core.NewRegionInfo(r4)
+	region5 := core.NewRegionInfo(r5)
 	regionStats := NewRegionStatistics(nil, opt, manager)
 	// r2 didn't match the rules
 	regionStats.Observe(region2, stores)
@@ -235,7 +235,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 
 			stores = append(stores, s)
 		}
-		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)}, nil)
+		region := core.NewRegionInfo(&metapb.Region{Id: uint64(regionID)})
 		label := GetRegionLabelIsolation(stores, locationLabels)
 		labelLevelStats.Observe(region, stores, locationLabels)
 		re.Equal(res, label)
@@ -298,8 +298,8 @@ func BenchmarkObserve(b *testing.B) {
 	regionNum := uint64(1000000)
 	regions := make([]*core.RegionInfo, 0, regionNum)
 	for i := uint64(1); i <= regionNum; i++ {
-		r := &metapb.Region{Id: i, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}}
-		regions = append(regions, core.NewRegionInfo(r, peers[0]))
+		r := &metapb.Region{Id: i, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}, Leader: peers[0]}
+		regions = append(regions, core.NewRegionInfo(r))
 	}
 	regionStats := NewRegionStatistics(nil, opt, manager)
 

@@ -255,15 +255,13 @@ func buildRegion(kind utils.RWType, peerCount int, interval uint64) *core.Region
 		StartKey:    []byte(""),
 		EndKey:      []byte(""),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 6, Version: 6},
+		Leader:      peers[rand.Intn(3)],
 	}
-
-	leader := meta.Peers[rand.Intn(3)]
 
 	switch kind {
 	case utils.Read:
 		return core.NewRegionInfo(
 			meta,
-			leader,
 			core.SetReportInterval(0, interval),
 			core.SetReadBytes(10*units.MiB*interval),
 			core.SetReadKeys(10*units.MiB*interval),
@@ -272,7 +270,6 @@ func buildRegion(kind utils.RWType, peerCount int, interval uint64) *core.Region
 	case utils.Write:
 		return core.NewRegionInfo(
 			meta,
-			leader,
 			core.SetReportInterval(0, interval),
 			core.SetWrittenBytes(10*units.MiB*interval),
 			core.SetWrittenKeys(10*units.MiB*interval),
@@ -302,7 +299,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	cache := NewHotPeerCache(context.Background(), utils.Read)
 	storeID, regionID := uint64(1), uint64(2)
 	peer := &metapb.Peer{StoreId: storeID}
-	region := core.NewRegionInfo(&metapb.Region{Id: regionID, Peers: []*metapb.Peer{peer}}, peer)
+	region := core.NewRegionInfo(&metapb.Region{Id: regionID, Peers: []*metapb.Peer{peer}, Leader: peer})
 	// we statistic read peer info from store heartbeat rather than region heartbeat
 	m := utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval
 	ThresholdsUpdateInterval = 0
@@ -668,11 +665,13 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 		cache := NewHotPeerCache(context.Background(), utils.Write)
 		now := time.Now()
 		for id := uint64(0); id < 100; id++ {
+			peers := []*metapb.Peer{{Id: id, StoreId: 1}}
 			meta := &metapb.Region{
-				Id:    id,
-				Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
+				Id:     id,
+				Peers:  peers,
+				Leader: peers[0],
 			}
-			region := core.NewRegionInfo(meta, meta.Peers[0], core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
+			region := core.NewRegionInfo(meta, core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
 			for i := 0; i < 10; i++ {
 				start := uint64(now.Add(time.Minute * time.Duration(i)).Unix())
 				end := uint64(now.Add(time.Minute * time.Duration(i+1)).Unix())

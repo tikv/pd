@@ -148,8 +148,9 @@ func mustPutRegion(re *require.Assertions, svr *server.Server, regionID, storeID
 		EndKey:      end,
 		Peers:       []*metapb.Peer{leader},
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+		Leader:      leader,
 	}
-	r := core.NewRegionInfo(metaRegion, leader, opts...)
+	r := core.NewRegionInfo(metaRegion, opts...)
 	err := svr.GetRaftCluster().HandleRegionHeartbeat(r)
 	re.NoError(err)
 	return r
