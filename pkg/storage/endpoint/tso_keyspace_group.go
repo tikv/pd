@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -78,6 +79,14 @@ func IsUserKindValid(kind string) bool {
 type KeyspaceGroupMember struct {
 	Address  string `json:"address"`
 	Priority int    `json:"priority"`
+}
+
+// CompareAddress compares the address with the given address.
+// It compares the address without the scheme.
+// Otherwise, it will not work when we update the scheme from http to https.
+// Issue: https://github.com/tikv/pd/issues/8284
+func (m *KeyspaceGroupMember) CompareAddress(addr string) bool {
+	return typeutil.EqualBaseUrl(m.Address, addr)
 }
 
 // SplitState defines the split state of a keyspace group.
