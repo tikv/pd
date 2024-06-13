@@ -1045,7 +1045,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// region stats needs to be collected in API mode.
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			if err := ctx.MiscRunner.RunTask(
+			_ = ctx.MiscRunner.RunTask(
 				ctx.Context,
 				ratelimit.ObserveRegionStatsAsync,
 				func(_ context.Context) {
@@ -1053,22 +1053,18 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 						cluster.Collect(c, region, hasRegionStats)
 					}
 				},
-			); err != nil {
-				log.Warn("run task failed", zap.String("name", ratelimit.ObserveRegionStatsAsync), zap.Error(err))
-			}
+			)
 		}
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
-			if err := ctx.TaskRunner.RunTask(
+			_ = ctx.TaskRunner.RunTask(
 				ctx,
 				ratelimit.UpdateSubTree,
 				func(_ context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
 				ratelimit.WithRetained(true),
-			); err != nil {
-				log.Warn("run task failed", zap.String("name", ratelimit.UpdateSubTree), zap.Error(err))
-			}
+			)
 		}
 		return nil
 	}
@@ -1089,35 +1085,31 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			tracer.OnSaveCacheFinished()
 			return err
 		}
-		if err := ctx.TaskRunner.RunTask(
+		_ = ctx.TaskRunner.RunTask(
 			ctx,
 			ratelimit.UpdateSubTree,
 			func(_ context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
 			ratelimit.WithRetained(retained),
-		); err != nil {
-			log.Warn("run task failed", zap.String("name", ratelimit.UpdateSubTree), zap.Error(err))
-		}
+		)
 		tracer.OnUpdateSubTreeFinished()
 
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-			if err := ctx.MiscRunner.RunTask(
+			_ = ctx.MiscRunner.RunTask(
 				ctx.Context,
 				ratelimit.HandleOverlaps,
 				func(_ context.Context) {
 					cluster.HandleOverlaps(c, overlaps)
 				},
-			); err != nil {
-				log.Warn("run task failed", zap.String("name", ratelimit.HandleOverlaps), zap.Error(err))
-			}
+			)
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
 
 	tracer.OnSaveCacheFinished()
 	// handle region stats
-	if err := ctx.MiscRunner.RunTask(
+	_ = ctx.MiscRunner.RunTask(
 		ctx.Context,
 		ratelimit.CollectRegionStatsAsync,
 		func(_ context.Context) {
@@ -1126,14 +1118,12 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			// We need to think of a better way to reduce this part of the cost in the future.
 			cluster.Collect(c, region, hasRegionStats)
 		},
-	); err != nil {
-		log.Warn("run task failed", zap.String("name", ratelimit.CollectRegionStatsAsync), zap.Error(err))
-	}
+	)
 
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
 		if saveKV {
-			if err := ctx.MiscRunner.RunTask(
+			_ = ctx.MiscRunner.RunTask(
 				ctx.Context,
 				ratelimit.SaveRegionToKV,
 				func(_ context.Context) {
@@ -1157,9 +1147,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 					}
 					regionUpdateKVEventCounter.Inc()
 				},
-			); err != nil {
-				log.Warn("run task failed", zap.String("name", ratelimit.SaveRegionToKV), zap.Error(err))
-			}
+			)
 		}
 	}
 
