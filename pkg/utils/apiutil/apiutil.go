@@ -336,20 +336,28 @@ func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 	return returned, rawKey, nil
 }
 
-// ParseHexKeys decodes hexadecimal keys to bytes if the format is "hex".
-func ParseHexKeys(format string, keys []string) (hexStrings []string, err error) {
+// ParseHexKeys decodes hexadecimal src into DecodedLen(len(src)) bytes if the format is "hex".
+//
+// ParseHexKeys expects that each key contains only
+// hexadecimal characters and each key has even length.
+// If existing one key is malformed, ParseHexKeys returns
+// the original bytes.
+func ParseHexKeys(format string, keys [][]byte) (decodedBytes [][]byte, err error) {
 	if format != "hex" {
 		return keys, nil
 	}
 
 	for _, key := range keys {
-		keyBytes, err := hex.DecodeString(key)
+		// We can use the source slice itself as the destination
+		// because the decode loop increments by one and then the 'seen' byte is not used anymore.
+		// Reference to hex.DecodeString()
+		n, err := hex.Decode(key, key)
 		if err != nil {
 			return keys, err
 		}
-		hexStrings = append(hexStrings, string(keyBytes))
+		decodedBytes = append(decodedBytes, key[:n])
 	}
-	return hexStrings, nil
+	return decodedBytes, nil
 }
 
 // ReadJSON reads a JSON data from r and then closes it.

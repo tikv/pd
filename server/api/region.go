@@ -85,21 +85,20 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	vars := mux.Vars(r)
-	key := vars["key"]
-	key, err := url.QueryUnescape(key)
+	key, err := url.QueryUnescape(vars["key"])
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// decode hex if query has params with hex format
-	params := []string{key}
-	params, err = apiutil.ParseHexKeys(r.URL.Query().Get("format"), params)
+	paramsByte := [][]byte{[]byte(key)}
+	paramsByte, err = apiutil.ParseHexKeys(r.URL.Query().Get("format"), paramsByte)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	regionInfo := rc.GetRegionByKey([]byte(params[0]))
+	regionInfo := rc.GetRegionByKey(paramsByte[0])
 	b, err := response.MarshalRegionInfoJSON(r.Context(), regionInfo)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -170,22 +169,21 @@ func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 // @Router   /regions/key [get]
 func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
-	var err error
-	// decode hex if query has params with hex format
-	params := []string{r.URL.Query().Get("key"), r.URL.Query().Get("end_key")}
-	params, err = apiutil.ParseHexKeys(r.URL.Query().Get("format"), params)
+	query := r.URL.Query()
+	paramsByte := [][]byte{[]byte(query.Get("key")), []byte(query.Get("end_key"))}
+	paramsByte, err := apiutil.ParseHexKeys(query.Get("format"), paramsByte)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	limit, err := h.AdjustLimit(r.URL.Query().Get("limit"))
+	limit, err := h.AdjustLimit(query.Get("limit"))
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	regions := rc.ScanRegions([]byte(params[0]), []byte(params[1]), limit)
+	regions := rc.ScanRegions(paramsByte[0], paramsByte[1], limit)
 	b, err := response.MarshalRegionsInfoJSON(r.Context(), regions)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
