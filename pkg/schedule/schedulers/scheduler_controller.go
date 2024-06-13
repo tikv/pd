@@ -456,7 +456,7 @@ func (s *ScheduleController) Stop() {
 
 // Schedule tries to create some operators.
 func (s *ScheduleController) Schedule(diagnosable bool) []*operator.Operator {
-loop:
+retry:
 	for i := 0; i < maxScheduleRetries; i++ {
 		// no need to retry if schedule should stop to speed exit
 		select {
@@ -478,17 +478,17 @@ loop:
 		// If we have schedule, reset interval to the minimal interval.
 		s.nextInterval = s.Scheduler.GetMinInterval()
 		for _, op := range ops {
+			region := s.cluster.GetRegion(op.RegionID())
+			if region == nil {
+				continue retry
+			}
 			labelMgr := s.cluster.GetRegionLabeler()
 			if labelMgr == nil {
 				continue
 			}
-			region := s.cluster.GetRegion(op.RegionID())
-			if region == nil {
-				continue
-			}
 			if labelMgr.ScheduleDisabled(region) {
 				denySchedulersByLabelerCounter.Inc()
-				continue loop
+				continue retry
 			}
 		}
 		return ops
