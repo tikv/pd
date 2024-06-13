@@ -18,16 +18,15 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
-	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newRegionSplit() *Case {
+func newRegionSplit(config *sc.SimConfig) *Case {
 	var simCase Case
-	// Initialize the cluster
-	storeNum := getStoreNum()
-	for i := 1; i <= storeNum; i++ {
+	totalStore := config.TotalStore
+
+	for i := 0; i < totalStore; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     uint64(i),
 			Status: metapb.StoreState_Up,
@@ -57,15 +56,13 @@ func newRegionSplit() *Case {
 
 	// Checker description
 	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		res := true
-		regionCounts := make([]int, 0, storeNum)
-		for i := 1; i <= storeNum; i++ {
-			regionCount := regions.GetStoreRegionCount(uint64(i))
-			regionCounts = append(regionCounts, regionCount)
-			res = res && regionCount > 5
+		for i := 1; i <= totalStore; i++ {
+			peerCount := regions.GetStoreRegionCount(uint64(i))
+			if peerCount < 5 {
+				return false
+			}
 		}
-		simutil.Logger.Info("current counts", zap.Ints("region", regionCounts))
-		return res
+		return true
 	}
 	return &simCase
 }

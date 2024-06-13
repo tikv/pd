@@ -18,31 +18,39 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newBalanceLeader() *Case {
+func newBalanceLeader(config *sc.SimConfig) *Case {
 	var simCase Case
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-
-	for i := 1; i <= storeNum; i++ {
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	for i := 0; i < totalStore; i++ {
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		})
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeNum)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%(storeNum-1)) + 1},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%(storeNum-1)) + 1},
+	leaderStoreID := simCase.Stores[totalStore-1].ID
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		peers = append(peers, &metapb.Peer{
+			Id:      simutil.IDAllocator.NextID(),
+			StoreId: leaderStoreID,
+		})
+		for j := 1; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      simutil.IDAllocator.NextID(),
+				StoreId: uint64((i+j)%(totalStore-1) + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -50,17 +58,14 @@ func newBalanceLeader() *Case {
 		})
 	}
 
-	threshold := 0.05
 	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		res := true
-		leaderCounts := make([]int, 0, storeNum)
-		for i := 1; i <= storeNum; i++ {
+		for i := 1; i <= totalStore; i++ {
 			leaderCount := regions.GetStoreLeaderCount(uint64(i))
-			leaderCounts = append(leaderCounts, leaderCount)
-			res = res && isUniform(leaderCount, regionNum/3, threshold)
+			if !isUniform(leaderCount, totalRegion/totalStore) {
+				return false
+			}
 		}
-		simutil.Logger.Info("current counts", zap.Ints("leader", leaderCounts))
-		return res
+		return true
 	}
 	return &simCase
 }
