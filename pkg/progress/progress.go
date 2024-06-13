@@ -204,7 +204,7 @@ func (m *Manager) GetProgresses(filter func(p string) bool) []string {
 	m.RLock()
 	defer m.RUnlock()
 
-	progresses := []string{}
+	progresses := make([]string, 0, len(m.progresses))
 	for p := range m.progresses {
 		if filter(p) {
 			progresses = append(progresses, p)
