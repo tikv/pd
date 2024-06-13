@@ -80,8 +80,8 @@ func Float64Equal(a, b float64) bool {
 	return math.Abs(a-b) <= 1e-6
 }
 
-// EqualBaseUrl compares two URLs without scheme.
-func EqualBaseUrl(url1, url2 string) bool {
+// EqualBaseURLs compares two URLs without scheme.
+func EqualBaseURLs(url1, url2 string) bool {
 	trimScheme := func(s string) string {
 		return strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://")
 	}
