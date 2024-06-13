@@ -122,16 +122,14 @@ func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
 	return res
 }
 
-func (conf *evictLeaderSchedulerConfig) removeStoreLocked(id uint64) (succ bool, last bool) {
+func (conf *evictLeaderSchedulerConfig) removeStoreLocked(id uint64) (bool, error) {
 	_, exists := conf.StoreIDWithRanges[id]
-	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
 		conf.cluster.ResumeLeaderTransfer(id)
-		succ = true
-		last = len(conf.StoreIDWithRanges) == 0
+		return len(conf.StoreIDWithRanges) == 0, nil
 	}
-	return succ, last
+	return false, errs.ErrScheduleConfigNotExist.FastGenByArgs()
 }
 
 func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []core.KeyRange) {
@@ -221,7 +219,7 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRa
 	}
 	conf.Batch = batch
 	err := conf.persistLocked()
-	if err != nil {
+	if err != nil && id != 0 {
 		conf.removeStoreLocked(id)
 	}
 	return err
@@ -230,15 +228,14 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRa
 func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 	conf.Lock()
 	keyRanges := conf.StoreIDWithRanges[id]
-	succ, last := conf.removeStoreLocked(id)
 	var resp any
-
-	if !succ {
+	last, err := conf.removeStoreLocked(id)
+	if err != nil {
 		conf.Unlock()
-		return resp, errs.ErrScheduleConfigNotExist.FastGenByArgs()
+		return resp, err
 	}
 
-	err := conf.persistLocked()
+	err = conf.persistLocked()
 	if err != nil {
 		conf.resetStoreLocked(id, keyRanges)
 		conf.Unlock()
@@ -448,8 +445,8 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	batch := handler.config.getBatch()
 	batchFloat, ok := input["batch"].(float64)
 	if ok {
-		if batchFloat < 0 || batchFloat > 10 {
-			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [0, 10]")
+		if batchFloat < 1 || batchFloat > 10 {
+			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
 			return
 		}
 		batch = (int)(batchFloat)
