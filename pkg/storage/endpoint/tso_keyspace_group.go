@@ -86,7 +86,7 @@ type KeyspaceGroupMember struct {
 // Otherwise, it will not work when we update the scheme from http to https.
 // Issue: https://github.com/tikv/pd/issues/8284
 func (m *KeyspaceGroupMember) CompareAddress(addr string) bool {
-	return typeutil.EqualBaseUrl(m.Address, addr)
+	return typeutil.EqualBaseURLs(m.Address, addr)
 }
 
 // SplitState defines the split state of a keyspace group.
