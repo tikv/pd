@@ -290,7 +290,7 @@ func (s *state) getNextPrimaryToReset(
 				if member.Priority > maxPriority {
 					maxPriority = member.Priority
 				}
-				if member.Address == localAddress {
+				if member.CompareAddress(localAddress) {
 					localPriority = member.Priority
 				}
 			}
@@ -667,7 +667,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 
 func (kgm *KeyspaceGroupManager) isAssignedToMe(group *endpoint.KeyspaceGroup) bool {
 	return slice.AnyOf(group.Members, func(i int) bool {
-		return group.Members[i].Address == kgm.tsoServiceID.ServiceAddr
+		return group.Members[i].CompareAddress(kgm.tsoServiceID.ServiceAddr)
 	})
 }
 

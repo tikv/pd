@@ -71,3 +71,11 @@ func TestAreStringSlicesEquivalent(t *testing.T) {
 	re.False(AreStringSlicesEquivalent([]string{}, []string{"a", "b"}))
 	re.False(AreStringSlicesEquivalent([]string{"a", "b"}, []string{}))
 }
+
+func TestCompareURLsWithoutScheme(t *testing.T) {
+	re := require.New(t)
+	re.True(EqualBaseUrl("", ""))
+	re.True(EqualBaseUrl("http://127.0.0.1", "http://127.0.0.1"))
+	re.True(EqualBaseUrl("http://127.0.0.1", "https://127.0.0.1"))
+	re.True(EqualBaseUrl("127.0.0.1", "http://127.0.0.1"))
+}
