@@ -1333,22 +1333,22 @@ func TestStaleTermHeartbeat(t *testing.T) {
 		Term:            5,
 		ApproximateSize: 10,
 	}
-
-	region := core.RegionFromHeartbeat(regionReq)
+	flowRoundDivisor := leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit
+	region := core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 
 	// Transfer leader
 	regionReq.Term = 6
 	regionReq.Leader = peers[1]
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 
 	// issue #3379
 	regionReq.KeysWritten = uint64(18446744073709551615)  // -1
 	regionReq.BytesWritten = uint64(18446744073709550602) // -1024
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	re.Equal(uint64(0), region.GetKeysWritten())
 	re.Equal(uint64(0), region.GetBytesWritten())
 	err = rc.HandleRegionHeartbeat(region)
@@ -1357,14 +1357,14 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	// Stale heartbeat, update check should fail
 	regionReq.Term = 5
 	regionReq.Leader = peers[0]
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.Error(err)
 
 	// Allow regions that are created by unsafe recover to send a heartbeat, even though they
 	// are considered "stale" because their conf ver and version are both equal to 1.
 	regionReq.Region.RegionEpoch.ConfVer = 1
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 }

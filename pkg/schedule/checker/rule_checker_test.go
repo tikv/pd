@@ -2053,7 +2053,7 @@ func (suite *ruleCheckerTestAdvancedSuite) TestReplaceAnExistingPeerCases() {
 		{"111_learner,211_learner,311_learner,151_leader,252,351", []string{"3/voter//", "3/learner/type=read/"}, ""},
 	}
 	groupName := "a_test"
-	for i, cas := range testCases {
+	for _, cas := range testCases {
 		bundle := placement.GroupBundle{
 			ID:       groupName,
 			Index:    1000,
@@ -2071,7 +2071,7 @@ func (suite *ruleCheckerTestAdvancedSuite) TestReplaceAnExistingPeerCases() {
 		suite.cluster.PutRegion(region)
 		op := suite.rc.Check(region)
 		if len(cas.opStr) > 0 {
-			re.Contains(op.String(), cas.opStr, i, cas.opStr)
+			re.Contains(op.String(), cas.opStr, cas.opStr)
 		}
 		suite.ruleManager.DeleteGroupBundle(groupName, false)
 	}

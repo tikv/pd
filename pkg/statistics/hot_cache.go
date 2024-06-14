@@ -34,8 +34,8 @@ var (
 // HotCache is a cache hold hot regions.
 type HotCache struct {
 	ctx        context.Context
-	writeCache *hotPeerCache
-	readCache  *hotPeerCache
+	writeCache *HotPeerCache
+	readCache  *HotPeerCache
 }
 
 // NewHotCache creates a new hot spot cache.
@@ -51,7 +51,7 @@ func NewHotCache(ctx context.Context) *HotCache {
 }
 
 // CheckWriteAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
+func (w *HotCache) CheckWriteAsync(task func(cache *HotPeerCache)) bool {
 	if w.writeCache.taskQueue.Len() > chanMaxLength {
 		return false
 	}
@@ -64,7 +64,7 @@ func (w *HotCache) CheckWriteAsync(task FlowItemTask) bool {
 }
 
 // CheckReadAsync puts the flowItem into queue, and check it asynchronously
-func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
+func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	if w.readCache.taskQueue.Len() > chanMaxLength {
 		return false
 	}
@@ -78,52 +78,86 @@ func (w *HotCache) CheckReadAsync(task FlowItemTask) bool {
 
 // RegionStats returns hot items according to kind
 func (w *HotCache) RegionStats(kind utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat {
-	task := newCollectRegionStatsTask(minHotDegree)
+	ret := make(chan map[uint64][]*HotPeerStat, 1)
+	collectRegionStatsTask := func(cache *HotPeerCache) {
+		ret <- cache.RegionStats(minHotDegree)
+	}
 	var succ bool
 	switch kind {
 	case utils.Write:
-		succ = w.CheckWriteAsync(task)
+		succ = w.CheckWriteAsync(collectRegionStatsTask)
 	case utils.Read:
-		succ = w.CheckReadAsync(task)
+		succ = w.CheckReadAsync(collectRegionStatsTask)
 	}
 	if !succ {
 		return nil
 	}
-	return task.waitRet(w.ctx)
+	select {
+	case <-w.ctx.Done():
+		return nil
+	case r := <-ret:
+		return r
+	}
 }
 
 // IsRegionHot checks if the region is hot.
 func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
-	checkRegionHotWriteTask := newCheckRegionHotTask(region, minHotDegree)
-	checkRegionHotReadTask := newCheckRegionHotTask(region, minHotDegree)
+	retWrite := make(chan bool, 1)
+	retRead := make(chan bool, 1)
+	checkRegionHotWriteTask := func(cache *HotPeerCache) {
+		retWrite <- cache.isRegionHotWithAnyPeers(region, minHotDegree)
+	}
+	checkRegionHotReadTask := func(cache *HotPeerCache) {
+		retRead <- cache.isRegionHotWithAnyPeers(region, minHotDegree)
+	}
 	succ1 := w.CheckWriteAsync(checkRegionHotWriteTask)
 	succ2 := w.CheckReadAsync(checkRegionHotReadTask)
 	if succ1 && succ2 {
-		return checkRegionHotWriteTask.waitRet(w.ctx) || checkRegionHotReadTask.waitRet(w.ctx)
+		select {
+		case <-w.ctx.Done():
+			return false
+		case r := <-retWrite:
+			return r
+		case r := <-retRead:
+			return r
+		}
 	}
 	return false
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.
 func (w *HotCache) GetHotPeerStat(kind utils.RWType, regionID, storeID uint64) *HotPeerStat {
-	task := newGetHotPeerStatTask(regionID, storeID)
+	ret := make(chan *HotPeerStat, 1)
+	getHotPeerStatTask := func(cache *HotPeerCache) {
+		ret <- cache.getHotPeerStat(regionID, storeID)
+	}
+
 	var succ bool
 	switch kind {
 	case utils.Read:
-		succ = w.CheckReadAsync(task)
+		succ = w.CheckReadAsync(getHotPeerStatTask)
 	case utils.Write:
-		succ = w.CheckWriteAsync(task)
+		succ = w.CheckWriteAsync(getHotPeerStatTask)
 	}
 	if !succ {
 		return nil
 	}
-	return task.waitRet(w.ctx)
+	select {
+	case <-w.ctx.Done():
+		return nil
+	case r := <-ret:
+		return r
+	}
 }
 
 // CollectMetrics collects the hot cache metrics.
 func (w *HotCache) CollectMetrics() {
-	w.CheckWriteAsync(newCollectMetricsTask())
-	w.CheckReadAsync(newCollectMetricsTask())
+	w.CheckWriteAsync(func(cache *HotPeerCache) {
+		cache.collectMetrics()
+	})
+	w.CheckReadAsync(func(cache *HotPeerCache) {
+		cache.collectMetrics()
+	})
 }
 
 // ResetHotCacheStatusMetrics resets the hot cache metrics.
@@ -131,7 +165,7 @@ func ResetHotCacheStatusMetrics() {
 	hotCacheStatusGauge.Reset()
 }
 
-func (w *HotCache) updateItems(queue *chanx.UnboundedChan[FlowItemTask], runTask func(task FlowItemTask)) {
+func (w *HotCache) updateItems(queue *chanx.UnboundedChan[func(*HotPeerCache)], runTask func(task func(*HotPeerCache))) {
 	defer logutil.LogPanic()
 
 	for {
@@ -144,18 +178,18 @@ func (w *HotCache) updateItems(queue *chanx.UnboundedChan[FlowItemTask], runTask
 	}
 }
 
-func (w *HotCache) runReadTask(task FlowItemTask) {
+func (w *HotCache) runReadTask(task func(cache *HotPeerCache)) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
-		task.runTask(w.readCache)
+		task(w.readCache)
 		readTaskMetrics.Set(float64(w.readCache.taskQueue.Len()))
 	}
 }
 
-func (w *HotCache) runWriteTask(task FlowItemTask) {
+func (w *HotCache) runWriteTask(task func(cache *HotPeerCache)) {
 	if task != nil {
 		// TODO: do we need a run-task timeout to protect the queue won't be stuck by a task?
-		task.runTask(w.writeCache)
+		task(w.writeCache)
 		writeTaskMetrics.Set(float64(w.writeCache.taskQueue.Len()))
 	}
 }
@@ -165,34 +199,34 @@ func (w *HotCache) runWriteTask(task FlowItemTask) {
 func (w *HotCache) Update(item *HotPeerStat, kind utils.RWType) {
 	switch kind {
 	case utils.Write:
-		w.writeCache.updateStat(item)
+		w.writeCache.UpdateStat(item)
 	case utils.Read:
-		w.readCache.updateStat(item)
+		w.readCache.UpdateStat(item)
 	}
 }
 
 // CheckWritePeerSync checks the write status, returns update items.
 // This is used for mockcluster, for test purpose.
 func (w *HotCache) CheckWritePeerSync(region *core.RegionInfo, peers []*metapb.Peer, loads []float64, interval uint64) []*HotPeerStat {
-	return w.writeCache.checkPeerFlow(region, peers, loads, interval)
+	return w.writeCache.CheckPeerFlow(region, peers, loads, interval)
 }
 
 // CheckReadPeerSync checks the read status, returns update items.
 // This is used for mockcluster, for test purpose.
 func (w *HotCache) CheckReadPeerSync(region *core.RegionInfo, peers []*metapb.Peer, loads []float64, interval uint64) []*HotPeerStat {
-	return w.readCache.checkPeerFlow(region, peers, loads, interval)
+	return w.readCache.CheckPeerFlow(region, peers, loads, interval)
 }
 
 // ExpiredReadItems returns the read items which are already expired.
 // This is used for mockcluster, for test purpose.
 func (w *HotCache) ExpiredReadItems(region *core.RegionInfo) []*HotPeerStat {
-	return w.readCache.collectExpiredItems(region)
+	return w.readCache.CollectExpiredItems(region)
 }
 
 // ExpiredWriteItems returns the write items which are already expired.
 // This is used for mockcluster, for test purpose.
 func (w *HotCache) ExpiredWriteItems(region *core.RegionInfo) []*HotPeerStat {
-	return w.writeCache.collectExpiredItems(region)
+	return w.writeCache.CollectExpiredItems(region)
 }
 
 // GetThresholds returns thresholds.
