@@ -19,7 +19,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -164,7 +163,7 @@ func (s *Service) FindGroupByKeyspaceID(
 			Address: member.Address,
 			// TODO: watch the keyspace groups' primary serving address changes
 			// to get the latest primary serving addresses of all keyspace groups.
-			IsPrimary: strings.EqualFold(member.Address, am.GetLeaderAddr()),
+			IsPrimary: member.CompareAddress(am.GetLeaderAddr()),
 		})
 	}
 

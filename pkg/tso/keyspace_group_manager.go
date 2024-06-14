@@ -625,7 +625,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 			if member != nil {
 				aliveTSONodes := make(map[string]struct{})
 				kgm.tsoNodes.Range(func(key, _ any) bool {
-					aliveTSONodes[key.(string)] = struct{}{}
+					aliveTSONodes[typeutil.TrimScheme(key.(string))] = struct{}{}
 					return true
 				})
 				if len(aliveTSONodes) == 0 {
@@ -638,7 +638,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					if member.Priority <= localPriority {
 						continue
 					}
-					if _, ok := aliveTSONodes[member.Address]; ok {
+					if _, ok := aliveTSONodes[typeutil.TrimScheme(member.Address)]; ok {
 						resetLeader = true
 						break
 					}
