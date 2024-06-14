@@ -324,6 +324,6 @@ func StopGRPCServer(s server) {
 
 // Exit exits the program with the given code.
 func Exit(code int) {
-	log.Sync()
+	_ = log.Sync()
 	os.Exit(code)
 }
