@@ -82,9 +82,9 @@ type Client interface {
 	GetAllRegionLabelRules(context.Context) ([]*LabelRule, error)
 	GetRegionLabelRulesByIDs(context.Context, []string) ([]*LabelRule, error)
 	// `SetRegionLabelRule` sets the label rule for a region.
-	// When you set a label rule(deny scheduler),
-	//  1. All of the scheduler will be disabled expect the evict-leader-scheduler.
-	// 	2. Merge-checker will be disabled, which means those regions will not be merged.
+	// When a label rule (deny scheduler) is set,
+	//  1. All schedulers will be disabled except for the evict-leader-scheduler.
+	//  2. The merge-checker will be disabled, preventing these regions from being merged.
 	SetRegionLabelRule(context.Context, *LabelRule) error
 	PatchRegionLabelRules(context.Context, *LabelRulePatch) error
 	/* Scheduling-related interfaces */
