@@ -486,7 +486,8 @@ retry:
 			if labelMgr == nil {
 				continue
 			}
-			if labelMgr.ScheduleDisabled(region) {
+			_, ok := s.Scheduler.(*evictLeaderScheduler)
+			if labelMgr.ScheduleDisabled(region) && !ok {
 				denySchedulersByLabelerCounter.Inc()
 				continue retry
 			}
