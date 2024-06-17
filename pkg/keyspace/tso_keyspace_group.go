@@ -195,7 +195,6 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		if len(groups) == 0 {
 			continue
 		}
-		withError := false
 		for _, group := range groups {
 			existMembers := make(map[string]struct{})
 			for _, member := range group.Members {
@@ -206,17 +205,11 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 			if len(existMembers) < utils.DefaultKeyspaceGroupReplicaCount {
 				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, existMembers, utils.DefaultKeyspaceGroupReplicaCount)
 				if err != nil {
-					withError = true
 					log.Error("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
 					continue
 				}
 				group.Members = nodes
 			}
-		}
-		if !withError {
-			// all keyspace groups have equal or more than default replica count
-			log.Info("all keyspace groups have equal or more than default replica count, stop to alloc node")
-			return
 		}
 	}
 }
