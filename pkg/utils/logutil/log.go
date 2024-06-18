@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -67,16 +68,19 @@ func StringToZapLogLevel(level string) zapcore.Level {
 }
 
 // SetupLogger setup the logger.
-func SetupLogger(logConfig log.Config, logger **zap.Logger, logProps **log.ZapProperties, enabled ...bool) error {
+func SetupLogger(
+	logConfig log.Config,
+	logger **zap.Logger,
+	logProps **log.ZapProperties,
+	redactInfoLog bool, redactInfoMark string,
+) error {
 	lg, p, err := log.InitLogger(&logConfig, zap.AddStacktrace(zapcore.FatalLevel))
 	if err != nil {
 		return errs.ErrInitLogger.Wrap(err)
 	}
 	*logger = lg
 	*logProps = p
-	if len(enabled) > 0 {
-		SetRedactLog(enabled[0])
-	}
+	setRedactType(redactInfoLog, redactInfoMark)
 	return nil
 }
 
@@ -88,22 +92,61 @@ func LogPanic() {
 	}
 }
 
+type redactType int
+
+const (
+	// redactOFF indicates no redaction.
+	redactOFF redactType = iota
+	// redactON indicates redaction.
+	redactON
+	// redactWithMarker indicates redaction with marker.
+	redactWithMarker
+)
+
 var (
-	enabledRedactLog atomic.Value
+	curRedactType   atomic.Value
+	redactMarkLeft  atomic.Value
+	redactMarkRight atomic.Value
 )
 
 func init() {
-	SetRedactLog(false)
+	curRedactType.Store(redactOFF)
 }
 
-// IsRedactLogEnabled indicates whether the log desensitization is enabled
-func IsRedactLogEnabled() bool {
-	return enabledRedactLog.Load().(bool)
+func getRedactType() redactType {
+	return curRedactType.Load().(redactType)
 }
 
-// SetRedactLog sets enabledRedactLog
-func SetRedactLog(enabled bool) {
-	enabledRedactLog.Store(enabled)
+func setRedactType(redactInfoLog bool, redactInfoMark string) {
+	if !redactInfoLog {
+		curRedactType.Store(redactOFF)
+		return
+	}
+	markLength := len(redactInfoMark)
+	if markLength == 0 || markLength != 2 {
+		curRedactType.Store(redactON)
+		return
+	}
+	curRedactType.Store(redactWithMarker)
+	redactMarkLeft.Store(rune(redactInfoMark[0]))
+	redactMarkRight.Store(rune(redactInfoMark[1]))
+}
+
+func redactInfo(input string) string {
+	res := &strings.Builder{}
+	res.Grow(len(input) + 2)
+	leftMark, rightMark := redactMarkLeft.Load().(rune), redactMarkRight.Load().(rune)
+	_, _ = res.WriteRune(leftMark)
+	for _, c := range input {
+		if c == leftMark || c == rightMark {
+			_, _ = res.WriteRune(c)
+			_, _ = res.WriteRune(c)
+		} else {
+			_, _ = res.WriteRune(c)
+		}
+	}
+	_, _ = res.WriteRune(rightMark)
+	return res.String()
 }
 
 // ZapRedactByteString receives []byte argument and return omitted information zap.Field if redact log enabled
@@ -123,34 +166,47 @@ func ZapRedactStringer(key string, arg fmt.Stringer) zap.Field {
 
 // RedactBytes receives []byte argument and return omitted information if redact log enabled
 func RedactBytes(arg []byte) []byte {
-	if IsRedactLogEnabled() {
+	switch getRedactType() {
+	case redactON:
 		return []byte("?")
+	case redactWithMarker:
+		return typeutil.StringToBytes(redactInfo(typeutil.BytesToString(arg)))
+	default:
 	}
 	return arg
 }
 
 // RedactString receives string argument and return omitted information if redact log enabled
 func RedactString(arg string) string {
-	if IsRedactLogEnabled() {
+	switch getRedactType() {
+	case redactON:
 		return "?"
+	case redactWithMarker:
+		return redactInfo(arg)
+	default:
 	}
 	return arg
 }
 
 // RedactStringer receives stringer argument and return omitted information if redact log enabled
 func RedactStringer(arg fmt.Stringer) fmt.Stringer {
-	if IsRedactLogEnabled() {
-		return stringer{}
+	switch getRedactType() {
+	case redactON:
+		return &redactedStringer{"?"}
+	case redactWithMarker:
+		return &redactedStringer{redactInfo(arg.String())}
+	default:
 	}
 	return arg
 }
 
-type stringer struct {
+type redactedStringer struct {
+	content string
 }
 
 // String implement fmt.Stringer
-func (stringer) String() string {
-	return "?"
+func (rs *redactedStringer) String() string {
+	return rs.content
 }
 
 // CondUint32 constructs a field with the given key and value conditionally.

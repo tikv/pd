@@ -15,7 +15,7 @@
 package logutil
 
 import (
-	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -39,6 +39,7 @@ func TestRedactLog(t *testing.T) {
 		name            string
 		arg             any
 		enableRedactLog bool
+		redactLogMark   string
 		expect          any
 	}{
 		{
@@ -65,20 +66,80 @@ func TestRedactLog(t *testing.T) {
 			enableRedactLog: false,
 			expect:          []byte("foo"),
 		},
+		{
+			name:            "string arg, enable redact mark",
+			arg:             "foo",
+			enableRedactLog: true,
+			redactLogMark:   "<>",
+			expect:          "<foo>",
+		},
+		{
+			name:            "string arg contains left mark, enable redact mark",
+			arg:             "f<oo",
+			enableRedactLog: true,
+			redactLogMark:   "<>",
+			expect:          "<f<<oo>",
+		},
+		{
+			name:            "string arg contains right mark, enable redact mark",
+			arg:             "foo>",
+			enableRedactLog: true,
+			redactLogMark:   "<>",
+			expect:          "<foo>>>",
+		},
+		{
+			name:            "string arg contains mark, enable redact mark",
+			arg:             "f<oo>",
+			enableRedactLog: true,
+			redactLogMark:   "<>",
+			expect:          "<f<<oo>>>",
+		},
+		{
+			name:            "[]byte arg, enable redact mark",
+			arg:             []byte("foo"),
+			enableRedactLog: true,
+			redactLogMark:   "<>",
+			expect:          []byte("<foo>"),
+		},
+		{
+			name:            "[]byte arg contains left mark, enable redact mark",
+			arg:             []byte("foo<"),
+			enableRedactLog: true,
+			redactLogMark:   "<>",
+			expect:          []byte("<foo<<>"),
+		},
+		{
+			name:            "[]byte arg contains right mark, enable redact mark",
+			arg:             []byte(">foo"),
+			enableRedactLog: true,
+			redactLogMark:   "<>",
+			expect:          []byte("<>>foo>"),
+		},
+		{
+			name:            "[]byte arg contains mark, enable redact mark",
+			arg:             []byte("f>o<o"),
+			enableRedactLog: true,
+			redactLogMark:   "<>",
+			expect:          []byte("<f>>o<<o>"),
+		},
 	}
 
 	for _, testCase := range testCases {
-		t.Log(testCase.name)
-		SetRedactLog(testCase.enableRedactLog)
+		setRedactType(testCase.enableRedactLog, testCase.redactLogMark)
+		// Create `fmt.Stringer`s to test `RedactStringer` later.
+		var argStringer, expectStringer = &strings.Builder{}, &strings.Builder{}
 		switch r := testCase.arg.(type) {
 		case []byte:
-			re.Equal(testCase.expect, RedactBytes(r))
+			re.Equal(testCase.expect, RedactBytes(r), testCase.name)
+			argStringer.Write((testCase.arg).([]byte))
+			expectStringer.Write((testCase.expect).([]byte))
 		case string:
-			re.Equal(testCase.expect, RedactString(r))
-		case fmt.Stringer:
-			re.Equal(testCase.expect, RedactStringer(r))
+			re.Equal(testCase.expect, RedactString(r), testCase.name)
+			argStringer.WriteString((testCase.arg).(string))
+			expectStringer.WriteString((testCase.expect).(string))
 		default:
-			panic("unmatched case")
+			re.FailNow("unmatched case", testCase.name)
 		}
+		re.Equal(expectStringer.String(), RedactStringer(argStringer).String(), testCase.name)
 	}
 }

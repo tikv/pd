@@ -228,7 +228,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Check the PD version first before running.
 	server.CheckAndGetPDVersion()
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog, cfg.Security.RedactInfoMark)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
