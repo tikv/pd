@@ -663,9 +663,8 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 	defer am.ResetAllocatorGroup(allocator.GetDCLocation())
 	// Maintain the Local TSO Allocator leader
 	go allocator.KeepAllocatorLeader(ctx)
-	logger.Info("campaign local tso allocator leader ok")
 
-	logger.Info("initialize the local TSO allocator")
+	logger.Info("Complete campaign local tso allocator leader, begin to initialize the local TSO allocator")
 	if err := allocator.Initialize(int(dcLocationInfo.Suffix)); err != nil {
 		log.Error("failed to initialize the local TSO allocator", errs.ZapError(err))
 		return
