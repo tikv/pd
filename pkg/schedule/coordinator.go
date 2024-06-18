@@ -52,8 +52,8 @@ const (
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	// For 1,024,000 regions, patrolScanRegionLimit is 1000, which is max(patrolScanRegionMinLimit, 1000000/patrolRegionPartition)
-	// It takes about 10s to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
+	// For 1,024,000 regions, patrolScanRegionLimit is 1000, which is max(patrolScanRegionMinLimit, 1,024,000/patrolRegionPartition)
+	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
 	patrolScanRegionMinLimit = 128
 	patrolRegionChanLen      = 1024
 	patrolRegionPartition    = 1024
@@ -258,7 +258,7 @@ func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Coordinator) {
 	}
 }
 
-func (p *PatrolRegionContext) roundUpdate() {
+func (p *PatrolRegionContext) roundUpdateMetrics() {
 	dur := time.Since(p.patrolRoundStartTime)
 	patrolCheckRegionsGauge.Set(dur.Seconds())
 	p.setPatrolRegionsDuration(dur)
@@ -272,15 +272,12 @@ func (c *Coordinator) PatrolRegions() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	ctx, cancel := context.WithCancel(c.ctx)
-	defer cancel()
-	c.patrolRegionContext.init(ctx, c.cluster)
+	c.patrolRegionContext.init(c.ctx, c.cluster)
+	c.patrolRegionContext.startPatrolRegionWorkers(c)
 	defer c.patrolRegionContext.stop()
 
 	ticker := time.NewTicker(c.patrolRegionContext.getInterval())
 	defer ticker.Stop()
-
-	c.patrolRegionContext.startPatrolRegionWorkers(c)
 
 	log.Info("coordinator starts patrol regions")
 	var (
@@ -292,11 +289,11 @@ func (c *Coordinator) PatrolRegions() {
 		case <-ticker.C:
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
-
 			if c.cluster.IsSchedulingHalted() {
 				for len(c.patrolRegionContext.regionChan) > 0 {
 					<-c.patrolRegionContext.regionChan
 				}
+				log.Debug("skip patrol regions due to scheduling is halted")
 				continue
 			}
 
@@ -318,9 +315,9 @@ func (c *Coordinator) PatrolRegions() {
 			}
 			// Updates the label level isolation statistics.
 			c.cluster.UpdateRegionsLabelLevelStats(regions)
-			// Update metrics if a full scan is done.
+			// Update metrics and scan limit if a full scan is done.
 			if len(key) == 0 {
-				c.patrolRegionContext.roundUpdate()
+				c.patrolRegionContext.roundUpdateMetrics()
 				c.patrolRegionContext.setScanLimit(calculateScanLimit(c.cluster))
 			}
 			failpoint.Inject("break-patrol", func() {
@@ -342,21 +339,23 @@ func (c *Coordinator) updateTickerIfNeeded(ticker *time.Ticker) {
 	if c.patrolRegionContext.getInterval() != newInterval {
 		c.patrolRegionContext.setInterval(newInterval)
 		ticker.Reset(newInterval)
+		log.Debug("coordinator starts patrol regions with new interval", zap.Duration("interval", newInterval))
 	}
 }
 
 func (c *Coordinator) updatePatrolWorkersIfNeeded() {
 	newWorkersCount := c.cluster.GetCheckerConfig().GetPatrolRegionWorkerCount()
 	if c.patrolRegionContext.getWorkerCount() != newWorkersCount {
-		log.Info("coordinator starts patrol regions with new workers count",
-			zap.Int("old-workers-count", c.patrolRegionContext.getWorkerCount()),
-			zap.Int("new-workers-count", newWorkersCount))
+		oldWorkersCount := c.patrolRegionContext.getWorkerCount()
 		c.patrolRegionContext.setWorkerCount(newWorkersCount)
 		// Stop the old workers and start the new workers.
 		c.patrolRegionContext.workersCancel()
-		c.wg.Wait()
+		c.patrolRegionContext.wg.Wait()
 		c.patrolRegionContext.workersCtx, c.patrolRegionContext.workersCancel = context.WithCancel(c.ctx)
 		c.patrolRegionContext.startPatrolRegionWorkers(c)
+		log.Info("coordinator starts patrol regions with new workers count",
+			zap.Int("old-workers-count", oldWorkersCount),
+			zap.Int("new-workers-count", newWorkersCount))
 	}
 }
 

@@ -18,7 +18,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1811,4 +1813,69 @@ func TestExternalTimestamp(t *testing.T) {
 		re.Equal(1, tsoutil.CompareTimestampUint64(unexpectedTS, currentGlobalTS))
 		re.Equal(ts, resp4.GetTimestamp())
 	}
+}
+
+func TestPatrolRegionConfigChange(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	for i := 1; i <= 3; i++ {
+		store := &metapb.Store{
+			Id:            uint64(i),
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		}
+		tests.MustPutStore(re, tc, store)
+	}
+	for i := 1; i <= 200; i++ {
+		startKey := []byte(fmt.Sprintf("%d", i*2-1))
+		endKey := []byte(fmt.Sprintf("%d", i*2))
+		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
+	}
+	fname := testutil.InitTempFileLogger("debug")
+	defer os.RemoveAll(fname)
+	testutil.Eventually(re, func() bool {
+		b, _ := os.ReadFile(fname)
+		l := string(b)
+		return strings.Contains(l, "coordinator starts patrol regions")
+	})
+
+	// test change patrol region interval
+	schedule := leaderServer.GetConfig().Schedule
+	schedule.PatrolRegionInterval = typeutil.NewDuration(99 * time.Millisecond)
+	leaderServer.GetServer().SetScheduleConfig(schedule)
+	testutil.Eventually(re, func() bool {
+		b, _ := os.ReadFile(fname)
+		l := string(b)
+		return strings.Contains(l, "coordinator starts patrol regions with new interval")
+	})
+
+	// test change patrol region worker count
+	schedule = leaderServer.GetConfig().Schedule
+	schedule.PatrolRegionWorkerCount = 8
+	leaderServer.GetServer().SetScheduleConfig(schedule)
+	testutil.Eventually(re, func() bool {
+		b, _ := os.ReadFile(fname)
+		l := string(b)
+		return strings.Contains(l, "coordinator starts patrol regions with new workers count")
+	})
+
+	// test change schedule halt
+	schedule = leaderServer.GetConfig().Schedule
+	schedule.HaltScheduling = true
+	leaderServer.GetServer().SetScheduleConfig(schedule)
+	testutil.Eventually(re, func() bool {
+		b, _ := os.ReadFile(fname)
+		l := string(b)
+		return strings.Contains(l, "skip patrol regions due to scheduling is halted")
+	})
 }
