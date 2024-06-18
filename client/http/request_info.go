@@ -53,6 +53,7 @@ const (
 	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"
+	deleteSchedulerName                     = "DeleteScheduler"
 	setSchedulerDelayName                   = "SetSchedulerDelay"
 	getAllPlacementRuleBundlesName          = "GetAllPlacementRuleBundles"
 	getPlacementRuleBundleByGroupName       = "GetPlacementRuleBundleByGroup"

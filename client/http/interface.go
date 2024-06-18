@@ -65,6 +65,7 @@ type Client interface {
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
@@ -764,6 +765,13 @@ func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint6
 		WithURI(Schedulers).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
+}
+
+func (c *client) DeleteScheduler(ctx context.Context, name string) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteSchedulerName).
+		WithURI(SchedulerByName(name)).
+		WithMethod(http.MethodDelete))
 }
 
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.
