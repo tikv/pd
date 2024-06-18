@@ -89,7 +89,6 @@ func TestRegionLabel_DenyScheduler(t *testing.T) {
 	re.True(len(regions.Regions) >= 2)
 	region1, region2 := regions.Regions[0], regions.Regions[1]
 
-	pdHTTPCli.DeleteScheduler(ctx, schedulers.ShuffleLeaderName)
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, schedulers.ShuffleLeaderName, 0))
 	defer func() {
 		re.NoError(pdHTTPCli.DeleteScheduler(ctx, schedulers.ShuffleLeaderName))
