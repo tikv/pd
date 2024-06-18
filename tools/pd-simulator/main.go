@@ -25,7 +25,6 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
 	flag "github.com/spf13/pflag"
-	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -93,7 +92,6 @@ func main() {
 
 func run(simCase string, simConfig *sc.SimConfig) {
 	if *pdAddr != "" {
-		simulator.PDHTTPClient = pdHttp.NewClient("pd-simulator", []string{*pdAddr})
 		simStart(*pdAddr, *statusAddress, simCase, simConfig)
 	} else {
 		local, clean := NewSingleServer(context.Background(), simConfig)
@@ -107,7 +105,6 @@ func run(simCase string, simConfig *sc.SimConfig) {
 			}
 			time.Sleep(100 * time.Millisecond)
 		}
-		simulator.PDHTTPClient = pdHttp.NewClient("pd-simulator", []string{local.GetAddr()})
 		simStart(local.GetAddr(), "", simCase, simConfig, clean)
 	}
 }
