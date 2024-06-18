@@ -767,6 +767,7 @@ func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint6
 		WithBody(inputJSON))
 }
 
+// DeleteScheduler deletes a scheduler from PD cluster.
 func (c *client) DeleteScheduler(ctx context.Context, name string) error {
 	return c.request(ctx, newRequestInfo().
 		WithName(deleteSchedulerName).

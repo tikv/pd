@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Authors
+// Copyright 2024 TiKV Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/testutil"
@@ -79,7 +80,7 @@ func TestTransferLeader(t *testing.T) {
 	re.Len(res, oldSchedulersLen)
 }
 
-func TestRegionLabel_DenyScheduler(t *testing.T) {
+func TestRegionLabelDenyScheduler(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -141,11 +142,12 @@ func TestRegionLabel_DenyScheduler(t *testing.T) {
 		}
 	}
 	// check shuffle leader scheduler of region1 has been disabled
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		regions, err := pdHTTPCli.GetRegions(ctx)
 		re.NoError(err)
 		for _, region := range regions.Regions {
 			if region.ID == region1.ID {
+				log.Info("hit region 1")
 				re.True(region.Leader.StoreID == region1.Leader.StoreID)
 			}
 		}
@@ -156,6 +158,9 @@ func TestRegionLabel_DenyScheduler(t *testing.T) {
 		regions, err := pdHTTPCli.GetRegions(ctx)
 		re.NoError(err)
 		for _, region := range regions.Regions {
+			if region.ID == region2.ID {
+				log.Info("hit region 2")
+			}
 			if region.ID == region2.ID && region.Leader.StoreID != region2.Leader.StoreID {
 				return true
 			}
@@ -163,11 +168,13 @@ func TestRegionLabel_DenyScheduler(t *testing.T) {
 		return false
 	})
 
-	oldRegions, err := pdHTTPCli.GetRegionsByStoreID(ctx, uint64(region1.Leader.StoreID))
+	oldRegions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
 	oldRegionMap := make(map[int64]bool, len(oldRegions.Regions))
 	for _, region := range oldRegions.Regions {
-		oldRegionMap[region.ID] = true
+		if region.Leader.ID == region1.Leader.ID {
+			oldRegionMap[region.ID] = true
+		}
 	}
 	// enable evict leader scheduler, and check it works
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, schedulers.EvictLeaderName, uint64(region1.Leader.StoreID)))
