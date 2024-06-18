@@ -182,10 +182,6 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		countOfNodes := m.GetNodesCount()
-		if countOfNodes < utils.DefaultKeyspaceGroupReplicaCount {
-			continue
-		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
 		if err != nil {
 			log.Error("failed to load all keyspace groups", zap.Error(err))
@@ -202,7 +198,11 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 					existMembers[addr] = struct{}{}
 				}
 			}
-			if len(existMembers) < utils.DefaultKeyspaceGroupReplicaCount {
+			numExistMembers := len(existMembers)
+			if numExistMembers != 0 && numExistMembers == len(group.Members) && numExistMembers == m.GetNodesCount() {
+				continue
+			}
+			if numExistMembers < utils.DefaultKeyspaceGroupReplicaCount {
 				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, existMembers, utils.DefaultKeyspaceGroupReplicaCount)
 				if err != nil {
 					log.Error("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
@@ -784,9 +784,11 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, existMembers map[st
 				return nil
 			case <-ticker.C:
 			}
-			countOfNodes := m.GetNodesCount()
-			if countOfNodes < desiredReplicaCount || countOfNodes == 0 { // double check
+			if m.GetNodesCount() == 0 { // double check
 				return ErrNoAvailableNode
+			}
+			if len(existMembers) == m.GetNodesCount() {
+				break
 			}
 			addr := m.nodesBalancer.Next()
 			if addr == "" {
