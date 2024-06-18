@@ -50,7 +50,7 @@ kill_cluster:
 	fi
 
 test:
-	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { exit 1; }
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || (cat ~/.tiup/data/pd_real_cluster_test/pd-0/pd.log ; exit 1)
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools

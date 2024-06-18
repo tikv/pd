@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"go.uber.org/zap"
 )
 
 // https://github.com/tikv/pd/issues/6988#issuecomment-1694924611
@@ -147,7 +148,7 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 		re.NoError(err)
 		for _, region := range regions.Regions {
 			if region.ID == region1.ID {
-				log.Info("hit region 1")
+				log.Info("hit region 1", zap.Int64("region id", region.ID))
 				re.True(region.Leader.StoreID == region1.Leader.StoreID)
 			}
 		}
@@ -159,7 +160,7 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 		re.NoError(err)
 		for _, region := range regions.Regions {
 			if region.ID == region2.ID {
-				log.Info("hit region 2")
+				log.Info("hit region 2", zap.Int64("region id", region.ID))
 			}
 			if region.ID == region2.ID && region.Leader.StoreID != region2.Leader.StoreID {
 				return true
