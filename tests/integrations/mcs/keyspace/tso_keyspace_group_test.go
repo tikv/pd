@@ -357,13 +357,60 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 
 	// the member list will be updated
 	testutil.Eventually(re, func() bool {
-		kg, code := suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
+		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
 		for _, member := range kg.Members {
 			if member.Address == stopNode {
 				return false
 			}
 		}
 		return code == http.StatusOK && kg != nil && len(kg.Members) == utils.DefaultKeyspaceGroupReplicaCount
+	})
+}
+
+func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
+	re := suite.Require()
+	// add one tso server
+	nodes := make(map[string]bs.Server)
+	oldTSOServer, cleanupOldTSOserver := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanupOldTSOserver()
+	nodes[oldTSOServer.GetAddr()] = oldTSOServer
+
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// create a keyspace group.
+	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(1),
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	code := suite.tryCreateKeyspaceGroup(re, kgs)
+	re.Equal(http.StatusOK, code)
+
+	// alloc nodes for the keyspace group
+	var kg *endpoint.KeyspaceGroup
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
+		return code == http.StatusOK && kg != nil && len(kg.Members) == 1
+	})
+	stopNode := kg.Members[0].Address
+	// close old tso server
+	nodes[stopNode].Close()
+
+	// create a new tso server
+	newTSOServer, cleanupNewTSOServer := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanupNewTSOServer()
+	nodes[newTSOServer.GetAddr()] = newTSOServer
+
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// the member list will be updated
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
+		if len(kg.Members) != 0 && kg.Members[0].Address == stopNode {
+			return false
+		}
+		return code == http.StatusOK && kg != nil && len(kg.Members) == 1
 	})
 }
 
