@@ -91,6 +91,8 @@ func (r *Rule) String() string {
 func (r *Rule) Clone() *Rule {
 	var clone Rule
 	_ = json.Unmarshal([]byte(r.String()), &clone)
+	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
+	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
 	return &clone
 }
 
