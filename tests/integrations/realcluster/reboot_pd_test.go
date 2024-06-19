@@ -47,10 +47,13 @@ func TestReloadLabel(t *testing.T) {
 	for _, label := range setStore.Store.Labels {
 		storeLabel[label.Key] = label.Value
 	}
-	err := pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel)
-	re.NoError(err)
 
-	resp, err = pdHTTPCli.GetStores(ctx)
+	re.NoError(pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, nil))
+	defer func() {
+		re.NoError(pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, nil))
+	}()
+
+	resp, err := pdHTTPCli.GetStores(ctx)
 	re.NoError(err)
 	for _, store := range resp.Stores {
 		if store.Store.ID == setStore.Store.ID {
