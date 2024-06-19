@@ -24,6 +24,7 @@ if [ ! -d "bin" ] || [ ! -e "bin/tikv-server" ] && [ ! -e "bin/tidb-server" ] &&
 		> $CUR_PATH/playground.log 2>&1 &
 else
 	color-green "using existing binaries..."
+	make pd-server WITH_RACE=1
 	$TIUP_BIN_DIR playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 --without-monitor \
 		--pd.binpath ./bin/pd-server --kv.binpath ./bin/tikv-server --db.binpath ./bin/tidb-server --tiflash.binpath ./bin/tiflash --tag pd_real_cluster_test \
 		> $CUR_PATH/playground.log 2>&1 &
