@@ -321,7 +321,12 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	}
 	defer func() {
 		if err != nil {
-			cl.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID)
+			if err := cl.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID); err != nil {
+				log.Warn("[keyspace] failed to delete region label for keyspace",
+					zap.Uint32("keyspace-id", id),
+					zap.Error(err),
+				)
+			}
 		}
 	}()
 
