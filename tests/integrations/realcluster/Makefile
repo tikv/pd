@@ -48,6 +48,7 @@ kill_cluster:
 		echo "waiting for cluster to exit..."; \
 		sleep 30; \
 	fi
+	@ rm -rf ~/.tiup/data/pd_real_cluster_test
 
 test:
 	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || (\
