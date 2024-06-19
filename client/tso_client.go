@@ -118,7 +118,9 @@ func (c *tsoClient) getOption() *option { return c.option }
 func (c *tsoClient) getServiceDiscovery() ServiceDiscovery { return c.svcDiscovery }
 
 func (c *tsoClient) setup() {
-	c.svcDiscovery.CheckMemberChanged()
+	if err := c.svcDiscovery.CheckMemberChanged(); err != nil {
+		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
+	}
 	c.updateTSODispatcher()
 
 	// Start the daemons.

@@ -426,7 +426,7 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
 		failpointOnce.Do(func() {
 			addrs := val.(string)
-			m.SetNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
+			_ = m.SetNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
 		})
 	})
 	m.Lock()
@@ -874,7 +874,7 @@ func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, prior
 		inKeyspaceGroup := false
 		members := make([]endpoint.KeyspaceGroupMember, 0, len(kg.Members))
 		for _, member := range kg.Members {
-			if member.Address == node {
+			if member.CompareAddress(node) {
 				inKeyspaceGroup = true
 				member.Priority = priority
 			}

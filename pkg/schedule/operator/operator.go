@@ -376,10 +376,11 @@ func (o *Operator) Check(region *core.RegionInfo) OpStep {
 	defer func() { _ = o.CheckTimeout() }()
 	for step := atomic.LoadInt32(&o.currentStep); int(step) < len(o.steps); step++ {
 		if o.steps[int(step)].IsFinish(region) {
-			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, time.Now().UnixNano()) {
+			current := time.Now()
+			if atomic.CompareAndSwapInt64(&(o.stepsTime[step]), 0, current.UnixNano()) {
 				startTime, _ := o.getCurrentTimeAndStep()
 				operatorStepDuration.WithLabelValues(reflect.TypeOf(o.steps[int(step)]).Name()).
-					Observe(time.Unix(0, o.stepsTime[step]).Sub(startTime).Seconds())
+					Observe(current.Sub(startTime).Seconds())
 			}
 			atomic.StoreInt32(&o.currentStep, step+1)
 		} else {
