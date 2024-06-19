@@ -16,6 +16,7 @@ package realcluster
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"testing"
@@ -79,6 +80,19 @@ func TestTransferLeader(t *testing.T) {
 	res, err = pdHTTPCli.GetSchedulers(ctx)
 	re.NoError(err)
 	re.Len(res, oldSchedulersLen)
+}
+
+func TestX(t *testing.T) {
+	type test struct {
+		A []string `json:"-"`
+		B []string `json:"b"`
+	}
+
+	tt := test{A: []string{"a", "b"}, B: []string{"c", "d"}}
+	b, _ := json.Marshal(tt)
+	var tt2 test
+	json.Unmarshal(b, &tt2)
+	require.Equal(t, tt, tt2)
 }
 
 func TestRegionLabelDenyScheduler(t *testing.T) {
@@ -192,4 +206,5 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 		}
 		return true
 	})
+	re.True(false)
 }

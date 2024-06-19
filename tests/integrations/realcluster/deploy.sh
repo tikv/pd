@@ -1,6 +1,8 @@
 #!/bin/bash
 # deploy `tiup playground`
 
+set -x
+
 TIUP_BIN_DIR=$HOME/.tiup/bin/tiup
 CUR_PATH=$(pwd)
 
@@ -26,7 +28,8 @@ else
 	color-green "using existing binaries..."
 	make pd-server WITH_RACE=1
 	$TIUP_BIN_DIR playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 --without-monitor \
-		--pd.binpath ./bin/pd-server --kv.binpath ./bin/tikv-server --db.binpath ./bin/tidb-server --tiflash.binpath ./bin/tiflash --tag pd_real_cluster_test \
+		--pd.binpath ./bin/pd-server --kv.binpath ./bin/tikv-server --db.binpath ./bin/tidb-server \
+		--tiflash.binpath ./bin/tiflash --tag pd_real_cluster_test --pd.config ./tests/integrations/realcluster/pd.toml \
 		> $CUR_PATH/playground.log 2>&1 &
 fi
 
