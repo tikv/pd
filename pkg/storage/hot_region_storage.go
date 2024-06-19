@@ -171,7 +171,9 @@ func (h *HotRegionStorage) backgroundDelete() {
 				 there may be residual hot regions, you can remove it manually, [pd-dir]/data/hot-region.`)
 				continue
 			}
-			h.delete(int(curReservedDays))
+			if err := h.delete(int(curReservedDays)); err != nil {
+				log.Error("delete hot region meet error", errs.ZapError(err))
+			}
 		case <-h.hotRegionInfoCtx.Done():
 			return
 		}
