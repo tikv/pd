@@ -51,7 +51,7 @@ type Client interface {
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	DeleteStore(context.Context, uint64) error
 	SetStoreLabels(context.Context, int64, map[string]string) error
-	SetStoreLabelsV2(ctx context.Context, storeID int64, force bool, storeLabels map[string]string) error
+	DeleteStoreLabel(ctx context.Context, storeID int64, labelKey string) error
 	GetHealthStatus(context.Context) ([]Health, error)
 	/* Config-related interfaces */
 	GetConfig(context.Context) (map[string]any, error)
@@ -340,21 +340,21 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 	}
 	return c.request(ctx, newRequestInfo().
 		WithName(setStoreLabelsName).
-		WithURI(LabelByStoreID(storeID, false)).
+		WithURI(LabelByStoreID(storeID)).
 		WithMethod(http.MethodPost).
 		WithBody(jsonInput))
 }
 
-// SetStoreLabelsV2 sets the labels of a store.
-func (c *client) SetStoreLabelsV2(ctx context.Context, storeID int64, force bool, storeLabels map[string]string) error {
-	jsonInput, err := json.Marshal(storeLabels)
+// DeleteStoreLabel deletes the labels of a store.
+func (c *client) DeleteStoreLabel(ctx context.Context, storeID int64, labelKey string) error {
+	jsonInput, err := json.Marshal(labelKey)
 	if err != nil {
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName(setStoreLabelsName).
-		WithURI(LabelByStoreID(storeID, force)).
-		WithMethod(http.MethodPost).
+		WithName(deleteStoreLableName).
+		WithURI(LabelByStoreID(storeID)).
+		WithMethod(http.MethodDelete).
 		WithBody(jsonInput))
 }
 
