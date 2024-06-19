@@ -48,7 +48,7 @@ func TestReloadLabel(t *testing.T) {
 		storeLabel[label.Key] = label.Value
 	}
 
-	re.NoError(pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, nil))
+	re.NoError(pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel))
 	defer func() {
 		re.NoError(pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, nil))
 	}()
