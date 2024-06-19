@@ -80,12 +80,12 @@ type SecurityConfig struct {
 	grpcutil.TLSConfig
 	// RedactInfoLog indicates that whether enabling redact log
 	RedactInfoLog bool `toml:"redact-info-log" json:"redact-info-log"`
-	// RedactInfoMark specifies the symbol used for redacting information and is
-	// effective only when `RedactInfoLog` is set to `true` and itself is not empty.
-	// The symbol must be two characters long to differentiate between left and right values;
-	// for example, "[]" is valid and will redact "key" as "[key]", whereas "[" or "[[[" are
-	// invalid. Any original content that is identical to the mark will have it repeated once
-	// for clarity. For instance, "k<ey" would be redacted as "<k<<ey>" if the mark is "<>".
+	// RedactInfoMark specifies the symbol used for redacting information and is effective only
+	// when `RedactInfoLog` is set to `true` and itself is not empty. The symbol must be empty or
+	// two characters long to differentiate between left and right values; for example, "[]" is valid
+	// and will redact "key" as "[key]", whereas "[" or "[[[" are invalid. Any original content that
+	// is identical to the mark will have it repeated once for clarity. For instance, "k<ey" would be
+	// redacted as "<k<<ey>" if the mark is "<>".
 	RedactInfoMark string            `toml:"redact-info-mark" json:"redact-info-mark"`
 	Encryption     encryption.Config `toml:"encryption" json:"encryption"`
 }

@@ -35,11 +35,11 @@
 # cert-allowed-cn = ["example.com"]
 ## Whether or not to enable redact log.
 # redact-info-log = false
-## RedactInfoMark specifies the symbol used for redacting information and is effective only when `RedactInfoLog`
-## is set to `true` and itself is not empty. The symbol must be two characters long to differentiate between left
-## and right values; for example, "[]" is valid and will redact "key" as "[key]", whereas "[" or "[[[" are invalid.
-## Any original content that is identical to the mark will have it repeated once for clarity. For instance, "k<ey"
-## would be redacted as "<k<<ey>" if the mark is "<>".
+## Specify the symbol used for redacting information and is effective only when `RedactInfoLog` is set to `true`
+## and itself is not empty. The symbol must be empty or two characters long to differentiate between left and
+## right values; for example, "[]" is valid and will redact "key" as "[key]", whereas "[" or "[[[" are invalid.
+## Any original content that is identical to the mark will have it repeated once for clarity. For instance,
+## "k<ey" would be redacted as "<k<<ey>" if the mark is "<>".
 # redact-info-mark = ""
 
 [security.encryption]
