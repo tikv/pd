@@ -137,7 +137,10 @@ func StoreLabelByID(id uint64) string {
 }
 
 // LabelByStoreID returns the path of PD HTTP API to set store label.
-func LabelByStoreID(storeID int64) string {
+func LabelByStoreID(storeID int64, force bool) string {
+	if force {
+		return fmt.Sprintf("%s/%d/label?force=true", store, storeID)
+	}
 	return fmt.Sprintf("%s/%d/label", store, storeID)
 }
 

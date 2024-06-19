@@ -51,6 +51,7 @@ type Client interface {
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	DeleteStore(context.Context, uint64) error
 	SetStoreLabels(context.Context, int64, map[string]string) error
+	SetStoreLabelsV2(ctx context.Context, storeID int64, force bool, storeLabels map[string]string) error
 	GetHealthStatus(context.Context) ([]Health, error)
 	/* Config-related interfaces */
 	GetConfig(context.Context) (map[string]any, error)
@@ -339,7 +340,20 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 	}
 	return c.request(ctx, newRequestInfo().
 		WithName(setStoreLabelsName).
-		WithURI(LabelByStoreID(storeID)).
+		WithURI(LabelByStoreID(storeID, false)).
+		WithMethod(http.MethodPost).
+		WithBody(jsonInput))
+}
+
+// SetStoreLabelsV2 sets the labels of a store.
+func (c *client) SetStoreLabelsV2(ctx context.Context, storeID int64, force bool, storeLabels map[string]string) error {
+	jsonInput, err := json.Marshal(storeLabels)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(setStoreLabelsName).
+		WithURI(LabelByStoreID(storeID, force)).
 		WithMethod(http.MethodPost).
 		WithBody(jsonInput))
 }
