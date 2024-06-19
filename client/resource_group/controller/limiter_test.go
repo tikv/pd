@@ -163,6 +163,7 @@ func TestCancel(t *testing.T) {
 	d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
 	re.Equal(d, 4*time.Second)
 	re.Error(err)
+	re.Contains(err.Error(), "estimated wait time 4s, ltb state is 1.00:-4.00")
 	checkTokens(re, lim1, t3, 13)
 	checkTokens(re, lim2, t3, 3)
 	cancel1()
