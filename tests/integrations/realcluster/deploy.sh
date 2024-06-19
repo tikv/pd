@@ -20,7 +20,7 @@ if [ ! -d "bin" ] || [ ! -e "bin/tikv-server" ] && [ ! -e "bin/tidb-server" ] &&
 	color-green "this may take a few minutes, you can also download them manually and put them in the bin directory."
 	make pd-server WITH_RACE=1
 	$TIUP_BIN_DIR playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 --without-monitor --tag pd_real_cluster_test \
-		--pd.binpath ./bin/pd-server \
+		--pd.binpath ./bin/pd-server --pd.config ./tests/integrations/realcluster/pd.toml \
 		> $CUR_PATH/playground.log 2>&1 &
 else
 	color-green "using existing binaries..."
