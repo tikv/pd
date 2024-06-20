@@ -143,7 +143,6 @@ func combineErrors(err1, err2 error) error {
 
 func readFile(filepath string) (res []byte, err error) {
 	var f *os.File
-	//nolint:gosec
 	f, err = os.Open(filepath)
 	if err != nil {
 		return nil, err
@@ -155,10 +154,36 @@ func readFile(filepath string) (res []byte, err error) {
 	return res, err
 }
 
+// The field in /proc/self/cgroup and /proc/self/mountinfo may appear as "cpuacct,cpu" or "rw,cpuacct,cpu"
+// while the input controller is "cpu,cpuacct"
+func controllerMatch(field string, controller string) bool {
+	if field == controller {
+		return true
+	}
+
+	fs := strings.Split(field, ",")
+	if len(fs) < 2 {
+		return false
+	}
+	cs := strings.Split(controller, ",")
+	if len(fs) < len(cs) {
+		return false
+	}
+	fmap := make(map[string]struct{}, len(fs))
+	for _, f := range fs {
+		fmap[f] = struct{}{}
+	}
+	for _, c := range cs {
+		if _, ok := fmap[c]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // The controller is defined via either type `memory` for cgroup v1 or via empty type for cgroup v2,
 // where the type is the second field in /proc/[pid]/cgroup file
 func detectControlPath(cgroupFilePath string, controller string) (string, error) {
-	//nolint:gosec
 	cgroup, err := os.Open(cgroupFilePath)
 	if err != nil {
 		return "", errors.Wrapf(err, "failed to read %s cgroup from cgroups file: %s", controller, cgroupFilePath)
@@ -185,7 +210,7 @@ func detectControlPath(cgroupFilePath string, controller string) (string, error)
 		// but no known container solutions support it.
 		if f0 == "0" && f1 == "" {
 			unifiedPathIfFound = string(fields[2])
-		} else if f1 == controller {
+		} else if controllerMatch(f1, controller) {
 			var result []byte
 			// In some case, the cgroup path contains `:`. We need to join them back.
 			if len(fields) > 3 {
@@ -202,7 +227,6 @@ func detectControlPath(cgroupFilePath string, controller string) (string, error)
 
 // See http://man7.org/linux/man-pages/man5/proc.5.html for `mountinfo` format.
 func getCgroupDetails(mountInfoPath string, cRoot string, controller string) (mount []string, version []int, err error) {
-	//nolint:gosec
 	info, err := os.Open(mountInfoPath)
 	if err != nil {
 		return nil, nil, errors.Wrapf(err, "failed to read mounts info from file: %s", mountInfoPath)
@@ -314,7 +338,7 @@ func detectCgroupVersion(fields [][]byte, controller string) (_ int, found bool)
 
 	// Check for controller specifically in cgroup v1 (it is listed in super
 	// options field), as the value can't be found if it is not enforced.
-	if bytes.Equal(fields[pos], []byte("cgroup")) && bytes.Contains(fields[pos+2], []byte(controller)) {
+	if bytes.Equal(fields[pos], []byte("cgroup")) && controllerMatch(string(fields[pos+2]), controller) {
 		return 1, true
 	} else if bytes.Equal(fields[pos], []byte("cgroup2")) {
 		return 2, true
@@ -384,7 +408,6 @@ func detectCPUQuotaInV2(cRoot string) (period, quota int64, err error) {
 func detectCPUUsageInV2(cRoot string) (stime, utime uint64, err error) {
 	statFilePath := filepath.Join(cRoot, cgroupV2CPUStat)
 	var stat *os.File
-	//nolint:gosec
 	stat, err = os.Open(statFilePath)
 	if err != nil {
 		return 0, 0, errors.Wrapf(err, "can't read cpu usage from cgroup v2 at %s", statFilePath)
@@ -417,7 +440,6 @@ func detectCPUUsageInV2(cRoot string) (stime, utime uint64, err error) {
 
 func readInt64Value(root, filename string, cgVersion int) (value uint64, err error) {
 	filePath := filepath.Join(root, filename)
-	//nolint:gosec
 	file, err := os.Open(filePath)
 	if err != nil {
 		return 0, errors.Wrapf(err, "can't read %s from cgroup v%d", filename, cgVersion)

@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -35,6 +36,7 @@ func TestRegionKeyFormat(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
@@ -61,6 +63,7 @@ func TestRegion(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()
@@ -80,6 +83,7 @@ func TestRegion(t *testing.T) {
 	r1 := pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1),
 		core.SetRegionVersion(1), core.SetApproximateSize(1), core.SetApproximateKeys(100),
+		core.SetReadQuery(100), core.SetWrittenQuery(100),
 		core.SetPeers([]*metapb.Peer{
 			{Id: 1, StoreId: 1},
 			{Id: 5, StoreId: 2},
@@ -89,17 +93,25 @@ func TestRegion(t *testing.T) {
 	r2 := pdTests.MustPutRegion(re, cluster, 2, 1, []byte("b"), []byte("c"),
 		core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2),
 		core.SetRegionVersion(3), core.SetApproximateSize(144), core.SetApproximateKeys(14400),
+		core.SetReadQuery(200), core.SetWrittenQuery(200),
 	)
 	r3 := pdTests.MustPutRegion(re, cluster, 3, 1, []byte("c"), []byte("d"),
 		core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3),
 		core.SetRegionVersion(2), core.SetApproximateSize(30), core.SetApproximateKeys(3000),
+		core.SetReadQuery(300), core.SetWrittenQuery(300),
 		core.WithDownPeers([]*pdpb.PeerStats{{Peer: downPeer, DownSeconds: 3600}}),
 		core.WithPendingPeers([]*metapb.Peer{downPeer}), core.WithLearners([]*metapb.Peer{{Id: 3, StoreId: 1}}))
 	r4 := pdTests.MustPutRegion(re, cluster, 4, 1, []byte("d"), []byte("e"),
-		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(1),
-		core.SetRegionVersion(1), core.SetApproximateSize(10), core.SetApproximateKeys(1000),
+		core.SetWrittenBytes(100), core.SetReadBytes(100), core.SetRegionConfVer(4),
+		core.SetRegionVersion(4), core.SetApproximateSize(10), core.SetApproximateKeys(1000),
+		core.SetReadQuery(400), core.SetWrittenQuery(400),
 	)
 	defer cluster.Destroy()
+
+	getRegionsByType := func(storeID uint64, regionType core.SubTreeRegionType) []*core.RegionInfo {
+		regions, _ := leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(storeID, regionType)
+		return regions
+	}
 
 	var testRegionsCases = []struct {
 		args   []string
@@ -111,27 +123,12 @@ func TestRegion(t *testing.T) {
 		{[]string{"region", "sibling", "2"}, leaderServer.GetAdjacentRegions(leaderServer.GetRegionInfoByID(2))},
 		// region store <store_id> command
 		{[]string{"region", "store", "1"}, leaderServer.GetStoreRegions(1)},
-		{[]string{"region", "store", "1"}, []*core.RegionInfo{r1, r2, r3, r4}},
-		// region topread [limit] command
-		{[]string{"region", "topread", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)},
-		// region topwrite [limit] command
-		{[]string{"region", "topwrite", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 2)},
-		// region topconfver [limit] command
-		{[]string{"region", "topconfver", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-			return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
-		}, 2)},
-		// region topversion [limit] command
-		{[]string{"region", "topversion", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-			return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
-		}, 2)},
-		// region topsize [limit] command
-		{[]string{"region", "topsize", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-			return a.GetApproximateSize() < b.GetApproximateSize()
-		}, 2)},
-		// region topkeys [limit] command
-		{[]string{"region", "topkeys", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
-			return a.GetApproximateKeys() < b.GetApproximateKeys()
-		}, 2)},
+		{[]string{"region", "store", "1", "--type=leader"}, getRegionsByType(1, core.LeaderInSubTree)},
+		{[]string{"region", "store", "1", "--type=follower"}, getRegionsByType(1, core.FollowerInSubTree)},
+		{[]string{"region", "store", "1", "--type=learner"}, getRegionsByType(1, core.LearnerInSubTree)},
+		{[]string{"region", "store", "1", "--type=witness"}, getRegionsByType(1, core.WitnessInSubTree)},
+		{[]string{"region", "store", "1", "--type=pending"}, getRegionsByType(1, core.PendingPeerInSubTree)},
+		{[]string{"region", "store", "1", "--type=all"}, []*core.RegionInfo{r1, r2, r3, r4}},
 		// region check extra-peer command
 		{[]string{"region", "check", "extra-peer"}, []*core.RegionInfo{r1}},
 		// region check miss-peer command
@@ -168,9 +165,64 @@ func TestRegion(t *testing.T) {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		regions := &api.RegionsInfo{}
-		re.NoError(json.Unmarshal(output, regions))
+		regions := &response.RegionsInfo{}
+		re.NoError(json.Unmarshal(output, regions), string(output))
 		tests.CheckRegionsInfo(re, regions, testCase.expect)
+	}
+
+	testRegionsCases = []struct {
+		args   []string
+		expect []*core.RegionInfo
+	}{
+		// region topread [limit] command
+		{[]string{"region", "topread"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 4)},
+		// region topwrite [limit] command
+		{[]string{"region", "topwrite"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 4)},
+		// region topread [limit] command
+		{[]string{"region", "topread", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)},
+		// region topwrite [limit] command
+		{[]string{"region", "topwrite", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 2)},
+		// region topread byte [limit] command
+		{[]string{"region", "topread", "byte"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 4)},
+		// region topwrite byte [limit] command
+		{[]string{"region", "topwrite", "byte"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 4)},
+		// region topread byte [limit] command
+		{[]string{"region", "topread", "query"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetReadQueryNum() < b.GetReadQueryNum() }, 4)},
+		// region topwrite byte [limit] command
+		{[]string{"region", "topwrite", "query"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetWriteQueryNum() < b.GetWriteQueryNum() }, 4)},
+		// region topread byte [limit] command
+		{[]string{"region", "topread", "byte", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() }, 2)},
+		// region topwrite byte [limit] command
+		{[]string{"region", "topwrite", "byte", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() }, 2)},
+		// region topread byte [limit] command
+		{[]string{"region", "topread", "query", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetReadQueryNum() < b.GetReadQueryNum() }, 2)},
+		// region topwrite byte [limit] command
+		{[]string{"region", "topwrite", "query", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool { return a.GetWriteQueryNum() < b.GetWriteQueryNum() }, 2)},
+		// region topconfver [limit] command
+		{[]string{"region", "topconfver", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+			return a.GetMeta().GetRegionEpoch().GetConfVer() < b.GetMeta().GetRegionEpoch().GetConfVer()
+		}, 2)},
+		// region topversion [limit] command
+		{[]string{"region", "topversion", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+			return a.GetMeta().GetRegionEpoch().GetVersion() < b.GetMeta().GetRegionEpoch().GetVersion()
+		}, 2)},
+		// region topsize [limit] command
+		{[]string{"region", "topsize", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+			return a.GetApproximateSize() < b.GetApproximateSize()
+		}, 2)},
+		// region topkeys [limit] command
+		{[]string{"region", "topkeys", "2"}, api.TopNRegions(leaderServer.GetRegions(), func(a, b *core.RegionInfo) bool {
+			return a.GetApproximateKeys() < b.GetApproximateKeys()
+		}, 2)},
+	}
+
+	for _, testCase := range testRegionsCases {
+		args := append([]string{"-u", pdAddr}, testCase.args...)
+		output, err := tests.ExecuteCommand(cmd, args...)
+		re.NoError(err)
+		regions := &response.RegionsInfo{}
+		re.NoError(json.Unmarshal(output, regions), string(output))
+		tests.CheckRegionsInfoWithoutSort(re, regions, testCase.expect)
 	}
 
 	var testRegionCases = []struct {
@@ -191,7 +243,7 @@ func TestRegion(t *testing.T) {
 		args := append([]string{"-u", pdAddr}, testCase.args...)
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
-		region := &api.RegionInfo{}
+		region := &response.RegionInfo{}
 		re.NoError(json.Unmarshal(output, region))
 		tests.CheckRegionInfo(re, region, testCase.expect)
 	}
@@ -215,6 +267,7 @@ func TestRegionNoLeader(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	cluster.WaitLeader()

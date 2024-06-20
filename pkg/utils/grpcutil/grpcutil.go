@@ -30,8 +30,10 @@ import (
 	"go.etcd.io/etcd/pkg/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -138,7 +140,7 @@ func (s TLSConfig) GetOneAllowedCN() (string, error) {
 // ctx will be noop. Users should call ClientConn.Close to terminate all the
 // pending operations after this function returns.
 func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...grpc.DialOption) (*grpc.ClientConn, error) {
-	opt := grpc.WithInsecure()
+	opt := grpc.WithTransportCredentials(insecure.NewCredentials())
 	if tlsCfg != nil {
 		creds := credentials.NewTLS(tlsCfg)
 		opt = grpc.WithTransportCredentials(creds)
@@ -147,7 +149,18 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	if err != nil {
 		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 	}
-	cc, err := grpc.DialContext(ctx, u.Host, append(do, opt)...)
+	// Here we use a shorter MaxDelay to make the connection recover faster.
+	// The default MaxDelay is 120s, which is too long for us.
+	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{
+		Backoff: backoff.Config{
+			BaseDelay:  time.Second,
+			Multiplier: 1.6,
+			Jitter:     0.2,
+			MaxDelay:   3 * time.Second,
+		},
+	})
+	do = append(do, opt, backoffOpts)
+	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
 	}
@@ -156,8 +169,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 
 // BuildForwardContext creates a context with receiver metadata information.
 // It is used in client side.
-func BuildForwardContext(ctx context.Context, addr string) context.Context {
-	md := metadata.Pairs(ForwardMetadataKey, addr)
+func BuildForwardContext(ctx context.Context, url string) context.Context {
+	md := metadata.Pairs(ForwardMetadataKey, url)
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
@@ -173,13 +186,9 @@ func ResetForwardContext(ctx context.Context) context.Context {
 
 // GetForwardedHost returns the forwarded host in metadata.
 func GetForwardedHost(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		log.Debug("failed to get gRPC incoming metadata when getting forwarded host")
-		return ""
-	}
-	if t, ok := md[ForwardMetadataKey]; ok {
-		return t[0]
+	s := metadata.ValueFromIncomingContext(ctx, ForwardMetadataKey)
+	if len(s) > 0 {
+		return s[0]
 	}
 	return ""
 }
@@ -252,11 +261,11 @@ func CheckStream(ctx context.Context, cancel context.CancelFunc, done chan struc
 
 // NeedRebuildConnection checks if the error is a connection error.
 func NeedRebuildConnection(err error) bool {
-	return err == io.EOF ||
+	return (err != nil) && (err == io.EOF ||
 		strings.Contains(err.Error(), codes.Unavailable.String()) || // Unavailable indicates the service is currently unavailable. This is a most likely a transient condition.
 		strings.Contains(err.Error(), codes.DeadlineExceeded.String()) || // DeadlineExceeded means operation expired before completion.
 		strings.Contains(err.Error(), codes.Internal.String()) || // Internal errors.
 		strings.Contains(err.Error(), codes.Unknown.String()) || // Unknown error.
-		strings.Contains(err.Error(), codes.ResourceExhausted.String()) // ResourceExhausted is returned when either the client or the server has exhausted their resources.
+		strings.Contains(err.Error(), codes.ResourceExhausted.String())) // ResourceExhausted is returned when either the client or the server has exhausted their resources.
 	// Besides, we don't need to rebuild the connection if the code is Canceled, which means the client cancelled the request.
 }

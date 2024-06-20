@@ -186,7 +186,7 @@ func TestTolerantRatio(t *testing.T) {
 		kind                   constant.ScheduleKind
 		expectTolerantResource func(constant.ScheduleKind) int64
 	}{
-		{0, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount}, func(k constant.ScheduleKind) int64 {
+		{0, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount}, func(constant.ScheduleKind) int64 {
 			return int64(leaderTolerantSizeRatio)
 		}},
 		{0, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
@@ -198,7 +198,7 @@ func TestTolerantRatio(t *testing.T) {
 		{0, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
 			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
 		}},
-		{10, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount}, func(k constant.ScheduleKind) int64 {
+		{10, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount}, func(constant.ScheduleKind) int64 {
 			return int64(tc.GetScheduleConfig().TolerantSizeRatio)
 		}},
 		{10, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
@@ -697,7 +697,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestReSortStores() {
 	suite.tc.AddLeaderStore(4, 100)
 	suite.tc.AddLeaderStore(5, 100)
 	suite.tc.AddLeaderStore(6, 0)
-	stores := suite.tc.Stores.GetStores()
+	stores := suite.tc.GetStores()
 	sort.Slice(stores, func(i, j int) bool {
 		return stores[i].GetID() < stores[j].GetID()
 	})

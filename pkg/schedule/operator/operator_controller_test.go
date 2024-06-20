@@ -15,7 +15,6 @@
 package operator
 
 import (
-	"container/heap"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -109,7 +108,7 @@ func (suite *operatorControllerTestSuite) TestGetOpInfluence() {
 	re.True(op2.Start())
 	oc.SetOperator(op2)
 	go func(ctx context.Context) {
-		suite.checkRemoveOperatorSuccess(re, oc, op1)
+		checkRemoveOperatorSuccess(re, oc, op1)
 		for {
 			select {
 			case <-ctx.Done():
@@ -365,10 +364,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 		oc.SetOperator(op4)
 		re.True(op2.Start())
 		oc.SetOperator(op2)
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
-		heap.Push(&oc.opNotifierQueue, &operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
+		oc.opNotifierQueue.Push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
 	// first poll got nil
 	r, next := oc.pollNeedDispatchRegion()
@@ -407,6 +406,131 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	re.False(next)
 }
 
+// issue #7992
+func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(source)
+	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(target)
+
+	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+	re.NoError(err)
+	re.Len(ops, 2)
+	re.Equal(2, controller.AddWaitingOperator(ops...))
+	// Change next push time to now, it's used to make test case faster.
+	controller.opNotifierQueue.heap[0].time = time.Now()
+
+	// first poll gets source region op.
+	r, next := controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, source)
+
+	// second poll gets target region op.
+	controller.opNotifierQueue.heap[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, target)
+
+	// third poll removes the two merge-region ops.
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Empty(controller.GetOperators())
+	re.Empty(controller.wop.ListOperator())
+	re.NotNil(controller.records.Get(101))
+	re.NotNil(controller.records.Get(102))
+
+	// fourth poll removes target region op from opNotifierQueue
+	controller.opNotifierQueue.heap[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Equal(0, controller.opNotifierQueue.Len())
+
+	// Add the two ops to waiting operators again.
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
+	controller.records.ttl.Remove(101)
+	controller.records.ttl.Remove(102)
+	ops, err = CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+	re.NoError(err)
+	re.Equal(2, controller.AddWaitingOperator(ops...))
+	// change the target RegionEpoch
+	// first poll gets source region from opNotifierQueue
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	controller.opNotifierQueue.heap[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Equal(r, source)
+
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Empty(controller.GetOperators())
+	re.Empty(controller.wop.ListOperator())
+	re.NotNil(controller.records.Get(101))
+	re.NotNil(controller.records.Get(102))
+
+	controller.opNotifierQueue.heap[0].time = time.Now()
+	r, next = controller.pollNeedDispatchRegion()
+	re.True(next)
+	re.Nil(r)
+	re.Equal(0, controller.opNotifierQueue.Len())
+}
+
+func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
+	re := suite.Require()
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(source)
+	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(target)
+
+	ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
+	re.NoError(err)
+	re.Len(ops, 2)
+
+	// check successfully
+	r, reason := controller.checkOperatorLightly(ops[0])
+	re.Empty(reason)
+	re.Equal(r, source)
+
+	// check failed because of region disappeared
+	cluster.RemoveRegion(target)
+	r, reason = controller.checkOperatorLightly(ops[1])
+	re.Nil(r)
+	re.Equal(reason, RegionNotFound)
+
+	// check failed because of verions of region epoch changed
+	cluster.PutRegion(target)
+	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
+	r, reason = controller.checkOperatorLightly(ops[0])
+	re.Nil(r)
+	re.Equal(reason, EpochNotMatch)
+}
+
 func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
@@ -426,7 +550,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	for i := uint64(1); i <= 5; i++ {
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: 1})
 	re.False(oc.AddOperator(op))
@@ -436,13 +560,13 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	for i := uint64(1); i <= 10; i++ {
 		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	tc.SetAllStoresLimit(storelimit.AddPeer, 60)
 	for i := uint64(1); i <= 5; i++ {
 		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: i})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, AddPeer{ToStore: 2, PeerID: 1})
 	re.False(oc.AddOperator(op))
@@ -452,7 +576,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	for i := uint64(1); i <= 5; i++ {
 		op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	re.False(oc.AddOperator(op))
@@ -462,13 +586,13 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	for i := uint64(1); i <= 10; i++ {
 		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	tc.SetAllStoresLimit(storelimit.RemovePeer, 60)
 	for i := uint64(1); i <= 5; i++ {
 		op = NewTestOperator(i, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 		re.True(oc.AddOperator(op))
-		suite.checkRemoveOperatorSuccess(re, oc, op)
+		checkRemoveOperatorSuccess(re, oc, op)
 	}
 	op = NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, RemovePeer{FromStore: 2})
 	re.False(oc.AddOperator(op))
@@ -736,7 +860,7 @@ func newRegionInfo(id uint64, startKey, endKey string, size, keys int64, leader 
 	)
 }
 
-func (suite *operatorControllerTestSuite) checkRemoveOperatorSuccess(re *require.Assertions, oc *Controller, op *Operator) {
+func checkRemoveOperatorSuccess(re *require.Assertions, oc *Controller, op *Operator) {
 	re.True(oc.RemoveOperator(op))
 	re.True(op.IsEnd())
 	re.Equal(op, oc.GetOperatorStatus(op.RegionID()).Operator)
@@ -786,7 +910,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	batch = append(batch, addPeerOp(100))
 	added = controller.AddWaitingOperator(batch...)
 	re.Equal(1, added)
-	re.NotNil(controller.operators[uint64(100)])
+	re.NotNil(controller.GetOperator(uint64(100)))
 
 	source := newRegionInfo(101, "1a", "1b", 1, 1, []uint64{101, 1}, []uint64{101, 1})
 	cluster.PutRegion(source)
@@ -803,7 +927,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 		ID:       "schedulelabel",
 		Labels:   []labeler.RegionLabel{{Key: "schedule", Value: "deny"}},
 		RuleType: labeler.KeyRange,
-		Data:     []interface{}{map[string]interface{}{"start_key": "1a", "end_key": "1b"}},
+		Data:     []any{map[string]any{"start_key": "1a", "end_key": "1b"}},
 	})
 
 	re.True(labelerManager.ScheduleDisabled(source))
@@ -827,7 +951,44 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 		RemovePeer{FromStore: 3, PeerID: 3, IsDownStore: false},
 	}
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpRegion, steps...)
-	re.True(oc.addOperatorLocked(op))
+	re.True(oc.AddOperator(op))
 	// Although store 3 does not exist in PD, PD can also send op to TiKV.
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
+}
+
+func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
+	re := require.New(t)
+	opt := mockconfig.NewTestOptions()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	regionNum := 1000
+	limit := 1600.0
+	storeID := uint64(2)
+	for i := 1; i < 4; i++ {
+		tc.AddRegionStore(uint64(i), regionNum)
+		tc.SetStoreLimit(uint64(i), storelimit.AddPeer, limit)
+	}
+	for i := 1; i <= regionNum; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 3, 4)
+	}
+
+	// Add operator and set store limit concurrently
+	var wg sync.WaitGroup
+	for i := 1; i < 10; i++ {
+		wg.Add(1)
+		go func(i uint64) {
+			defer wg.Done()
+			for j := 1; j < 10; j++ {
+				regionID := uint64(j) + i*100
+				op := NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), OpRegion, AddPeer{ToStore: storeID, PeerID: regionID})
+				re.True(oc.AddOperator(op))
+				tc.SetStoreLimit(storeID, storelimit.AddPeer, limit-float64(j)) // every goroutine set a different limit
+			}
+		}(uint64(i))
+	}
+	wg.Wait()
 }

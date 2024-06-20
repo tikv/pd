@@ -20,21 +20,20 @@ import (
 	"github.com/pingcap/errors"
 )
 
+// Note: keep the same as the ones defined on the server side to ensure the client can use them correctly.
 const (
+	// NoLeaderErr indicates there is no leader in the cluster currently.
+	NoLeaderErr = "no leader"
 	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
-	// Note: keep the same as the ones defined on the server side, because the client side checks if an error message
-	// contains this string to judge whether the leader is changed.
-	NotLeaderErr = "is not leader"
+	NotLeaderErr = "not leader"
 	// MismatchLeaderErr indicates the non-leader member received the requests which should be received by leader.
-	// Note: keep the same as the ones defined on the server side, because the client side checks if an error message
-	// contains this string to judge whether the leader is changed.
 	MismatchLeaderErr = "mismatch leader id"
 	// NotServedErr indicates an tso node/pod received the requests for the keyspace groups which are not served by it.
-	// Note: keep the same as the ones defined on the server side, because the client side checks if an error message
-	// contains this string to judge whether the leader is changed.
 	NotServedErr = "is not served"
 	// RetryTimeoutErr indicates the server is busy.
 	RetryTimeoutErr = "retry timeout"
+	// NotPrimaryErr indicates the non-primary member received the requests which should be received by primary.
+	NotPrimaryErr = "not primary"
 )
 
 // client errors
@@ -51,6 +50,7 @@ var (
 	ErrClientGetClusterInfo           = errors.Normalize("get cluster info failed", errors.RFCCodeText("PD:client:ErrClientGetClusterInfo"))
 	ErrClientUpdateMember             = errors.Normalize("update member failed, %v", errors.RFCCodeText("PD:client:ErrUpdateMember"))
 	ErrClientNoAvailableMember        = errors.Normalize("no available member", errors.RFCCodeText("PD:client:ErrClientNoAvailableMember"))
+	ErrClientNoTargetMember           = errors.Normalize("no target member", errors.RFCCodeText("PD:client:ErrClientNoTargetMember"))
 	ErrClientProtoUnmarshal           = errors.Normalize("failed to unmarshal proto", errors.RFCCodeText("PD:proto:ErrClientProtoUnmarshal"))
 	ErrClientGetMultiResponse         = errors.Normalize("get invalid value response %v, must only one", errors.RFCCodeText("PD:client:ErrClientGetMultiResponse"))
 	ErrClientGetServingEndpoint       = errors.Normalize("get serving endpoint failed", errors.RFCCodeText("PD:client:ErrClientGetServingEndpoint"))
@@ -90,7 +90,7 @@ var (
 var (
 	ErrClientListResourceGroup              = errors.Normalize("get all resource group failed, %v", errors.RFCCodeText("PD:client:ErrClientListResourceGroup"))
 	ErrClientResourceGroupConfigUnavailable = errors.Normalize("resource group config is unavailable, %v", errors.RFCCodeText("PD:client:ErrClientResourceGroupConfigUnavailable"))
-	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
+	ErrClientResourceGroupThrottled         = errors.Normalize("exceeded resource group quota limitation, estimated wait time %s, ltb state is %.2f:%.2f", errors.RFCCodeText("PD:client:ErrClientResourceGroupThrottled"))
 )
 
 // ErrClientGetResourceGroup is the error type for getting resource group.

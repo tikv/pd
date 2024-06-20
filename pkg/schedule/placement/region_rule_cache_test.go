@@ -226,7 +226,7 @@ func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.Re
 	}
 }
 
-// nolint
+// nolint:unparam
 func mockStores(num int) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, num)
 	now := time.Now()
@@ -237,7 +237,6 @@ func mockStores(num int) []*core.StoreInfo {
 	return stores
 }
 
-// nolint
 func mockStoresNoHeartbeat(num int) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, num)
 	for i := 1; i <= num; i++ {

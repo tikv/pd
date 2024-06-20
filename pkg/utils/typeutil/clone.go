@@ -36,6 +36,6 @@ func DeepClone[T Codec](src T, factory func() T) T {
 		return dst
 	}
 	dst := factory()
-	dst.Unmarshal(b)
+	_ = dst.Unmarshal(b)
 	return dst
 }

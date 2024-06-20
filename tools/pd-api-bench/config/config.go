@@ -15,7 +15,6 @@
 package config
 
 import (
-	"github.com/BurntSushi/toml"
 	"github.com/pingcap/log"
 	"github.com/pkg/errors"
 	flag "github.com/spf13/pflag"
@@ -45,6 +44,7 @@ type Config struct {
 	// only for init
 	HTTP map[string]cases.Config `toml:"http" json:"http"`
 	GRPC map[string]cases.Config `toml:"grpc" json:"grpc"`
+	ETCD map[string]cases.Config `toml:"etcd" json:"etcd"`
 }
 
 // NewConfig return a set of settings.
@@ -72,14 +72,13 @@ func (c *Config) Parse(arguments []string) error {
 	}
 
 	// Load config file if specified.
-	var meta *toml.MetaData
 	if c.configFile != "" {
-		meta, err = configutil.ConfigFromFile(c, c.configFile)
+		_, err = configutil.ConfigFromFile(c, c.configFile)
 		if err != nil {
 			return err
 		}
 	}
-	c.Adjust(meta)
+	c.Adjust()
 
 	// Parse again to replace with command line options.
 	err = c.flagSet.Parse(arguments)
@@ -108,10 +107,16 @@ func (c *Config) InitCoordinator(co *cases.Coordinator) {
 			log.Error("create gRPC case failed", zap.Error(err))
 		}
 	}
+	for name, cfg := range c.ETCD {
+		err := co.SetETCDCase(name, &cfg)
+		if err != nil {
+			log.Error("create etcd case failed", zap.Error(err))
+		}
+	}
 }
 
 // Adjust is used to adjust configurations
-func (c *Config) Adjust(meta *toml.MetaData) {
+func (c *Config) Adjust() {
 	if len(c.Log.Format) == 0 {
 		c.Log.Format = "text"
 	}

@@ -201,10 +201,12 @@ func (l *RegionLabeler) getAndCheckRule(id string, now time.Time) *LabelRule {
 		return rule
 	}
 	if len(rule.Labels) == 0 {
-		l.DeleteLabelRuleLocked(id)
+		if err := l.DeleteLabelRuleLocked(id); err != nil {
+			log.Error("failed to delete label rule", zap.String("rule-key", id), zap.Error(err))
+		}
 		return nil
 	}
-	l.SaveLabelRuleLocked(rule)
+	_ = l.SaveLabelRuleLocked(rule)
 	return rule
 }
 
@@ -382,10 +384,10 @@ func (l *RegionLabeler) GetRegionLabels(region *core.RegionInfo) []*RegionLabel 
 }
 
 // MakeKeyRanges is a helper function to make key ranges.
-func MakeKeyRanges(keys ...string) []interface{} {
-	var res []interface{}
+func MakeKeyRanges(keys ...string) []any {
+	var res []any
 	for i := 0; i < len(keys); i += 2 {
-		res = append(res, map[string]interface{}{"start_key": keys[i], "end_key": keys[i+1]})
+		res = append(res, map[string]any{"start_key": keys[i], "end_key": keys[i+1]})
 	}
 	return res
 }

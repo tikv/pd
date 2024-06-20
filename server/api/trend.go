@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -136,7 +137,7 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 	}
 	trendStores := make([]trendStore, 0, len(stores))
 	for _, store := range stores {
-		info := newStoreInfo(h.svr.GetScheduleConfig(), store)
+		info := response.BuildStoreInfo(h.svr.GetScheduleConfig(), store)
 		s := trendStore{
 			ID:              info.Store.GetId(),
 			Address:         info.Store.GetAddress(),
@@ -149,14 +150,14 @@ func (h *trendHandler) getTrendStores() ([]trendStore, error) {
 			LastHeartbeatTS: info.Status.LastHeartbeatTS,
 			Uptime:          info.Status.Uptime,
 		}
-		s.HotReadFlow, s.HotReadRegionFlows = h.getStoreFlow(hotRead.AsLeader, store.GetID())
-		s.HotWriteFlow, s.HotWriteRegionFlows = h.getStoreFlow(hotWrite.AsPeer, store.GetID())
+		s.HotReadFlow, s.HotReadRegionFlows = getStoreFlow(hotRead.AsLeader, store.GetID())
+		s.HotWriteFlow, s.HotWriteRegionFlows = getStoreFlow(hotWrite.AsPeer, store.GetID())
 		trendStores = append(trendStores, s)
 	}
 	return trendStores, nil
 }
 
-func (h *trendHandler) getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeByteFlow float64, regionByteFlows []float64) {
+func getStoreFlow(stats statistics.StoreHotPeersStat, storeID uint64) (storeByteFlow float64, regionByteFlows []float64) {
 	if stats == nil {
 		return
 	}

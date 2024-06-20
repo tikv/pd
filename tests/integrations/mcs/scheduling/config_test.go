@@ -164,7 +164,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	re.Equal(namesFromAPIServer, namesFromSchedulingServer)
 	// Add a new scheduler.
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
 		"store_id": 1,
 	})
 	// Check the new scheduler's config.
@@ -175,7 +175,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1})
 	// Update the scheduler by adding a store.
-	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(
+	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
 			Address:       "mock://2",
@@ -186,7 +186,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		},
 	)
 	re.NoError(err)
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
 		"store_id": 2,
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1, 2})

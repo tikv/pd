@@ -39,8 +39,6 @@ import (
 
 const (
 	controllerConfigPath    = "resource_group/controller"
-	maxRetry                = 10
-	retryInterval           = 50 * time.Millisecond
 	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
 	trickleReserveDuration  = 1250 * time.Millisecond
@@ -102,6 +100,27 @@ func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.ruConfig.LTBMaxWaitDuration = d
+	}
+}
+
+// WithWaitRetryInterval is the option to set the retry interval when waiting for the token.
+func WithWaitRetryInterval(d time.Duration) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.WaitRetryInterval = d
+	}
+}
+
+// WithWaitRetryTimes is the option to set the times to retry when waiting for the token.
+func WithWaitRetryTimes(times int) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.WaitRetryTimes = times
+	}
+}
+
+// WithDegradedModeWaitDuration is the option to set the wait duration for degraded mode.
+func WithDegradedModeWaitDuration(d time.Duration) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.DegradedModeWaitDuration = d
 	}
 }
 
@@ -186,7 +205,7 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 		log.Warn("[resource group controller] server does not save config, load config failed")
 		return DefaultConfig(), nil
 	}
-	config := &Config{}
+	config := DefaultConfig()
 	err = json.Unmarshal(kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
@@ -367,7 +386,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 				for _, item := range resp {
 					cfgRevision = item.Kv.ModRevision
-					config := &Config{}
+					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
 					}
@@ -386,8 +405,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 
 			case gc := <-c.tokenBucketUpdateChan:
-				now := gc.run.now
-				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
+				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
 			}
 		}
 	}()
@@ -461,7 +479,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 }
 
 func (c *ResourceGroupsController) executeOnAllGroups(f func(controller *groupCostController)) {
-	c.groupsController.Range(func(name, value any) bool {
+	c.groupsController.Range(func(_, value any) bool {
 		f(value.(*groupCostController))
 		return true
 	})
@@ -492,12 +510,12 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 
 func (c *ResourceGroupsController) collectTokenBucketRequests(ctx context.Context, source string, typ selectType) {
 	c.run.currentRequests = make([]*rmpb.TokenBucketRequest, 0)
-	c.groupsController.Range(func(name, value any) bool {
+	c.groupsController.Range(func(_, value any) bool {
 		gc := value.(*groupCostController)
 		request := gc.collectRequestAndConsumption(typ)
 		if request != nil {
 			c.run.currentRequests = append(c.run.currentRequests, request)
-			gc.tokenRequestCounter.Inc()
+			gc.metrics.tokenRequestCounter.Inc()
 		}
 		return true
 	})
@@ -564,7 +582,6 @@ func (c *ResourceGroupsController) IsBackgroundRequest(ctx context.Context,
 	resourceGroupName, requestResource string) bool {
 	gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 	if err != nil {
-		failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 		return false
 	}
 
@@ -577,7 +594,6 @@ func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, 
 		resourceGroupName := "default"
 		gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
 		if err != nil {
-			failedRequestCounter.WithLabelValues(resourceGroupName).Inc()
 			return false
 		}
 		bg = gc.getMeta().BackgroundSettings
@@ -616,13 +632,9 @@ type groupCostController struct {
 	calculators    []ResourceCalculator
 	handleRespFunc func(*rmpb.TokenBucketResponse)
 
-	successfulRequestDuration  prometheus.Observer
-	failedLimitReserveDuration prometheus.Observer
-	requestRetryCounter        prometheus.Counter
-	failedRequestCounter       prometheus.Counter
-	tokenRequestCounter        prometheus.Counter
-
-	mu struct {
+	// metrics
+	metrics *groupMetricsCollection
+	mu      struct {
 		sync.Mutex
 		consumption   *rmpb.Consumption
 		storeCounter  map[uint64]*rmpb.Consumption
@@ -669,6 +681,30 @@ type groupCostController struct {
 	tombstone bool
 }
 
+type groupMetricsCollection struct {
+	successfulRequestDuration         prometheus.Observer
+	failedLimitReserveDuration        prometheus.Observer
+	requestRetryCounter               prometheus.Counter
+	failedRequestCounterWithOthers    prometheus.Counter
+	failedRequestCounterWithThrottled prometheus.Counter
+	tokenRequestCounter               prometheus.Counter
+}
+
+func initMetrics(oldName, name string) *groupMetricsCollection {
+	const (
+		otherType     = "others"
+		throttledType = "throttled"
+	)
+	return &groupMetricsCollection{
+		successfulRequestDuration:         successfulRequestDuration.WithLabelValues(oldName, name),
+		failedLimitReserveDuration:        failedLimitReserveDuration.WithLabelValues(oldName, name),
+		failedRequestCounterWithOthers:    failedRequestCounter.WithLabelValues(oldName, name, otherType),
+		failedRequestCounterWithThrottled: failedRequestCounter.WithLabelValues(oldName, name, throttledType),
+		requestRetryCounter:               requestRetryCounter.WithLabelValues(oldName, name),
+		tokenRequestCounter:               resourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
+	}
+}
+
 type tokenCounter struct {
 	getTokenBucketFunc func() *rmpb.TokenBucket
 
@@ -709,16 +745,13 @@ func newGroupCostController(
 	default:
 		return nil, errs.ErrClientResourceGroupConfigUnavailable.FastGenByArgs("not supports the resource type")
 	}
+	ms := initMetrics(group.Name, group.Name)
 	gc := &groupCostController{
-		meta:                       group,
-		name:                       group.Name,
-		mainCfg:                    mainCfg,
-		mode:                       group.GetMode(),
-		successfulRequestDuration:  successfulRequestDuration.WithLabelValues(group.Name, group.Name),
-		failedLimitReserveDuration: failedLimitReserveDuration.WithLabelValues(group.Name, group.Name),
-		failedRequestCounter:       failedRequestCounter.WithLabelValues(group.Name, group.Name),
-		requestRetryCounter:        requestRetryCounter.WithLabelValues(group.Name, group.Name),
-		tokenRequestCounter:        resourceGroupTokenRequestCounter.WithLabelValues(group.Name, group.Name),
+		meta:    group,
+		name:    group.Name,
+		mainCfg: mainCfg,
+		mode:    group.GetMode(),
+		metrics: ms,
 		calculators: []ResourceCalculator{
 			newKVCalculator(mainCfg),
 			newSQLCalculator(mainCfg),
@@ -773,7 +806,7 @@ func (gc *groupCostController) initRunState() {
 	case rmpb.GroupMode_RUMode:
 		gc.run.requestUnitTokens = make(map[rmpb.RequestUnitType]*tokenCounter)
 		for typ := range requestUnitLimitTypeList {
-			limiter := NewLimiterWithCfg(now, cfgFunc(getRUTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
+			limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(getRUTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
 			counter := &tokenCounter{
 				limiter:     limiter,
 				avgRUPerSec: 0,
@@ -787,7 +820,7 @@ func (gc *groupCostController) initRunState() {
 	case rmpb.GroupMode_RawMode:
 		gc.run.resourceTokens = make(map[rmpb.RawResourceType]*tokenCounter)
 		for typ := range requestResourceLimitTypeList {
-			limiter := NewLimiterWithCfg(now, cfgFunc(getRawResourceTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
+			limiter := NewLimiterWithCfg(gc.name, now, cfgFunc(getRawResourceTokenBucketSetting(gc.meta, typ)), gc.lowRUNotifyChan)
 			counter := &tokenCounter{
 				limiter:     limiter,
 				avgRUPerSec: 0,
@@ -846,7 +879,7 @@ func (gc *groupCostController) resetEmergencyTokenAcquisition() {
 	}
 }
 
-func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context, now time.Time) {
+func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context) {
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		for _, counter := range gc.run.resourceTokens {
@@ -863,7 +896,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context,
 				counter.notify.setupNotificationCh = nil
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(now, threshold)
+				counter.limiter.SetupNotificationThreshold(threshold)
 			case <-ctx.Done():
 				return
 			}
@@ -884,7 +917,7 @@ func (gc *groupCostController) handleTokenBucketUpdateEvent(ctx context.Context,
 				counter.notify.setupNotificationCh = nil
 				threshold := counter.notify.setupNotificationThreshold
 				counter.notify.mu.Unlock()
-				counter.limiter.SetupNotificationThreshold(now, threshold)
+				counter.limiter.SetupNotificationThreshold(threshold)
 			case <-ctx.Done():
 				return
 			}
@@ -1208,7 +1241,7 @@ func (gc *groupCostController) onRequestWait(
 		var i int
 		var d time.Duration
 	retryLoop:
-		for i = 0; i < maxRetry; i++ {
+		for i = 0; i < gc.mainCfg.WaitRetryTimes; i++ {
 			switch gc.mode {
 			case rmpb.GroupMode_RawMode:
 				res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
@@ -1217,7 +1250,7 @@ func (gc *groupCostController) onRequestWait(
 						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v))
 					}
 				}
-				if d, err = WaitReservations(ctx, now, res); err == nil {
+				if d, err = WaitReservations(ctx, now, res); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
 					break retryLoop
 				}
 			case rmpb.GroupMode_RUMode:
@@ -1227,18 +1260,20 @@ func (gc *groupCostController) onRequestWait(
 						res = append(res, counter.limiter.Reserve(ctx, gc.mainCfg.LTBMaxWaitDuration, now, v))
 					}
 				}
-				if d, err = WaitReservations(ctx, now, res); err == nil {
+				if d, err = WaitReservations(ctx, now, res); err == nil || errs.ErrClientResourceGroupThrottled.NotEqual(err) {
 					break retryLoop
 				}
 			}
-			gc.requestRetryCounter.Inc()
-			time.Sleep(retryInterval)
-			waitDuration += retryInterval
+			gc.metrics.requestRetryCounter.Inc()
+			time.Sleep(gc.mainCfg.WaitRetryInterval)
+			waitDuration += gc.mainCfg.WaitRetryInterval
 		}
 		if err != nil {
-			gc.failedRequestCounter.Inc()
-			if d.Seconds() > 0 {
-				gc.failedLimitReserveDuration.Observe(d.Seconds())
+			if errs.ErrClientResourceGroupThrottled.Equal(err) {
+				gc.metrics.failedRequestCounterWithThrottled.Inc()
+				gc.metrics.failedLimitReserveDuration.Observe(d.Seconds())
+			} else {
+				gc.metrics.failedRequestCounterWithOthers.Inc()
 			}
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
@@ -1248,7 +1283,7 @@ func (gc *groupCostController) onRequestWait(
 			})
 			return nil, nil, waitDuration, 0, err
 		}
-		gc.successfulRequestDuration.Observe(d.Seconds())
+		gc.metrics.successfulRequestDuration.Observe(d.Seconds())
 		waitDuration += d
 	}
 

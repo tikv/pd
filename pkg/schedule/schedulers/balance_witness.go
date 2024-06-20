@@ -60,7 +60,7 @@ type balanceWitnessSchedulerConfig struct {
 	Batch int `json:"batch"`
 }
 
-func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}) {
+func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -79,7 +79,7 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, interface{}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
 		return http.StatusOK, "Config is updated."
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
@@ -150,7 +150,7 @@ func (handler *balanceWitnessHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	handler.rd.JSON(w, httpCode, v)
 }
 
-func (handler *balanceWitnessHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *balanceWitnessHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -214,7 +214,7 @@ func (b *balanceWitnessScheduler) GetName() string {
 	return b.name
 }
 
-func (b *balanceWitnessScheduler) GetType() string {
+func (*balanceWitnessScheduler) GetType() string {
 	return BalanceWitnessType
 }
 
@@ -378,7 +378,7 @@ func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 		b.counter.WithLabelValues("move-witness", solver.SourceMetricLabel()+"-out"),
 		b.counter.WithLabelValues("move-witness", solver.TargetMetricLabel()+"-in"),
 	)
-	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
-	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
+	op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
+	op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 	return op
 }

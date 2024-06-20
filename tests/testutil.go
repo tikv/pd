@@ -17,8 +17,12 @@ package tests
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"net"
+	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -44,6 +48,45 @@ import (
 	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
 )
+
+var (
+	TestDialClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
+
+	testPortMutex sync.Mutex
+	testPortMap   = make(map[string]struct{})
+)
+
+// SetRangePort sets the range of ports for test.
+func SetRangePort(start, end int) {
+	portRange := []int{start, end}
+	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{}
+		randomPort := strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
+		testPortMutex.Lock()
+		for i := 0; i < 10; i++ {
+			if _, ok := testPortMap[randomPort]; !ok {
+				break
+			}
+			randomPort = strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
+		}
+		testPortMutex.Unlock()
+		localAddr, err := net.ResolveTCPAddr(network, "0.0.0.0:"+randomPort)
+		if err != nil {
+			return nil, err
+		}
+		dialer.LocalAddr = localAddr
+		return dialer.DialContext(ctx, network, addr)
+	}
+
+	TestDialClient.Transport = &http.Transport{
+		DisableKeepAlives: true,
+		DialContext:       dialContext,
+	}
+}
 
 var once sync.Once
 
@@ -157,7 +200,7 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 			}
 		}
 		return false
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return primary
 }
@@ -273,14 +316,14 @@ func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
 
 // RunTestInPDMode is to run test in pd mode.
 func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
-	s.t.Logf("start test %s in pd mode", s.getTestName())
+	s.t.Logf("start test %s in pd mode", getTestName())
 	if _, ok := s.clusters[pdMode]; !ok {
 		s.startCluster(pdMode)
 	}
 	test(s.clusters[pdMode])
 }
 
-func (s *SchedulingTestEnvironment) getTestName() string {
+func getTestName() string {
 	pc, _, _, _ := runtime.Caller(2)
 	caller := runtime.FuncForPC(pc)
 	if caller == nil || strings.Contains(caller.Name(), "RunTestInTwoModes") {
@@ -303,7 +346,7 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
-	s.t.Logf("start test %s in api mode", s.getTestName())
+	s.t.Logf("start test %s in api mode", getTestName())
 	if _, ok := s.clusters[apiMode]; !ok {
 		s.startCluster(apiMode)
 	}

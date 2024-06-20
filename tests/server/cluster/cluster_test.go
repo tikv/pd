@@ -38,6 +38,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
@@ -179,6 +180,99 @@ func TestDamagedRegion(t *testing.T) {
 	_, err1 := grpcPDClient.StoreHeartbeat(context.Background(), req1)
 	re.NoError(err1)
 	re.Equal(uint64(1), rc.GetOperatorController().OperatorCount(operator.OpAdmin))
+}
+
+func TestRegionStatistics(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 2)
+	defer tc.Destroy()
+	re.NoError(err)
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+
+	region := &metapb.Region{
+		Id:       10,
+		StartKey: []byte("abc"),
+		EndKey:   []byte("xyz"),
+		Peers: []*metapb.Peer{
+			{Id: 101, StoreId: 1},
+			{Id: 102, StoreId: 2},
+			{Id: 103, StoreId: 3},
+			{Id: 104, StoreId: 4, Role: metapb.PeerRole_Learner},
+		},
+	}
+
+	// To put region.
+	regionInfo := core.NewRegionInfo(region, region.Peers[0], core.SetApproximateSize(0))
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+	regions := rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Len(regions, 1)
+
+	// wait for sync region
+	time.Sleep(1000 * time.Millisecond)
+
+	leaderServer.ResignLeader()
+	newLeaderName := tc.WaitLeader()
+	re.NotEqual(newLeaderName, leaderName)
+	leaderServer = tc.GetLeaderServer()
+	rc = leaderServer.GetRaftCluster()
+	r := rc.GetRegion(region.Id)
+	re.NotNil(r)
+	re.True(r.LoadedFromSync())
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Empty(regions)
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Len(regions, 1)
+
+	leaderServer.ResignLeader()
+	newLeaderName = tc.WaitLeader()
+	re.Equal(newLeaderName, leaderName)
+	leaderServer = tc.GetLeaderServer()
+	rc = leaderServer.GetRaftCluster()
+	re.NotNil(r)
+	re.True(r.LoadedFromStorage() || r.LoadedFromSync())
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Empty(regions)
+	regionInfo = regionInfo.Clone(core.SetSource(core.Heartbeat), core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+	rc = leaderServer.GetRaftCluster()
+	r = rc.GetRegion(region.Id)
+	re.NotNil(r)
+	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
+
+	leaderServer.ResignLeader()
+	newLeaderName = tc.WaitLeader()
+	re.NotEqual(newLeaderName, leaderName)
+	leaderServer.ResignLeader()
+	newLeaderName = tc.WaitLeader()
+	re.Equal(newLeaderName, leaderName)
+	leaderServer = tc.GetLeaderServer()
+	rc = leaderServer.GetRaftCluster()
+	r = rc.GetRegion(region.Id)
+	re.NotNil(r)
+	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Empty(regions)
+
+	regionInfo = regionInfo.Clone(core.SetSource(core.Heartbeat), core.SetApproximateSize(30))
+	err = tc.HandleRegionHeartbeat(regionInfo)
+	re.NoError(err)
+	regions = rc.GetRegionStatsByType(statistics.LearnerPeer)
+	re.Len(regions, 1)
 }
 
 func TestStaleRegion(t *testing.T) {
@@ -507,7 +601,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline, getTestDeployPath(storeID))
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
-	err = rc.PutStore(store)
+	err = rc.PutMetaStore(store)
 	re.NoError(err)
 	re.NotNil(tc)
 	rc.Stop()
@@ -568,7 +662,7 @@ func TestNotLeader(t *testing.T) {
 	grpcStatus, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Unavailable, grpcStatus.Code())
-	re.Equal("not leader", grpcStatus.Message())
+	re.ErrorContains(server.ErrNotLeader, grpcStatus.Message())
 }
 
 func TestStoreVersionChange(t *testing.T) {
@@ -659,20 +753,19 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		re.NoError(err)
 		peerID, err := id.Alloc()
 		re.NoError(err)
-		regionID, err := id.Alloc()
-		re.NoError(err)
 		peer := &metapb.Peer{Id: peerID, StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(clusterID),
 			Region: &metapb.Region{
-				Id:    regionID,
+				// mock error msg to trigger stream.Recv()
+				Id:    0,
 				Peers: []*metapb.Peer{peer},
 			},
 			Leader: peer,
 		}
 		err = stream.Send(regionReq)
 		re.NoError(err)
-		// make sure the first store can receive one response
+		// make sure the first store can receive one response(error msg)
 		if i == 0 {
 			wg.Add(1)
 		}
@@ -730,7 +823,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// TODO: enable placementrules
-	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, svr string) { cfg.Replication.EnablePlacementRules = false })
+	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	re.NoError(err)
 
@@ -891,7 +984,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, name string) { cfg.Replication.EnablePlacementRules = false })
+	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	re.NoError(err)
 	err = tc.RunInitialServers()
@@ -941,7 +1034,7 @@ func TestReplicationModeStatus(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.ReplicationMode.ReplicationMode = "dr-auto-sync"
 	})
 
@@ -1240,22 +1333,22 @@ func TestStaleTermHeartbeat(t *testing.T) {
 		Term:            5,
 		ApproximateSize: 10,
 	}
-
-	region := core.RegionFromHeartbeat(regionReq)
+	flowRoundDivisor := leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit
+	region := core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 
 	// Transfer leader
 	regionReq.Term = 6
 	regionReq.Leader = peers[1]
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 
 	// issue #3379
 	regionReq.KeysWritten = uint64(18446744073709551615)  // -1
 	regionReq.BytesWritten = uint64(18446744073709550602) // -1024
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	re.Equal(uint64(0), region.GetKeysWritten())
 	re.Equal(uint64(0), region.GetBytesWritten())
 	err = rc.HandleRegionHeartbeat(region)
@@ -1264,14 +1357,14 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	// Stale heartbeat, update check should fail
 	regionReq.Term = 5
 	regionReq.Leader = peers[0]
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.Error(err)
 
 	// Allow regions that are created by unsafe recover to send a heartbeat, even though they
 	// are considered "stale" because their conf ver and version are both equal to 1.
 	regionReq.Region.RegionEpoch.ConfVer = 1
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 }
@@ -1312,10 +1405,10 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
 		"store_id": 1,
 	})
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
 		"store_id": 2,
 	})
 	// Check scheduler updated.

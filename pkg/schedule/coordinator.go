@@ -52,7 +52,8 @@ const (
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+	// It takes about 1.3 minutes(1000000/128*10/60/1000) to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
+	patrolScanRegionLimit = 128
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
@@ -74,6 +75,7 @@ type Coordinator struct {
 	cancel context.CancelFunc
 
 	schedulersInitialized bool
+	patrolRegionsDuration time.Duration
 
 	cluster           sche.ClusterInformer
 	prepareChecker    *prepareChecker
@@ -108,6 +110,22 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 		pluginInterface:       NewPluginInterface(),
 		diagnosticManager:     diagnostic.NewManager(schedulers, cluster.GetSchedulerConfig()),
 	}
+}
+
+// GetPatrolRegionsDuration returns the duration of the last patrol region round.
+func (c *Coordinator) GetPatrolRegionsDuration() time.Duration {
+	if c == nil {
+		return 0
+	}
+	c.RLock()
+	defer c.RUnlock()
+	return c.patrolRegionsDuration
+}
+
+func (c *Coordinator) setPatrolRegionsDuration(dur time.Duration) {
+	c.Lock()
+	defer c.Unlock()
+	c.patrolRegionsDuration = dur
 }
 
 // markSchedulersInitialized marks the scheduler initialization is finished.
@@ -157,10 +175,11 @@ func (c *Coordinator) PatrolRegions() {
 			ticker.Reset(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
 		case <-c.ctx.Done():
 			patrolCheckRegionsGauge.Set(0)
+			c.setPatrolRegionsDuration(0)
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if c.isSchedulingHalted() {
+		if c.cluster.IsSchedulingHalted() {
 			continue
 		}
 
@@ -178,17 +197,15 @@ func (c *Coordinator) PatrolRegions() {
 		// Updates the label level isolation statistics.
 		c.cluster.UpdateRegionsLabelLevelStats(regions)
 		if len(key) == 0 {
-			patrolCheckRegionsGauge.Set(time.Since(start).Seconds())
+			dur := time.Since(start)
+			patrolCheckRegionsGauge.Set(dur.Seconds())
+			c.setPatrolRegionsDuration(dur)
 			start = time.Now()
 		}
 		failpoint.Inject("break-patrol", func() {
 			failpoint.Break()
 		})
 	}
-}
-
-func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {

@@ -156,18 +156,19 @@ func TestSortedEqual(t *testing.T) {
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 	}
 
+	flowRoundDivisor := 3
 	// test RegionFromHeartbeat
 	for _, testCase := range testCases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 			Region:       &metapb.Region{Id: 100, Peers: pickPeers(testCase.idsA)},
 			DownPeers:    pickPeerStats(testCase.idsA),
 			PendingPeers: pickPeers(testCase.idsA),
-		})
+		}, flowRoundDivisor)
 		regionB := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 			Region:       &metapb.Region{Id: 100, Peers: pickPeers(testCase.idsB)},
 			DownPeers:    pickPeerStats(testCase.idsB),
 			PendingPeers: pickPeers(testCase.idsB),
-		})
+		}, flowRoundDivisor)
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()))
@@ -363,7 +364,7 @@ func TestNeedSync(t *testing.T) {
 	for _, testCase := range testCases {
 		regionA := region.Clone(testCase.optionsA...)
 		regionB := region.Clone(testCase.optionsB...)
-		_, _, _, needSync := RegionGuide(regionA, regionB)
+		_, _, needSync, _ := RegionGuide(ContextTODO(), regionA, regionB)
 		re.Equal(testCase.needSync, needSync)
 	}
 }
@@ -459,9 +460,9 @@ func TestSetRegionConcurrence(t *testing.T) {
 	regions := NewRegionsInfo()
 	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
 	go func() {
-		regions.AtomicCheckAndPutRegion(region)
+		regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 	}()
-	regions.AtomicCheckAndPutRegion(region)
+	regions.AtomicCheckAndPutRegion(ContextTODO(), region)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/core/UpdateSubTree"))
 }
 
@@ -642,21 +643,64 @@ func BenchmarkUpdateBuckets(b *testing.B) {
 }
 
 func BenchmarkRandomRegion(b *testing.B) {
-	regions := NewRegionsInfo()
-	for i := 0; i < 5000000; i++ {
-		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
-		region := NewRegionInfo(&metapb.Region{
-			Id:       uint64(i + 1),
-			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
-		}, peer)
-		origin, overlaps, rangeChanged := regions.SetRegion(region)
-		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		regions.RandLeaderRegion(1, nil)
+	for _, size := range []int{10, 100, 1000, 10000, 100000, 1000000, 10000000} {
+		regions := NewRegionsInfo()
+		for i := 0; i < size; i++ {
+			peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
+			region := NewRegionInfo(&metapb.Region{
+				Id:       uint64(i + 1),
+				Peers:    []*metapb.Peer{peer},
+				StartKey: []byte(fmt.Sprintf("%20d", i)),
+				EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			}, peer)
+			origin, overlaps, rangeChanged := regions.SetRegion(region)
+			regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
+		}
+		b.Run(fmt.Sprintf("random region whole range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.randLeaderRegion(1, nil)
+			}
+		})
+		b.Run(fmt.Sprintf("random regions whole range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.RandLeaderRegions(1, nil)
+			}
+		})
+		ranges := []KeyRange{
+			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
+		}
+		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.randLeaderRegion(1, ranges)
+			}
+		})
+		b.Run(fmt.Sprintf("random regions single range with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.RandLeaderRegions(1, ranges)
+			}
+		})
+		ranges = []KeyRange{
+			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
+			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
+			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
+			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+		}
+		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.randLeaderRegion(1, ranges)
+			}
+		})
+		b.Run(fmt.Sprintf("random regions multiple ranges with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				regions.RandLeaderRegions(1, ranges)
+			}
+		})
 	}
 }
 
@@ -778,26 +822,24 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 	)
 }
 
-const keyLength = 100
+const (
+	peerNum   = 3
+	storeNum  = 10
+	keyLength = 100
+)
 
-func randomBytes(n int) []byte {
-	bytes := make([]byte, n)
-	_, err := rand.Read(bytes)
-	if err != nil {
-		panic(err)
-	}
-	return bytes
-}
-
-func newRegionInfoID(idAllocator id.Allocator) *RegionInfo {
+func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 	var (
 		peers  []*metapb.Peer
 		leader *metapb.Peer
 	)
-	for i := 0; i < 3; i++ {
+	// Randomly select a peer as the leader.
+	leaderIdx := mrand.Intn(peerNum)
+	for i := 0; i < peerNum; i++ {
 		id, _ := idAllocator.Alloc()
-		p := &metapb.Peer{Id: id, StoreId: id}
-		if i == 0 {
+		// Randomly distribute the peers to different stores.
+		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
+		if i == leaderIdx {
 			leader = p
 		}
 		peers = append(peers, p)
@@ -811,21 +853,77 @@ func newRegionInfoID(idAllocator id.Allocator) *RegionInfo {
 			Peers:    peers,
 		},
 		leader,
+		SetApproximateSize(10),
+		SetApproximateKeys(10),
 	)
+}
+
+func randomBytes(n int) []byte {
+	bytes := make([]byte, n)
+	_, err := rand.Read(bytes)
+	if err != nil {
+		panic(err)
+	}
+	return bytes
 }
 
 func BenchmarkAddRegion(b *testing.B) {
 	regions := NewRegionsInfo()
 	idAllocator := mockid.NewIDAllocator()
-	var items []*RegionInfo
-	for i := 0; i < 10000000; i++ {
-		items = append(items, newRegionInfoID(idAllocator))
-	}
+	items := generateRegionItems(idAllocator, 10000000)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
 		regions.UpdateSubTree(items[i], origin, overlaps, rangeChanged)
 	}
+}
+
+func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
+	idAllocator := mockid.NewIDAllocator()
+	for _, size := range []int{10, 100, 1000, 10000, 100000, 1000000, 10000000} {
+		regions := NewRegionsInfo()
+		items := generateRegionItems(idAllocator, size)
+		// Update the subtrees from an empty `*RegionsInfo`.
+		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for idx := range items {
+					regions.UpdateSubTreeOrderInsensitive(items[idx])
+				}
+			}
+		})
+
+		// Update the subtrees from a non-empty `*RegionsInfo` with the same regions,
+		// which means the regions are completely non-overlapped.
+		b.Run(fmt.Sprintf("from non-overlapped regions with size %d", size), func(b *testing.B) {
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for idx := range items {
+					regions.UpdateSubTreeOrderInsensitive(items[idx])
+				}
+			}
+		})
+
+		// Update the subtrees from a non-empty `*RegionsInfo` with different regions,
+		// which means the regions are most likely overlapped.
+		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
+			items = generateRegionItems(idAllocator, size)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for idx := range items {
+					regions.UpdateSubTreeOrderInsensitive(items[idx])
+				}
+			}
+		})
+	}
+}
+
+func generateRegionItems(idAllocator *mockid.IDAllocator, size int) []*RegionInfo {
+	items := make([]*RegionInfo, size)
+	for i := 0; i < size; i++ {
+		items[i] = newRegionInfoIDRandom(idAllocator)
+	}
+	return items
 }
 
 func BenchmarkRegionFromHeartbeat(b *testing.B) {
@@ -853,8 +951,193 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 		PendingPeers:    []*metapb.Peer{peers[1]},
 		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
 	}
+	flowRoundDivisor := 3
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		RegionFromHeartbeat(regionReq)
+		RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	}
+}
+
+func TestUpdateRegionEquivalence(t *testing.T) {
+	re := require.New(t)
+	regionsOld := NewRegionsInfo()
+	regionsNew := NewRegionsInfo()
+	storeNums := 5
+	items := generateTestRegions(1000, storeNums)
+
+	updateRegion := func(item *RegionInfo) {
+		// old way
+		ctx := ContextTODO()
+		regionsOld.AtomicCheckAndPutRegion(ctx, item)
+		// new way
+		newItem := item.Clone()
+		ctx = ContextTODO()
+		regionsNew.CheckAndPutRootTree(ctx, newItem)
+		regionsNew.CheckAndPutSubTree(newItem)
+	}
+	checksEquivalence := func() {
+		re.Equal(regionsOld.GetRegionCount([]byte(""), []byte("")), regionsNew.GetRegionCount([]byte(""), []byte("")))
+		re.Equal(regionsOld.GetRegionSizeByRange([]byte(""), []byte("")), regionsNew.GetRegionSizeByRange([]byte(""), []byte("")))
+		checkRegions(re, regionsOld)
+		checkRegions(re, regionsNew)
+
+		for _, r := range regionsOld.GetRegions() {
+			re.Equal(int32(2), r.GetRef(), fmt.Sprintf("inconsistent region %d", r.GetID()))
+		}
+		for _, r := range regionsNew.GetRegions() {
+			re.Equal(int32(2), r.GetRef(), fmt.Sprintf("inconsistent region %d", r.GetID()))
+		}
+
+		for i := 1; i <= storeNums; i++ {
+			re.Equal(regionsOld.GetStoreRegionCount(uint64(i)), regionsNew.GetStoreRegionCount(uint64(i)))
+			re.Equal(regionsOld.GetStoreLeaderCount(uint64(i)), regionsNew.GetStoreLeaderCount(uint64(i)))
+			re.Equal(regionsOld.GetStorePendingPeerCount(uint64(i)), regionsNew.GetStorePendingPeerCount(uint64(i)))
+			re.Equal(regionsOld.GetStoreLearnerRegionSize(uint64(i)), regionsNew.GetStoreLearnerRegionSize(uint64(i)))
+			re.Equal(regionsOld.GetStoreRegionSize(uint64(i)), regionsNew.GetStoreRegionSize(uint64(i)))
+			re.Equal(regionsOld.GetStoreLeaderRegionSize(uint64(i)), regionsNew.GetStoreLeaderRegionSize(uint64(i)))
+			re.Equal(regionsOld.GetStoreFollowerRegionSize(uint64(i)), regionsNew.GetStoreFollowerRegionSize(uint64(i)))
+		}
+	}
+
+	// Add a region.
+	for _, item := range items {
+		updateRegion(item)
+	}
+	checksEquivalence()
+
+	// Merge regions.
+	itemA, itemB := items[10], items[11]
+	itemMergedAB := itemA.Clone(WithEndKey(itemB.GetEndKey()), WithIncVersion())
+	updateRegion(itemMergedAB)
+	checksEquivalence()
+
+	// Split
+	itemA = itemA.Clone(WithIncVersion(), WithIncVersion())
+	itemB = itemB.Clone(WithIncVersion(), WithIncVersion())
+	updateRegion(itemA)
+	updateRegion(itemB)
+	checksEquivalence()
+}
+
+func generateTestRegions(count int, storeNum int) []*RegionInfo {
+	var items []*RegionInfo
+	for i := 0; i < count; i++ {
+		peer1 := &metapb.Peer{StoreId: uint64(i%storeNum + 1), Id: uint64(i*storeNum + 1)}
+		peer2 := &metapb.Peer{StoreId: uint64((i+1)%storeNum + 1), Id: uint64(i*storeNum + 2)}
+		peer3 := &metapb.Peer{StoreId: uint64((i+2)%storeNum + 1), Id: uint64(i*storeNum + 3)}
+		if i%3 == 0 {
+			peer2.IsWitness = true
+		}
+		region := NewRegionInfo(&metapb.Region{
+			Id:          uint64(i + 1),
+			Peers:       []*metapb.Peer{peer1, peer2, peer3},
+			StartKey:    []byte(fmt.Sprintf("%20d", i*10)),
+			EndKey:      []byte(fmt.Sprintf("%20d", (i+1)*10)),
+			RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
+		},
+			peer1,
+			SetApproximateKeys(10),
+			SetApproximateSize(10))
+		items = append(items, region)
+	}
+	return items
+}
+
+func TestUpdateRegionEventualConsistency(t *testing.T) {
+	re := require.New(t)
+	regionsOld := NewRegionsInfo()
+	regionsNew := NewRegionsInfo()
+	i := 1
+	storeNum := 5
+	peer1 := &metapb.Peer{StoreId: uint64(i%storeNum + 1), Id: uint64(i*storeNum + 1)}
+	peer2 := &metapb.Peer{StoreId: uint64((i+1)%storeNum + 1), Id: uint64(i*storeNum + 2)}
+	peer3 := &metapb.Peer{StoreId: uint64((i+2)%storeNum + 1), Id: uint64(i*storeNum + 3)}
+	item := NewRegionInfo(&metapb.Region{
+		Id:          uint64(i + 1),
+		Peers:       []*metapb.Peer{peer1, peer2, peer3},
+		StartKey:    []byte(fmt.Sprintf("%20d", i*10)),
+		EndKey:      []byte(fmt.Sprintf("%20d", (i+1)*10)),
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
+	},
+		peer1,
+		SetApproximateKeys(10),
+		SetApproximateSize(10),
+	)
+	regionItemA := item
+	regionPendingItemA := regionItemA.Clone(WithPendingPeers([]*metapb.Peer{peer3}))
+
+	regionItemB := regionItemA.Clone()
+	regionPendingItemB := regionItemB.Clone(WithPendingPeers([]*metapb.Peer{peer3}))
+	regionGuide := GenerateRegionGuideFunc(true)
+
+	// Old way
+	{
+		ctx := ContextTODO()
+		regionsOld.AtomicCheckAndPutRegion(ctx, regionPendingItemA)
+		re.Equal(int32(2), regionPendingItemA.GetRef())
+		// check new item
+		saveKV, saveCache, needSync, _ := regionGuide(ctx, regionItemA, regionPendingItemA)
+		re.True(needSync)
+		re.True(saveCache)
+		re.False(saveKV)
+		// update cache
+		regionsOld.AtomicCheckAndPutRegion(ctx, regionItemA)
+		re.Equal(int32(2), regionItemA.GetRef())
+	}
+
+	// New way
+	{
+		// root tree part in order, and updated in order, updated regionPendingItemB first, then regionItemB
+		ctx := ContextTODO()
+		regionsNew.CheckAndPutRootTree(ctx, regionPendingItemB)
+		re.Equal(int32(1), regionPendingItemB.GetRef())
+		ctx = ContextTODO()
+		regionsNew.CheckAndPutRootTree(ctx, regionItemB)
+		re.Equal(int32(1), regionItemB.GetRef())
+		re.Equal(int32(0), regionPendingItemB.GetRef())
+
+		// subtree part missing order, updated regionItemB first, then regionPendingItemB
+		regionsNew.CheckAndPutSubTree(regionItemB)
+		re.Equal(int32(2), regionItemB.GetRef())
+		re.Equal(int32(0), regionPendingItemB.GetRef())
+		regionsNew.UpdateSubTreeOrderInsensitive(regionPendingItemB)
+		re.Equal(int32(1), regionItemB.GetRef())
+		re.Equal(int32(1), regionPendingItemB.GetRef())
+
+		// heartbeat again, no need updates root tree
+		saveKV, saveCache, needSync, _ := regionGuide(ctx, regionItemB, regionItemB)
+		re.False(needSync)
+		re.False(saveCache)
+		re.False(saveKV)
+
+		// but need update sub tree again
+		item := regionsNew.GetRegion(regionItemB.GetID())
+		re.Equal(int32(1), item.GetRef())
+		regionsNew.CheckAndPutSubTree(item)
+		re.Equal(int32(2), item.GetRef())
+	}
+}
+
+func TestCheckAndPutSubTree(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	regions.CheckAndPutSubTree(region)
+	// should failed to put because the root tree is missing
+	re.Equal(0, regions.tree.length())
+}
+
+func TestCntRefAfterResetRegionCache(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	// Put the region first.
+	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	regions.CheckAndPutRegion(region)
+	re.Equal(int32(2), region.GetRef())
+	regions.ResetRegionCache()
+	// Put the region after reset.
+	region = NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	re.Zero(region.GetRef())
+	regions.CheckAndPutRegion(region)
+	re.Equal(int32(2), region.GetRef())
 }

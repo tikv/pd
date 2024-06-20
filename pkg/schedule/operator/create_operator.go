@@ -78,7 +78,7 @@ func CreateRemovePeerOperator(desc string, ci sche.SharedCluster, kind OpKind, r
 }
 
 // CreateTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store.
-func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
+func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, targetStoreIDs []uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck).
 		SetLeader(targetStoreID).
 		SetLeaders(targetStoreIDs).
@@ -86,7 +86,7 @@ func CreateTransferLeaderOperator(desc string, ci sche.SharedCluster, region *co
 }
 
 // CreateForceTransferLeaderOperator creates an operator that transfers the leader from a source store to a target store forcible.
-func CreateForceTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, sourceStoreID uint64, targetStoreID uint64, kind OpKind) (*Operator, error) {
+func CreateForceTransferLeaderOperator(desc string, ci sche.SharedCluster, region *core.RegionInfo, targetStoreID uint64, kind OpKind) (*Operator, error) {
 	return NewBuilder(desc, ci, region, SkipOriginJointStateCheck, SkipPlacementRulesCheck).
 		SetLeader(targetStoreID).
 		EnableForceTargetLeader().
@@ -170,8 +170,8 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
 	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step)
-	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey()))
-	op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey()))
+	op.SetAdditionalInfo("region-start-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey())))
+	op.SetAdditionalInfo("region-end-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey())))
 	return op, nil
 }
 

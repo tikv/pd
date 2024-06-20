@@ -26,10 +26,12 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -76,6 +78,8 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 		RankFormulaVersion:     "v2",
 		ForbidRWType:           "none",
 		SplitThresholds:        0.2,
+		HistorySampleDuration:  typeutil.NewDuration(statistics.DefaultHistorySampleDuration),
+		HistorySampleInterval:  typeutil.NewDuration(statistics.DefaultHistorySampleInterval),
 	}
 	cfg.applyPrioritiesConfig(defaultPrioritiesConfig)
 	return cfg
@@ -104,6 +108,8 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 		RankFormulaVersion:     conf.getRankFormulaVersionLocked(),
 		ForbidRWType:           conf.getForbidRWTypeLocked(),
 		SplitThresholds:        conf.SplitThresholds,
+		HistorySampleDuration:  conf.HistorySampleDuration,
+		HistorySampleInterval:  conf.HistorySampleInterval,
 	}
 }
 
@@ -147,6 +153,9 @@ type hotRegionSchedulerConfig struct {
 	ForbidRWType string `json:"forbid-rw-type,omitempty"`
 	// SplitThresholds is the threshold to split hot region if the first priority flow of on hot region exceeds it.
 	SplitThresholds float64 `json:"split-thresholds"`
+
+	HistorySampleDuration typeutil.Duration `json:"history-sample-duration"`
+	HistorySampleInterval typeutil.Duration `json:"history-sample-interval"`
 }
 
 func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
@@ -305,6 +314,30 @@ func (conf *hotRegionSchedulerConfig) GetRankFormulaVersion() string {
 	return conf.getRankFormulaVersionLocked()
 }
 
+func (conf *hotRegionSchedulerConfig) GetHistorySampleDuration() time.Duration {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.HistorySampleDuration.Duration
+}
+
+func (conf *hotRegionSchedulerConfig) GetHistorySampleInterval() time.Duration {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.HistorySampleInterval.Duration
+}
+
+func (conf *hotRegionSchedulerConfig) SetHistorySampleDuration(d time.Duration) {
+	conf.Lock()
+	defer conf.Unlock()
+	conf.HistorySampleDuration = typeutil.NewDuration(d)
+}
+
+func (conf *hotRegionSchedulerConfig) SetHistorySampleInterval(d time.Duration) {
+	conf.Lock()
+	defer conf.Unlock()
+	conf.HistorySampleInterval = typeutil.NewDuration(d)
+}
+
 func (conf *hotRegionSchedulerConfig) getRankFormulaVersionLocked() string {
 	switch conf.RankFormulaVersion {
 	case "v2":
@@ -342,7 +375,7 @@ func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.R
 	router.ServeHTTP(w, r)
 }
 
-func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, r *http.Request) {
+func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
 	conf.RLock()
 	defer conf.RUnlock()
 	rd := render.New(render.Options{IndentJSON: true})
@@ -426,7 +459,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		return
 	}
 
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

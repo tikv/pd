@@ -132,7 +132,7 @@ func TestPriorityAndDifferentLocalTSO(t *testing.T) {
 	time.Sleep(time.Second * 5)
 
 	// Join a new dc-location
-	pd4, err := cluster.Join(ctx, func(conf *config.Config, serverName string) {
+	pd4, err := cluster.Join(ctx, func(conf *config.Config, _ string) {
 		conf.EnableLocalTSO = true
 		conf.Labels[config.ZoneLabel] = "dc-4"
 	})
@@ -162,10 +162,10 @@ func TestPriorityAndDifferentLocalTSO(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(len(dcLocationConfig))
 	for serverName, dcLocation := range dcLocationConfig {
-		go func(serName, dc string) {
+		go func(name, dc string) {
 			defer wg.Done()
 			testutil.Eventually(re, func() bool {
-				return cluster.WaitAllocatorLeader(dc) == serName
+				return cluster.WaitAllocatorLeader(dc) == name
 			}, testutil.WithWaitFor(90*time.Second), testutil.WithTickInterval(time.Second))
 		}(serverName, dcLocation)
 	}
@@ -188,8 +188,8 @@ func waitAllocatorPriorityCheck(cluster *tests.TestCluster) {
 	wg := sync.WaitGroup{}
 	for _, server := range cluster.GetServers() {
 		wg.Add(1)
-		go func(ser *tests.TestServer) {
-			ser.GetTSOAllocatorManager().PriorityChecker()
+		go func(s *tests.TestServer) {
+			s.GetTSOAllocatorManager().PriorityChecker()
 			wg.Done()
 		}(server)
 	}

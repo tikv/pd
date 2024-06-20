@@ -46,11 +46,11 @@ func (se *StorageEndpoint) saveProto(key string, msg proto.Message) error {
 	return se.Save(key, string(value))
 }
 
-func (se *StorageEndpoint) saveJSON(key string, data interface{}) error {
+func (se *StorageEndpoint) saveJSON(key string, data any) error {
 	return saveJSONInTxn(se /* use the same interface */, key, data)
 }
 
-func saveJSONInTxn(txn kv.Txn, key string, data interface{}) error {
+func saveJSONInTxn(txn kv.Txn, key string, data any) error {
 	value, err := json.Marshal(data)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()

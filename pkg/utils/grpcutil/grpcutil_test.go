@@ -1,6 +1,7 @@
 package grpcutil
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path"
@@ -9,6 +10,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/errs"
+	"google.golang.org/grpc/metadata"
 )
 
 var (
@@ -37,7 +39,6 @@ func TestToTLSConfig(t *testing.T) {
 		}
 	}()
 
-	t.Parallel()
 	re := require.New(t)
 	tlsConfig := TLSConfig{
 		KeyPath:  path.Join(certPath, "pd-server-key.pem"),
@@ -66,4 +67,15 @@ func TestToTLSConfig(t *testing.T) {
 	tlsConfig.SSLCABytes = []byte("invalid ca")
 	_, err = tlsConfig.ToTLSConfig()
 	re.True(errors.ErrorEqual(err, errs.ErrCryptoAppendCertsFromPEM))
+}
+
+func BenchmarkGetForwardedHost(b *testing.B) {
+	// Without forwarded host key
+	md := metadata.Pairs("test", "example.com")
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+
+	// Run the GetForwardedHost function b.N times
+	for i := 0; i < b.N; i++ {
+		GetForwardedHost(ctx)
+	}
 }

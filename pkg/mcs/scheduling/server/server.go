@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -319,6 +320,7 @@ func (s *Server) Close() {
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
+	s.CloseClientConns()
 	s.serverLoopCancel()
 	s.serverLoopWg.Wait()
 
@@ -412,7 +414,18 @@ func (s *Server) startServer() (err error) {
 	// different service modes provided by the same pd-server binary
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
-	s.serviceID = &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
+	if err != nil {
+		deployPath = ""
+	}
+	s.serviceID = &discovery.ServiceRegistryEntry{
+		ServiceAddr:    s.cfg.AdvertiseListenAddr,
+		Version:        versioninfo.PDReleaseVersion,
+		GitHash:        versioninfo.PDGitHash,
+		DeployPath:     deployPath,
+		StartTimestamp: s.StartTimestamp(),
+	}
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))

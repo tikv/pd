@@ -366,7 +366,10 @@ func (m *ModeManager) Run(ctx context.Context) {
 	}()
 
 	go func() {
-		defer wg.Done()
+		defer func() {
+			wg.Done()
+			drStateGauge.Set(0)
+		}()
 		ticker := time.NewTicker(replicateStateInterval)
 		defer ticker.Stop()
 		for {

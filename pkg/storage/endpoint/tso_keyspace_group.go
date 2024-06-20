@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 )
 
@@ -78,6 +79,14 @@ func IsUserKindValid(kind string) bool {
 type KeyspaceGroupMember struct {
 	Address  string `json:"address"`
 	Priority int    `json:"priority"`
+}
+
+// CompareAddress compares the address with the given address.
+// It compares the address without the scheme.
+// Otherwise, it will not work when we update the scheme from http to https.
+// Issue: https://github.com/tikv/pd/issues/8284
+func (m *KeyspaceGroupMember) CompareAddress(addr string) bool {
+	return typeutil.EqualBaseURLs(m.Address, addr)
 }
 
 // SplitState defines the split state of a keyspace group.
@@ -163,7 +172,7 @@ type KeyspaceGroupStorage interface {
 var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
 // LoadKeyspaceGroup loads the keyspace group by ID.
-func (se *StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
+func (*StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
 	value, err := txn.Load(KeyspaceGroupIDPath(id))
 	if err != nil || value == "" {
 		return nil, err
@@ -176,12 +185,12 @@ func (se *StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGr
 }
 
 // SaveKeyspaceGroup saves the keyspace group.
-func (se *StorageEndpoint) SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error {
+func (*StorageEndpoint) SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error {
 	return saveJSONInTxn(txn, KeyspaceGroupIDPath(kg.ID), kg)
 }
 
 // DeleteKeyspaceGroup deletes the keyspace group.
-func (se *StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
+func (*StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
 	return txn.Remove(KeyspaceGroupIDPath(id))
 }
 

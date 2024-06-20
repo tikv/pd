@@ -207,7 +207,6 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage  = true
-	defaultTraceRegionFlow   = true
 	defaultFlowRoundByDigit  = 3 // KB
 	maxTraceFlowRoundByDigit = 5 // 0.1 MB
 	defaultMaxResetTSGap     = 24 * time.Hour
@@ -235,6 +234,7 @@ const (
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
+	defaultLogLevel  = "info"
 
 	defaultServerMemoryLimit          = 0
 	minServerMemoryLimit              = 0
@@ -469,10 +469,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Security.Encryption.Adjust()
 
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = defaultLogFormat
-	}
-
 	c.Controller.Adjust(configMetaData.Child("controller"))
 
 	return nil
@@ -482,6 +478,8 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, defaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, defaultLogLevel)
 }
 
 // Clone returns a cloned configuration.
@@ -547,9 +545,6 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	}
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
-	}
-	if !meta.IsDefined("trace-region-flow") {
-		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
 	if !meta.IsDefined("flow-round-by-digit") {
 		configutil.AdjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
@@ -748,22 +743,22 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.Logger = "zap"
 	var err error
 
-	cfg.LPUrls, err = parseUrls(c.PeerUrls)
+	cfg.ListenPeerUrls, err = parseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.APUrls, err = parseUrls(c.AdvertisePeerUrls)
+	cfg.AdvertisePeerUrls, err = parseUrls(c.AdvertisePeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.LCUrls, err = parseUrls(c.ClientUrls)
+	cfg.ListenClientUrls, err = parseUrls(c.ClientUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.ACUrls, err = parseUrls(c.AdvertiseClientUrls)
+	cfg.AdvertiseClientUrls, err = parseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, err
 	}

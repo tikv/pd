@@ -137,7 +137,7 @@ func TestLogicalOverflow(t *testing.T) {
 	runCase := func(updateInterval time.Duration) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+		cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 			conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
 		})
 		defer cluster.Destroy()
@@ -165,7 +165,7 @@ func TestLogicalOverflow(t *testing.T) {
 			re.NoError(err)
 			if i == 1 {
 				// the 2nd request may (but not must) overflow, as max logical interval is 262144
-				re.Less(time.Since(begin), updateInterval+20*time.Millisecond) // additional 20ms for gRPC latency
+				re.Less(time.Since(begin), updateInterval+50*time.Millisecond) // additional 50ms for gRPC latency
 			}
 		}
 		// the 3rd request must overflow

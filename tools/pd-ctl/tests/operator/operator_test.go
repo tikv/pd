@@ -43,7 +43,7 @@ func TestOperatorTestSuite(t *testing.T) {
 
 func (suite *operatorTestSuite) SetupSuite() {
 	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, serverName string) {
+		func(conf *config.Config, _ string) {
 			// TODO: enable placement rules
 			conf.Replication.MaxReplicas = 2
 			conf.Replication.EnablePlacementRules = false
@@ -232,25 +232,25 @@ func (suite *operatorTestSuite) checkOperator(cluster *pdTests.TestCluster) {
 		})
 	}
 
-	output, err = tests.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "3")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "add", "transfer-region", "1", "2", "3")
 	re.NoError(err)
 	re.Contains(string(output), "not supported")
-	output, err = tests.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "3")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "add", "transfer-region", "1", "2", "follower", "3")
 	re.NoError(err)
 	re.Contains(string(output), "not match")
-	output, err = tests.ExecuteCommand(cmd, "operator", "add", "transfer-peer", "1", "2", "4")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "add", "transfer-peer", "1", "2", "4")
 	re.NoError(err)
 	re.Contains(string(output), "is unhealthy")
-	output, err = tests.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "4", "follower")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "add", "transfer-region", "1", "2", "leader", "4", "follower")
 	re.NoError(err)
 	re.Contains(string(output), "is unhealthy")
-	output, err = tests.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "follower", "leader", "3", "follower")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "add", "transfer-region", "1", "2", "follower", "leader", "3", "follower")
 	re.NoError(err)
 	re.Contains(string(output), "invalid")
-	output, err = tests.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "leader", "2", "follower", "3")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "add", "transfer-region", "1", "leader", "2", "follower", "3")
 	re.NoError(err)
 	re.Contains(string(output), "invalid")
-	output, err = tests.ExecuteCommand(cmd, "operator", "add", "transfer-region", "1", "2", "leader", "3", "follower")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "add", "transfer-region", "1", "2", "leader", "3", "follower")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "operator", "remove", "1")

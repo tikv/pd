@@ -23,6 +23,7 @@ import (
 	"path"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/tests"
 )
 
 const (
@@ -30,19 +31,12 @@ const (
 	schedulerConfigPrefix = "/pd/api/v1/scheduler-config"
 )
 
-// dialClient used to dial http request.
-var dialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
-
 // MustAddScheduler adds a scheduler with HTTP API.
 func MustAddScheduler(
 	re *require.Assertions, serverAddr string,
-	schedulerName string, args map[string]interface{},
+	schedulerName string, args map[string]any,
 ) {
-	request := map[string]interface{}{
+	request := map[string]any{
 		"name": schedulerName,
 	}
 	for arg, val := range args {
@@ -53,7 +47,7 @@ func MustAddScheduler(
 	httpReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s", serverAddr, schedulersPrefix), bytes.NewBuffer(data))
 	re.NoError(err)
 	// Send request.
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)
@@ -65,7 +59,7 @@ func MustAddScheduler(
 func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName string) {
 	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), http.NoBody)
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -77,14 +71,14 @@ func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName strin
 func MustCallSchedulerConfigAPI(
 	re *require.Assertions,
 	method, serverAddr, schedulerName string, args []string,
-	input map[string]interface{},
+	input map[string]any,
 ) {
 	data, err := json.Marshal(input)
 	re.NoError(err)
 	args = append([]string{schedulerConfigPrefix, schedulerName}, args...)
 	httpReq, err := http.NewRequest(method, fmt.Sprintf("%s%s", serverAddr, path.Join(args...)), bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)

@@ -59,6 +59,8 @@ func TestServerTestSuite(t *testing.T) {
 func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
@@ -78,6 +80,8 @@ func (suite *serverTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
@@ -137,7 +141,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 6
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
 	})
 	// change primary
 	primary.Close()
@@ -148,7 +152,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
-			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 6
+			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
 	})
 }
 
@@ -299,14 +303,14 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the API server.
-	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]any{
 		"store_id": 1,
 	})
 	// Check if the evict-leader-scheduler is added.
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
 	// Add a store_id to the evict-leader-scheduler through the API server.
-	err = suite.pdLeader.GetServer().GetRaftCluster().PutStore(
+	err = suite.pdLeader.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
 			Address:       "mock://2",
@@ -317,7 +321,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 		},
 	)
 	re.NoError(err)
-	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]any{
 		"store_id": 2,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
@@ -327,7 +331,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{2})
 	// Add a store_id to the evict-leader-scheduler through the API server by the scheduler handler.
-	api.MustCallSchedulerConfigAPI(re, http.MethodPost, suite.backendEndpoints, schedulers.EvictLeaderName, []string{"config"}, map[string]interface{}{
+	api.MustCallSchedulerConfigAPI(re, http.MethodPost, suite.backendEndpoints, schedulers.EvictLeaderName, []string{"config"}, map[string]any{
 		"name":     schedulers.EvictLeaderName,
 		"store_id": 1,
 	})
@@ -343,7 +347,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
 	// Delete the evict-leader-scheduler through the API server by removing the last store_id.
-	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]any{
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
@@ -352,7 +356,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
 	// Delete the evict-leader-scheduler through the API server.
-	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]interface{}{
+	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]any{
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
@@ -364,9 +368,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	defaultSchedulerNames := []string{
 		schedulers.BalanceLeaderName,
 		schedulers.BalanceRegionName,
-		schedulers.BalanceWitnessName,
 		schedulers.HotRegionName,
-		schedulers.TransferWitnessLeaderName,
 	}
 	checkDisabled := func(name string, shouldDisabled bool) {
 		re.NotNil(schedulersController.GetScheduler(name), name)

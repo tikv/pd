@@ -15,6 +15,7 @@
 package operator
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -64,9 +65,8 @@ func (trk *OpStatusTracker) getTime(s OpStatus) time.Time {
 		return trk.reachTimes[s]
 	} else if trk.current == s {
 		return trk.reachTimes[firstEndStatus]
-	} else {
-		return time.Time{}
 	}
+	return time.Time{}
 }
 
 // To transfer the current status to dst if this transition is valid,
@@ -135,4 +135,36 @@ func (trk *OpStatusTracker) String() string {
 	trk.rw.RLock()
 	defer trk.rw.RUnlock()
 	return OpStatusToString(trk.current)
+}
+
+type opAdditionalInfo struct {
+	syncutil.RWMutex
+	value map[string]string
+}
+
+// SetAdditionalInfo sets additional info with key and value.
+func (o *Operator) SetAdditionalInfo(key string, value string) {
+	o.additionalInfos.Lock()
+	defer o.additionalInfos.Unlock()
+	o.additionalInfos.value[key] = value
+}
+
+// GetAdditionalInfo returns additional info with key.
+func (o *Operator) GetAdditionalInfo(key string) string {
+	o.additionalInfos.RLock()
+	defer o.additionalInfos.RUnlock()
+	return o.additionalInfos.value[key]
+}
+
+// LogAdditionalInfo returns additional info with string
+func (o *Operator) LogAdditionalInfo() string {
+	o.additionalInfos.RLock()
+	defer o.additionalInfos.RUnlock()
+	if len(o.additionalInfos.value) != 0 {
+		additionalInfo, err := json.Marshal(o.additionalInfos.value)
+		if err == nil {
+			return string(additionalInfo)
+		}
+	}
+	return ""
 }

@@ -34,6 +34,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -106,7 +107,7 @@ const (
 type cluster interface {
 	core.StoreSetInformer
 
-	DropCacheAllRegion()
+	ResetRegionCache()
 	AllocID() (uint64, error)
 	BuryStore(storeID uint64, forceBury bool) error
 	GetSchedulerConfig() sc.SchedulerConfigProvider
@@ -492,12 +493,11 @@ func (u *Controller) GetStage() stage {
 }
 
 func (u *Controller) changeStage(stage stage) {
-	u.stage = stage
-	// Halt and resume the scheduling once the running state changed.
-	running := isRunning(stage)
-	if opt := u.cluster.GetSchedulerConfig(); opt.IsSchedulingHalted() != running {
-		opt.SetHaltScheduling(running, "online-unsafe-recovery")
+	// If the running stage changes, update the scheduling allowance status to add or remove "online-unsafe-recovery" halt.
+	if running := isRunning(stage); running != isRunning(u.stage) {
+		u.cluster.GetSchedulerConfig().SetSchedulingAllowanceStatus(running, "online-unsafe-recovery")
 	}
+	u.stage = stage
 
 	var output StageOutput
 	output.Time = time.Now().Format("2006-01-02 15:04:05.000")
@@ -544,7 +544,7 @@ func (u *Controller) changeStage(stage stage) {
 	case Finished:
 		if u.step > 1 {
 			// == 1 means no operation has done, no need to invalid cache
-			u.cluster.DropCacheAllRegion()
+			u.cluster.ResetRegionCache()
 		}
 		output.Info = "Unsafe recovery Finished"
 		output.Details = u.getAffectedTableDigest()
@@ -779,6 +779,12 @@ func (r *regionItem) IsRaftStale(origin *regionItem, u *Controller) bool {
 	cmps := []func(a, b *regionItem) int{
 		func(a, b *regionItem) int {
 			return int(a.report.GetRaftState().GetHardState().GetTerm()) - int(b.report.GetRaftState().GetHardState().GetTerm())
+		},
+		// choose the peer has maximum applied index or last index.
+		func(a, b *regionItem) int {
+			maxIdxA := typeutil.MaxUint64(a.report.GetRaftState().GetLastIndex(), a.report.AppliedIndex)
+			maxIdxB := typeutil.MaxUint64(b.report.GetRaftState().GetLastIndex(), b.report.AppliedIndex)
+			return int(maxIdxA - maxIdxB)
 		},
 		func(a, b *regionItem) int {
 			return int(a.report.GetRaftState().GetLastIndex()) - int(b.report.GetRaftState().GetLastIndex())

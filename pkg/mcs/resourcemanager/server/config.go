@@ -112,10 +112,13 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if rmc == nil {
 		return
 	}
-	rmc.RequestUnit.Adjust()
-
-	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
-	configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
+	rmc.RequestUnit.Adjust(meta.Child("request-unit"))
+	if !meta.IsDefined("degraded-mode-wait-duration") {
+		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
+	}
+	if !meta.IsDefined("ltb-max-wait-duration") {
+		configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
+	}
 	failpoint.Inject("enableDegradedMode", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
 	})
@@ -123,7 +126,6 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of
 // the RRU and WRU cost. This configuration should be modified carefully.
-// TODO: use common config with client size.
 type RequestUnitConfig struct {
 	// ReadBaseCost is the base cost for a read request. No matter how many bytes read/written or
 	// the CPU times taken for a request, this cost is inevitable.
@@ -145,30 +147,30 @@ type RequestUnitConfig struct {
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
-func (ruc *RequestUnitConfig) Adjust() {
+func (ruc *RequestUnitConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if ruc == nil {
 		return
 	}
-	if ruc.ReadBaseCost == 0 {
-		ruc.ReadBaseCost = defaultReadBaseCost
+	if !meta.IsDefined("read-base-cost") {
+		configutil.AdjustFloat64(&ruc.ReadBaseCost, defaultReadBaseCost)
 	}
-	if ruc.ReadPerBatchBaseCost == 0 {
-		ruc.ReadPerBatchBaseCost = defaultReadPerBatchBaseCost
+	if !meta.IsDefined("read-per-batch-base-cost") {
+		configutil.AdjustFloat64(&ruc.ReadPerBatchBaseCost, defaultReadPerBatchBaseCost)
 	}
-	if ruc.ReadCostPerByte == 0 {
-		ruc.ReadCostPerByte = defaultReadCostPerByte
+	if !meta.IsDefined("read-cost-per-byte") {
+		configutil.AdjustFloat64(&ruc.ReadCostPerByte, defaultReadCostPerByte)
 	}
-	if ruc.WriteBaseCost == 0 {
-		ruc.WriteBaseCost = defaultWriteBaseCost
+	if !meta.IsDefined("write-base-cost") {
+		configutil.AdjustFloat64(&ruc.WriteBaseCost, defaultWriteBaseCost)
 	}
-	if ruc.WritePerBatchBaseCost == 0 {
-		ruc.WritePerBatchBaseCost = defaultWritePerBatchBaseCost
+	if !meta.IsDefined("write-per-batch-base-cost") {
+		configutil.AdjustFloat64(&ruc.WritePerBatchBaseCost, defaultWritePerBatchBaseCost)
 	}
-	if ruc.WriteCostPerByte == 0 {
-		ruc.WriteCostPerByte = defaultWriteCostPerByte
+	if !meta.IsDefined("write-cost-per-byte") {
+		configutil.AdjustFloat64(&ruc.WriteCostPerByte, defaultWriteCostPerByte)
 	}
-	if ruc.CPUMsCost == 0 {
-		ruc.CPUMsCost = defaultCPUMsCost
+	if !meta.IsDefined("read-cpu-ms-cost") {
+		configutil.AdjustFloat64(&ruc.CPUMsCost, defaultCPUMsCost)
 	}
 }
 
@@ -202,11 +204,11 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandLineString(flagSet, &c.ListenAddr, "listen-addr")
 	configutil.AdjustCommandLineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
-	return c.Adjust(meta, false)
+	return c.Adjust(meta)
 }
 
 // Adjust is used to adjust the resource manager configurations.
-func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
+func (c *Config) Adjust(meta *toml.MetaData) error {
 	configMetaData := configutil.NewConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
@@ -237,10 +239,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.adjustLog(configMetaData.Child("log"))
 	c.Security.Encryption.Adjust()
 
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = utils.DefaultLogFormat
-	}
-
 	c.Controller.Adjust(configMetaData.Child("controller"))
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
 
@@ -251,6 +249,8 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
 }
 
 // GetName returns the Name

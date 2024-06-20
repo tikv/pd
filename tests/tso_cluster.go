@@ -76,7 +76,7 @@ func RestartTestTSOCluster(
 			defer wg.Done()
 			clean()
 			serverCfg := cluster.servers[addr].GetConfig()
-			newServer, newCleanup, err := NewTSOTestServer(newCluster.ctx, serverCfg)
+			newServer, newCleanup, err := NewTSOTestServer(ctx, serverCfg)
 			serverMap.Store(addr, newServer)
 			cleanupMap.Store(addr, newCleanup)
 			errorMap.Store(addr, err)
@@ -84,7 +84,7 @@ func RestartTestTSOCluster(
 	}
 	wg.Wait()
 
-	errorMap.Range(func(key, value interface{}) bool {
+	errorMap.Range(func(key, value any) bool {
 		if value != nil {
 			err = value.(error)
 			return false

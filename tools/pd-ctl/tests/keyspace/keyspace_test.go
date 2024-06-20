@@ -47,10 +47,11 @@ func TestKeyspace(t *testing.T) {
 	for i := 1; i < 10; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, serverName string) {
+	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -115,6 +116,7 @@ func TestKeyspaceGroupUninitialized(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	tc, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer tc.Destroy()
 	re.NoError(tc.RunInitialServers())
 	tc.WaitLeader()
 	re.NoError(tc.GetLeaderServer().BootstrapCluster())
@@ -165,10 +167,14 @@ func (suite *keyspaceTestSuite) TearDownTest() {
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
-	suite.cancel()
 }
 
-func (suite *keyspaceTestSuite) TestshowKeyspace() {
+func (suite *keyspaceTestSuite) TearDownSuite() {
+	suite.cancel()
+	suite.cluster.Destroy()
+}
+
+func (suite *keyspaceTestSuite) TestShowKeyspace() {
 	re := suite.Require()
 	keyspaceName := "DEFAULT"
 	keyspaceID := uint32(0)

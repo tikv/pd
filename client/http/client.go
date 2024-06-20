@@ -47,7 +47,7 @@ const (
 )
 
 // respHandleFunc is the function to handle the HTTP response.
-type respHandleFunc func(resp *http.Response, res interface{}) error
+type respHandleFunc func(resp *http.Response, res any) error
 
 // clientInner is the inner implementation of the PD HTTP client, which contains some fundamental fields.
 // It is wrapped by the `client` struct to make sure the inner implementation won't be exposed and could
@@ -66,6 +66,8 @@ type clientInner struct {
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
+	// defaultSD indicates whether the client is created with the default service discovery.
+	defaultSD bool
 }
 
 func newClientInner(ctx context.Context, cancel context.CancelFunc, source string) *clientInner {
@@ -89,6 +91,10 @@ func (ci *clientInner) close() {
 	ci.cancel()
 	if ci.cli != nil {
 		ci.cli.CloseIdleConnections()
+	}
+	// only close the service discovery if it's created by the client.
+	if ci.defaultSD && ci.sd != nil {
+		ci.sd.Close()
 	}
 }
 
@@ -114,23 +120,50 @@ func (ci *clientInner) requestWithRetry(
 	headerOpts ...HeaderOption,
 ) error {
 	var (
+		serverURL  string
+		isLeader   bool
 		statusCode int
 		err        error
+		logFields  = append(reqInfo.logFields(), zap.String("source", ci.source))
 	)
 	execFunc := func() error {
+		defer func() {
+			// If the status code is 503, it indicates that there may be PD leader/follower changes.
+			// If the error message contains the leader/primary change information, it indicates that there may be PD leader/primary change.
+			if statusCode == http.StatusServiceUnavailable || errs.IsLeaderChange(err) {
+				ci.sd.ScheduleCheckMemberChanged()
+			}
+			log.Debug("[pd] http request finished", append(logFields,
+				zap.String("server-url", serverURL),
+				zap.Bool("is-leader", isLeader),
+				zap.Int("status-code", statusCode),
+				zap.Error(err))...)
+		}()
 		// It will try to send the request to the PD leader first and then try to send the request to the other PD followers.
 		clients := ci.sd.GetAllServiceClients()
 		if len(clients) == 0 {
 			return errs.ErrClientNoAvailableMember
 		}
+		skipNum := 0
 		for _, cli := range clients {
-			addr := cli.GetHTTPAddress()
-			statusCode, err = ci.doRequest(ctx, addr, reqInfo, headerOpts...)
+			serverURL = cli.GetURL()
+			isLeader = cli.IsConnectedToLeader()
+			if len(reqInfo.targetURL) > 0 && reqInfo.targetURL != serverURL {
+				skipNum++
+				continue
+			}
+			statusCode, err = ci.doRequest(ctx, serverURL, reqInfo, headerOpts...)
 			if err == nil || noNeedRetry(statusCode) {
 				return err
 			}
-			log.Debug("[pd] request addr failed",
-				zap.String("source", ci.source), zap.Bool("is-leader", cli.IsConnectedToLeader()), zap.String("addr", addr), zap.Error(err))
+			log.Debug("[pd] http request url failed", append(logFields,
+				zap.String("server-url", serverURL),
+				zap.Bool("is-leader", isLeader),
+				zap.Int("status-code", statusCode),
+				zap.Error(err))...)
+		}
+		if skipNum == len(clients) {
+			return errs.ErrClientNoTargetMember
 		}
 		return err
 	}
@@ -139,10 +172,11 @@ func (ci *clientInner) requestWithRetry(
 	}
 	// Copy a new backoffer for each request.
 	bo := *reqInfo.bo
-	// Backoffer also needs to check the status code to determine whether to retry.
+	// Set the retryable checker for the backoffer if it's not set.
 	bo.SetRetryableChecker(func(err error) bool {
+		// Backoffer also needs to check the status code to determine whether to retry.
 		return err != nil && !noNeedRetry(statusCode)
-	})
+	}, false)
 	return bo.Exec(ctx, execFunc)
 }
 
@@ -154,26 +188,21 @@ func noNeedRetry(statusCode int) bool {
 
 func (ci *clientInner) doRequest(
 	ctx context.Context,
-	addr string, reqInfo *requestInfo,
+	serverURL string, reqInfo *requestInfo,
 	headerOpts ...HeaderOption,
 ) (int, error) {
 	var (
-		source      = ci.source
 		callerID    = reqInfo.callerID
 		name        = reqInfo.name
-		url         = reqInfo.getURL(addr)
 		method      = reqInfo.method
 		body        = reqInfo.body
 		res         = reqInfo.res
 		respHandler = reqInfo.respHandler
+		url         = reqInfo.getURL(serverURL)
+		logFields   = append(reqInfo.logFields(),
+			zap.String("source", ci.source),
+			zap.String("url", url))
 	)
-	logFields := []zap.Field{
-		zap.String("source", source),
-		zap.String("name", name),
-		zap.String("url", url),
-		zap.String("method", method),
-		zap.String("caller-id", callerID),
-	}
 	log.Debug("[pd] request the http url", logFields...)
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(body))
 	if err != nil {
@@ -214,11 +243,14 @@ func (ci *clientInner) doRequest(
 		if readErr != nil {
 			logFields = append(logFields, zap.NamedError("read-body-error", err))
 		} else {
+			// API server will return a JSON body containing the detailed error message
+			// when the status code is not `http.StatusOK` 200.
+			bs = bytes.TrimSpace(bs)
 			logFields = append(logFields, zap.ByteString("body", bs))
 		}
 
 		log.Error("[pd] request failed with a non-200 status", logFields...)
-		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s'", resp.Status)
+		return resp.StatusCode, errors.Errorf("request pd http api failed with status: '%s', body: '%s'", resp.Status, bs)
 	}
 
 	if res == nil {
@@ -238,6 +270,7 @@ type client struct {
 	callerID    string
 	respHandler respHandleFunc
 	bo          *retry.Backoffer
+	targetURL   string
 }
 
 // ClientOption configures the HTTP client.
@@ -299,10 +332,12 @@ func NewClient(
 	}
 	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
 	if err := sd.Init(); err != nil {
-		log.Error("[pd] init service discovery failed", zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
+		log.Error("[pd] init service discovery failed",
+			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
 		return nil
 	}
 	c.inner.init(sd)
+	c.inner.defaultSD = true
 	return c
 }
 
@@ -321,7 +356,7 @@ func (c *client) WithCallerID(callerID string) Client {
 
 // WithRespHandler sets and returns a new client with the given HTTP response handler.
 func (c *client) WithRespHandler(
-	handler func(resp *http.Response, res interface{}) error,
+	handler func(resp *http.Response, res any) error,
 ) Client {
 	newClient := *c
 	newClient.respHandler = handler
@@ -332,6 +367,13 @@ func (c *client) WithRespHandler(
 func (c *client) WithBackoffer(bo *retry.Backoffer) Client {
 	newClient := *c
 	newClient.bo = bo
+	return &newClient
+}
+
+// WithTargetURL sets and returns a new client with the given target URL.
+func (c *client) WithTargetURL(targetURL string) Client {
+	newClient := *c
+	newClient.targetURL = targetURL
 	return &newClient
 }
 
@@ -355,7 +397,8 @@ func (c *client) request(ctx context.Context, reqInfo *requestInfo, headerOpts .
 	return c.inner.requestWithRetry(ctx, reqInfo.
 		WithCallerID(c.callerID).
 		WithRespHandler(c.respHandler).
-		WithBackoffer(c.bo),
+		WithBackoffer(c.bo).
+		WithTargetURL(c.targetURL),
 		headerOpts...)
 }
 
@@ -375,9 +418,8 @@ func NewHTTPClientWithRequestChecker(checker requestChecker) *http.Client {
 	}
 }
 
-// newClientWithoutInitServiceDiscovery creates a PD HTTP client
-// with the given PD addresses and TLS config without init service discovery.
-func newClientWithoutInitServiceDiscovery(
+// newClientWithMockServiceDiscovery creates a new PD HTTP client with a mock PD service discovery.
+func newClientWithMockServiceDiscovery(
 	source string,
 	pdAddrs []string,
 	opts ...ClientOption,
@@ -388,7 +430,12 @@ func newClientWithoutInitServiceDiscovery(
 	for _, opt := range opts {
 		opt(c)
 	}
-	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
+	sd := pd.NewMockPDServiceDiscovery(pdAddrs, c.inner.tlsConf)
+	if err := sd.Init(); err != nil {
+		log.Error("[pd] init mock service discovery failed",
+			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
+		return nil
+	}
 	c.inner.init(sd)
 	return c
 }

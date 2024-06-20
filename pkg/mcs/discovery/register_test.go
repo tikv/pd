@@ -16,6 +16,8 @@ package discovery
 
 import (
 	"context"
+	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -59,10 +61,21 @@ func TestRegister(t *testing.T) {
 	sr = NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	err = sr.Register()
 	re.NoError(err)
+	fname := testutil.InitTempFileLogger("info")
+	defer os.Remove(fname)
 	for i := 0; i < 3; i++ {
 		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(re, client, sr.key))
-		etcd.Server.HardStop()                  // close the etcd to make the keepalive failed
-		time.Sleep(etcdutil.DefaultDialTimeout) // ensure that the request is timeout
+		etcd.Server.HardStop() // close the etcd to make the keepalive failed
+		// ensure that the request is timeout
+		testutil.Eventually(re, func() bool {
+			content, _ := os.ReadFile(fname)
+			// check log in function `ServiceRegister.Register`
+			// ref https://github.com/tikv/pd/blob/6377b26e4e879e7623fbc1d0b7f1be863dea88ad/pkg/mcs/discovery/register.go#L77
+			// need to both contain `register.go` and `keep alive failed`
+			pattern := regexp.MustCompile(`register.go.*keep alive failed`)
+			matches := pattern.FindAll(content, -1)
+			return len(matches) >= i+1
+		})
 		etcd.Close()
 		etcd, err = embed.StartEtcd(&cfg)
 		re.NoError(err)

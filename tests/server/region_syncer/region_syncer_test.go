@@ -36,11 +36,11 @@ func TestMain(m *testing.M) {
 func TestRegionSyncer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
 
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer func() {
 		cluster.Destroy()
 		cancel()
@@ -73,7 +73,7 @@ func TestRegionSyncer(t *testing.T) {
 	}
 	// merge case
 	// region2 -> region1 -> region0
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region0 version is max(1, max(1, 1)+1)+1=3
 	regions[0] = regions[0].Clone(core.WithEndKey(regions[2].GetEndKey()), core.WithIncVersion(), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[0])
@@ -81,7 +81,7 @@ func TestRegionSyncer(t *testing.T) {
 
 	// merge case
 	// region3 -> region4
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region4 version is max(1, 1)+1=2
 	regions[4] = regions[3].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[4])
@@ -89,7 +89,7 @@ func TestRegionSyncer(t *testing.T) {
 
 	// merge case
 	// region0 -> region4
-	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conver
+	// merge A to B will increases version to max(versionA, versionB)+1, but does not increase conversion
 	// region4 version is max(3, 2)+1=4
 	regions[4] = regions[0].Clone(core.WithEndKey(regions[4].GetEndKey()), core.WithIncVersion())
 	err = rc.HandleRegionHeartbeat(regions[4])
@@ -156,14 +156,14 @@ func TestRegionSyncer(t *testing.T) {
 		re.Equal(region.GetBuckets(), r.GetBuckets())
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/noFastExitSync"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/regionStorageFastFlush"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))
 }
 
 func TestFullSyncWithAddMember(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -207,7 +207,7 @@ func TestPrepareChecker(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -256,7 +256,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.PDServerCfg.UseRegionStorage = true })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
 	defer cluster.Destroy()
 	re.NoError(err)
 

@@ -123,22 +123,23 @@ func WaitAPIServiceReady(s server) error {
 	)
 	ticker := time.NewTicker(RetryIntervalWaitAPIService)
 	defer ticker.Stop()
-	for i := 0; i < MaxRetryTimesWaitAPIService; i++ {
+	retryTimes := 0
+	for {
 		ready, err = isAPIServiceReady(s)
 		if err == nil && ready {
 			return nil
 		}
-		log.Debug("api server is not ready, retrying", errs.ZapError(err), zap.Bool("ready", ready))
 		select {
 		case <-s.Context().Done():
 			return errors.New("context canceled while waiting api server ready")
 		case <-ticker.C:
+			retryTimes++
+			if retryTimes/500 > 0 {
+				log.Warn("api server is not ready, retrying", errs.ZapError(err))
+				retryTimes /= 500
+			}
 		}
 	}
-	if err != nil {
-		log.Warn("failed to check api server ready", errs.ZapError(err))
-	}
-	return errors.Errorf("failed to wait api server ready after retrying %d times", MaxRetryTimesWaitAPIService)
 }
 
 func isAPIServiceReady(s server) (bool, error) {
@@ -177,7 +178,7 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls)
+	etcdClient, err := etcdutil.CreateEtcdClient(tlsConfig, backendUrls, "mcs-etcd-client")
 	if err != nil {
 		return err
 	}
@@ -265,7 +266,9 @@ func StopHTTPServer(s server) {
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
-		s.GetHTTPServer().Shutdown(ctx)
+		if err := s.GetHTTPServer().Shutdown(ctx); err != nil {
+			log.Error("http server graceful shutdown failed", errs.ZapError(err))
+		}
 	}()
 
 	select {
@@ -273,7 +276,9 @@ func StopHTTPServer(s server) {
 	case <-ctx.Done():
 		// Took too long, manually close open transports
 		log.Warn("http server graceful shutdown timeout, forcing close")
-		s.GetHTTPServer().Close()
+		if err := s.GetHTTPServer().Close(); err != nil {
+			log.Warn("http server close failed", errs.ZapError(err))
+		}
 		// concurrent Graceful Shutdown should be interrupted
 		<-ch
 	}
@@ -319,6 +324,6 @@ func StopGRPCServer(s server) {
 
 // Exit exits the program with the given code.
 func Exit(code int) {
-	log.Sync()
+	_ = log.Sync()
 	os.Exit(code)
 }

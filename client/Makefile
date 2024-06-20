@@ -12,20 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-GO_TOOLS_BIN_PATH := $(shell pwd)/../.tools/bin
+ROOT_PATH := $(shell pwd)/..
+GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
 PATH := $(GO_TOOLS_BIN_PATH):$(PATH)
 SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 default: static tidy test
 
-test:
-	CGO_ENABLE=1 go test ./... -race -cover
+test: failpoint-enable
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
 
-basic-test:
-	CGO_ENABLE=1 go test ./...
+basic-test: failpoint-enable
+	CGO_ENABLED=1 go test ./... || { $(MAKE) failpoint-disable && exit 1; }
+	$(MAKE) failpoint-disable
 
 ci-test-job:
-	CGO_ENABLED=1 go test ./... -race -covermode=atomic -coverprofile=covprofile -coverpkg=../... github.com/tikv/pd/client
+	if [ -f covprofile ]; then rm covprofile; fi
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover -covermode=atomic -coverprofile=covprofile -coverpkg=../...
+
+failpoint-enable:
+	cd $(ROOT_PATH) && $(MAKE) failpoint-enable
+
+failpoint-disable:
+	cd $(ROOT_PATH) && $(MAKE) failpoint-disable
 
 install-tools:
 	cd .. && $(MAKE) install-tools
@@ -35,8 +45,6 @@ static: install-tools
 	@ gofmt -s -l -d . 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run -c ../.golangci.yml --verbose ./... --allow-parallel-runners
-	@ echo "revive ..."
-	@ revive -formatter friendly -config ../revive.toml ./...
 
 tidy:
 	@ go mod tidy

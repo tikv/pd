@@ -34,7 +34,7 @@ type memberTestSuite struct {
 	cluster          *tests.TestCluster
 	server           *tests.TestServer
 	backendEndpoints string
-	dialClient       pdClient.Client
+	pdClient         pdClient.Client
 }
 
 func TestMemberTestSuite(t *testing.T) {
@@ -53,7 +53,7 @@ func (suite *memberTestSuite) SetupTest() {
 	suite.server = cluster.GetLeaderServer()
 	re.NoError(suite.server.BootstrapCluster())
 	suite.backendEndpoints = suite.server.GetAddr()
-	suite.dialClient = pdClient.NewClient("mcs-member-test", []string{suite.server.GetAddr()})
+	suite.pdClient = pdClient.NewClient("mcs-member-test", []string{suite.server.GetAddr()})
 
 	// TSO
 	nodes := make(map[string]bs.Server)
@@ -86,17 +86,30 @@ func (suite *memberTestSuite) TearDownTest() {
 	for _, cleanup := range suite.cleanupFunc {
 		cleanup()
 	}
-	suite.dialClient.Close()
+	if suite.pdClient != nil {
+		suite.pdClient.Close()
+	}
 	suite.cluster.Destroy()
 }
 
 func (suite *memberTestSuite) TestMembers() {
 	re := suite.Require()
-	members, err := suite.dialClient.GetMicroServiceMembers(suite.ctx, "tso")
+	members, err := suite.pdClient.GetMicroServiceMembers(suite.ctx, "tso")
 	re.NoError(err)
 	re.Len(members, utils.DefaultKeyspaceGroupReplicaCount)
 
-	members, err = suite.dialClient.GetMicroServiceMembers(suite.ctx, "scheduling")
+	members, err = suite.pdClient.GetMicroServiceMembers(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.Len(members, 3)
+}
+
+func (suite *memberTestSuite) TestPrimary() {
+	re := suite.Require()
+	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
+	re.NoError(err)
+	re.NotEmpty(primary)
+
+	primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, "scheduling")
+	re.NoError(err)
+	re.NotEmpty(primary)
 }

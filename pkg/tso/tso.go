@@ -156,7 +156,7 @@ func (t *timestampOracle) GetTimestampPath() string {
 }
 
 // SyncTimestamp is used to synchronize the timestamp.
-func (t *timestampOracle) SyncTimestamp(leadership *election.Leadership) error {
+func (t *timestampOracle) SyncTimestamp() error {
 	log.Info("start to sync timestamp", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 	t.metrics.syncEvent.Inc()
 
@@ -311,7 +311,7 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 //
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
-func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error {
+func (t *timestampOracle) UpdateTimestamp() error {
 	if !t.isInitialized() {
 		return errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}

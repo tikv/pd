@@ -290,7 +290,7 @@ func (s *state) getNextPrimaryToReset(
 				if member.Priority > maxPriority {
 					maxPriority = member.Priority
 				}
-				if member.Address == localAddress {
+				if member.CompareAddress(localAddress) {
 					localPriority = member.Priority
 				}
 			}
@@ -398,7 +398,7 @@ func NewKeyspaceGroupManager(
 	etcdClient *clientv3.Client,
 	httpClient *http.Client,
 	electionNamePrefix string,
-	tsoServiceKey string,
+	clusterID uint64,
 	legacySvcRootPath string,
 	tsoSvcRootPath string,
 	cfg ServiceConfig,
@@ -417,7 +417,7 @@ func NewKeyspaceGroupManager(
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
-		tsoServiceKey:                tsoServiceKey,
+		tsoServiceKey:                discovery.TSOPath(clusterID),
 		legacySvcRootPath:            legacySvcRootPath,
 		tsoSvcRootPath:               tsoSvcRootPath,
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,
@@ -624,7 +624,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 			member, kg, localPriority, nextGroupID := kgm.getNextPrimaryToReset(groupID, kgm.tsoServiceID.ServiceAddr)
 			if member != nil {
 				aliveTSONodes := make(map[string]struct{})
-				kgm.tsoNodes.Range(func(key, _ interface{}) bool {
+				kgm.tsoNodes.Range(func(key, _ any) bool {
 					aliveTSONodes[key.(string)] = struct{}{}
 					return true
 				})
@@ -667,14 +667,14 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 
 func (kgm *KeyspaceGroupManager) isAssignedToMe(group *endpoint.KeyspaceGroup) bool {
 	return slice.AnyOf(group.Members, func(i int) bool {
-		return group.Members[i].Address == kgm.tsoServiceID.ServiceAddr
+		return group.Members[i].CompareAddress(kgm.tsoServiceID.ServiceAddr)
 	})
 }
 
 // updateKeyspaceGroup applies the given keyspace group. If the keyspace group is just assigned to
 // this host/pod, it will join the primary election.
 func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGroup) {
-	if err := kgm.checkKeySpaceGroupID(group.ID); err != nil {
+	if err := checkKeySpaceGroupID(group.ID); err != nil {
 		log.Warn("keyspace group ID is invalid, ignore it", zap.Error(err))
 		return
 	}
@@ -751,7 +751,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			kgm.groupUpdateRetryList[group.ID] = group
 			return
 		}
-		participant.SetCampaignChecker(func(leadership *election.Leadership) bool {
+		participant.SetCampaignChecker(func(*election.Leadership) bool {
 			return splitSourceAM.GetMember().IsLeader()
 		})
 	}
@@ -997,7 +997,7 @@ func (kgm *KeyspaceGroupManager) exitElectionMembership(group *endpoint.Keyspace
 
 // GetAllocatorManager returns the AllocatorManager of the given keyspace group
 func (kgm *KeyspaceGroupManager) GetAllocatorManager(keyspaceGroupID uint32) (*AllocatorManager, error) {
-	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
 	if am, _ := kgm.getKeyspaceGroupMeta(keyspaceGroupID); am != nil {
@@ -1022,7 +1022,7 @@ func (kgm *KeyspaceGroupManager) FindGroupByKeyspaceID(
 func (kgm *KeyspaceGroupManager) GetElectionMember(
 	keyspaceID, keyspaceGroupID uint32,
 ) (ElectionMember, error) {
-	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return nil, err
 	}
 	am, _, _, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
@@ -1052,7 +1052,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	keyspaceID, keyspaceGroupID uint32,
 	dcLocation string, count uint32,
 ) (ts pdpb.Timestamp, curKeyspaceGroupID uint32, err error) {
-	if err := kgm.checkKeySpaceGroupID(keyspaceGroupID); err != nil {
+	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
 	}
 	am, _, curKeyspaceGroupID, err := kgm.getKeyspaceGroupMetaWithCheck(keyspaceID, keyspaceGroupID)
@@ -1086,7 +1086,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	return ts, curKeyspaceGroupID, err
 }
 
-func (kgm *KeyspaceGroupManager) checkKeySpaceGroupID(id uint32) error {
+func checkKeySpaceGroupID(id uint32) error {
 	if id < mcsutils.MaxKeyspaceGroupCountInUse {
 		return nil
 	}
@@ -1439,7 +1439,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
 	failpoint.Inject("fastGroupSplitPatroller", func() {
-		patrolInterval = 200 * time.Millisecond
+		patrolInterval = 3 * time.Second
 	})
 	ticker := time.NewTicker(patrolInterval)
 	defer ticker.Stop()

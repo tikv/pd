@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/client/retry"
@@ -48,16 +49,19 @@ type Client interface {
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
+	DeleteStore(context.Context, uint64) error
 	SetStoreLabels(context.Context, int64, map[string]string) error
+	GetHealthStatus(context.Context) ([]Health, error)
 	/* Config-related interfaces */
-	GetConfig(context.Context) (map[string]interface{}, error)
-	SetConfig(context.Context, map[string]interface{}, ...float64) error
-	GetScheduleConfig(context.Context) (map[string]interface{}, error)
-	SetScheduleConfig(context.Context, map[string]interface{}) error
+	GetConfig(context.Context) (map[string]any, error)
+	SetConfig(context.Context, map[string]any, ...float64) error
+	GetScheduleConfig(context.Context) (map[string]any, error)
+	SetScheduleConfig(context.Context, map[string]any) error
 	GetClusterVersion(context.Context) (string, error)
 	GetCluster(context.Context) (*metapb.Cluster, error)
 	GetClusterStatus(context.Context) (*ClusterState, error)
-	GetReplicateConfig(context.Context) (map[string]interface{}, error)
+	GetStatus(context.Context) (*State, error)
+	GetReplicateConfig(context.Context) (map[string]any, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
@@ -91,7 +95,18 @@ type Client interface {
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
 	/* Micro Service interfaces */
-	GetMicroServiceMembers(context.Context, string) ([]string, error)
+	GetMicroServiceMembers(context.Context, string) ([]MicroServiceMember, error)
+	GetMicroServicePrimary(context.Context, string) (string, error)
+	DeleteOperators(context.Context) error
+
+	/* Keyspace interface */
+
+	// UpdateKeyspaceGCManagementType update the `gc_management_type` in keyspace meta config.
+	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a global gc worker to calculate a global gc safe point.
+	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCManagementType *KeyspaceGCManagementTypeConfig) error
+	GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error)
 
 	/* Client-related methods */
 	// WithCallerID sets and returns a new client with the given caller ID.
@@ -100,9 +115,11 @@ type Client interface {
 	// This allows the caller to customize how the response is handled, including error handling logic.
 	// Additionally, it is important for the caller to handle the content of the response body properly
 	// in order to ensure that it can be read and marshaled correctly into `res`.
-	WithRespHandler(func(resp *http.Response, res interface{}) error) Client
+	WithRespHandler(func(resp *http.Response, res any) error) Client
 	// WithBackoffer sets and returns a new client with the given backoffer.
 	WithBackoffer(*retry.Backoffer) Client
+	// WithTargetURL sets and returns a new client with the given target URL.
+	WithTargetURL(string) Client
 	// Close gracefully closes the HTTP client.
 	Close()
 }
@@ -322,9 +339,23 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 		WithBody(jsonInput))
 }
 
+// GetHealthStatus gets the health status of the cluster.
+func (c *client) GetHealthStatus(ctx context.Context) ([]Health, error) {
+	var healths []Health
+	err := c.request(ctx, newRequestInfo().
+		WithName(getHealthStatusName).
+		WithURI(health).
+		WithMethod(http.MethodGet).
+		WithResp(&healths))
+	if err != nil {
+		return nil, err
+	}
+	return healths, nil
+}
+
 // GetConfig gets the configurations.
-func (c *client) GetConfig(ctx context.Context) (map[string]interface{}, error) {
-	var config map[string]interface{}
+func (c *client) GetConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getConfigName).
 		WithURI(Config).
@@ -337,7 +368,7 @@ func (c *client) GetConfig(ctx context.Context) (map[string]interface{}, error) 
 }
 
 // SetConfig sets the configurations. ttlSecond is optional.
-func (c *client) SetConfig(ctx context.Context, config map[string]interface{}, ttlSecond ...float64) error {
+func (c *client) SetConfig(ctx context.Context, config map[string]any, ttlSecond ...float64) error {
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return errors.Trace(err)
@@ -356,8 +387,8 @@ func (c *client) SetConfig(ctx context.Context, config map[string]interface{}, t
 }
 
 // GetScheduleConfig gets the schedule configurations.
-func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{}, error) {
-	var config map[string]interface{}
+func (c *client) GetScheduleConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getScheduleConfigName).
 		WithURI(ScheduleConfig).
@@ -370,7 +401,7 @@ func (c *client) GetScheduleConfig(ctx context.Context) (map[string]interface{},
 }
 
 // SetScheduleConfig sets the schedule configurations.
-func (c *client) SetScheduleConfig(ctx context.Context, config map[string]interface{}) error {
+func (c *client) SetScheduleConfig(ctx context.Context, config map[string]any) error {
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return errors.Trace(err)
@@ -408,6 +439,14 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*StoreInfo, erro
 		return nil, err
 	}
 	return &store, nil
+}
+
+// DeleteStore deletes the store by ID.
+func (c *client) DeleteStore(ctx context.Context, storeID uint64) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteStoreName).
+		WithURI(StoreByID(storeID)).
+		WithMethod(http.MethodDelete))
 }
 
 // GetClusterVersion gets the cluster version.
@@ -452,9 +491,24 @@ func (c *client) GetClusterStatus(ctx context.Context) (*ClusterState, error) {
 	return clusterStatus, nil
 }
 
+// GetStatus gets the status of PD.
+func (c *client) GetStatus(ctx context.Context) (*State, error) {
+	var status *State
+	err := c.request(ctx, newRequestInfo().
+		WithName(getStatusName).
+		WithURI(Status).
+		WithMethod(http.MethodGet).
+		WithResp(&status),
+		WithAllowFollowerHandle())
+	if err != nil {
+		return nil, err
+	}
+	return status, nil
+}
+
 // GetReplicateConfig gets the replication configurations.
-func (c *client) GetReplicateConfig(ctx context.Context) (map[string]interface{}, error) {
-	var config map[string]interface{}
+func (c *client) GetReplicateConfig(ctx context.Context) (map[string]any, error) {
+	var config map[string]any
 	err := c.request(ctx, newRequestInfo().
 		WithName(getReplicateConfigName).
 		WithURI(ReplicateConfig).
@@ -694,7 +748,7 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 
 // CreateScheduler creates a scheduler to PD cluster.
 func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
-	inputJSON, err := json.Marshal(map[string]interface{}{
+	inputJSON, err := json.Marshal(map[string]any{
 		"name":     name,
 		"store_id": storeID,
 	})
@@ -854,8 +908,8 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 }
 
 // GetMicroServiceMembers gets the members of the microservice.
-func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]string, error) {
-	var members []string
+func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]MicroServiceMember, error) {
+	var members []MicroServiceMember
 	err := c.request(ctx, newRequestInfo().
 		WithName(getMicroServiceMembersName).
 		WithURI(MicroServiceMembers(service)).
@@ -865,6 +919,17 @@ func (c *client) GetMicroServiceMembers(ctx context.Context, service string) ([]
 		return nil, err
 	}
 	return members, nil
+}
+
+// GetMicroServicePrimary gets the primary of the microservice.
+func (c *client) GetMicroServicePrimary(ctx context.Context, service string) (string, error) {
+	var primary string
+	err := c.request(ctx, newRequestInfo().
+		WithName(getMicroServicePrimaryName).
+		WithURI(MicroServicePrimary(service)).
+		WithMethod(http.MethodGet).
+		WithResp(&primary))
+	return primary, err
 }
 
 // GetPDVersion gets the release version of the PD binary.
@@ -878,4 +943,57 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 		WithMethod(http.MethodGet).
 		WithResp(&ver))
 	return ver.Version, err
+}
+
+// DeleteOperators deletes the running operators.
+func (c *client) DeleteOperators(ctx context.Context) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteOperators).
+		WithURI(operators).
+		WithMethod(http.MethodDelete))
+}
+
+// UpdateKeyspaceGCManagementType patches the keyspace config.
+func (c *client) UpdateKeyspaceGCManagementType(ctx context.Context, keyspaceName string, keyspaceGCmanagementType *KeyspaceGCManagementTypeConfig) error {
+	keyspaceConfigPatchJSON, err := json.Marshal(keyspaceGCmanagementType)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(UpdateKeyspaceGCManagementTypeName).
+		WithURI(GetUpdateKeyspaceConfigURL(keyspaceName)).
+		WithMethod(http.MethodPatch).
+		WithBody(keyspaceConfigPatchJSON))
+}
+
+// GetKeyspaceMetaByName get the given keyspace meta.
+func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string) (*keyspacepb.KeyspaceMeta, error) {
+	var (
+		tempKeyspaceMeta tempKeyspaceMeta
+		keyspaceMetaPB   keyspacepb.KeyspaceMeta
+	)
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetKeyspaceMetaByNameName).
+		WithURI(GetKeyspaceMetaByNameURL(keyspaceName)).
+		WithMethod(http.MethodGet).
+		WithResp(&tempKeyspaceMeta))
+
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceState, err := stringToKeyspaceState(tempKeyspaceMeta.State)
+	if err != nil {
+		return nil, err
+	}
+
+	keyspaceMetaPB = keyspacepb.KeyspaceMeta{
+		Name:           tempKeyspaceMeta.Name,
+		Id:             tempKeyspaceMeta.ID,
+		Config:         tempKeyspaceMeta.Config,
+		CreatedAt:      tempKeyspaceMeta.CreatedAt,
+		StateChangedAt: tempKeyspaceMeta.StateChangedAt,
+		State:          keyspaceState,
+	}
+	return &keyspaceMetaPB, nil
 }

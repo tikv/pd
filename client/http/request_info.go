@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"github.com/tikv/pd/client/retry"
+	"go.uber.org/zap"
 )
 
 // The following constants are the names of the requests.
@@ -38,7 +39,9 @@ const (
 	getRegionStatusByKeyRangeName           = "GetRegionStatusByKeyRange"
 	getStoresName                           = "GetStores"
 	getStoreName                            = "GetStore"
+	deleteStoreName                         = "DeleteStore"
 	setStoreLabelsName                      = "SetStoreLabels"
+	getHealthStatusName                     = "GetHealthStatus"
 	getConfigName                           = "GetConfig"
 	setConfigName                           = "SetConfig"
 	getScheduleConfigName                   = "GetScheduleConfig"
@@ -46,6 +49,7 @@ const (
 	getClusterVersionName                   = "GetClusterVersion"
 	getClusterName                          = "GetCluster"
 	getClusterStatusName                    = "GetClusterStatus"
+	getStatusName                           = "GetStatus"
 	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"
@@ -70,11 +74,15 @@ const (
 	accelerateScheduleInBatchName           = "AccelerateScheduleInBatch"
 	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
+	getMicroServicePrimaryName              = "GetMicroServicePrimary"
 	getPDVersionName                        = "GetPDVersion"
 	resetTSName                             = "ResetTS"
 	resetBaseAllocIDName                    = "ResetBaseAllocID"
 	setSnapshotRecoveringMarkName           = "SetSnapshotRecoveringMark"
 	deleteSnapshotRecoveringMarkName        = "DeleteSnapshotRecoveringMark"
+	deleteOperators                         = "DeleteOperators"
+	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
+	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
 )
 
 type requestInfo struct {
@@ -83,9 +91,10 @@ type requestInfo struct {
 	uri         string
 	method      string
 	body        []byte
-	res         interface{}
+	res         any
 	respHandler respHandleFunc
 	bo          *retry.Backoffer
+	targetURL   string
 }
 
 // newRequestInfo creates a new request info.
@@ -124,7 +133,7 @@ func (ri *requestInfo) WithBody(body []byte) *requestInfo {
 }
 
 // WithResp sets the response struct of the request.
-func (ri *requestInfo) WithResp(res interface{}) *requestInfo {
+func (ri *requestInfo) WithResp(res any) *requestInfo {
 	ri.res = res
 	return ri
 }
@@ -141,6 +150,22 @@ func (ri *requestInfo) WithBackoffer(bo *retry.Backoffer) *requestInfo {
 	return ri
 }
 
+// WithTargetURL sets the target URL of the request.
+func (ri *requestInfo) WithTargetURL(targetURL string) *requestInfo {
+	ri.targetURL = targetURL
+	return ri
+}
+
 func (ri *requestInfo) getURL(addr string) string {
 	return fmt.Sprintf("%s%s", addr, ri.uri)
+}
+
+func (ri *requestInfo) logFields() []zap.Field {
+	return []zap.Field{
+		zap.String("caller-id", ri.callerID),
+		zap.String("name", ri.name),
+		zap.String("uri", ri.uri),
+		zap.String("method", ri.method),
+		zap.String("target-url", ri.targetURL),
+	}
 }

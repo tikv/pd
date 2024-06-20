@@ -15,6 +15,12 @@
 package simulator
 
 import (
+	"context"
+	"fmt"
+	"math/rand"
+	"net/http"
+	"sync"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/core"
@@ -30,6 +36,7 @@ type Event interface {
 
 // EventRunner includes all events.
 type EventRunner struct {
+	sync.RWMutex
 	events     []Event
 	raftEngine *RaftEngine
 }
@@ -46,6 +53,33 @@ func NewEventRunner(events []cases.EventDescriptor, raftEngine *RaftEngine) *Eve
 	return er
 }
 
+type eventHandler struct {
+	er *EventRunner
+}
+
+func newEventHandler(er *EventRunner) *eventHandler {
+	return &eventHandler{
+		er: er,
+	}
+}
+
+func (e *eventHandler) createEvent(w http.ResponseWriter, r *http.Request) {
+	event := r.URL.Query().Get("event")
+	if len(event) < 1 {
+		fmt.Fprintf(w, "no given event")
+		return
+	}
+	switch event {
+	case "add-node":
+		e.er.addEvent(&AddNode{})
+		return
+	case "down-node":
+		e.er.addEvent(&DownNode{})
+		return
+	default:
+	}
+}
+
 func parserEvent(e cases.EventDescriptor) Event {
 	switch t := e.(type) {
 	case *cases.WriteFlowOnSpotDescriptor:
@@ -54,16 +88,20 @@ func parserEvent(e cases.EventDescriptor) Event {
 		return &WriteFlowOnRegion{descriptor: t}
 	case *cases.ReadFlowOnRegionDescriptor:
 		return &ReadFlowOnRegion{descriptor: t}
-	case *cases.AddNodesDescriptor:
-		return &AddNodes{descriptor: t}
-	case *cases.DeleteNodesDescriptor:
-		return &DeleteNodes{descriptor: t}
 	}
 	return nil
 }
 
+func (er *EventRunner) addEvent(e Event) {
+	er.Lock()
+	defer er.Unlock()
+	er.events = append(er.events, e)
+}
+
 // Tick ticks the event run
 func (er *EventRunner) Tick(tickCount int64) {
+	er.Lock()
+	defer er.Unlock()
 	var finishedIndex int
 	for i, e := range er.events {
 		isFinished := e.Run(er.raftEngine, tickCount)
@@ -126,75 +164,79 @@ func (e *ReadFlowOnRegion) Run(raft *RaftEngine, tickCount int64) bool {
 	return false
 }
 
-// AddNodes adds nodes.
-type AddNodes struct {
-	descriptor *cases.AddNodesDescriptor
-}
+// AddNode adds nodes.
+type AddNode struct{}
 
 // Run implements the event interface.
-func (e *AddNodes) Run(raft *RaftEngine, tickCount int64) bool {
-	id := e.descriptor.Step(tickCount)
-	if id == 0 {
-		return false
-	}
-
-	if _, ok := raft.conn.Nodes[id]; ok {
-		simutil.Logger.Info("node has already existed", zap.Uint64("node-id", id))
-		return false
-	}
-
+func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 	config := raft.storeConfig
+	nodes := raft.conn.getNodes()
+	id, err := nodes[0].client.AllocID(context.TODO())
+	if err != nil {
+		simutil.Logger.Error("alloc node id failed", zap.Error(err))
+		return false
+	}
 	s := &cases.Store{
 		ID:       id,
 		Status:   metapb.StoreState_Up,
 		Capacity: uint64(config.RaftStore.Capacity),
 		Version:  config.StoreVersion,
 	}
-	n, err := NewNode(s, raft.conn.pdAddr, config)
+	n, err := NewNode(s, config)
 	if err != nil {
-		simutil.Logger.Error("add node failed", zap.Uint64("node-id", id), zap.Error(err))
+		simutil.Logger.Error("create node failed", zap.Error(err))
 		return false
 	}
-	raft.conn.Nodes[id] = n
+
+	raft.conn.Nodes[s.ID] = n
 	n.raftEngine = raft
+	n.client = NewRetryClient(n)
+
 	err = n.Start()
 	if err != nil {
-		simutil.Logger.Error("start node failed", zap.Uint64("node-id", id), zap.Error(err))
+		delete(raft.conn.Nodes, s.ID)
+		simutil.Logger.Error("start node failed", zap.Uint64("node-id", s.ID), zap.Error(err))
+		return false
 	}
-	return false
+	return true
 }
 
-// DeleteNodes deletes nodes.
-type DeleteNodes struct {
-	descriptor *cases.DeleteNodesDescriptor
-}
+// DownNode deletes nodes.
+type DownNode struct{}
 
 // Run implements the event interface.
-func (e *DeleteNodes) Run(raft *RaftEngine, tickCount int64) bool {
-	id := e.descriptor.Step(tickCount)
-	if id == 0 {
+func (*DownNode) Run(raft *RaftEngine, _ int64) bool {
+	nodes := raft.conn.getNodes()
+	if len(nodes) == 0 {
+		simutil.Logger.Error("can not find any node")
 		return false
 	}
-
-	node := raft.conn.Nodes[id]
+	i := rand.Intn(len(nodes))
+	node := nodes[i]
 	if node == nil {
-		simutil.Logger.Error("node is not existed", zap.Uint64("node-id", id))
+		simutil.Logger.Error("node is not existed", zap.Uint64("node-id", node.Id))
 		return false
 	}
-	delete(raft.conn.Nodes, id)
+	delete(raft.conn.Nodes, node.Id)
+	// delete store
+	err := PDHTTPClient.DeleteStore(context.Background(), node.Id)
+	if err != nil {
+		simutil.Logger.Error("put store failed", zap.Uint64("node-id", node.Id), zap.Error(err))
+		return false
+	}
 	node.Stop()
 
 	regions := raft.GetRegions()
 	for _, region := range regions {
 		storeIDs := region.GetStoreIDs()
-		if _, ok := storeIDs[id]; ok {
+		if _, ok := storeIDs[node.Id]; ok {
 			downPeer := &pdpb.PeerStats{
-				Peer:        region.GetStorePeer(id),
+				Peer:        region.GetStorePeer(node.Id),
 				DownSeconds: 24 * 60 * 60,
 			}
 			region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
 			raft.SetRegion(region)
 		}
 	}
-	return false
+	return true
 }

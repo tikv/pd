@@ -45,6 +45,7 @@ import (
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestMain(m *testing.M) {
@@ -103,20 +104,20 @@ func (suite *tsoServerTestSuite) TestTSOServerStartAndStopNormally() {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithInsecure())
+	cc, err := grpc.DialContext(suite.ctx, s.GetAddr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	cc.Close()
 
 	url := s.GetAddr() + tsoapi.APIPathPrefix + "/admin/reset-ts"
 	// Test reset ts
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
-	err = testutil.CheckPostJSON(dialClient, url, input,
+	err = testutil.CheckPostJSON(tests.TestDialClient, url, input,
 		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"))
 	re.NoError(err)
 
 	// Test reset ts with invalid tso
 	input = []byte(`{}`)
-	err = testutil.CheckPostJSON(dialClient, suite.backendEndpoints+"/pd/api/v1/admin/reset-ts", input,
+	err = testutil.CheckPostJSON(tests.TestDialClient, suite.backendEndpoints+"/pd/api/v1/admin/reset-ts", input,
 		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"))
 	re.NoError(err)
 }
@@ -186,6 +187,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	defer cleanup()
 
 	cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV2(""), []string{backendEndpoints})
+	defer cli.Close()
 	physical, logical, err := cli.GetTS(ctx)
 	re.NoError(err)
 	ts := tsoutil.ComposeTS(physical, logical)
@@ -581,7 +583,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 
 	// check the default keyspace group
 	check := func() {
-		resp, err := http.Get(suite.pdLeader.GetServer().GetConfig().AdvertiseClientUrls + "/pd/api/v2/tso/keyspace-groups")
+		resp, err := tests.TestDialClient.Get(suite.pdLeader.GetServer().GetConfig().AdvertiseClientUrls + "/pd/api/v2/tso/keyspace-groups")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)

@@ -85,7 +85,7 @@ func (m *EmbeddedEtcdMember) Name() string {
 }
 
 // GetMember returns the member.
-func (m *EmbeddedEtcdMember) GetMember() interface{} {
+func (m *EmbeddedEtcdMember) GetMember() any {
 	return m.member
 }
 
@@ -182,15 +182,16 @@ func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
 // and make it become a PD leader.
 // leader should be changed when campaign leader frequently.
 func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
+	m.leadership.AddCampaignTimes()
 	failpoint.Inject("skipCampaignLeaderCheck", func() {
 		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
 	})
 
-	if m.leadership.GetCampaignTimesNum() >= campaignLeaderFrequencyTimes {
-		m.leadership.ResetCampaignTimes()
+	if m.leadership.GetCampaignTimesNum() > campaignLeaderFrequencyTimes {
 		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
 			return err
 		}
+		m.leadership.ResetCampaignTimes()
 		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
 	}
 

@@ -21,12 +21,13 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
 
-func newLabelNotMatch1() *Case {
+func newLabelNotMatch1(_ *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"host"}
 
@@ -62,7 +63,7 @@ func newLabelNotMatch1() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
@@ -88,7 +89,7 @@ func newLabelNotMatch1() *Case {
 	return &simCase
 }
 
-func newLabelIsolation1() *Case {
+func newLabelIsolation1(_ *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"host"}
 
@@ -128,7 +129,7 @@ func newLabelIsolation1() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
@@ -154,7 +155,7 @@ func newLabelIsolation1() *Case {
 	return &simCase
 }
 
-func newLabelIsolation2() *Case {
+func newLabelIsolation2(_ *sc.SimConfig) *Case {
 	var simCase Case
 	simCase.Labels = []string{"dc", "zone", "host"}
 
@@ -189,7 +190,7 @@ func newLabelIsolation2() *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
 		res := true
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)

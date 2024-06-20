@@ -120,18 +120,18 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 		err = os.Rename(certsDirExp, certsDir)
 		re.NoError(err)
 	}
-	testTLSReload(re, ctx, cloneFunc, replaceFunc, revertFunc)
+	testTLSReload(ctx, re, cloneFunc, replaceFunc, revertFunc)
 }
 
 func testTLSReload(
-	re *require.Assertions,
 	ctx context.Context,
+	re *require.Assertions,
 	cloneFunc func() transport.TLSInfo,
 	replaceFunc func(),
 	revertFunc func()) {
 	tlsInfo := cloneFunc()
 	// 1. start cluster with valid certs
-	clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) {
+	clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Security.TLSConfig = grpcutil.TLSConfig{
 			KeyPath:  tlsInfo.KeyFile,
 			CertPath: tlsInfo.CertFile,
@@ -178,8 +178,8 @@ func testTLSReload(
 				dcancel()
 				return
 			}
-			dcancel()
 			cli.Close()
+			dcancel()
 		}
 	}()
 
@@ -212,12 +212,13 @@ func testTLSReload(
 	caData, certData, keyData := loadTLSContent(re,
 		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
 	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
-	_, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
+	cli, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
 		SSLCABytes:   caData,
 		SSLCertBytes: certData,
 		SSLKEYBytes:  keyData,
 	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 	re.NoError(err)
+	defer cli.Close()
 	cancel1()
 }
 

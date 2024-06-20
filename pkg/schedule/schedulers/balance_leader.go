@@ -74,7 +74,7 @@ type balanceLeaderSchedulerConfig struct {
 	Batch int `json:"batch"`
 }
 
-func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{}) {
+func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -93,7 +93,7 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, interface{})
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
 		return http.StatusOK, "Config is updated."
 	}
-	m := make(map[string]interface{})
+	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
@@ -164,7 +164,7 @@ func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http
 	handler.rd.JSON(w, httpCode, v)
 }
 
-func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -208,6 +208,13 @@ func (l *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 // BalanceLeaderCreateOption is used to create a scheduler with an option.
 type BalanceLeaderCreateOption func(s *balanceLeaderScheduler)
 
+// WithBalanceLeaderFilterCounterName sets the filter counter name for the scheduler.
+func WithBalanceLeaderFilterCounterName(name string) BalanceLeaderCreateOption {
+	return func(s *balanceLeaderScheduler) {
+		s.filterCounter.SetScope(name)
+	}
+}
+
 // WithBalanceLeaderName sets the name for the scheduler.
 func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 	return func(s *balanceLeaderScheduler) {
@@ -219,7 +226,7 @@ func (l *balanceLeaderScheduler) GetName() string {
 	return l.name
 }
 
-func (l *balanceLeaderScheduler) GetType() string {
+func (*balanceLeaderScheduler) GetType() string {
 	return BalanceLeaderType
 }
 
@@ -354,6 +361,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
 	}
+	defer l.filterCounter.Flush()
 	batch := l.conf.getBatch()
 	balanceLeaderScheduleCounter.Inc()
 
@@ -395,7 +403,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			}
 		}
 	}
-	l.filterCounter.Flush()
 	l.retryQuota.GC(append(sourceCandidate.stores, targetCandidate.stores...))
 	return result, collector.GetPlans()
 }
@@ -553,7 +560,7 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, solver, solver.Region, solver.Region.GetLeader().GetStoreId(), solver.TargetStoreID(), []uint64{}, operator.OpLeader)
+	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, solver, solver.Region, solver.TargetStoreID(), []uint64{}, operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		if collector != nil {
@@ -567,7 +574,7 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	op.FinishedCounters = append(op.FinishedCounters,
 		balanceDirectionCounter.WithLabelValues(l.GetName(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
 	)
-	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
-	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
+	op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
+	op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 	return op
 }

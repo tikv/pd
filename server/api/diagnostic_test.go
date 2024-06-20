@@ -36,7 +36,7 @@ type diagnosticTestSuite struct {
 	cleanup         tu.CleanupFunc
 	urlPrefix       string
 	configPrefix    string
-	schedulerPrifex string
+	schedulerPrefix string
 }
 
 func TestDiagnosticTestSuite(t *testing.T) {
@@ -50,7 +50,7 @@ func (suite *diagnosticTestSuite) SetupSuite() {
 
 	addr := suite.svr.GetAddr()
 	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/schedulers/diagnostic", addr, apiPrefix)
-	suite.schedulerPrifex = fmt.Sprintf("%s%s/api/v1/schedulers", addr, apiPrefix)
+	suite.schedulerPrefix = fmt.Sprintf("%s%s/api/v1/schedulers", addr, apiPrefix)
 	suite.configPrefix = fmt.Sprintf("%s%s/api/v1/config", addr, apiPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
@@ -84,7 +84,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, cfg))
 	re.True(cfg.Schedule.EnableDiagnostic)
 
-	ms := map[string]interface{}{
+	ms := map[string]any{
 		"enable-diagnostic": "true",
 		"max-replicas":      1,
 	}
@@ -104,33 +104,35 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	evictLeaderURL := suite.urlPrefix + "/" + schedulers.EvictLeaderName
 	re.NoError(tu.CheckGetJSON(testDialClient, evictLeaderURL, nil, tu.StatusNotOK(re)))
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = schedulers.BalanceRegionName
 	body, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex, body, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix, body, tu.StatusOK(re))
 	re.NoError(err)
 	suite.checkStatus("pending", balanceRegionURL)
 
-	input = make(map[string]interface{})
+	input = make(map[string]any)
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	suite.checkStatus("paused", balanceRegionURL)
 
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrifex+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix+"/"+schedulers.BalanceRegionName, pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	suite.checkStatus("pending", balanceRegionURL)
 
+	fmt.Println("before put region")
 	mustPutRegion(re, suite.svr, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
+	fmt.Println("after put region")
 	suite.checkStatus("normal", balanceRegionURL)
 
-	deleteURL := fmt.Sprintf("%s/%s", suite.schedulerPrifex, schedulers.BalanceRegionName)
+	deleteURL := fmt.Sprintf("%s/%s", suite.schedulerPrefix, schedulers.BalanceRegionName)
 	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 	re.NoError(err)
 	suite.checkStatus("disabled", balanceRegionURL)

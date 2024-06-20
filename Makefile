@@ -80,7 +80,7 @@ BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
 build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench
+tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench pd-ut
 
 PD_SERVER_DEP :=
 ifeq ($(SWAGGER), 1)
@@ -92,7 +92,9 @@ ifneq ($(DASHBOARD_DISTRIBUTION_DIR),)
 endif
 PD_SERVER_DEP += dashboard-ui
 
-pd-server: ${PD_SERVER_DEP}
+pre-build: ${PD_SERVER_DEP}
+
+pd-server: pre-build
 	GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -tags "$(BUILD_TAGS)" -o $(BUILD_BIN_PATH)/pd-server cmd/pd-server/main.go
 
 pd-server-failpoint:
@@ -103,10 +105,9 @@ pd-server-failpoint:
 pd-server-basic:
 	SWAGGER=0 DASHBOARD=0 $(MAKE) pd-server
 
-.PHONY: build tools pd-server pd-server-basic
+.PHONY: pre-build build tools pd-server pd-server-basic
 
 # Tools
-
 pd-ctl:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl pd-ctl/main.go
 pd-tso-bench:
@@ -125,8 +126,12 @@ regions-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/regions-dump regions-dump/main.go
 stores-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
+pd-ut: pd-xprog
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
+pd-xprog:
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-ut/xprog.go
 
-.PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench
+.PHONY: pd-ctl pd-tso-bench pd-recover pd-analysis pd-heartbeat-bench simulator regions-dump stores-dump pd-api-bench pd-ut
 
 #### Docker image ####
 
@@ -165,24 +170,26 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.55.2
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.56.2
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
 
 #### Static checks ####
 
-check: install-tools tidy static generate-errdoc
+check: tidy static generate-errdoc
 
-static: install-tools
+static: install-tools pre-build
 	@ echo "gofmt ..."
 	@ gofmt -s -l -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 	@ echo "golangci-lint ..."
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
-	@ echo "revive ..."
-	@ revive -formatter friendly -config revive.toml $(PACKAGES)
-
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
+
+# Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
+fmt:
+	@ echo "gofmt ..."
+	@ gofmt -s -l -w -r 'interface{} -> any' -d $(PACKAGE_DIRECTORIES) 2>&1 | awk '{ print } END { if (NR > 0) { exit 1 } }'
 
 tidy:
 	@ go mod tidy
@@ -218,6 +225,13 @@ failpoint-disable: install-tools
 
 #### Test ####
 
+ut: pd-ut
+	@$(FAILPOINT_ENABLE)
+	# only run unit tests
+	./bin/pd-ut run --ignore tests --race
+	@$(CLEAN_UT_BINARY)
+	@$(FAILPOINT_DISABLE)
+
 PACKAGE_DIRECTORIES := $(subst $(PD_PKG)/,,$(PACKAGES))
 TEST_PKGS := $(filter $(shell find . -iname "*_test.go" -exec dirname {} \; | \
                      sort -u | sed -e "s/^\./github.com\/tikv\/pd/"),$(PACKAGES))
@@ -238,9 +252,9 @@ basic-test: install-tools
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-ci-test-job: install-tools dashboard-ui
+ci-test-job: install-tools dashboard-ui pd-ut
 	@$(FAILPOINT_ENABLE)
-	./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX)
+	./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
@@ -296,6 +310,8 @@ split:
 
 clean: failpoint-disable clean-test clean-build
 
+CLEAN_UT_BINARY := find . -name '*.test.bin'| xargs rm -f
+
 clean-test:
 	# Cleaning test tmp...
 	rm -rf /tmp/test_pd*
@@ -303,6 +319,7 @@ clean-test:
 	rm -rf /tmp/test_etcd*
 	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
+	@$(CLEAN_UT_BINARY)
 
 clean-build:
 	# Cleaning building files...

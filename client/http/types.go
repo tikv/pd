@@ -17,10 +17,12 @@ package http
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
@@ -30,6 +32,15 @@ type ClusterState struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
 	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
+}
+
+// State is the status of PD server.
+// NOTE: This type sync with https://github.com/tikv/pd/blob/1d77b25656bc18e1f5aa82337d4ab62a34b10087/pkg/versioninfo/versioninfo.go#L29
+type State struct {
+	BuildTS        string `json:"build_ts"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git_hash"`
+	StartTimestamp int64  `json:"start_timestamp"`
 }
 
 // KeyRange defines a range of keys in bytes.
@@ -122,11 +133,22 @@ type RegionsInfo struct {
 	Regions []RegionInfo `json:"regions"`
 }
 
+func newRegionsInfo(count int64) *RegionsInfo {
+	return &RegionsInfo{
+		Count:   count,
+		Regions: make([]RegionInfo, 0, count),
+	}
+}
+
 // Merge merges two RegionsInfo together and returns a new one.
 func (ri *RegionsInfo) Merge(other *RegionsInfo) *RegionsInfo {
-	newRegionsInfo := &RegionsInfo{
-		Regions: make([]RegionInfo, 0, ri.Count+other.Count),
+	if ri == nil {
+		ri = newRegionsInfo(0)
 	}
+	if other == nil {
+		other = newRegionsInfo(0)
+	}
+	newRegionsInfo := newRegionsInfo(ri.Count + other.Count)
 	m := make(map[int64]RegionInfo, ri.Count+other.Count)
 	for _, region := range ri.Regions {
 		m[region.ID] = region
@@ -344,7 +366,7 @@ func (r *Rule) String() string {
 // Clone returns a copy of Rule.
 func (r *Rule) Clone() *Rule {
 	var clone Rule
-	json.Unmarshal([]byte(r.String()), &clone)
+	_ = json.Unmarshal([]byte(r.String()), &clone)
 	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
 	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
 	return &clone
@@ -575,7 +597,7 @@ type LabelRule struct {
 	Index    int           `json:"index"`
 	Labels   []RegionLabel `json:"labels"`
 	RuleType string        `json:"rule_type"`
-	Data     interface{}   `json:"data"`
+	Data     any           `json:"data"`
 }
 
 // LabelRulePatch is the patch to update the label rules.
@@ -591,4 +613,60 @@ type MembersInfo struct {
 	Members    []*pdpb.Member       `json:"members,omitempty"`
 	Leader     *pdpb.Member         `json:"leader,omitempty"`
 	EtcdLeader *pdpb.Member         `json:"etcd_leader,omitempty"`
+}
+
+// MicroServiceMember is the member info of a micro service.
+type MicroServiceMember struct {
+	ServiceAddr    string `json:"service-addr"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git-hash"`
+	DeployPath     string `json:"deploy-path"`
+	StartTimestamp int64  `json:"start-timestamp"`
+}
+
+// KeyspaceGCManagementType represents parameters needed to modify the gc management type.
+// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+// configured to run a global gc worker to calculate a global gc safe point.
+// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+type KeyspaceGCManagementType struct {
+	GCManagementType string `json:"gc_management_type,omitempty"`
+}
+
+// KeyspaceGCManagementTypeConfig represents parameters needed to modify target keyspace's configs.
+type KeyspaceGCManagementTypeConfig struct {
+	Config KeyspaceGCManagementType `json:"config"`
+}
+
+// tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
+type tempKeyspaceMeta struct {
+	ID             uint32            `json:"id"`
+	Name           string            `json:"name"`
+	State          string            `json:"state"`
+	CreatedAt      int64             `json:"created_at"`
+	StateChangedAt int64             `json:"state_changed_at"`
+	Config         map[string]string `json:"config"`
+}
+
+func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
+	switch str {
+	case "ENABLED":
+		return keyspacepb.KeyspaceState_ENABLED, nil
+	case "DISABLED":
+		return keyspacepb.KeyspaceState_DISABLED, nil
+	case "ARCHIVED":
+		return keyspacepb.KeyspaceState_ARCHIVED, nil
+	case "TOMBSTONE":
+		return keyspacepb.KeyspaceState_TOMBSTONE, nil
+	default:
+		return keyspacepb.KeyspaceState(0), fmt.Errorf("invalid KeyspaceState string: %s", str)
+	}
+}
+
+// Health reflects the cluster's health.
+// NOTE: This type is moved from `server/api/health.go`, maybe move them to the same place later.
+type Health struct {
+	Name       string   `json:"name"`
+	MemberID   uint64   `json:"member_id"`
+	ClientUrls []string `json:"client_urls"`
+	Health     bool     `json:"health"`
 }

@@ -84,7 +84,9 @@ func (l *lease) Close() error {
 	if l.ID.Load() != nil {
 		leaseID = l.ID.Load().(clientv3.LeaseID)
 	}
-	l.lease.Revoke(ctx, leaseID)
+	if _, err := l.lease.Revoke(ctx, leaseID); err != nil {
+		log.Error("revoke lease failed", zap.String("purpose", l.Purpose), errs.ZapError(err))
+	}
 	return l.lease.Close()
 }
 
@@ -135,7 +137,7 @@ func (l *lease) KeepAlive(ctx context.Context) {
 			// https://pkg.go.dev/time@master#Timer.Reset
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
-			log.Info("lease timeout", zap.Time("expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
+			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
 			return
 		case <-ctx.Done():
 			return
@@ -154,11 +156,14 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 
 		log.Info("start lease keep alive worker", zap.Duration("interval", interval), zap.String("purpose", l.Purpose))
 		defer log.Info("stop lease keep alive worker", zap.String("purpose", l.Purpose))
-
+		lastTime := time.Now()
 		for {
-			go func() {
+			start := time.Now()
+			if start.Sub(lastTime) > interval*2 {
+				log.Warn("the interval between keeping alive lease is too long", zap.Time("last-time", lastTime))
+			}
+			go func(start time.Time) {
 				defer logutil.LogPanic()
-				start := time.Now()
 				ctx1, cancel := context.WithTimeout(ctx, l.leaseTimeout)
 				defer cancel()
 				var leaseID clientv3.LeaseID
@@ -180,12 +185,13 @@ func (l *lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 				} else {
 					log.Error("keep alive response ttl is zero", zap.String("purpose", l.Purpose))
 				}
-			}()
+			}(start)
 
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				lastTime = start
 			}
 		}
 	}()

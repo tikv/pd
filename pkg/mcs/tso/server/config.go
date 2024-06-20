@@ -177,11 +177,11 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandLineString(flagSet, &c.ListenAddr, "listen-addr")
 	configutil.AdjustCommandLineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
-	return c.Adjust(meta, false)
+	return c.Adjust(meta)
 }
 
 // Adjust is used to adjust the TSO configurations.
-func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
+func (c *Config) Adjust(meta *toml.MetaData) error {
 	configMetaData := configutil.NewConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
@@ -226,10 +226,6 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	c.adjustLog(configMetaData.Child("log"))
 	c.Security.Encryption.Adjust()
 
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = utils.DefaultLogFormat
-	}
-
 	return nil
 }
 
@@ -237,6 +233,8 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
 }
 
 // Validate is used to validate if some configurations are right.
