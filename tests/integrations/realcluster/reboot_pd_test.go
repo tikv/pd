@@ -4,65 +4,70 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package realcluster
 
-// func restartTiUP() {
-// 	log.Info("start to restart TiUP")
-// 	cmd := exec.Command("make", "deploy")
-// 	err := cmd.Run()
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	log.Info("TiUP restart success")
-// }
+import (
+	"context"
+	"os/exec"
+	"testing"
 
-// // https://github.com/tikv/pd/issues/6467
-// func TestReloadLabel(t *testing.T) {
-// 	re := require.New(t)
-// 	ctx := context.Background()
+	"github.com/pingcap/log"
+	"github.com/stretchr/testify/require"
+)
 
-// 	resp, _ := pdHTTPCli.GetStores(ctx)
-// 	setStore := resp.Stores[0]
-// 	// TiFlash labels will be ["engine": "tiflash"]
-// 	storeLabel := map[string]string{
-// 		"zone": "zone1",
-// 	}
-// 	for _, label := range setStore.Store.Labels {
-// 		storeLabel[label.Key] = label.Value
-// 	}
+func restartTiUP() {
+	log.Info("start to restart TiUP")
+	cmd := exec.Command("make", "deploy")
+	err := cmd.Run()
+	if err != nil {
+		panic(err)
+	}
+	log.Info("TiUP restart success")
+}
 
-// 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel))
-// 	defer func() {
-// 		pdHTTPCli.DeleteStoreLabel(ctx, setStore.Store.ID, "zone")
-// 	}()
+// https://github.com/tikv/pd/issues/6467
+func TestReloadLabel(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
 
-// 	resp, err := pdHTTPCli.GetStores(ctx)
-// 	re.NoError(err)
-// 	for _, store := range resp.Stores {
-// 		if store.Store.ID == setStore.Store.ID {
-// 			for _, label := range store.Store.Labels {
-// 				re.Equal(label.Value, storeLabel[label.Key])
-// 			}
-// 		}
-// 	}
+	resp, _ := pdHTTPCli.GetStores(ctx)
+	setStore := resp.Stores[0]
+	// TiFlash labels will be ["engine": "tiflash"]
+	storeLabel := map[string]string{
+		"zone": "zone1",
+	}
+	for _, label := range setStore.Store.Labels {
+		storeLabel[label.Key] = label.Value
+	}
+	err := pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel)
+	re.NoError(err)
 
-// 	restartTiUP()
+	resp, err = pdHTTPCli.GetStores(ctx)
+	re.NoError(err)
+	for _, store := range resp.Stores {
+		if store.Store.ID == setStore.Store.ID {
+			for _, label := range store.Store.Labels {
+				re.Equal(label.Value, storeLabel[label.Key])
+			}
+		}
+	}
 
-// 	resp, err = pdHTTPCli.GetStores(ctx)
-// 	re.NoError(err)
-// 	for _, store := range resp.Stores {
-// 		if store.Store.ID == setStore.Store.ID {
-// 			for _, label := range store.Store.Labels {
-// 				re.Equal(label.Value, storeLabel[label.Key])
-// 			}
-// 		}
-// 	}
-// }
+	restartTiUP()
+
+	resp, err = pdHTTPCli.GetStores(ctx)
+	re.NoError(err)
+	for _, store := range resp.Stores {
+		if store.Store.ID == setStore.Store.ID {
+			for _, label := range store.Store.Labels {
+				re.Equal(label.Value, storeLabel[label.Key])
+			}
+		}
+	}
+}
