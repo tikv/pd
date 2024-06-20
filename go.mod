@@ -39,7 +39,11 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
+<<<<<<< HEAD
 	github.com/pingcap/kvproto v0.0.0-20230920042517-db656f45023b
+=======
+	github.com/pingcap/kvproto v0.0.0-20240620063548-118a4cab53e4
+>>>>>>> 049de1761 (api: client and server support `BatchScanRegions` (#8300))
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20241212093248-834dbcafa291
