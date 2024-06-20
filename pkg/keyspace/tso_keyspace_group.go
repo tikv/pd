@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.etcd.io/etcd/mvcc/mvccpb"
 	"go.uber.org/zap"
@@ -181,10 +182,6 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		countOfNodes := m.GetNodesCount()
-		if countOfNodes < utils.DefaultKeyspaceGroupReplicaCount {
-			continue
-		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
 		if err != nil {
 			log.Error("failed to load all keyspace groups", zap.Error(err))
@@ -194,22 +191,25 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 		if len(groups) == 0 {
 			continue
 		}
-		withError := false
 		for _, group := range groups {
-			if len(group.Members) < utils.DefaultKeyspaceGroupReplicaCount {
-				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, utils.DefaultKeyspaceGroupReplicaCount)
+			existMembers := make(map[string]struct{})
+			for _, member := range group.Members {
+				if exist, addr := m.IsExistNode(member.Address); exist {
+					existMembers[addr] = struct{}{}
+				}
+			}
+			numExistMembers := len(existMembers)
+			if numExistMembers != 0 && numExistMembers == len(group.Members) && numExistMembers == m.GetNodesCount() {
+				continue
+			}
+			if numExistMembers < utils.DefaultKeyspaceGroupReplicaCount {
+				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, existMembers, utils.DefaultKeyspaceGroupReplicaCount)
 				if err != nil {
-					withError = true
 					log.Error("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
 					continue
 				}
 				group.Members = nodes
 			}
-		}
-		if !withError {
-			// all keyspace groups have equal or more than default replica count
-			log.Info("all keyspace groups have equal or more than default replica count, stop to alloc node")
-			return
 		}
 	}
 }
@@ -745,7 +745,7 @@ func (m *GroupManager) GetNodesCount() int {
 }
 
 // AllocNodesForKeyspaceGroup allocates nodes for the keyspace group.
-func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount int) ([]endpoint.KeyspaceGroupMember, error) {
+func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, existMembers map[string]struct{}, desiredReplicaCount int) ([]endpoint.KeyspaceGroupMember, error) {
 	m.Lock()
 	defer m.Unlock()
 	ctx, cancel := context.WithTimeout(m.ctx, allocNodesTimeout)
@@ -770,32 +770,34 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, desiredReplicaCount
 		if kg.IsMerging() {
 			return ErrKeyspaceGroupInMerging(id)
 		}
-		exists := make(map[string]struct{})
-		for _, member := range kg.Members {
-			exists[member.Address] = struct{}{}
-			nodes = append(nodes, member)
+
+		for addr := range existMembers {
+			nodes = append(nodes, endpoint.KeyspaceGroupMember{
+				Address:  addr,
+				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
+			})
 		}
-		if len(exists) >= desiredReplicaCount {
-			return nil
-		}
-		for len(exists) < desiredReplicaCount {
+
+		for len(existMembers) < desiredReplicaCount {
 			select {
 			case <-ctx.Done():
 				return nil
 			case <-ticker.C:
 			}
-			countOfNodes := m.GetNodesCount()
-			if countOfNodes < desiredReplicaCount || countOfNodes == 0 { // double check
+			if m.GetNodesCount() == 0 { // double check
 				return ErrNoAvailableNode
+			}
+			if len(existMembers) == m.GetNodesCount() {
+				break
 			}
 			addr := m.nodesBalancer.Next()
 			if addr == "" {
 				return ErrNoAvailableNode
 			}
-			if _, ok := exists[addr]; ok {
+			if _, ok := existMembers[addr]; ok {
 				continue
 			}
-			exists[addr] = struct{}{}
+			existMembers[addr] = struct{}{}
 			nodes = append(nodes, endpoint.KeyspaceGroupMember{
 				Address:  addr,
 				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
@@ -894,14 +896,14 @@ func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, prior
 }
 
 // IsExistNode checks if the node exists.
-func (m *GroupManager) IsExistNode(addr string) bool {
+func (m *GroupManager) IsExistNode(addr string) (bool, string) {
 	nodes := m.nodesBalancer.GetAll()
 	for _, node := range nodes {
-		if node == addr {
-			return true
+		if typeutil.EqualBaseURLs(node, addr) {
+			return true, node
 		}
 	}
-	return false
+	return false, ""
 }
 
 // MergeKeyspaceGroups merges the keyspace group in the list into the target keyspace group.
