@@ -40,17 +40,17 @@ func TestReloadLabel(t *testing.T) {
 
 	resp, err := pdHTTPCli.GetStores(ctx)
 	re.NoError(err)
-	re.NotEmpty(len(resp.Stores))
+	re.NotEmpty(resp.Stores)
 	firstStore := resp.Stores[0]
 	// TiFlash labels will be ["engine": "tiflash"]
 	// So we need to merge the labels
-	storeLabel := map[string]string{
+	storeLabels := map[string]string{
 		"zone": "zone1",
 	}
 	for _, label := range firstStore.Store.Labels {
-		storeLabel[label.Key] = label.Value
+		storeLabels[label.Key] = label.Value
 	}
-	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabel))
+	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels))
 
 	checkLabelsAreEqual := func() {
 		resp, err = pdHTTPCli.GetStores(ctx)
@@ -67,7 +67,7 @@ func TestReloadLabel(t *testing.T) {
 				labelsMap[label.Key] = label.Value
 			}
 
-			for key, value := range storeLabel {
+			for key, value := range storeLabels {
 				re.Equal(value, labelsMap[key])
 			}
 			break
