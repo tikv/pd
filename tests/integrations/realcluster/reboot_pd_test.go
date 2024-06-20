@@ -14,55 +14,64 @@
 
 package realcluster
 
-// func restartTiUP() {
-// 	log.Info("start to restart TiUP")
-// 	cmd := exec.Command("make", "deploy")
-// 	err := cmd.Run()
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	log.Info("TiUP restart success")
-// }
+import (
+	"context"
+	"os/exec"
+	"testing"
 
-// // https://github.com/tikv/pd/issues/6467
-// func TestReloadLabel(t *testing.T) {
-// 	re := require.New(t)
-// 	ctx := context.Background()
+	"github.com/pingcap/log"
+	"github.com/stretchr/testify/require"
+)
 
-// 	resp, _ := pdHTTPCli.GetStores(ctx)
-// 	setStore := resp.Stores[0]
-// 	// TiFlash labels will be ["engine": "tiflash"]
-// 	storeLabel := map[string]string{
-// 		"zone": "zone1",
-// 	}
-// 	for _, label := range setStore.Store.Labels {
-// 		storeLabel[label.Key] = label.Value
-// 	}
+func restartTiUP() {
+	log.Info("start to restart TiUP")
+	cmd := exec.Command("make", "deploy")
+	err := cmd.Run()
+	if err != nil {
+		panic(err)
+	}
+	log.Info("TiUP restart success")
+}
 
-// 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel))
-// 	defer func() {
-// 		pdHTTPCli.DeleteStoreLabel(ctx, setStore.Store.ID, "zone")
-// 	}()
+// https://github.com/tikv/pd/issues/6467
+func TestReloadLabel(t *testing.T) {
+	re := require.New(t)
+	ctx := context.Background()
 
-// 	resp, err := pdHTTPCli.GetStores(ctx)
-// 	re.NoError(err)
-// 	for _, store := range resp.Stores {
-// 		if store.Store.ID == setStore.Store.ID {
-// 			for _, label := range store.Store.Labels {
-// 				re.Equal(label.Value, storeLabel[label.Key])
-// 			}
-// 		}
-// 	}
+	resp, _ := pdHTTPCli.GetStores(ctx)
+	setStore := resp.Stores[0]
+	// TiFlash labels will be ["engine": "tiflash"]
+	storeLabel := map[string]string{
+		"zone": "zone1",
+	}
+	for _, label := range setStore.Store.Labels {
+		storeLabel[label.Key] = label.Value
+	}
 
-// 	restartTiUP()
+	re.NoError(pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel))
+	defer func() {
+		re.NoError(pdHTTPCli.DeleteStoreLabel(ctx, setStore.Store.ID, "zone"))
+	}()
 
-// 	resp, err = pdHTTPCli.GetStores(ctx)
-// 	re.NoError(err)
-// 	for _, store := range resp.Stores {
-// 		if store.Store.ID == setStore.Store.ID {
-// 			for _, label := range store.Store.Labels {
-// 				re.Equal(label.Value, storeLabel[label.Key])
-// 			}
-// 		}
-// 	}
-// }
+	resp, err := pdHTTPCli.GetStores(ctx)
+	re.NoError(err)
+	for _, store := range resp.Stores {
+		if store.Store.ID == setStore.Store.ID {
+			for key, value := range storeLabel {
+				re.Equal(value, storeLabel[key])
+			}
+		}
+	}
+
+	restartTiUP()
+
+	resp, err = pdHTTPCli.GetStores(ctx)
+	re.NoError(err)
+	for _, store := range resp.Stores {
+		if store.Store.ID == setStore.Store.ID {
+			for key, value := range storeLabel {
+				re.Equal(value, storeLabel[key])
+			}
+		}
+	}
+}
