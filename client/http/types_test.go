@@ -308,3 +308,30 @@ func mustMarshalAndUnmarshalRuleOp(re *require.Assertions, ruleOp *RuleOp) *Rule
 	re.NoError(err)
 	return newRuleOp
 }
+
+// startKey and endKey are json:"-" which means cannot be Unmarshal from json
+// We need to take care of `Clone` method.
+func TestRuleKeyClone(t *testing.T) {
+	re := require.New(t)
+	r := &Rule{
+		StartKey: []byte{1, 2, 3},
+		EndKey:   []byte{4, 5, 6},
+	}
+
+	clone := r.Clone()
+	// Modify the original rule
+	r.StartKey[0] = 9
+	r.EndKey[0] = 9
+
+	// The clone should not be affected
+	re.Equal([]byte{1, 2, 3}, clone.StartKey)
+	re.Equal([]byte{4, 5, 6}, clone.EndKey)
+
+	// Modify the clone
+	clone.StartKey[0] = 8
+	clone.EndKey[0] = 8
+
+	// The original rule should not be affected
+	re.Equal([]byte{9, 2, 3}, r.StartKey)
+	re.Equal([]byte{9, 5, 6}, r.EndKey)
+}
