@@ -41,7 +41,7 @@ const (
 	getStoreName                            = "GetStore"
 	deleteStoreName                         = "DeleteStore"
 	setStoreLabelsName                      = "SetStoreLabels"
-	deleteStoreLableName                    = "DeleteStoreLabel"
+	deleteStoreLabelName                    = "DeleteStoreLabel"
 	getHealthStatusName                     = "GetHealthStatus"
 	getConfigName                           = "GetConfig"
 	setConfigName                           = "SetConfig"

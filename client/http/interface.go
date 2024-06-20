@@ -352,7 +352,7 @@ func (c *client) DeleteStoreLabel(ctx context.Context, storeID int64, labelKey s
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName(deleteStoreLableName).
+		WithName(deleteStoreLabelName).
 		WithURI(LabelByStoreID(storeID)).
 		WithMethod(http.MethodDelete).
 		WithBody(jsonInput))

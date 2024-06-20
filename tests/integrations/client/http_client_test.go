@@ -560,9 +560,14 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re.NoError(err)
 	err = client.SetSchedulerDelay(ctx, "not-exist", 100)
 	re.ErrorContains(err, "500 Internal Server Error") // TODO: should return friendly error message
+
+	re.NoError(client.DeleteScheduler(ctx, schedulerName))
+	schedulers, err = client.GetSchedulers(ctx)
+	re.NoError(err)
+	re.NotContains(schedulers, schedulerName)
 }
 
-func (suite *httpClientTestSuite) TestSetStoreLabels() {
+func (suite *httpClientTestSuite) TestStoreLabels() {
 	re := suite.Require()
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
@@ -586,6 +591,11 @@ func (suite *httpClientTestSuite) TestSetStoreLabels() {
 			}
 		}
 	}
+
+	re.NoError(client.DeleteStoreLabel(ctx, 1, "zone"))
+	store, err := client.GetStore(ctx, 1)
+	re.NoError(err)
+	re.Empty(store.Store.Labels)
 }
 
 func (suite *httpClientTestSuite) TestTransferLeader() {
