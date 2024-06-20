@@ -38,37 +38,44 @@ func TestReloadLabel(t *testing.T) {
 	re := require.New(t)
 	ctx := context.Background()
 
-	resp, _ := pdHTTPCli.GetStores(ctx)
-	setStore := resp.Stores[0]
+	resp, err := pdHTTPCli.GetStores(ctx)
+	re.NoError(err)
+	re.NotEmpty(len(resp.Stores))
+	firstStore := resp.Stores[0]
 	// TiFlash labels will be ["engine": "tiflash"]
+	// So we need to merge the labels
 	storeLabel := map[string]string{
 		"zone": "zone1",
 	}
-	for _, label := range setStore.Store.Labels {
+	for _, label := range firstStore.Store.Labels {
 		storeLabel[label.Key] = label.Value
 	}
-	err := pdHTTPCli.SetStoreLabels(ctx, setStore.Store.ID, storeLabel)
-	re.NoError(err)
+	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabel))
 
-	resp, err = pdHTTPCli.GetStores(ctx)
-	re.NoError(err)
-	for _, store := range resp.Stores {
-		if store.Store.ID == setStore.Store.ID {
-			for _, label := range store.Store.Labels {
-				re.Equal(label.Value, storeLabel[label.Key])
+	checkLabelsAreEqual := func() {
+		resp, err = pdHTTPCli.GetStores(ctx)
+		re.NoError(err)
+
+		for _, store := range resp.Stores {
+			if store.Store.ID != firstStore.Store.ID {
+				continue
 			}
+
+			labelsMap := make(map[string]string)
+			for _, label := range store.Store.Labels {
+				re.NotNil(label)
+				labelsMap[label.Key] = label.Value
+			}
+
+			for key, value := range storeLabel {
+				re.Equal(value, labelsMap[key])
+			}
+			break
 		}
 	}
-
+	// Check the label is set
+	checkLabelsAreEqual()
+	// Restart TiUP to reload the label
 	restartTiUP()
-
-	resp, err = pdHTTPCli.GetStores(ctx)
-	re.NoError(err)
-	for _, store := range resp.Stores {
-		if store.Store.ID == setStore.Store.ID {
-			for _, label := range store.Store.Labels {
-				re.Equal(label.Value, storeLabel[label.Key])
-			}
-		}
-	}
+	checkLabelsAreEqual()
 }
