@@ -23,7 +23,7 @@ if [ ! -d "bin" ] || [ ! -e "bin/tikv-server" ] && [ ! -e "bin/tidb-server" ] &&
 		--pd.binpath ./bin/pd-server \
 		> $CUR_PATH/playground.log 2>&1 &
 else
-  # CI will download the binaries in the prepare phase
+  # CI will download the binaries in the prepare phase.
   # ref https://github.com/PingCAP-QE/ci/blob/387e9e533b365174962ccb1959442a7070f9cd66/pipelines/tikv/pd/latest/pull_integration_realcluster_test.groovy#L55-L68
 	color-green "using existing binaries..."
 	$TIUP_BIN_DIR playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 --without-monitor \

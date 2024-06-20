@@ -53,24 +53,17 @@ func TestReloadLabel(t *testing.T) {
 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels))
 
 	checkLabelsAreEqual := func() {
-		resp, err = pdHTTPCli.GetStores(ctx)
+		resp, err := pdHTTPCli.GetStore(ctx, uint64(firstStore.Store.ID))
 		re.NoError(err)
 
-		for _, store := range resp.Stores {
-			if store.Store.ID != firstStore.Store.ID {
-				continue
-			}
+		labelsMap := make(map[string]string)
+		for _, label := range resp.Store.Labels {
+			re.NotNil(label)
+			labelsMap[label.Key] = label.Value
+		}
 
-			labelsMap := make(map[string]string)
-			for _, label := range store.Store.Labels {
-				re.NotNil(label)
-				labelsMap[label.Key] = label.Value
-			}
-
-			for key, value := range storeLabels {
-				re.Equal(value, labelsMap[key])
-			}
-			break
+		for key, value := range storeLabels {
+			re.Equal(value, labelsMap[key])
 		}
 	}
 	// Check the label is set
