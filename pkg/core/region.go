@@ -1816,6 +1816,42 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 	return res
 }
 
+// BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
+// limit <= 0 means no limit.
+// The given key pairs should be non-overlapping.
+func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, limit int) []*RegionInfo {
+	r.t.RLock()
+	defer r.t.RUnlock()
+
+	krs := keyRanges.Ranges()
+	res := make([]*RegionInfo, 0, len(krs))
+	var lastRegion *RegionInfo
+	for _, keyRange := range krs {
+		if limit > 0 && len(res) >= limit {
+			return res
+		}
+		if lastRegion != nil {
+			if lastRegion.Contains(keyRange.EndKey) {
+				continue
+			} else if lastRegion.Contains(keyRange.StartKey) {
+				keyRange.StartKey = lastRegion.GetEndKey()
+			}
+		}
+		r.tree.scanRange(keyRange.StartKey, func(region *RegionInfo) bool {
+			if len(keyRange.EndKey) > 0 && bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
+				return false
+			}
+			if limit > 0 && len(res) >= limit {
+				return false
+			}
+			lastRegion = region
+			res = append(res, region)
+			return true
+		})
+	}
+	return res
+}
+
 // ScanRegionWithIterator scans from the first region containing or behind start key,
 // until iterator returns false.
 func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(region *RegionInfo) bool) {

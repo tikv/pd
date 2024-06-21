@@ -15,6 +15,8 @@
 package cases
 
 import (
+	"fmt"
+
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
@@ -23,18 +25,22 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
+var hotReadStore uint64 = 1
+
 func newHotRead(config *sc.SimConfig) *Case {
 	var simCase Case
 	totalStore := config.TotalStore
 	totalRegion := config.TotalRegion
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
-
+	allStores := make(map[uint64]struct{}, totalStore)
 	// Initialize the cluster
 	for i := 0; i < totalStore; i++ {
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 
 	for i := 0; i < totalRegion; i++ {
@@ -54,12 +60,18 @@ func newHotRead(config *sc.SimConfig) *Case {
 		})
 	}
 
+	// select the first store as hot read store
+	for store := range allStores {
+		hotReadStore = store
+		break
+	}
+
 	// Events description
-	// select regions on store 1 as hot read regions.
+	// select regions on `hotReadStore` as hot read regions.
 	selectRegionNum := 4 * totalStore
 	readFlow := make(map[uint64]int64, selectRegionNum)
 	for _, r := range simCase.Regions {
-		if r.Leader.GetStoreId() == 1 {
+		if r.Leader.GetStoreId() == hotReadStore {
 			readFlow[r.ID] = 128 * units.MiB
 			if len(readFlow) == selectRegionNum {
 				break
@@ -72,15 +84,25 @@ func newHotRead(config *sc.SimConfig) *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		leaderCount := make([]int, totalStore)
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				if store.Id == hotReadStore {
+					simutil.Logger.Error(fmt.Sprintf("hot store %d is removed", hotReadStore))
+					return true
+				}
+				delete(allStores, store.GetId())
+			}
+		}
+
+		leaderCount := make(map[uint64]int, len(allStores))
 		for id := range readFlow {
 			leaderStore := regions.GetRegion(id).GetLeader().GetStoreId()
-			leaderCount[int(leaderStore-1)]++
+			leaderCount[leaderStore]++
 		}
 
 		// check count diff < 2.
-		var min, max int
+		var min, max uint64
 		for i := range leaderCount {
 			if leaderCount[i] > leaderCount[max] {
 				max = i
