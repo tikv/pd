@@ -569,22 +569,26 @@ func (suite *httpClientTestSuite) TestSetStoreLabels() {
 	defer cancel()
 	resp, err := client.GetStores(ctx)
 	re.NoError(err)
-	setStore := resp.Stores[0]
-	re.Empty(setStore.Store.Labels, nil)
+	re.NotEmpty(resp.Stores)
+	firstStore := resp.Stores[0]
+	re.Empty(firstStore.Store.Labels, nil)
 	storeLabels := map[string]string{
 		"zone": "zone1",
 	}
-	err = client.SetStoreLabels(ctx, 1, storeLabels)
+	err = client.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels)
 	re.NoError(err)
 
-	resp, err = client.GetStores(ctx)
+	getResp, err := client.GetStore(ctx, uint64(firstStore.Store.ID))
 	re.NoError(err)
-	for _, store := range resp.Stores {
-		if store.Store.ID == setStore.Store.ID {
-			for _, label := range store.Store.Labels {
-				re.Equal(label.Value, storeLabels[label.Key])
-			}
-		}
+
+	labelsMap := make(map[string]string)
+	for _, label := range getResp.Store.Labels {
+		re.NotNil(label)
+		labelsMap[label.Key] = label.Value
+	}
+
+	for key, value := range storeLabels {
+		re.Equal(value, labelsMap[key])
 	}
 }
 

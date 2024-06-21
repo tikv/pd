@@ -30,6 +30,7 @@ func newRedundantBalanceRegion(config *sc.SimConfig) *Case {
 	totalStore := config.TotalStore
 	totalRegion := config.TotalRegion
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	allStores := make(map[uint64]struct{}, totalStore)
 
 	for i := 0; i < totalStore; i++ {
 		s := &Store{
@@ -40,6 +41,7 @@ func newRedundantBalanceRegion(config *sc.SimConfig) *Case {
 			s.HasExtraUsedSpace = true
 		}
 		simCase.Stores = append(simCase.Stores, s)
+		allStores[s.ID] = struct{}{}
 	}
 
 	for i := 0; i < totalRegion; i++ {
@@ -57,21 +59,27 @@ func newRedundantBalanceRegion(config *sc.SimConfig) *Case {
 		})
 	}
 
-	storesLastUpdateTime := make([]int64, totalStore+1)
-	storeLastAvailable := make([]uint64, totalStore+1)
-	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
+	storesLastUpdateTime := make(map[uint64]int64, totalStore)
+	storeLastAvailable := make(map[uint64]uint64, totalStore)
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
+			}
+		}
+
 		curTime := time.Now().Unix()
-		for i := 1; i <= totalStore; i++ {
-			available := stats[i].GetAvailable()
-			if curTime-storesLastUpdateTime[i] > 60 {
-				if storeLastAvailable[i] != available {
+		for storeID := range allStores {
+			available := stats[storeID].GetAvailable()
+			if curTime-storesLastUpdateTime[storeID] > 60 {
+				if storeLastAvailable[storeID] != available {
 					return false
 				}
-				if stats[i].ToCompactionSize != 0 {
+				if stats[storeID].ToCompactionSize != 0 {
 					return false
 				}
-				storesLastUpdateTime[i] = curTime
-				storeLastAvailable[i] = available
+				storesLastUpdateTime[storeID] = curTime
+				storeLastAvailable[storeID] = available
 			} else {
 				return false
 			}

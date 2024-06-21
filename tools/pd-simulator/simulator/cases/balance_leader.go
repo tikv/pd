@@ -28,12 +28,15 @@ func newBalanceLeader(config *sc.SimConfig) *Case {
 
 	totalStore := config.TotalStore
 	totalRegion := config.TotalRegion
+	allStores := make(map[uint64]struct{}, totalStore)
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
 	for i := 0; i < totalStore; i++ {
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 
 	leaderStoreID := simCase.Stores[totalStore-1].ID
@@ -58,10 +61,18 @@ func newBalanceLeader(config *sc.SimConfig) *Case {
 		})
 	}
 
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		for i := 1; i <= totalStore; i++ {
-			leaderCount := regions.GetStoreLeaderCount(uint64(i))
-			if !isUniform(leaderCount, totalRegion/totalStore) {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
+			}
+		}
+		if len(allStores) == 0 {
+			return false
+		}
+		for storeID := range allStores {
+			leaderCount := regions.GetStoreLeaderCount(storeID)
+			if !isUniform(leaderCount, totalRegion/len(allStores)) {
 				return false
 			}
 		}

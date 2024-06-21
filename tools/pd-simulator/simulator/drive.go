@@ -252,11 +252,12 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
 	var stats []info.StoreStats
-	for _, n := range d.conn.Nodes {
-		stats = append(stats, *n.stats)
+	var stores []*metapb.Store
+	for _, s := range d.conn.Nodes {
+		stores = append(stores, s.Store)
+		stats = append(stats, *s.stats)
 	}
-
-	return d.simCase.Checker(d.raftEngine.regionsInfo, stats)
+	return d.simCase.Checker(stores, d.raftEngine.regionsInfo, stats)
 }
 
 // Start starts all nodes.

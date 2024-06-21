@@ -15,6 +15,7 @@
 package cases
 
 import (
+	"fmt"
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
@@ -23,18 +24,22 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
+var hotWriteStore uint64 = 1
+
 func newHotWrite(config *sc.SimConfig) *Case {
 	var simCase Case
 	totalStore := config.TotalStore
 	totalRegion := config.TotalRegion
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
-
+	allStores := make(map[uint64]struct{}, totalStore)
 	// Initialize the cluster
 	for i := 0; i < totalStore; i++ {
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 
 	for i := 0; i < totalRegion; i++ {
@@ -54,14 +59,20 @@ func newHotWrite(config *sc.SimConfig) *Case {
 		})
 	}
 
+	// select the first store as hot write store.
+	for store := range allStores {
+		hotWriteStore = store
+		break
+	}
+
 	// Events description
-	// select regions on store 1 as hot write regions.
-	selectStoreNum := totalStore
-	writeFlow := make(map[uint64]int64, selectStoreNum)
+	// select regions on `hotWriteStore` as hot write regions.
+	selectRegionNum := totalStore
+	writeFlow := make(map[uint64]int64, selectRegionNum)
 	for _, r := range simCase.Regions {
-		if r.Leader.GetStoreId() == 1 {
+		if r.Leader.GetStoreId() == hotWriteStore {
 			writeFlow[r.ID] = 2 * units.MiB
-			if len(writeFlow) == selectStoreNum {
+			if len(writeFlow) == selectRegionNum {
 				break
 			}
 		}
@@ -70,23 +81,31 @@ func newHotWrite(config *sc.SimConfig) *Case {
 	e.Step = func(int64) map[uint64]int64 {
 		return writeFlow
 	}
-
 	simCase.Events = []EventDescriptor{e}
-
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		leaderCount := make([]int, totalStore)
-		peerCount := make([]int, totalStore)
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				if store.Id == hotWriteStore {
+					simutil.Logger.Error(fmt.Sprintf("hot store %d is removed", hotReadStore))
+					return true
+				}
+				delete(allStores, store.GetId())
+			}
+		}
+
+		leaderCount := make(map[uint64]int, len(allStores))
+		peerCount := make(map[uint64]int, totalStore)
 		for id := range writeFlow {
 			region := regions.GetRegion(id)
-			leaderCount[int(region.GetLeader().GetStoreId()-1)]++
+			leaderCount[region.GetLeader().GetStoreId()]++
 			for _, p := range region.GetPeers() {
-				peerCount[int(p.GetStoreId()-1)]++
+				peerCount[p.GetStoreId()]++
 			}
 		}
 
 		// check count diff <= 2.
-		var minLeader, maxLeader, minPeer, maxPeer int
+		var minLeader, maxLeader, minPeer, maxPeer uint64
 		for i := range leaderCount {
 			if leaderCount[i] > leaderCount[maxLeader] {
 				maxLeader = i

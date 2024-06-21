@@ -2,9 +2,9 @@
 
 ## the tick interval when starting PD inside (default: "100ms")
 sim-tick-interval = "100ms"
-total-store = 300
-total-region = 10000000
-case-name = "stable"
+total-store = 10
+total-region = 10000
+case-name = "balance-leader"
 
 [store]
 ## the capacity size of a new store in GB (default: 1024)
