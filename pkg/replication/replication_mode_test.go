@@ -87,8 +87,7 @@ func TestStatus(t *testing.T) {
 		},
 	}, rep.GetReplicationStatus())
 
-	err = rep.drSwitchToAsync(nil)
-	re.NoError(err)
+	rep.drSwitchToAsync(nil)
 	re.Equal(&pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,
 		DrAutoSync: &pb.DRAutoSync{
@@ -99,8 +98,7 @@ func TestStatus(t *testing.T) {
 		},
 	}, rep.GetReplicationStatus())
 
-	err = rep.drSwitchToSyncRecover()
-	re.NoError(err)
+	rep.drSwitchToSyncRecover()
 	stateID := rep.drAutoSync.StateID
 	re.Equal(&pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,

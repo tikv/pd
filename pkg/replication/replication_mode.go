@@ -232,46 +232,44 @@ func (m *ModeManager) loadDRAutoSync() error {
 	return nil
 }
 
-func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) error {
+func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) {
 	m.Lock()
 	defer m.Unlock()
 
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to async wait state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
-		return err
+		return
 	}
 	dr := drAutoSyncStatus{State: drStateAsyncWait, StateID: id, AvailableStores: availableStores}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
-		return err
+		return
 	}
 	m.drAutoSync = dr
 	log.Info("switched to async_wait state", zap.String("replicate-mode", modeDRAutoSync))
-	return nil
 }
 
-func (m *ModeManager) drSwitchToAsync(availableStores []uint64) error {
+func (m *ModeManager) drSwitchToAsync(availableStores []uint64) {
 	m.Lock()
 	defer m.Unlock()
-	return m.drSwitchToAsyncWithLock(availableStores)
+	m.drSwitchToAsyncWithLock(availableStores)
 }
 
-func (m *ModeManager) drSwitchToAsyncWithLock(availableStores []uint64) error {
+func (m *ModeManager) drSwitchToAsyncWithLock(availableStores []uint64) {
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
-		return err
+		return
 	}
 	now := time.Now()
 	dr := drAutoSyncStatus{State: drStateAsync, StateID: id, AvailableStores: availableStores, AsyncStartTime: &now}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
-		return err
+		return
 	}
 	m.drAutoSync = dr
 	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutoSync))
-	return nil
 }
 
 func (m *ModeManager) drDurationSinceAsyncStart() time.Duration {
@@ -283,10 +281,10 @@ func (m *ModeManager) drDurationSinceAsyncStart() time.Duration {
 	return time.Since(*m.drAutoSync.AsyncStartTime)
 }
 
-func (m *ModeManager) drSwitchToSyncRecover() error {
+func (m *ModeManager) drSwitchToSyncRecover() {
 	m.Lock()
 	defer m.Unlock()
-	return m.drSwitchToSyncRecoverWithLock()
+	_ = m.drSwitchToSyncRecoverWithLock()
 }
 
 func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
@@ -472,7 +470,7 @@ func (m *ModeManager) tickUpdateState() {
 		}
 	case drStateAsyncWait:
 		if canSync {
-			m.drSwitchToSync()
+			_ = m.drSwitchToSync()
 			break
 		}
 		if oldAvailableStores := m.drGetAvailableStores(); !reflect.DeepEqual(oldAvailableStores, storeIDs[primaryUp]) {
@@ -500,7 +498,7 @@ func (m *ModeManager) tickUpdateState() {
 			drRecoverProgressGauge.Set(float64(progress))
 
 			if progress == 1.0 {
-				m.drSwitchToSync()
+				_ = m.drSwitchToSync()
 			} else {
 				m.updateRecoverProgress(progress)
 			}

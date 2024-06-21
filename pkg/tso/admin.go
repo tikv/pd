@@ -73,12 +73,12 @@ func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	}
 	tsValue, ok := input["tso"].(string)
 	if !ok || len(tsValue) == 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
+		_ = h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
 		return
 	}
 	ts, err := strconv.ParseUint(tsValue, 10, 64)
 	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
+		_ = h.rd.JSON(w, http.StatusBadRequest, "invalid tso value")
 		return
 	}
 
@@ -86,7 +86,7 @@ func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 	forceUseLargerVal, contains := input["force-use-larger"]
 	if contains {
 		if forceUseLarger, ok = forceUseLargerVal.(bool); !ok {
-			h.rd.JSON(w, http.StatusBadRequest, "invalid force-use-larger value")
+			_ = h.rd.JSON(w, http.StatusBadRequest, "invalid force-use-larger value")
 			return
 		}
 	}
@@ -97,17 +97,17 @@ func (h *AdminHandler) ResetTS(w http.ResponseWriter, r *http.Request) {
 
 	if err = handler.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
 		if err == errs.ErrServerNotStarted {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			_ = h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else if err == errs.ErrEtcdTxnConflict {
 			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			// Return 503 to let the client retry.
 			// Ref: https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4
-			h.rd.JSON(w, http.StatusServiceUnavailable,
+			_ = h.rd.JSON(w, http.StatusServiceUnavailable,
 				fmt.Sprintf("It's a temporary failure with error %s, please retry.", err.Error()))
 		} else {
-			h.rd.JSON(w, http.StatusForbidden, err.Error())
+			_ = h.rd.JSON(w, http.StatusForbidden, err.Error())
 		}
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, "Reset ts successfully.")
+	_ = h.rd.JSON(w, http.StatusOK, "Reset ts successfully.")
 }
