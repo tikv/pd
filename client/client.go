@@ -17,7 +17,9 @@ package pd
 import (
 	"context"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
+	"net/url"
 	"runtime/trace"
 	"strings"
 	"sync"
@@ -85,11 +87,18 @@ type RPCClient interface {
 	GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegionOption) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64, opts ...GetRegionOption) (*Region, error)
+	// Deprecated: use BatchScanRegions instead.
 	// ScanRegions gets a list of regions, starts from the region that contains key.
-	// Limit limits the maximum number of regions returned.
+	// Limit limits the maximum number of regions returned. It returns all the regions in the given range if limit <= 0.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
 	ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...GetRegionOption) ([]*Region, error)
+	// BatchScanRegions gets a list of regions, starts from the region that contains key.
+	// Limit limits the maximum number of regions returned. It returns all the regions in the given ranges if limit <= 0.
+	// If a region has no leader, corresponding leader will be placed by a peer
+	// with empty value (PeerID is 0).
+	// The returned regions are flattened, even there are key ranges located in the same region, only one region will be returned.
+	BatchScanRegions(ctx context.Context, keyRanges []KeyRange, limit int, opts ...GetRegionOption) ([]*Region, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -335,6 +344,38 @@ type SecurityOption struct {
 	SSLCABytes   []byte
 	SSLCertBytes []byte
 	SSLKEYBytes  []byte
+}
+
+// KeyRange defines a range of keys in bytes.
+type KeyRange struct {
+	StartKey []byte
+	EndKey   []byte
+}
+
+// NewKeyRange creates a new key range structure with the given start key and end key bytes.
+// Notice: the actual encoding of the key range is not specified here. It should be either UTF-8 or hex.
+//   - UTF-8 means the key has already been encoded into a string with UTF-8 encoding, like:
+//     []byte{52 56 54 53 54 99 54 99 54 102 50 48 53 55 54 102 55 50 54 99 54 52}, which will later be converted to "48656c6c6f20576f726c64"
+//     by using `string()` method.
+//   - Hex means the key is just a raw hex bytes without encoding to a UTF-8 string, like:
+//     []byte{72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100}, which will later be converted to "48656c6c6f20576f726c64"
+//     by using `hex.EncodeToString()` method.
+func NewKeyRange(startKey, endKey []byte) *KeyRange {
+	return &KeyRange{startKey, endKey}
+}
+
+// EscapeAsUTF8Str returns the URL escaped key strings as they are UTF-8 encoded.
+func (r *KeyRange) EscapeAsUTF8Str() (startKeyStr, endKeyStr string) {
+	startKeyStr = url.QueryEscape(string(r.StartKey))
+	endKeyStr = url.QueryEscape(string(r.EndKey))
+	return
+}
+
+// EscapeAsHexStr returns the URL escaped key strings as they are hex encoded.
+func (r *KeyRange) EscapeAsHexStr() (startKeyStr, endKeyStr string) {
+	startKeyStr = url.QueryEscape(hex.EncodeToString(r.StartKey))
+	endKeyStr = url.QueryEscape(hex.EncodeToString(r.EndKey))
+	return
 }
 
 // NewClient creates a PD client.
@@ -1094,6 +1135,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
+	//nolint:staticcheck
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
 	failpoint.Inject("responseNil", func() {
 		resp = nil
@@ -1103,6 +1145,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		if protoClient == nil {
 			return nil, errs.ErrClientGetProtoClient
 		}
+		//nolint:staticcheck
 		resp, err = protoClient.ScanRegions(cctx, req)
 	}
 
@@ -1111,6 +1154,74 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 	}
 
 	return handleRegionsResponse(resp), nil
+}
+
+func (c *client) BatchScanRegions(ctx context.Context, ranges []KeyRange, limit int, opts ...GetRegionOption) ([]*Region, error) {
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.BatchScanRegions", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	start := time.Now()
+	defer func() { cmdDurationBatchScanRegions.Observe(time.Since(start).Seconds()) }()
+
+	var cancel context.CancelFunc
+	scanCtx := ctx
+	if _, ok := ctx.Deadline(); !ok {
+		scanCtx, cancel = context.WithTimeout(ctx, c.option.timeout)
+		defer cancel()
+	}
+	options := &GetRegionOp{}
+	for _, opt := range opts {
+		opt(options)
+	}
+	pbRanges := make([]*pdpb.KeyRange, 0, len(ranges))
+	for _, r := range ranges {
+		pbRanges = append(pbRanges, &pdpb.KeyRange{StartKey: r.StartKey, EndKey: r.EndKey})
+	}
+	req := &pdpb.BatchScanRegionsRequest{
+		Header:      c.requestHeader(),
+		NeedBuckets: options.needBuckets,
+		Ranges:      pbRanges,
+		Limit:       int32(limit),
+	}
+	serviceClient, cctx := c.getRegionAPIClientAndContext(scanCtx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+	if serviceClient == nil {
+		return nil, errs.ErrClientGetProtoClient
+	}
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
+	failpoint.Inject("responseNil", func() {
+		resp = nil
+	})
+	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+		protoClient, cctx := c.getClientAndContext(scanCtx)
+		if protoClient == nil {
+			return nil, errs.ErrClientGetProtoClient
+		}
+		resp, err = protoClient.BatchScanRegions(cctx, req)
+	}
+
+	if err = c.respForErr(cmdFailedDurationBatchScanRegions, start, err, resp.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	return handleBatchRegionsResponse(resp), nil
+}
+
+func handleBatchRegionsResponse(resp *pdpb.BatchScanRegionsResponse) []*Region {
+	regions := make([]*Region, 0, len(resp.GetRegions()))
+	for _, r := range resp.GetRegions() {
+		region := &Region{
+			Meta:         r.Region,
+			Leader:       r.Leader,
+			PendingPeers: r.PendingPeers,
+			Buckets:      r.Buckets,
+		}
+		for _, p := range r.DownPeers {
+			region.DownPeers = append(region.DownPeers, p.Peer)
+		}
+		regions = append(regions, region)
+	}
+	return regions
 }
 
 func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*Region {
@@ -1131,6 +1242,7 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*Region {
 				Meta:         r.Region,
 				Leader:       r.Leader,
 				PendingPeers: r.PendingPeers,
+				Buckets:      r.Buckets,
 			}
 			for _, p := range r.DownPeers {
 				region.DownPeers = append(region.DownPeers, p.Peer)
