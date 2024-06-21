@@ -250,26 +250,27 @@ func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) {
 	log.Info("switched to async_wait state", zap.String("replicate-mode", modeDRAutoSync))
 }
 
-func (m *ModeManager) drSwitchToAsync(availableStores []uint64) {
+func (m *ModeManager) drSwitchToAsync(availableStores []uint64) error {
 	m.Lock()
 	defer m.Unlock()
-	m.drSwitchToAsyncWithLock(availableStores)
+	return m.drSwitchToAsyncWithLock(availableStores)
 }
 
-func (m *ModeManager) drSwitchToAsyncWithLock(availableStores []uint64) {
+func (m *ModeManager) drSwitchToAsyncWithLock(availableStores []uint64) error {
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
-		return
+		return err
 	}
 	now := time.Now()
 	dr := drAutoSyncStatus{State: drStateAsync, StateID: id, AvailableStores: availableStores, AsyncStartTime: &now}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
-		return
+		return err
 	}
 	m.drAutoSync = dr
 	log.Info("switched to async state", zap.String("replicate-mode", modeDRAutoSync))
+	return nil
 }
 
 func (m *ModeManager) drDurationSinceAsyncStart() time.Duration {
@@ -281,10 +282,10 @@ func (m *ModeManager) drDurationSinceAsyncStart() time.Duration {
 	return time.Since(*m.drAutoSync.AsyncStartTime)
 }
 
-func (m *ModeManager) drSwitchToSyncRecover() {
+func (m *ModeManager) drSwitchToSyncRecover() error {
 	m.Lock()
 	defer m.Unlock()
-	_ = m.drSwitchToSyncRecoverWithLock()
+	return m.drSwitchToSyncRecoverWithLock()
 }
 
 func (m *ModeManager) drSwitchToSyncRecoverWithLock() error {
@@ -478,19 +479,19 @@ func (m *ModeManager) tickUpdateState() {
 			break
 		}
 		if m.drCheckStoreStateUpdated(storeIDs[primaryUp]) {
-			m.drSwitchToAsync(storeIDs[primaryUp])
+			_ = m.drSwitchToAsync(storeIDs[primaryUp])
 		}
 	case drStateAsync:
 		if canSync && m.drDurationSinceAsyncStart() > m.config.DRAutoSync.WaitRecoverTimeout.Duration {
-			m.drSwitchToSyncRecover()
+			_ = m.drSwitchToSyncRecover()
 			break
 		}
 		if !reflect.DeepEqual(m.drGetAvailableStores(), storeIDs[primaryUp]) && m.drCheckStoreStateUpdated(storeIDs[primaryUp]) {
-			m.drSwitchToAsync(storeIDs[primaryUp])
+			_ = m.drSwitchToAsync(storeIDs[primaryUp])
 		}
 	case drStateSyncRecover:
 		if !canSync && hasMajority {
-			m.drSwitchToAsync(storeIDs[primaryUp])
+			_ = m.drSwitchToAsync(storeIDs[primaryUp])
 		} else {
 			m.updateProgress()
 			progress := m.estimateProgress()

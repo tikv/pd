@@ -87,7 +87,7 @@ func TestStatus(t *testing.T) {
 		},
 	}, rep.GetReplicationStatus())
 
-	rep.drSwitchToAsync(nil)
+	re.NoError(rep.drSwitchToAsync(nil))
 	re.Equal(&pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,
 		DrAutoSync: &pb.DRAutoSync{
@@ -98,7 +98,7 @@ func TestStatus(t *testing.T) {
 		},
 	}, rep.GetReplicationStatus())
 
-	rep.drSwitchToSyncRecover()
+	re.NoError(rep.drSwitchToSyncRecover())
 	stateID := rep.drAutoSync.StateID
 	re.Equal(&pb.ReplicationStatus{
 		Mode: pb.ReplicationMode_DR_AUTO_SYNC,
@@ -325,7 +325,7 @@ func TestStateSwitch(t *testing.T) {
 	re.Equal(drStateSyncRecover, rep.drGetState())
 	assertStateIDUpdate()
 
-	rep.drSwitchToAsync([]uint64{1, 2, 3, 4, 5})
+	re.NoError(rep.drSwitchToAsync([]uint64{1, 2, 3, 4, 5}))
 	rep.config.DRAutoSync.WaitRecoverTimeout = typeutil.NewDuration(time.Hour)
 	rep.tickUpdateState()
 	re.Equal(drStateAsync, rep.drGetState()) // wait recover timeout
@@ -344,14 +344,14 @@ func TestStateSwitch(t *testing.T) {
 	re.Equal(drStateAsync, rep.drGetState())
 	assertStateIDUpdate()
 	// lost majority, does not switch to async.
-	rep.drSwitchToSyncRecover()
+	re.NoError(rep.drSwitchToSyncRecover())
 	assertStateIDUpdate()
 	setStoreState(cluster, "down", "down", "up", "up", "down", "down")
 	rep.tickUpdateState()
 	re.Equal(drStateSyncRecover, rep.drGetState())
 
 	// sync_recover -> sync
-	rep.drSwitchToSyncRecover()
+	re.NoError(rep.drSwitchToSyncRecover())
 	assertStateIDUpdate()
 	setStoreState(cluster, "up", "up", "up", "up", "up", "up")
 	cluster.AddLeaderRegion(1, 1, 2, 3, 4, 5)
@@ -498,7 +498,7 @@ func TestRecoverProgress(t *testing.T) {
 	re.NoError(err)
 
 	prepare := func(n int, asyncRegions []int) {
-		rep.drSwitchToSyncRecover()
+		re.NoError(rep.drSwitchToSyncRecover())
 		regions := genRegions(cluster, rep.drAutoSync.StateID, n)
 		for _, i := range asyncRegions {
 			regions[i] = regions[i].Clone(core.SetReplicationStatus(&pb.RegionReplicationStatus{
@@ -563,7 +563,7 @@ func TestRecoverProgressWithSplitAndMerge(t *testing.T) {
 	re.NoError(err)
 
 	prepare := func(n int, asyncRegions []int) {
-		rep.drSwitchToSyncRecover()
+		re.NoError(rep.drSwitchToSyncRecover())
 		regions := genRegions(cluster, rep.drAutoSync.StateID, n)
 		for _, i := range asyncRegions {
 			regions[i] = regions[i].Clone(core.SetReplicationStatus(&pb.RegionReplicationStatus{
