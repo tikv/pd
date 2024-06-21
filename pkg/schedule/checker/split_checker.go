@@ -51,7 +51,7 @@ func NewSplitChecker(cluster sche.CheckerCluster, ruleManager *placement.RuleMan
 
 // GetType returns the checker type.
 func (*SplitChecker) GetType() string {
-	return "split-checker"
+	return config.SplitCheckerName.String()
 }
 
 // Check checks whether the region need to split and returns Operator to fix.
