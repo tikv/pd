@@ -21,10 +21,16 @@ func (c CheckerSchedulerName) String() string {
 }
 
 const (
+	// JointStateCheckerName is the name for joint state checker.
 	JointStateCheckerName CheckerSchedulerName = "joint_state_checker"
-	LearnerCheckerName    CheckerSchedulerName = "learner_checker"
-	MergeCheckerName      CheckerSchedulerName = "merge_checker"
-	ReplicaCheckerName    CheckerSchedulerName = "replica_checker"
-	RuleCheckerName       CheckerSchedulerName = "rule_checker"
-	SplitCheckerName      CheckerSchedulerName = "split_checker"
+	// LearnerCheckerName is the name for learner checker.
+	LearnerCheckerName CheckerSchedulerName = "learner_checker"
+	// SplitCheckerName is the name for split checker.
+	MergeCheckerName CheckerSchedulerName = "merge_checker"
+	// ReplicaCheckerName is the name for replica checker.
+	ReplicaCheckerName CheckerSchedulerName = "replica_checker"
+	// RuleCheckerName is the name for rule checker.
+	RuleCheckerName CheckerSchedulerName = "rule_checker"
+	// SplitCheckerName is the name for split checker.
+	SplitCheckerName CheckerSchedulerName = "split_checker"
 )
