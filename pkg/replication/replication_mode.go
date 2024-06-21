@@ -232,22 +232,23 @@ func (m *ModeManager) loadDRAutoSync() error {
 	return nil
 }
 
-func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) {
+func (m *ModeManager) drSwitchToAsyncWait(availableStores []uint64) error {
 	m.Lock()
 	defer m.Unlock()
 
 	id, err := m.cluster.AllocID()
 	if err != nil {
 		log.Warn("failed to switch to async wait state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
-		return
+		return err
 	}
 	dr := drAutoSyncStatus{State: drStateAsyncWait, StateID: id, AvailableStores: availableStores}
 	if err := m.storage.SaveReplicationStatus(modeDRAutoSync, dr); err != nil {
 		log.Warn("failed to switch to async state", zap.String("replicate-mode", modeDRAutoSync), errs.ZapError(err))
-		return
+		return err
 	}
 	m.drAutoSync = dr
 	log.Info("switched to async_wait state", zap.String("replicate-mode", modeDRAutoSync))
+	return nil
 }
 
 func (m *ModeManager) drSwitchToAsync(availableStores []uint64) error {
@@ -467,7 +468,7 @@ func (m *ModeManager) tickUpdateState() {
 	case drStateSync:
 		// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
 		if !canSync && hasMajority {
-			m.drSwitchToAsyncWait(storeIDs[primaryUp])
+			_ = m.drSwitchToAsyncWait(storeIDs[primaryUp])
 		}
 	case drStateAsyncWait:
 		if canSync {
@@ -475,7 +476,7 @@ func (m *ModeManager) tickUpdateState() {
 			break
 		}
 		if oldAvailableStores := m.drGetAvailableStores(); !reflect.DeepEqual(oldAvailableStores, storeIDs[primaryUp]) {
-			m.drSwitchToAsyncWait(storeIDs[primaryUp])
+			_ = m.drSwitchToAsyncWait(storeIDs[primaryUp])
 			break
 		}
 		if m.drCheckStoreStateUpdated(storeIDs[primaryUp]) {
