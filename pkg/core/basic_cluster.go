@@ -97,6 +97,7 @@ type RegionSetInformer interface {
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo
+	BatchScanRegions(keyRanges *KeyRanges, limit int) []*RegionInfo
 }
 
 // StoreSetInformer provides access to a shared informer of stores.
@@ -138,6 +139,13 @@ func NewKeyRange(startKey, endKey string) KeyRange {
 // KeyRanges is a slice of KeyRange.
 type KeyRanges struct {
 	krs []*KeyRange
+}
+
+// NewKeyRangesWithSize creates a KeyRanges with the hint size.
+func NewKeyRangesWithSize(size int) *KeyRanges {
+	return &KeyRanges{
+		krs: make([]*KeyRange, 0, size),
+	}
 }
 
 // Append appends a KeyRange.

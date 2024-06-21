@@ -188,7 +188,7 @@ func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 		Capacity: uint64(config.RaftStore.Capacity),
 		Version:  config.StoreVersion,
 	}
-	n, err := NewNode(s, raft.conn.pdAddr, config)
+	n, err := NewNode(s, config)
 	if err != nil {
 		simutil.Logger.Error("create node failed", zap.Error(err))
 		return false
@@ -196,6 +196,8 @@ func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 
 	raft.conn.Nodes[s.ID] = n
 	n.raftEngine = raft
+	n.client = NewRetryClient(n)
+
 	err = n.Start()
 	if err != nil {
 		delete(raft.conn.Nodes, s.ID)

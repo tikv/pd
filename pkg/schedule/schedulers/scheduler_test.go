@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -218,7 +219,9 @@ func TestHotRegionScheduleAbnormalReplica(t *testing.T) {
 	tc.AddRegionWithReadInfo(1, 1, 512*units.KiB*utils.StoreHeartBeatReportInterval, 0, 0, utils.StoreHeartBeatReportInterval, []uint64{2})
 	tc.AddRegionWithReadInfo(2, 2, 512*units.KiB*utils.StoreHeartBeatReportInterval, 0, 0, utils.StoreHeartBeatReportInterval, []uint64{1, 3})
 	tc.AddRegionWithReadInfo(3, 1, 512*units.KiB*utils.StoreHeartBeatReportInterval, 0, 0, utils.StoreHeartBeatReportInterval, []uint64{2, 3})
-	re.True(tc.IsRegionHot(tc.GetRegion(1)))
+	testutil.Eventually(re, func() bool {
+		return tc.IsRegionHot(tc.GetRegion(1))
+	})
 	re.False(hb.IsScheduleAllowed(tc))
 }
 
@@ -314,8 +317,6 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	cd := ConfigSliceDecoder(BalanceRegionType, []string{"", ""})
 	bs, err := CreateScheduler(BalanceRegionType, oc, storage, cd)
 	re.NoError(err)
-	hs, err := CreateScheduler(utils.Write.String(), oc, storage, cd)
-	re.NoError(err)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 10)
@@ -351,6 +352,8 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3})
 	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{1, 3})
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{1, 2})
+	hs, err := CreateScheduler(utils.Write.String(), oc, storage, cd)
+	re.NoError(err)
 	ops, _ = hs.Schedule(tc, false)
 	re.Len(ops, 1)
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)

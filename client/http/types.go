@@ -15,15 +15,14 @@
 package http
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	pd "github.com/tikv/pd/client"
 )
 
 // ClusterState saves some cluster state information.
@@ -43,37 +42,11 @@ type State struct {
 	StartTimestamp int64  `json:"start_timestamp"`
 }
 
-// KeyRange defines a range of keys in bytes.
-type KeyRange struct {
-	startKey []byte
-	endKey   []byte
-}
+// KeyRange alias pd.KeyRange to avoid break client compatibility.
+type KeyRange = pd.KeyRange
 
-// NewKeyRange creates a new key range structure with the given start key and end key bytes.
-// Notice: the actual encoding of the key range is not specified here. It should be either UTF-8 or hex.
-//   - UTF-8 means the key has already been encoded into a string with UTF-8 encoding, like:
-//     []byte{52 56 54 53 54 99 54 99 54 102 50 48 53 55 54 102 55 50 54 99 54 52}, which will later be converted to "48656c6c6f20576f726c64"
-//     by using `string()` method.
-//   - Hex means the key is just a raw hex bytes without encoding to a UTF-8 string, like:
-//     []byte{72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100}, which will later be converted to "48656c6c6f20576f726c64"
-//     by using `hex.EncodeToString()` method.
-func NewKeyRange(startKey, endKey []byte) *KeyRange {
-	return &KeyRange{startKey, endKey}
-}
-
-// EscapeAsUTF8Str returns the URL escaped key strings as they are UTF-8 encoded.
-func (r *KeyRange) EscapeAsUTF8Str() (startKeyStr, endKeyStr string) {
-	startKeyStr = url.QueryEscape(string(r.startKey))
-	endKeyStr = url.QueryEscape(string(r.endKey))
-	return
-}
-
-// EscapeAsHexStr returns the URL escaped key strings as they are hex encoded.
-func (r *KeyRange) EscapeAsHexStr() (startKeyStr, endKeyStr string) {
-	startKeyStr = url.QueryEscape(hex.EncodeToString(r.startKey))
-	endKeyStr = url.QueryEscape(hex.EncodeToString(r.endKey))
-	return
-}
+// NewKeyRange alias pd.NewKeyRange to avoid break client compatibility.
+var NewKeyRange = pd.NewKeyRange
 
 // NOTICE: the structures below are copied from the PD API definitions.
 // Please make sure the consistency if any change happens to the PD API.
@@ -366,7 +339,7 @@ func (r *Rule) String() string {
 // Clone returns a copy of Rule.
 func (r *Rule) Clone() *Rule {
 	var clone Rule
-	json.Unmarshal([]byte(r.String()), &clone)
+	_ = json.Unmarshal([]byte(r.String()), &clone)
 	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
 	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
 	return &clone

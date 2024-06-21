@@ -352,6 +352,7 @@ func (c *scanRegions) Unary(ctx context.Context, cli pd.Client) error {
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
+	//nolint:staticcheck
 	_, err := cli.ScanRegions(ctx, generateKeyForSimulator(startID), generateKeyForSimulator(endID), c.regionSample)
 	if err != nil {
 		return err

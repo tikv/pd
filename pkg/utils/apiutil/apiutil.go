@@ -116,14 +116,14 @@ func TagJSONError(err error) error {
 func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	if err == nil {
 		log.Error("nil is given to errorResp")
-		rd.JSON(w, http.StatusInternalServerError, "nil error")
+		_ = rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}
 	if errCode := errcode.CodeChain(err); errCode != nil {
 		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
-		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
+		_ = rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
 	} else {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 }
 
