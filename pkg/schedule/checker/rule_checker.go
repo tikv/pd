@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -37,8 +38,6 @@ import (
 
 const (
 	maxPendingListLen = 100000
-	ruleChecker       = "rule_checker"
-	ruleCheckerName   = "rule-checker"
 )
 
 var (
@@ -49,36 +48,36 @@ var (
 	errNoNewLeader         = errors.New("no new leader")
 	errRegionNoLeader      = errors.New("region no leader")
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	ruleCheckerCounter                            = checkerCounter.WithLabelValues(ruleChecker, "check")
-	ruleCheckerPausedCounter                      = checkerCounter.WithLabelValues(ruleChecker, "paused")
-	ruleCheckerRegionNoLeaderCounter              = checkerCounter.WithLabelValues(ruleChecker, "region-no-leader")
-	ruleCheckerGetCacheCounter                    = checkerCounter.WithLabelValues(ruleChecker, "get-cache")
-	ruleCheckerNeedSplitCounter                   = checkerCounter.WithLabelValues(ruleChecker, "need-split")
-	ruleCheckerSetCacheCounter                    = checkerCounter.WithLabelValues(ruleChecker, "set-cache")
-	ruleCheckerReplaceDownCounter                 = checkerCounter.WithLabelValues(ruleChecker, "replace-down")
-	ruleCheckerPromoteWitnessCounter              = checkerCounter.WithLabelValues(ruleChecker, "promote-witness")
-	ruleCheckerReplaceOfflineCounter              = checkerCounter.WithLabelValues(ruleChecker, "replace-offline")
-	ruleCheckerAddRulePeerCounter                 = checkerCounter.WithLabelValues(ruleChecker, "add-rule-peer")
-	ruleCheckerNoStoreAddCounter                  = checkerCounter.WithLabelValues(ruleChecker, "no-store-add")
-	ruleCheckerNoStoreThenTryReplace              = checkerCounter.WithLabelValues(ruleChecker, "no-store-then-try-replace")
-	ruleCheckerNoStoreReplaceCounter              = checkerCounter.WithLabelValues(ruleChecker, "no-store-replace")
-	ruleCheckerFixPeerRoleCounter                 = checkerCounter.WithLabelValues(ruleChecker, "fix-peer-role")
-	ruleCheckerFixLeaderRoleCounter               = checkerCounter.WithLabelValues(ruleChecker, "fix-leader-role")
-	ruleCheckerNotAllowLeaderCounter              = checkerCounter.WithLabelValues(ruleChecker, "not-allow-leader")
-	ruleCheckerFixFollowerRoleCounter             = checkerCounter.WithLabelValues(ruleChecker, "fix-follower-role")
-	ruleCheckerNoNewLeaderCounter                 = checkerCounter.WithLabelValues(ruleChecker, "no-new-leader")
-	ruleCheckerDemoteVoterRoleCounter             = checkerCounter.WithLabelValues(ruleChecker, "demote-voter-role")
-	ruleCheckerRecentlyPromoteToNonWitnessCounter = checkerCounter.WithLabelValues(ruleChecker, "recently-promote-to-non-witness")
-	ruleCheckerCancelSwitchToWitnessCounter       = checkerCounter.WithLabelValues(ruleChecker, "cancel-switch-to-witness")
-	ruleCheckerSetVoterWitnessCounter             = checkerCounter.WithLabelValues(ruleChecker, "set-voter-witness")
-	ruleCheckerSetLearnerWitnessCounter           = checkerCounter.WithLabelValues(ruleChecker, "set-learner-witness")
-	ruleCheckerSetVoterNonWitnessCounter          = checkerCounter.WithLabelValues(ruleChecker, "set-voter-non-witness")
-	ruleCheckerSetLearnerNonWitnessCounter        = checkerCounter.WithLabelValues(ruleChecker, "set-learner-non-witness")
-	ruleCheckerMoveToBetterLocationCounter        = checkerCounter.WithLabelValues(ruleChecker, "move-to-better-location")
-	ruleCheckerSkipRemoveOrphanPeerCounter        = checkerCounter.WithLabelValues(ruleChecker, "skip-remove-orphan-peer")
-	ruleCheckerRemoveOrphanPeerCounter            = checkerCounter.WithLabelValues(ruleChecker, "remove-orphan-peer")
-	ruleCheckerReplaceOrphanPeerCounter           = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer")
-	ruleCheckerReplaceOrphanPeerNoFitCounter      = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer-no-fit")
+	ruleCheckerCounter                            = counterWithEvent(config.RuleCheckerName, "check")
+	ruleCheckerPausedCounter                      = counterWithEvent(config.RuleCheckerName, "paused")
+	ruleCheckerRegionNoLeaderCounter              = counterWithEvent(config.RuleCheckerName, "region-no-leader")
+	ruleCheckerGetCacheCounter                    = counterWithEvent(config.RuleCheckerName, "get-cache")
+	ruleCheckerNeedSplitCounter                   = counterWithEvent(config.RuleCheckerName, "need-split")
+	ruleCheckerSetCacheCounter                    = counterWithEvent(config.RuleCheckerName, "set-cache")
+	ruleCheckerReplaceDownCounter                 = counterWithEvent(config.RuleCheckerName, "replace-down")
+	ruleCheckerPromoteWitnessCounter              = counterWithEvent(config.RuleCheckerName, "promote-witness")
+	ruleCheckerReplaceOfflineCounter              = counterWithEvent(config.RuleCheckerName, "replace-offline")
+	ruleCheckerAddRulePeerCounter                 = counterWithEvent(config.RuleCheckerName, "add-rule-peer")
+	ruleCheckerNoStoreAddCounter                  = counterWithEvent(config.RuleCheckerName, "no-store-add")
+	ruleCheckerNoStoreThenTryReplace              = counterWithEvent(config.RuleCheckerName, "no-store-then-try-replace")
+	ruleCheckerNoStoreReplaceCounter              = counterWithEvent(config.RuleCheckerName, "no-store-replace")
+	ruleCheckerFixPeerRoleCounter                 = counterWithEvent(config.RuleCheckerName, "fix-peer-role")
+	ruleCheckerFixLeaderRoleCounter               = counterWithEvent(config.RuleCheckerName, "fix-leader-role")
+	ruleCheckerNotAllowLeaderCounter              = counterWithEvent(config.RuleCheckerName, "not-allow-leader")
+	ruleCheckerFixFollowerRoleCounter             = counterWithEvent(config.RuleCheckerName, "fix-follower-role")
+	ruleCheckerNoNewLeaderCounter                 = counterWithEvent(config.RuleCheckerName, "no-new-leader")
+	ruleCheckerDemoteVoterRoleCounter             = counterWithEvent(config.RuleCheckerName, "demote-voter-role")
+	ruleCheckerRecentlyPromoteToNonWitnessCounter = counterWithEvent(config.RuleCheckerName, "recently-promote-to-non-witness")
+	ruleCheckerCancelSwitchToWitnessCounter       = counterWithEvent(config.RuleCheckerName, "cancel-switch-to-witness")
+	ruleCheckerSetVoterWitnessCounter             = counterWithEvent(config.RuleCheckerName, "set-voter-witness")
+	ruleCheckerSetLearnerWitnessCounter           = counterWithEvent(config.RuleCheckerName, "set-learner-witness")
+	ruleCheckerSetVoterNonWitnessCounter          = counterWithEvent(config.RuleCheckerName, "set-voter-non-witness")
+	ruleCheckerSetLearnerNonWitnessCounter        = counterWithEvent(config.RuleCheckerName, "set-learner-non-witness")
+	ruleCheckerMoveToBetterLocationCounter        = counterWithEvent(config.RuleCheckerName, "move-to-better-location")
+	ruleCheckerSkipRemoveOrphanPeerCounter        = counterWithEvent(config.RuleCheckerName, "skip-remove-orphan-peer")
+	ruleCheckerRemoveOrphanPeerCounter            = counterWithEvent(config.RuleCheckerName, "remove-orphan-peer")
+	ruleCheckerReplaceOrphanPeerCounter           = counterWithEvent(config.RuleCheckerName, "replace-orphan-peer")
+	ruleCheckerReplaceOrphanPeerNoFitCounter      = counterWithEvent(config.RuleCheckerName, "replace-orphan-peer-no-fit")
 )
 
 // RuleChecker fix/improve region by placement rules.
@@ -86,7 +85,7 @@ type RuleChecker struct {
 	PauseController
 	cluster            sche.CheckerCluster
 	ruleManager        *placement.RuleManager
-	name               string
+	name               config.CheckerSchedulerName
 	regionWaitingList  cache.Cache
 	pendingList        cache.Cache
 	switchWitnessCache *cache.TTLUint64
@@ -98,7 +97,7 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 	return &RuleChecker{
 		cluster:            cluster,
 		ruleManager:        ruleManager,
-		name:               ruleCheckerName,
+		name:               config.RuleCheckerName,
 		regionWaitingList:  regionWaitingList,
 		pendingList:        cache.NewDefaultCache(maxPendingListLen),
 		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
@@ -108,7 +107,7 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 
 // GetType returns RuleChecker's Type
 func (*RuleChecker) GetType() string {
-	return ruleCheckerName
+	return config.RuleCheckerName.String()
 }
 
 // Check checks if the region matches placement rules and returns Operator to
@@ -404,7 +403,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	if s == nil {
 		return false
 	}
-	stateFilter := &filter.StoreStateFilter{ActionScope: "rule-checker", TransferLeader: true}
+	stateFilter := &filter.StoreStateFilter{ActionScope: "rule_checker", TransferLeader: true}
 	if !stateFilter.Target(c.cluster.GetCheckerConfig(), s).IsOK() {
 		return false
 	}
@@ -651,12 +650,12 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerName:    c.name,
+		checkerName:    c.name.String(),
 		cluster:        c.cluster,
 		isolationLevel: rule.IsolationLevel,
 		locationLabels: rule.LocationLabels,
 		region:         region,
-		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.name, rule.LabelConstraints)},
+		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.name.String(), rule.LabelConstraints)},
 		fastFailover:   fastFailover,
 	}
 }

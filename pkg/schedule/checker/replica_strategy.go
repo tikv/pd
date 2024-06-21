@@ -26,7 +26,7 @@ import (
 // ReplicaStrategy collects some utilities to manipulate region peers. It
 // exists to allow replica_checker and rule_checker to reuse common logics.
 type ReplicaStrategy struct {
-	checkerName    string // replica-checker / rule-checker
+	checkerName    string // replica_checker / rule_checker
 	cluster        sche.CheckerCluster
 	locationLabels []string
 	isolationLevel string

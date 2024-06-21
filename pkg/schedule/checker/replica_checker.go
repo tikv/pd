@@ -30,28 +30,26 @@ import (
 )
 
 const (
-	replicaCheckerName = "replica-checker"
-	replicaChecker     = "replica_checker"
-	offlineStatus      = "offline"
-	downStatus         = "down"
+	offlineStatus = "offline"
+	downStatus    = "down"
 )
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	replicaCheckerCounter                         = checkerCounter.WithLabelValues(replicaChecker, "check")
-	replicaCheckerPausedCounter                   = checkerCounter.WithLabelValues(replicaChecker, "paused")
-	replicaCheckerNewOpCounter                    = checkerCounter.WithLabelValues(replicaChecker, "new-operator")
-	replicaCheckerNoTargetStoreCounter            = checkerCounter.WithLabelValues(replicaChecker, "no-target-store")
-	replicaCheckerNoWorstPeerCounter              = checkerCounter.WithLabelValues(replicaChecker, "no-worst-peer")
-	replicaCheckerCreateOpFailedCounter           = checkerCounter.WithLabelValues(replicaChecker, "create-operator-failed")
-	replicaCheckerAllRightCounter                 = checkerCounter.WithLabelValues(replicaChecker, "all-right")
-	replicaCheckerNotBetterCounter                = checkerCounter.WithLabelValues(replicaChecker, "not-better")
-	replicaCheckerRemoveExtraOfflineFailedCounter = checkerCounter.WithLabelValues(replicaChecker, "remove-extra-offline-replica-failed")
-	replicaCheckerRemoveExtraDownFailedCounter    = checkerCounter.WithLabelValues(replicaChecker, "remove-extra-down-replica-failed")
-	replicaCheckerNoStoreOfflineCounter           = checkerCounter.WithLabelValues(replicaChecker, "no-store-offline")
-	replicaCheckerNoStoreDownCounter              = checkerCounter.WithLabelValues(replicaChecker, "no-store-down")
-	replicaCheckerReplaceOfflineFailedCounter     = checkerCounter.WithLabelValues(replicaChecker, "replace-offline-replica-failed")
-	replicaCheckerReplaceDownFailedCounter        = checkerCounter.WithLabelValues(replicaChecker, "replace-down-replica-failed")
+	replicaCheckerCounter                         = counterWithEvent(config.ReplicaCheckerName, "check")
+	replicaCheckerPausedCounter                   = counterWithEvent(config.ReplicaCheckerName, "paused")
+	replicaCheckerNewOpCounter                    = counterWithEvent(config.ReplicaCheckerName, "new-operator")
+	replicaCheckerNoTargetStoreCounter            = counterWithEvent(config.ReplicaCheckerName, "no-target-store")
+	replicaCheckerNoWorstPeerCounter              = counterWithEvent(config.ReplicaCheckerName, "no-worst-peer")
+	replicaCheckerCreateOpFailedCounter           = counterWithEvent(config.ReplicaCheckerName, "create-operator-failed")
+	replicaCheckerAllRightCounter                 = counterWithEvent(config.ReplicaCheckerName, "all-right")
+	replicaCheckerNotBetterCounter                = counterWithEvent(config.ReplicaCheckerName, "not-better")
+	replicaCheckerRemoveExtraOfflineFailedCounter = counterWithEvent(config.ReplicaCheckerName, "remove-extra-offline-replica-failed")
+	replicaCheckerRemoveExtraDownFailedCounter    = counterWithEvent(config.ReplicaCheckerName, "remove-extra-down-replica-failed")
+	replicaCheckerNoStoreOfflineCounter           = counterWithEvent(config.ReplicaCheckerName, "no-store-offline")
+	replicaCheckerNoStoreDownCounter              = counterWithEvent(config.ReplicaCheckerName, "no-store-down")
+	replicaCheckerReplaceOfflineFailedCounter     = counterWithEvent(config.ReplicaCheckerName, "replace-offline-replica-failed")
+	replicaCheckerReplaceDownFailedCounter        = counterWithEvent(config.ReplicaCheckerName, "replace-down-replica-failed")
 )
 
 // ReplicaChecker ensures region has the best replicas.
@@ -77,7 +75,7 @@ func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigPro
 
 // GetType return ReplicaChecker's type
 func (*ReplicaChecker) GetType() string {
-	return replicaCheckerName
+	return config.ReplicaCheckerName.String()
 }
 
 // Check verifies a region's replicas, creating an operator.Operator if need.
@@ -291,7 +289,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 
 func (r *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerName:    replicaCheckerName,
+		checkerName:    config.ReplicaCheckerName.String(),
 		cluster:        r.cluster,
 		locationLabels: r.conf.GetLocationLabels(),
 		isolationLevel: r.conf.GetIsolationLevel(),

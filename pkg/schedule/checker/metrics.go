@@ -14,7 +14,10 @@
 
 package checker
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/schedule/config"
+)
 
 var (
 	checkerCounter = prometheus.NewCounterVec(
@@ -28,4 +31,8 @@ var (
 
 func init() {
 	prometheus.MustRegister(checkerCounter)
+}
+
+func counterWithEvent(checker config.CheckerSchedulerName, event string) prometheus.Counter {
+	return checkerCounter.WithLabelValues(checker.String(), event)
 }
