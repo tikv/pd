@@ -180,7 +180,9 @@ func (s *Server) campaignLeader() {
 
 	log.Info("triggering the primary callback functions")
 	for _, cb := range s.primaryCallbacks {
-		cb(ctx)
+		if err := cb(ctx); err != nil {
+			log.Error("failed to trigger the primary callback function", errs.ZapError(err))
+		}
 	}
 
 	s.participant.EnableLeader()
@@ -213,7 +215,9 @@ func (s *Server) Close() {
 	}
 
 	log.Info("closing resource manager server ...")
-	s.serviceRegister.Deregister()
+	if err := s.serviceRegister.Deregister(); err != nil {
+		log.Error("failed to deregister the service", errs.ZapError(err))
+	}
 	utils.StopHTTPServer(s)
 	utils.StopGRPCServer(s)
 	s.GetListener().Close()
@@ -362,10 +366,14 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
-	cmd.Flags().Parse(args)
+	err := cmd.Flags().Parse(args)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
 	cfg := NewConfig()
 	flagSet := cmd.Flags()
-	err := cfg.Parse(flagSet)
+	err = cfg.Parse(flagSet)
 	defer logutil.LogPanic()
 
 	if err != nil {
@@ -389,7 +397,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
 	// Flushing any buffered log entries
-	defer log.Sync()
+	defer log.Sync() // nolint:errcheck
 
 	versioninfo.Log(serviceName)
 	log.Info("resource manager config", zap.Reflect("config", cfg))

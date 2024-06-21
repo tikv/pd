@@ -33,7 +33,7 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *config.Conf
 	re.NoError(err)
 	log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	// Flushing any buffered log entries
-	defer log.Sync()
+	defer log.Sync() // nolint:errcheck
 
 	s := CreateServer(ctx, cfg)
 	if err = s.Run(); err != nil {

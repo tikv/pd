@@ -207,6 +207,6 @@ issues:
     - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
       linters:
         - errcheck
-    - path: (server/api/.*\.go|server/.*\.go|pkg/schedule/schedulers/.*\.go)
+    - path: (server/api/.*\.go|pkg/schedule/schedulers/.*\.go)
       linters:
         - errcheck

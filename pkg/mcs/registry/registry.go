@@ -37,7 +37,7 @@ type ServiceBuilder func(bs.Server) RegistrableService
 // RegistrableService is the interface that should wraps the RegisterService method.
 type RegistrableService interface {
 	RegisterGRPCService(g *grpc.Server)
-	RegisterRESTHandler(userDefineHandlers map[string]http.Handler)
+	RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error
 }
 
 // ServiceRegistry is a map that stores all registered grpc services.
@@ -82,14 +82,20 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv bs.Server, h map[string]http
 	for name, builder := range r.builders {
 		serviceName := createServiceName(prefix, name)
 		if l, ok := r.services[serviceName]; ok {
-			l.RegisterRESTHandler(h)
-			log.Info("restful API service already registered", zap.String("prefix", prefix), zap.String("service-name", name))
+			if err := l.RegisterRESTHandler(h); err != nil {
+				log.Error("register REST handler failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
+			} else {
+				log.Info("restful API service already registered", zap.String("prefix", prefix), zap.String("service-name", name))
+			}
 			continue
 		}
 		l := builder(srv)
 		r.services[serviceName] = l
-		l.RegisterRESTHandler(h)
-		log.Info("restful API service registered successfully", zap.String("prefix", prefix), zap.String("service-name", name))
+		if err := l.RegisterRESTHandler(h); err != nil {
+			log.Error("register REST handler failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
+		} else {
+			log.Info("restful API service registered successfully", zap.String("prefix", prefix), zap.String("service-name", name))
+		}
 	}
 }
 
