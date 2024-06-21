@@ -28,12 +28,15 @@ func newRegionMerge(config *sc.SimConfig) *Case {
 	totalStore := config.TotalStore
 	totalRegion := config.TotalRegion
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	allStores := make(map[uint64]struct{}, totalStore)
 
 	for i := 0; i < totalStore; i++ {
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 
 	for i := 0; i < totalRegion; i++ {
@@ -54,10 +57,16 @@ func newRegionMerge(config *sc.SimConfig) *Case {
 	}
 	// Checker description
 	mergeRatio := 4 // when max-merge-region-size is 20, per region will reach 40MB
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
+			}
+		}
+
 		currentPeerCount := 0
-		for i := 1; i <= totalStore; i++ {
-			currentPeerCount += regions.GetStoreRegionCount(uint64(i))
+		for storeID := range allStores {
+			currentPeerCount += regions.GetStoreRegionCount(storeID)
 		}
 		return isUniform(currentPeerCount, totalRegion*replica/mergeRatio)
 	}
