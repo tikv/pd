@@ -81,11 +81,11 @@ type KeyspaceGroupMember struct {
 	Priority int    `json:"priority"`
 }
 
-// CompareAddress compares the address with the given address.
+// IsAddressEquivalent compares the address with the given address.
 // It compares the address without the scheme.
 // Otherwise, it will not work when we update the scheme from http to https.
 // Issue: https://github.com/tikv/pd/issues/8284
-func (m *KeyspaceGroupMember) CompareAddress(addr string) bool {
+func (m *KeyspaceGroupMember) IsAddressEquivalent(addr string) bool {
 	return typeutil.EqualBaseURLs(m.Address, addr)
 }
 

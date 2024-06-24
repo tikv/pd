@@ -874,7 +874,7 @@ func (m *GroupManager) SetPriorityForKeyspaceGroup(id uint32, node string, prior
 		inKeyspaceGroup := false
 		members := make([]endpoint.KeyspaceGroupMember, 0, len(kg.Members))
 		for _, member := range kg.Members {
-			if member.CompareAddress(node) {
+			if member.IsAddressEquivalent(node) {
 				inKeyspaceGroup = true
 				member.Priority = priority
 			}

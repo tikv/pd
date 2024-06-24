@@ -512,7 +512,7 @@ func SetPriorityForKeyspaceGroup(c *gin.Context) {
 	// check if node exists
 	members := kg.Members
 	if slice.NoneOf(members, func(i int) bool {
-		return members[i].CompareAddress(node)
+		return members[i].IsAddressEquivalent(node)
 	}) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "tso node does not exist in the keyspace group")
 	}

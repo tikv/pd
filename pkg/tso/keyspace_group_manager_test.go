@@ -891,7 +891,7 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupM
 				re.Equal(i, int(am.kgID))
 				re.Equal(i, int(kg.ID))
 				for _, m := range kg.Members {
-					if m.CompareAddress(kgm.tsoServiceID.ServiceAddr) {
+					if m.IsAddressEquivalent(kgm.tsoServiceID.ServiceAddr) {
 						ids = append(ids, uint32(i))
 						break
 					}
