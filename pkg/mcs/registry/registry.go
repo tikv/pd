@@ -83,7 +83,7 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv bs.Server, h map[string]http
 		serviceName := createServiceName(prefix, name)
 		if l, ok := r.services[serviceName]; ok {
 			if err := l.RegisterRESTHandler(h); err != nil {
-				log.Error("register REST handler failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
+				log.Error("register restful API service failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
 			} else {
 				log.Info("restful API service already registered", zap.String("prefix", prefix), zap.String("service-name", name))
 			}
@@ -92,7 +92,7 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv bs.Server, h map[string]http
 		l := builder(srv)
 		r.services[serviceName] = l
 		if err := l.RegisterRESTHandler(h); err != nil {
-			log.Error("register REST handler failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
+			log.Error("register restful API service failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
 		} else {
 			log.Info("restful API service registered successfully", zap.String("prefix", prefix), zap.String("service-name", name))
 		}
