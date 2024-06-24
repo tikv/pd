@@ -448,6 +448,11 @@ func (s *ScheduleController) Stop() {
 
 // Schedule tries to create some operators.
 func (s *ScheduleController) Schedule(diagnosable bool) []*operator.Operator {
+<<<<<<< HEAD
+=======
+	_, isEvictLeaderScheduler := s.Scheduler.(*evictLeaderScheduler)
+retry:
+>>>>>>> 26e90e9ff (scheduler: skip evict-leader-scheduler when setting schedule deny label (#8303))
 	for i := 0; i < maxScheduleRetries; i++ {
 		// no need to retry if schedule should stop to speed exit
 		select {
@@ -483,7 +488,17 @@ func (s *ScheduleController) Schedule(diagnosable bool) []*operator.Operator {
 			if foundDisabled {
 				continue
 			}
+<<<<<<< HEAD
 			return ops
+=======
+
+			// If the evict-leader-scheduler is disabled, it will obstruct the restart operation of tikv by the operator.
+			// Refer: https://docs.pingcap.com/tidb-in-kubernetes/stable/restart-a-tidb-cluster#perform-a-graceful-restart-to-a-single-tikv-pod
+			if labelMgr.ScheduleDisabled(region) && !isEvictLeaderScheduler {
+				denySchedulersByLabelerCounter.Inc()
+				continue retry
+			}
+>>>>>>> 26e90e9ff (scheduler: skip evict-leader-scheduler when setting schedule deny label (#8303))
 		}
 	}
 	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)

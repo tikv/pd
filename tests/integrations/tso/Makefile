@@ -34,8 +34,39 @@ test: failpoint-enable
 	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
+<<<<<<< HEAD:tests/integrations/tso/Makefile
 ci-test-job:
 	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -covermode=atomic -coverprofile=covprofile -coverpkg=$(ROOT_PATH)/... github.com/tikv/pd/tests/integrations/tso
+=======
+deploy: kill_cluster
+	@ echo "deploying..."
+	./deploy.sh
+	@ echo "wait cluster ready..."
+	./wait_tiup.sh 15 20
+	@ echo "check cluster status..."
+	@ pid=$$(ps -ef | grep 'playground' | grep -v grep | awk '{print $$2}' | head -n 1); \
+	echo $$pid;
+
+kill_cluster:
+	@ echo "kill cluster..."
+	@ pid=$$(ps -ef | grep 'playground' | grep -v grep | awk '{print $$2}' | head -n 1); \
+	if [ ! -z "$$pid" ]; then \
+		echo $$pid; \
+		kill $$pid; \
+		echo "waiting for cluster to exit..."; \
+		sleep 30; \
+	fi
+
+test:
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || (\
+	echo "follow is pd-0 log\n" ; \
+	cat ~/.tiup/data/pd_real_cluster_test/pd-0/pd.log ; \
+	echo "follow is pd-1 log\n" ; \
+	cat ~/.tiup/data/pd_real_cluster_test/pd-1/pd.log ; \
+	echo "follow is pd-2 log\n" ; \
+	cat ~/.tiup/data/pd_real_cluster_test/pd-2/pd.log ; \
+	exit 1)
+>>>>>>> 26e90e9ff (scheduler: skip evict-leader-scheduler when setting schedule deny label (#8303)):tests/integrations/realcluster/Makefile
 
 install-tools:
 	cd $(ROOT_PATH) && $(MAKE) install-tools
