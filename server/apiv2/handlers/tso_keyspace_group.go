@@ -413,8 +413,16 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "existed replica is larger than the new replica")
 		return
 	}
+
+	// check if nodes exist
+	existMembers := make(map[string]struct{})
+	for _, member := range keyspaceGroup.Members {
+		if exist, addr := manager.IsExistNode(member.Address); exist {
+			existMembers[addr] = struct{}{}
+		}
+	}
 	// get the nodes
-	nodes, err := manager.AllocNodesForKeyspaceGroup(id, allocParams.Replica)
+	nodes, err := manager.AllocNodesForKeyspaceGroup(id, existMembers, allocParams.Replica)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -455,7 +463,7 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 	}
 	// check if node exists
 	for _, node := range setParams.Nodes {
-		if !manager.IsExistNode(node) {
+		if exist, _ := manager.IsExistNode(node); !exist {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "node does not exist")
 			return
 		}

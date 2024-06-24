@@ -15,6 +15,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -1569,6 +1570,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}, nil
 }
 
+// Deprecated: use BatchScanRegions instead.
 // ScanRegions implements gRPC PDServer.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
@@ -1624,6 +1626,83 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 			PendingPeers: r.GetPendingPeers(),
 		})
 	}
+	return resp, nil
+}
+
+// BatchScanRegions implements gRPC PDServer.
+func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if done, err := limiter.Allow(fName); err == nil {
+			defer done()
+		} else {
+			return &pdpb.BatchScanRegionsResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			}, nil
+		}
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).BatchScanRegions(ctx, request)
+	}
+	followerHandle := new(bool)
+	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.BatchScanRegionsResponse), nil
+	}
+
+	var rc *cluster.RaftCluster
+	if *followerHandle {
+		rc = s.cluster
+		if !rc.GetRegionSyncer().IsRunning() {
+			return &pdpb.BatchScanRegionsResponse{Header: s.regionNotFound()}, nil
+		}
+	} else {
+		rc = s.GetRaftCluster()
+		if rc == nil {
+			return &pdpb.BatchScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+		}
+	}
+	needBucket := request.GetNeedBuckets() && !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket()
+	limit := request.GetLimit()
+	// cast to core.KeyRanges and check the validation.
+	keyRanges := core.NewKeyRangesWithSize(len(request.GetRanges()))
+	reqRanges := request.GetRanges()
+	for i, reqRange := range reqRanges {
+		if i > 0 {
+			if bytes.Compare(reqRange.StartKey, reqRanges[i-1].EndKey) < 0 {
+				return &pdpb.BatchScanRegionsResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, ranges overlapped")}, nil
+			}
+		}
+		if len(reqRange.EndKey) > 0 && bytes.Compare(reqRange.StartKey, reqRange.EndKey) > 0 {
+			return &pdpb.BatchScanRegionsResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, start key > end key")}, nil
+		}
+		keyRanges.Append(reqRange.StartKey, reqRange.EndKey)
+	}
+	res := rc.BatchScanRegions(keyRanges, int(limit))
+	regions := make([]*pdpb.Region, 0, len(res))
+	for _, r := range res {
+		leader := r.GetLeader()
+		if leader == nil {
+			leader = &metapb.Peer{}
+		}
+		var buckets *metapb.Buckets
+		if needBucket {
+			buckets = r.GetBuckets()
+		}
+		regions = append(regions, &pdpb.Region{
+			Region:       r.GetMeta(),
+			Leader:       leader,
+			DownPeers:    r.GetDownPeers(),
+			PendingPeers: r.GetPendingPeers(),
+			Buckets:      buckets,
+		})
+	}
+	if *followerHandle && len(regions) == 0 {
+		return &pdpb.BatchScanRegionsResponse{Header: s.regionNotFound()}, nil
+	}
+	resp := &pdpb.BatchScanRegionsResponse{Header: s.header(), Regions: regions}
 	return resp, nil
 }
 
