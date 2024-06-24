@@ -25,12 +25,15 @@ import (
 func newRegionSplit(config *sc.SimConfig) *Case {
 	var simCase Case
 	totalStore := config.TotalStore
+	allStores := make(map[uint64]struct{}, totalStore)
 
 	for i := 0; i < totalStore; i++ {
+		id := uint64(i)
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     uint64(i),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 	peers := []*metapb.Peer{
 		{Id: 4, StoreId: 1},
@@ -55,9 +58,9 @@ func newRegionSplit(config *sc.SimConfig) *Case {
 	simCase.Events = []EventDescriptor{e}
 
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		for i := 1; i <= totalStore; i++ {
-			peerCount := regions.GetStoreRegionCount(uint64(i))
+	simCase.Checker = func(_ []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for storeID := range allStores {
+			peerCount := regions.GetStoreRegionCount(storeID)
 			if peerCount < 5 {
 				return false
 			}
