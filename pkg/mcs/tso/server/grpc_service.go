@@ -163,7 +163,7 @@ func (s *Service) FindGroupByKeyspaceID(
 			Address: member.Address,
 			// TODO: watch the keyspace groups' primary serving address changes
 			// to get the latest primary serving addresses of all keyspace groups.
-			IsPrimary: member.CompareAddress(am.GetLeaderAddr()),
+			IsPrimary: member.IsAddressEquivalent(am.GetLeaderAddr()),
 		})
 	}
 
