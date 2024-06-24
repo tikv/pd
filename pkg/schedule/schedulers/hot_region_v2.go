@@ -184,9 +184,9 @@ func (bs *balanceSolver) setSearchRevertRegionsV2() {
 
 // calcProgressiveRankV2 calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
-// isBetter: score > 0
+// isBetter: score < 0
 // isNotWorsened: score == 0
-// isWorsened: score < 0
+// isWorsened: score > 0
 // | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | isWorsened |
 // |   isBetter                         | -4       | -3            | -2         |
 // |   isNotWorsened                    | -1       | 1             | 1          |

@@ -163,6 +163,7 @@ func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.Sched
 	switch rw {
 	case utils.Read:
 		// update read statistics
+		// avoid to update read statistics frequently
 		if time.Since(h.updateReadTime) >= statisticsInterval {
 			regionRead := cluster.RegionReadStats()
 			prepare(regionRead, constant.LeaderKind)
@@ -171,6 +172,7 @@ func (h *baseHotScheduler) prepareForBalance(rw utils.RWType, cluster sche.Sched
 		}
 	case utils.Write:
 		// update write statistics
+		// avoid to update write statistics frequently
 		if time.Since(h.updateWriteTime) >= statisticsInterval {
 			regionWrite := cluster.RegionWriteStats()
 			prepare(regionWrite, constant.LeaderKind)
@@ -510,6 +512,7 @@ type balanceSolver struct {
 	best *solution
 	ops  []*operator.Operator
 
+	// maxSrc and minDst are used to calculate the rank.
 	maxSrc   *statistics.StoreLoad
 	minDst   *statistics.StoreLoad
 	rankStep *statistics.StoreLoad
@@ -1217,7 +1220,7 @@ func (bs *balanceSolver) isUniformSecondPriority(store *statistics.StoreLoadDeta
 // calcProgressiveRank calculates `bs.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 // | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened |
-// |   isBetter                         | -4       | -3            | -1 / 0   |
+// |   isBetter                         | -4       | -3            | -1       |
 // |   isNotWorsened                    | -2       | 1             | 1        |
 // |   Worsened                         | 0        | 1             | 1        |
 func (bs *balanceSolver) calcProgressiveRankV1() {
@@ -1363,17 +1366,21 @@ func (bs *balanceSolver) betterThanV1(old *solution) bool {
 		firstCmp, secondCmp := bs.getRkCmpPrioritiesV1(old)
 		switch bs.cur.progressiveRank {
 		case -4: // isBetter(firstPriority) && isBetter(secondPriority)
+			// Both are better, prefer the one with higher first priority rate.
+			// If the first priority rate is the similiar, prefer the one with higher second priority rate.
 			if firstCmp != 0 {
 				return firstCmp > 0
 			}
 			return secondCmp > 0
 		case -3: // isBetter(firstPriority) && isNotWorsened(secondPriority)
+			// The first priority is better, prefer the one with higher first priority rate.
 			if firstCmp != 0 {
 				return firstCmp > 0
 			}
 			// prefer smaller second priority rate, to reduce oscillation
 			return secondCmp < 0
 		case -2: // isNotWorsened(firstPriority) && isBetter(secondPriority)
+			// The second priority is better, prefer the one with higher second priority rate.
 			if secondCmp != 0 {
 				return secondCmp > 0
 			}
