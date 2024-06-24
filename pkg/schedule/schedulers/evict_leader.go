@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -150,7 +151,9 @@ func (conf *evictLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 func (conf *evictLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
 	conf.Lock()
 	defer conf.Unlock()
-	conf.cluster.PauseLeaderTransfer(id)
+	if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
+		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
+	}
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
@@ -370,7 +373,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
 				handler.config.RUnlock()
-				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
@@ -385,26 +388,30 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
+	err := handler.config.BuildWithArgs(args)
 	if err != nil {
-		handler.config.removeStore(id)
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
+	err = handler.config.Persist()
+	if err != nil {
+		handler.config.removeStore(id)
+		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
 func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	handler.rd.JSON(w, http.StatusOK, conf)
+	_ = handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["store_id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		_ = handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -415,26 +422,26 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		err = handler.config.Persist()
 		if err != nil {
 			handler.config.resetStore(id, keyRanges)
-			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if last {
 			if err := handler.config.removeSchedulerCb(EvictLeaderName); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-					handler.rd.JSON(w, http.StatusNotFound, err.Error())
+					_ = handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {
 					handler.config.resetStore(id, keyRanges)
-					handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+					_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				}
 				return
 			}
 			resp = lastStoreDeleteInfo
 		}
-		handler.rd.JSON(w, http.StatusOK, resp)
+		_ = handler.rd.JSON(w, http.StatusOK, resp)
 		return
 	}
 
-	handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist.FastGenByArgs().Error())
+	_ = handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist.FastGenByArgs().Error())
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {

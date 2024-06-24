@@ -234,7 +234,7 @@ func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *h
 	}
 	limit, ok := input["limit"].(float64)
 	if !ok {
-		handler.rd.JSON(w, http.StatusBadRequest, "invalid limit")
+		_ = handler.rd.JSON(w, http.StatusBadRequest, "invalid limit")
 		return
 	}
 	handler.config.Lock()
@@ -243,16 +243,16 @@ func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *h
 	handler.config.Limit = uint64(limit)
 	err := handler.config.persistLocked()
 	if err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.Limit = previous
 		return
 	}
-	handler.rd.JSON(w, http.StatusOK, nil)
+	_ = handler.rd.JSON(w, http.StatusOK, nil)
 }
 
 func (handler *shuffleHotRegionHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	handler.rd.JSON(w, http.StatusOK, conf)
+	_ = handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 func newShuffleHotRegionHandler(config *shuffleHotRegionSchedulerConfig) http.Handler {

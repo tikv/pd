@@ -161,12 +161,12 @@ func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http
 	data, _ := io.ReadAll(r.Body)
 	r.Body.Close()
 	httpCode, v := handler.config.Update(data)
-	handler.rd.JSON(w, httpCode, v)
+	_ = handler.rd.JSON(w, httpCode, v)
 }
 
 func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	handler.rd.JSON(w, http.StatusOK, conf)
+	_ = handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 type balanceLeaderScheduler struct {
