@@ -1206,10 +1206,10 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
 	}
-	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
-	if len(newStore.GetLabels()) == 0 {
+	if len(store.GetLabels()) == 0 {
 		return errors.Errorf("the label key %s does not exist", labelKey)
 	}
+	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
 	labels := make([]*metapb.StoreLabel, 0, len(newStore.GetLabels())-1)
 	for _, label := range newStore.GetLabels() {
 		if label.Key == labelKey {
