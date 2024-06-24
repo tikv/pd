@@ -28,7 +28,6 @@ else
   # CI will download the binaries in the prepare phase.
   # ref https://github.com/PingCAP-QE/ci/blob/387e9e533b365174962ccb1959442a7070f9cd66/pipelines/tikv/pd/latest/pull_integration_realcluster_test.groovy#L55-L68
 	color-green "using existing binaries..."
-	make pd-server WITH_RACE=1
 	$TIUP_BIN_DIR playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 --without-monitor \
 		--pd.binpath ./bin/pd-server --kv.binpath ./bin/tikv-server --db.binpath ./bin/tidb-server \
 		--tiflash.binpath ./bin/tiflash --tag pd_real_cluster_test --pd.config ./tests/integrations/realcluster/pd.toml \
