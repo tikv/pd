@@ -1477,7 +1477,7 @@ const (
 	PendingPeerInSubTree SubTreeRegionType = "pending"
 )
 
-// GetStoreRegions gets all RegionInfo with a given storeID
+// GetStoreRegionsByTypeInSubTree gets all RegionInfo with a given storeID
 func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTreeRegionType) ([]*RegionInfo, error) {
 	r.st.RLock()
 	var regions []*RegionInfo
@@ -2209,4 +2209,12 @@ func NewTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...Regi
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}
 	return NewRegionInfo(metaRegion, leader, opts...)
+}
+
+// TraverseRegions executes a function on all regions.
+// ONLY for simulator now and function need to be self-locked.
+func (r *RegionsInfo) TraverseRegions(lockedFunc func(*RegionInfo)) {
+	for _, item := range r.regions {
+		lockedFunc(item.RegionInfo)
+	}
 }

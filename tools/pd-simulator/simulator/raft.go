@@ -91,11 +91,10 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimCo
 }
 
 func (r *RaftEngine) stepRegions() {
-	regions := r.GetRegions()
-	for _, region := range regions {
+	r.TraverseRegions(func(region *core.RegionInfo) {
 		r.stepLeader(region)
 		r.stepSplit(region)
-	}
+	})
 }
 
 func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
@@ -265,11 +264,9 @@ func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
 	}
 }
 
-// GetRegions gets all RegionInfo from regionMap
-func (r *RaftEngine) GetRegions() []*core.RegionInfo {
-	r.RLock()
-	defer r.RUnlock()
-	return r.regionsInfo.GetRegions()
+// TraverseRegions executes a function on all regions, and function need to be self-locked.
+func (r *RaftEngine) TraverseRegions(lockedFunc func(*core.RegionInfo)) {
+	r.regionsInfo.TraverseRegions(lockedFunc)
 }
 
 // SetRegion sets the RegionInfo with regionID

@@ -24,6 +24,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
@@ -204,8 +205,7 @@ func (n *Node) regionHeartBeat() {
 	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
-	regions := n.raftEngine.GetRegions()
-	for _, region := range regions {
+	n.raftEngine.TraverseRegions(func(region *core.RegionInfo) {
 		if region.GetLeader() != nil && region.GetLeader().GetStoreId() == n.Id {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
 			err := n.client.RegionHeartbeat(ctx, region)
@@ -217,7 +217,7 @@ func (n *Node) regionHeartBeat() {
 			}
 			cancel()
 		}
-	}
+	})
 }
 
 func (n *Node) reportRegionChange() {
