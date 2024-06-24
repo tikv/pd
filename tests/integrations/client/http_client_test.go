@@ -596,8 +596,8 @@ func (suite *httpClientTestSuite) TestStoreLabels() {
 		re.Equal(value, labelsMap[key])
 	}
 
-	re.NoError(client.DeleteStoreLabel(ctx, 1, "zone"))
-	store, err := client.GetStore(ctx, 1)
+	re.NoError(client.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
+	store, err := client.GetStore(ctx, uint64(firstStore.Store.ID))
 	re.NoError(err)
 	re.Empty(store.Store.Labels)
 }
