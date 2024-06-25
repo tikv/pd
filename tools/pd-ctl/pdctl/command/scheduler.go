@@ -592,6 +592,10 @@ func newConfigEvictLeaderCommand() *cobra.Command {
 		Use:   "delete-store <store-id>",
 		Short: "delete a store from evict leader list",
 		Run:   func(cmd *cobra.Command, args []string) { deleteStoreFromSchedulerConfig(cmd, c.Name(), args) },
+	}, &cobra.Command{
+		Use:   "set <key> <value>",
+		Short: "set the config item",
+		Run:   func(cmd *cobra.Command, args []string) { postSchedulerConfigCommandFunc(cmd, c.Name(), args) },
 	})
 	return c
 }

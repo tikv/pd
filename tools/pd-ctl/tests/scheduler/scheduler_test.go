@@ -140,7 +140,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		testutil.Eventually(re, func() bool {
 			configInfo := make(map[string]any)
 			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", schedulerName}, &configInfo)
-			return reflect.DeepEqual(expectedConfig, configInfo)
+			return reflect.DeepEqual(expectedConfig["store-id-ranges"], configInfo["store-id-ranges"])
 		})
 	}
 
@@ -528,6 +528,27 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	testutil.Eventually(re, func() bool {
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
 		return !strings.Contains(echo, "shuffle-hot-region-scheduler")
+	})
+
+	// test evict leader scheduler
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}, nil)
+	re.Contains(echo, "Success!")
+	testutil.Eventually(re, func() bool {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+		return strings.Contains(echo, "evict-leader-scheduler")
+	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler", "set", "batch", "5"}, nil)
+	re.Contains(echo, "Success!")
+	conf = make(map[string]any)
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, &conf)
+		return conf["batch"] == 5.
+	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
+	re.Contains(echo, "Success!")
+	testutil.Eventually(re, func() bool {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+		return !strings.Contains(echo, "evict-leader-scheduler")
 	})
 
 	// test balance leader config

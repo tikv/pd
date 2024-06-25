@@ -137,6 +137,7 @@ func schedulersRegister() {
 				return err
 			}
 			conf.StoreIDWithRanges[id] = ranges
+			conf.Batch = EvictLeaderBatchSize
 			return nil
 		}
 	})
