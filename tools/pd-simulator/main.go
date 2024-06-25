@@ -187,6 +187,7 @@ EXIT:
 
 	if simulator.PDHTTPClient != nil {
 		simulator.PDHTTPClient.Close()
+		simulator.SD.Close()
 	}
 	if simResult != "OK" {
 		os.Exit(1)

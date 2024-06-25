@@ -150,12 +150,12 @@ func (d *Driver) allocID() error {
 func (d *Driver) updateNodesClient() error {
 	urls := strings.Split(d.pdAddr, ",")
 	ctx, cancel := context.WithCancel(context.Background())
-	sd = pd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
-	if err := sd.Init(); err != nil {
+	SD = pd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
+	if err := SD.Init(); err != nil {
 		return err
 	}
 	// Init PD HTTP client.
-	PDHTTPClient = pdHttp.NewClientWithServiceDiscovery("pd-simulator", sd)
+	PDHTTPClient = pdHttp.NewClientWithServiceDiscovery("pd-simulator", SD)
 
 	for _, node := range d.conn.Nodes {
 		node.client = NewRetryClient(node)
