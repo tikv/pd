@@ -148,6 +148,7 @@ func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimCon
 	}
 	tickInterval := simConfig.SimTickInterval.Duration
 
+	ctx, cancel := context.WithCancel(context.Background())
 	tick := time.NewTicker(tickInterval)
 	defer tick.Stop()
 	sc := make(chan os.Signal, 1)
@@ -160,6 +161,10 @@ func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimCon
 		syscall.SIGQUIT)
 
 	simResult := "FAIL"
+
+	go driver.StoresHeartbeat(ctx)
+	go driver.RegionsHeartbeat(ctx)
+	go driver.StepRegions(ctx)
 
 EXIT:
 	for {
@@ -175,6 +180,7 @@ EXIT:
 		}
 	}
 
+	cancel()
 	driver.Stop()
 	if len(clean) != 0 && clean[0] != nil {
 		clean[0]()
