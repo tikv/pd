@@ -23,6 +23,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/typeutil"
 )
 
 func TestTiKVConfig(t *testing.T) {
@@ -158,4 +159,9 @@ func TestMergeCheck(t *testing.T) {
 			re.Error(config.CheckRegionKeys(v.keys, v.mergeKeys))
 		}
 	}
+	// Test CheckRegionSize when the region split size is 0.
+	config.RegionSplitSize = "100KiB"
+	config.RegionSplitSizeMB = typeutil.ParseMBFromText(config.RegionSplitSize, defaultRegionSplitSize)
+	re.Empty(config.GetRegionSplitSize())
+	re.NoError(config.CheckRegionSize(defaultRegionMaxSize, 50))
 }
