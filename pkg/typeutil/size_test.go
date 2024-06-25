@@ -40,24 +40,48 @@ func (s *testSizeSuite) TestJSON(c *C) {
 	c.Assert(string(o), Equals, `"1.598TiB"`)
 }
 
+<<<<<<< HEAD:pkg/typeutil/size_test.go
 func (s *testSizeSuite) TestParseMbFromText(c *C) {
 	testdata := []struct {
+=======
+func TestParseMbFromText(t *testing.T) {
+	const defaultValue = 2
+
+	re := require.New(t)
+	testCases := []struct {
+>>>>>>> 6fbe73796 (config: fix the panic caused by zero RegionSplitSizeMB (#8324)):pkg/utils/typeutil/size_test.go
 		body []string
 		size uint64
 	}{{
 		body: []string{"10Mib", "10MiB", "10M", "10MB"},
-		size: uint64(10),
+		size: 10,
 	}, {
 		body: []string{"10GiB", "10Gib", "10G", "10GB"},
+<<<<<<< HEAD:pkg/typeutil/size_test.go
 		size: uint64(10 * 1024),
+=======
+		size: 10 * units.GiB / units.MiB,
+	}, {
+		body: []string{"1024KiB", "1048576"},
+		size: 1,
+	}, {
+		body: []string{"100KiB", "1023KiB", "1048575", "0"},
+		size: 0,
+>>>>>>> 6fbe73796 (config: fix the panic caused by zero RegionSplitSizeMB (#8324)):pkg/utils/typeutil/size_test.go
 	}, {
 		body: []string{"10yiB", "10aib"},
-		size: uint64(1),
+		size: defaultValue,
 	}}
 
+<<<<<<< HEAD:pkg/typeutil/size_test.go
 	for _, t := range testdata {
 		for _, b := range t.body {
 			c.Assert(int(ParseMBFromText(b, 1)), Equals, int(t.size))
+=======
+	for _, testCase := range testCases {
+		for _, b := range testCase.body {
+			re.Equal(testCase.size, ParseMBFromText(b, defaultValue))
+>>>>>>> 6fbe73796 (config: fix the panic caused by zero RegionSplitSizeMB (#8324)):pkg/utils/typeutil/size_test.go
 		}
 	}
 }
