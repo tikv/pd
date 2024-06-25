@@ -41,7 +41,7 @@ func NewHTTPHandler(svr *server.Server, rd *render.Render) *HTTPHandler {
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
 	if rc == nil {
-		_ = h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 		return
 	}
 	data, err := io.ReadAll(r.Body)

@@ -198,6 +198,9 @@ linters-settings:
         severity: warning
         disabled: false
         exclude: [""]
+  errcheck:
+    exclude-functions:
+      - (*github.com/unrolled/render.Render).JSON
 issues:
   exclude-rules:
     - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
