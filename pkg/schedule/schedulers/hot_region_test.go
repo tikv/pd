@@ -390,7 +390,6 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 }
 
 func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules bool) {
-	// This test is used to test move leader and move peer.
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetEnableUseJointConsensus(true)
