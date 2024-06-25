@@ -40,12 +40,9 @@ func TestSizeJSON(t *testing.T) {
 }
 
 func TestParseMbFromText(t *testing.T) {
-<<<<<<< HEAD
-	t.Parallel()
-=======
 	const defaultValue = 2
 
->>>>>>> 6fbe73796 (config: fix the panic caused by zero RegionSplitSizeMB (#8324))
+	t.Parallel()
 	re := require.New(t)
 	testCases := []struct {
 		body []string
