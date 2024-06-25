@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
@@ -55,6 +56,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -3796,7 +3798,6 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 	// Setup: create a new instance of Cluster
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
 	_, opt, _ := newTestScheduleConfig()
 	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	c.coordinator = schedule.NewCoordinator(ctx, c, nil)
@@ -3814,11 +3815,72 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 		core.SetApproximateSize(10),
 		core.SetReportInterval(0, 10),
 	)
-
 	// Reset timer after setup
 	b.ResetTimer()
 	// Run HandleStatsAsync b.N times
 	for i := 0; i < b.N; i++ {
 		cluster.HandleStatsAsync(c, region)
+	}
+}
+
+func BenchmarkHandleRegionHeartbeat(b *testing.B) {
+	// Setup: create a new instance of Cluster
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, _ := newTestScheduleConfig()
+	c := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	c.coordinator = schedule.NewCoordinator(ctx, c, nil)
+	c.SetPrepared()
+	log.SetLevel(logutil.StringToZapLogLevel("fatal"))
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+	queryStats := &pdpb.QueryStats{
+		Get:                    5,
+		Coprocessor:            6,
+		Scan:                   7,
+		Put:                    8,
+		Delete:                 9,
+		DeleteRange:            10,
+		AcquirePessimisticLock: 11,
+		Rollback:               12,
+		Prewrite:               13,
+		Commit:                 14,
+	}
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	downPeers := []*pdpb.PeerStats{{Peer: peers[1], DownSeconds: 100}, {Peer: peers[2], DownSeconds: 100}}
+	pendingPeers := []*metapb.Peer{peers[1], peers[2]}
+
+	var requests []*pdpb.RegionHeartbeatRequest
+	for i := 0; i < 1000000; i++ {
+		request := &pdpb.RegionHeartbeatRequest{
+			Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}},
+			Leader:          peers[0],
+			DownPeers:       downPeers,
+			PendingPeers:    pendingPeers,
+			BytesWritten:    10,
+			BytesRead:       20,
+			KeysWritten:     100,
+			KeysRead:        200,
+			ApproximateSize: 30 * units.MiB,
+			ApproximateKeys: 300,
+			Interval:        interval,
+			QueryStats:      queryStats,
+			Term:            1,
+			CpuUsage:        100,
+		}
+		requests = append(requests, request)
+	}
+	flowRoundDivisor := opt.GetPDServerConfig().FlowRoundByDigit
+
+	// Reset timer after setup
+	b.ResetTimer()
+	// Run HandleRegionHeartbeat b.N times
+	for i := 0; i < b.N; i++ {
+		region := core.RegionFromHeartbeat(requests[i], flowRoundDivisor)
+		c.HandleRegionHeartbeat(region)
 	}
 }

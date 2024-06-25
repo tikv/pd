@@ -290,7 +290,7 @@ func (s *state) getNextPrimaryToReset(
 				if member.Priority > maxPriority {
 					maxPriority = member.Priority
 				}
-				if member.Address == localAddress {
+				if member.IsAddressEquivalent(localAddress) {
 					localPriority = member.Priority
 				}
 			}
@@ -625,7 +625,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 			if member != nil {
 				aliveTSONodes := make(map[string]struct{})
 				kgm.tsoNodes.Range(func(key, _ any) bool {
-					aliveTSONodes[key.(string)] = struct{}{}
+					aliveTSONodes[typeutil.TrimScheme(key.(string))] = struct{}{}
 					return true
 				})
 				if len(aliveTSONodes) == 0 {
@@ -638,7 +638,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					if member.Priority <= localPriority {
 						continue
 					}
-					if _, ok := aliveTSONodes[member.Address]; ok {
+					if _, ok := aliveTSONodes[typeutil.TrimScheme(member.Address)]; ok {
 						resetLeader = true
 						break
 					}
@@ -667,7 +667,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 
 func (kgm *KeyspaceGroupManager) isAssignedToMe(group *endpoint.KeyspaceGroup) bool {
 	return slice.AnyOf(group.Members, func(i int) bool {
-		return group.Members[i].Address == kgm.tsoServiceID.ServiceAddr
+		return group.Members[i].IsAddressEquivalent(kgm.tsoServiceID.ServiceAddr)
 	})
 }
 

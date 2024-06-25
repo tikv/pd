@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -1287,8 +1288,9 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 		{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
 	})
 
-	re.True(tc.IsRegionHot(tc.GetRegion(1)))
-	re.False(tc.IsRegionHot(tc.GetRegion(11)))
+	testutil.Eventually(re, func() bool {
+		return tc.IsRegionHot(tc.GetRegion(1)) && !tc.IsRegionHot(tc.GetRegion(11))
+	})
 	// check randomly pick hot region
 	r := tc.HotRegionsFromStore(2, utils.Read)
 	re.Len(r, 3)

@@ -188,7 +188,7 @@ func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestCluster(ctx, 2)
+	tc, err := tests.NewTestCluster(ctx, 3)
 	defer tc.Destroy()
 	re.NoError(err)
 
@@ -225,9 +225,9 @@ func TestRegionStatistics(t *testing.T) {
 	time.Sleep(1000 * time.Millisecond)
 
 	leaderServer.ResignLeader()
-	newLeaderName := tc.WaitLeader()
-	re.NotEqual(newLeaderName, leaderName)
+	re.NotEqual(tc.WaitLeader(), leaderName)
 	leaderServer = tc.GetLeaderServer()
+	leaderName = leaderServer.GetServer().Name()
 	rc = leaderServer.GetRaftCluster()
 	r := rc.GetRegion(region.Id)
 	re.NotNil(r)
@@ -240,9 +240,9 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regions, 1)
 
 	leaderServer.ResignLeader()
-	newLeaderName = tc.WaitLeader()
-	re.Equal(newLeaderName, leaderName)
+	re.NotEqual(tc.WaitLeader(), leaderName)
 	leaderServer = tc.GetLeaderServer()
+	leaderName = leaderServer.GetServer().Name()
 	rc = leaderServer.GetRaftCluster()
 	re.NotNil(r)
 	re.True(r.LoadedFromStorage() || r.LoadedFromSync())
@@ -257,13 +257,12 @@ func TestRegionStatistics(t *testing.T) {
 	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
 
 	leaderServer.ResignLeader()
-	newLeaderName = tc.WaitLeader()
-	re.NotEqual(newLeaderName, leaderName)
-	leaderServer.ResignLeader()
-	newLeaderName = tc.WaitLeader()
-	re.Equal(newLeaderName, leaderName)
+	re.NotEqual(tc.WaitLeader(), leaderName)
 	leaderServer = tc.GetLeaderServer()
-	rc = leaderServer.GetRaftCluster()
+	leaderName = leaderServer.GetServer().Name()
+	leaderServer.ResignLeader()
+	re.NotEqual(tc.WaitLeader(), leaderName)
+	rc = tc.GetLeaderServer().GetRaftCluster()
 	r = rc.GetRegion(region.Id)
 	re.NotNil(r)
 	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
@@ -1335,22 +1334,22 @@ func TestStaleTermHeartbeat(t *testing.T) {
 		Term:            5,
 		ApproximateSize: 10,
 	}
-
-	region := core.RegionFromHeartbeat(regionReq)
+	flowRoundDivisor := leaderServer.GetConfig().PDServerCfg.FlowRoundByDigit
+	region := core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 
 	// Transfer leader
 	regionReq.Term = 6
 	regionReq.Leader = peers[1]
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 
 	// issue #3379
 	regionReq.KeysWritten = uint64(18446744073709551615)  // -1
 	regionReq.BytesWritten = uint64(18446744073709550602) // -1024
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	re.Equal(uint64(0), region.GetKeysWritten())
 	re.Equal(uint64(0), region.GetBytesWritten())
 	err = rc.HandleRegionHeartbeat(region)
@@ -1359,14 +1358,14 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	// Stale heartbeat, update check should fail
 	regionReq.Term = 5
 	regionReq.Leader = peers[0]
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.Error(err)
 
 	// Allow regions that are created by unsafe recover to send a heartbeat, even though they
 	// are considered "stale" because their conf ver and version are both equal to 1.
 	regionReq.Region.RegionEpoch.ConfVer = 1
-	region = core.RegionFromHeartbeat(regionReq)
+	region = core.RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	err = rc.HandleRegionHeartbeat(region)
 	re.NoError(err)
 }

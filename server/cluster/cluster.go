@@ -958,7 +958,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 				utils.RegionWriteKeys:     0,
 				utils.RegionWriteQueryNum: 0,
 			}
-			c.hotStat.CheckReadAsync(statistics.NewCheckReadPeerTask(region, []*metapb.Peer{peer}, loads, interval))
+			checkReadPeerTask := func(cache *statistics.HotPeerCache) {
+				stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
+				for _, stat := range stats {
+					cache.UpdateStat(stat)
+				}
+			}
+			c.hotStat.CheckReadAsync(checkReadPeerTask)
 		}
 	}
 	for _, stat := range stats.GetSnapshotStats() {
@@ -981,7 +987,13 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	}
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
-		c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
+		collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
+			stats := cache.CheckColdPeer(storeID, regions, interval)
+			for _, stat := range stats {
+				cache.UpdateStat(stat)
+			}
+		}
+		c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
 	}
 	return nil
 }
@@ -1038,6 +1050,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	saveKV, saveCache, needSync, retained := regionGuide(ctx, region, origin)
 	tracer.OnRegionGuideFinished()
+	regionID := region.GetID()
 	if !saveKV && !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
@@ -1045,10 +1058,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// region stats needs to be collected in API mode.
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			ctx.MiscRunner.RunTask(
-				ctx.Context,
+			_ = ctx.MiscRunner.RunTask(
+				regionID,
 				ratelimit.ObserveRegionStatsAsync,
-				func(_ context.Context) {
+				func() {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
 					}
@@ -1057,10 +1070,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
-			ctx.TaskRunner.RunTask(
-				ctx,
+			_ = ctx.TaskRunner.RunTask(
+				regionID,
 				ratelimit.UpdateSubTree,
-				func(_ context.Context) {
+				func() {
 					c.CheckAndPutSubTree(region)
 				},
 				ratelimit.WithRetained(true),
@@ -1085,10 +1098,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			tracer.OnSaveCacheFinished()
 			return err
 		}
-		ctx.TaskRunner.RunTask(
-			ctx,
+		_ = ctx.TaskRunner.RunTask(
+			regionID,
 			ratelimit.UpdateSubTree,
-			func(_ context.Context) {
+			func() {
 				c.CheckAndPutSubTree(region)
 			},
 			ratelimit.WithRetained(retained),
@@ -1096,10 +1109,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		tracer.OnUpdateSubTreeFinished()
 
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-			ctx.MiscRunner.RunTask(
-				ctx.Context,
+			_ = ctx.MiscRunner.RunTask(
+				regionID,
 				ratelimit.HandleOverlaps,
-				func(_ context.Context) {
+				func() {
 					cluster.HandleOverlaps(c, overlaps)
 				},
 			)
@@ -1109,10 +1122,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 
 	tracer.OnSaveCacheFinished()
 	// handle region stats
-	ctx.MiscRunner.RunTask(
-		ctx.Context,
+	_ = ctx.MiscRunner.RunTask(
+		regionID,
 		ratelimit.CollectRegionStatsAsync,
-		func(_ context.Context) {
+		func() {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
 			// region stats needs to be collected in API mode.
 			// We need to think of a better way to reduce this part of the cost in the future.
@@ -1123,10 +1136,10 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
 		if saveKV {
-			ctx.MiscRunner.RunTask(
-				ctx.Context,
+			_ = ctx.MiscRunner.RunTask(
+				regionID,
 				ratelimit.SaveRegionToKV,
-				func(_ context.Context) {
+				func() {
 					// If there are concurrent heartbeats from the same region, the last write will win even if
 					// writes to storage in the critical area. So don't use mutex to protect it.
 					// Not successfully saved to storage is not fatal, it only leads to longer warm-up
@@ -1192,6 +1205,9 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrInvalidStoreID.FastGenByArgs(storeID)
+	}
+	if len(store.GetLabels()) == 0 {
+		return errors.Errorf("the label key %s does not exist", labelKey)
 	}
 	newStore := typeutil.DeepClone(store.GetMeta(), core.StoreFactory)
 	labels := make([]*metapb.StoreLabel, 0, len(newStore.GetLabels())-1)
@@ -1332,21 +1348,22 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()),
 		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
-	err := c.setStore(newStore)
-	if err == nil {
-		regionSize := float64(c.GetStoreRegionSize(storeID))
-		c.resetProgress(storeID, store.GetAddress())
-		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
-		// record the current store limit in memory
-		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
-			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
-			storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
-		}
-		// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
-		// And considering the store state has changed, RemoveStore is actually successful.
-		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+
+	if err := c.setStore(newStore); err != nil {
+		return err
 	}
-	return err
+	regionSize := float64(c.GetStoreRegionSize(storeID))
+	c.resetProgress(storeID, store.GetAddress())
+	c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
+	// record the current store limit in memory
+	c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
+		storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
+		storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
+	}
+	// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
+	// And considering the store state has changed, RemoveStore is actually successful.
+	_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+	return nil
 }
 
 func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
@@ -1833,14 +1850,14 @@ func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string
 		return
 	}
 	c.progressManager.UpdateProgress(progressName, current, remaining, isInc, opts...)
-	process, ls, cs, err := c.progressManager.Status(progressName)
+	progress, leftSeconds, currentSpeed, err := c.progressManager.Status(progressName)
 	if err != nil {
 		log.Error("get progress status failed", zap.String("progress", progressName), zap.Float64("remaining", remaining), errs.ZapError(err))
 		return
 	}
-	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)
-	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(cs)
-	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(ls)
+	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(progress)
+	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(currentSpeed)
+	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(leftSeconds)
 }
 
 func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string) {
