@@ -67,4 +67,9 @@ func TestMergeCheck(t *testing.T) {
 			re.Error(config.CheckRegionKeys(v.keys, v.mergeKeys))
 		}
 	}
+	// Test CheckRegionSize when the region split size is 0.
+	config.RegionSplitSize = "100KiB"
+	config.Adjust()
+	re.Empty(config.GetRegionSplitSize())
+	re.NoError(config.CheckRegionSize(defaultRegionMaxSize, 50))
 }
