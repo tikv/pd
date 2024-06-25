@@ -30,12 +30,12 @@ import (
 func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -1.
 	re := require.New(t)
-	schedulePeerPr = 1.0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")
@@ -91,12 +91,12 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -3.
 	re := require.New(t)
-	schedulePeerPr = 1.0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")
@@ -143,12 +143,12 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -2.
 	re := require.New(t)
-	schedulePeerPr = 1.0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")

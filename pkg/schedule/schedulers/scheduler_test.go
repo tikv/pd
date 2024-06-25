@@ -41,7 +41,6 @@ func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerCon
 	clean := func() {
 		cancel()
 		// reset some config to avoid affecting other tests
-		schedulePeerPr = defaultSchedulePeerPr
 		pendingAmpFactor = defaultPendingAmpFactor
 		stddevThreshold = defaultStddevThreshold
 		topnPosition = defaultTopnPosition
@@ -317,7 +316,6 @@ func TestShuffleRegionRole(t *testing.T) {
 }
 
 func TestSpecialUseHotRegion(t *testing.T) {
-	schedulePeerPr = 1.0
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -363,9 +361,13 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{1, 2})
 	hs, err := CreateScheduler(utils.Write.String(), oc, storage, cd)
 	re.NoError(err)
-	ops, _ = hs.Schedule(tc, false)
-	re.Len(ops, 1)
-	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)
+	for i := 0; i < 100; i++ {
+		ops, _ = hs.Schedule(tc, false)
+		if len(ops) == 0 {
+			continue
+		}
+		operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)
+	}
 }
 
 func TestSpecialUseReserved(t *testing.T) {

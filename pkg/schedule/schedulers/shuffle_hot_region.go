@@ -159,9 +159,9 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerClus
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleHotRegionCounter.Inc()
-	rw := s.randomRWType()
-	s.prepareForBalance(rw, cluster)
-	operators := s.randomSchedule(cluster, s.stLoadInfos[buildResourceType(rw, constant.LeaderKind)])
+	typ := s.randomType()
+	s.prepareForBalance(typ, cluster)
+	operators := s.randomSchedule(cluster, s.stLoadInfos[typ])
 	return operators, nil
 }
 

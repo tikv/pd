@@ -258,13 +258,13 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 
 func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantHotRegionCounter.Inc()
-	rw := s.randomRWType()
-	s.prepareForBalance(rw, cluster)
-	return s.dispatch(rw, cluster), nil
+	typ := s.randomType()
+	s.prepareForBalance(typ, cluster)
+	return s.dispatch(typ, cluster), nil
 }
 
-func (s *grantHotRegionScheduler) dispatch(typ utils.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
-	stLoadInfos := s.stLoadInfos[buildResourceType(typ, constant.RegionKind)]
+func (s *grantHotRegionScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) []*operator.Operator {
+	stLoadInfos := s.stLoadInfos[typ]
 	infos := make([]*statistics.StoreLoadDetail, len(stLoadInfos))
 	index := 0
 	for _, info := range stLoadInfos {

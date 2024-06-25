@@ -56,14 +56,14 @@ func init() {
 func newHotReadScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
 	ret := newHotScheduler(opController, conf)
 	ret.name = ""
-	ret.types = []utils.RWType{utils.Read}
+	ret.types = []resourceType{readLeader, readPeer}
 	return ret
 }
 
 func newHotWriteScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
 	ret := newHotScheduler(opController, conf)
 	ret.name = ""
-	ret.types = []utils.RWType{utils.Write}
+	ret.types = []resourceType{writeLeader, writePeer}
 	return ret
 }
 
@@ -201,7 +201,6 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 
 func TestSplitIfRegionTooHot(t *testing.T) {
 	re := require.New(t)
-	schedulePeerPr = 1.0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
@@ -260,6 +259,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
 	})
 	hb, _ = CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	hb.(*hotScheduler).types = []resourceType{writePeer}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
 	expectOp, _ = operator.CreateSplitRegionOperator(splitHotReadBuckets, tc.GetRegion(1), operator.OpSplit,
@@ -391,7 +391,6 @@ func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 
 func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules bool) {
 	// This test is used to test move leader and move peer.
-	schedulePeerPr = 1.0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetEnableUseJointConsensus(true)
@@ -401,6 +400,7 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
 	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).types = []resourceType{writePeer}
 	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
 
 	tc.AddLabelsStore(1, 2, map[string]string{"zone": "z1", "host": "h1"})
@@ -740,8 +740,10 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
-		op := ops[0]
-		operatorutil.CheckTransferLeaderFrom(re, op, operator.OpHotRegion, 1)
+		if len(ops) == 0 {
+			continue
+		}
+		operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpHotRegion, 1)
 	}
 	// | store_id | write_bytes_rate |
 	// |----------|------------------|
@@ -870,19 +872,21 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
-		op := ops[0]
-		operatorutil.CheckTransferLeader(re, op, operator.OpHotRegion, 1, 3)
+		if len(ops) == 0 {
+			continue
+		}
+		operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
 	}
 }
 
 func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 	// This test is used to test move peer.
-	schedulePeerPr = 1.0
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).types = []resourceType{writePeer}
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
@@ -1016,6 +1020,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	hb.(*hotScheduler).types = []resourceType{writeLeader}
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
 	re.NoError(err)
@@ -1132,7 +1137,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 			ops, _ := hb.Schedule(tc, false)
 			for len(ops) == 0 {
 				emptyCnt++
-				if emptyCnt >= 10 {
+				if emptyCnt >= 100 {
 					break testLoop
 				}
 				ops, _ = hb.Schedule(tc, false)
@@ -1229,9 +1234,11 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
-		op := ops[0]
+		if len(ops) == 0 {
+			continue
+		}
 		// The targetID should always be 1 as leader is only allowed to be placed in store1 or store2 by placement rule
-		operatorutil.CheckTransferLeader(re, op, operator.OpHotRegion, 2, 1)
+		operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 1)
 		ops, _ = hb.Schedule(tc, false)
 		re.Empty(ops)
 	}
@@ -1908,7 +1915,8 @@ func checkHotCacheCheckRegionFlow(re *require.Assertions, testCase testHotCacheC
 
 	if testCase.DegreeAfterTransferLeader >= 3 {
 		// try schedule
-		hb.prepareForBalance(testCase.kind, tc)
+		typ := toResourceType(testCase.kind, transferLeader)
+		hb.prepareForBalance(typ, tc)
 		leaderSolver := newBalanceSolver(hb, tc, testCase.kind, transferLeader)
 		leaderSolver.cur = &solution{srcStore: hb.stLoadInfos[toResourceType(testCase.kind, transferLeader)][2]}
 		re.Empty(leaderSolver.filterHotPeers(leaderSolver.cur.srcStore)) // skip schedule
@@ -2036,6 +2044,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).types = []resourceType{writePeer}
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
@@ -2054,8 +2063,6 @@ func TestInfluenceByRWType(t *testing.T) {
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
 		{1, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
 	})
-	// must move peer
-	schedulePeerPr = 1.0
 	// must move peer from 1 to 4
 	ops, _ := hb.Schedule(tc, false)
 	op := ops[0]
@@ -2080,7 +2087,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	}
 
 	// must transfer leader
-	schedulePeerPr = 0
+	hb.(*hotScheduler).types = []resourceType{writeLeader}
 	// must transfer leader from 1 to 3
 	ops, _ = hb.Schedule(tc, false)
 	op = ops[0]
@@ -2157,6 +2164,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).types = []resourceType{writePeer}
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.05)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.05)
 	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
@@ -2175,8 +2183,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	tc.UpdateStorageWrittenStats(3, 6*units.MiB*utils.StoreHeartBeatReportInterval, 6*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(4, 9*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(5, 1*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
-	// must transfer peer
-	schedulePeerPr = 1.0
+
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 2 * units.MiB, 1 * units.MiB, 0},
 		{6, []uint64{4, 2, 3}, 1 * units.MiB, 2 * units.MiB, 0},
@@ -2215,6 +2222,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 1, 3)
 
 	hb, err = CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	hb.(*hotScheduler).types = []resourceType{writePeer}
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
@@ -2254,11 +2262,11 @@ func TestHotScheduleWithPriority(t *testing.T) {
 
 func TestHotScheduleWithStddev(t *testing.T) {
 	re := require.New(t)
-	schedulePeerPr = 1.0
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).types = []resourceType{writePeer}
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.0)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.0)
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
@@ -2317,6 +2325,7 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
+	hb.(*hotScheduler).types = []resourceType{writeLeader}
 	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
