@@ -299,6 +299,6 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 }
 
 func exit(code int) {
-	log.Sync() // nolint:errcheck
+	_ = log.Sync()
 	os.Exit(code)
 }

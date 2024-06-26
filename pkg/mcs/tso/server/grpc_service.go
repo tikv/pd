@@ -49,7 +49,7 @@ type dummyRestService struct{}
 
 func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("not implemented")) // nolint:errcheck
+	_, _ = w.Write([]byte("not implemented"))
 }
 
 // ConfigProvider is used to get tso config from the given
