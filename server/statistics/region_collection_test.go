@@ -42,7 +42,7 @@ func (t *testRegionStatisticsSuite) SetUpTest(c *C) {
 	t.store = storage.NewStorageWithMemoryBackend()
 	var err error
 	t.manager = placement.NewRuleManager(t.store, nil, nil)
-	err = t.manager.Initialize(3, []string{"zone", "rack", "host"})
+	err = t.manager.Initialize(3, []string{"zone", "rack", "host"}, "")
 	c.Assert(err, IsNil)
 }
 
