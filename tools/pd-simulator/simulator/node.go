@@ -208,6 +208,9 @@ func (n *Node) regionHeartBeat() {
 	n.raftEngine.TraverseRegions(func(region *core.RegionInfo) {
 		if region.GetLeader() != nil && region.GetLeader().GetStoreId() == n.Id {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
+			if region == nil {
+				simutil.Logger.Fatal("region not found")
+			}
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
 				simutil.Logger.Info("report region heartbeat error",
@@ -225,6 +228,10 @@ func (n *Node) reportRegionChange() {
 	for _, regionID := range regionIDs {
 		region := n.raftEngine.GetRegion(regionID)
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
+		if region == nil {
+			simutil.Logger.Info("region not found",
+				zap.Uint64("region-id", regionID), zap.Uint64("node-id", n.Id))
+		}
 		err := n.client.RegionHeartbeat(ctx, region)
 		if err != nil {
 			simutil.Logger.Info("report region change heartbeat error",

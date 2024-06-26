@@ -15,6 +15,8 @@
 package simutil
 
 import (
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/core"
 	"strings"
 	"testing"
 
@@ -124,6 +126,15 @@ func TestGenerateSplitKey(t *testing.T) {
 	splitKey := GenerateSplitKey(s, e)
 	re.Less(string(s), string(splitKey))
 	re.Less(string(splitKey), string(e))
+	re.NotEqual(string(splitKey), string(e))
+
+	// empty key
+	s = []byte("")
+	// a is 97, z is 122, (97+122)/2 = 109.5 = 109 = byte("bQ==")
+	e = []byte("bQ==")
+	splitKey = GenerateSplitKey(s, e)
+	re.Less(string(s), string(splitKey))
+	re.NotEqual(string(splitKey), string(e))
 
 	// empty end key
 	s = []byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248}
@@ -143,12 +154,48 @@ func TestGenerateSplitKey(t *testing.T) {
 	s = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248})
 	e = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 255, 1, 0, 0, 0, 0, 0, 0, 0, 248})
 	splitKey = GenerateSplitKey(s, e)
-	re.Greater(string(s), string(splitKey))
-	re.Greater(string(e), string(splitKey))
+	re.Equal(string(s), string(splitKey))
+	re.Equal(string(e), string(splitKey))
 
 	s = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1})
 	e = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1, 1})
 	splitKey = GenerateSplitKey(s, e)
-	re.Greater(string(s), string(splitKey))
+	re.Less(string(s), string(splitKey))
 	re.Less(string(splitKey), string(e))
+}
+
+func TestRegionSplitKey(t *testing.T) {
+	re := require.New(t)
+
+	// empty start and end keys
+	var s []byte
+	var e []byte
+	splitKey := GenerateSplitKey(s, e)
+
+	// left
+	leftSplit := GenerateSplitKey(s, splitKey)
+	re.Less(string(leftSplit), string(splitKey))
+	rightSplit := GenerateSplitKey(splitKey, e)
+	re.Less(string(splitKey), string(rightSplit))
+
+	meta := &metapb.Region{
+		Id:          0,
+		Peers:       nil,
+		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
+	}
+	meta.StartKey = s
+	meta.EndKey = leftSplit
+	region := core.NewRegionInfo(
+		meta,
+		nil,
+		core.SetApproximateSize(int64(1)),
+		core.SetApproximateKeys(int64(1)),
+	)
+
+	regionsInfo := core.NewRegionsInfo()
+	origin, overlaps, rangeChanged := regionsInfo.SetRegion(region)
+	regionsInfo.UpdateSubTree(region, origin, overlaps, rangeChanged)
+
+	getRegion := regionsInfo.GetRegionByKey([]byte("a"))
+	re.NotNil(getRegion)
 }

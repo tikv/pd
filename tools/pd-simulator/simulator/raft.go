@@ -162,6 +162,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	r.SetRegion(right)
 	r.SetRegion(left)
 	simutil.Logger.Debug("region split",
+		zap.Uint64("node-id", region.GetLeader().GetStoreId()),
 		zap.Uint64("region-id", region.GetID()),
 		zap.Reflect("origin", region.GetMeta()),
 		zap.Reflect("left", left.GetMeta()),

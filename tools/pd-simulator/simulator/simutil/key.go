@@ -76,25 +76,48 @@ func GenerateTableKeys(tableCount, size int) []string {
 
 // GenerateSplitKey generate the split key.
 func GenerateSplitKey(start, end []byte) []byte {
-	key := make([]byte, 0, len(start))
-	// lessThanEnd is set as true when the key is already less than end key.
-	lessThanEnd := len(end) == 0
-	for i, s := range start {
-		e := byte('z')
-		if !lessThanEnd {
+	const maxLength = 16 // Define a maximum length for the key
+
+	// If both start and end are empty, return a default middle key
+	if len(start) == 0 && len(end) == 0 {
+		key := make([]byte, maxLength)
+		mid := (byte('a') + byte('z')) / 2
+		for i := 0; i < maxLength; i++ {
+			key[i] = mid
+		}
+		return key
+	}
+
+	maxLen := len(start)
+	if len(end) > maxLen {
+		maxLen = len(end)
+	}
+
+	key := make([]byte, maxLen)
+	carry := 0
+	for i := 0; i < maxLen; i++ {
+		s, e := byte('a'), byte('z')
+		if i < len(start) {
+			s = start[i]
+		}
+		if i < len(end) {
 			e = end[i]
 		}
-		c := (s + e) / 2
-		key = append(key, c)
-		// case1: s = c < e. Continue with lessThanEnd=true.
-		// case2: s < c < e. return key.
-		// case3: s = c = e. Continue with lessThanEnd=false.
-		lessThanEnd = c < e
-		if c > s && c < e {
-			return key
+
+		mid := (int(s) + int(e) + carry) / 2
+		if (int(s)+int(e)+carry)%2 == 1 {
+			carry = 1
+		} else {
+			carry = 0
 		}
+		key[i] = byte(mid)
 	}
-	key = append(key, ('a'+'z')/2)
+
+	// Add a character if needed to ensure the key is in the correct range
+	if carry == 1 && len(key) < maxLength {
+		key = append(key, (byte('a')+byte('z'))/2)
+	}
+
 	return key
 }
 
