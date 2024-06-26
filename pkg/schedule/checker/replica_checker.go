@@ -75,7 +75,7 @@ func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigPro
 
 // GetType return ReplicaChecker's type
 func (*ReplicaChecker) GetType() string {
-	return config.ReplicaCheckerName.String()
+	return config.ReplicaCheckerName.Type()
 }
 
 // Check verifies a region's replicas, creating an operator.Operator if need.

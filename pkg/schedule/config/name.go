@@ -16,8 +16,15 @@ package config
 
 type CheckerSchedulerName string
 
-func (c CheckerSchedulerName) String() string {
-	return string(c)
+func (n CheckerSchedulerName) String() string {
+	return string(n)
+}
+
+func (n CheckerSchedulerName) Type() string {
+	if t, ok := name2Type[n]; ok {
+		return t
+	}
+	return n.String()
 }
 
 const (
@@ -34,3 +41,12 @@ const (
 	// SplitCheckerName is the name for split checker.
 	SplitCheckerName CheckerSchedulerName = "split_checker"
 )
+
+var name2Type = map[CheckerSchedulerName]string{
+	JointStateCheckerName: "joint-state-checker",
+	LearnerCheckerName:    "learner-checker",
+	MergeCheckerName:      "merge-checker",
+	ReplicaCheckerName:    "replica-checker",
+	RuleCheckerName:       "rule-checker",
+	SplitCheckerName:      "split-checker",
+}

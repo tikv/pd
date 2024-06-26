@@ -107,7 +107,7 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 
 // GetType returns RuleChecker's Type
 func (*RuleChecker) GetType() string {
-	return config.RuleCheckerName.String()
+	return config.RuleCheckerName.Type()
 }
 
 // Check checks if the region matches placement rules and returns Operator to
@@ -403,7 +403,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	if s == nil {
 		return false
 	}
-	stateFilter := &filter.StoreStateFilter{ActionScope: "rule_checker", TransferLeader: true}
+	stateFilter := &filter.StoreStateFilter{ActionScope: c.name.Type(), TransferLeader: true}
 	if !stateFilter.Target(c.cluster.GetCheckerConfig(), s).IsOK() {
 		return false
 	}

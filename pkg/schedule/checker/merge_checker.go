@@ -94,7 +94,7 @@ func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf conf
 
 // GetType return MergeChecker's type
 func (*MergeChecker) GetType() string {
-	return config.MergeCheckerName.String()
+	return config.MergeCheckerName.Type()
 }
 
 // RecordRegionSplit put the recently split region into cache. MergeChecker
