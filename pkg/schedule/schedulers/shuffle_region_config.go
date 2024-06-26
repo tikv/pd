@@ -79,7 +79,7 @@ func (conf *shuffleRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *ht
 
 func (conf *shuffleRegionSchedulerConfig) handleGetRoles(w http.ResponseWriter, _ *http.Request) {
 	rd := render.New(render.Options{IndentJSON: true})
-	rd.JSON(w, http.StatusOK, conf.GetRoles())
+	_ = rd.JSON(w, http.StatusOK, conf.GetRoles())
 }
 
 func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +90,7 @@ func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, 
 	}
 	for _, r := range roles {
 		if slice.NoneOf(allRoles, func(i int) bool { return allRoles[i] == r }) {
-			rd.Text(w, http.StatusBadRequest, "invalid role:"+r)
+			_ = rd.Text(w, http.StatusBadRequest, "invalid role:"+r)
 			return
 		}
 	}
@@ -101,10 +101,10 @@ func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, 
 	conf.Roles = roles
 	if err := conf.persist(); err != nil {
 		conf.Roles = old // revert
-		rd.Text(w, http.StatusInternalServerError, err.Error())
+		_ = rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	rd.Text(w, http.StatusOK, "Config is updated.")
+	_ = rd.Text(w, http.StatusOK, "Config is updated.")
 }
 
 func (conf *shuffleRegionSchedulerConfig) persist() error {

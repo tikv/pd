@@ -72,10 +72,14 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
 		if !conf.validateLocked() {
-			json.Unmarshal(oldc, conf)
+			if err := json.Unmarshal(oldc, conf); err != nil {
+				return http.StatusInternalServerError, err.Error()
+			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		conf.persistLocked()
+		if err := conf.persistLocked(); err != nil {
+			log.Warn("failed to persist config", zap.Error(err))
+		}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
 		return http.StatusOK, "Config is updated."
 	}
@@ -147,12 +151,12 @@ func (handler *balanceWitnessHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	data, _ := io.ReadAll(r.Body)
 	r.Body.Close()
 	httpCode, v := handler.config.Update(data)
-	handler.rd.JSON(w, httpCode, v)
+	_ = handler.rd.JSON(w, httpCode, v)
 }
 
 func (handler *balanceWitnessHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	handler.rd.JSON(w, http.StatusOK, conf)
+	_ = handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 type balanceWitnessScheduler struct {

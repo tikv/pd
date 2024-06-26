@@ -61,7 +61,7 @@ var (
 	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
 	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
 	PDHTTPClient         pdHttp.Client
-	sd                   pd.ServiceDiscovery
+	SD                   pd.ServiceDiscovery
 	ClusterID            uint64
 )
 
@@ -167,9 +167,9 @@ func (c *client) HeartbeatStreamLoop() {
 
 		// update connection to recreate heartbeat stream
 		for i := 0; i < retryTimes; i++ {
-			sd.ScheduleCheckMemberChanged()
+			SD.ScheduleCheckMemberChanged()
 			time.Sleep(leaderChangedWaitTime)
-			if client := sd.GetServiceClient(); client != nil {
+			if client := SD.GetServiceClient(); client != nil {
 				_, conn, err := getLeaderURL(ctx, client.GetClientConn())
 				if err != nil {
 					simutil.Logger.Error("[HeartbeatStreamLoop] failed to get leader URL", zap.Error(err))
@@ -351,9 +351,9 @@ func (rc *RetryClient) requestWithRetry(f func() (any, error)) (any, error) {
 	}
 	// retry to get leader URL
 	for i := 0; i < rc.retryCount; i++ {
-		sd.ScheduleCheckMemberChanged()
+		SD.ScheduleCheckMemberChanged()
 		time.Sleep(100 * time.Millisecond)
-		if client := sd.GetServiceClient(); client != nil {
+		if client := SD.GetServiceClient(); client != nil {
 			_, conn, err := getLeaderURL(context.Background(), client.GetClientConn())
 			if err != nil {
 				simutil.Logger.Error("[retry] failed to get leader URL", zap.Error(err))

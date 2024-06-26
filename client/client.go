@@ -268,6 +268,15 @@ func WithForwardingOption(enableForwarding bool) ClientOption {
 	}
 }
 
+// WithTSOServerProxyOption configures the client to use TSO server proxy,
+// i.e., the client will send TSO requests to the API leader (the TSO server
+// proxy) which will forward the requests to the TSO servers.
+func WithTSOServerProxyOption(useTSOServerProxy bool) ClientOption {
+	return func(c *client) {
+		c.option.useTSOServerProxy = useTSOServerProxy
+	}
+}
+
 // WithMaxErrorRetry configures the client max retry times when connect meets error.
 func WithMaxErrorRetry(count int) ClientOption {
 	return func(c *client) {
@@ -647,6 +656,11 @@ func (c *client) Close() {
 func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	c.Lock()
 	defer c.Unlock()
+
+	if c.option.useTSOServerProxy {
+		// If we are using TSO server proxy, we always use PD_SVC_MODE.
+		newMode = pdpb.ServiceMode_PD_SVC_MODE
+	}
 
 	if newMode == c.serviceMode {
 		return
