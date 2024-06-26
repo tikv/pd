@@ -650,12 +650,12 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerName:    c.name.String(),
+		checkerName:    c.name.Type(),
 		cluster:        c.cluster,
 		isolationLevel: rule.IsolationLevel,
 		locationLabels: rule.LocationLabels,
 		region:         region,
-		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.name.String(), rule.LabelConstraints)},
+		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.name.Type(), rule.LabelConstraints)},
 		fastFailover:   fastFailover,
 	}
 }

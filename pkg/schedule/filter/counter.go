@@ -83,8 +83,8 @@ var scopes = [scopeLen]string{
 
 	"evict-leader-scheduler",
 	"region-scatter",
-	"replica_checker",
-	"rule_checker",
+	"replica-checker",
+	"rule-checker",
 
 	"grant-hot-leader-scheduler",
 	"shuffle-region-scheduler",
