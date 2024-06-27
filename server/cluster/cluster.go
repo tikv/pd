@@ -701,7 +701,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Stop()
-		ticker = time.NewTicker(100 * time.Millisecond)
+		ticker = time.NewTicker(2 * time.Second)
 	})
 	defer ticker.Stop()
 
