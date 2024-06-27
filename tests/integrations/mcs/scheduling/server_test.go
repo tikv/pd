@@ -707,7 +707,7 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 
 	// add a new store
 	resp, err := s.PutStore(
@@ -724,7 +724,7 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 	re.NoError(err)
 	re.Empty(resp.GetHeader().GetError())
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(2 * time.Second)
 	for i, r := range regions {
 		if i < 50 {
 			r.GetMeta().Peers[2].StoreId = 4
@@ -734,8 +734,7 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 			re.NoError(err)
 		}
 	}
-	time.Sleep(200 * time.Millisecond)
-
+	time.Sleep(2 * time.Second)
 	action, progress, ls, cs, err := rc.GetProgressByID("4")
 	re.Equal("preparing", action)
 	re.NotEmpty(progress)
