@@ -113,16 +113,18 @@ func (w *HotCache) IsRegionHot(region *core.RegionInfo, minHotDegree int) bool {
 	succ1 := w.CheckWriteAsync(checkRegionHotWriteTask)
 	succ2 := w.CheckReadAsync(checkRegionHotReadTask)
 	if succ1 && succ2 {
-		select {
-		case <-w.ctx.Done():
-			return false
-		case r := <-retWrite:
-			return r
-		case r := <-retRead:
-			return r
-		}
+		return waitRet(w.ctx, retWrite) || waitRet(w.ctx, retRead)
 	}
 	return false
+}
+
+func waitRet(ctx context.Context, ret chan bool) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case r := <-ret:
+		return r
+	}
 }
 
 // GetHotPeerStat returns hot peer stat with specified regionID and storeID.
