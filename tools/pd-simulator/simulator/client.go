@@ -206,6 +206,10 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 	for {
 		select {
 		case r := <-c.reportRegionHeartbeatCh:
+			if r == nil {
+				simutil.Logger.Error("report nil regionHeartbeat error",
+					zap.String("tag", c.tag), zap.Error(errors.New("nil region")))
+			}
 			region := r.Clone()
 			request := &pdpb.RegionHeartbeatRequest{
 				Header:          requestHeader(),
@@ -539,6 +543,7 @@ func PutPDConfig(config *sc.PDConfig) error {
 }
 
 func ChooseToHaltPDSchedule(halt bool) {
+	HaltSchedule = halt
 	PDHTTPClient.SetConfig(context.Background(), map[string]any{
 		"schedule.halt-scheduling": strconv.FormatBool(halt),
 	})
