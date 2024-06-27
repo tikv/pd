@@ -33,14 +33,11 @@
 # key-path = ""
 ## A CN which must be provided by a client
 # cert-allowed-cn = ["example.com"]
-## Whether or not to enable redact log.
+## Whether to enable the log redaction. It can be the following values:
+##   - false: disable redact log.
+##   - true: enable redact log, which will replace the sensitive information with "?".
+##   - "MARK": enable redact log, which will use ‹› to enclose the sensitive information.
 # redact-info-log = false
-## Specify the symbol used for redacting information and is effective only when `RedactInfoLog` is set to `true`
-## and itself is not empty. The symbol must be empty or two characters long to differentiate between left and
-## right values; for example, "[]" is valid and will redact "key" as "[key]", whereas "[" or "[[[" are invalid.
-## Any original content that is identical to the mark will have it repeated once for clarity. For instance,
-## "k<ey" would be redacted as "<k<<ey>" if the mark is "<>".
-# redact-info-mark = ""
 
 [security.encryption]
 ## Encryption method to use for PD data. One of "plaintext", "aes128-ctr", "aes192-ctr" and "aes256-ctr".

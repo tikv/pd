@@ -15,9 +15,11 @@
 package logutil
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap/zapcore"
 )
@@ -33,99 +35,112 @@ func TestStringToZapLogLevel(t *testing.T) {
 	re.Equal(zapcore.InfoLevel, StringToZapLogLevel("whatever"))
 }
 
+func TestRedactInfoLogType(t *testing.T) {
+	re := require.New(t)
+	// JSON unmarshal.
+	jsonStr := `[false,true,"MARK"]`
+	var redactTypes []RedactInfoLogType
+	err := json.Unmarshal([]byte(jsonStr), &redactTypes)
+	re.NoError(err)
+	re.Equal([]RedactInfoLogType{RedactInfoLogOFF, RedactInfoLogON, RedactInfoLogMark}, redactTypes)
+	// TOML unmarshal.
+	tomlStr := `redact-info-log = true`
+	var config struct {
+		RedactInfoLog RedactInfoLogType `toml:"redact-info-log"`
+	}
+	_, err = toml.Decode(tomlStr, &config)
+	re.NoError(err)
+	re.Equal(RedactInfoLogON, config.RedactInfoLog)
+	tomlStr = `redact-info-log = "MARK"`
+	_, err = toml.Decode(tomlStr, &config)
+	re.NoError(err)
+	re.Equal(RedactInfoLogMark, config.RedactInfoLog)
+}
+
 func TestRedactLog(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
-		name            string
-		arg             any
-		enableRedactLog bool
-		redactLogMark   string
-		expect          any
+		name              string
+		arg               any
+		redactInfoLogType RedactInfoLogType
+		expect            any
 	}{
 		{
-			name:            "string arg, enable redact",
-			arg:             "foo",
-			enableRedactLog: true,
-			expect:          "?",
+			name:              "string arg, enable redact",
+			arg:               "foo",
+			redactInfoLogType: RedactInfoLogON,
+			expect:            "?",
 		},
 		{
-			name:            "string arg",
-			arg:             "foo",
-			enableRedactLog: false,
-			expect:          "foo",
+			name:              "string arg",
+			arg:               "foo",
+			redactInfoLogType: RedactInfoLogOFF,
+			expect:            "foo",
 		},
 		{
-			name:            "[]byte arg, enable redact",
-			arg:             []byte("foo"),
-			enableRedactLog: true,
-			expect:          []byte("?"),
+			name:              "[]byte arg, enable redact",
+			arg:               []byte("foo"),
+			redactInfoLogType: RedactInfoLogON,
+			expect:            []byte("?"),
 		},
 		{
-			name:            "[]byte arg",
-			arg:             []byte("foo"),
-			enableRedactLog: false,
-			expect:          []byte("foo"),
+			name:              "[]byte arg",
+			arg:               []byte("foo"),
+			redactInfoLogType: RedactInfoLogOFF,
+			expect:            []byte("foo"),
 		},
 		{
-			name:            "string arg, enable redact mark",
-			arg:             "foo",
-			enableRedactLog: true,
-			redactLogMark:   "<>",
-			expect:          "<foo>",
+			name:              "string arg, enable redact mark",
+			arg:               "foo",
+			redactInfoLogType: RedactInfoLogMark,
+			expect:            "‹foo›",
 		},
 		{
-			name:            "string arg contains left mark, enable redact mark",
-			arg:             "f<oo",
-			enableRedactLog: true,
-			redactLogMark:   "<>",
-			expect:          "<f<<oo>",
+			name:              "string arg contains left mark, enable redact mark",
+			arg:               "f‹oo",
+			redactInfoLogType: RedactInfoLogMark,
+			expect:            "‹f‹‹oo›",
 		},
 		{
-			name:            "string arg contains right mark, enable redact mark",
-			arg:             "foo>",
-			enableRedactLog: true,
-			redactLogMark:   "<>",
-			expect:          "<foo>>>",
+			name:              "string arg contains right mark, enable redact mark",
+			arg:               "foo›",
+			redactInfoLogType: RedactInfoLogMark,
+			expect:            "‹foo›››",
 		},
 		{
-			name:            "string arg contains mark, enable redact mark",
-			arg:             "f<oo>",
-			enableRedactLog: true,
-			redactLogMark:   "<>",
-			expect:          "<f<<oo>>>",
+			name:              "string arg contains mark, enable redact mark",
+			arg:               "f‹oo›",
+			redactInfoLogType: RedactInfoLogMark,
+			expect:            "‹f‹‹oo›››",
 		},
 		{
-			name:            "[]byte arg, enable redact mark",
-			arg:             []byte("foo"),
-			enableRedactLog: true,
-			redactLogMark:   "<>",
-			expect:          []byte("<foo>"),
+			name:              "[]byte arg, enable redact mark",
+			arg:               []byte("foo"),
+			redactInfoLogType: RedactInfoLogMark,
+			expect:            []byte("‹foo›"),
 		},
 		{
-			name:            "[]byte arg contains left mark, enable redact mark",
-			arg:             []byte("foo<"),
-			enableRedactLog: true,
-			redactLogMark:   "<>",
-			expect:          []byte("<foo<<>"),
+			name:              "[]byte arg contains left mark, enable redact mark",
+			arg:               []byte("foo‹"),
+			redactInfoLogType: RedactInfoLogMark,
+			expect:            []byte("‹foo‹‹›"),
 		},
 		{
-			name:            "[]byte arg contains right mark, enable redact mark",
-			arg:             []byte(">foo"),
-			enableRedactLog: true,
-			redactLogMark:   "<>",
-			expect:          []byte("<>>foo>"),
+			name:              "[]byte arg contains right mark, enable redact mark",
+			arg:               []byte("›foo"),
+			redactInfoLogType: RedactInfoLogMark,
+			expect:            []byte("‹››foo›"),
 		},
 		{
-			name:            "[]byte arg contains mark, enable redact mark",
-			arg:             []byte("f>o<o"),
-			enableRedactLog: true,
-			redactLogMark:   "<>",
-			expect:          []byte("<f>>o<<o>"),
+			name:              "[]byte arg contains mark, enable redact mark",
+			arg:               []byte("f›o‹o"),
+			redactInfoLogType: RedactInfoLogMark,
+			expect:            []byte("‹f››o‹‹o›"),
 		},
 	}
 
 	for _, testCase := range testCases {
-		setRedactType(testCase.enableRedactLog, testCase.redactLogMark)
+		setRedactType(testCase.redactInfoLogType)
 		// Create `fmt.Stringer`s to test `RedactStringer` later.
 		var argStringer, expectStringer = &strings.Builder{}, &strings.Builder{}
 		switch r := testCase.arg.(type) {

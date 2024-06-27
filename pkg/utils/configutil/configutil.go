@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -78,16 +79,12 @@ func (m *ConfigMetaData) CheckUndecoded() error {
 // SecurityConfig indicates the security configuration
 type SecurityConfig struct {
 	grpcutil.TLSConfig
-	// RedactInfoLog indicates that whether enabling redact log
-	RedactInfoLog bool `toml:"redact-info-log" json:"redact-info-log"`
-	// RedactInfoMark specifies the symbol used for redacting information and is effective only
-	// when `RedactInfoLog` is set to `true` and itself is not empty. The symbol must be empty or
-	// two characters long to differentiate between left and right values; for example, "[]" is valid
-	// and will redact "key" as "[key]", whereas "[" or "[[[" are invalid. Any original content that
-	// is identical to the mark will have it repeated once for clarity. For instance, "k<ey" would be
-	// redacted as "<k<<ey>" if the mark is "<>".
-	RedactInfoMark string            `toml:"redact-info-mark" json:"redact-info-mark"`
-	Encryption     encryption.Config `toml:"encryption" json:"encryption"`
+	// RedactInfoLog indicates that whether to enable the log redaction. It can be the following values:
+	//   - false: disable redact log.
+	//   - true: enable redact log, which will replace the sensitive information with "?".
+	//   - "MARK": enable redact log, which will use ‹› to enclose the sensitive information.
+	RedactInfoLog logutil.RedactInfoLogType `toml:"redact-info-log" json:"redact-info-log"`
+	Encryption    encryption.Config         `toml:"encryption" json:"encryption"`
 }
 
 // PrintConfigCheckMsg prints the message about configuration checks.

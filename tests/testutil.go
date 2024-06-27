@@ -91,10 +91,10 @@ func SetRangePort(start, end int) {
 var once sync.Once
 
 // InitLogger initializes the logger for test.
-func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, redactInfoLog bool, redactInfoMark string) (err error) {
+func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, redactInfoLog logutil.RedactInfoLogType) (err error) {
 	once.Do(func() {
 		// Setup the logger.
-		err = logutil.SetupLogger(logConfig, &logger, &logProps, redactInfoLog, redactInfoMark)
+		err = logutil.SetupLogger(logConfig, &logger, &logProps, redactInfoLog)
 		if err != nil {
 			return
 		}
@@ -130,7 +130,7 @@ func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Asser
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 	// Setup the logger.
-	err = InitLogger(cfg.Log, cfg.Logger, cfg.LogProps, cfg.Security.RedactInfoLog, cfg.Security.RedactInfoMark)
+	err = InitLogger(cfg.Log, cfg.Logger, cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
 	return NewTSOTestServer(ctx, cfg)
 }
