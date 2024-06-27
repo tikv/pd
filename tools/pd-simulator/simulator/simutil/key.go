@@ -16,37 +16,10 @@ package simutil
 
 import (
 	"bytes"
-	"math/rand"
-	"sort"
 
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/codec"
 )
-
-const (
-	// 26^10 ~= 1.4e+14, should be enough.
-	keyChars = "abcdefghijklmnopqrstuvwxyz"
-	keyLen   = 10
-)
-
-// GenerateKeys generates ordered, unique strings.
-func GenerateKeys(size int) []string {
-	m := make(map[string]struct{}, size)
-	for len(m) < size {
-		k := make([]byte, keyLen)
-		for i := range k {
-			k[i] = keyChars[rand.Intn(len(keyChars))]
-		}
-		m[string(k)] = struct{}{}
-	}
-
-	v := make([]string, 0, size)
-	for k := range m {
-		v = append(v, k)
-	}
-	sort.Strings(v)
-	return v
-}
 
 // GenerateTableKey generates the table key according to the table ID and row ID.
 func GenerateTableKey(tableID, rowID int64) []byte {
@@ -59,6 +32,10 @@ func GenerateTableKey(tableID, rowID int64) []byte {
 
 // GenerateTableKeys generates the table keys according to the table count and size.
 func GenerateTableKeys(tableCount, size int) []string {
+	if tableCount <= 0 {
+		// set default tableCount as 1
+		tableCount = 1
+	}
 	v := make([]string, 0, size)
 	groupNumber := size / tableCount
 	tableID := 0
@@ -72,30 +49,6 @@ func GenerateTableKeys(tableCount, size int) []string {
 		}
 	}
 	return v
-}
-
-// GenerateSplitKey generate the split key.
-func GenerateSplitKey(start, end []byte) []byte {
-	key := make([]byte, 0, len(start))
-	// lessThanEnd is set as true when the key is already less than end key.
-	lessThanEnd := len(end) == 0
-	for i, s := range start {
-		e := byte('z')
-		if !lessThanEnd {
-			e = end[i]
-		}
-		c := (s + e) / 2
-		key = append(key, c)
-		// case1: s = c < e. Continue with lessThanEnd=true.
-		// case2: s < c < e. return key.
-		// case3: s = c = e. Continue with lessThanEnd=false.
-		lessThanEnd = c < e
-		if c > s && c < e {
-			return key
-		}
-	}
-	key = append(key, ('a'+'z')/2)
-	return key
 }
 
 func mustDecodeMvccKey(key []byte) ([]byte, error) {
