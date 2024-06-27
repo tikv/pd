@@ -45,7 +45,7 @@ type Region struct {
 }
 
 // CheckerFunc checks if the scheduler is finished.
-type CheckerFunc func(*core.RegionsInfo, []info.StoreStats) bool
+type CheckerFunc func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) bool
 
 // Case represents a test suite for simulator.
 type Case struct {

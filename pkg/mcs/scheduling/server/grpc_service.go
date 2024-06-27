@@ -53,7 +53,7 @@ type dummyRestService struct{}
 
 func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("not implemented"))
+	_, _ = w.Write([]byte("not implemented"))
 }
 
 // ConfigProvider is used to get scheduling config from the given
@@ -158,7 +158,8 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 			s.hbStreams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
-		region := core.RegionFromHeartbeat(request)
+		// scheduling service doesn't sync the pd server config, so we use 0 here
+		region := core.RegionFromHeartbeat(request, 0)
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
 			// TODO: if we need to send the error back to API server.
@@ -335,9 +336,9 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 }
 
 // RegisterRESTHandler registers the service to REST server.
-func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error {
 	handler, group := SetUpRestHandler(s)
-	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	return apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 func (s *Service) errorHeader(err *schedulingpb.Error) *schedulingpb.ResponseHeader {

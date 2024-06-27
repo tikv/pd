@@ -42,16 +42,16 @@ const (
 
 // Runner is the interface for running tasks.
 type Runner interface {
-	RunTask(ctx context.Context, name string, f func(context.Context), opts ...TaskOption) error
+	RunTask(id uint64, name string, f func(), opts ...TaskOption) error
 	Start()
 	Stop()
 }
 
 // Task is a task to be run.
 type Task struct {
-	ctx         context.Context
+	id          uint64
 	submittedAt time.Time
-	f           func(context.Context)
+	f           func()
 	name        string
 	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
 	retained bool
@@ -60,17 +60,22 @@ type Task struct {
 // ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
 var ErrMaxWaitingTasksExceeded = errors.New("max waiting tasks exceeded")
 
-// ConcurrentRunner is a simple task runner that limits the number of concurrent tasks.
+type taskID struct {
+	id   uint64
+	name string
+}
+
 type ConcurrentRunner struct {
 	name               string
 	limiter            *ConcurrencyLimiter
 	maxPendingDuration time.Duration
 	taskChan           chan *Task
-	pendingTasks       []*Task
 	pendingMu          sync.Mutex
 	stopChan           chan struct{}
 	wg                 sync.WaitGroup
-	pendingTaskCount   map[string]int64
+	pendingTaskCount   map[string]int
+	pendingTasks       []*Task
+	existTasks         map[taskID]*Task
 	maxWaitingDuration prometheus.Gauge
 }
 
@@ -82,7 +87,8 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		maxPendingDuration: maxPendingDuration,
 		taskChan:           make(chan *Task),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
-		pendingTaskCount:   make(map[string]int64),
+		pendingTaskCount:   make(map[string]int),
+		existTasks:         make(map[taskID]*Task),
 		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
@@ -101,6 +107,7 @@ func (cr *ConcurrentRunner) Start() {
 	cr.stopChan = make(chan struct{})
 	cr.wg.Add(1)
 	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 	go func() {
 		defer cr.wg.Done()
 		for {
@@ -139,7 +146,7 @@ func (cr *ConcurrentRunner) Start() {
 
 func (cr *ConcurrentRunner) run(task *Task, token *TaskToken) {
 	start := time.Now()
-	task.f(task.ctx)
+	task.f()
 	if token != nil {
 		cr.limiter.ReleaseToken(token)
 		cr.processPendingTasks()
@@ -157,6 +164,7 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 		case cr.taskChan <- task:
 			cr.pendingTasks = cr.pendingTasks[1:]
 			cr.pendingTaskCount[task.name]--
+			delete(cr.existTasks, taskID{id: task.id, name: task.name})
 		default:
 		}
 		return
@@ -170,11 +178,12 @@ func (cr *ConcurrentRunner) Stop() {
 }
 
 // RunTask runs the task asynchronously.
-func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(context.Context), opts ...TaskOption) error {
+func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(), opts ...TaskOption) error {
 	task := &Task{
-		ctx:  ctx,
-		name: name,
-		f:    f,
+		id:          id,
+		name:        name,
+		f:           f,
+		submittedAt: time.Now(),
 	}
 	for _, opt := range opts {
 		opt(task)
@@ -187,7 +196,15 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 	}()
 
 	pendingTaskNum := len(cr.pendingTasks)
+	tid := taskID{task.id, task.name}
 	if pendingTaskNum > 0 {
+		// Here we use a map to find the task with the same ID.
+		// Then replace the old task with the new one.
+		if t, ok := cr.existTasks[tid]; ok {
+			t.f = f
+			t.submittedAt = time.Now()
+			return nil
+		}
 		if !task.retained {
 			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
 			if maxWait > cr.maxPendingDuration {
@@ -195,15 +212,13 @@ func (cr *ConcurrentRunner) RunTask(ctx context.Context, name string, f func(con
 				return ErrMaxWaitingTasksExceeded
 			}
 		}
-		// We use the max task number to limit the memory usage.
-		// It occupies around 1.5GB memory when there is 20000000 pending task.
-		if len(cr.pendingTasks) > maxPendingTaskNum {
+		if pendingTaskNum > maxPendingTaskNum {
 			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 			return ErrMaxWaitingTasksExceeded
 		}
 	}
-	task.submittedAt = time.Now()
 	cr.pendingTasks = append(cr.pendingTasks, task)
+	cr.existTasks[tid] = task
 	cr.pendingTaskCount[task.name]++
 	return nil
 }
@@ -217,8 +232,8 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (*SyncRunner) RunTask(ctx context.Context, _ string, f func(context.Context), _ ...TaskOption) error {
-	f(ctx)
+func (*SyncRunner) RunTask(_ uint64, _ string, f func(), _ ...TaskOption) error {
+	f()
 	return nil
 }
 

@@ -123,33 +123,33 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	data, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	if err := json.Unmarshal(data, h.conf); err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
 		h.conf.persistLocked()
-		rd.Text(w, http.StatusOK, "Config is updated.")
+		_ = rd.Text(w, http.StatusOK, "Config is updated.")
 		return
 	}
 
 	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ok := reflectutil.FindSameFieldByJSON(h.conf, m)
 	if ok {
-		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
+		_ = rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
 		return
 	}
 
-	rd.Text(w, http.StatusBadRequest, "Config item is not found.")
+	_ = rd.Text(w, http.StatusBadRequest, "Config item is not found.")
 }
 
 func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {

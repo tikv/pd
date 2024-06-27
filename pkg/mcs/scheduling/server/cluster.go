@@ -443,11 +443,23 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 			utils.RegionWriteKeys:     0,
 			utils.RegionWriteQueryNum: 0,
 		}
-		c.hotStat.CheckReadAsync(statistics.NewCheckReadPeerTask(region, []*metapb.Peer{peer}, loads, interval))
+		checkReadPeerTask := func(cache *statistics.HotPeerCache) {
+			stats := cache.CheckPeerFlow(region, []*metapb.Peer{peer}, loads, interval)
+			for _, stat := range stats {
+				cache.UpdateStat(stat)
+			}
+		}
+		c.hotStat.CheckReadAsync(checkReadPeerTask)
 	}
 
 	// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
-	c.hotStat.CheckReadAsync(statistics.NewCollectUnReportedPeerTask(storeID, regions, interval))
+	collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
+		stats := cache.CheckColdPeer(storeID, regions, interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+	c.hotStat.CheckReadAsync(collectUnReportedPeerTask)
 	return nil
 }
 
@@ -607,15 +619,15 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 	// Save to storage if meta is updated, except for flashback.
 	// Save to cache if meta or leader is updated, or contains any down/pending peer.
 	_, saveCache, _, retained := core.GenerateRegionGuideFunc(true)(ctx, region, origin)
-
+	regionID := region.GetID()
 	if !saveCache {
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			ctx.TaskRunner.RunTask(
-				ctx,
+			_ = ctx.TaskRunner.RunTask(
+				regionID,
 				ratelimit.ObserveRegionStatsAsync,
-				func(_ context.Context) {
+				func() {
 					if c.regionStats.RegionStatsNeedUpdate(region) {
 						cluster.Collect(c, region, hasRegionStats)
 					}
@@ -624,10 +636,10 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		}
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
-			ctx.TaskRunner.RunTask(
-				ctx,
+			_ = ctx.TaskRunner.RunTask(
+				regionID,
 				ratelimit.UpdateSubTree,
-				func(_ context.Context) {
+				func() {
 					c.CheckAndPutSubTree(region)
 				},
 				ratelimit.WithRetained(true),
@@ -648,29 +660,29 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			tracer.OnSaveCacheFinished()
 			return err
 		}
-		ctx.TaskRunner.RunTask(
-			ctx,
+		_ = ctx.TaskRunner.RunTask(
+			regionID,
 			ratelimit.UpdateSubTree,
-			func(_ context.Context) {
+			func() {
 				c.CheckAndPutSubTree(region)
 			},
 			ratelimit.WithRetained(retained),
 		)
 		tracer.OnUpdateSubTreeFinished()
-		ctx.TaskRunner.RunTask(
-			ctx,
+		_ = ctx.TaskRunner.RunTask(
+			regionID,
 			ratelimit.HandleOverlaps,
-			func(_ context.Context) {
+			func() {
 				cluster.HandleOverlaps(c, overlaps)
 			},
 		)
 	}
 	tracer.OnSaveCacheFinished()
 	// handle region stats
-	ctx.TaskRunner.RunTask(
-		ctx,
+	_ = ctx.TaskRunner.RunTask(
+		regionID,
 		ratelimit.CollectRegionStatsAsync,
-		func(_ context.Context) {
+		func() {
 			cluster.Collect(c, region, hasRegionStats)
 		},
 	)

@@ -349,7 +349,9 @@ func (m *Manager) persistResourceGroupRunningState() {
 		m.RLock()
 		group, ok := m.groups[keys[idx]]
 		if ok {
-			group.persistStates(m.storage)
+			if err := group.persistStates(m.storage); err != nil {
+				log.Error("persist resource group state failed", zap.Error(err))
+			}
 		}
 		m.RUnlock()
 	}

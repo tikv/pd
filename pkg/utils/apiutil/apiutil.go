@@ -116,14 +116,14 @@ func TagJSONError(err error) error {
 func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	if err == nil {
 		log.Error("nil is given to errorResp")
-		rd.JSON(w, http.StatusInternalServerError, "nil error")
+		_ = rd.JSON(w, http.StatusInternalServerError, "nil error")
 		return
 	}
 	if errCode := errcode.CodeChain(err); errCode != nil {
 		w.Header().Set("TiDB-Error-Code", errCode.Code().CodeStr().String())
-		rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
+		_ = rd.JSON(w, errCode.Code().HTTPCode(), errcode.NewJSONFormat(errCode))
 	} else {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
 }
 
@@ -334,6 +334,30 @@ func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("split key %s is not in hex format", name)
 	}
 	return returned, rawKey, nil
+}
+
+// ParseHexKeys decodes hexadecimal src into DecodedLen(len(src)) bytes if the format is "hex".
+//
+// ParseHexKeys expects that each key contains only
+// hexadecimal characters and each key has even length.
+// If existing one key is malformed, ParseHexKeys returns
+// the original bytes.
+func ParseHexKeys(format string, keys [][]byte) (decodedBytes [][]byte, err error) {
+	if format != "hex" {
+		return keys, nil
+	}
+
+	for _, key := range keys {
+		// We can use the source slice itself as the destination
+		// because the decode loop increments by one and then the 'seen' byte is not used anymore.
+		// Reference to hex.DecodeString()
+		n, err := hex.Decode(key, key)
+		if err != nil {
+			return keys, err
+		}
+		decodedBytes = append(decodedBytes, key[:n])
+	}
+	return decodedBytes, nil
 }
 
 // ReadJSON reads a JSON data from r and then closes it.

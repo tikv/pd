@@ -14,7 +14,6 @@ linters:
     - testifylint
     - gofmt
     - revive
-  disable:
     - errcheck
 linters-settings:
   gocritic:
@@ -199,3 +198,15 @@ linters-settings:
         severity: warning
         disabled: false
         exclude: [""]
+issues:
+  exclude-rules:
+    - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
+      linters:
+        - errcheck
+    # following path will enable in the future
+    - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
+      linters:
+        - errcheck
+    - path: (pkg/schedule/schedulers/split_bucket.go|server/api/.*\.go|pkg/schedule/schedulers/balance_leader.go)
+      linters:
+        - errcheck

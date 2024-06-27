@@ -160,7 +160,7 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	}
 	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
 	if !ok {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+		_ = handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 	handler.config.Lock()
@@ -169,17 +169,17 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
 	if err := handler.config.persistLocked(); err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return
 	}
 	log.Info("evict-slow-store-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
-	handler.rd.JSON(w, http.StatusOK, "Config updated.")
+	_ = handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
 func (handler *evictSlowStoreHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	handler.rd.JSON(w, http.StatusOK, conf)
+	_ = handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 type evictSlowStoreScheduler struct {
@@ -282,7 +282,6 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 
 func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
-	var ops []*operator.Operator
 
 	if s.conf.evictStore() != 0 {
 		store := cluster.GetStore(s.conf.evictStore())
@@ -298,7 +297,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			return s.schedulerEvictLeader(cluster), nil
 		}
 		s.cleanupEvictLeader(cluster)
-		return ops, nil
+		return nil, nil
 	}
 
 	var slowStore *core.StoreInfo
@@ -311,14 +310,14 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
 			// Do nothing if there is more than one slow store.
 			if slowStore != nil {
-				return ops, nil
+				return nil, nil
 			}
 			slowStore = store
 		}
 	}
 
 	if slowStore == nil || slowStore.GetSlowScore() < slowStoreEvictThreshold {
-		return ops, nil
+		return nil, nil
 	}
 
 	// If there is only one slow store, evict leaders from that store.
@@ -327,7 +326,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 	err := s.prepareEvictLeader(cluster, slowStore.GetID())
 	if err != nil {
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
-		return ops, nil
+		return nil, nil
 	}
 	return s.schedulerEvictLeader(cluster), nil
 }
