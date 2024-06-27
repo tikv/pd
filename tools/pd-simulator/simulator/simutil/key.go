@@ -16,37 +16,10 @@ package simutil
 
 import (
 	"bytes"
-	"math/rand"
-	"sort"
 
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/codec"
 )
-
-const (
-	// 26^10 ~= 1.4e+14, should be enough.
-	keyChars = "abcdefghijklmnopqrstuvwxyz"
-	keyLen   = 10
-)
-
-// GenerateKeys generates ordered, unique strings.
-func GenerateKeys(size int) []string {
-	m := make(map[string]struct{}, size)
-	for len(m) < size {
-		k := make([]byte, keyLen)
-		for i := range k {
-			k[i] = keyChars[rand.Intn(len(keyChars))]
-		}
-		m[string(k)] = struct{}{}
-	}
-
-	v := make([]string, 0, size)
-	for k := range m {
-		v = append(v, k)
-	}
-	sort.Strings(v)
-	return v
-}
 
 // GenerateTableKey generates the table key according to the table ID and row ID.
 func GenerateTableKey(tableID, rowID int64) []byte {
@@ -59,6 +32,10 @@ func GenerateTableKey(tableID, rowID int64) []byte {
 
 // GenerateTableKeys generates the table keys according to the table count and size.
 func GenerateTableKeys(tableCount, size int) []string {
+	if tableCount <= 0 {
+		// set default tableCount as 1
+		tableCount = 1
+	}
 	v := make([]string, 0, size)
 	groupNumber := size / tableCount
 	tableID := 0
@@ -72,53 +49,6 @@ func GenerateTableKeys(tableCount, size int) []string {
 		}
 	}
 	return v
-}
-
-// GenerateSplitKey generate the split key.
-func GenerateSplitKey(start, end []byte) []byte {
-	const maxLength = 16 // Define a maximum length for the key
-
-	// If both start and end are empty, return a default middle key
-	if len(start) == 0 && len(end) == 0 {
-		key := make([]byte, maxLength)
-		mid := (byte('a') + byte('z')) / 2
-		for i := 0; i < maxLength; i++ {
-			key[i] = mid
-		}
-		return key
-	}
-
-	maxLen := len(start)
-	if len(end) > maxLen {
-		maxLen = len(end)
-	}
-
-	key := make([]byte, maxLen)
-	carry := 0
-	for i := 0; i < maxLen; i++ {
-		s, e := byte('a'), byte('z')
-		if i < len(start) {
-			s = start[i]
-		}
-		if i < len(end) {
-			e = end[i]
-		}
-
-		mid := (int(s) + int(e) + carry) / 2
-		if (int(s)+int(e)+carry)%2 == 1 {
-			carry = 1
-		} else {
-			carry = 0
-		}
-		key[i] = byte(mid)
-	}
-
-	// Add a character if needed to ensure the key is in the correct range
-	if carry == 1 && len(key) < maxLength {
-		key = append(key, (byte('a')+byte('z'))/2)
-	}
-
-	return key
 }
 
 func mustDecodeMvccKey(key []byte) ([]byte, error) {

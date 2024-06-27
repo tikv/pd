@@ -38,7 +38,7 @@ func newRegionSplit(config *sc.SimConfig) *Case {
 	}
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
 	peers := make([]*metapb.Peer, 0, replica)
-	for j := 1; j < replica; j++ {
+	for j := 0; j < replica; j++ {
 		peers = append(peers, &metapb.Peer{
 			Id:      simutil.IDAllocator.NextID(),
 			StoreId: uint64((j)%(totalStore-1) + 1),
@@ -63,7 +63,7 @@ func newRegionSplit(config *sc.SimConfig) *Case {
 	e := &WriteFlowOnSpotDescriptor{}
 	e.Step = func(int64) map[string]int64 {
 		return map[string]int64{
-			"a": 8 * units.MiB,
+			"foobar": 8 * units.MiB,
 		}
 	}
 	simCase.Events = []EventDescriptor{e}
