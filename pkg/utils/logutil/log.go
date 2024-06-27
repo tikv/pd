@@ -109,8 +109,6 @@ const (
 // MarshalJSON implements the `json.Marshaler` interface to ensure the compatibility.
 func (t RedactInfoLogType) MarshalJSON() ([]byte, error) {
 	switch t {
-	case RedactInfoLogOFF:
-		return json.Marshal(false)
 	case RedactInfoLogON:
 		return json.Marshal(true)
 	case RedactInfoLogMark:
@@ -120,7 +118,7 @@ func (t RedactInfoLogType) MarshalJSON() ([]byte, error) {
 	return json.Marshal(false)
 }
 
-const invalidRedactInfoLogTypeErrMsg = "invalid `redact-info-log` value, it should be one of false, true and \"MARK\""
+const invalidRedactInfoLogTypeErrMsg = `the "redact-info-log" value is invalid; it should be either false, true, or "MARK"`
 
 // UnmarshalJSON implements the `json.Marshaler` interface	to ensure the compatibility.
 func (t *RedactInfoLogType) UnmarshalJSON(data []byte) error {
@@ -159,10 +157,14 @@ func (t *RedactInfoLogType) UnmarshalTOML(data any) error {
 		}
 		return nil
 	case string:
-		if v != "MARK" {
-			return errors.New(invalidRedactInfoLogTypeErrMsg)
+		switch strings.ToUpper(v) {
+		case "FALSE", "OFF", "":
+			*t = RedactInfoLogOFF
+		case "MARK":
+			*t = RedactInfoLogMark
+		default:
+			*t = RedactInfoLogON
 		}
-		*t = RedactInfoLogMark
 		return nil
 	default:
 		return errors.New(invalidRedactInfoLogTypeErrMsg)

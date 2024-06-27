@@ -38,41 +38,69 @@ func TestStringToZapLogLevel(t *testing.T) {
 func TestRedactInfoLogType(t *testing.T) {
 	re := require.New(t)
 	// JSON unmarshal.
-	var (
-		jsonStr     = `[false,true,"MARK","OTHER","OFF","ON","mark","off","on",""]`
-		redactTypes []RedactInfoLogType
-		err         error
-	)
-	err = json.Unmarshal([]byte(jsonStr), &redactTypes)
-	re.NoError(err)
-	re.Equal([]RedactInfoLogType{
-		RedactInfoLogOFF,
-		RedactInfoLogON,
-		RedactInfoLogMark,
-		RedactInfoLogON,
-		RedactInfoLogOFF,
-		RedactInfoLogON,
-		RedactInfoLogMark,
-		RedactInfoLogOFF,
-		RedactInfoLogON,
-		RedactInfoLogOFF,
-	}, redactTypes)
+	jsonUnmarshalTestCases := []struct {
+		jsonStr string
+		expect  RedactInfoLogType
+	}{
+		{`false`, RedactInfoLogOFF},
+		{`true`, RedactInfoLogON},
+		{`"MARK"`, RedactInfoLogMark},
+		{`"OTHER"`, RedactInfoLogON},
+		{`"OFF"`, RedactInfoLogOFF},
+		{`"ON"`, RedactInfoLogON},
+		{`"mark"`, RedactInfoLogMark},
+		{`"off"`, RedactInfoLogOFF},
+		{`"on"`, RedactInfoLogON},
+		{`""`, RedactInfoLogOFF},
+		{`"fALSe"`, RedactInfoLogOFF},
+		{`"trUE"`, RedactInfoLogON},
+	}
+	var redactType RedactInfoLogType
+	for _, tc := range jsonUnmarshalTestCases {
+		err := json.Unmarshal([]byte(tc.jsonStr), &redactType)
+		re.NoError(err)
+		re.Equal(tc.expect, redactType)
+	}
 	// JSON marshal.
-	jsonBytes, err := json.Marshal(redactTypes)
-	re.NoError(err)
-	re.Equal(`[false,true,"MARK",true,false,true,"MARK",false,true,false]`, string(jsonBytes))
+	jsonMarshalTestCases := []struct {
+		typ    RedactInfoLogType
+		expect string
+	}{
+		{RedactInfoLogOFF, `false`},
+		{RedactInfoLogON, `true`},
+		{RedactInfoLogMark, `"MARK"`},
+	}
+	for _, tc := range jsonMarshalTestCases {
+		b, err := json.Marshal(tc.typ)
+		re.NoError(err)
+		re.Equal(tc.expect, string(b))
+	}
 	// TOML unmarshal.
-	tomlStr := `redact-info-log = true`
+	tomlTestCases := []struct {
+		tomlStr string
+		expect  RedactInfoLogType
+	}{
+		{`redact-info-log = false`, RedactInfoLogOFF},
+		{`redact-info-log = true`, RedactInfoLogON},
+		{`redact-info-log = "MARK"`, RedactInfoLogMark},
+		{`redact-info-log = "OTHER"`, RedactInfoLogON},
+		{`redact-info-log = "OFF"`, RedactInfoLogOFF},
+		{`redact-info-log = "ON"`, RedactInfoLogON},
+		{`redact-info-log = "mark"`, RedactInfoLogMark},
+		{`redact-info-log = "off"`, RedactInfoLogOFF},
+		{`redact-info-log = "on"`, RedactInfoLogON},
+		{`redact-info-log = ""`, RedactInfoLogOFF},
+		{`redact-info-log = "fALSe"`, RedactInfoLogOFF},
+		{`redact-info-log = "trUE"`, RedactInfoLogON},
+	}
 	var config struct {
 		RedactInfoLog RedactInfoLogType `toml:"redact-info-log"`
 	}
-	_, err = toml.Decode(tomlStr, &config)
-	re.NoError(err)
-	re.Equal(RedactInfoLogON, config.RedactInfoLog)
-	tomlStr = `redact-info-log = "MARK"`
-	_, err = toml.Decode(tomlStr, &config)
-	re.NoError(err)
-	re.Equal(RedactInfoLogMark, config.RedactInfoLog)
+	for _, tc := range tomlTestCases {
+		_, err := toml.Decode(tc.tomlStr, &config)
+		re.NoError(err)
+		re.Equal(tc.expect, config.RedactInfoLog)
+	}
 }
 
 func TestRedactLog(t *testing.T) {
