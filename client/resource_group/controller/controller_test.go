@@ -45,7 +45,7 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 			JobTypes: []string{"lightning", "br"},
 		},
 	}
-	ch1 := make(chan struct{})
+	ch1 := make(chan NotifyMsg)
 	ch2 := make(chan *groupCostController)
 	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2)
 	re.NoError(err)
