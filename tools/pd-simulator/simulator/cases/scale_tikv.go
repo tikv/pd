@@ -76,7 +76,7 @@ func newScaleInOut(config *sc.SimConfig) *Case {
 	}
 	simCase.Events = []EventDescriptor{addEvent, removeEvent}
 
-	simCase.Checker = func(_ *core.RegionsInfo, _ []info.StoreStats) bool {
+	simCase.Checker = func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) bool {
 		return false
 	}
 	return &simCase
