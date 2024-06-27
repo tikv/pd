@@ -197,6 +197,8 @@ func redactInfo(input string) string {
 	res.Grow(len(input) + 2)
 	_, _ = res.WriteRune(leftMark)
 	for _, c := range input {
+		// Double the mark character if it is already in the input string.
+		// to avoid the ambiguity of the redacted content.
 		if c == leftMark || c == rightMark {
 			_, _ = res.WriteRune(c)
 			_, _ = res.WriteRune(c)
@@ -229,6 +231,7 @@ func RedactBytes(arg []byte) []byte {
 	case RedactInfoLogON:
 		return []byte("?")
 	case RedactInfoLogMark:
+		// Use unsafe conversion to avoid copy.
 		return typeutil.StringToBytes(redactInfo(typeutil.BytesToString(arg)))
 	default:
 	}

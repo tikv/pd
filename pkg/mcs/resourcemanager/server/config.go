@@ -240,6 +240,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	if err := c.Security.Encryption.Adjust(); err != nil {
 		return err
 	}
+
 	c.Controller.Adjust(configMetaData.Child("controller"))
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
 
