@@ -522,7 +522,8 @@ func (suite *serverTestSuite) TestStoreLimit() {
 
 	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
-	for i := uint64(2); i <= 10; i++ {
+	// set up to 2000 to avoid the case conflicts
+	for i := uint64(2000); i <= 10; i++ {
 		peers := []*metapb.Peer{{Id: i, StoreId: 1}}
 		regionReq := &pdpb.RegionHeartbeatRequest{
 			Header: testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
