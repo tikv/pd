@@ -47,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
+	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -700,7 +701,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
 		ticker.Stop()
-		ticker = time.NewTicker(2 * time.Second)
+		ticker = time.NewTicker(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -1590,6 +1591,20 @@ func (c *RaftCluster) setStore(store *core.StoreInfo) error {
 	return nil
 }
 
+func (c *RaftCluster) isStorePrepared() bool {
+	for _, store := range c.GetStores() {
+		if !store.IsPreparing() && !store.IsServing() {
+			continue
+		}
+		storeID := store.GetID()
+		// For each store, the number of active regions should be more than total region of the store * CollectFactor
+		if float64(c.GetStoreRegionCount(storeID))*schedule.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
@@ -1621,7 +1636,7 @@ func (c *RaftCluster) checkStores() {
 						zap.Int("region-count", c.GetTotalRegionCount()),
 						errs.ZapError(err))
 				}
-			} else if c.IsPrepared() {
+			} else if c.IsPrepared() || (c.IsServiceIndependent(mcsutils.SchedulingServiceName) && c.isStorePrepared()) {
 				threshold := c.getThreshold(stores, store)
 				regionSize := float64(store.GetRegionSize())
 				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))

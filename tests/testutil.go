@@ -438,6 +438,11 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(3)},
 			},
 		}
+		if i == 0 {
+			r.StartKey = []byte{}
+		} else if i == regionLen-1 {
+			r.EndKey = []byte{}
+		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.
 		if i < regionLen/2 {

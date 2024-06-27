@@ -675,3 +675,71 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 	rc = suite.pdLeader.GetServer().GetRaftCluster()
 	rc.IsPrepared()
 }
+
+func (suite *serverTestSuite) TestOnlineProgress() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://%d", i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	regionLen := 1000
+	regions := tests.InitRegions(regionLen)
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	// add a new store
+	resp, err := s.PutStore(
+		context.Background(), &pdpb.PutStoreRequest{
+			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      4,
+				Address: fmt.Sprintf("mock://%d", 4),
+				State:   metapb.StoreState_Up,
+				Version: "7.0.0",
+			},
+		},
+	)
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+
+	time.Sleep(200 * time.Millisecond)
+	for i, r := range regions {
+		if i < 50 {
+			r.GetMeta().Peers[2].StoreId = 4
+			r.GetMeta().RegionEpoch.ConfVer = 2
+			r.GetMeta().RegionEpoch.Version = 2
+			err = rc.HandleRegionHeartbeat(r)
+			re.NoError(err)
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	action, progress, ls, cs, err := rc.GetProgressByID("4")
+	re.Equal("preparing", action)
+	re.NotEmpty(progress)
+	re.NotEmpty(cs)
+	re.NotEmpty(ls)
+	re.NoError(err)
+}
