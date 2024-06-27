@@ -38,11 +38,29 @@ func TestStringToZapLogLevel(t *testing.T) {
 func TestRedactInfoLogType(t *testing.T) {
 	re := require.New(t)
 	// JSON unmarshal.
-	jsonStr := `[false,true,"MARK"]`
-	var redactTypes []RedactInfoLogType
-	err := json.Unmarshal([]byte(jsonStr), &redactTypes)
+	var (
+		jsonStr     = `[false,true,"MARK","OTHER","OFF","ON","mark","off","on",""]`
+		redactTypes []RedactInfoLogType
+		err         error
+	)
+	err = json.Unmarshal([]byte(jsonStr), &redactTypes)
 	re.NoError(err)
-	re.Equal([]RedactInfoLogType{RedactInfoLogOFF, RedactInfoLogON, RedactInfoLogMark}, redactTypes)
+	re.Equal([]RedactInfoLogType{
+		RedactInfoLogOFF,
+		RedactInfoLogON,
+		RedactInfoLogMark,
+		RedactInfoLogON,
+		RedactInfoLogOFF,
+		RedactInfoLogON,
+		RedactInfoLogMark,
+		RedactInfoLogOFF,
+		RedactInfoLogON,
+		RedactInfoLogOFF,
+	}, redactTypes)
+	// JSON marshal.
+	jsonBytes, err := json.Marshal(redactTypes)
+	re.NoError(err)
+	re.Equal(`[false,true,"MARK",true,false,true,"MARK",false,true,false]`, string(jsonBytes))
 	// TOML unmarshal.
 	tomlStr := `redact-info-log = true`
 	var config struct {
