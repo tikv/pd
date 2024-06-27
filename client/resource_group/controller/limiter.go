@@ -75,7 +75,7 @@ type Limiter struct {
 	// last is the last time the limiter's tokens field was updated
 	last                time.Time
 	notifyThreshold     float64
-	lowTokensNotifyChan chan<- struct{}
+	lowTokensNotifyChan chan<- NotifyMsg
 	// To prevent too many chan sent, the notifyThreshold is set to 0 after notify.
 	// So the notifyThreshold cannot show whether the limiter is in the low token state,
 	// isLowProcess is used to check it.
@@ -86,6 +86,11 @@ type Limiter struct {
 
 	// metrics
 	metrics *limiterMetricsCollection
+}
+
+// NotifyMsg is a message to notify the low token state.
+type NotifyMsg struct {
+	StartTime time.Time
 }
 
 // limiterMetricsCollection is a collection of metrics for a limiter.
@@ -102,7 +107,7 @@ func (lim *Limiter) Limit() Limit {
 
 // NewLimiter returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan<- struct{}) *Limiter {
+func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan<- NotifyMsg) *Limiter {
 	lim := &Limiter{
 		limit:               r,
 		last:                now,
@@ -116,7 +121,7 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 
 // NewLimiterWithCfg returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- struct{}) *Limiter {
+func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- NotifyMsg) *Limiter {
 	lim := &Limiter{
 		name:                name,
 		limit:               Limit(cfg.NewRate),
@@ -144,6 +149,7 @@ type Reservation struct {
 	// This is the Limit at reservation time, it can change later.
 	limit           Limit
 	remainingTokens float64
+	err             error
 }
 
 // OK returns whether the limiter can provide the requested number of tokens
@@ -218,7 +224,8 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 	select {
 	case <-ctx.Done():
 		return &Reservation{
-			ok: false,
+			ok:  false,
+			err: ctx.Err(),
 		}
 	default:
 	}
@@ -255,7 +262,7 @@ func (lim *Limiter) notify() {
 	lim.notifyThreshold = 0
 	lim.isLowProcess = true
 	select {
-	case lim.lowTokensNotifyChan <- struct{}{}:
+	case lim.lowTokensNotifyChan <- NotifyMsg{StartTime: time.Now()}:
 		if lim.metrics != nil {
 			lim.metrics.lowTokenNotifyCounter.Inc()
 		}
@@ -414,7 +421,8 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 				zap.Float64("notify-threshold", lim.notifyThreshold),
 				zap.Bool("is-low-process", lim.isLowProcess),
 				zap.Int64("burst", lim.burst),
-				zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
+				zap.Int("remaining-notify-times", lim.remainingNotifyTimes),
+				zap.String("name", lim.name))
 		}
 		lim.last = last
 		if lim.limit == 0 {
@@ -495,6 +503,9 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
+			if res.err != nil {
+				return res.needWaitDuration, res.err
+			}
 			return res.needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(res.needWaitDuration, res.limit, res.remainingTokens)
 		}
 		delay := res.DelayFrom(now)
