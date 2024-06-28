@@ -49,7 +49,7 @@ type dummyRestService struct{}
 
 func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
-	w.Write([]byte("not implemented"))
+	_, _ = w.Write([]byte("not implemented"))
 }
 
 // ConfigProvider is used to get tso config from the given
@@ -78,9 +78,9 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 }
 
 // RegisterRESTHandler registers the service to REST server.
-func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error {
 	handler, group := SetUpRestHandler(s)
-	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	return apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 // Tso returns a stream of timestamps

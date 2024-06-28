@@ -196,8 +196,12 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
-	flagSet.Parse(args)
-	err := cfg.Parse(flagSet)
+	err := flagSet.Parse(args)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	err = cfg.Parse(flagSet)
 	defer logutil.LogPanic()
 
 	if err != nil {
@@ -231,7 +235,9 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
 	// Flushing any buffered log entries
-	defer log.Sync()
+	defer func() {
+		_ = log.Sync()
+	}()
 	memory.InitMemoryHook()
 	if len(services) != 0 {
 		versioninfo.Log(server.APIServiceMode)
@@ -295,6 +301,6 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 }
 
 func exit(code int) {
-	log.Sync()
+	_ = log.Sync()
 	os.Exit(code)
 }

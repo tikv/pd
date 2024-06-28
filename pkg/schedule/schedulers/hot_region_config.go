@@ -379,7 +379,7 @@ func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, _ *
 	conf.RLock()
 	defer conf.RUnlock()
 	rd := render.New(render.Options{IndentJSON: true})
-	rd.JSON(w, http.StatusOK, conf.getValidConf())
+	_ = rd.JSON(w, http.StatusOK, conf.getValidConf())
 }
 
 func isPriorityValid(priorities []string) (map[string]bool, error) {
@@ -434,43 +434,45 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	if err := json.Unmarshal(data, conf); err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := conf.validateLocked(); err != nil {
 		// revert to old version
 		if err2 := json.Unmarshal(oldc, conf); err2 != nil {
-			rd.JSON(w, http.StatusInternalServerError, err2.Error())
+			_ = rd.JSON(w, http.StatusInternalServerError, err2.Error())
 		} else {
-			rd.JSON(w, http.StatusBadRequest, err.Error())
+			_ = rd.JSON(w, http.StatusBadRequest, err.Error())
 		}
 		return
 	}
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
-		conf.persistLocked()
+		if err := conf.persistLocked(); err != nil {
+			log.Warn("failed to persist config", zap.Error(err))
+		}
 		log.Info("hot-region-scheduler config is updated", zap.String("old", string(oldc)), zap.String("new", string(newc)))
-		rd.Text(w, http.StatusOK, "Config is updated.")
+		_ = rd.Text(w, http.StatusOK, "Config is updated.")
 		return
 	}
 
 	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
-		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ok := reflectutil.FindSameFieldByJSON(conf, m)
 	if ok {
-		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
+		_ = rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
 		return
 	}
 
-	rd.Text(w, http.StatusBadRequest, "Config item is not found.")
+	_ = rd.Text(w, http.StatusBadRequest, "Config item is not found.")
 }
 
 func (conf *hotRegionSchedulerConfig) persistLocked() error {

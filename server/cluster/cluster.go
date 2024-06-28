@@ -2175,7 +2175,9 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 			interval = c.opt.GetMinResolvedTSPersistenceInterval()
 			if interval != 0 {
 				if current, needPersist := c.CheckAndUpdateMinResolvedTS(); needPersist {
-					c.storage.SaveMinResolvedTS(current)
+					if err := c.storage.SaveMinResolvedTS(current); err != nil {
+						log.Error("persist min resolved ts meet error", errs.ZapError(err))
+					}
 				}
 			} else {
 				// If interval in config is zero, it means not to persist resolved ts and check config with this interval
@@ -2252,8 +2254,7 @@ func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
 	c.Lock()
 	defer c.Unlock()
 	c.externalTS = timestamp
-	c.storage.SaveExternalTS(timestamp)
-	return nil
+	return c.storage.SaveExternalTS(timestamp)
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
@@ -2289,8 +2290,8 @@ func (c *RaftCluster) SetAllStoresLimit(typ storelimit.Type, ratePerMin float64)
 }
 
 // SetAllStoresLimitTTL sets all store limit for a given type and rate with ttl.
-func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) {
-	c.opt.SetAllStoresLimitTTL(c.ctx, c.etcdClient, typ, ratePerMin, ttl)
+func (c *RaftCluster) SetAllStoresLimitTTL(typ storelimit.Type, ratePerMin float64, ttl time.Duration) error {
+	return c.opt.SetAllStoresLimitTTL(c.ctx, c.etcdClient, typ, ratePerMin, ttl)
 }
 
 // GetClusterVersion returns the current cluster version.
