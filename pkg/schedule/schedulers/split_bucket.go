@@ -23,6 +23,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -133,7 +135,9 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		h.conf.persistLocked()
+		if err := h.conf.persistLocked(); err != nil {
+			log.Warn("failed to save config", errs.ZapError(err))
+		}
 		_ = rd.Text(w, http.StatusOK, "Config is updated.")
 		return
 	}

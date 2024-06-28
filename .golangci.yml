@@ -201,6 +201,9 @@ linters-settings:
   errcheck:
     exclude-functions:
       - (*github.com/unrolled/render.Render).JSON
+      - (*github.com/unrolled/render.Render).Data
+      - (*github.com/unrolled/render.Render).Text
+      - (net/http.ResponseWriter).Write
 issues:
   exclude-rules:
     - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
@@ -208,8 +211,5 @@ issues:
         - errcheck
     # following path will enable in the future
     - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
-      linters:
-        - errcheck
-    - path: (pkg/schedule/schedulers/split_bucket.go|server/api/.*\.go|pkg/schedule/schedulers/balance_leader.go)
       linters:
         - errcheck
