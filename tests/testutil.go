@@ -283,19 +283,21 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 	return buckets
 }
 
-type mode int
+type SchedulerMode int
 
 const (
-	pdMode mode = iota
-	apiMode
+	Both SchedulerMode = iota
+	PDMode
+	APIMode
 )
 
 // SchedulingTestEnvironment is used for test purpose.
 type SchedulingTestEnvironment struct {
 	t        *testing.T
 	opts     []ConfigOption
-	clusters map[mode]*TestCluster
+	clusters map[SchedulerMode]*TestCluster
 	cancels  []context.CancelFunc
+	RunMode  SchedulerMode
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
@@ -303,24 +305,30 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 	return &SchedulingTestEnvironment{
 		t:        t,
 		opts:     opts,
-		clusters: make(map[mode]*TestCluster),
+		clusters: make(map[SchedulerMode]*TestCluster),
 		cancels:  make([]context.CancelFunc, 0),
 	}
 }
 
-// RunTestInTwoModes is to run test in two modes.
 func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
-	s.RunTestInPDMode(test)
-	s.RunTestInAPIMode(test)
+	switch s.RunMode {
+	case PDMode:
+		s.RunTestInPDMode(test)
+	case APIMode:
+		s.RunTestInAPIMode(test)
+	default:
+		s.RunTestInPDMode(test)
+		s.RunTestInAPIMode(test)
+	}
 }
 
 // RunTestInPDMode is to run test in pd mode.
 func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
 	s.t.Logf("start test %s in pd mode", getTestName())
-	if _, ok := s.clusters[pdMode]; !ok {
-		s.startCluster(pdMode)
+	if _, ok := s.clusters[PDMode]; !ok {
+		s.startCluster(PDMode)
 	}
-	test(s.clusters[pdMode])
+	test(s.clusters[PDMode])
 }
 
 func getTestName() string {
@@ -347,18 +355,18 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
 	s.t.Logf("start test %s in api mode", getTestName())
-	if _, ok := s.clusters[apiMode]; !ok {
-		s.startCluster(apiMode)
+	if _, ok := s.clusters[APIMode]; !ok {
+		s.startCluster(APIMode)
 	}
-	test(s.clusters[apiMode])
+	test(s.clusters[APIMode])
 }
 
 // RunFuncInTwoModes is to run func in two modes.
 func (s *SchedulingTestEnvironment) RunFuncInTwoModes(f func(*TestCluster)) {
-	if c, ok := s.clusters[pdMode]; ok {
+	if c, ok := s.clusters[PDMode]; ok {
 		f(c)
 	}
-	if c, ok := s.clusters[apiMode]; ok {
+	if c, ok := s.clusters[APIMode]; ok {
 		f(c)
 	}
 }
@@ -373,12 +381,12 @@ func (s *SchedulingTestEnvironment) Cleanup() {
 	}
 }
 
-func (s *SchedulingTestEnvironment) startCluster(m mode) {
+func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 	re := require.New(s.t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancels = append(s.cancels, cancel)
 	switch m {
-	case pdMode:
+	case PDMode:
 		cluster, err := NewTestCluster(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
@@ -386,8 +394,8 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
-		s.clusters[pdMode] = cluster
-	case apiMode:
+		s.clusters[PDMode] = cluster
+	case APIMode:
 		cluster, err := NewTestAPICluster(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
@@ -406,7 +414,7 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		testutil.Eventually(re, func() bool {
 			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
 		})
-		s.clusters[apiMode] = cluster
+		s.clusters[APIMode] = cluster
 	}
 }
 

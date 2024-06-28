@@ -40,11 +40,20 @@ const apiPrefix = "/pd"
 
 type scheduleTestSuite struct {
 	suite.Suite
-	env *tests.SchedulingTestEnvironment
+	env     *tests.SchedulingTestEnvironment
+	runMode tests.SchedulerMode
 }
 
-func TestScheduleTestSuite(t *testing.T) {
-	suite.Run(t, new(scheduleTestSuite))
+func TestPDSchedulingTestSuite(t *testing.T) {
+	suite.Run(t, &scheduleTestSuite{
+		runMode: tests.PDMode,
+	})
+}
+
+func TestAPISchedulingTestSuite(t *testing.T) {
+	suite.Run(t, &scheduleTestSuite{
+		runMode: tests.APIMode,
+	})
 }
 
 func (suite *scheduleTestSuite) SetupSuite() {
@@ -52,6 +61,7 @@ func (suite *scheduleTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.RunMode = suite.runMode
 }
 
 func (suite *scheduleTestSuite) TearDownSuite() {

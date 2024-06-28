@@ -67,7 +67,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) allocID() uint32 {
 	return uint32(id)
 }
 
-func TestTSOKeyspaceGroupManager(t *testing.T) {
+func TestTSOKeyspaceGroupManagerSuite(t *testing.T) {
 	suite.Run(t, &tsoKeyspaceGroupManagerTestSuite{})
 }
 

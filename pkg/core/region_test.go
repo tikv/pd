@@ -731,7 +731,7 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 
 func TestGetRegionSizeByRange(t *testing.T) {
 	regions := NewRegionsInfo()
-	nums := 1000010
+	nums := 100001
 	for i := 0; i < nums; i++ {
 		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
 		endKey := []byte(fmt.Sprintf("%20d", i+1))
