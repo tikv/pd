@@ -45,7 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/replication"
-	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -1704,8 +1703,7 @@ func (c *RaftCluster) isStorePrepared() bool {
 			continue
 		}
 		storeID := store.GetID()
-		// For each store, the number of active regions should be more than total region of the store * CollectFactor
-		if float64(c.GetStoreRegionCount(storeID))*schedule.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
+		if !c.IsStorePrepared(storeID) {
 			return false
 		}
 	}
