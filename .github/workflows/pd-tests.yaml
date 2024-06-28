@@ -88,7 +88,7 @@ jobs:
           # only keep the first line(`mode: aomic`) of the coverage profile
           sed -i '2,${/mode: atomic/d;}' covprofile
       - name: Send coverage
-        uses: codecov/codecov-action@v4.2.0
+        uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV }}
           file: ./covprofile
