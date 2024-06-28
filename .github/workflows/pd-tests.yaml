@@ -27,15 +27,15 @@ jobs:
       matrix:
         include:
           - worker_id: 1
-            name: 'Unit Test(core)'
+            name: 'Unit Test(1)'
           - worker_id: 2
-            name: 'Unit Test(schedule)'
+            name: 'Unit Test(2)'
           - worker_id: 3
-            name: 'Unit Test(others)'
+            name: 'Unit Test(3)'
           - worker_id: 4
-            name: 'Tests(core)'
+            name: 'Tests(1)'
           - worker_id: 5
-            name: 'Tests(others)'
+            name: 'Tests(2)'
           - worker_id: 6
             name: 'Tools Test'
           - worker_id: 7
@@ -43,7 +43,7 @@ jobs:
           - worker_id: 8
             name: 'TSO Integration Test'
           - worker_id: 9
-            name: 'MicroService Integration(Core)'
+            name: 'MicroService Integration(!TSO)'
           - worker_id: 10
             name: 'MicroService Integration(TSO)'
     outputs:

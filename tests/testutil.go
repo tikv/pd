@@ -310,7 +310,9 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 	}
 }
 
-func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
+// RunTestBasedOnMode runs test based on mode.
+// If mode not set, it will run test in both PD mode and API mode.
+func (s *SchedulingTestEnvironment) RunTestBasedOnMode(test func(*TestCluster)) {
 	switch s.RunMode {
 	case PDMode:
 		s.RunTestInPDMode(test)
@@ -334,7 +336,7 @@ func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
 func getTestName() string {
 	pc, _, _, _ := runtime.Caller(2)
 	caller := runtime.FuncForPC(pc)
-	if caller == nil || strings.Contains(caller.Name(), "RunTestInTwoModes") {
+	if caller == nil || strings.Contains(caller.Name(), "RunTestBasedOnMode") {
 		pc, _, _, _ = runtime.Caller(3)
 		caller = runtime.FuncForPC(pc)
 	}

@@ -72,7 +72,7 @@ func (suite *scheduleTestSuite) TearDownSuite() {
 }
 
 func (suite *scheduleTestSuite) TestOriginAPI() {
-	suite.env.RunTestInTwoModes(suite.checkOriginAPI)
+	suite.env.RunTestBasedOnMode(suite.checkOriginAPI)
 }
 
 func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
@@ -140,7 +140,7 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestAPI() {
-	suite.env.RunTestInTwoModes(suite.checkAPI)
+	suite.env.RunTestBasedOnMode(suite.checkAPI)
 }
 
 func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
@@ -626,7 +626,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestDisable() {
-	suite.env.RunTestInTwoModes(suite.checkDisable)
+	suite.env.RunTestBasedOnMode(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
@@ -734,7 +734,7 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 }
 
 func (suite *scheduleTestSuite) TestEmptySchedulers() {
-	suite.env.RunTestInTwoModes(suite.checkEmptySchedulers)
+	suite.env.RunTestBasedOnMode(suite.checkEmptySchedulers)
 }
 
 func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster) {
