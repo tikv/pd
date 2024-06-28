@@ -1058,7 +1058,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// region stats needs to be collected in API mode.
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
-			_ = ctx.MiscRunner.RunTask(
+			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.ObserveRegionStatsAsync,
 				func() {
@@ -1070,7 +1070,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		}
 		// region is not updated to the subtree.
 		if origin.GetRef() < 2 {
-			_ = ctx.TaskRunner.RunTask(
+			ctx.TaskRunner.RunTask(
 				regionID,
 				ratelimit.UpdateSubTree,
 				func() {
@@ -1098,7 +1098,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			tracer.OnSaveCacheFinished()
 			return err
 		}
-		_ = ctx.TaskRunner.RunTask(
+		ctx.TaskRunner.RunTask(
 			regionID,
 			ratelimit.UpdateSubTree,
 			func() {
@@ -1109,7 +1109,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		tracer.OnUpdateSubTreeFinished()
 
 		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-			_ = ctx.MiscRunner.RunTask(
+			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.HandleOverlaps,
 				func() {
@@ -1122,7 +1122,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 
 	tracer.OnSaveCacheFinished()
 	// handle region stats
-	_ = ctx.MiscRunner.RunTask(
+	ctx.MiscRunner.RunTask(
 		regionID,
 		ratelimit.CollectRegionStatsAsync,
 		func() {
@@ -1136,7 +1136,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
 		if saveKV {
-			_ = ctx.MiscRunner.RunTask(
+			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.SaveRegionToKV,
 				func() {

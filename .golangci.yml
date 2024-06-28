@@ -204,6 +204,8 @@ linters-settings:
       - (*github.com/unrolled/render.Render).Data
       - (*github.com/unrolled/render.Render).Text
       - (net/http.ResponseWriter).Write
+      - github.com/pingcap/log.Sync
+      - (github.com/tikv/pd/pkg/ratelimit.Runner).RunTask
 issues:
   exclude-rules:
     - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)

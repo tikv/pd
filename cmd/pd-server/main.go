@@ -235,9 +235,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
 	// Flushing any buffered log entries
-	defer func() {
-		_ = log.Sync()
-	}()
+	defer log.Sync()
 	memory.InitMemoryHook()
 	if len(services) != 0 {
 		versioninfo.Log(server.APIServiceMode)
@@ -301,6 +299,6 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 }
 
 func exit(code int) {
-	_ = log.Sync()
+	log.Sync()
 	os.Exit(code)
 }

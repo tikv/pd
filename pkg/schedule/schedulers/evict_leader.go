@@ -373,7 +373,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
 				handler.config.RUnlock()
-				_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
@@ -390,28 +390,28 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = handler.config.Persist()
 	if err != nil {
 		handler.config.removeStore(id)
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
+	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
 func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	_ = handler.rd.JSON(w, http.StatusOK, conf)
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["store_id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -422,26 +422,26 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 		err = handler.config.Persist()
 		if err != nil {
 			handler.config.resetStore(id, keyRanges)
-			_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if last {
 			if err := handler.config.removeSchedulerCb(EvictLeaderName); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
-					_ = handler.rd.JSON(w, http.StatusNotFound, err.Error())
+					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {
 					handler.config.resetStore(id, keyRanges)
-					_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+					handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				}
 				return
 			}
 			resp = lastStoreDeleteInfo
 		}
-		_ = handler.rd.JSON(w, http.StatusOK, resp)
+		handler.rd.JSON(w, http.StatusOK, resp)
 		return
 	}
 
-	_ = handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist.FastGenByArgs().Error())
+	handler.rd.JSON(w, http.StatusNotFound, errs.ErrScheduleConfigNotExist.FastGenByArgs().Error())
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
