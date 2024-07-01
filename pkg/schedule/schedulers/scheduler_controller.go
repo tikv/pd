@@ -472,14 +472,11 @@ retry:
 		if diagnosable {
 			s.diagnosticRecorder.SetResultFromPlans(ops, plans)
 		}
-		if len(ops) == 0 {
-			continue
-		}
 
 		// If we have schedule, reset interval to the minimal interval.
 		s.nextInterval = s.Scheduler.GetMinInterval()
-		for _, op := range ops {
-			region := s.cluster.GetRegion(op.RegionID())
+		for i := 0; i < len(ops); i++ {
+			region := s.cluster.GetRegion(ops[i].RegionID())
 			if region == nil {
 				continue retry
 			}
@@ -492,8 +489,12 @@ retry:
 			// Refer: https://docs.pingcap.com/tidb-in-kubernetes/stable/restart-a-tidb-cluster#perform-a-graceful-restart-to-a-single-tikv-pod
 			if labelMgr.ScheduleDisabled(region) && !isEvictLeaderScheduler {
 				denySchedulersByLabelerCounter.Inc()
-				continue retry
+				ops = append(ops[:i], ops[i+1:]...)
+				i--
 			}
+		}
+		if len(ops) == 0 {
+			continue
 		}
 		return ops
 	}
