@@ -244,11 +244,11 @@ func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Coordinator) {
 			for {
 				select {
 				case region, ok := <-p.regionChan:
-					if ok {
-						c.tryAddOperators(region)
-					} else {
+					if !ok {
 						log.Debug("region channel is closed", zap.Int("worker-id", i))
+						return
 					}
+					c.tryAddOperators(region)
 				case <-p.workersCtx.Done():
 					log.Debug("region worker is closed", zap.Int("worker-id", i))
 					return
