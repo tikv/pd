@@ -1842,39 +1842,32 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 	}
 	fname := testutil.InitTempFileLogger("debug")
 	defer os.RemoveAll(fname)
-	testutil.Eventually(re, func() bool {
-		b, _ := os.ReadFile(fname)
-		l := string(b)
-		return strings.Contains(l, "coordinator starts patrol regions")
-	})
+	checkLog(re, fname, "coordinator starts patrol regions")
 
 	// test change patrol region interval
 	schedule := leaderServer.GetConfig().Schedule
 	schedule.PatrolRegionInterval = typeutil.NewDuration(99 * time.Millisecond)
 	leaderServer.GetServer().SetScheduleConfig(schedule)
-	testutil.Eventually(re, func() bool {
-		b, _ := os.ReadFile(fname)
-		l := string(b)
-		return strings.Contains(l, "coordinator starts patrol regions with new interval")
-	})
+	checkLog(re, fname, "coordinator starts patrol regions with new interval")
 
 	// test change patrol region worker count
 	schedule = leaderServer.GetConfig().Schedule
 	schedule.PatrolRegionWorkerCount = 8
 	leaderServer.GetServer().SetScheduleConfig(schedule)
-	testutil.Eventually(re, func() bool {
-		b, _ := os.ReadFile(fname)
-		l := string(b)
-		return strings.Contains(l, "coordinator starts patrol regions with new workers count")
-	})
+	checkLog(re, fname, "coordinator starts patrol regions with new workers count")
 
 	// test change schedule halt
 	schedule = leaderServer.GetConfig().Schedule
 	schedule.HaltScheduling = true
 	leaderServer.GetServer().SetScheduleConfig(schedule)
+	checkLog(re, fname, "skip patrol regions due to scheduling is halted")
+}
+
+func checkLog(re *require.Assertions, fname, expect string) {
 	testutil.Eventually(re, func() bool {
 		b, _ := os.ReadFile(fname)
 		l := string(b)
-		return strings.Contains(l, "skip patrol regions due to scheduling is halted")
+		return strings.Contains(l, expect)
 	})
+	os.Truncate(fname, 0)
 }
