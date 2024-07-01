@@ -1367,7 +1367,7 @@ func (bs *balanceSolver) betterThanV1(old *solution) bool {
 		switch bs.cur.progressiveRank {
 		case 4: // isBetter(firstPriority) && isBetter(secondPriority)
 			// Both are better, prefer the one with higher first priority rate.
-			// If the first priority rate is the similiar, prefer the one with higher second priority rate.
+			// If the first priority rate is the similar, prefer the one with higher second priority rate.
 			if firstCmp != 0 {
 				return firstCmp > 0
 			}
