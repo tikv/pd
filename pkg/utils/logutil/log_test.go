@@ -39,27 +39,34 @@ func TestRedactInfoLogType(t *testing.T) {
 	re := require.New(t)
 	// JSON unmarshal.
 	jsonUnmarshalTestCases := []struct {
-		jsonStr string
-		expect  RedactInfoLogType
+		jsonStr   string
+		expect    RedactInfoLogType
+		expectErr bool
 	}{
-		{`false`, RedactInfoLogOFF},
-		{`true`, RedactInfoLogON},
-		{`"MARKER"`, RedactInfoLogMarker},
-		{`"OTHER"`, RedactInfoLogON},
-		{`"OFF"`, RedactInfoLogOFF},
-		{`"ON"`, RedactInfoLogON},
-		{`"marker"`, RedactInfoLogMarker},
-		{`"off"`, RedactInfoLogOFF},
-		{`"on"`, RedactInfoLogON},
-		{`""`, RedactInfoLogOFF},
-		{`"fALSe"`, RedactInfoLogOFF},
-		{`"trUE"`, RedactInfoLogON},
+		{`false`, RedactInfoLogOFF, false},
+		{`true`, RedactInfoLogON, false},
+		{`"MARKER"`, RedactInfoLogMarker, false},
+		{`"marker"`, RedactInfoLogMarker, false},
+		{`"OTHER"`, RedactInfoLogOFF, true},
+		{`"OFF"`, RedactInfoLogOFF, true},
+		{`"ON"`, RedactInfoLogOFF, true},
+		{`"off"`, RedactInfoLogOFF, true},
+		{`"on"`, RedactInfoLogOFF, true},
+		{`""`, RedactInfoLogOFF, true},
+		{`"fALSe"`, RedactInfoLogOFF, true},
+		{`"trUE"`, RedactInfoLogOFF, true},
 	}
 	var redactType RedactInfoLogType
-	for _, tc := range jsonUnmarshalTestCases {
+	for idx, tc := range jsonUnmarshalTestCases {
+		t.Logf("test case %d: %s", idx, tc.jsonStr)
 		err := json.Unmarshal([]byte(tc.jsonStr), &redactType)
-		re.NoError(err)
-		re.Equal(tc.expect, redactType)
+		if tc.expectErr {
+			re.Error(err)
+			re.ErrorContains(err, invalidRedactInfoLogTypeErrMsg)
+		} else {
+			re.NoError(err)
+			re.Equal(tc.expect, redactType)
+		}
 	}
 	// JSON marshal.
 	jsonMarshalTestCases := []struct {
@@ -77,29 +84,35 @@ func TestRedactInfoLogType(t *testing.T) {
 	}
 	// TOML unmarshal.
 	tomlTestCases := []struct {
-		tomlStr string
-		expect  RedactInfoLogType
+		tomlStr   string
+		expect    RedactInfoLogType
+		expectErr bool
 	}{
-		{`redact-info-log = false`, RedactInfoLogOFF},
-		{`redact-info-log = true`, RedactInfoLogON},
-		{`redact-info-log = "MARKER"`, RedactInfoLogMarker},
-		{`redact-info-log = "OTHER"`, RedactInfoLogON},
-		{`redact-info-log = "OFF"`, RedactInfoLogOFF},
-		{`redact-info-log = "ON"`, RedactInfoLogON},
-		{`redact-info-log = "marker"`, RedactInfoLogMarker},
-		{`redact-info-log = "off"`, RedactInfoLogOFF},
-		{`redact-info-log = "on"`, RedactInfoLogON},
-		{`redact-info-log = ""`, RedactInfoLogOFF},
-		{`redact-info-log = "fALSe"`, RedactInfoLogOFF},
-		{`redact-info-log = "trUE"`, RedactInfoLogON},
+		{`redact-info-log = false`, RedactInfoLogOFF, false},
+		{`redact-info-log = true`, RedactInfoLogON, false},
+		{`redact-info-log = "MARKER"`, RedactInfoLogMarker, false},
+		{`redact-info-log = "marker"`, RedactInfoLogMarker, false},
+		{`redact-info-log = "OTHER"`, RedactInfoLogOFF, true},
+		{`redact-info-log = "OFF"`, RedactInfoLogOFF, true},
+		{`redact-info-log = "ON"`, RedactInfoLogOFF, true},
+		{`redact-info-log = "off"`, RedactInfoLogOFF, true},
+		{`redact-info-log = "on"`, RedactInfoLogOFF, true},
+		{`redact-info-log = ""`, RedactInfoLogOFF, true},
+		{`redact-info-log = "fALSe"`, RedactInfoLogOFF, true},
+		{`redact-info-log = "trUE"`, RedactInfoLogOFF, true},
 	}
 	var config struct {
 		RedactInfoLog RedactInfoLogType `toml:"redact-info-log"`
 	}
 	for _, tc := range tomlTestCases {
 		_, err := toml.Decode(tc.tomlStr, &config)
-		re.NoError(err)
-		re.Equal(tc.expect, config.RedactInfoLog)
+		if tc.expectErr {
+			re.Error(err)
+			re.ErrorContains(err, invalidRedactInfoLogTypeErrMsg)
+		} else {
+			re.NoError(err)
+			re.Equal(tc.expect, config.RedactInfoLog)
+		}
 	}
 }
 

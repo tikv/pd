@@ -123,27 +123,22 @@ const invalidRedactInfoLogTypeErrMsg = `the "redact-info-log" value is invalid; 
 // UnmarshalJSON implements the `json.Marshaler` interface to ensure the compatibility.
 func (t *RedactInfoLogType) UnmarshalJSON(data []byte) error {
 	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		switch strings.ToUpper(s) {
-		case "FALSE", "OFF", "":
-			*t = RedactInfoLogOFF
-		case "MARKER":
-			*t = RedactInfoLogMarker
-		default:
-			*t = RedactInfoLogON
-		}
+	err := json.Unmarshal(data, &s)
+	if err == nil && strings.ToUpper(s) == "MARKER" {
+		*t = RedactInfoLogMarker
 		return nil
 	}
 	var b bool
-	if err := json.Unmarshal(data, &b); err == nil {
-		if b {
-			*t = RedactInfoLogON
-		} else {
-			*t = RedactInfoLogOFF
-		}
-		return nil
+	err = json.Unmarshal(data, &b)
+	if err != nil {
+		return errors.New(invalidRedactInfoLogTypeErrMsg)
 	}
-	return errors.New(invalidRedactInfoLogTypeErrMsg)
+	if b {
+		*t = RedactInfoLogON
+	} else {
+		*t = RedactInfoLogOFF
+	}
+	return nil
 }
 
 // UnmarshalTOML implements the `toml.Unmarshaler` interface to ensure the compatibility.
@@ -157,18 +152,14 @@ func (t *RedactInfoLogType) UnmarshalTOML(data any) error {
 		}
 		return nil
 	case string:
-		switch strings.ToUpper(v) {
-		case "FALSE", "OFF", "":
-			*t = RedactInfoLogOFF
-		case "MARKER":
+		if strings.ToUpper(v) == "MARKER" {
 			*t = RedactInfoLogMarker
-		default:
-			*t = RedactInfoLogON
+			return nil
 		}
-		return nil
-	default:
 		return errors.New(invalidRedactInfoLogTypeErrMsg)
+	default:
 	}
+	return errors.New(invalidRedactInfoLogTypeErrMsg)
 }
 
 var (
