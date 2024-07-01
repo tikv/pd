@@ -561,12 +561,14 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
 		}
 
-		// To make sure the expected leader(if exist) and primary are on the same server.
-		targetPrimary := mcsutils.GetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
-		if targetPrimary != "" && targetPrimary != gta.member.MemberValue() {
-			log.Info("skip campaigning of scheduling primary and check later",
+		// To make sure the expected primary(if existed) and new primary are on the same server.
+		expectedPrimary := mcsutils.GetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
+		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
+		// expected primary ONLY SET BY `/ms/primary/transfer` API.
+		if expectedPrimary != "" && expectedPrimary != gta.member.MemberValue() {
+			log.Info("skip campaigning of tso primary and check later",
 				zap.String("server-name", gta.member.Name()),
-				zap.String("target-primary-id", targetPrimary),
+				zap.String("expected-primary-id", expectedPrimary),
 				zap.Uint64("member-id", gta.member.ID()),
 				zap.String("cur-memberValue", gta.member.MemberValue()))
 			time.Sleep(200 * time.Millisecond)
@@ -674,6 +676,11 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	}
 }
 
+// primaryWatch watches `/ms/primary/transfer` API whether changed the primary.
+// 1. modify the expected primary flag to the new primary
+// 2. modify memory status
+// 3. exit the primary watch loop
+// 4. delete the leader key
 func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	resp, err := etcdutil.EtcdKVGet(gta.member.GetLeadership().GetClient(), gta.member.GetLeaderPath())
 	if err != nil || resp == nil || len(resp.Kvs) == 0 {
@@ -688,21 +695,22 @@ func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary cha
 	gta.member.GetLeadership().Watch(ctx, resp.Kvs[0].ModRevision+1)
 	gta.member.GetLeadership().SetPrimaryWatch(false)
 
-	// only `/ms/primary/transfer` API update primary will set the expected primary
+	// only `/ms/primary/transfer` API update primary will set `leaderPath` to the expected primary.
 	curPrimary, err := etcdutil.GetValue(gta.member.Client(), gta.member.GetLeaderPath())
 	if err != nil {
 		log.Error("tso primary getting the leader meets error", errs.ZapError(err))
 		return
 	}
-	// `exitPrimary` only triggered by updating primary
 	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
+		// 1. modify the expected primary flag to the new primary.
 		mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
-
+		// 2. modify memory status.
 		gta.member.UnsetLeader()
 		defer log.Info("tso primary exit the primary watch loop")
 		select {
 		case <-ctx.Done():
 			return
+		// 3. exit the primary watch loop, 4.`exitPrimary` will help delete the leader key.
 		case exitPrimary <- struct{}{}:
 			return
 		}

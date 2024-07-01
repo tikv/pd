@@ -52,8 +52,12 @@ const (
 	ClusterIDPath = "/pd/cluster_id"
 	// retryInterval is the interval to retry.
 	retryInterval = time.Second
-	// ExpectedPrimary is the path to store the expected primary
-	// ONLY SET VALUE BY API
+	// ExpectedPrimary is the path to store the expected primary , ONLY Triggered BY `/ms/primary/transfer` API.
+	// This flag likes a fence to avoid exited 2 primaries in the cluster simultaneously.
+	// 1. Since follower will campaign a new primary when it found the `leader_key` is deleted.
+	// **We can ensure `expected_primary` is set before deleting the `leader_key`.**
+	// 2. Old primary will set `expected_primary` firstly,
+	// then delete the `leader_key` which will trigger the follower to campaign a new primary.
 	ExpectedPrimary = "expected_primary"
 )
 
@@ -74,7 +78,7 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)
 }
 
-// GetExpectedPrimary indicates API has changed the primary, ONLY SET VALUE BY API.
+// GetExpectedPrimary indicates API has changed the primary.
 func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
 	primary, err := etcdutil.GetValue(client, strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))
 	if err != nil {
@@ -86,7 +90,7 @@ func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
 }
 
 // RemoveExpectedPrimary removes the expected primary key.
-// - removed when campaign new primary successfully
+// - removed when campaign new primary successfully.
 // - removed when appoint new primary by API.
 func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 	log.Info("remove expected primary key", zap.String("leader-path", leaderPath))

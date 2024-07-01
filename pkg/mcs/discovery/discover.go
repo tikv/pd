@@ -15,6 +15,7 @@
 package discovery
 
 import (
+	"fmt"
 	"math/rand"
 	"strconv"
 	"time"
@@ -91,7 +92,7 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 
 	// Do nothing when I am the only member of cluster.
 	if len(entries) == 1 {
-		return errors.New("no valid secondary to transfer primary")
+		return errors.New(fmt.Sprintf("no valid secondary to transfer primary, the only member is %s", entries[0].Name))
 	}
 
 	var primaryIDs []string
@@ -100,7 +101,7 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 		if (newPrimary == "" && member.ServiceAddr != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 			if string(member.MemberValue) == "" {
-				return errors.New("member value is empty")
+				return errors.New(fmt.Sprintf("member %s value is empty", member.Name))
 			}
 			secondaryValues = append(secondaryValues, string(member.MemberValue))
 		}
@@ -126,10 +127,10 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 		primaryKey = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
 	}
 
-	// remove possible residual value
+	// remove possible residual value.
 	utils.RemoveExpectedPrimary(client, primaryKey)
 
-	// only give the primary lease to the new primary
+	// grant the primary lease to the new primary.
 	grantResp, err := client.Grant(client.Ctx(), utils.DefaultLeaderLease)
 	if err != nil {
 		return errors.Errorf("failed to grant lease for %s, err: %v", serviceName, err)

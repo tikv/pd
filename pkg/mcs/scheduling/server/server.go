@@ -248,12 +248,14 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("the scheduling primary has changed, try to re-campaign a primary")
 		}
 
-		// To make sure the expected leader(if exist) and primary are on the same server.
+		// To make sure the expected primary(if existed) and new primary are on the same server.
 		expectedPrimary := utils.GetExpectedPrimary(s.GetClient(), s.participant.GetLeaderPath())
+		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
+		// expected primary ONLY SET BY `/ms/primary/transfer` API.
 		if expectedPrimary != "" && expectedPrimary != s.participant.MemberValue() {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
-				zap.String("target-primary-id", expectedPrimary),
+				zap.String("expected-primary-id", expectedPrimary),
 				zap.Uint64("member-id", s.participant.ID()),
 				zap.String("cur-member-value", s.participant.MemberValue()))
 			time.Sleep(200 * time.Millisecond)
@@ -331,6 +333,11 @@ func (s *Server) campaignLeader() {
 	}
 }
 
+// primaryWatch watches `/ms/primary/transfer` API whether changed the primary.
+// 1. modify the expected primary flag to the new primary
+// 2. modify memory status
+// 3. exit the primary watch loop
+// 4. delete the leader key
 func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	resp, err := etcdutil.EtcdKVGet(s.participant.GetLeadership().GetClient(), s.participant.GetLeaderPath())
 	if err != nil || resp == nil || len(resp.Kvs) == 0 {
@@ -343,21 +350,22 @@ func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	s.participant.GetLeadership().Watch(ctx, resp.Kvs[0].ModRevision+1)
 	s.participant.GetLeadership().SetPrimaryWatch(false)
 
-	// only `/ms/primary/transfer` API update primary will set the expected primary
+	// only `/ms/primary/transfer` API update primary will set `leaderPath` to the expected primary.
 	curPrimary, err := etcdutil.GetValue(s.participant.Client(), s.participant.GetLeaderPath())
 	if err != nil {
 		log.Error("scheduling primary getting the leader meets error", errs.ZapError(err))
 		return
 	}
-	// `exitPrimary` only triggered by updating primary
 	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
+		// 1. modify the expected primary flag to the new primary.
 		utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
-
+		// 2. modify memory status.
 		s.participant.UnsetLeader()
 		defer log.Info("scheduling primary exit the primary watch loop")
 		select {
 		case <-ctx.Done():
 			return
+		// 3. exit the primary watch loop, 4.`exitPrimary` will help delete the leader key.
 		case exitPrimary <- struct{}{}:
 			return
 		}

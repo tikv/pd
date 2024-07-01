@@ -71,12 +71,9 @@ type Leadership struct {
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
-	// primaryWatch is ONLY set to true when the use `/ms/primary/transfer` API.
+	// primaryWatch is for the primary watch only,
+	// which is used to reuse `Watch` interface in `Leadership`.
 	primaryWatch atomic.Bool
-}
-
-func (ls *Leadership) GetLeaderValue() string {
-	return ls.leaderValue
 }
 
 // NewLeadership creates a new Leadership.
@@ -392,10 +389,11 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
-				// only API update the leader key to transfer the primary will meet
+				// ONLY `/ms/primary/transfer` API update primary will meet this condition.
 				if ev.Type == mvccpb.PUT && ls.IsPrimary() {
-					log.Info("current leadership is updated",
-						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
+					log.Info("current leadership is updated", zap.Int64("revision", wresp.Header.Revision),
+						zap.String("leader-key", ls.leaderKey), zap.Any("value", ls.leaderValue),
+						zap.String("purpose", ls.purpose))
 					return
 				}
 			}

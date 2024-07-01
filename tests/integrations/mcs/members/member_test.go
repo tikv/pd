@@ -304,6 +304,53 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		// Wait for the new primary lease to expire which is `DefaultLeaderLease`
 		time.Sleep(4 * time.Second)
 		// TODO: Add campaign times check in mcs to avoid frequent campaign
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
+		// Can still work after lease expired
+		tests.WaitForPrimaryServing(re, nodes)
+	}
+}
+
+// TestTransferPrimaryWhileLeaseExpiredAndServerDown tests transfer primary while lease expired and server down
+func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown() {
+	re := suite.Require()
+	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
+	re.NoError(err)
+	re.NotEmpty(primary)
+
+	supportedServices := []string{"tso", "scheduling"}
+	for _, service := range supportedServices {
+		var nodes map[string]bs.Server
+		switch service {
+		case "tso":
+			nodes = suite.tsoNodes
+		case "scheduling":
+			nodes = suite.schedulingNodes
+		}
+
+		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		re.NoError(err)
+
+		// Test transfer primary to a specific node
+		var newPrimary string
+		for _, member := range nodes {
+			if member.GetAddr() != primary {
+				newPrimary = member.Name()
+				break
+			}
+		}
+		// Mock the new primary can not grant leader which means the lease will expire
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", newPrimary)))
+		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		re.NoError(err)
+
+		// Wait for the old primary exit and new primary campaign
+		testutil.Eventually(re, func() bool {
+			return !nodes[primary].IsServing()
+		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+
+		// Wait for the new primary lease to expire which is `DefaultLeaderLease`
+		time.Sleep(4 * time.Second)
+		// TODO: Add campaign times check in mcs to avoid frequent campaign
 		// for now, close the current primary to mock the server down
 		nodes[newPrimary].Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
