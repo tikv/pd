@@ -53,7 +53,7 @@ type dummyRestService struct{}
 
 func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
-	_, _ = w.Write([]byte("not implemented"))
+	w.Write([]byte("not implemented"))
 }
 
 // ConfigProvider is used to get scheduling config from the given

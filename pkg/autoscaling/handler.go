@@ -41,22 +41,22 @@ func NewHTTPHandler(svr *server.Server, rd *render.Render) *HTTPHandler {
 func (h *HTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rc := h.svr.GetRaftCluster()
 	if rc == nil {
-		_ = h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrNotBootstrapped.FastGenByArgs().Error())
 		return
 	}
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
-		_ = h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	strategy := Strategy{}
 	if err := json.Unmarshal(data, &strategy); err != nil {
-		_ = h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	plan := calculate(rc, h.svr.GetPDServerConfig(), &strategy)
-	_ = h.rd.JSON(w, http.StatusOK, plan)
+	h.rd.JSON(w, http.StatusOK, plan)
 }

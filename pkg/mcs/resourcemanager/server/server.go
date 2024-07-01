@@ -397,10 +397,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 		log.Fatal("initialize logger error", errs.ZapError(err))
 	}
 	// Flushing any buffered log entries
-	defer func() {
-		_ = log.Sync()
-	}()
-
+	log.Sync()
 	versioninfo.Log(serviceName)
 	log.Info("resource manager config", zap.Reflect("config", cfg))
 
