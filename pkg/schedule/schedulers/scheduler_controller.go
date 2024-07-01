@@ -472,6 +472,9 @@ retry:
 		if diagnosable {
 			s.diagnosticRecorder.SetResultFromPlans(ops, plans)
 		}
+		if len(ops) == 0 {
+			continue
+		}
 
 		// If we have schedule, reset interval to the minimal interval.
 		s.nextInterval = s.Scheduler.GetMinInterval()
