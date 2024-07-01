@@ -51,6 +51,9 @@ func TestReloadLabel(t *testing.T) {
 		storeLabels[label.Key] = label.Value
 	}
 	re.NoError(pdHTTPCli.SetStoreLabels(ctx, firstStore.Store.ID, storeLabels))
+	defer func() {
+		re.NoError(pdHTTPCli.DeleteStoreLabel(ctx, firstStore.Store.ID, "zone"))
+	}()
 
 	checkLabelsAreEqual := func() {
 		resp, err := pdHTTPCli.GetStore(ctx, uint64(firstStore.Store.ID))

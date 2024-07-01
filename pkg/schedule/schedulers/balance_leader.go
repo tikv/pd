@@ -86,10 +86,14 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, any) {
 	newConfig, _ := json.Marshal(conf)
 	if !bytes.Equal(oldConfig, newConfig) {
 		if !conf.validateLocked() {
-			json.Unmarshal(oldConfig, conf)
+			if err := json.Unmarshal(oldConfig, conf); err != nil {
+				return http.StatusInternalServerError, err.Error()
+			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		conf.persistLocked()
+		if err := conf.persistLocked(); err != nil {
+			log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
+		}
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
 		return http.StatusOK, "Config is updated."
 	}

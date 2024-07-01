@@ -795,7 +795,9 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{Config: &Config{}}
 	// Pass nil to initialize cfg to default values (all items undefined)
-	cfg.Adjust(nil, true)
+	if err := cfg.Adjust(nil, true); err != nil {
+		return err
+	}
 
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {

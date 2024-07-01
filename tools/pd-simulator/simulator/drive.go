@@ -150,12 +150,12 @@ func (d *Driver) allocID() error {
 func (d *Driver) updateNodesClient() error {
 	urls := strings.Split(d.pdAddr, ",")
 	ctx, cancel := context.WithCancel(context.Background())
-	sd = pd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
-	if err := sd.Init(); err != nil {
+	SD = pd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
+	if err := SD.Init(); err != nil {
 		return err
 	}
 	// Init PD HTTP client.
-	PDHTTPClient = pdHttp.NewClientWithServiceDiscovery("pd-simulator", sd)
+	PDHTTPClient = pdHttp.NewClientWithServiceDiscovery("pd-simulator", SD)
 
 	for _, node := range d.conn.Nodes {
 		node.client = NewRetryClient(node)
@@ -176,8 +176,13 @@ func (d *Driver) Tick() {
 	d.wg.Wait()
 }
 
+var HaltSchedule = false
+
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
+	if !HaltSchedule {
+		return false
+	}
 	length := uint64(len(d.conn.Nodes) + 1)
 	var stores []*metapb.Store
 	for index, s := range d.conn.Nodes {
