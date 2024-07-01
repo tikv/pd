@@ -86,7 +86,7 @@ func GetPrimary(c *gin.Context) {
 // @Summary  Transfer the primary member of the specified service.
 // @Produce  json
 // @Param    service     path    string  true  "service name"
-// @Param    new_primary body   string  false "new primary address"
+// @Param    new_primary body   string  false "new primary name"
 // @Success  200  string  string
 // @Router   /ms/primary/transfer/{service} [post]
 func TransferPrimary(c *gin.Context) {

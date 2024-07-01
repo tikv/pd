@@ -107,7 +107,7 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 		}
 	}
 	if len(primaryIDs) == 0 {
-		return errors.New("no valid secondary to transfer primary")
+		return errors.New(fmt.Sprintf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary))
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
