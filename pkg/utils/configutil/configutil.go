@@ -82,7 +82,7 @@ type SecurityConfig struct {
 	// RedactInfoLog indicates that whether to enable the log redaction. It can be the following values:
 	//   - false: disable redact log.
 	//   - true: enable redact log, which will replace the sensitive information with "?".
-	//   - "MARK": enable redact log, which will use ‹› to enclose the sensitive information.
+	//   - "MARKER": enable redact log, which will use single guillemets ‹› to enclose the sensitive information.
 	RedactInfoLog logutil.RedactInfoLogType `toml:"redact-info-log" json:"redact-info-log"`
 	Encryption    encryption.Config         `toml:"encryption" json:"encryption"`
 }

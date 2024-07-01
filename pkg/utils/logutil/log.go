@@ -102,8 +102,8 @@ const (
 	RedactInfoLogOFF RedactInfoLogType = iota
 	// RedactInfoLogON means log redaction is enabled, and will replace the sensitive information with "?".
 	RedactInfoLogON
-	// RedactInfoLogMark means log redaction is enabled, and will use ‹› to enclose the sensitive information.
-	RedactInfoLogMark
+	// RedactInfoLogMarker means log redaction is enabled, and will use single guillemets ‹› to enclose the sensitive information.
+	RedactInfoLogMarker
 )
 
 // MarshalJSON implements the `json.Marshaler` interface to ensure the compatibility.
@@ -111,24 +111,24 @@ func (t RedactInfoLogType) MarshalJSON() ([]byte, error) {
 	switch t {
 	case RedactInfoLogON:
 		return json.Marshal(true)
-	case RedactInfoLogMark:
-		return json.Marshal("MARK")
+	case RedactInfoLogMarker:
+		return json.Marshal("MARKER")
 	default:
 	}
 	return json.Marshal(false)
 }
 
-const invalidRedactInfoLogTypeErrMsg = `the "redact-info-log" value is invalid; it should be either false, true, or "MARK"`
+const invalidRedactInfoLogTypeErrMsg = `the "redact-info-log" value is invalid; it should be either false, true, or "MARKER"`
 
-// UnmarshalJSON implements the `json.Marshaler` interface	to ensure the compatibility.
+// UnmarshalJSON implements the `json.Marshaler` interface to ensure the compatibility.
 func (t *RedactInfoLogType) UnmarshalJSON(data []byte) error {
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
 		switch strings.ToUpper(s) {
 		case "FALSE", "OFF", "":
 			*t = RedactInfoLogOFF
-		case "MARK":
-			*t = RedactInfoLogMark
+		case "MARKER":
+			*t = RedactInfoLogMarker
 		default:
 			*t = RedactInfoLogON
 		}
@@ -160,8 +160,8 @@ func (t *RedactInfoLogType) UnmarshalTOML(data any) error {
 		switch strings.ToUpper(v) {
 		case "FALSE", "OFF", "":
 			*t = RedactInfoLogOFF
-		case "MARK":
-			*t = RedactInfoLogMark
+		case "MARKER":
+			*t = RedactInfoLogMarker
 		default:
 			*t = RedactInfoLogON
 		}
@@ -230,7 +230,7 @@ func RedactBytes(arg []byte) []byte {
 	switch getRedactType() {
 	case RedactInfoLogON:
 		return []byte("?")
-	case RedactInfoLogMark:
+	case RedactInfoLogMarker:
 		// Use unsafe conversion to avoid copy.
 		return typeutil.StringToBytes(redactInfo(typeutil.BytesToString(arg)))
 	default:
@@ -243,7 +243,7 @@ func RedactString(arg string) string {
 	switch getRedactType() {
 	case RedactInfoLogON:
 		return "?"
-	case RedactInfoLogMark:
+	case RedactInfoLogMarker:
 		return redactInfo(arg)
 	default:
 	}
@@ -255,7 +255,7 @@ func RedactStringer(arg fmt.Stringer) fmt.Stringer {
 	switch getRedactType() {
 	case RedactInfoLogON:
 		return &redactedStringer{"?"}
-	case RedactInfoLogMark:
+	case RedactInfoLogMarker:
 		return &redactedStringer{redactInfo(arg.String())}
 	default:
 	}
