@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/response"
@@ -358,7 +359,9 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 			if typ == storelimit.RemovePeer {
 				key = fmt.Sprintf("remove-peer-%v", storeID)
 			}
-			h.handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second)
+			if err := h.handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second); err != nil {
+				log.Warn("failed to set store limit", errs.ZapError(err))
+			}
 			continue
 		}
 		if err := h.handler.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
