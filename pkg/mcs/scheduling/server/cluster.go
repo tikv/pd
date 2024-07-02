@@ -308,54 +308,60 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
+			name, err := sc.ConvertSchedulerStr2Name(scheduler.Type)
+			if err != nil {
+				log.Error("failed to convert scheduler name",
+					zap.String("scheduler", scheduler.Type),
+					errs.ZapError(err))
+				continue
+			}
 			s, err := schedulers.CreateScheduler(
-				scheduler.Type,
+				name,
 				c.coordinator.GetOperatorController(),
 				c.storage,
-				schedulers.ConfigSliceDecoder(scheduler.Type, scheduler.Args),
+				schedulers.ConfigSliceDecoder(name, scheduler.Args),
 				schedulersController.RemoveScheduler,
 			)
 			if err != nil {
 				log.Error("failed to create scheduler",
-					zap.String("scheduler-type", scheduler.Type),
+					zap.String("scheduler", scheduler.Type),
 					zap.Strings("scheduler-args", scheduler.Args),
 					errs.ZapError(err))
 				continue
 			}
-			name := s.GetName()
 			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
 				log.Info("scheduler has already existed, skip adding it",
-					zap.String("scheduler-name", name),
+					zap.Stringer("scheduler", name),
 					zap.Strings("scheduler-args", scheduler.Args))
 				continue
 			}
 			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
 				log.Error("failed to add scheduler",
-					zap.String("scheduler-name", name),
+					zap.Stringer("scheduler", name),
 					zap.Strings("scheduler-args", scheduler.Args),
 					errs.ZapError(err))
 				continue
 			}
 			log.Info("add scheduler successfully",
-				zap.String("scheduler-name", name),
+				zap.Stringer("scheduler-name", name),
 				zap.Strings("scheduler-args", scheduler.Args))
 		}
 		// Remove the deleted schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
 			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
-				return latestSchedulersConfig[i].Type == scheduler.GetType()
+				return latestSchedulersConfig[i].Type == scheduler.Name()
 			}) {
 				continue
 			}
 			if err := schedulersController.RemoveScheduler(name); err != nil {
 				log.Error("failed to remove scheduler",
-					zap.String("scheduler-name", name),
+					zap.Stringer("scheduler-name", name),
 					errs.ZapError(err))
 				continue
 			}
 			log.Info("remove scheduler successfully",
-				zap.String("scheduler-name", name))
+				zap.Stringer("scheduler-name", name))
 		}
 	}
 }

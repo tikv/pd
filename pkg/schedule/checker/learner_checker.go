@@ -18,6 +18,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 )
@@ -30,7 +31,7 @@ type LearnerChecker struct {
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	learnerCheckerPausedCounter = checkerCounter.WithLabelValues("learner_checker", "paused")
+	learnerCheckerPausedCounter = counterWithEvent(config.LearnerCheckerName, "paused")
 )
 
 // NewLearnerChecker creates a learner checker.
@@ -38,6 +39,11 @@ func NewLearnerChecker(cluster sche.CheckerCluster) *LearnerChecker {
 	return &LearnerChecker{
 		cluster: cluster,
 	}
+}
+
+// Name returns the checker name.
+func (*LearnerChecker) Name() string {
+	return config.LearnerCheckerName.String()
 }
 
 // Check verifies a region's role, creating an Operator if need.

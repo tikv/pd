@@ -24,6 +24,7 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
@@ -199,8 +200,15 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 			return err
 		}
 		// Ensure the scheduler config could be updated as soon as possible.
-		if sc := cw.getSchedulersController(); sc != nil {
-			return sc.ReloadSchedulerConfig(name)
+		if schedulersController := cw.getSchedulersController(); schedulersController != nil {
+			schedulerName, err := sc.ConvertSchedulerStr2Name(name)
+			if err != nil {
+				log.Error("failed to convert scheduler name",
+					zap.String("scheduler", name),
+					errs.ZapError(err))
+				return errs.ErrSchedulerNotFound.GenWithStackByArgs()
+			}
+			return schedulersController.ReloadSchedulerConfig(schedulerName)
 		}
 		return nil
 	}

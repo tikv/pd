@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -33,12 +34,10 @@ type SplitChecker struct {
 	labeler     *labeler.RegionLabeler
 }
 
-const splitCheckerName = "split_checker"
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	splitCheckerCounter       = checkerCounter.WithLabelValues(splitCheckerName, "check")
-	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitCheckerName, "paused")
+	splitCheckerCounter       = counterWithEvent(config.SplitCheckerName, "check")
+	splitCheckerPausedCounter = counterWithEvent(config.SplitCheckerName, "paused")
 )
 
 // NewSplitChecker creates a new SplitChecker.
@@ -50,9 +49,9 @@ func NewSplitChecker(cluster sche.CheckerCluster, ruleManager *placement.RuleMan
 	}
 }
 
-// GetType returns the checker type.
-func (*SplitChecker) GetType() string {
-	return "split-checker"
+// Name returns the checker name.
+func (*SplitChecker) Name() string {
+	return config.SplitCheckerName.String()
 }
 
 // Check checks whether the region need to split and returns Operator to fix.

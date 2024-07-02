@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -795,7 +796,7 @@ func (h *Handler) GetSchedulersController() (*schedulers.Controller, error) {
 }
 
 // GetSchedulerNames returns all names of schedulers.
-func (h *Handler) GetSchedulerNames() ([]string, error) {
+func (h *Handler) GetSchedulerNames() ([]config.CheckerSchedulerName, error) {
 	sc, err := h.GetSchedulersController()
 	if err != nil {
 		return nil, err
@@ -818,7 +819,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) 
 	schedulers := sc.GetSchedulerNames()
 	switch status {
 	case "paused":
-		pausedSchedulers := make([]string, 0, len(schedulers))
+		pausedSchedulers := make([]config.CheckerSchedulerName, 0, len(schedulers))
 		pausedPeriods := []schedulerPausedPeriod{}
 		for _, scheduler := range schedulers {
 			paused, err := sc.IsSchedulerPaused(scheduler)
@@ -828,7 +829,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) 
 			if paused {
 				if needTS {
 					s := schedulerPausedPeriod{
-						Name:     scheduler,
+						Name:     scheduler.String(),
 						PausedAt: time.Time{},
 						ResumeAt: time.Time{},
 					}
@@ -853,7 +854,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) 
 		}
 		return pausedSchedulers, nil
 	case "disabled":
-		disabledSchedulers := make([]string, 0, len(schedulers))
+		disabledSchedulers := make([]config.CheckerSchedulerName, 0, len(schedulers))
 		for _, scheduler := range schedulers {
 			disabled, err := sc.IsSchedulerDisabled(scheduler)
 			if err != nil {
@@ -868,7 +869,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) 
 		// The default scheduler could not be deleted in scheduling server,
 		// so schedulers could only be disabled.
 		// We should not return the disabled schedulers here.
-		enabledSchedulers := make([]string, 0, len(schedulers))
+		enabledSchedulers := make([]config.CheckerSchedulerName, 0, len(schedulers))
 		for _, scheduler := range schedulers {
 			disabled, err := sc.IsSchedulerDisabled(scheduler)
 			if err != nil {
@@ -883,7 +884,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) 
 }
 
 // GetDiagnosticResult returns the diagnostic results of the specified scheduler.
-func (h *Handler) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
+func (h *Handler) GetDiagnosticResult(name config.CheckerSchedulerName) (*schedulers.DiagnosticResult, error) {
 	if _, ok := schedulers.DiagnosableSummaryFunc[name]; !ok {
 		return nil, errs.ErrSchedulerUndiagnosable.FastGenByArgs(name)
 	}

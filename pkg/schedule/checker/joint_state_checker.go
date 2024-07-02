@@ -19,6 +19,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 )
@@ -29,15 +30,13 @@ type JointStateChecker struct {
 	cluster sche.CheckerCluster
 }
 
-const jointStateCheckerName = "joint_state_checker"
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	jointCheckCounter                 = checkerCounter.WithLabelValues(jointStateCheckerName, "check")
-	jointCheckerPausedCounter         = checkerCounter.WithLabelValues(jointStateCheckerName, "paused")
-	jointCheckerFailedCounter         = checkerCounter.WithLabelValues(jointStateCheckerName, "create-operator-fail")
-	jointCheckerNewOpCounter          = checkerCounter.WithLabelValues(jointStateCheckerName, "new-operator")
-	jointCheckerTransferLeaderCounter = checkerCounter.WithLabelValues(jointStateCheckerName, "transfer-leader")
+	jointCheckCounter                 = counterWithEvent(config.JointStateCheckerName, "check")
+	jointCheckerPausedCounter         = counterWithEvent(config.JointStateCheckerName, "paused")
+	jointCheckerFailedCounter         = counterWithEvent(config.JointStateCheckerName, "create-operator-fail")
+	jointCheckerNewOpCounter          = counterWithEvent(config.JointStateCheckerName, "new-operator")
+	jointCheckerTransferLeaderCounter = counterWithEvent(config.JointStateCheckerName, "transfer-leader")
 )
 
 // NewJointStateChecker creates a joint state checker.
@@ -45,6 +44,11 @@ func NewJointStateChecker(cluster sche.CheckerCluster) *JointStateChecker {
 	return &JointStateChecker{
 		cluster: cluster,
 	}
+}
+
+// Name returns the checker name.
+func (*JointStateChecker) Name() string {
+	return config.JointStateCheckerName.String()
 }
 
 // Check verifies a region's role, creating an Operator if need.

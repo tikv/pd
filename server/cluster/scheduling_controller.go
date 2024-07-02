@@ -25,7 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
-	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -48,7 +48,7 @@ type schedulingController struct {
 	mu        syncutil.RWMutex
 	wg        sync.WaitGroup
 	*core.BasicCluster
-	opt         sc.ConfProvider
+	opt         config.ConfProvider
 	coordinator *schedule.Coordinator
 	labelStats  *statistics.LabelStatistics
 	regionStats *statistics.RegionStatistics
@@ -58,7 +58,7 @@ type schedulingController struct {
 }
 
 // newSchedulingController creates a new scheduling controller.
-func newSchedulingController(parentCtx context.Context, basicCluster *core.BasicCluster, opt sc.ConfProvider, ruleManager *placement.RuleManager) *schedulingController {
+func newSchedulingController(parentCtx context.Context, basicCluster *core.BasicCluster, opt config.ConfProvider, ruleManager *placement.RuleManager) *schedulingController {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &schedulingController{
 		parentCtx:    parentCtx,
@@ -299,14 +299,14 @@ func (sc *schedulingController) GetCoordinator() *schedule.Coordinator {
 }
 
 // GetPausedSchedulerDelayAt returns DelayAt of a paused scheduler
-func (sc *schedulingController) GetPausedSchedulerDelayAt(name string) (int64, error) {
+func (sc *schedulingController) GetPausedSchedulerDelayAt(name config.CheckerSchedulerName) (int64, error) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().GetPausedSchedulerDelayAt(name)
 }
 
 // GetPausedSchedulerDelayUntil returns DelayUntil of a paused scheduler
-func (sc *schedulingController) GetPausedSchedulerDelayUntil(name string) (int64, error) {
+func (sc *schedulingController) GetPausedSchedulerDelayUntil(name config.CheckerSchedulerName) (int64, error) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().GetPausedSchedulerDelayUntil(name)
@@ -348,14 +348,14 @@ func (sc *schedulingController) GetRuleChecker() *checker.RuleChecker {
 }
 
 // GetSchedulers gets all schedulers.
-func (sc *schedulingController) GetSchedulers() []string {
+func (sc *schedulingController) GetSchedulers() []config.CheckerSchedulerName {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().GetSchedulerNames()
 }
 
 // GetSchedulerHandlers gets all scheduler handlers.
-func (sc *schedulingController) GetSchedulerHandlers() map[string]http.Handler {
+func (sc *schedulingController) GetSchedulerHandlers() map[config.CheckerSchedulerName]http.Handler {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().GetSchedulerHandlers()
@@ -369,7 +369,7 @@ func (sc *schedulingController) AddSchedulerHandler(scheduler schedulers.Schedul
 }
 
 // RemoveSchedulerHandler removes a scheduler handler.
-func (sc *schedulingController) RemoveSchedulerHandler(name string) error {
+func (sc *schedulingController) RemoveSchedulerHandler(name config.CheckerSchedulerName) error {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().RemoveSchedulerHandler(name)
@@ -383,7 +383,7 @@ func (sc *schedulingController) AddScheduler(scheduler schedulers.Scheduler, arg
 }
 
 // RemoveScheduler removes a scheduler.
-func (sc *schedulingController) RemoveScheduler(name string) error {
+func (sc *schedulingController) RemoveScheduler(name config.CheckerSchedulerName) error {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetSchedulersController().RemoveScheduler(name)
@@ -462,7 +462,7 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 	if sc.coordinator == nil {
 		return nil
 	}
-	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[config.EvictLeaderName]
 	if !ok {
 		return
 	}

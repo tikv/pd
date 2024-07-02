@@ -37,7 +37,7 @@ func NewManager(schedulerController *schedulers.Controller, config config.Schedu
 }
 
 // GetDiagnosticResult gets the diagnostic result of the scheduler.
-func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
+func (d *Manager) GetDiagnosticResult(name config.CheckerSchedulerName) (*schedulers.DiagnosticResult, error) {
 	if !d.config.IsDiagnosticAllowed() {
 		return nil, errs.ErrDiagnosticDisabled
 	}
@@ -45,13 +45,13 @@ func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 	scheduler := d.schedulerController.GetScheduler(name)
 	if scheduler == nil {
 		ts := uint64(time.Now().Unix())
-		res := &schedulers.DiagnosticResult{Name: name, Timestamp: ts, Status: schedulers.Disabled}
+		res := &schedulers.DiagnosticResult{Name: name.String(), Timestamp: ts, Status: schedulers.Disabled}
 		return res, nil
 	}
-	isDisabled := d.config.IsSchedulerDisabled(scheduler.Scheduler.GetType())
+	isDisabled := d.config.IsSchedulerDisabled(scheduler.Scheduler.Name())
 	if isDisabled {
 		ts := uint64(time.Now().Unix())
-		res := &schedulers.DiagnosticResult{Name: name, Timestamp: ts, Status: schedulers.Disabled}
+		res := &schedulers.DiagnosticResult{Name: name.String(), Timestamp: ts, Status: schedulers.Disabled}
 		return res, nil
 	}
 
@@ -66,6 +66,6 @@ func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 	return result, nil
 }
 
-func (d *Manager) getSchedulerRecorder(name string) *schedulers.DiagnosticRecorder {
+func (d *Manager) getSchedulerRecorder(name config.CheckerSchedulerName) *schedulers.DiagnosticRecorder {
 	return d.schedulerController.GetScheduler(name).GetDiagnosticRecorder()
 }

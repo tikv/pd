@@ -98,7 +98,7 @@ func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 }
 
 // IsSchedulerExisted returns whether scheduler is existed.
-func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
+func (h *Handler) IsSchedulerExisted(name sc.CheckerSchedulerName) (bool, error) {
 	rc, err := h.GetRaftCluster()
 	if err != nil {
 		return false, err
@@ -106,7 +106,7 @@ func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 	return rc.GetCoordinator().GetSchedulersController().IsSchedulerExisted(name)
 }
 
-// GetScheduleConfig returns ScheduleConfig.
+// GetScheduleConfig returns Schedulesc.
 func (h *Handler) GetScheduleConfig() *sc.ScheduleConfig {
 	return h.s.GetScheduleConfig()
 }
@@ -186,13 +186,13 @@ func (h *Handler) GetAllRequestHistoryHotRegion(request *HistoryHotRegionsReques
 }
 
 // AddScheduler adds a scheduler.
-func (h *Handler) AddScheduler(name string, args ...string) error {
+func (h *Handler) AddScheduler(name sc.CheckerSchedulerName, args ...string) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
-	var removeSchedulerCb func(string) error
+	var removeSchedulerCb func(sc.CheckerSchedulerName) error
 	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveSchedulerHandler
 	} else {
@@ -202,45 +202,45 @@ func (h *Handler) AddScheduler(name string, args ...string) error {
 	if err != nil {
 		return err
 	}
-	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
+	log.Info("create scheduler", zap.String("scheduler", s.Name()), zap.Strings("scheduler-args", args))
 	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		if err = c.AddSchedulerHandler(s, args...); err != nil {
-			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
+			log.Error("can not add scheduler handler", zap.String("scheduler", s.Name()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-		log.Info("add scheduler handler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+		log.Info("add scheduler handler successfully", zap.Stringer("scheduler", name), zap.Strings("scheduler-args", args))
 	} else {
 		if err = c.AddScheduler(s, args...); err != nil {
-			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
+			log.Error("can not add scheduler", zap.String("scheduler", s.Name()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-		log.Info("add scheduler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+		log.Info("add scheduler successfully", zap.Stringer("scheduler", name), zap.Strings("scheduler-args", args))
 	}
 	if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
-	log.Info("persist scheduler config successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+	log.Info("persist scheduler config successfully", zap.Stringer("scheduler", name), zap.Strings("scheduler-args", args))
 	return nil
 }
 
 // RemoveScheduler removes a scheduler by name.
-func (h *Handler) RemoveScheduler(name string) error {
+func (h *Handler) RemoveScheduler(name sc.CheckerSchedulerName) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		if err = c.RemoveSchedulerHandler(name); err != nil {
-			log.Error("can not remove scheduler handler", zap.String("scheduler-name", name), errs.ZapError(err))
+			log.Error("can not remove scheduler handler", zap.Stringer("scheduler", name), errs.ZapError(err))
 		} else {
-			log.Info("remove scheduler handler successfully", zap.String("scheduler-name", name))
+			log.Info("remove scheduler handler successfully", zap.Stringer("scheduler", name))
 		}
 	} else {
 		if err = c.RemoveScheduler(name); err != nil {
-			log.Error("can not remove scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
+			log.Error("can not remove scheduler", zap.Stringer("scheduler", name), errs.ZapError(err))
 		} else {
-			log.Info("remove scheduler successfully", zap.String("scheduler-name", name))
+			log.Info("remove scheduler successfully", zap.Stringer("scheduler", name))
 		}
 	}
 	return err
@@ -248,87 +248,87 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	return h.AddScheduler(schedulers.BalanceLeaderType)
+	return h.AddScheduler(sc.BalanceLeaderName)
 }
 
 // AddBalanceWitnessScheduler adds a balance-witness-scheduler.
 func (h *Handler) AddBalanceWitnessScheduler() error {
-	return h.AddScheduler(schedulers.BalanceWitnessType)
+	return h.AddScheduler(sc.BalanceWitnessName)
 }
 
 // AddTransferWitnessLeaderScheduler adds a transfer-witness-leader-scheduler.
 func (h *Handler) AddTransferWitnessLeaderScheduler() error {
-	return h.AddScheduler(schedulers.TransferWitnessLeaderType)
+	return h.AddScheduler(sc.TransferWitnessLeaderName)
 }
 
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
-	return h.AddScheduler(schedulers.BalanceRegionType)
+	return h.AddScheduler(sc.BalanceRegionName)
 }
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
-	return h.AddScheduler(schedulers.HotRegionType)
+	return h.AddScheduler(sc.HotRegionName)
 }
 
 // AddEvictSlowTrendScheduler adds a evict-slow-trend-scheduler.
 func (h *Handler) AddEvictSlowTrendScheduler() error {
-	return h.AddScheduler(schedulers.EvictSlowTrendType)
+	return h.AddScheduler(sc.EvictSlowTrendName)
 }
 
 // AddLabelScheduler adds a label-scheduler.
 func (h *Handler) AddLabelScheduler() error {
-	return h.AddScheduler(schedulers.LabelType)
+	return h.AddScheduler(sc.LabelName)
 }
 
 // AddScatterRangeScheduler adds a balance-range-leader-scheduler
 func (h *Handler) AddScatterRangeScheduler(args ...string) error {
-	return h.AddScheduler(schedulers.ScatterRangeType, args...)
+	return h.AddScheduler(sc.ScatterRangeName, args...)
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler(schedulers.GrantLeaderType, strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(sc.GrantLeaderName, strconv.FormatUint(storeID, 10))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler(schedulers.EvictLeaderType, strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(sc.EvictLeaderName, strconv.FormatUint(storeID, 10))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	return h.AddScheduler(schedulers.ShuffleLeaderType)
+	return h.AddScheduler(sc.ShuffleLeaderName)
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	return h.AddScheduler(schedulers.ShuffleRegionType)
+	return h.AddScheduler(sc.ShuffleRegionName)
 }
 
 // AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
 func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
-	return h.AddScheduler(schedulers.ShuffleHotRegionType, strconv.FormatUint(limit, 10))
+	return h.AddScheduler(sc.ShuffleHotRegionName, strconv.FormatUint(limit, 10))
 }
 
 // AddEvictSlowStoreScheduler adds a evict-slow-store-scheduler.
 func (h *Handler) AddEvictSlowStoreScheduler() error {
-	return h.AddScheduler(schedulers.EvictSlowStoreType)
+	return h.AddScheduler(sc.EvictSlowStoreName)
 }
 
 // AddSplitBucketScheduler adds a split-bucket-scheduler.
 func (h *Handler) AddSplitBucketScheduler() error {
-	return h.AddScheduler(schedulers.SplitBucketType)
+	return h.AddScheduler(sc.SplitBucketName)
 }
 
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
-	return h.AddScheduler(schedulers.RandomMergeType)
+	return h.AddScheduler(sc.RandomMergeName)
 }
 
 // AddGrantHotRegionScheduler adds a grant-hot-region-scheduler
 func (h *Handler) AddGrantHotRegionScheduler(leaderID, peers string) error {
-	return h.AddScheduler(schedulers.GrantHotRegionType, leaderID, peers)
+	return h.AddScheduler(sc.GrantHotRegionName, leaderID, peers)
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
@@ -386,7 +386,7 @@ func (h *Handler) GetRegionsByType(typ statistics.RegionStatisticType) ([]*core.
 	return c.GetRegionStatsByType(typ), nil
 }
 
-// GetSchedulerConfigHandler gets the handler of schedulers.
+// GetSchedulerConfigHandler gets the handler of config.
 func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	c, err := h.GetRaftCluster()
 	if err != nil {
@@ -394,7 +394,7 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.GetSchedulerHandlers() {
-		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
+		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name.String())
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
@@ -556,7 +556,7 @@ func (h *Handler) GetHistoryHotRegionIter(
 	return iter
 }
 
-// RedirectSchedulerUpdate update scheduler config. Export this func to help handle damaged store.
+// RedirectSchedulerUpdate update scheduler sc. Export this func to help handle damaged store.
 func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]any)
 	input["name"] = name
@@ -573,25 +573,25 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 }
 
 // AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
-func (h *Handler) AddEvictOrGrant(storeID float64, name string) (exist bool, err error) {
+func (h *Handler) AddEvictOrGrant(storeID float64, name sc.CheckerSchedulerName) (exist bool, err error) {
 	if exist, err = h.IsSchedulerExisted(name); !exist {
 		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			return exist, err
 		}
 		switch name {
-		case schedulers.EvictLeaderName:
+		case sc.EvictLeaderName:
 			err = h.AddEvictLeaderScheduler(uint64(storeID))
-		case schedulers.GrantLeaderName:
+		case sc.GrantLeaderName:
 			err = h.AddGrantLeaderScheduler(uint64(storeID))
 		}
 		if err != nil {
 			return exist, err
 		}
 	} else {
-		if err := h.redirectSchedulerUpdate(name, storeID); err != nil {
+		if err := h.redirectSchedulerUpdate(name.String(), storeID); err != nil {
 			return exist, err
 		}
-		log.Info("update scheduler", zap.String("scheduler-name", name), zap.Uint64("store-id", uint64(storeID)))
+		log.Info("update scheduler", zap.Stringer("scheduler", name), zap.Uint64("store-id", uint64(storeID)))
 		return exist, nil
 	}
 	return exist, nil

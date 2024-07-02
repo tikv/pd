@@ -7980,6 +7980,14 @@
               "legendFormat": "{{name}}",
               "refId": "A",
               "step": 10
+            },
+            {
+              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"rule-checker\"}[1m])) by (name)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{name}}",
+              "refId": "B",
+              "step": 10
             }
           ],
           "thresholds": [],
@@ -8071,6 +8079,14 @@
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
               "refId": "A",
+              "step": 10
+            },
+            {
+              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"replica-checker\"}[1m])) by (name)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{name}}",
+              "refId": "B",
               "step": 10
             }
           ],
@@ -8164,6 +8180,14 @@
               "intervalFactor": 2,
               "legendFormat": "{{name}}",
               "refId": "A",
+              "step": 10
+            },
+            {
+              "expr": "sum(rate(pd_checker_event_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", type=\"merge-checker\"}[1m])) by (name)",
+              "format": "time_series",
+              "intervalFactor": 2,
+              "legendFormat": "{{name}}",
+              "refId": "B",
               "step": 10
             }
           ],

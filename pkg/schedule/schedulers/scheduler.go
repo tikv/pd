@@ -34,9 +34,7 @@ import (
 // Scheduler is an interface to schedule resources.
 type Scheduler interface {
 	http.Handler
-	GetName() string
-	// GetType should in accordance with the name passing to RegisterScheduler()
-	GetType() string
+	Name() string
 	EncodeConfig() ([]byte, error)
 	// ReloadConfig reloads the config from the storage.
 	ReloadConfig() error
@@ -98,7 +96,7 @@ func ConfigJSONDecoder(data []byte) ConfigDecoder {
 }
 
 // ConfigSliceDecoder the default decode for the config.
-func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
+func ConfigSliceDecoder(name config.CheckerSchedulerName, args []string) ConfigDecoder {
 	builder, ok := schedulerArgsToDecoder[name]
 	if !ok {
 		return func(any) error {
@@ -109,34 +107,40 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 }
 
 // CreateSchedulerFunc is for creating scheduler.
-type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
+type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(config.CheckerSchedulerName) error) (Scheduler, error)
 
 var (
-	schedulerMap           = make(map[string]CreateSchedulerFunc)
-	schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
+	schedulerMap           = make(map[config.CheckerSchedulerName]CreateSchedulerFunc)
+	schedulerArgsToDecoder = make(map[config.CheckerSchedulerName]ConfigSliceDecoderBuilder)
 )
 
 // RegisterScheduler binds a scheduler creator. It should be called in init()
 // func of a package.
-func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
+func RegisterScheduler(typ config.CheckerSchedulerName, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
+		log.Fatal("duplicated scheduler", zap.Stringer("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerMap[typ] = createFn
 }
 
 // RegisterSliceDecoderBuilder convert arguments to config. It should be called in init()
 // func of package.
-func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) {
+func RegisterSliceDecoderBuilder(typ config.CheckerSchedulerName, builder ConfigSliceDecoderBuilder) {
 	if _, ok := schedulerArgsToDecoder[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
+		log.Fatal("duplicated scheduler", zap.Stringer("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerArgsToDecoder[typ] = builder
 	config.RegisterScheduler(typ)
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(typ string, oc *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
+func CreateScheduler(
+	typ config.CheckerSchedulerName,
+	oc *operator.Controller,
+	storage endpoint.ConfigStorage,
+	dec ConfigDecoder,
+	removeSchedulerCb ...func(config.CheckerSchedulerName) error,
+) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
@@ -151,16 +155,16 @@ func SaveSchedulerConfig(storage endpoint.ConfigStorage, s Scheduler) error {
 	if err != nil {
 		return err
 	}
-	return storage.SaveSchedulerConfig(s.GetName(), data)
+	return storage.SaveSchedulerConfig(s.Name(), data)
 }
 
 // FindSchedulerTypeByName finds the type of the specified name.
 func FindSchedulerTypeByName(name string) string {
 	var typ string
 	for registeredType := range schedulerMap {
-		if strings.Contains(name, registeredType) {
+		if strings.Contains(name, registeredType.String()) {
 			if len(registeredType) > len(typ) {
-				typ = registeredType
+				typ = registeredType.String()
 			}
 		}
 	}

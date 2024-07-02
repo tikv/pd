@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -41,7 +42,7 @@ func TestEvictLeader(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 1)
 	tc.AddLeaderRegion(3, 3, 1)
 
-	sl, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}), func(string) error { return nil })
+	sl, err := CreateScheduler(config.EvictLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderName, []string{"1"}), func(config.CheckerSchedulerName) error { return nil })
 	re.NoError(err)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
@@ -54,7 +55,7 @@ func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sl, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}), func(string) error { return nil })
+	sl, err := CreateScheduler(config.EvictLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderName, []string{"1"}), func(config.CheckerSchedulerName) error { return nil })
 	re.NoError(err)
 
 	// Add stores 1, 2, 3

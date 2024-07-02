@@ -21,6 +21,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -38,7 +39,7 @@ func TestTransferWitnessLeader(t *testing.T) {
 	// Add regions 1 with leader in stores 1
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
-	sl, err := CreateScheduler(TransferWitnessLeaderType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := CreateScheduler(config.TransferWitnessLeaderName, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	re.True(sl.IsScheduleAllowed(tc))
@@ -53,7 +54,7 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
-	sl, err := CreateScheduler(TransferWitnessLeaderType, oc, storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := CreateScheduler(config.TransferWitnessLeaderName, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 
 	// Add stores 1, 2, 3

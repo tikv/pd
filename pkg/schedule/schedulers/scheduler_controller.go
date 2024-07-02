@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -50,10 +51,10 @@ type Controller struct {
 	storage endpoint.ConfigStorage
 	// schedulers are used to manage all schedulers, which will only be initialized
 	// and used in the PD leader service mode now.
-	schedulers map[string]*ScheduleController
+	schedulers map[config.CheckerSchedulerName]*ScheduleController
 	// schedulerHandlers is used to manage the HTTP handlers of schedulers,
 	// which will only be initialized and used in the API service mode now.
-	schedulerHandlers map[string]http.Handler
+	schedulerHandlers map[config.CheckerSchedulerName]http.Handler
 	opController      *operator.Controller
 }
 
@@ -63,8 +64,8 @@ func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage e
 		ctx:               ctx,
 		cluster:           cluster,
 		storage:           storage,
-		schedulers:        make(map[string]*ScheduleController),
-		schedulerHandlers: make(map[string]http.Handler),
+		schedulers:        make(map[config.CheckerSchedulerName]*ScheduleController),
+		schedulerHandlers: make(map[config.CheckerSchedulerName]http.Handler),
 		opController:      opController,
 	}
 }
@@ -77,17 +78,17 @@ func (c *Controller) Wait() {
 }
 
 // GetScheduler returns a schedule controller by name.
-func (c *Controller) GetScheduler(name string) *ScheduleController {
+func (c *Controller) GetScheduler(name config.CheckerSchedulerName) *ScheduleController {
 	c.RLock()
 	defer c.RUnlock()
 	return c.schedulers[name]
 }
 
 // GetSchedulerNames returns all names of schedulers.
-func (c *Controller) GetSchedulerNames() []string {
+func (c *Controller) GetSchedulerNames() []config.CheckerSchedulerName {
 	c.RLock()
 	defer c.RUnlock()
-	names := make([]string, 0, len(c.schedulers))
+	names := make([]config.CheckerSchedulerName, 0, len(c.schedulers))
 	for name := range c.schedulers {
 		names = append(names, name)
 	}
@@ -95,13 +96,13 @@ func (c *Controller) GetSchedulerNames() []string {
 }
 
 // GetSchedulerHandlers returns all handlers of schedulers.
-func (c *Controller) GetSchedulerHandlers() map[string]http.Handler {
+func (c *Controller) GetSchedulerHandlers() map[config.CheckerSchedulerName]http.Handler {
 	c.RLock()
 	defer c.RUnlock()
 	if len(c.schedulerHandlers) > 0 {
 		return c.schedulerHandlers
 	}
-	handlers := make(map[string]http.Handler, len(c.schedulers))
+	handlers := make(map[config.CheckerSchedulerName]http.Handler, len(c.schedulers))
 	for name, scheduler := range c.schedulers {
 		handlers[name] = scheduler.Scheduler
 	}
@@ -118,7 +119,7 @@ func (c *Controller) CollectSchedulerMetrics() {
 		if !s.IsPaused() && !c.cluster.IsSchedulingHalted() {
 			allowScheduler = 1
 		}
-		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
+		schedulerStatusGauge.WithLabelValues(s.Scheduler.Name(), "allow").Set(allowScheduler)
 	}
 	c.RUnlock()
 	ruleMgr := c.cluster.GetRuleManager()
@@ -142,23 +143,28 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	c.Lock()
 	defer c.Unlock()
 
-	name := scheduler.GetName()
+	name, err := config.ConvertSchedulerStr2Name(scheduler.Name())
+	if err != nil {
+		log.Error("failed to convert scheduler name",
+			zap.String("scheduler", scheduler.Name()),
+			errs.ZapError(err))
+		return err
+	}
 	if _, ok := c.schedulerHandlers[name]; ok {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
 	c.schedulerHandlers[name] = scheduler
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
-		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.Name()), errs.ZapError(err))
 		return err
 	}
-	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	err := scheduler.PrepareConfig(c.cluster)
-	return err
+	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.Name(), args)
+	return scheduler.PrepareConfig(c.cluster)
 }
 
 // RemoveSchedulerHandler removes the HTTP handler for a scheduler.
-func (c *Controller) RemoveSchedulerHandler(name string) error {
+func (c *Controller) RemoveSchedulerHandler(name config.CheckerSchedulerName) error {
 	c.Lock()
 	defer c.Unlock()
 	if c.cluster == nil {
@@ -170,13 +176,13 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 	}
 
 	conf := c.cluster.GetSchedulerConfig()
-	conf.RemoveSchedulerCfg(s.(Scheduler).GetType())
+	conf.RemoveSchedulerCfg(s.(Scheduler).Name())
 	if err := conf.Persist(c.storage); err != nil {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
 
-	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
+	if err := c.storage.RemoveSchedulerConfig(name.String()); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
@@ -192,7 +198,14 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
-	if _, ok := c.schedulers[scheduler.GetName()]; ok {
+	name, err := config.ConvertSchedulerStr2Name(scheduler.Name())
+	if err != nil {
+		log.Error("failed to convert scheduler name",
+			zap.String("scheduler", scheduler.Name()),
+			errs.ZapError(err))
+		return err
+	}
+	if _, ok := c.schedulers[name]; ok {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
@@ -203,17 +216,17 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 
 	c.wg.Add(1)
 	go c.runScheduler(s)
-	c.schedulers[s.Scheduler.GetName()] = s
+	c.schedulers[name] = s
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
-		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.Name()), errs.ZapError(err))
 		return err
 	}
-	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.Scheduler.GetType(), args)
+	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.Scheduler.Name(), args)
 	return nil
 }
 
 // RemoveScheduler removes a scheduler by name.
-func (c *Controller) RemoveScheduler(name string) error {
+func (c *Controller) RemoveScheduler(name config.CheckerSchedulerName) error {
 	c.Lock()
 	defer c.Unlock()
 	if c.cluster == nil {
@@ -225,19 +238,19 @@ func (c *Controller) RemoveScheduler(name string) error {
 	}
 
 	conf := c.cluster.GetSchedulerConfig()
-	conf.RemoveSchedulerCfg(s.Scheduler.GetType())
+	conf.RemoveSchedulerCfg(s.Scheduler.Name())
 	if err := conf.Persist(c.storage); err != nil {
 		log.Error("the option can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
 
-	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
+	if err := c.storage.RemoveSchedulerConfig(name.String()); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
 	}
 
 	s.Stop()
-	schedulerStatusGauge.DeleteLabelValues(name, "allow")
+	schedulerStatusGauge.DeleteLabelValues(name.String(), "allow")
 	delete(c.schedulers, name)
 
 	return nil
@@ -252,7 +265,14 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 	}
 	var s []*ScheduleController
 	if name != "all" {
-		sc, ok := c.schedulers[name]
+		schedulerName, err := config.ConvertSchedulerStr2Name(name)
+		if err != nil {
+			log.Error("failed to convert scheduler name",
+				zap.String("scheduler", name),
+				errs.ZapError(err))
+			return errs.ErrSchedulerNotFound.FastGenByArgs()
+		}
+		sc, ok := c.schedulers[schedulerName]
 		if !ok {
 			return errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
@@ -275,7 +295,7 @@ func (c *Controller) PauseOrResumeScheduler(name string, t int64) error {
 }
 
 // ReloadSchedulerConfig reloads a scheduler's config if it exists.
-func (c *Controller) ReloadSchedulerConfig(name string) error {
+func (c *Controller) ReloadSchedulerConfig(name config.CheckerSchedulerName) error {
 	if exist, _ := c.IsSchedulerExisted(name); !exist {
 		return fmt.Errorf("scheduler %s is not existed", name)
 	}
@@ -283,7 +303,7 @@ func (c *Controller) ReloadSchedulerConfig(name string) error {
 }
 
 // IsSchedulerAllowed returns whether a scheduler is allowed to schedule, a scheduler is not allowed to schedule if it is paused or blocked by unsafe recovery.
-func (c *Controller) IsSchedulerAllowed(name string) (bool, error) {
+func (c *Controller) IsSchedulerAllowed(name config.CheckerSchedulerName) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if c.cluster == nil {
@@ -297,7 +317,7 @@ func (c *Controller) IsSchedulerAllowed(name string) (bool, error) {
 }
 
 // IsSchedulerPaused returns whether a scheduler is paused.
-func (c *Controller) IsSchedulerPaused(name string) (bool, error) {
+func (c *Controller) IsSchedulerPaused(name config.CheckerSchedulerName) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if c.cluster == nil {
@@ -311,7 +331,7 @@ func (c *Controller) IsSchedulerPaused(name string) (bool, error) {
 }
 
 // IsSchedulerDisabled returns whether a scheduler is disabled.
-func (c *Controller) IsSchedulerDisabled(name string) (bool, error) {
+func (c *Controller) IsSchedulerDisabled(name config.CheckerSchedulerName) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if c.cluster == nil {
@@ -321,11 +341,11 @@ func (c *Controller) IsSchedulerDisabled(name string) (bool, error) {
 	if !ok {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return c.cluster.GetSchedulerConfig().IsSchedulerDisabled(s.Scheduler.GetType()), nil
+	return c.cluster.GetSchedulerConfig().IsSchedulerDisabled(s.Scheduler.Name()), nil
 }
 
 // IsSchedulerExisted returns whether a scheduler is existed.
-func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
+func (c *Controller) IsSchedulerExisted(name config.CheckerSchedulerName) (bool, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if c.cluster == nil {
@@ -355,13 +375,13 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 			}
 			if op := s.Schedule(diagnosable); len(op) > 0 {
 				added := c.opController.AddWaitingOperator(op...)
-				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.Scheduler.GetName()))
+				log.Debug("add operator", zap.Int("added", added), zap.Int("total", len(op)), zap.String("scheduler", s.Scheduler.Name()))
 			}
 			// Note: we reset the ticker here to support updating configuration dynamically.
 			ticker.Reset(s.GetInterval())
 		case <-s.Ctx().Done():
 			log.Info("scheduler has been stopped",
-				zap.String("scheduler-name", s.Scheduler.GetName()),
+				zap.String("scheduler-name", s.Scheduler.Name()),
 				errs.ZapError(s.Ctx().Err()))
 			return
 		}
@@ -369,7 +389,7 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 }
 
 // GetPausedSchedulerDelayAt returns paused timestamp of a paused scheduler
-func (c *Controller) GetPausedSchedulerDelayAt(name string) (int64, error) {
+func (c *Controller) GetPausedSchedulerDelayAt(name config.CheckerSchedulerName) (int64, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if c.cluster == nil {
@@ -383,7 +403,7 @@ func (c *Controller) GetPausedSchedulerDelayAt(name string) (int64, error) {
 }
 
 // GetPausedSchedulerDelayUntil returns the delay time until the scheduler is paused.
-func (c *Controller) GetPausedSchedulerDelayUntil(name string) (int64, error) {
+func (c *Controller) GetPausedSchedulerDelayUntil(name config.CheckerSchedulerName) (int64, error) {
 	c.RLock()
 	defer c.RUnlock()
 	if c.cluster == nil {
@@ -400,7 +420,7 @@ func (c *Controller) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 	if core.NeedTransferWitnessLeader(region) {
 		c.RLock()
-		s, ok := c.schedulers[TransferWitnessLeaderName]
+		s, ok := c.schedulers[config.TransferWitnessLeaderName]
 		c.RUnlock()
 		if ok {
 			select {
@@ -433,6 +453,7 @@ type ScheduleController struct {
 // NewScheduleController creates a new ScheduleController.
 func NewScheduleController(ctx context.Context, cluster sche.SchedulerCluster, opController *operator.Controller, s Scheduler) *ScheduleController {
 	ctx, cancel := context.WithCancel(ctx)
+	schedulerName, _ := config.ConvertSchedulerStr2Name(s.Name())
 	return &ScheduleController{
 		Scheduler:          s,
 		cluster:            cluster,
@@ -440,7 +461,7 @@ func NewScheduleController(ctx context.Context, cluster sche.SchedulerCluster, o
 		nextInterval:       s.GetMinInterval(),
 		ctx:                ctx,
 		cancel:             cancel,
-		diagnosticRecorder: NewDiagnosticRecorder(s.GetName(), cluster.GetSchedulerConfig()),
+		diagnosticRecorder: NewDiagnosticRecorder(schedulerName, cluster.GetSchedulerConfig()),
 	}
 }
 

@@ -164,14 +164,14 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	re.Equal(namesFromAPIServer, namesFromSchedulingServer)
 	// Add a new scheduler.
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), sc.EvictLeaderName.String(), map[string]any{
 		"store_id": 1,
 	})
 	// Check the new scheduler's config.
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
+		return slice.Contains(namesFromSchedulingServer, sc.EvictLeaderName.String())
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1})
 	// Update the scheduler by adding a store.
@@ -186,20 +186,20 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		},
 	)
 	re.NoError(err)
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), sc.EvictLeaderName.String(), map[string]any{
 		"store_id": 2,
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1, 2})
 	// Update the scheduler by removing a store.
-	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), fmt.Sprintf("%s-%d", schedulers.EvictLeaderName, 1))
+	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), fmt.Sprintf("%s-%d", sc.EvictLeaderName.String(), 1))
 	assertEvictLeaderStoreIDs(re, storage, []uint64{2})
 	// Delete the scheduler.
-	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName)
+	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), sc.EvictLeaderName.String())
 	// Check the removed scheduler's config.
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return !slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
+		return !slice.Contains(namesFromSchedulingServer, sc.EvictLeaderName.String())
 	})
 	watcher.Close()
 }
@@ -211,7 +211,7 @@ func assertEvictLeaderStoreIDs(
 		StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	}
 	testutil.Eventually(re, func() bool {
-		cfg, err := storage.LoadSchedulerConfig(schedulers.EvictLeaderName)
+		cfg, err := storage.LoadSchedulerConfig(sc.EvictLeaderName.String())
 		re.NoError(err)
 		err = schedulers.DecodeConfig([]byte(cfg), &evictLeaderCfg)
 		re.NoError(err)
