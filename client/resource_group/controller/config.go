@@ -52,8 +52,10 @@ const (
 	defaultTargetPeriod = 5 * time.Second
 	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
 	defaultMaxWaitDuration = 30 * time.Second
+	// defaultLTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
+	defaultLTBTokenRPCMaxDelay = 1 * time.Second
 	// defaultWaitRetryTimes is the times to retry when waiting for the token.
-	defaultWaitRetryTimes = 10
+	defaultWaitRetryTimes = 20
 	// defaultWaitRetryInterval is the interval to retry when waiting for the token.
 	defaultWaitRetryInterval = 50 * time.Millisecond
 )
@@ -77,23 +79,35 @@ const (
 
 	// Because the resource manager has not been deployed in microservice mode,
 	// do not enable this function.
-	defaultDegradedModeWaitDuration = 0
+	defaultDegradedModeWaitDuration = time.Duration(0)
 	defaultAvgBatchProportion       = 0.7
 )
 
-// Config is the configuration of the resource manager controller which includes some option for client needed.
-type Config struct {
+// TokenRPCParams is the parameters for local bucket RPC.
+type TokenRPCParams struct {
+	// WaitRetryInterval is the interval to retry when waiting for the token.
+	WaitRetryInterval Duration `toml:"wait-retry-interval" json:"wait-retry-interval"`
+
+	// WaitRetryTimes is the times to retry when waiting for the token.
+	WaitRetryTimes int `toml:"wait-retry-times" json:"wait-retry-times"`
+}
+
+// LocalBucketConfig is the configuration for local bucket. not export to server side.
+type LocalBucketConfig struct {
+	TokenRPCParams `toml:"token-rpc-params" json:"token-rpc-params"`
+}
+
+// BaseConfig is the configuration of the resource manager controller which includes some option for client needed.
+// TODO: unified the configuration for client and server, server side in pkg/mcs/resourcemanger/config.go.
+type BaseConfig struct {
 	// EnableDegradedMode is to control whether resource control client enable degraded mode when server is disconnect.
 	DegradedModeWaitDuration Duration `toml:"degraded-mode-wait-duration" json:"degraded-mode-wait-duration"`
 
 	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
 	LTBMaxWaitDuration Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
 
-	// WaitRetryInterval is the interval to retry when waiting for the token.
-	WaitRetryInterval Duration `toml:"wait-retry-interval" json:"wait-retry-interval"`
-
-	// WaitRetryTimes is the times to retry when waiting for the token.
-	WaitRetryTimes int `toml:"wait-retry-times" json:"wait-retry-times"`
+	// LTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
+	LTBTokenRPCMaxDelay Duration `toml:"ltb-token-rpc-max-delay" json:"ltb-token-rpc-max-delay"`
 
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
@@ -103,15 +117,43 @@ type Config struct {
 	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
 }
 
+// Config is the configuration of the resource manager controller.
+type Config struct {
+	BaseConfig
+	LocalBucketConfig
+}
+
+// Adjust adjusts the configuration.
+func (c *Config) Adjust() {
+	// valid the configuration, TODO: separately add the valid function.
+	if c.BaseConfig.LTBMaxWaitDuration.Duration == 0 {
+		c.BaseConfig.LTBMaxWaitDuration = NewDuration(defaultMaxWaitDuration)
+	}
+	if c.LocalBucketConfig.WaitRetryInterval.Duration == 0 {
+		c.LocalBucketConfig.WaitRetryInterval = NewDuration(defaultWaitRetryInterval)
+	}
+	// adjust the client settings. calculate the retry times.
+	if int(c.BaseConfig.LTBTokenRPCMaxDelay.Duration) != int(c.LocalBucketConfig.WaitRetryInterval.Duration)*c.LocalBucketConfig.WaitRetryTimes {
+		c.LocalBucketConfig.WaitRetryTimes = int(c.BaseConfig.LTBTokenRPCMaxDelay.Duration / c.LocalBucketConfig.WaitRetryInterval.Duration)
+	}
+}
+
 // DefaultConfig returns the default resource manager controller configuration.
 func DefaultConfig() *Config {
 	return &Config{
-		DegradedModeWaitDuration: NewDuration(defaultDegradedModeWaitDuration),
-		LTBMaxWaitDuration:       NewDuration(defaultMaxWaitDuration),
-		WaitRetryInterval:        NewDuration(defaultWaitRetryInterval),
-		WaitRetryTimes:           defaultWaitRetryTimes,
-		RequestUnit:              DefaultRequestUnitConfig(),
-		EnableControllerTraceLog: false,
+		BaseConfig: BaseConfig{
+			DegradedModeWaitDuration: NewDuration(defaultDegradedModeWaitDuration),
+			RequestUnit:              DefaultRequestUnitConfig(),
+			EnableControllerTraceLog: false,
+			LTBMaxWaitDuration:       NewDuration(defaultMaxWaitDuration),
+			LTBTokenRPCMaxDelay:      NewDuration(defaultLTBTokenRPCMaxDelay),
+		},
+		LocalBucketConfig: LocalBucketConfig{
+			TokenRPCParams: TokenRPCParams{
+				WaitRetryInterval: NewDuration(defaultWaitRetryInterval),
+				WaitRetryTimes:    defaultWaitRetryTimes,
+			},
+		},
 	}
 }
 
