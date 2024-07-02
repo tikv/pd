@@ -75,7 +75,7 @@ type Limiter struct {
 	// last is the last time the limiter's tokens field was updated
 	last                time.Time
 	notifyThreshold     float64
-	lowTokensNotifyChan chan<- NotifyMsg
+	lowTokensNotifyChan chan<- notifyMsg
 	// To prevent too many chan sent, the notifyThreshold is set to 0 after notify.
 	// So the notifyThreshold cannot show whether the limiter is in the low token state,
 	// isLowProcess is used to check it.
@@ -88,9 +88,9 @@ type Limiter struct {
 	metrics *limiterMetricsCollection
 }
 
-// NotifyMsg is a message to notify the low token state.
-type NotifyMsg struct {
-	StartTime time.Time
+// notifyMsg is a message to notify the low token state.
+type notifyMsg struct {
+	startTime time.Time
 }
 
 // limiterMetricsCollection is a collection of metrics for a limiter.
@@ -107,7 +107,7 @@ func (lim *Limiter) Limit() Limit {
 
 // NewLimiter returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan<- NotifyMsg) *Limiter {
+func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan<- notifyMsg) *Limiter {
 	lim := &Limiter{
 		limit:               r,
 		last:                now,
@@ -121,7 +121,7 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 
 // NewLimiterWithCfg returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- NotifyMsg) *Limiter {
+func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- notifyMsg) *Limiter {
 	lim := &Limiter{
 		name:                name,
 		limit:               Limit(cfg.NewRate),
@@ -262,7 +262,7 @@ func (lim *Limiter) notify() {
 	lim.notifyThreshold = 0
 	lim.isLowProcess = true
 	select {
-	case lim.lowTokensNotifyChan <- NotifyMsg{StartTime: time.Now()}:
+	case lim.lowTokensNotifyChan <- notifyMsg{startTime: time.Now()}:
 		if lim.metrics != nil {
 			lim.metrics.lowTokenNotifyCounter.Inc()
 		}
