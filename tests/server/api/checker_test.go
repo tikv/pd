@@ -44,7 +44,7 @@ func (suite *checkerTestSuite) TearDownSuite() {
 }
 
 func (suite *checkerTestSuite) TestAPI() {
-	suite.env.RunTestInTwoModes(suite.checkAPI)
+	suite.env.RunTestBasedOnMode(suite.checkAPI)
 }
 
 func (suite *checkerTestSuite) checkAPI(cluster *tests.TestCluster) {
