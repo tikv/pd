@@ -154,8 +154,8 @@ func (m *Participant) setLeader(member participant) {
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
-// unsetLeader unsets the member's leader.
-func (m *Participant) unsetLeader() {
+// UnsetLeader unsets the member's leader.
+func (m *Participant) UnsetLeader() {
 	leader := NewParticipantByService(m.serviceName)
 	m.leader.Store(leader)
 	m.lastLeaderUpdatedTime.Store(time.Now())
@@ -164,6 +164,7 @@ func (m *Participant) unsetLeader() {
 // EnableLeader declares the member itself to be the leader.
 func (m *Participant) EnableLeader() {
 	m.setLeader(m.member)
+	utils.RemoveExpectedPrimary(m.client, m.GetLeaderPath())
 }
 
 // GetLeaderPath returns the path of the leader.
@@ -264,14 +265,14 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 func (m *Participant) WatchLeader(ctx context.Context, leader participant, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(ctx, revision)
-	m.unsetLeader()
+	m.UnsetLeader()
 }
 
 // ResetLeader is used to reset the member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
 func (m *Participant) ResetLeader() {
 	m.leadership.Reset()
-	m.unsetLeader()
+	m.UnsetLeader()
 }
 
 // IsSameLeader checks whether a server is the leader itself.

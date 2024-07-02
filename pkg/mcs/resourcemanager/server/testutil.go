@@ -49,16 +49,18 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*S
 // GenerateConfig generates a new config with the given options.
 func GenerateConfig(c *Config) (*Config, error) {
 	arguments := []string{
+		"--name=" + c.Name,
 		"--listen-addr=" + c.ListenAddr,
 		"--advertise-listen-addr=" + c.AdvertiseListenAddr,
 		"--backend-endpoints=" + c.BackendEndpoints,
 	}
 
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flagSet.StringP("name", "", "", "human-readable name for this resource manager member")
 	flagSet.BoolP("version", "V", false, "print version information and exit")
 	flagSet.StringP("config", "", "", "config file")
 	flagSet.StringP("backend-endpoints", "", "", "url for etcd client")
-	flagSet.StringP("listen-addr", "", "", "listen address for tso service")
+	flagSet.StringP("listen-addr", "", "", "listen address for resource manager service")
 	flagSet.StringP("advertise-listen-addr", "", "", "advertise urls for listen address (default '${listen-addr}')")
 	flagSet.StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	flagSet.StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")

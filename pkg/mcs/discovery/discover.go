@@ -15,12 +15,16 @@
 package discovery
 
 import (
+	"fmt"
+	"math/rand"
 	"strconv"
+	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -45,14 +49,14 @@ func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, er
 }
 
 // GetMSMembers returns all the members of the specified service name.
-func GetMSMembers(name string, client *clientv3.Client) ([]ServiceRegistryEntry, error) {
-	switch name {
+func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistryEntry, error) {
+	switch serviceName {
 	case utils.TSOServiceName, utils.SchedulingServiceName, utils.ResourceManagerServiceName:
 		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
 		if err != nil {
 			return nil, err
 		}
-		servicePath := ServicePath(strconv.FormatUint(clusterID, 10), name)
+		servicePath := ServicePath(strconv.FormatUint(clusterID, 10), serviceName)
 		resps, err := kv.NewSlowLogTxn(client).Then(clientv3.OpGet(servicePath, clientv3.WithPrefix())).Commit()
 		if err != nil {
 			return nil, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()
@@ -75,5 +79,68 @@ func GetMSMembers(name string, client *clientv3.Client) ([]ServiceRegistryEntry,
 		return entries, nil
 	}
 
-	return nil, errors.Errorf("unknown service name %s", name)
+	return nil, errors.Errorf("unknown service name %s", serviceName)
+}
+
+// TransferPrimary transfers the primary of the specified service.
+func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimary string, keyspaceGroupID uint32) error {
+	log.Info("transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimary), zap.String("to", newPrimary))
+	entries, err := GetMSMembers(serviceName, client)
+	if err != nil {
+		return err
+	}
+
+	// Do nothing when I am the only member of cluster.
+	if len(entries) == 1 {
+		return errors.New(fmt.Sprintf("no valid secondary to transfer primary, the only member is %s", entries[0].Name))
+	}
+
+	var primaryIDs []string
+	var secondaryValues []string
+	for _, member := range entries {
+		if (newPrimary == "" && member.ServiceAddr != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
+			primaryIDs = append(primaryIDs, member.ServiceAddr)
+			if string(member.MemberValue) == "" {
+				return errors.New(fmt.Sprintf("member %s value is empty", member.Name))
+			}
+			secondaryValues = append(secondaryValues, string(member.MemberValue))
+		}
+	}
+	if len(primaryIDs) == 0 {
+		return errors.New(fmt.Sprintf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary))
+	}
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	nextPrimaryID := r.Intn(len(primaryIDs))
+
+	clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+	if err != nil {
+		return errors.Errorf("failed to get cluster ID: %v", err)
+	}
+
+	var primaryKey string
+	switch serviceName {
+	case utils.SchedulingServiceName:
+		primaryKey = endpoint.SchedulingPrimaryPath(clusterID)
+	case utils.TSOServiceName:
+		tsoRootPath := endpoint.TSOSvcRootPath(clusterID)
+		primaryKey = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
+	}
+
+	// remove possible residual value.
+	utils.RemoveExpectedPrimary(client, primaryKey)
+
+	// grant the primary lease to the new primary.
+	grantResp, err := client.Grant(client.Ctx(), utils.DefaultLeaderLease)
+	if err != nil {
+		return errors.Errorf("failed to grant lease for %s, err: %v", serviceName, err)
+	}
+	// update primary key to notify old primary server.
+	putResp, err := kv.NewSlowLogTxn(client).
+		Then(clientv3.OpPut(primaryKey, secondaryValues[nextPrimaryID], clientv3.WithLease(grantResp.ID))).
+		Commit()
+	if err != nil || !putResp.Succeeded {
+		return errors.Errorf("failed to write primary flag for %s, err: %v", serviceName, err)
+	}
+	return nil
 }

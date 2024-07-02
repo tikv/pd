@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -560,6 +561,20 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
 		}
 
+		// To make sure the expected primary(if existed) and new primary are on the same server.
+		expectedPrimary := mcsutils.GetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
+		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
+		// expected primary ONLY SET BY `/ms/primary/transfer` API.
+		if expectedPrimary != "" && expectedPrimary != gta.member.MemberValue() {
+			log.Info("skip campaigning of tso primary and check later",
+				zap.String("server-name", gta.member.Name()),
+				zap.String("expected-primary-id", expectedPrimary),
+				zap.Uint64("member-id", gta.member.ID()),
+				zap.String("cur-memberValue", gta.member.MemberValue()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		gta.campaignLeader()
 	}
 }
@@ -596,7 +611,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		gta.member.ResetLeader()
 	})
 
-	// maintain the the leadership, after this, TSO can be service.
+	// maintain the leadership, after this, TSO can be service.
 	gta.member.KeepLeader(ctx)
 	log.Info("campaign tso primary ok",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
@@ -635,6 +650,9 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("tso-primary-name", gta.member.Name()))
 
+	exitPrimary := make(chan struct{})
+	go gta.primaryWatch(ctx, exitPrimary)
+
 	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
@@ -650,6 +668,50 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 			// Server is closed and it should return nil.
 			log.Info("exit leader campaign",
 				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
+			return
+		case <-exitPrimary:
+			log.Info("no longer be primary because primary have been updated, the TSO primary will step down")
+			return
+		}
+	}
+}
+
+// primaryWatch watches `/ms/primary/transfer` API whether changed the primary.
+// 1. modify the expected primary flag to the new primary
+// 2. modify memory status
+// 3. exit the primary watch loop
+// 4. delete the leader key
+func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
+	resp, err := etcdutil.EtcdKVGet(gta.member.GetLeadership().GetClient(), gta.member.GetLeaderPath())
+	if err != nil || resp == nil || len(resp.Kvs) == 0 {
+		log.Error("tso primary getting the primary meets error", errs.ZapError(err))
+		return
+	}
+	log.Info("tso primary start to watch the primary",
+		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
+		zap.String("campaign-tso-primary-name", gta.member.Name()))
+	// Watch will keep looping and never return unless the primary has changed.
+	gta.member.GetLeadership().SetPrimaryWatch(true)
+	gta.member.GetLeadership().Watch(ctx, resp.Kvs[0].ModRevision+1)
+	gta.member.GetLeadership().SetPrimaryWatch(false)
+
+	// only `/ms/primary/transfer` API update primary will set `leaderPath` to the expected primary.
+	curPrimary, err := etcdutil.GetValue(gta.member.Client(), gta.member.GetLeaderPath())
+	if err != nil {
+		log.Error("tso primary getting the leader meets error", errs.ZapError(err))
+		return
+	}
+	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
+		// 1. modify the expected primary flag to the new primary.
+		mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
+		// 2. modify memory status.
+		gta.member.UnsetLeader()
+		defer log.Info("tso primary exit the primary watch loop")
+		select {
+		case <-ctx.Done():
+			return
+		// 3. exit the primary watch loop, 4.`exitPrimary` will help delete the leader key.
+		case exitPrimary <- struct{}{}:
 			return
 		}
 	}

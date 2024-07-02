@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -51,6 +52,13 @@ const (
 	ClusterIDPath = "/pd/cluster_id"
 	// retryInterval is the interval to retry.
 	retryInterval = time.Second
+	// ExpectedPrimary is the path to store the expected primary , ONLY Triggered BY `/ms/primary/transfer` API.
+	// This flag likes a fence to avoid exited 2 primaries in the cluster simultaneously.
+	// 1. Since follower will campaign a new primary when it found the `leader_key` is deleted.
+	// **We can ensure `expected_primary` is set before deleting the `leader_key`.**
+	// 2. Old primary will set `expected_primary` firstly,
+	// then delete the `leader_key` which will trigger the follower to campaign a new primary.
+	ExpectedPrimary = "expected_primary"
 )
 
 // InitClusterID initializes the cluster ID.
@@ -68,6 +76,58 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 		}
 	}
 	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)
+}
+
+// GetExpectedPrimary indicates API has changed the primary.
+func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
+	primary, err := etcdutil.GetValue(client, strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))
+	if err != nil {
+		log.Error("get expected primary key error", errs.ZapError(err))
+		return ""
+	}
+
+	return string(primary)
+}
+
+// RemoveExpectedPrimary removes the expected primary key.
+// - removed when campaign new primary successfully.
+// - removed when appoint new primary by API.
+func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
+	log.Info("remove expected primary key", zap.String("leader-path", leaderPath))
+	// remove expected leader key
+	resp, err := kv.NewSlowLogTxn(client).
+		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))).
+		Commit()
+	if err != nil || !resp.Succeeded {
+		log.Error("change expected primary error", errs.ZapError(err))
+		return
+	}
+}
+
+// SetExpectedPrimary sets the expected primary key when the current primary has exited.
+func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
+	log.Info("set expected primary key", zap.String("leader-path", leaderPath))
+	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
+	if err != nil {
+		log.Error("get primary key error", zap.Error(err))
+		return
+	}
+	grantResp, err := client.Grant(client.Ctx(), DefaultLeaderLease)
+	if err != nil {
+		log.Error("grant lease for expected primary error", errs.ZapError(err))
+		return
+	}
+	// write a flag to indicate the current primary has exited
+	resp, err := kv.NewSlowLogTxn(client).
+		Then(
+			clientv3.OpPut(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"), string(leaderRaw), clientv3.WithLease(grantResp.ID)),
+			// indicate the current primary has exited
+			clientv3.OpDelete(leaderPath)).
+		Commit()
+	if err != nil || !resp.Succeeded {
+		log.Error("change expected primary error", errs.ZapError(err))
+		return
+	}
 }
 
 // PromHandler is a handler to get prometheus metrics.

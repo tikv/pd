@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -148,8 +149,8 @@ func (m *EmbeddedEtcdMember) setLeader(member *pdpb.Member) {
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
-// unsetLeader unsets the member's PD leader.
-func (m *EmbeddedEtcdMember) unsetLeader() {
+// UnsetLeader unsets the member's PD leader.
+func (m *EmbeddedEtcdMember) UnsetLeader() {
 	m.leader.Store(&pdpb.Member{})
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
@@ -157,6 +158,7 @@ func (m *EmbeddedEtcdMember) unsetLeader() {
 // EnableLeader sets the member itself to a PD leader.
 func (m *EmbeddedEtcdMember) EnableLeader() {
 	m.setLeader(m.member)
+	utils.RemoveExpectedPrimary(m.client, m.GetLeaderPath())
 }
 
 // GetLeaderPath returns the path of the PD leader.
@@ -270,14 +272,14 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 func (m *EmbeddedEtcdMember) WatchLeader(ctx context.Context, leader *pdpb.Member, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(ctx, revision)
-	m.unsetLeader()
+	m.UnsetLeader()
 }
 
 // ResetLeader is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
 func (m *EmbeddedEtcdMember) ResetLeader() {
 	m.leadership.Reset()
-	m.unsetLeader()
+	m.UnsetLeader()
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.
@@ -325,8 +327,8 @@ func (m *EmbeddedEtcdMember) GetEtcdLeader() uint64 {
 }
 
 // IsSameLeader checks whether a server is the leader itself.
-func (m *EmbeddedEtcdMember) IsSameLeader(leader *pdpb.Member) bool {
-	return leader.GetMemberId() == m.ID()
+func (m *EmbeddedEtcdMember) IsSameLeader(leader any) bool {
+	return leader.(*pdpb.Member).GetMemberId() == m.ID()
 }
 
 // InitMemberInfo initializes the member info.

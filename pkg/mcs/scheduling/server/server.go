@@ -55,6 +55,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
@@ -126,6 +127,10 @@ func (s *Server) GetAddr() string {
 // GetBackendEndpoints returns the backend endpoints.
 func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
+}
+
+func (s *Server) GetParticipant() *member.Participant {
+	return s.participant
 }
 
 // SetLogLevel sets log level.
@@ -243,6 +248,20 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("the scheduling primary has changed, try to re-campaign a primary")
 		}
 
+		// To make sure the expected primary(if existed) and new primary are on the same server.
+		expectedPrimary := utils.GetExpectedPrimary(s.GetClient(), s.participant.GetLeaderPath())
+		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
+		// expected primary ONLY SET BY `/ms/primary/transfer` API.
+		if expectedPrimary != "" && expectedPrimary != s.participant.MemberValue() {
+			log.Info("skip campaigning of scheduling primary and check later",
+				zap.String("server-name", s.Name()),
+				zap.String("expected-primary-id", expectedPrimary),
+				zap.Uint64("member-id", s.participant.ID()),
+				zap.String("cur-member-value", s.participant.MemberValue()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		s.campaignLeader()
 	}
 }
@@ -290,6 +309,9 @@ func (s *Server) campaignLeader() {
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
+	exitPrimary := make(chan struct{})
+	go s.primaryWatch(ctx, exitPrimary)
+
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
@@ -303,6 +325,48 @@ func (s *Server) campaignLeader() {
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
+			return
+		case <-exitPrimary:
+			log.Info("no longer be primary because primary have been updated, the scheduling primary will step down")
+			return
+		}
+	}
+}
+
+// primaryWatch watches `/ms/primary/transfer` API whether changed the primary.
+// 1. modify the expected primary flag to the new primary
+// 2. modify memory status
+// 3. exit the primary watch loop
+// 4. delete the leader key
+func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
+	resp, err := etcdutil.EtcdKVGet(s.participant.GetLeadership().GetClient(), s.participant.GetLeaderPath())
+	if err != nil || resp == nil || len(resp.Kvs) == 0 {
+		log.Error("scheduling primary getting the primary meets error", errs.ZapError(err))
+		return
+	}
+	log.Info("scheduling primary start to watch the primary", zap.Stringer("scheduling-primary", s.participant.GetLeader()))
+	// Watch will keep looping and never return unless the primary has changed.
+	s.participant.GetLeadership().SetPrimaryWatch(true)
+	s.participant.GetLeadership().Watch(ctx, resp.Kvs[0].ModRevision+1)
+	s.participant.GetLeadership().SetPrimaryWatch(false)
+
+	// only `/ms/primary/transfer` API update primary will set `leaderPath` to the expected primary.
+	curPrimary, err := etcdutil.GetValue(s.participant.Client(), s.participant.GetLeaderPath())
+	if err != nil {
+		log.Error("scheduling primary getting the leader meets error", errs.ZapError(err))
+		return
+	}
+	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
+		// 1. modify the expected primary flag to the new primary.
+		utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
+		// 2. modify memory status.
+		s.participant.UnsetLeader()
+		defer log.Info("scheduling primary exit the primary watch loop")
+		select {
+		case <-ctx.Done():
+			return
+		// 3. exit the primary watch loop, 4.`exitPrimary` will help delete the leader key.
+		case exitPrimary <- struct{}{}:
 			return
 		}
 	}
@@ -427,6 +491,7 @@ func (s *Server) startServer() (err error) {
 		GitHash:        versioninfo.PDGitHash,
 		DeployPath:     deployPath,
 		StartTimestamp: s.StartTimestamp(),
+		Name:           s.Name(),
 	}
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
@@ -438,6 +503,7 @@ func (s *Server) startServer() (err error) {
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
 	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
+	s.serviceID.MemberValue = []byte(s.participant.MemberValue())
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
