@@ -55,7 +55,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "placement_status",
 			Help:      "Status of the cluster placement.",
-		}, []string{"type", "name"})
+		}, []string{"type", "name", "store"})
 
 	configStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{

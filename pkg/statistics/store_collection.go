@@ -47,7 +47,7 @@ type storeStatistics struct {
 	LeaderCount     int
 	LearnerCount    int
 	WitnessCount    int
-	LabelCounter    map[string]int
+	LabelCounter    map[string][]uint64
 	Preparing       int
 	Serving         int
 	Removing        int
@@ -57,7 +57,7 @@ type storeStatistics struct {
 func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
 	return &storeStatistics{
 		opt:          opt,
-		LabelCounter: make(map[string]int),
+		LabelCounter: make(map[string][]uint64),
 	}
 }
 
@@ -70,7 +70,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 		key := fmt.Sprintf("%s:%s", k, v)
 		// exclude tombstone
 		if !store.IsRemoved() {
-			s.LabelCounter[key]++
+			s.LabelCounter[key] = append(s.LabelCounter[key], store.GetID())
 		}
 	}
 	storeAddress := store.GetAddress()
@@ -249,8 +249,10 @@ func (s *storeStatistics) Collect() {
 		configStatusGauge.WithLabelValues(typ).Set(value)
 	}
 
-	for name, value := range s.LabelCounter {
-		placementStatusGauge.WithLabelValues(labelType, name).Set(float64(value))
+	for name, stores := range s.LabelCounter {
+		for _, storeID := range stores {
+			placementStatusGauge.WithLabelValues(labelType, name, strconv.FormatUint(storeID, 10)).Set(1)
+		}
 	}
 
 	for storeID, limit := range s.opt.GetStoresLimit() {
