@@ -359,7 +359,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 		return nil
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
-	return scheduleEvictLeaderBatch(s.Name(), s.Name(), cluster, s.conf, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.Name(), cluster, s.conf, EvictLeaderBatchSize)
 }
 
 func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {

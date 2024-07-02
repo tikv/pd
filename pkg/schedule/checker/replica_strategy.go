@@ -27,7 +27,7 @@ import (
 // exists to allow replica_checker and rule_checker to reuse common logics.
 type ReplicaStrategy struct {
 	// replica-checker/rule-checker: should be "xxx-checker" format.
-	checkerType    string
+	checkerName    string
 	cluster        sche.CheckerCluster
 	locationLabels []string
 	isolationLevel string
@@ -60,13 +60,13 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 		level = constant.Urgent
 	}
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.checkerType, nil, s.region.GetStoreIDs()),
-		filter.NewStorageThresholdFilter(s.checkerType),
-		filter.NewSpecialUseFilter(s.checkerType),
-		&filter.StoreStateFilter{ActionScope: s.checkerType, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level},
+		filter.NewExcludedFilter(s.checkerName, nil, s.region.GetStoreIDs()),
+		filter.NewStorageThresholdFilter(s.checkerName),
+		filter.NewSpecialUseFilter(s.checkerName),
+		&filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowTemporaryStates: true, OperatorLevel: level},
 	}
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
-		filters = append(filters, filter.NewIsolationFilter(s.checkerType, s.isolationLevel, s.locationLabels, coLocationStores))
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores))
 	}
 	if len(extraFilters) > 0 {
 		filters = append(filters, extraFilters...)
@@ -76,7 +76,7 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 	}
 
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
-	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerType, MoveRegion: true, AllowFastFailover: s.fastFailover, OperatorLevel: level}
+	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover, OperatorLevel: level}
 	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
 		FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, filters...).
 		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
@@ -120,10 +120,10 @@ func (s *ReplicaStrategy) SelectStoreToImprove(coLocationStores []*core.StoreInf
 		return 0, false
 	}
 	filters := []filter.Filter{
-		filter.NewLocationImprover(s.checkerType, s.locationLabels, coLocationStores, oldStore),
+		filter.NewLocationImprover(s.checkerName, s.locationLabels, coLocationStores, oldStore),
 	}
 	if len(s.locationLabels) > 0 && s.isolationLevel != "" {
-		filters = append(filters, filter.NewIsolationFilter(s.checkerType, s.isolationLevel, s.locationLabels, coLocationStores[1:]))
+		filters = append(filters, filter.NewIsolationFilter(s.checkerName, s.isolationLevel, s.locationLabels, coLocationStores[1:]))
 	}
 	return s.SelectStoreToAdd(coLocationStores[1:], filters...)
 }
@@ -145,7 +145,7 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 		level = constant.Urgent
 	}
 	source := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerType, MoveRegion: true, OperatorLevel: level}).
+		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
 		KeepTheTopStores(isolationComparer, true).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetCheckerConfig()), false)
 	if source == nil {

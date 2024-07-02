@@ -289,7 +289,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 
 func (r *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerType:    r.Name(),
+		checkerName:    r.Name(),
 		cluster:        r.cluster,
 		locationLabels: r.conf.GetLocationLabels(),
 		isolationLevel: r.conf.GetIsolationLevel(),

@@ -261,7 +261,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		oldPeer := solver.Region.GetStorePeer(sourceID)
 		newPeer := &metapb.Peer{StoreId: solver.Target.GetID(), Role: oldPeer.Role}
 		solver.Step++
-		op, err := operator.CreateMovePeerOperator(config.BalanceRegionName.String(), solver, solver.Region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+		op, err := operator.CreateMovePeerOperator(s.Name(), solver, solver.Region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			balanceRegionCreateOpFailCounter.Inc()
 			if collector != nil {

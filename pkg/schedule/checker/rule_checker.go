@@ -648,7 +648,7 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerType:    c.Name(),
+		checkerName:    c.Name(),
 		cluster:        c.cluster,
 		isolationLevel: rule.IsolationLevel,
 		locationLabels: rule.LocationLabels,
