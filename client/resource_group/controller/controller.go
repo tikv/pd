@@ -543,7 +543,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		if err != nil {
 			// Don't log any errors caused by the stopper canceling the context.
 			if !errors.ErrorEqual(err, context.Canceled) {
-				log.Info("[resource group controller] token bucket rpc error", zap.Error(err))
+				log.Error("[resource group controller] token bucket rpc error", zap.Error(err))
 			}
 			resp = nil
 			failedTokenRequestDuration.Observe(latency.Seconds())
@@ -1057,7 +1057,7 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 			cfg.NewRate = 99999999
 		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
-		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("resource-group", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
+		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("name", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
 	}
 }
 
