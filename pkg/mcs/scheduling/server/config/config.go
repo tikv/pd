@@ -147,7 +147,9 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	c.Security.Encryption.Adjust()
+	if err := c.Security.Encryption.Adjust(); err != nil {
+		return err
+	}
 
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
 

@@ -33,9 +33,25 @@ type Cluster interface {
 
 // HandleStatsAsync handles the flow asynchronously.
 func HandleStatsAsync(c Cluster, region *core.RegionInfo) {
-	c.GetHotStat().CheckWriteAsync(statistics.NewCheckExpiredItemTask(region))
-	c.GetHotStat().CheckReadAsync(statistics.NewCheckExpiredItemTask(region))
-	c.GetHotStat().CheckWriteAsync(statistics.NewCheckWritePeerTask(region))
+	checkWritePeerTask := func(cache *statistics.HotPeerCache) {
+		reportInterval := region.GetInterval()
+		interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+		stats := cache.CheckPeerFlow(region, region.GetPeers(), region.GetWriteLoads(), interval)
+		for _, stat := range stats {
+			cache.UpdateStat(stat)
+		}
+	}
+
+	checkExpiredTask := func(cache *statistics.HotPeerCache) {
+		expiredStats := cache.CollectExpiredItems(region)
+		for _, stat := range expiredStats {
+			cache.UpdateStat(stat)
+		}
+	}
+
+	c.GetHotStat().CheckWriteAsync(checkExpiredTask)
+	c.GetHotStat().CheckReadAsync(checkExpiredTask)
+	c.GetHotStat().CheckWriteAsync(checkWritePeerTask)
 	c.GetCoordinator().GetSchedulersController().CheckTransferWitnessLeader(region)
 }
 

@@ -225,9 +225,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	c.Security.Encryption.Adjust()
-
-	return nil
+	return c.Security.Encryption.Adjust()
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {

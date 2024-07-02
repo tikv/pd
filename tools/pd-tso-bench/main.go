@@ -62,6 +62,7 @@ var (
 	maxTSOSendIntervalMilliseconds = flag.Int("max-send-interval-ms", 0, "max tso send interval in milliseconds, 60s by default")
 	keyspaceID                     = flag.Uint("keyspace-id", 0, "the id of the keyspace to access")
 	keyspaceName                   = flag.String("keyspace-name", "", "the name of the keyspace to access")
+	useTSOServerProxy              = flag.Bool("use-tso-server-proxy", false, "whether send tso requests to tso server proxy instead of tso service directly")
 	wg                             sync.WaitGroup
 )
 
@@ -424,6 +425,9 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 	)
 
 	opts := make([]pd.ClientOption, 0)
+	if *useTSOServerProxy {
+		opts = append(opts, pd.WithTSOServerProxyOption(true))
+	}
 	opts = append(opts, pd.WithGRPCDialOptions(
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    keepaliveTime,

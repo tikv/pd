@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,30 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package typeutil
+package statistics
 
 import (
-	"reflect"
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
-// Codec is the interface representing objects that can marshal and unmarshal themselves.
-type Codec interface {
-	Marshal() (data []byte, err error)
-	Unmarshal(data []byte) error
-}
-
-// DeepClone returns the deep copy of the source
-func DeepClone[T Codec](src T, factory func() T) T {
-	if reflect.ValueOf(src).IsNil() {
-		var dst T
-		return dst
+func TestIsHot(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cache := NewHotCache(ctx)
+	region := buildRegion(utils.Read, 3, 60)
+	stats := cache.CheckReadPeerSync(region, region.GetPeers(), []float64{100000000, 1000, 1000}, 60)
+	cache.Update(stats[0], utils.Read)
+	for i := 0; i < 100; i++ {
+		re.True(cache.IsRegionHot(region, 1))
 	}
-	b, err := src.Marshal()
-	if err != nil {
-		var dst T
-		return dst
-	}
-	dst := factory()
-	_ = dst.Unmarshal(b)
-	return dst
 }

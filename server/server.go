@@ -442,9 +442,15 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.rootPath = endpoint.PDRootPath(clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
-	s.member.SetMemberDeployPath(s.member.ID())
-	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
-	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
+	if err := s.member.SetMemberDeployPath(s.member.ID()); err != nil {
+		return err
+	}
+	if err := s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion); err != nil {
+		return err
+	}
+	if err := s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash); err != nil {
+		return err
+	}
 	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -1686,7 +1692,9 @@ func (s *Server) leaderLoop() {
 						zap.String("current-leader-member-id", types.ID(etcdLeader).String()),
 						zap.String("transferee-member-id", types.ID(s.member.ID()).String()),
 					)
-					s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID())
+					if err := s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID()); err != nil {
+						log.Error("failed to move etcd leader", errs.ZapError(err))
+					}
 				}
 			}
 			log.Info("skip campaigning of pd leader and check later",

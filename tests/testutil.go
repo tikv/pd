@@ -91,10 +91,10 @@ func SetRangePort(start, end int) {
 var once sync.Once
 
 // InitLogger initializes the logger for test.
-func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, isRedactInfoLogEnabled bool) (err error) {
+func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, redactInfoLog logutil.RedactInfoLogType) (err error) {
 	once.Do(func() {
 		// Setup the logger.
-		err = logutil.SetupLogger(logConfig, &logger, &logProps, isRedactInfoLogEnabled)
+		err = logutil.SetupLogger(logConfig, &logger, &logProps, redactInfoLog)
 		if err != nil {
 			return
 		}
@@ -439,6 +439,11 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(2)},
 				{Id: allocator.alloc(), StoreId: uint64(3)},
 			},
+		}
+		if i == 0 {
+			r.StartKey = []byte{}
+		} else if i == regionLen-1 {
+			r.EndKey = []byte{}
 		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.

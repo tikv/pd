@@ -467,7 +467,9 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.MicroService.adjust(configMetaData.Child("micro-service"))
 
-	c.Security.Encryption.Adjust()
+	if err := c.Security.Encryption.Adjust(); err != nil {
+		return err
+	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
 
@@ -579,7 +581,9 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
 	}
-	c.migrateConfigurationFromFile(meta)
+	if err := c.migrateConfigurationFromFile(meta); err != nil {
+		return err
+	}
 	return c.Validate()
 }
 

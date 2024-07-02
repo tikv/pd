@@ -1,4 +1,4 @@
-// Copyright 2017 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 package cases
 
 import (
-	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
@@ -23,60 +22,62 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
-func newBalanceLeader(config *sc.SimConfig) *Case {
+func newScaleInOut(config *sc.SimConfig) *Case {
 	var simCase Case
 
 	totalStore := config.TotalStore
 	totalRegion := config.TotalRegion
-	allStores := make(map[uint64]struct{}, totalStore)
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
-	for i := 0; i < totalStore; i++ {
-		id := simutil.IDAllocator.NextID()
-		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     id,
-			Status: metapb.StoreState_Up,
-		})
-		allStores[id] = struct{}{}
+	if totalStore == 0 || totalRegion == 0 {
+		totalStore, totalRegion = 6, 4000
 	}
 
-	leaderStoreID := simCase.Stores[totalStore-1].ID
+	for i := 0; i < totalStore; i++ {
+		s := &Store{
+			ID:     IDAllocator.nextID(),
+			Status: metapb.StoreState_Up,
+		}
+		if i%2 == 1 {
+			s.HasExtraUsedSpace = true
+		}
+		simCase.Stores = append(simCase.Stores, s)
+	}
+
 	for i := 0; i < totalRegion; i++ {
 		peers := make([]*metapb.Peer, 0, replica)
-		peers = append(peers, &metapb.Peer{
-			Id:      simutil.IDAllocator.NextID(),
-			StoreId: leaderStoreID,
-		})
-		for j := 1; j < replica; j++ {
+		for j := 0; j < replica; j++ {
 			peers = append(peers, &metapb.Peer{
 				Id:      simutil.IDAllocator.NextID(),
-				StoreId: uint64((i+j)%(totalStore-1) + 1),
+				StoreId: uint64((i+j)%totalStore + 1),
 			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * units.MiB,
-			Keys:   960000,
 		})
 	}
 
-	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		for _, store := range stores {
-			if store.NodeState == metapb.NodeState_Removed {
-				delete(allStores, store.GetId())
-			}
+	scaleInTick := int64(totalRegion * 3 / totalStore)
+	addEvent := &AddNodesDescriptor{}
+	addEvent.Step = func(tick int64) uint64 {
+		if tick == scaleInTick {
+			return uint64(totalStore + 1)
 		}
-		if len(allStores) == 0 {
-			return false
+		return 0
+	}
+
+	removeEvent := &DeleteNodesDescriptor{}
+	removeEvent.Step = func(tick int64) uint64 {
+		if tick == scaleInTick*2 {
+			return uint64(totalStore + 1)
 		}
-		for storeID := range allStores {
-			leaderCount := regions.GetStoreLeaderCount(storeID)
-			if !isUniform(leaderCount, totalRegion/len(allStores)) {
-				return false
-			}
-		}
-		return true
+		return 0
+	}
+	simCase.Events = []EventDescriptor{addEvent, removeEvent}
+
+	simCase.Checker = func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) bool {
+		return false
 	}
 	return &simCase
 }

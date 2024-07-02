@@ -10634,19 +10634,12 @@
               "step": 2
             },
             {
-              "expr": "histogram_quantile(0.99999, sum(rate(pd_server_handle_tso_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
-              "format": "time_series",
-              "intervalFactor": 1,
-              "legendFormat": "99.999% tso",
-              "refId": "D"
-            },
-            {
               "expr": "histogram_quantile(0.90, sum(rate(tso_server_handle_tso_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
               "format": "time_series",
               "hide": false,
               "intervalFactor": 2,
               "legendFormat": "90% tso",
-              "refId": "E",
+              "refId": "D",
               "step": 2
             },
             {
@@ -10655,7 +10648,7 @@
               "hide": false,
               "intervalFactor": 2,
               "legendFormat": "99% tso",
-              "refId": "F",
+              "refId": "E",
               "step": 2
             },
             {
@@ -10664,22 +10657,15 @@
               "hide": false,
               "intervalFactor": 2,
               "legendFormat": "99.9% tso",
-              "refId": "G",
+              "refId": "F",
               "step": 2
-            },
-            {
-              "expr": "histogram_quantile(0.99999, sum(rate(tso_server_handle_tso_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
-              "format": "time_series",
-              "intervalFactor": 1,
-              "legendFormat": "99.999% tso",
-              "refId": "H"
             }
           ],
           "thresholds": [],
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "PD server TSO handle time",
+          "title": "PD server TSO handle duration",
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -10766,18 +10752,34 @@
           "steppedLine": false,
           "targets": [
             {
-              "expr": "histogram_quantile(0.98, sum(rate(pd_client_request_handle_requests_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
-              "hide": false,
+              "expr": "avg(rate(pd_client_request_handle_requests_duration_seconds_sum{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type) /  avg(rate(pd_client_request_handle_requests_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type)",
               "intervalFactor": 2,
-              "legendFormat": "{{type}} 98th percentile",
+              "legendFormat": "avg {{type}}",
               "refId": "A",
               "step": 2
             },
             {
-              "expr": "avg(rate(pd_client_request_handle_requests_duration_seconds_sum{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type) /  avg(rate(pd_client_request_handle_requests_duration_seconds_count{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type)",
+              "expr": "histogram_quantile(0.90, sum(rate(pd_client_request_handle_requests_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
+              "hide": false,
               "intervalFactor": 2,
-              "legendFormat": "{{type}} average",
+              "legendFormat": "90% {{type}}",
               "refId": "B",
+              "step": 2
+            },
+            {
+              "expr": "histogram_quantile(0.99, sum(rate(pd_client_request_handle_requests_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "99% {{type}}",
+              "refId": "C",
+              "step": 2
+            },
+            {
+              "expr": "histogram_quantile(0.999, sum(rate(pd_client_request_handle_requests_duration_seconds_bucket{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\"}[30s])) by (type, le))",
+              "hide": false,
+              "intervalFactor": 2,
+              "legendFormat": "99.9% {{type}}",
+              "refId": "D",
               "step": 2
             }
           ],
@@ -10785,7 +10787,7 @@
           "timeFrom": null,
           "timeRegions": [],
           "timeShift": null,
-          "title": "Handle requests duration",
+          "title": "PD client requests handle duration",
           "tooltip": {
             "msResolution": false,
             "shared": true,

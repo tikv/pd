@@ -22,19 +22,17 @@ import (
 
 // Connection records the information of connection among nodes.
 type Connection struct {
-	pdAddr string
-	Nodes  map[uint64]*Node
+	Nodes map[uint64]*Node
 }
 
 // NewConnection creates nodes according to the configuration and returns the connection among nodes.
-func NewConnection(simCase *cases.Case, pdAddr string, storeConfig *config.SimConfig) (*Connection, error) {
+func NewConnection(simCase *cases.Case, storeConfig *config.SimConfig) (*Connection, error) {
 	conn := &Connection{
-		pdAddr: pdAddr,
-		Nodes:  make(map[uint64]*Node),
+		Nodes: make(map[uint64]*Node),
 	}
 
 	for _, store := range simCase.Stores {
-		node, err := NewNode(store, pdAddr, storeConfig)
+		node, err := NewNode(store, storeConfig)
 		if err != nil {
 			return nil, err
 		}
