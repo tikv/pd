@@ -31,15 +31,23 @@ jobs:
           - worker_id: 2
             name: 'Unit Test(2)'
           - worker_id: 3
-            name: 'Tools Test'
+            name: 'Unit Test(3)'
           - worker_id: 4
-            name: 'Client Integration Test'
+            name: 'Tests(1)'
           - worker_id: 5
-            name: 'TSO Integration Test'
+            name: 'Tests(2)'
           - worker_id: 6
-            name: 'MicroService Integration Test'
+            name: 'Tools Test'
+          - worker_id: 7
+            name: 'Client Integration Test'
+          - worker_id: 8
+            name: 'TSO Integration Test'
+          - worker_id: 9
+            name: 'MicroService Integration(!TSO)'
+          - worker_id: 10
+            name: 'MicroService Integration(TSO)'
     outputs:
-      job-total: 6
+      job-total: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -52,6 +60,9 @@ jobs:
         run: |
           make ci-test-job JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID
+          if [ -f junitfile ]; then
+            cat junitfile
+          fi
       - name: Upload coverage result ${{ matrix.worker_id }}
         uses: actions/upload-artifact@v4
         with:
@@ -77,7 +88,7 @@ jobs:
           # only keep the first line(`mode: aomic`) of the coverage profile
           sed -i '2,${/mode: atomic/d;}' covprofile
       - name: Send coverage
-        uses: codecov/codecov-action@v4.2.0
+        uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV }}
           file: ./covprofile
