@@ -43,8 +43,8 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantHotRegionCounter     = newEventCounter(config.GrantHotRegionName, "schedule")
-	grantHotRegionSkipCounter = newEventCounter(config.GrantHotRegionName, "skip")
+	grantHotRegionCounter     = counterWithEvent(config.GrantHotRegionName, "schedule")
+	grantHotRegionSkipCounter = counterWithEvent(config.GrantHotRegionName, "skip")
 )
 
 type grantHotRegionSchedulerConfig struct {

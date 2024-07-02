@@ -39,9 +39,9 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	transferWitnessLeaderCounter              = newEventCounter(config.TransferWitnessLeaderName, "schedule")
-	transferWitnessLeaderNewOperatorCounter   = newEventCounter(config.TransferWitnessLeaderName, "new-operator")
-	transferWitnessLeaderNoTargetStoreCounter = newEventCounter(config.TransferWitnessLeaderName, "no-target-store")
+	transferWitnessLeaderCounter              = counterWithEvent(config.TransferWitnessLeaderName, "schedule")
+	transferWitnessLeaderNewOperatorCounter   = counterWithEvent(config.TransferWitnessLeaderName, "new-operator")
+	transferWitnessLeaderNoTargetStoreCounter = counterWithEvent(config.TransferWitnessLeaderName, "no-target-store")
 )
 
 type transferWitnessLeaderScheduler struct {

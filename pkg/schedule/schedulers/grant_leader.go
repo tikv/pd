@@ -38,9 +38,9 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantLeaderCounter            = newEventCounter(config.GrantLeaderName, "schedule")
-	grantLeaderNoFollowerCounter  = newEventCounter(config.GrantLeaderName, "no-follower")
-	grantLeaderNewOperatorCounter = newEventCounter(config.GrantLeaderName, "new-operator")
+	grantLeaderCounter            = counterWithEvent(config.GrantLeaderName, "schedule")
+	grantLeaderNoFollowerCounter  = counterWithEvent(config.GrantLeaderName, "no-follower")
+	grantLeaderNewOperatorCounter = counterWithEvent(config.GrantLeaderName, "new-operator")
 )
 
 type grantLeaderSchedulerConfig struct {

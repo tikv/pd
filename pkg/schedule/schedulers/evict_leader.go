@@ -46,11 +46,11 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	evictLeaderCounter              = newEventCounter(config.EvictLeaderName, "schedule")
-	evictLeaderNoLeaderCounter      = newEventCounter(config.EvictLeaderName, "no-leader")
-	evictLeaderPickUnhealthyCounter = newEventCounter(config.EvictLeaderName, "pick-unhealthy-region")
-	evictLeaderNoTargetStoreCounter = newEventCounter(config.EvictLeaderName, "no-target-store")
-	evictLeaderNewOperatorCounter   = newEventCounter(config.EvictLeaderName, "new-operator")
+	evictLeaderCounter              = counterWithEvent(config.EvictLeaderName, "schedule")
+	evictLeaderNoLeaderCounter      = counterWithEvent(config.EvictLeaderName, "no-leader")
+	evictLeaderPickUnhealthyCounter = counterWithEvent(config.EvictLeaderName, "pick-unhealthy-region")
+	evictLeaderNoTargetStoreCounter = counterWithEvent(config.EvictLeaderName, "no-target-store")
+	evictLeaderNewOperatorCounter   = counterWithEvent(config.EvictLeaderName, "new-operator")
 )
 
 type evictLeaderSchedulerConfig struct {

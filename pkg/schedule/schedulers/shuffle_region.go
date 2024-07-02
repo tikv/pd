@@ -29,12 +29,12 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleRegionCounter                   = newEventCounter(config.ShuffleRegionName, "schedule")
-	shuffleRegionNewOperatorCounter        = newEventCounter(config.ShuffleRegionName, "new-operator")
-	shuffleRegionNoRegionCounter           = newEventCounter(config.ShuffleRegionName, "no-region")
-	shuffleRegionNoNewPeerCounter          = newEventCounter(config.ShuffleRegionName, "no-new-peer")
-	shuffleRegionCreateOperatorFailCounter = newEventCounter(config.ShuffleRegionName, "create-operator-fail")
-	shuffleRegionNoSourceStoreCounter      = newEventCounter(config.ShuffleRegionName, "no-source-store")
+	shuffleRegionCounter                   = counterWithEvent(config.ShuffleRegionName, "schedule")
+	shuffleRegionNewOperatorCounter        = counterWithEvent(config.ShuffleRegionName, "new-operator")
+	shuffleRegionNoRegionCounter           = counterWithEvent(config.ShuffleRegionName, "no-region")
+	shuffleRegionNoNewPeerCounter          = counterWithEvent(config.ShuffleRegionName, "no-new-peer")
+	shuffleRegionCreateOperatorFailCounter = counterWithEvent(config.ShuffleRegionName, "create-operator-fail")
+	shuffleRegionNoSourceStoreCounter      = counterWithEvent(config.ShuffleRegionName, "no-source-store")
 )
 
 type shuffleRegionScheduler struct {

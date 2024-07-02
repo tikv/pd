@@ -179,7 +179,7 @@ func (bs *balanceSolver) setSearchRevertRegionsV2() {
 	bs.sche.searchRevertRegions[bs.resourceTy] = searchRevertRegions
 	if searchRevertRegions {
 		event := fmt.Sprintf("%s-%s-allow-search-revert-regions", bs.rwTy.String(), bs.opTy.String())
-		newEventCounter(config.HotRegionName, event).Inc()
+		counterWithEvent(config.HotRegionName, event).Inc()
 	}
 }
 

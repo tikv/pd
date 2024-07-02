@@ -37,9 +37,9 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleHotRegionCounter            = newEventCounter(config.ShuffleHotRegionName, "schedule")
-	shuffleHotRegionNewOperatorCounter = newEventCounter(config.ShuffleHotRegionName, "new-operator")
-	shuffleHotRegionSkipCounter        = newEventCounter(config.ShuffleHotRegionName, "skip")
+	shuffleHotRegionCounter            = counterWithEvent(config.ShuffleHotRegionName, "schedule")
+	shuffleHotRegionNewOperatorCounter = counterWithEvent(config.ShuffleHotRegionName, "new-operator")
+	shuffleHotRegionSkipCounter        = counterWithEvent(config.ShuffleHotRegionName, "skip")
 )
 
 type shuffleHotRegionSchedulerConfig struct {

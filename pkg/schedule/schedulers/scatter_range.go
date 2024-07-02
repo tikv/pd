@@ -34,12 +34,12 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	scatterRangeCounter                    = newEventCounter(config.ScatterRangeName, "schedule")
-	scatterRangeNewOperatorCounter         = newEventCounter(config.ScatterRangeName, "new-operator")
-	scatterRangeNewLeaderOperatorCounter   = newEventCounter(config.ScatterRangeName, "new-leader-operator")
-	scatterRangeNewRegionOperatorCounter   = newEventCounter(config.ScatterRangeName, "new-region-operator")
-	scatterRangeNoNeedBalanceRegionCounter = newEventCounter(config.ScatterRangeName, "no-need-balance-region")
-	scatterRangeNoNeedBalanceLeaderCounter = newEventCounter(config.ScatterRangeName, "no-need-balance-leader")
+	scatterRangeCounter                    = counterWithEvent(config.ScatterRangeName, "schedule")
+	scatterRangeNewOperatorCounter         = counterWithEvent(config.ScatterRangeName, "new-operator")
+	scatterRangeNewLeaderOperatorCounter   = counterWithEvent(config.ScatterRangeName, "new-leader-operator")
+	scatterRangeNewRegionOperatorCounter   = counterWithEvent(config.ScatterRangeName, "new-region-operator")
+	scatterRangeNoNeedBalanceRegionCounter = counterWithEvent(config.ScatterRangeName, "no-need-balance-region")
+	scatterRangeNoNeedBalanceLeaderCounter = counterWithEvent(config.ScatterRangeName, "no-need-balance-leader")
 )
 
 type scatterRangeSchedulerConfig struct {

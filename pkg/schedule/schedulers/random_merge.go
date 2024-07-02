@@ -31,12 +31,12 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	randomMergeCounter              = newEventCounter(config.RandomMergeName, "schedule")
-	randomMergeNewOperatorCounter   = newEventCounter(config.RandomMergeName, "new-operator")
-	randomMergeNoSourceStoreCounter = newEventCounter(config.RandomMergeName, "no-source-store")
-	randomMergeNoRegionCounter      = newEventCounter(config.RandomMergeName, "no-region")
-	randomMergeNoTargetStoreCounter = newEventCounter(config.RandomMergeName, "no-target-store")
-	randomMergeNotAllowedCounter    = newEventCounter(config.RandomMergeName, "not-allowed")
+	randomMergeCounter              = counterWithEvent(config.RandomMergeName, "schedule")
+	randomMergeNewOperatorCounter   = counterWithEvent(config.RandomMergeName, "new-operator")
+	randomMergeNoSourceStoreCounter = counterWithEvent(config.RandomMergeName, "no-source-store")
+	randomMergeNoRegionCounter      = counterWithEvent(config.RandomMergeName, "no-region")
+	randomMergeNoTargetStoreCounter = counterWithEvent(config.RandomMergeName, "no-target-store")
+	randomMergeNotAllowedCounter    = counterWithEvent(config.RandomMergeName, "not-allowed")
 )
 
 type randomMergeSchedulerConfig struct {

@@ -40,7 +40,7 @@ const (
 )
 
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
-var evictSlowStoreCounter = newEventCounter(config.EvictSlowStoreName, "schedule")
+var evictSlowStoreCounter = counterWithEvent(config.EvictSlowStoreName, "schedule")
 
 type evictSlowStoreSchedulerConfig struct {
 	syncutil.RWMutex

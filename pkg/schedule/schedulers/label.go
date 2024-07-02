@@ -29,11 +29,11 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	labelCounter            = newEventCounter(config.LabelName, "schedule")
-	labelNewOperatorCounter = newEventCounter(config.LabelName, "new-operator")
-	labelNoTargetCounter    = newEventCounter(config.LabelName, "no-target")
-	labelSkipCounter        = newEventCounter(config.LabelName, "skip")
-	labelNoRegionCounter    = newEventCounter(config.LabelName, "no-region")
+	labelCounter            = counterWithEvent(config.LabelName, "schedule")
+	labelNewOperatorCounter = counterWithEvent(config.LabelName, "new-operator")
+	labelNoTargetCounter    = counterWithEvent(config.LabelName, "no-target")
+	labelSkipCounter        = counterWithEvent(config.LabelName, "skip")
+	labelNoRegionCounter    = counterWithEvent(config.LabelName, "no-region")
 )
 
 type labelSchedulerConfig struct {

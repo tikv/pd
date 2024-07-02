@@ -165,6 +165,6 @@ func init() {
 	prometheus.MustRegister(HotPendingSum)
 }
 
-func newEventCounter(schedulerName config.CheckerSchedulerName, event string) prometheus.Counter {
+func counterWithEvent(schedulerName config.CheckerSchedulerName, event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(schedulerName.String(), event)
 }

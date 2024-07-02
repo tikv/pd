@@ -54,13 +54,13 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceLeaderScheduleCounter         = newEventCounter(config.BalanceLeaderName, "schedule")
-	balanceLeaderNoLeaderRegionCounter   = newEventCounter(config.BalanceLeaderName, "no-leader-region")
-	balanceLeaderRegionHotCounter        = newEventCounter(config.BalanceLeaderName, "region-hot")
-	balanceLeaderNoTargetStoreCounter    = newEventCounter(config.BalanceLeaderName, "no-target-store")
-	balanceLeaderNoFollowerRegionCounter = newEventCounter(config.BalanceLeaderName, "no-follower-region")
-	balanceLeaderSkipCounter             = newEventCounter(config.BalanceLeaderName, "skip")
-	balanceLeaderNewOpCounter            = newEventCounter(config.BalanceLeaderName, "new-operator")
+	balanceLeaderScheduleCounter         = counterWithEvent(config.BalanceLeaderName, "schedule")
+	balanceLeaderNoLeaderRegionCounter   = counterWithEvent(config.BalanceLeaderName, "no-leader-region")
+	balanceLeaderRegionHotCounter        = counterWithEvent(config.BalanceLeaderName, "region-hot")
+	balanceLeaderNoTargetStoreCounter    = counterWithEvent(config.BalanceLeaderName, "no-target-store")
+	balanceLeaderNoFollowerRegionCounter = counterWithEvent(config.BalanceLeaderName, "no-follower-region")
+	balanceLeaderSkipCounter             = counterWithEvent(config.BalanceLeaderName, "skip")
+	balanceLeaderNewOpCounter            = counterWithEvent(config.BalanceLeaderName, "new-operator")
 )
 
 type balanceLeaderSchedulerConfig struct {

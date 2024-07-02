@@ -28,10 +28,10 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleLeaderCounter              = newEventCounter(config.ShuffleLeaderName, "schedule")
-	shuffleLeaderNewOperatorCounter   = newEventCounter(config.ShuffleLeaderName, "new-operator")
-	shuffleLeaderNoTargetStoreCounter = newEventCounter(config.ShuffleLeaderName, "no-target-store")
-	shuffleLeaderNoFollowerCounter    = newEventCounter(config.ShuffleLeaderName, "no-follower")
+	shuffleLeaderCounter              = counterWithEvent(config.ShuffleLeaderName, "schedule")
+	shuffleLeaderNewOperatorCounter   = counterWithEvent(config.ShuffleLeaderName, "new-operator")
+	shuffleLeaderNoTargetStoreCounter = counterWithEvent(config.ShuffleLeaderName, "no-target-store")
+	shuffleLeaderNoFollowerCounter    = counterWithEvent(config.ShuffleLeaderName, "no-follower")
 )
 
 type shuffleLeaderSchedulerConfig struct {

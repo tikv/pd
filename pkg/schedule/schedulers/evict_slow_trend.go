@@ -374,7 +374,7 @@ func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 }
 
 func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
-	newEventCounter(config.EvictSlowTrendName, "schedule").Inc()
+	counterWithEvent(config.EvictSlowTrendName, "schedule").Inc()
 
 	var ops []*operator.Operator
 

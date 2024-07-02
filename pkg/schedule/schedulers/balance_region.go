@@ -32,14 +32,14 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceRegionScheduleCounter      = newEventCounter(config.BalanceRegionName, "schedule")
-	balanceRegionNoRegionCounter      = newEventCounter(config.BalanceRegionName, "no-region")
-	balanceRegionHotCounter           = newEventCounter(config.BalanceRegionName, "region-hot")
-	balanceRegionNoLeaderCounter      = newEventCounter(config.BalanceRegionName, "no-leader")
-	balanceRegionNewOpCounter         = newEventCounter(config.BalanceRegionName, "new-operator")
-	balanceRegionSkipCounter          = newEventCounter(config.BalanceRegionName, "skip")
-	balanceRegionCreateOpFailCounter  = newEventCounter(config.BalanceRegionName, "create-operator-fail")
-	balanceRegionNoReplacementCounter = newEventCounter(config.BalanceRegionName, "no-replacement")
+	balanceRegionScheduleCounter      = counterWithEvent(config.BalanceRegionName, "schedule")
+	balanceRegionNoRegionCounter      = counterWithEvent(config.BalanceRegionName, "no-region")
+	balanceRegionHotCounter           = counterWithEvent(config.BalanceRegionName, "region-hot")
+	balanceRegionNoLeaderCounter      = counterWithEvent(config.BalanceRegionName, "no-leader")
+	balanceRegionNewOpCounter         = counterWithEvent(config.BalanceRegionName, "new-operator")
+	balanceRegionSkipCounter          = counterWithEvent(config.BalanceRegionName, "skip")
+	balanceRegionCreateOpFailCounter  = counterWithEvent(config.BalanceRegionName, "create-operator-fail")
+	balanceRegionNoReplacementCounter = counterWithEvent(config.BalanceRegionName, "no-replacement")
 )
 
 type balanceRegionSchedulerConfig struct {
