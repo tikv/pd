@@ -51,8 +51,12 @@ const (
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	// It takes about 1.3 minutes(1000000/128*10/60/1000) to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
-	patrolScanRegionLimit = 128
+	// For 1,024,000 regions, patrolScanRegionLimit is 1000, which is max(patrolScanRegionMinLimit, 1,024,000/patrolRegionPartition)
+	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
+	patrolScanRegionMinLimit = 128
+	patrolRegionChanLen      = 1024
+	patrolRegionPartition    = 1024
+
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
@@ -74,18 +78,18 @@ type Coordinator struct {
 	cancel context.CancelFunc
 
 	schedulersInitialized bool
-	patrolRegionsDuration time.Duration
 
-	cluster           sche.ClusterInformer
-	prepareChecker    *prepareChecker
-	checkers          *checker.Controller
-	regionScatterer   *scatter.RegionScatterer
-	regionSplitter    *splitter.RegionSplitter
-	schedulers        *schedulers.Controller
-	opController      *operator.Controller
-	hbStreams         *hbstream.HeartbeatStreams
-	pluginInterface   *PluginInterface
-	diagnosticManager *diagnostic.Manager
+	cluster             sche.ClusterInformer
+	prepareChecker      *prepareChecker
+	checkers            *checker.Controller
+	regionScatterer     *scatter.RegionScatterer
+	regionSplitter      *splitter.RegionSplitter
+	schedulers          *schedulers.Controller
+	opController        *operator.Controller
+	hbStreams           *hbstream.HeartbeatStreams
+	pluginInterface     *PluginInterface
+	diagnosticManager   *diagnostic.Manager
+	patrolRegionContext *PatrolRegionContext
 }
 
 // NewCoordinator creates a new Coordinator.
@@ -108,6 +112,7 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 		hbStreams:             hbStreams,
 		pluginInterface:       NewPluginInterface(),
 		diagnosticManager:     diagnostic.NewManager(schedulers, cluster.GetSchedulerConfig()),
+		patrolRegionContext:   &PatrolRegionContext{},
 	}
 }
 
@@ -116,15 +121,7 @@ func (c *Coordinator) GetPatrolRegionsDuration() time.Duration {
 	if c == nil {
 		return 0
 	}
-	c.RLock()
-	defer c.RUnlock()
-	return c.patrolRegionsDuration
-}
-
-func (c *Coordinator) setPatrolRegionsDuration(dur time.Duration) {
-	c.Lock()
-	defer c.Unlock()
-	c.patrolRegionsDuration = dur
+	return c.patrolRegionContext.getPatrolRegionsDuration()
 }
 
 // markSchedulersInitialized marks the scheduler initialization is finished.
@@ -151,18 +148,137 @@ func (c *Coordinator) IsPendingRegion(region uint64) bool {
 	return c.checkers.IsPendingRegion(region)
 }
 
+// PatrolRegionContext is used to store the context of patrol regions.
+type PatrolRegionContext struct {
+	syncutil.RWMutex
+	// config
+	interval    time.Duration
+	workerCount int
+	scanLimit   int
+	// status
+	patrolRoundStartTime time.Time
+	duration             time.Duration
+	// workers
+	workersCtx    context.Context
+	workersCancel context.CancelFunc
+	regionChan    chan *core.RegionInfo
+	wg            sync.WaitGroup
+}
+
+func (p *PatrolRegionContext) init(ctx context.Context, cluster sche.ClusterInformer) {
+	p.interval = cluster.GetCheckerConfig().GetPatrolRegionInterval()
+	p.workerCount = cluster.GetCheckerConfig().GetPatrolRegionWorkerCount()
+
+	p.scanLimit = calculateScanLimit(cluster)
+	p.patrolRoundStartTime = time.Now()
+
+	p.regionChan = make(chan *core.RegionInfo, patrolRegionChanLen)
+	p.workersCtx, p.workersCancel = context.WithCancel(ctx)
+}
+
+func (p *PatrolRegionContext) stop() {
+	close(p.regionChan)
+	p.workersCancel()
+	p.wg.Wait()
+}
+
+func (p *PatrolRegionContext) getWorkerCount() int {
+	p.RLock()
+	defer p.RUnlock()
+	return p.workerCount
+}
+
+func (p *PatrolRegionContext) setWorkerCount(count int) {
+	p.Lock()
+	defer p.Unlock()
+	p.workerCount = count
+}
+
+func (p *PatrolRegionContext) getInterval() time.Duration {
+	p.RLock()
+	defer p.RUnlock()
+	return p.interval
+}
+
+func (p *PatrolRegionContext) setInterval(interval time.Duration) {
+	p.Lock()
+	defer p.Unlock()
+	p.interval = interval
+}
+
+func (p *PatrolRegionContext) getScanLimit() int {
+	p.RLock()
+	defer p.RUnlock()
+	return p.scanLimit
+}
+
+func (p *PatrolRegionContext) setScanLimit(limit int) {
+	p.Lock()
+	defer p.Unlock()
+	p.scanLimit = limit
+}
+
+func calculateScanLimit(cluster sche.ClusterInformer) int {
+	return max(patrolScanRegionMinLimit, cluster.GetTotalRegionCount()/patrolRegionPartition)
+}
+
+func (p *PatrolRegionContext) getPatrolRegionsDuration() time.Duration {
+	p.RLock()
+	defer p.RUnlock()
+	return p.duration
+}
+
+func (p *PatrolRegionContext) setPatrolRegionsDuration(dur time.Duration) {
+	p.Lock()
+	defer p.Unlock()
+	p.duration = dur
+}
+
+func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Coordinator) {
+	for i := 0; i < p.getWorkerCount(); i++ {
+		p.wg.Add(1)
+		go func(i int) {
+			defer logutil.LogPanic()
+			defer p.wg.Done()
+			for {
+				select {
+				case region, ok := <-p.regionChan:
+					if !ok {
+						log.Debug("region channel is closed", zap.Int("worker-id", i))
+						return
+					}
+					c.tryAddOperators(region)
+				case <-p.workersCtx.Done():
+					log.Debug("region worker is closed", zap.Int("worker-id", i))
+					return
+				}
+			}
+		}(i)
+	}
+}
+
+func (p *PatrolRegionContext) roundUpdateMetrics() {
+	dur := time.Since(p.patrolRoundStartTime)
+	patrolCheckRegionsGauge.Set(dur.Seconds())
+	p.setPatrolRegionsDuration(dur)
+	p.patrolRoundStartTime = time.Now()
+}
+
 // PatrolRegions is used to scan regions.
 // The checkers will check these regions to decide if they need to do some operations.
 // The function is exposed for test purpose.
 func (c *Coordinator) PatrolRegions() {
 	defer logutil.LogPanic()
-
 	defer c.wg.Done()
-	ticker := time.NewTicker(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
+
+	c.patrolRegionContext.init(c.ctx, c.cluster)
+	c.patrolRegionContext.startPatrolRegionWorkers(c)
+	defer c.patrolRegionContext.stop()
+
+	ticker := time.NewTicker(c.patrolRegionContext.getInterval())
 	defer ticker.Stop()
 
 	log.Info("coordinator starts patrol regions")
-	start := time.Now()
 	var (
 		key     []byte
 		regions []*core.RegionInfo
@@ -170,45 +286,80 @@ func (c *Coordinator) PatrolRegions() {
 	for {
 		select {
 		case <-ticker.C:
-			// Note: we reset the ticker here to support updating configuration dynamically.
-			ticker.Reset(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
+			c.updateTickerIfNeeded(ticker)
+			c.updatePatrolWorkersIfNeeded()
+			if c.cluster.IsSchedulingHalted() {
+				for len(c.patrolRegionContext.regionChan) > 0 {
+					<-c.patrolRegionContext.regionChan
+				}
+				log.Debug("skip patrol regions due to scheduling is halted")
+				continue
+			}
+
+			// wait for the regionChan to be drained
+			if len(c.patrolRegionContext.regionChan) > 0 {
+				continue
+			}
+
+			// Check priority regions first.
+			c.checkPriorityRegions()
+			// Check suspect regions first.
+			c.checkSuspectRegions()
+			// Check regions in the waiting list
+			c.checkWaitingRegions()
+
+			key, regions = c.checkRegions(key)
+			if len(regions) == 0 {
+				continue
+			}
+			// Updates the label level isolation statistics.
+			c.cluster.UpdateRegionsLabelLevelStats(regions)
+			// Update metrics and scan limit if a full scan is done.
+			if len(key) == 0 {
+				c.patrolRegionContext.roundUpdateMetrics()
+				c.patrolRegionContext.setScanLimit(calculateScanLimit(c.cluster))
+			}
+			failpoint.Inject("break-patrol", func() {
+				time.Sleep(100 * time.Millisecond) // ensure the regions are handled by the workers
+				failpoint.Return()
+			})
 		case <-c.ctx.Done():
 			patrolCheckRegionsGauge.Set(0)
-			c.setPatrolRegionsDuration(0)
+			c.patrolRegionContext.setPatrolRegionsDuration(0)
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if c.cluster.IsSchedulingHalted() {
-			continue
-		}
+	}
+}
 
-		// Check priority regions first.
-		c.checkPriorityRegions()
-		// Check suspect regions first.
-		c.checkSuspectRegions()
-		// Check regions in the waiting list
-		c.checkWaitingRegions()
+func (c *Coordinator) updateTickerIfNeeded(ticker *time.Ticker) {
+	// Note: we reset the ticker here to support updating configuration dynamically.
+	newInterval := c.cluster.GetCheckerConfig().GetPatrolRegionInterval()
+	if c.patrolRegionContext.getInterval() != newInterval {
+		c.patrolRegionContext.setInterval(newInterval)
+		ticker.Reset(newInterval)
+		log.Debug("coordinator starts patrol regions with new interval", zap.Duration("interval", newInterval))
+	}
+}
 
-		key, regions = c.checkRegions(key)
-		if len(regions) == 0 {
-			continue
-		}
-		// Updates the label level isolation statistics.
-		c.cluster.UpdateRegionsLabelLevelStats(regions)
-		if len(key) == 0 {
-			dur := time.Since(start)
-			patrolCheckRegionsGauge.Set(dur.Seconds())
-			c.setPatrolRegionsDuration(dur)
-			start = time.Now()
-		}
-		failpoint.Inject("break-patrol", func() {
-			failpoint.Break()
-		})
+func (c *Coordinator) updatePatrolWorkersIfNeeded() {
+	newWorkersCount := c.cluster.GetCheckerConfig().GetPatrolRegionWorkerCount()
+	if c.patrolRegionContext.getWorkerCount() != newWorkersCount {
+		oldWorkersCount := c.patrolRegionContext.getWorkerCount()
+		c.patrolRegionContext.setWorkerCount(newWorkersCount)
+		// Stop the old workers and start the new workers.
+		c.patrolRegionContext.workersCancel()
+		c.patrolRegionContext.wg.Wait()
+		c.patrolRegionContext.workersCtx, c.patrolRegionContext.workersCancel = context.WithCancel(c.ctx)
+		c.patrolRegionContext.startPatrolRegionWorkers(c)
+		log.Info("coordinator starts patrol regions with new workers count",
+			zap.Int("old-workers-count", oldWorkersCount),
+			zap.Int("new-workers-count", newWorkersCount))
 	}
 }
 
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
-	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
+	regions = c.cluster.ScanRegions(startKey, nil, c.patrolRegionContext.getScanLimit())
 	if len(regions) == 0 {
 		// Resets the scan key.
 		key = nil
@@ -216,7 +367,7 @@ func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core
 	}
 
 	for _, region := range regions {
-		c.tryAddOperators(region)
+		c.patrolRegionContext.regionChan <- region
 		key = region.GetEndKey()
 	}
 	return
@@ -225,7 +376,7 @@ func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core
 func (c *Coordinator) checkSuspectRegions() {
 	for _, id := range c.checkers.GetSuspectRegions() {
 		region := c.cluster.GetRegion(id)
-		c.tryAddOperators(region)
+		c.patrolRegionContext.regionChan <- region
 	}
 }
 
@@ -234,7 +385,7 @@ func (c *Coordinator) checkWaitingRegions() {
 	waitingListGauge.Set(float64(len(items)))
 	for _, item := range items {
 		region := c.cluster.GetRegion(item.Key)
-		c.tryAddOperators(region)
+		c.patrolRegionContext.regionChan <- region
 	}
 }
 
