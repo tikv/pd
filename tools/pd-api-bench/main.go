@@ -92,7 +92,7 @@ func main() {
 	default:
 		log.Fatal("parse cmd flags error", zap.Error(err))
 	}
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps)
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, logutil.RedactInfoLogOFF)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -199,9 +199,7 @@ func parseCaseNameAndConfig(str string) (string, *cases.Config) {
 		strsb := strings.Split(strs[1], "+")
 		cfg.QPS, err = strconv.ParseInt(strsb[0], 10, 64)
 		if err != nil {
-			if err != nil {
-				log.Error("parse qps failed for case", zap.String("case", name), zap.String("config", strsb[0]))
-			}
+			log.Error("parse qps failed for case", zap.String("case", name), zap.String("config", strsb[0]))
 		}
 		// to get case Burst
 		if len(strsb) > 1 {

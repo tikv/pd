@@ -246,7 +246,7 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	}
 	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
 	if !ok {
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
 	handler.config.Lock()
@@ -255,17 +255,17 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
 	if err := handler.config.persistLocked(); err != nil {
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return
 	}
 	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
-	_ = handler.rd.JSON(w, http.StatusOK, "Config updated.")
+	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
 func (handler *evictSlowTrendHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	_ = handler.rd.JSON(w, http.StatusOK, conf)
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 type evictSlowTrendScheduler struct {
