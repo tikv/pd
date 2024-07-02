@@ -172,6 +172,18 @@ groups:
       value: '{{ $value }}'
       summary: PD_no_store_for_making_replica
 
+  - alert: PD_no_store_for_making_replica_v2
+    expr: increase(pd_checker_event_count{type="replica-checker", name="no_target_store"}[1m]) > 0
+    for: 1m
+    labels:
+      env: ENV_LABELS_ENV
+      level: warning
+      expr: increase(pd_checker_event_count{type="replica-checker", name="no_target_store"}[1m]) > 0
+    annotations:
+      description: 'cluster: ENV_LABELS_ENV, type: {{ $labels.type }}, instance: {{ $labels.instance }}, values: {{ $value }}'
+      value: '{{ $value }}'
+      summary: PD_no_store_for_making_replica
+
   - alert: PD_node_restart
     expr: changes(process_start_time_seconds{job="pd"}[5m]) > 0
     for: 1m
