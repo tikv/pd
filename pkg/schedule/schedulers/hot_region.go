@@ -121,7 +121,8 @@ type baseHotScheduler struct {
 	// regionPendings stores regionID -> pendingInfluence,
 	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
 	// be selected if its owner region is tracked in this attribute.
-	regionPendings  map[uint64]*pendingInfluence
+	regionPendings map[uint64]*pendingInfluence
+	// types is the resource types that the scheduler considers.
 	types           []resourceType
 	r               *rand.Rand
 	updateReadTime  time.Time

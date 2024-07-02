@@ -161,8 +161,12 @@ func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bo
 	shuffleHotRegionCounter.Inc()
 	typ := s.randomType()
 	s.prepareForBalance(typ, cluster)
-	operators := s.randomSchedule(cluster, s.stLoadInfos[typ])
-	return operators, nil
+	switch typ {
+	case readLeader, writeLeader:
+		return s.randomSchedule(cluster, s.stLoadInfos[typ]), nil
+	default:
+	}
+	return nil, nil
 }
 
 func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
