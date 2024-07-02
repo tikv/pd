@@ -192,6 +192,7 @@ func NewResourceGroupController(
 	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig))
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
 	controller.safeRuConfig.Store(controller.ruConfig)
+	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 	return controller, nil
 }
 
@@ -200,12 +201,13 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 	if err != nil {
 		return nil, err
 	}
+	config := DefaultConfig()
+	defer config.Adjust()
 	kvs := resp.GetKvs()
 	if len(kvs) == 0 {
 		log.Warn("[resource group controller] server does not save config, load config failed")
-		return DefaultConfig(), nil
+		return config, nil
 	}
-	config := DefaultConfig()
 	err = json.Unmarshal(kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
@@ -280,6 +282,29 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 
 		for {
 			select {
+			/* high priority */
+			case <-c.lowTokenNotifyChan:
+				c.executeOnAllGroups((*groupCostController).updateRunState)
+				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
+				if len(c.run.currentRequests) == 0 {
+					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */)
+				}
+				if c.run.inDegradedMode {
+					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
+				}
+			case resp := <-c.tokenResponseChan:
+				if resp != nil {
+					c.executeOnAllGroups((*groupCostController).updateRunState)
+					c.handleTokenBucketResponse(resp)
+				}
+				c.run.currentRequests = nil
+			case gc := <-c.tokenBucketUpdateChan:
+				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
+			case <-c.responseDeadlineCh:
+				c.run.inDegradedMode = true
+				c.executeOnAllGroups((*groupCostController).applyDegradedMode)
+				log.Warn("[resource group controller] enter degraded mode")
+
 			/* tickers */
 			case <-cleanupTicker.C:
 				c.cleanUpResourceGroup()
@@ -308,32 +333,12 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
-
 			case <-emergencyTokenAcquisitionTicker.C:
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			/* channels */
 			case <-c.loopCtx.Done():
 				resourceGroupStatusGauge.Reset()
 				return
-			case <-c.responseDeadlineCh:
-				c.run.inDegradedMode = true
-				c.executeOnAllGroups((*groupCostController).applyDegradedMode)
-				log.Warn("[resource group controller] enter degraded mode")
-			case resp := <-c.tokenResponseChan:
-				if resp != nil {
-					c.executeOnAllGroups((*groupCostController).updateRunState)
-					c.handleTokenBucketResponse(resp)
-				}
-				c.run.currentRequests = nil
-			case <-c.lowTokenNotifyChan:
-				c.executeOnAllGroups((*groupCostController).updateRunState)
-				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
-				if len(c.run.currentRequests) == 0 {
-					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */)
-				}
-				if c.run.inDegradedMode {
-					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
-				}
 			case resp, ok := <-watchMetaChannel:
 				failpoint.Inject("disableWatch", func() {
 					if c.ruConfig.isSingleGroupByKeyspace {
@@ -390,6 +395,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
 					}
+					config.Adjust()
 					c.ruConfig = GenerateRUConfig(config)
 
 					// Stay compatible with serverless
@@ -403,9 +409,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
-
-			case gc := <-c.tokenBucketUpdateChan:
-				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
 			}
 		}
 	}()
