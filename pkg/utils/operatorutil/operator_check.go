@@ -95,9 +95,7 @@ func CheckTransferLearner(re *require.Assertions, op *operator.Operator, kind op
 	re.NotNil(op)
 	steps, _ := trimTransferLeaders(op)
 	re.Len(steps, 2)
-	if targetID != 0 {
-		re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
-	}
+	re.Equal(targetID, steps[0].(operator.AddLearner).ToStore)
 	re.Equal(sourceID, steps[1].(operator.RemovePeer).FromStore)
 	kind |= operator.OpRegion
 	re.Equal(kind, op.Kind()&kind)

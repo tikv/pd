@@ -655,12 +655,12 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	hb.conf.SetHistorySampleDuration(0)
 
 	// Add TiKV stores 1, 2, 3, 4, 5, 6, 7 (Down) with region counts 3, 3, 2, 2, 0, 0, 0.
-	// Add TiFlash stores 8, 9, 10, 11 with region counts 3, 1, 1, 0.
-	storeCount := uint64(11)
+	// Add TiFlash stores 8, 9, 10 with region counts 2, 1, 1.
+	storeCount := uint64(10)
 	aliveTiKVStartID := uint64(1)
 	aliveTiKVLastID := uint64(6)
 	aliveTiFlashStartID := uint64(8)
-	aliveTiFlashLastID := uint64(11)
+	aliveTiFlashLastID := uint64(10)
 	downStoreID := uint64(7)
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 3, map[string]string{"zone": "z2", "host": "h2"})
@@ -672,7 +672,6 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	tc.AddLabelsStore(8, 3, map[string]string{"zone": "z1", "host": "h8", "engine": "tiflash"})
 	tc.AddLabelsStore(9, 1, map[string]string{"zone": "z2", "host": "h9", "engine": "tiflash"})
 	tc.AddLabelsStore(10, 1, map[string]string{"zone": "z5", "host": "h10", "engine": "tiflash"})
-	tc.AddLabelsStore(11, 0, map[string]string{"zone": "z3", "host": "h11", "engine": "tiflash"})
 	tc.SetStoreDown(downStoreID)
 	for i := uint64(1); i <= storeCount; i++ {
 		if i != downStoreID {
@@ -712,7 +711,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	// Will transfer a hot learner from store 8, because the total count of peers
 	// which is hot for store 8 is larger than other TiFlash stores.
 	pdServerCfg := tc.GetPDServerConfig()
-	pdServerCfg.FlowRoundByDigit = 8
+	pdServerCfg.FlowRoundByDigit = 6
 	hasLeaderOperator, hasPeerOperator := false, false
 	for i := 0; i < 20 || !(hasLeaderOperator && hasPeerOperator); i++ {
 		clearPendingInfluence(hb)
@@ -727,7 +726,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		case 2:
 			// balance by peer selected
 			re.Equal("move-hot-write-peer", op.Desc())
-			operatorutil.CheckTransferLearner(re, op, operator.OpHotRegion, 8, 0)
+			operatorutil.CheckTransferLearner(re, op, operator.OpHotRegion, 8, 10)
 			hasPeerOperator = true
 		default:
 			re.FailNow("wrong op: " + op.String())
@@ -756,7 +755,6 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	// |    8     |        n/a       | <- TiFlash is always 0.
 	// |    9     |        n/a       |
 	// |   10     |        n/a       |
-	// |   11     |        n/a       |
 	storesBytes := map[uint64]uint64{
 		1: 7.5 * units.MiB * utils.StoreHeartBeatReportInterval,
 		2: 4.5 * units.MiB * utils.StoreHeartBeatReportInterval,
