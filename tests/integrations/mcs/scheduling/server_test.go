@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -303,7 +304,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 	// Add a new evict-leader-scheduler through the API server.
-	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, suite.backendEndpoints, sc.EvictLeaderName.String(), map[string]any{
 		"store_id": 1,
 	})
 	// Check if the evict-leader-scheduler is added.
@@ -321,56 +322,56 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 		},
 	)
 	re.NoError(err)
-	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, suite.backendEndpoints, sc.EvictLeaderName.String(), map[string]any{
 		"store_id": 2,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 	// Delete a store_id from the evict-leader-scheduler through the API server.
-	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", schedulers.EvictLeaderName, 1))
+	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", sc.EvictLeaderName.String(), 1))
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{2})
 	// Add a store_id to the evict-leader-scheduler through the API server by the scheduler handler.
-	api.MustCallSchedulerConfigAPI(re, http.MethodPost, suite.backendEndpoints, schedulers.EvictLeaderName, []string{"config"}, map[string]any{
-		"name":     schedulers.EvictLeaderName,
+	api.MustCallSchedulerConfigAPI(re, http.MethodPost, suite.backendEndpoints, sc.EvictLeaderName.String(), []string{"config"}, map[string]any{
+		"name":     sc.EvictLeaderName.String(),
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 	// Delete a store_id from the evict-leader-scheduler through the API server by the scheduler handler.
-	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, schedulers.EvictLeaderName, []string{"delete", "2"}, nil)
+	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, sc.EvictLeaderName.String(), []string{"delete", "2"}, nil)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
 	// If the last store is deleted, the scheduler should be removed.
-	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, schedulers.EvictLeaderName, []string{"delete", "1"}, nil)
+	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, sc.EvictLeaderName.String(), []string{"delete", "1"}, nil)
 	// Check if the scheduler is removed.
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
 	// Delete the evict-leader-scheduler through the API server by removing the last store_id.
-	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, suite.backendEndpoints, sc.EvictLeaderName.String(), map[string]any{
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
-	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", schedulers.EvictLeaderName, 1))
+	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", sc.EvictLeaderName.String(), 1))
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
 	// Delete the evict-leader-scheduler through the API server.
-	api.MustAddScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, suite.backendEndpoints, sc.EvictLeaderName.String(), map[string]any{
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
-	api.MustDeleteScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName)
+	api.MustDeleteScheduler(re, suite.backendEndpoints, sc.EvictLeaderName.String())
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
 	// The default scheduler could not be deleted, it could only be disabled.
-	defaultSchedulerNames := []string{
-		schedulers.BalanceLeaderName,
-		schedulers.BalanceRegionName,
-		schedulers.HotRegionName,
+	defaultSchedulerNames := []sc.CheckerSchedulerName{
+		sc.BalanceLeaderName,
+		sc.BalanceRegionName,
+		sc.HotRegionName,
 	}
-	checkDisabled := func(name string, shouldDisabled bool) {
+	checkDisabled := func(name sc.CheckerSchedulerName, shouldDisabled bool) {
 		re.NotNil(schedulersController.GetScheduler(name), name)
 		testutil.Eventually(re, func() bool {
 			disabled, err := schedulersController.IsSchedulerDisabled(name)
@@ -380,27 +381,27 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	}
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, false)
-		api.MustDeleteScheduler(re, suite.backendEndpoints, name)
+		api.MustDeleteScheduler(re, suite.backendEndpoints, name.String())
 		checkDisabled(name, true)
 	}
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, true)
-		api.MustAddScheduler(re, suite.backendEndpoints, name, nil)
+		api.MustAddScheduler(re, suite.backendEndpoints, name.String(), nil)
 		checkDisabled(name, false)
 	}
 }
 
-func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
+func checkEvictLeaderSchedulerExist(re *require.Assertions, schedulersController *schedulers.Controller, exist bool) {
 	testutil.Eventually(re, func() bool {
 		if !exist {
-			return sc.GetScheduler(schedulers.EvictLeaderName) == nil
+			return schedulersController.GetScheduler(sc.EvictLeaderName) == nil
 		}
-		return sc.GetScheduler(schedulers.EvictLeaderName) != nil
+		return schedulersController.GetScheduler(sc.EvictLeaderName) != nil
 	})
 }
 
-func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller, expected []uint64) {
-	handler, ok := sc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+func checkEvictLeaderStoreIDs(re *require.Assertions, schedulersController *schedulers.Controller, expected []uint64) {
+	handler, ok := schedulersController.GetSchedulerHandlers()[sc.EvictLeaderName]
 	re.True(ok)
 	h, ok := handler.(interface {
 		EvictStoreIDs() []uint64

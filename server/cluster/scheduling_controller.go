@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/config"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -49,7 +48,7 @@ type schedulingController struct {
 	mu        syncutil.RWMutex
 	wg        sync.WaitGroup
 	*core.BasicCluster
-	opt         sc.ConfProvider
+	opt         config.ConfProvider
 	coordinator *schedule.Coordinator
 	labelStats  *statistics.LabelStatistics
 	regionStats *statistics.RegionStatistics
@@ -59,7 +58,7 @@ type schedulingController struct {
 }
 
 // newSchedulingController creates a new scheduling controller.
-func newSchedulingController(parentCtx context.Context, basicCluster *core.BasicCluster, opt sc.ConfProvider, ruleManager *placement.RuleManager) *schedulingController {
+func newSchedulingController(parentCtx context.Context, basicCluster *core.BasicCluster, opt config.ConfProvider, ruleManager *placement.RuleManager) *schedulingController {
 	ctx, cancel := context.WithCancel(parentCtx)
 	return &schedulingController{
 		parentCtx:    parentCtx,

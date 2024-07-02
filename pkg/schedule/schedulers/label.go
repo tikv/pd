@@ -56,7 +56,7 @@ func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerCo
 	}
 }
 
-func (s *labelScheduler) Name() string {
+func (*labelScheduler) Name() string {
 	return config.LabelName.String()
 }
 

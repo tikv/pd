@@ -21,7 +21,6 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/schedule/config"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 )
@@ -55,13 +54,13 @@ var DiagnosableSummaryFunc = map[config.CheckerSchedulerName]plan.Summary{
 // DiagnosticRecorder is used to manage diagnostic for one scheduler.
 type DiagnosticRecorder struct {
 	schedulerName config.CheckerSchedulerName
-	config        sc.SchedulerConfigProvider
+	config        config.SchedulerConfigProvider
 	summaryFunc   plan.Summary
 	results       *cache.FIFO
 }
 
 // NewDiagnosticRecorder creates a new DiagnosticRecorder.
-func NewDiagnosticRecorder(name config.CheckerSchedulerName, config sc.SchedulerConfigProvider) *DiagnosticRecorder {
+func NewDiagnosticRecorder(name config.CheckerSchedulerName, config config.SchedulerConfigProvider) *DiagnosticRecorder {
 	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
 		return nil

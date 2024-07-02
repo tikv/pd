@@ -245,7 +245,7 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 	return ret
 }
 
-func (h *hotScheduler) Name() string {
+func (*hotScheduler) Name() string {
 	return config.HotRegionName.String()
 }
 

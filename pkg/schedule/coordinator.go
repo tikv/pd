@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/config"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -455,7 +454,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	for i, name := range scheduleNames {
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
-		var cfg sc.SchedulerConfig
+		var cfg config.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
 			if c.Type == typ {
 				cfg = c
@@ -470,7 +469,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
-		name, err := sc.ConvertSchedulerStr2Name(cfg.Type)
+		name, err := config.ConvertSchedulerStr2Name(cfg.Type)
 		if err != nil {
 			log.Error("failed to convert scheduler name",
 				zap.String("scheduler", cfg.Type),
@@ -505,7 +504,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			continue
 		}
 
-		name, err := sc.ConvertSchedulerStr2Name(schedulerCfg.Type)
+		name, err := config.ConvertSchedulerStr2Name(schedulerCfg.Type)
 		if err != nil {
 			log.Error("failed to convert scheduler name",
 				zap.String("scheduler", schedulerCfg.Type),
@@ -567,7 +566,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 		return
 	}
 	schedulerArgs := SchedulerArgs.(func() []string)
-	name, err := sc.ConvertSchedulerStr2Name(schedulerType())
+	name, err := config.ConvertSchedulerStr2Name(schedulerType())
 	if err != nil {
 		log.Error("failed to convert scheduler name",
 			zap.String("scheduler", schedulerType()),
