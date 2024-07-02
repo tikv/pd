@@ -158,7 +158,7 @@ func checkBalance(re *require.Assertions, enablePlacementRules bool) {
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
-	hb, err := CreateScheduler(config.ShuffleHotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder("shuffle-hot-region", []string{"", ""}))
+	hb, err := CreateScheduler(config.ShuffleHotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleHotRegionName, []string{"", ""}))
 	re.NoError(err)
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})

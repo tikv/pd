@@ -177,7 +177,7 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 		conf:          conf,
 		handler:       newBalanceWitnessHandler(conf),
 		counter:       balanceWitnessCounter,
-		filterCounter: filter.NewCounter(filter.BalanceWitness.String()),
+		filterCounter: filter.NewCounter(config.BalanceWitnessName.String()),
 	}
 	for _, option := range options {
 		option(s)

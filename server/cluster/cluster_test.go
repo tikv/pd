@@ -3137,7 +3137,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(shuffle))
 	// suppose we add a new default enable scheduler
-	sc.DefaultSchedulers = append(sc.DefaultSchedulers, sc.SchedulerConfig{Type: "shuffle-region"})
+	sc.DefaultSchedulers = append(sc.DefaultSchedulers, sc.SchedulerConfig{Type: sc.ShuffleRegionName.String()})
 	defer func() {
 		sc.DefaultSchedulers = sc.DefaultSchedulers[:len(sc.DefaultSchedulers)-1]
 	}()

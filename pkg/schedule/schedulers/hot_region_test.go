@@ -2444,7 +2444,7 @@ func TestCompatibilityConfig(t *testing.T) {
 	defer cancel()
 
 	// From new or 3.x cluster, it will use new config
-	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder("hot-region", nil))
+	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionName, nil))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.QueryDim, utils.ByteDim},
@@ -2454,7 +2454,7 @@ func TestCompatibilityConfig(t *testing.T) {
 
 	// Config file is not currently supported
 	hb, err = CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(),
-		ConfigSliceDecoder("hot-region", []string{"read-priorities=byte,query"}))
+		ConfigSliceDecoder(config.HotRegionName, []string{"read-priorities=byte,query"}))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.QueryDim, utils.ByteDim},
@@ -2611,7 +2611,7 @@ func TestMaxZombieDuration(t *testing.T) {
 	re := require.New(t)
 	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
-	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder("hot-region", nil))
+	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionName, nil))
 	re.NoError(err)
 	maxZombieDur := hb.(*hotScheduler).conf.getValidConf().MaxZombieRounds
 	testCases := []maxZombieDurTestCase{
@@ -2664,7 +2664,7 @@ func TestExpect(t *testing.T) {
 	re := require.New(t)
 	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
-	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder("hot-region", nil))
+	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionName, nil))
 	re.NoError(err)
 	testCases := []struct {
 		initFunc       func(*balanceSolver)

@@ -156,7 +156,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	}
 	ops, _ = suite.es.Schedule(suite.tc, false)
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
-	re.Equal(config.EvictSlowTrendName, ops[0].Desc())
+	re.Equal(config.EvictSlowTrendName.String(), ops[0].Desc())
 	re.Zero(es2.conf.candidate())
 	re.Equal(uint64(1), es2.conf.evictedStore())
 	// Cannot balance leaders to store 1

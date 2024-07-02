@@ -64,7 +64,7 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
-		filterCounter: filter.NewCounter(filter.BalanceRegion.String()),
+		filterCounter: filter.NewCounter(config.BalanceRegionName.String()),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)
@@ -94,6 +94,9 @@ func WithBalanceRegionFilterCounterName(name string) BalanceRegionCreateOption {
 }
 
 func (s *balanceRegionScheduler) Name() string {
+	if len(s.name) == 0 {
+		return config.BalanceRegionName.String()
+	}
 	return s.name
 }
 

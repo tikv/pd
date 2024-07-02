@@ -189,7 +189,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
+		filterCounter: filter.NewCounter(config.BalanceLeaderName.String()),
 	}
 	for _, option := range options {
 		option(s)
