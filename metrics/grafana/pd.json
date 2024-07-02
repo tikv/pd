@@ -1668,7 +1668,7 @@
               "hide": true,
               "intervalFactor": 2,
               "legendFormat": "{{name}}--{{store}}",
-              "refId": "A"
+              "refId": "B"
             }
           ],
           "timeFrom": "1s",
