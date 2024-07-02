@@ -83,7 +83,7 @@ const (
 	defaultAvgBatchProportion       = 0.7
 )
 
-// LocalBucketRPCParams is the parameters for local bucket RPC.
+// TokenRPCParams is the parameters for local bucket RPC.
 type TokenRPCParams struct {
 	// WaitRetryInterval is the interval to retry when waiting for the token.
 	WaitRetryInterval Duration `toml:"wait-retry-interval" json:"wait-retry-interval"`
@@ -125,6 +125,14 @@ type Config struct {
 
 // Adjust adjusts the configuration.
 func (c *Config) Adjust() {
+	// valid the configuration, TODO: separately add the valid function.
+	if c.BaseConfig.LTBMaxWaitDuration.Duration == 0 {
+		c.BaseConfig.LTBMaxWaitDuration = NewDuration(defaultMaxWaitDuration)
+	}
+	if c.LocalBucketConfig.WaitRetryInterval.Duration == 0 {
+		c.LocalBucketConfig.WaitRetryInterval = NewDuration(defaultWaitRetryInterval)
+	}
+	// adjust the client settings. calculate the retry times.
 	if int(c.BaseConfig.LTBTokenRPCMaxDelay.Duration) != int(c.LocalBucketConfig.WaitRetryInterval.Duration)*c.LocalBucketConfig.WaitRetryTimes {
 		c.LocalBucketConfig.WaitRetryTimes = int(c.BaseConfig.LTBTokenRPCMaxDelay.Duration / c.LocalBucketConfig.WaitRetryInterval.Duration)
 	}
