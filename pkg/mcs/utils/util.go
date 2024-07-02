@@ -42,6 +42,7 @@ import (
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 const (
@@ -229,7 +230,14 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 		httpListener = mux.Match(cmux.HTTP1())
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		// Allow clients send consecutive pings in every 5 seconds.
+		// The default value of MinTime is 5 minutes,
+		// which is too long compared with 10 seconds of TiKV's pd client keepalive time.
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime: 5 * time.Second,
+		}),
+	)
 	s.SetGRPCServer(grpcServer)
 	s.RegisterGRPCService(grpcServer)
 	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)
