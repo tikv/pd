@@ -73,9 +73,9 @@ func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigPro
 	}
 }
 
-// GetType return ReplicaChecker's type
-func (*ReplicaChecker) GetType() string {
-	return config.ReplicaCheckerName.Type()
+// Name returns the checker name.
+func (*ReplicaChecker) Name() string {
+	return config.ReplicaCheckerName.String()
 }
 
 // Check verifies a region's replicas, creating an operator.Operator if need.
@@ -289,7 +289,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 
 func (r *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerType:    config.ReplicaCheckerName.Type(),
+		checkerType:    r.Name(),
 		cluster:        r.cluster,
 		locationLabels: r.conf.GetLocationLabels(),
 		isolationLevel: r.conf.GetIsolationLevel(),

@@ -20,27 +20,21 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 )
 
-const (
-	// ShuffleRegionName is shuffle region scheduler name.
-	ShuffleRegionName = "shuffle-region-scheduler"
-	// ShuffleRegionType is shuffle region scheduler type.
-	ShuffleRegionType = "shuffle-region"
-)
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleRegionCounter                   = schedulerCounter.WithLabelValues(ShuffleRegionName, "schedule")
-	shuffleRegionNewOperatorCounter        = schedulerCounter.WithLabelValues(ShuffleRegionName, "new-operator")
-	shuffleRegionNoRegionCounter           = schedulerCounter.WithLabelValues(ShuffleRegionName, "no-region")
-	shuffleRegionNoNewPeerCounter          = schedulerCounter.WithLabelValues(ShuffleRegionName, "no-new-peer")
-	shuffleRegionCreateOperatorFailCounter = schedulerCounter.WithLabelValues(ShuffleRegionName, "create-operator-fail")
-	shuffleRegionNoSourceStoreCounter      = schedulerCounter.WithLabelValues(ShuffleRegionName, "no-source-store")
+	shuffleRegionCounter                   = newEventCounter(config.ShuffleRegionName, "schedule")
+	shuffleRegionNewOperatorCounter        = newEventCounter(config.ShuffleRegionName, "new-operator")
+	shuffleRegionNoRegionCounter           = newEventCounter(config.ShuffleRegionName, "no-region")
+	shuffleRegionNoNewPeerCounter          = newEventCounter(config.ShuffleRegionName, "no-new-peer")
+	shuffleRegionCreateOperatorFailCounter = newEventCounter(config.ShuffleRegionName, "create-operator-fail")
+	shuffleRegionNoSourceStoreCounter      = newEventCounter(config.ShuffleRegionName, "no-source-store")
 )
 
 type shuffleRegionScheduler struct {
@@ -53,8 +47,8 @@ type shuffleRegionScheduler struct {
 // between stores.
 func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleRegionSchedulerConfig) Scheduler {
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true, OperatorLevel: constant.Low},
-		filter.NewSpecialUseFilter(ShuffleRegionName),
+		&filter.StoreStateFilter{ActionScope: config.ShuffleRegionName.String(), MoveRegion: true, OperatorLevel: constant.Low},
+		filter.NewSpecialUseFilter(config.ShuffleRegionName.String()),
 	}
 	base := NewBaseScheduler(opController)
 	return &shuffleRegionScheduler{
@@ -68,12 +62,8 @@ func (s *shuffleRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	s.conf.ServeHTTP(w, r)
 }
 
-func (*shuffleRegionScheduler) GetName() string {
-	return ShuffleRegionName
-}
-
-func (*shuffleRegionScheduler) GetType() string {
-	return ShuffleRegionType
+func (*shuffleRegionScheduler) Name() string {
+	return config.ShuffleRegionName.String()
 }
 
 func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -83,7 +73,7 @@ func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *shuffleRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.Name())
 	if err != nil {
 		return err
 	}
@@ -102,7 +92,7 @@ func (s *shuffleRegionScheduler) ReloadConfig() error {
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpRegion.String()).Inc()
 	}
 	return allowed
 }
@@ -121,7 +111,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 		return nil, nil
 	}
 
-	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+	op, err := operator.CreateMovePeerOperator(s.Name(), cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		shuffleRegionCreateOperatorFailCounter.Inc()
 		return nil, nil
@@ -169,8 +159,8 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster sche.SchedulerCluster, 
 	if store == nil {
 		return nil
 	}
-	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), region, store, nil)
-	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIDs())
+	scoreGuard := filter.NewPlacementSafeguard(s.Name(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), region, store, nil)
+	excludedFilter := filter.NewExcludedFilter(s.Name(), nil, region.GetStoreIDs())
 
 	target := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, append(s.filters, scoreGuard, excludedFilter)...).

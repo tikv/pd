@@ -22,31 +22,24 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 )
 
-const (
-	// RandomMergeName is random merge scheduler name.
-	RandomMergeName = "random-merge-scheduler"
-	// RandomMergeType is random merge scheduler type.
-	RandomMergeType = "random-merge"
-)
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	randomMergeCounter              = schedulerCounter.WithLabelValues(RandomMergeName, "schedule")
-	randomMergeNewOperatorCounter   = schedulerCounter.WithLabelValues(RandomMergeName, "new-operator")
-	randomMergeNoSourceStoreCounter = schedulerCounter.WithLabelValues(RandomMergeName, "no-source-store")
-	randomMergeNoRegionCounter      = schedulerCounter.WithLabelValues(RandomMergeName, "no-region")
-	randomMergeNoTargetStoreCounter = schedulerCounter.WithLabelValues(RandomMergeName, "no-target-store")
-	randomMergeNotAllowedCounter    = schedulerCounter.WithLabelValues(RandomMergeName, "not-allowed")
+	randomMergeCounter              = newEventCounter(config.RandomMergeName, "schedule")
+	randomMergeNewOperatorCounter   = newEventCounter(config.RandomMergeName, "new-operator")
+	randomMergeNoSourceStoreCounter = newEventCounter(config.RandomMergeName, "no-source-store")
+	randomMergeNoRegionCounter      = newEventCounter(config.RandomMergeName, "no-region")
+	randomMergeNoTargetStoreCounter = newEventCounter(config.RandomMergeName, "no-target-store")
+	randomMergeNotAllowedCounter    = newEventCounter(config.RandomMergeName, "not-allowed")
 )
 
 type randomMergeSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -66,12 +59,8 @@ func newRandomMergeScheduler(opController *operator.Controller, conf *randomMerg
 	}
 }
 
-func (s *randomMergeScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*randomMergeScheduler) GetType() string {
-	return RandomMergeType
+func (*randomMergeScheduler) Name() string {
+	return config.RandomMergeName.String()
 }
 
 func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
@@ -81,7 +70,7 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetSchedulerConfig().GetMergeScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpMerge.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpMerge.String()).Inc()
 	}
 	return allowed
 }
@@ -90,7 +79,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 	randomMergeCounter.Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
-		FilterSource(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true, OperatorLevel: constant.Low}).
+		FilterSource(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.Name(), MoveRegion: true, OperatorLevel: constant.Low}).
 		RandomPick()
 	if store == nil {
 		randomMergeNoSourceStoreCounter.Inc()
@@ -118,7 +107,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 		return nil, nil
 	}
 
-	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpMerge)
+	ops, err := operator.CreateMergeRegionOperator(s.Name(), cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil, nil

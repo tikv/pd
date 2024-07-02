@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -44,10 +45,6 @@ import (
 )
 
 const (
-	// HotRegionName is balance hot region scheduler name.
-	HotRegionName = "balance-hot-region-scheduler"
-	// HotRegionType is balance hot region scheduler type.
-	HotRegionType          = "hot-region"
 	splitHotReadBuckets    = "split-hot-read-region"
 	splitHotWriteBuckets   = "split-hot-write-region"
 	splitProgressiveRank   = int64(-5)
@@ -72,40 +69,40 @@ var (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	hotSchedulerCounter                     = schedulerCounter.WithLabelValues(HotRegionName, "schedule")
-	hotSchedulerSkipCounter                 = schedulerCounter.WithLabelValues(HotRegionName, "skip")
-	hotSchedulerSearchRevertRegionsCounter  = schedulerCounter.WithLabelValues(HotRegionName, "search_revert_regions")
-	hotSchedulerNotSameEngineCounter        = schedulerCounter.WithLabelValues(HotRegionName, "not_same_engine")
-	hotSchedulerNoRegionCounter             = schedulerCounter.WithLabelValues(HotRegionName, "no_region")
-	hotSchedulerUnhealthyReplicaCounter     = schedulerCounter.WithLabelValues(HotRegionName, "unhealthy_replica")
-	hotSchedulerAbnormalReplicaCounter      = schedulerCounter.WithLabelValues(HotRegionName, "abnormal_replica")
-	hotSchedulerCreateOperatorFailedCounter = schedulerCounter.WithLabelValues(HotRegionName, "create_operator_failed")
-	hotSchedulerNewOperatorCounter          = schedulerCounter.WithLabelValues(HotRegionName, "new_operator")
-	hotSchedulerSnapshotSenderLimitCounter  = schedulerCounter.WithLabelValues(HotRegionName, "snapshot_sender_limit")
+	hotSchedulerCounter                     = newEventCounter(config.HotRegionName, "schedule")
+	hotSchedulerSkipCounter                 = newEventCounter(config.HotRegionName, "skip")
+	hotSchedulerSearchRevertRegionsCounter  = newEventCounter(config.HotRegionName, "search_revert_regions")
+	hotSchedulerNotSameEngineCounter        = newEventCounter(config.HotRegionName, "not_same_engine")
+	hotSchedulerNoRegionCounter             = newEventCounter(config.HotRegionName, "no_region")
+	hotSchedulerUnhealthyReplicaCounter     = newEventCounter(config.HotRegionName, "unhealthy_replica")
+	hotSchedulerAbnormalReplicaCounter      = newEventCounter(config.HotRegionName, "abnormal_replica")
+	hotSchedulerCreateOperatorFailedCounter = newEventCounter(config.HotRegionName, "create_operator_failed")
+	hotSchedulerNewOperatorCounter          = newEventCounter(config.HotRegionName, "new_operator")
+	hotSchedulerSnapshotSenderLimitCounter  = newEventCounter(config.HotRegionName, "snapshot_sender_limit")
 
 	// counter related with the split region
-	hotSchedulerNotFoundSplitKeysCounter          = schedulerCounter.WithLabelValues(HotRegionName, "not_found_split_keys")
-	hotSchedulerRegionBucketsNotHotCounter        = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_not_hot")
-	hotSchedulerOnlyOneBucketsHotCounter          = schedulerCounter.WithLabelValues(HotRegionName, "only_one_buckets_hot")
-	hotSchedulerHotBucketNotValidCounter          = schedulerCounter.WithLabelValues(HotRegionName, "hot_buckets_not_valid")
-	hotSchedulerRegionBucketsSingleHotSpotCounter = schedulerCounter.WithLabelValues(HotRegionName, "region_buckets_single_hot_spot")
-	hotSchedulerSplitSuccessCounter               = schedulerCounter.WithLabelValues(HotRegionName, "split_success")
-	hotSchedulerNeedSplitBeforeScheduleCounter    = schedulerCounter.WithLabelValues(HotRegionName, "need_split_before_move_peer")
-	hotSchedulerRegionTooHotNeedSplitCounter      = schedulerCounter.WithLabelValues(HotRegionName, "region_is_too_hot_need_split")
+	hotSchedulerNotFoundSplitKeysCounter          = newEventCounter(config.HotRegionName, "not_found_split_keys")
+	hotSchedulerRegionBucketsNotHotCounter        = newEventCounter(config.HotRegionName, "region_buckets_not_hot")
+	hotSchedulerOnlyOneBucketsHotCounter          = newEventCounter(config.HotRegionName, "only_one_buckets_hot")
+	hotSchedulerHotBucketNotValidCounter          = newEventCounter(config.HotRegionName, "hot_buckets_not_valid")
+	hotSchedulerRegionBucketsSingleHotSpotCounter = newEventCounter(config.HotRegionName, "region_buckets_single_hot_spot")
+	hotSchedulerSplitSuccessCounter               = newEventCounter(config.HotRegionName, "split_success")
+	hotSchedulerNeedSplitBeforeScheduleCounter    = newEventCounter(config.HotRegionName, "need_split_before_move_peer")
+	hotSchedulerRegionTooHotNeedSplitCounter      = newEventCounter(config.HotRegionName, "region_is_too_hot_need_split")
 
-	hotSchedulerMoveLeaderCounter     = schedulerCounter.WithLabelValues(HotRegionName, moveLeader.String())
-	hotSchedulerMovePeerCounter       = schedulerCounter.WithLabelValues(HotRegionName, movePeer.String())
-	hotSchedulerTransferLeaderCounter = schedulerCounter.WithLabelValues(HotRegionName, transferLeader.String())
+	hotSchedulerMoveLeaderCounter     = newEventCounter(config.HotRegionName, moveLeader.String())
+	hotSchedulerMovePeerCounter       = newEventCounter(config.HotRegionName, movePeer.String())
+	hotSchedulerTransferLeaderCounter = newEventCounter(config.HotRegionName, transferLeader.String())
 
-	readSkipAllDimUniformStoreCounter    = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-all-dim-uniform-store")
-	writeSkipAllDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-all-dim-uniform-store")
-	readSkipByteDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-byte-uniform-store")
-	writeSkipByteDimUniformStoreCounter  = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-byte-uniform-store")
-	readSkipKeyDimUniformStoreCounter    = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-key-uniform-store")
-	writeSkipKeyDimUniformStoreCounter   = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-key-uniform-store")
-	readSkipQueryDimUniformStoreCounter  = schedulerCounter.WithLabelValues(HotRegionName, "read-skip-query-uniform-store")
-	writeSkipQueryDimUniformStoreCounter = schedulerCounter.WithLabelValues(HotRegionName, "write-skip-query-uniform-store")
-	pendingOpFailsStoreCounter           = schedulerCounter.WithLabelValues(HotRegionName, "pending-op-fails")
+	readSkipAllDimUniformStoreCounter    = newEventCounter(config.HotRegionName, "read-skip-all-dim-uniform-store")
+	writeSkipAllDimUniformStoreCounter   = newEventCounter(config.HotRegionName, "write-skip-all-dim-uniform-store")
+	readSkipByteDimUniformStoreCounter   = newEventCounter(config.HotRegionName, "read-skip-byte-uniform-store")
+	writeSkipByteDimUniformStoreCounter  = newEventCounter(config.HotRegionName, "write-skip-byte-uniform-store")
+	readSkipKeyDimUniformStoreCounter    = newEventCounter(config.HotRegionName, "read-skip-key-uniform-store")
+	writeSkipKeyDimUniformStoreCounter   = newEventCounter(config.HotRegionName, "write-skip-key-uniform-store")
+	readSkipQueryDimUniformStoreCounter  = newEventCounter(config.HotRegionName, "read-skip-query-uniform-store")
+	writeSkipQueryDimUniformStoreCounter = newEventCounter(config.HotRegionName, "write-skip-query-uniform-store")
+	pendingOpFailsStoreCounter           = newEventCounter(config.HotRegionName, "pending-op-fails")
 )
 
 type baseHotScheduler struct {
@@ -228,7 +225,6 @@ func (h *baseHotScheduler) randomRWType() utils.RWType {
 }
 
 type hotScheduler struct {
-	name string
 	*baseHotScheduler
 	syncutil.RWMutex
 	// config of hot scheduler
@@ -240,7 +236,6 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 	base := newBaseHotScheduler(opController,
 		conf.GetHistorySampleDuration(), conf.GetHistorySampleInterval())
 	ret := &hotScheduler{
-		name:             HotRegionName,
 		baseHotScheduler: base,
 		conf:             conf,
 	}
@@ -250,12 +245,8 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 	return ret
 }
 
-func (h *hotScheduler) GetName() string {
-	return h.name
-}
-
-func (*hotScheduler) GetType() string {
-	return HotRegionType
+func (h *hotScheduler) Name() string {
+	return config.HotRegionName.String()
 }
 
 func (h *hotScheduler) EncodeConfig() ([]byte, error) {
@@ -265,7 +256,7 @@ func (h *hotScheduler) EncodeConfig() ([]byte, error) {
 func (h *hotScheduler) ReloadConfig() error {
 	h.conf.Lock()
 	defer h.conf.Unlock()
-	cfgData, err := h.conf.storage.LoadSchedulerConfig(h.GetName())
+	cfgData, err := h.conf.storage.LoadSchedulerConfig(h.Name())
 	if err != nil {
 		return err
 	}
@@ -317,7 +308,7 @@ func (h *hotScheduler) GetNextInterval(time.Duration) time.Duration {
 func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetSchedulerConfig().GetHotRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(h.Name(), operator.OpHotRegion.String()).Inc()
 	}
 	return allowed
 }
@@ -358,7 +349,7 @@ func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []
 	h.regionPendings[regionID] = influence
 
 	utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
-		hotPeerHist.WithLabelValues(h.GetName(), rwTy.String(), utils.DimToString(dim)).Observe(infl.Loads[kind])
+		hotPeerHist.WithLabelValues(h.Name(), rwTy.String(), utils.DimToString(dim)).Observe(infl.Loads[kind])
 	})
 	return true
 }
@@ -1000,7 +991,7 @@ func (bs *balanceSolver) isRegionAvailable(region *core.RegionInfo) bool {
 	}
 
 	if !filter.IsRegionReplicated(bs.SchedulerCluster, region) {
-		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.GetName()), zap.Uint64("region-id", region.GetID()))
+		log.Debug("region has abnormal replica count", zap.String("scheduler", bs.sche.Name()), zap.Uint64("region-id", region.GetID()))
 		hotSchedulerAbnormalReplicaCounter.Inc()
 		return false
 	}
@@ -1050,10 +1041,10 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			return nil
 		}
 		filters = []filter.Filter{
-			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High},
-			filter.NewExcludedFilter(bs.sche.GetName(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
-			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
-			filter.NewPlacementSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
+			&filter.StoreStateFilter{ActionScope: bs.sche.Name(), MoveRegion: true, OperatorLevel: constant.High},
+			filter.NewExcludedFilter(bs.sche.Name(), bs.cur.region.GetStoreIDs(), bs.cur.region.GetStoreIDs()),
+			filter.NewSpecialUseFilter(bs.sche.Name(), filter.SpecialUseHotRegion),
+			filter.NewPlacementSafeguard(bs.sche.Name(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, nil),
 		}
 		for _, detail := range bs.stLoadDetail {
 			candidates = append(candidates, detail)
@@ -1064,13 +1055,13 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 			return nil
 		}
 		filters = []filter.Filter{
-			&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), TransferLeader: true, OperatorLevel: constant.High},
-			filter.NewSpecialUseFilter(bs.sche.GetName(), filter.SpecialUseHotRegion),
+			&filter.StoreStateFilter{ActionScope: bs.sche.Name(), TransferLeader: true, OperatorLevel: constant.High},
+			filter.NewSpecialUseFilter(bs.sche.Name(), filter.SpecialUseHotRegion),
 		}
 		if bs.rwTy == utils.Read {
 			peers := bs.cur.region.GetPeers()
-			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.GetName(), MoveRegion: true, OperatorLevel: constant.High}}
-			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
+			moveLeaderFilters := []filter.Filter{&filter.StoreStateFilter{ActionScope: bs.sche.Name(), MoveRegion: true, OperatorLevel: constant.High}}
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.Name(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, true /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
 			for storeID, detail := range bs.stLoadDetail {
@@ -1090,7 +1081,7 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 				}
 			}
 		} else {
-			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.GetName(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
+			if leaderFilter := filter.NewPlacementLeaderSafeguard(bs.sche.Name(), bs.GetSchedulerConfig(), bs.GetBasicCluster(), bs.GetRuleManager(), bs.cur.region, srcStore, false /*allowMoveLeader*/); leaderFilter != nil {
 				filters = append(filters, leaderFilter)
 			}
 			for _, peer := range bs.cur.region.GetFollowers() {
@@ -1758,7 +1749,7 @@ func (bs *balanceSolver) decorateOperator(op *operator.Operator, isRevert bool, 
 	op.FinishedCounters = append(op.FinishedCounters,
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), sourceLabel, "out", dim),
 		hotDirectionCounter.WithLabelValues(typ, bs.rwTy.String(), targetLabel, "in", dim),
-		balanceDirectionCounter.WithLabelValues(bs.sche.GetName(), sourceLabel, targetLabel))
+		balanceDirectionCounter.WithLabelValues(bs.sche.Name(), sourceLabel, targetLabel))
 	op.Counters = append(op.Counters,
 		hotSchedulerNewOperatorCounter,
 		opCounter(typ))

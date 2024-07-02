@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -36,10 +37,6 @@ import (
 )
 
 const (
-	// SplitBucketName is the split bucket name.
-	SplitBucketName = "split-bucket-scheduler"
-	// SplitBucketType is the spilt bucket type.
-	SplitBucketType = "split-bucket"
 	// defaultHotDegree is the default hot region threshold.
 	defaultHotDegree  = 3
 	defaultSplitLimit = 10
@@ -47,16 +44,16 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	splitBucketDisableCounter            = schedulerCounter.WithLabelValues(SplitBucketName, "bucket-disable")
-	splitBuckerSplitLimitCounter         = schedulerCounter.WithLabelValues(SplitBucketName, "split-limit")
-	splitBucketScheduleCounter           = schedulerCounter.WithLabelValues(SplitBucketName, "schedule")
-	splitBucketNoRegionCounter           = schedulerCounter.WithLabelValues(SplitBucketName, "no-region")
-	splitBucketRegionTooSmallCounter     = schedulerCounter.WithLabelValues(SplitBucketName, "region-too-small")
-	splitBucketOperatorExistCounter      = schedulerCounter.WithLabelValues(SplitBucketName, "operator-exist")
-	splitBucketKeyRangeNotMatchCounter   = schedulerCounter.WithLabelValues(SplitBucketName, "key-range-not-match")
-	splitBucketNoSplitKeysCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "no-split-keys")
-	splitBucketCreateOperatorFailCounter = schedulerCounter.WithLabelValues(SplitBucketName, "create-operator-fail")
-	splitBucketNewOperatorCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "new-operator")
+	splitBucketDisableCounter            = newEventCounter(config.SplitBucketName, "bucket-disable")
+	splitBuckerSplitLimitCounter         = newEventCounter(config.SplitBucketName, "split-limit")
+	splitBucketScheduleCounter           = newEventCounter(config.SplitBucketName, "schedule")
+	splitBucketNoRegionCounter           = newEventCounter(config.SplitBucketName, "no-region")
+	splitBucketRegionTooSmallCounter     = newEventCounter(config.SplitBucketName, "region-too-small")
+	splitBucketOperatorExistCounter      = newEventCounter(config.SplitBucketName, "operator-exist")
+	splitBucketKeyRangeNotMatchCounter   = newEventCounter(config.SplitBucketName, "key-range-not-match")
+	splitBucketNoSplitKeysCounter        = newEventCounter(config.SplitBucketName, "no-split-keys")
+	splitBucketCreateOperatorFailCounter = newEventCounter(config.SplitBucketName, "create-operator-fail")
+	splitBucketNewOperatorCounter        = newEventCounter(config.SplitBucketName, "new-operator")
 )
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
@@ -86,7 +83,7 @@ func (conf *splitBucketSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(SplitBucketName, data)
+	return conf.storage.SaveSchedulerConfig(config.SplitBucketName.String(), data)
 }
 
 func (conf *splitBucketSchedulerConfig) getDegree() int {
@@ -178,20 +175,15 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 	return ret
 }
 
-// GetName returns the name of the split bucket scheduler.
-func (*splitBucketScheduler) GetName() string {
-	return SplitBucketName
-}
-
-// GetType returns the type of the split bucket scheduler.
-func (*splitBucketScheduler) GetType() string {
-	return SplitBucketType
+// Name returns the name of the split bucket scheduler.
+func (*splitBucketScheduler) Name() string {
+	return config.SplitBucketName.String()
 }
 
 func (s *splitBucketScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.Name())
 	if err != nil {
 		return err
 	}
@@ -221,7 +213,7 @@ func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.getSplitLimit()
 	if !allowed {
 		splitBuckerSplitLimitCounter.Inc()
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpSplit.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpSplit.String()).Inc()
 	}
 	return allowed
 }
@@ -294,7 +286,7 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 		if bytes.Compare(region.GetEndKey(), splitBucket.EndKey) > 0 {
 			splitKey = append(splitKey, splitBucket.EndKey)
 		}
-		op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit,
+		op, err := operator.CreateSplitRegionOperator(s.Name(), region, operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
 			splitBucketCreateOperatorFailCounter.Inc()

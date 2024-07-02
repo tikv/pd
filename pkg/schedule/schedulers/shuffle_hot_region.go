@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -34,47 +35,33 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// ShuffleHotRegionName is shuffle hot region scheduler name.
-	ShuffleHotRegionName = "shuffle-hot-region-scheduler"
-	// ShuffleHotRegionType is shuffle hot region scheduler type.
-	ShuffleHotRegionType = "shuffle-hot-region"
-)
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleHotRegionCounter            = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "schedule")
-	shuffleHotRegionNewOperatorCounter = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "new-operator")
-	shuffleHotRegionSkipCounter        = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "skip")
+	shuffleHotRegionCounter            = newEventCounter(config.ShuffleHotRegionName, "schedule")
+	shuffleHotRegionNewOperatorCounter = newEventCounter(config.ShuffleHotRegionName, "new-operator")
+	shuffleHotRegionSkipCounter        = newEventCounter(config.ShuffleHotRegionName, "skip")
 )
 
 type shuffleHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	storage endpoint.ConfigStorage
-	Name    string `json:"name"`
 	Limit   uint64 `json:"limit"`
-}
-
-func (conf *shuffleHotRegionSchedulerConfig) getSchedulerName() string {
-	return conf.Name
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) Clone() *shuffleHotRegionSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &shuffleHotRegionSchedulerConfig{
-		Name:  conf.Name,
 		Limit: conf.Limit,
 	}
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) persistLocked() error {
-	name := conf.getSchedulerName()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(config.ShuffleHotRegionName.String(), data)
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) getLimit() uint64 {
@@ -110,12 +97,8 @@ func (s *shuffleHotRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *shuffleHotRegionScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*shuffleHotRegionScheduler) GetType() string {
-	return ShuffleHotRegionType
+func (*shuffleHotRegionScheduler) Name() string {
+	return config.ShuffleHotRegionName.String()
 }
 
 func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -125,7 +108,7 @@ func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *shuffleHotRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.Name())
 	if err != nil {
 		return err
 	}
@@ -146,13 +129,13 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerClus
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
 	if !hotRegionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpHotRegion.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpHotRegion.String()).Inc()
 	}
 	if !regionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpRegion.String()).Inc()
 	}
 	if !leaderAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpLeader.String()).Inc()
 	}
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
@@ -184,9 +167,9 @@ func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster
 		}
 
 		filters := []filter.Filter{
-			&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.Low},
-			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()),
-			filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
+			&filter.StoreStateFilter{ActionScope: s.Name(), MoveRegion: true, OperatorLevel: constant.Low},
+			filter.NewExcludedFilter(s.Name(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()),
+			filter.NewPlacementSafeguard(s.Name(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 		}
 		stores := cluster.GetStores()
 		destStoreIDs := make([]uint64, 0, len(stores))

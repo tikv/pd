@@ -27,24 +27,16 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// LabelName is label scheduler name.
-	LabelName = "label-scheduler"
-	// LabelType is label scheduler type.
-	LabelType = "label"
-)
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	labelCounter            = schedulerCounter.WithLabelValues(LabelName, "schedule")
-	labelNewOperatorCounter = schedulerCounter.WithLabelValues(LabelName, "new-operator")
-	labelNoTargetCounter    = schedulerCounter.WithLabelValues(LabelName, "no-target")
-	labelSkipCounter        = schedulerCounter.WithLabelValues(LabelName, "skip")
-	labelNoRegionCounter    = schedulerCounter.WithLabelValues(LabelName, "no-region")
+	labelCounter            = newEventCounter(config.LabelName, "schedule")
+	labelNewOperatorCounter = newEventCounter(config.LabelName, "new-operator")
+	labelNoTargetCounter    = newEventCounter(config.LabelName, "no-target")
+	labelSkipCounter        = newEventCounter(config.LabelName, "skip")
+	labelNoRegionCounter    = newEventCounter(config.LabelName, "no-region")
 )
 
 type labelSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -64,12 +56,8 @@ func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerCo
 	}
 }
 
-func (s *labelScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*labelScheduler) GetType() string {
-	return LabelType
+func (s *labelScheduler) Name() string {
+	return config.LabelName.String()
 }
 
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {
@@ -79,7 +67,7 @@ func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 func (s *labelScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
@@ -108,10 +96,10 @@ func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*ope
 			for _, p := range region.GetPendingPeers() {
 				excludeStores[p.GetStoreId()] = struct{}{}
 			}
-			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
+			f := filter.NewExcludedFilter(s.Name(), nil, excludeStores)
 
 			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true, OperatorLevel: constant.Medium}, f).
+				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.Name(), TransferLeader: true, OperatorLevel: constant.Medium}, f).
 				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))

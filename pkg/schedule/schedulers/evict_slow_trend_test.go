@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -71,9 +72,9 @@ func (suite *evictSlowTrendTestSuite) SetupTest() {
 
 	storage := storage.NewStorageWithMemoryBackend()
 	var err error
-	suite.es, err = CreateScheduler(EvictSlowTrendType, suite.oc, storage, ConfigSliceDecoder(EvictSlowTrendType, []string{}))
+	suite.es, err = CreateScheduler(config.EvictSlowTrendName, suite.oc, storage, ConfigSliceDecoder(config.EvictSlowTrendName, []string{}))
 	re.NoError(err)
-	suite.bs, err = CreateScheduler(BalanceLeaderType, suite.oc, storage, ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	suite.bs, err = CreateScheduler(config.BalanceLeaderName, suite.oc, storage, ConfigSliceDecoder(config.BalanceLeaderName, []string{}))
 	re.NoError(err)
 }
 
@@ -155,7 +156,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	}
 	ops, _ = suite.es.Schedule(suite.tc, false)
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2, 3})
-	re.Equal(EvictSlowTrendType, ops[0].Desc())
+	re.Equal(config.EvictSlowTrendName, ops[0].Desc())
 	re.Zero(es2.conf.candidate())
 	re.Equal(uint64(1), es2.conf.evictedStore())
 	// Cannot balance leaders to store 1
@@ -189,7 +190,7 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	re.NoError(err)
 	valueStr := ""
 	for id, sche := range sches {
-		if strings.EqualFold(sche, EvictSlowTrendName) {
+		if strings.EqualFold(sche, config.EvictSlowTrendName.String()) {
 			valueStr = vs[id]
 		}
 	}

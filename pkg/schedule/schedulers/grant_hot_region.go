@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -40,17 +41,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// GrantHotRegionName is grant hot region scheduler name.
-	GrantHotRegionName = "grant-hot-region-scheduler"
-	// GrantHotRegionType is grant hot region scheduler type.
-	GrantHotRegionType = "grant-hot-region"
-)
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantHotRegionCounter     = schedulerCounter.WithLabelValues(GrantHotRegionName, "schedule")
-	grantHotRegionSkipCounter = schedulerCounter.WithLabelValues(GrantHotRegionName, "skip")
+	grantHotRegionCounter     = newEventCounter(config.GrantHotRegionName, "schedule")
+	grantHotRegionSkipCounter = newEventCounter(config.GrantHotRegionName, "skip")
 )
 
 type grantHotRegionSchedulerConfig struct {
@@ -98,18 +92,13 @@ func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfi
 }
 
 func (conf *grantHotRegionSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
 	conf.RLock()
 	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*grantHotRegionSchedulerConfig) getSchedulerName() string {
-	return GrantHotRegionName
+	return conf.storage.SaveSchedulerConfig(config.GrantHotRegionName.String(), data)
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {
@@ -148,12 +137,8 @@ func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHo
 	return ret
 }
 
-func (*grantHotRegionScheduler) GetName() string {
-	return GrantHotRegionName
-}
-
-func (*grantHotRegionScheduler) GetType() string {
-	return GrantHotRegionType
+func (*grantHotRegionScheduler) Name() string {
+	return config.GrantHotRegionName.String()
 }
 
 func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -163,7 +148,7 @@ func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *grantHotRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.Name())
 	if err != nil {
 		return err
 	}
@@ -186,10 +171,10 @@ func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
 	if !regionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpRegion.String()).Inc()
 	}
 	if !leaderAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpLeader.String()).Inc()
 	}
 	return regionAllowed && leaderAllowed
 }
@@ -319,18 +304,18 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		return nil, errs.ErrStoreNotFound
 	}
 	filters := []filter.Filter{
-		filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
+		filter.NewPlacementSafeguard(s.Name(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), srcRegion, srcStore, nil),
 	}
 
 	storeIDs := s.conf.getStoreIDs()
 	destStoreIDs := make([]uint64, 0, len(storeIDs))
 	var candidate []uint64
 	if isLeader {
-		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.High})
+		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.Name(), TransferLeader: true, OperatorLevel: constant.High})
 		candidate = []uint64{s.conf.GetStoreLeaderID()}
 	} else {
-		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.High},
-			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
+		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.Name(), MoveRegion: true, OperatorLevel: constant.High},
+			filter.NewExcludedFilter(s.Name(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))
 		candidate = storeIDs
 	}
 	for _, storeID := range candidate {
@@ -352,9 +337,9 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {
-		op, err = operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
+		op, err = operator.CreateTransferLeaderOperator(s.Name()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
 	} else {
-		op, err = operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
+		op, err = operator.CreateMovePeerOperator(s.Name()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
 	op.SetPriorityLevel(constant.High)
 	return

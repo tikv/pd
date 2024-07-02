@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -35,18 +36,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// GrantLeaderName is grant leader scheduler name.
-	GrantLeaderName = "grant-leader-scheduler"
-	// GrantLeaderType is grant leader scheduler type.
-	GrantLeaderType = "grant-leader"
-)
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantLeaderCounter            = schedulerCounter.WithLabelValues(GrantLeaderName, "schedule")
-	grantLeaderNoFollowerCounter  = schedulerCounter.WithLabelValues(GrantLeaderName, "no-follower")
-	grantLeaderNewOperatorCounter = schedulerCounter.WithLabelValues(GrantLeaderName, "new-operator")
+	grantLeaderCounter            = newEventCounter(config.GrantLeaderName, "schedule")
+	grantLeaderNoFollowerCounter  = newEventCounter(config.GrantLeaderName, "no-follower")
+	grantLeaderNewOperatorCounter = newEventCounter(config.GrantLeaderName, "new-operator")
 )
 
 type grantLeaderSchedulerConfig struct {
@@ -54,7 +48,7 @@ type grantLeaderSchedulerConfig struct {
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
-	removeSchedulerCb func(name string) error
+	removeSchedulerCb func(name config.CheckerSchedulerName) error
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -89,18 +83,13 @@ func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 }
 
 func (conf *grantLeaderSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
 	conf.RLock()
 	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*grantLeaderSchedulerConfig) getSchedulerName() string {
-	return GrantLeaderName
+	return conf.storage.SaveSchedulerConfig(config.GrantLeaderName.String(), data)
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -179,12 +168,8 @@ func (s *grantLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*grantLeaderScheduler) GetName() string {
-	return GrantLeaderName
-}
-
-func (*grantLeaderScheduler) GetType() string {
-	return GrantLeaderType
+func (*grantLeaderScheduler) Name() string {
+	return config.GrantLeaderName.String()
 }
 
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -194,7 +179,7 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 func (s *grantLeaderScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.Name())
 	if err != nil {
 		return err
 	}
@@ -233,7 +218,7 @@ func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
@@ -251,7 +236,7 @@ func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 			continue
 		}
 
-		op, err := operator.CreateForceTransferLeaderOperator(GrantLeaderType, cluster, region, id, operator.OpLeader)
+		op, err := operator.CreateForceTransferLeaderOperator(s.Name(), cluster, region, id, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue
@@ -337,7 +322,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(GrantLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(config.GrantLeaderName); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

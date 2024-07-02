@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
@@ -178,7 +179,7 @@ func (bs *balanceSolver) setSearchRevertRegionsV2() {
 	bs.sche.searchRevertRegions[bs.resourceTy] = searchRevertRegions
 	if searchRevertRegions {
 		event := fmt.Sprintf("%s-%s-allow-search-revert-regions", bs.rwTy.String(), bs.opTy.String())
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), event).Inc()
+		newEventCounter(config.HotRegionName, event).Inc()
 	}
 }
 

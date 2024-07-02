@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -34,17 +35,12 @@ import (
 )
 
 const (
-	// EvictSlowStoreName is evict leader scheduler name.
-	EvictSlowStoreName = "evict-slow-store-scheduler"
-	// EvictSlowStoreType is evict leader scheduler type.
-	EvictSlowStoreType = "evict-slow-store"
-
 	slowStoreEvictThreshold   = 100
 	slowStoreRecoverThreshold = 1
 )
 
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
-var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
+var evictSlowStoreCounter = newEventCounter(config.EvictSlowStoreName, "schedule")
 
 type evictSlowStoreSchedulerConfig struct {
 	syncutil.RWMutex
@@ -75,7 +71,6 @@ func (conf *evictSlowStoreSchedulerConfig) Clone() *evictSlowStoreSchedulerConfi
 }
 
 func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
-	name := EvictSlowStoreName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
@@ -83,7 +78,7 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(config.EvictSlowStoreName.String(), data)
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
@@ -192,12 +187,8 @@ func (s *evictSlowStoreScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*evictSlowStoreScheduler) GetName() string {
-	return EvictSlowStoreName
-}
-
-func (*evictSlowStoreScheduler) GetType() string {
-	return EvictSlowStoreType
+func (*evictSlowStoreScheduler) Name() string {
+	return config.EvictSlowStoreName.String()
 }
 
 func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
@@ -207,7 +198,7 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.Name())
 	if err != nil {
 		return err
 	}
@@ -266,14 +257,14 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.Name(), s.Name(), cluster, s.conf, EvictLeaderBatchSize)
 }
 
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if s.conf.evictStore() != 0 {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 		if !allowed {
-			operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+			operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpLeader.String()).Inc()
 		}
 		return allowed
 	}

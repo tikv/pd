@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -37,10 +38,6 @@ import (
 )
 
 const (
-	// EvictLeaderName is evict leader scheduler name.
-	EvictLeaderName = "evict-leader-scheduler"
-	// EvictLeaderType is evict leader scheduler type.
-	EvictLeaderType = "evict-leader"
 	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
 	EvictLeaderBatchSize = 3
@@ -49,11 +46,11 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	evictLeaderCounter              = schedulerCounter.WithLabelValues(EvictLeaderName, "schedule")
-	evictLeaderNoLeaderCounter      = schedulerCounter.WithLabelValues(EvictLeaderName, "no-leader")
-	evictLeaderPickUnhealthyCounter = schedulerCounter.WithLabelValues(EvictLeaderName, "pick-unhealthy-region")
-	evictLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(EvictLeaderName, "no-target-store")
-	evictLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(EvictLeaderName, "new-operator")
+	evictLeaderCounter              = newEventCounter(config.EvictLeaderName, "schedule")
+	evictLeaderNoLeaderCounter      = newEventCounter(config.EvictLeaderName, "no-leader")
+	evictLeaderPickUnhealthyCounter = newEventCounter(config.EvictLeaderName, "pick-unhealthy-region")
+	evictLeaderNoTargetStoreCounter = newEventCounter(config.EvictLeaderName, "no-target-store")
+	evictLeaderNewOperatorCounter   = newEventCounter(config.EvictLeaderName, "new-operator")
 )
 
 type evictLeaderSchedulerConfig struct {
@@ -61,7 +58,7 @@ type evictLeaderSchedulerConfig struct {
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
-	removeSchedulerCb func(string) error
+	removeSchedulerCb func(config.CheckerSchedulerName) error
 }
 
 func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
@@ -106,7 +103,6 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 }
 
 func (conf *evictLeaderSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
 	conf.RLock()
 	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
@@ -116,11 +112,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*evictLeaderSchedulerConfig) getSchedulerName() string {
-	return EvictLeaderName
+	return conf.storage.SaveSchedulerConfig(config.EvictLeaderName.String(), data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -193,12 +185,8 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*evictLeaderScheduler) GetName() string {
-	return EvictLeaderName
-}
-
-func (*evictLeaderScheduler) GetType() string {
-	return EvictLeaderType
+func (*evictLeaderScheduler) Name() string {
+	return config.EvictLeaderName.String()
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -210,7 +198,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 func (s *evictLeaderScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
+	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.Name())
 	if err != nil {
 		return err
 	}
@@ -249,14 +237,14 @@ func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
 
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize), nil
+	return scheduleEvictLeaderBatch(s.Name(), s.Name(), cluster, s.conf, EvictLeaderBatchSize), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -426,7 +414,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(EvictLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(config.EvictLeaderName); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

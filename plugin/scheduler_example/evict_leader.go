@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -38,14 +39,12 @@ import (
 
 const (
 	// EvictLeaderName is evict leader scheduler name.
-	EvictLeaderName = "user-evict-leader-scheduler"
-	// EvictLeaderType is evict leader scheduler type.
-	EvictLeaderType        = "user-evict-leader"
-	noStoreInSchedulerInfo = "No store in user-evict-leader-scheduler-config"
+	EvictLeaderName        config.CheckerSchedulerName = "user-evict-leader-scheduler"
+	noStoreInSchedulerInfo                             = "No store in user-evict-leader-scheduler-config"
 )
 
 func init() {
-	schedulers.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedulers.ConfigDecoder {
+	schedulers.RegisterSliceDecoderBuilder(EvictLeaderName, func(args []string) schedulers.ConfigDecoder {
 		return func(v any) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -68,7 +67,7 @@ func init() {
 		}
 	})
 
-	schedulers.RegisterScheduler(EvictLeaderType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(string) error) (schedulers.Scheduler, error) {
+	schedulers.RegisterScheduler(EvictLeaderName, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(config.CheckerSchedulerName) error) (schedulers.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -79,8 +78,8 @@ func init() {
 }
 
 // SchedulerType returns the type of the scheduler
-func SchedulerType() string {
-	return EvictLeaderType
+func SchedulerType() config.CheckerSchedulerName {
+	return EvictLeaderName
 }
 
 // SchedulerArgs returns the args for the scheduler
@@ -124,18 +123,13 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 }
 
 func (conf *evictLeaderSchedulerConfig) Persist() error {
-	name := conf.getScheduleName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedulers.EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*evictLeaderSchedulerConfig) getScheduleName() string {
-	return EvictLeaderName
+	return conf.storage.SaveSchedulerConfig(EvictLeaderName.String(), data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -170,12 +164,8 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*evictLeaderScheduler) GetName() string {
-	return EvictLeaderName
-}
-
-func (*evictLeaderScheduler) GetType() string {
-	return EvictLeaderType
+func (*evictLeaderScheduler) Name() string {
+	return EvictLeaderName.String()
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -207,7 +197,7 @@ func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
@@ -224,12 +214,12 @@ func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 			continue
 		}
 		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true, OperatorLevel: constant.Urgent}).
+			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: EvictLeaderName.String(), TransferLeader: true, OperatorLevel: constant.Urgent}).
 			RandomPick()
 		if target == nil {
 			continue
 		}
-		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(EvictLeaderName.String(), cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue

@@ -21,11 +21,13 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 type schedulerHandler struct {
@@ -81,43 +83,52 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	switch name {
-	case schedulers.BalanceLeaderName:
+	schedulerName, err := config.ConvertSchedulerStr2Name(name)
+	if err != nil {
+		log.Error("failed to convert scheduler name",
+			zap.String("scheduler", name),
+			errs.ZapError(err))
+		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
+		return
+	}
+
+	switch schedulerName {
+	case config.BalanceLeaderName:
 		if err := h.AddBalanceLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.BalanceWitnessName:
+	case config.BalanceWitnessName:
 		if err := h.AddBalanceWitnessScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.TransferWitnessLeaderName:
+	case config.TransferWitnessLeaderName:
 		if err := h.AddTransferWitnessLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.HotRegionName:
+	case config.HotRegionName:
 		if err := h.AddBalanceHotRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.EvictSlowTrendName:
+	case config.EvictSlowTrendName:
 		if err := h.AddEvictSlowTrendScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.BalanceRegionName:
+	case config.BalanceRegionName:
 		if err := h.AddBalanceRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.LabelName:
+	case config.LabelName:
 		if err := h.AddLabelScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.ScatterRangeName:
+	case config.ScatterRangeName:
 		var args []string
 
 		collector := func(v string) {
@@ -142,13 +153,13 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-	case schedulers.GrantLeaderName, schedulers.EvictLeaderName:
+	case config.GrantLeaderName, config.EvictLeaderName:
 		storeID, ok := input["store_id"].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
 			return
 		}
-		exist, err := h.AddEvictOrGrant(storeID, name)
+		exist, err := h.AddEvictOrGrant(storeID, schedulerName)
 		if err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -159,22 +170,22 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 			return
 		}
-	case schedulers.ShuffleLeaderName:
+	case config.ShuffleLeaderName:
 		if err := h.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.ShuffleRegionName:
+	case config.ShuffleRegionName:
 		if err := h.AddShuffleRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.RandomMergeName:
+	case config.RandomMergeName:
 		if err := h.AddRandomMergeScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.ShuffleHotRegionName:
+	case config.ShuffleHotRegionName:
 		limit := uint64(1)
 		l, ok := input["limit"].(float64)
 		if ok {
@@ -184,17 +195,17 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.EvictSlowStoreName:
+	case config.EvictSlowStoreName:
 		if err := h.AddEvictSlowStoreScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.SplitBucketName:
+	case config.SplitBucketName:
 		if err := h.AddSplitBucketScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case schedulers.GrantHotRegionName:
+	case config.GrantHotRegionName:
 		leaderID, ok := input["store-leader-id"].(string)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing leader id")
@@ -228,14 +239,22 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 func (h *schedulerHandler) DeleteScheduler(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
-	case strings.HasPrefix(name, schedulers.EvictLeaderName) && name != schedulers.EvictLeaderName:
-		h.redirectSchedulerDelete(w, name, schedulers.EvictLeaderName)
+	case strings.HasPrefix(name, config.EvictLeaderName.String()) && name != config.EvictLeaderName.String():
+		h.redirectSchedulerDelete(w, name, config.EvictLeaderName.String())
 		return
-	case strings.HasPrefix(name, schedulers.GrantLeaderName) && name != schedulers.GrantLeaderName:
-		h.redirectSchedulerDelete(w, name, schedulers.GrantLeaderName)
+	case strings.HasPrefix(name, config.GrantLeaderName.String()) && name != config.GrantLeaderName.String():
+		h.redirectSchedulerDelete(w, name, config.GrantLeaderName.String())
 		return
 	default:
-		if err := h.RemoveScheduler(name); err != nil {
+		schedulerName, err := config.ConvertSchedulerStr2Name(name)
+		if err != nil {
+			log.Error("failed to convert scheduler name",
+				zap.String("scheduler", name),
+				errs.ZapError(err))
+			h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
+			return
+		}
+		if err := h.RemoveScheduler(schedulerName); err != nil {
 			h.handleErr(w, err)
 			return
 		}

@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -29,27 +30,19 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// BalanceRegionName is balance region scheduler name.
-	BalanceRegionName = "balance-region-scheduler"
-	// BalanceRegionType is balance region scheduler type.
-	BalanceRegionType = "balance-region"
-)
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceRegionScheduleCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "schedule")
-	balanceRegionNoRegionCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "no-region")
-	balanceRegionHotCounter           = schedulerCounter.WithLabelValues(BalanceRegionName, "region-hot")
-	balanceRegionNoLeaderCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "no-leader")
-	balanceRegionNewOpCounter         = schedulerCounter.WithLabelValues(BalanceRegionName, "new-operator")
-	balanceRegionSkipCounter          = schedulerCounter.WithLabelValues(BalanceRegionName, "skip")
-	balanceRegionCreateOpFailCounter  = schedulerCounter.WithLabelValues(BalanceRegionName, "create-operator-fail")
-	balanceRegionNoReplacementCounter = schedulerCounter.WithLabelValues(BalanceRegionName, "no-replacement")
+	balanceRegionScheduleCounter      = newEventCounter(config.BalanceRegionName, "schedule")
+	balanceRegionNoRegionCounter      = newEventCounter(config.BalanceRegionName, "no-region")
+	balanceRegionHotCounter           = newEventCounter(config.BalanceRegionName, "region-hot")
+	balanceRegionNoLeaderCounter      = newEventCounter(config.BalanceRegionName, "no-leader")
+	balanceRegionNewOpCounter         = newEventCounter(config.BalanceRegionName, "new-operator")
+	balanceRegionSkipCounter          = newEventCounter(config.BalanceRegionName, "skip")
+	balanceRegionCreateOpFailCounter  = newEventCounter(config.BalanceRegionName, "create-operator-fail")
+	balanceRegionNoReplacementCounter = newEventCounter(config.BalanceRegionName, "no-replacement")
 )
 
 type balanceRegionSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -57,6 +50,7 @@ type balanceRegionSchedulerConfig struct {
 type balanceRegionScheduler struct {
 	*BaseScheduler
 	*retryQuota
+	name          string
 	conf          *balanceRegionSchedulerConfig
 	filters       []filter.Filter
 	filterCounter *filter.Counter
@@ -76,8 +70,8 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 		setOption(scheduler)
 	}
 	scheduler.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true, OperatorLevel: constant.Medium},
-		filter.NewSpecialUseFilter(scheduler.GetName()),
+		&filter.StoreStateFilter{ActionScope: scheduler.Name(), MoveRegion: true, OperatorLevel: constant.Medium},
+		filter.NewSpecialUseFilter(scheduler.Name()),
 	}
 	return scheduler
 }
@@ -85,10 +79,10 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 // BalanceRegionCreateOption is used to create a scheduler with an option.
 type BalanceRegionCreateOption func(s *balanceRegionScheduler)
 
-// WithBalanceRegionName sets the name for the scheduler.
+// Withconfig.BalanceRegionName sets the name for the scheduler.
 func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	return func(s *balanceRegionScheduler) {
-		s.conf.Name = name
+		s.name = name
 	}
 }
 
@@ -99,12 +93,8 @@ func WithBalanceRegionFilterCounterName(name string) BalanceRegionCreateOption {
 	}
 }
 
-func (s *balanceRegionScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*balanceRegionScheduler) GetType() string {
-	return BalanceRegionType
+func (s *balanceRegionScheduler) Name() string {
+	return s.name
 }
 
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -114,7 +104,7 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(s.Name(), operator.OpRegion.String()).Inc()
 	}
 	return allowed
 }
@@ -165,7 +155,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.Source = range sourceStores {
 		retryLimit := s.retryQuota.GetLimit(solver.Source)
-		solver.sourceScore = solver.sourceStoreScore(s.GetName())
+		solver.sourceScore = solver.sourceStoreScore(s.Name())
 		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
@@ -193,10 +183,10 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 				balanceRegionNoRegionCounter.Inc()
 				continue
 			}
-			log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+			log.Debug("select region", zap.String("scheduler", s.Name()), zap.Uint64("region-id", solver.Region.GetID()))
 			// Skip hot regions.
 			if cluster.IsRegionHot(solver.Region) {
-				log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+				log.Debug("region is hot", zap.String("scheduler", s.Name()), zap.Uint64("region-id", solver.Region.GetID()))
 				if collector != nil {
 					collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionHot)))
 				}
@@ -205,7 +195,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			}
 			// Check region leader
 			if solver.Region.GetLeader() == nil {
-				log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+				log.Warn("region have no leader", zap.String("scheduler", s.Name()), zap.Uint64("region-id", solver.Region.GetID()))
 				if collector != nil {
 					collector.Collect(plan.SetResource(solver.Region), plan.SetStatus(plan.NewStatus(plan.StatusRegionNoLeader)))
 				}
@@ -239,8 +229,8 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	// the more expensive the filter is, the later it should be placed.
 	conf := solver.GetSchedulerConfig()
 	filters := []filter.Filter{
-		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
-		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(),
+		filter.NewExcludedFilter(s.Name(), nil, excludeTargets),
+		filter.NewPlacementSafeguard(s.Name(), conf, solver.GetBasicCluster(), solver.GetRuleManager(),
 			solver.Region, solver.Source, solver.fit),
 	}
 	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
@@ -251,13 +241,13 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	// candidates are sorted by region score desc, so we pick the last store as target store.
 	for i := range candidates.Stores {
 		solver.Target = candidates.Stores[len(candidates.Stores)-i-1]
-		solver.targetScore = solver.targetStoreScore(s.GetName())
+		solver.targetScore = solver.targetStoreScore(s.Name())
 		regionID := solver.Region.GetID()
 		sourceID := solver.Source.GetID()
 		targetID := solver.Target.GetID()
 		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
-		if !solver.shouldBalance(s.GetName()) {
+		if !solver.shouldBalance(s.Name()) {
 			balanceRegionSkipCounter.Inc()
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
@@ -268,7 +258,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		oldPeer := solver.Region.GetStorePeer(sourceID)
 		newPeer := &metapb.Peer{StoreId: solver.Target.GetID(), Role: oldPeer.Role}
 		solver.Step++
-		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.Region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+		op, err := operator.CreateMovePeerOperator(config.BalanceRegionName.String(), solver, solver.Region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			balanceRegionCreateOpFailCounter.Inc()
 			if collector != nil {
@@ -283,7 +273,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		sourceLabel := strconv.FormatUint(sourceID, 10)
 		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
-			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+			balanceDirectionCounter.WithLabelValues(s.Name(), sourceLabel, targetLabel),
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))

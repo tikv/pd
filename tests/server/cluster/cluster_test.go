@@ -1404,10 +1404,10 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), sc.EvictLeaderName.String(), map[string]any{
 		"store_id": 1,
 	})
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), sc.EvictLeaderName.String(), map[string]any{
 		"store_id": 2,
 	})
 	// Check scheduler updated.
@@ -1459,17 +1459,17 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
-func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
+func checkEvictLeaderSchedulerExist(re *require.Assertions, schedulersController *schedulers.Controller, exist bool) {
 	testutil.Eventually(re, func() bool {
 		if !exist {
-			return sc.GetScheduler(schedulers.EvictLeaderName) == nil
+			return schedulersController.GetScheduler(sc.EvictLeaderName) == nil
 		}
-		return sc.GetScheduler(schedulers.EvictLeaderName) != nil
+		return schedulersController.GetScheduler(sc.EvictLeaderName) != nil
 	})
 }
 
-func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller, expected []uint64) {
-	handler, ok := sc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+func checkEvictLeaderStoreIDs(re *require.Assertions, schedulersController *schedulers.Controller, expected []uint64) {
+	handler, ok := schedulersController.GetSchedulerHandlers()[sc.EvictLeaderName]
 	re.True(ok)
 	h, ok := handler.(interface {
 		EvictStoreIDs() []uint64

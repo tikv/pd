@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -31,21 +32,14 @@ import (
 	"github.com/unrolled/render"
 )
 
-const (
-	// ScatterRangeType is scatter range scheduler type
-	ScatterRangeType = "scatter-range"
-	// ScatterRangeName is scatter range scheduler name
-	ScatterRangeName = "scatter-range"
-)
-
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	scatterRangeCounter                    = schedulerCounter.WithLabelValues(ScatterRangeName, "schedule")
-	scatterRangeNewOperatorCounter         = schedulerCounter.WithLabelValues(ScatterRangeName, "new-operator")
-	scatterRangeNewLeaderOperatorCounter   = schedulerCounter.WithLabelValues(ScatterRangeName, "new-leader-operator")
-	scatterRangeNewRegionOperatorCounter   = schedulerCounter.WithLabelValues(ScatterRangeName, "new-region-operator")
-	scatterRangeNoNeedBalanceRegionCounter = schedulerCounter.WithLabelValues(ScatterRangeName, "no-need-balance-region")
-	scatterRangeNoNeedBalanceLeaderCounter = schedulerCounter.WithLabelValues(ScatterRangeName, "no-need-balance-leader")
+	scatterRangeCounter                    = newEventCounter(config.ScatterRangeName, "schedule")
+	scatterRangeNewOperatorCounter         = newEventCounter(config.ScatterRangeName, "new-operator")
+	scatterRangeNewLeaderOperatorCounter   = newEventCounter(config.ScatterRangeName, "new-leader-operator")
+	scatterRangeNewRegionOperatorCounter   = newEventCounter(config.ScatterRangeName, "new-region-operator")
+	scatterRangeNoNeedBalanceRegionCounter = newEventCounter(config.ScatterRangeName, "no-need-balance-region")
+	scatterRangeNoNeedBalanceLeaderCounter = newEventCounter(config.ScatterRangeName, "no-need-balance-leader")
 )
 
 type scatterRangeSchedulerConfig struct {
@@ -154,12 +148,8 @@ func (l *scatterRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	l.handler.ServeHTTP(w, r)
 }
 
-func (l *scatterRangeScheduler) GetName() string {
+func (l *scatterRangeScheduler) Name() string {
 	return l.name
-}
-
-func (*scatterRangeScheduler) GetType() string {
-	return ScatterRangeType
 }
 
 func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
@@ -171,7 +161,7 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 func (l *scatterRangeScheduler) ReloadConfig() error {
 	l.config.Lock()
 	defer l.config.Unlock()
-	cfgData, err := l.config.storage.LoadSchedulerConfig(l.GetName())
+	cfgData, err := l.config.storage.LoadSchedulerConfig(l.Name())
 	if err != nil {
 		return err
 	}
@@ -195,7 +185,7 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 func (l *scatterRangeScheduler) allowBalanceLeader(cluster sche.SchedulerCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(l.Name(), operator.OpLeader.String()).Inc()
 	}
 	return allowed
 }
@@ -203,7 +193,7 @@ func (l *scatterRangeScheduler) allowBalanceLeader(cluster sche.SchedulerCluster
 func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.SchedulerCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpRegion.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(l.Name(), operator.OpRegion.String()).Inc()
 	}
 	return allowed
 }

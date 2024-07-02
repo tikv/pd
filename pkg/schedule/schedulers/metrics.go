@@ -14,7 +14,10 @@
 
 package schedulers
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/schedule/config"
+)
 
 var (
 	schedulerStatusGauge = prometheus.NewGaugeVec(
@@ -160,4 +163,8 @@ func init() {
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)
 	prometheus.MustRegister(HotPendingSum)
+}
+
+func newEventCounter(schedulerName config.CheckerSchedulerName, event string) prometheus.Counter {
+	return schedulerCounter.WithLabelValues(schedulerName.String(), event)
 }

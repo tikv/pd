@@ -46,6 +46,11 @@ func NewJointStateChecker(cluster sche.CheckerCluster) *JointStateChecker {
 	}
 }
 
+// Name returns the checker name.
+func (*JointStateChecker) Name() string {
+	return config.JointStateCheckerName.String()
+}
+
 // Check verifies a region's role, creating an Operator if need.
 func (c *JointStateChecker) Check(region *core.RegionInfo) *operator.Operator {
 	jointCheckCounter.Inc()

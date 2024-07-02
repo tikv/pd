@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -40,10 +41,6 @@ import (
 )
 
 const (
-	// BalanceWitnessName is balance witness scheduler name.
-	BalanceWitnessName = "balance-witness-scheduler"
-	// BalanceWitnessType is balance witness scheduler type.
-	BalanceWitnessType = "balance-witness"
 	// balanceWitnessBatchSize is the default number of operators to transfer witnesses by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and witness-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
@@ -114,7 +111,7 @@ func (conf *balanceWitnessSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(BalanceWitnessName, data)
+	return conf.storage.SaveSchedulerConfig(config.BalanceWitnessName.String(), data)
 }
 
 func (conf *balanceWitnessSchedulerConfig) getBatch() int {
@@ -177,7 +174,6 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 	s := &balanceWitnessScheduler{
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
-		name:          BalanceWitnessName,
 		conf:          conf,
 		handler:       newBalanceWitnessHandler(conf),
 		counter:       balanceWitnessCounter,
@@ -187,8 +183,8 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 		option(s)
 	}
 	s.filters = []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.Medium},
-		filter.NewSpecialUseFilter(s.GetName()),
+		&filter.StoreStateFilter{ActionScope: s.Name(), MoveRegion: true, OperatorLevel: constant.Medium},
+		filter.NewSpecialUseFilter(s.Name()),
 	}
 	return s
 }
@@ -214,12 +210,11 @@ func WithBalanceWitnessName(name string) BalanceWitnessCreateOption {
 	}
 }
 
-func (b *balanceWitnessScheduler) GetName() string {
+func (b *balanceWitnessScheduler) Name() string {
+	if len(b.name) == 0 {
+		return config.BalanceWitnessName.String()
+	}
 	return b.name
-}
-
-func (*balanceWitnessScheduler) GetType() string {
-	return BalanceWitnessType
 }
 
 func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
@@ -231,7 +226,7 @@ func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 func (b *balanceWitnessScheduler) ReloadConfig() error {
 	b.conf.Lock()
 	defer b.conf.Unlock()
-	cfgData, err := b.conf.storage.LoadSchedulerConfig(b.GetName())
+	cfgData, err := b.conf.storage.LoadSchedulerConfig(b.Name())
 	if err != nil {
 		return err
 	}
@@ -250,7 +245,7 @@ func (b *balanceWitnessScheduler) ReloadConfig() error {
 func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetSchedulerConfig().GetWitnessScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(b.GetType(), operator.OpWitness.String()).Inc()
+		operator.OperatorLimitCounter.WithLabelValues(b.Name(), operator.OpWitness.String()).Inc()
 	}
 	return allowed
 }
@@ -262,7 +257,7 @@ func (b *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 		collector = plan.NewCollector(basePlan)
 	}
 	batch := b.conf.getBatch()
-	schedulerCounter.WithLabelValues(b.GetName(), "schedule").Inc()
+	newEventCounter(config.BalanceWitnessName, "schedule").Inc()
 
 	opInfluence := b.OpController.GetOpInfluence(cluster.GetBasicCluster())
 	kind := constant.NewScheduleKind(constant.WitnessKind, constant.ByCount)
@@ -299,7 +294,7 @@ func createTransferWitnessOperator(cs *candidateStores, b *balanceWitnessSchedul
 	ssolver.Source, ssolver.Target = store, nil
 	var op *operator.Operator
 	for i := 0; i < retryLimit; i++ {
-		schedulerCounter.WithLabelValues(b.GetName(), "total").Inc()
+		newEventCounter(config.BalanceWitnessName, "total").Inc()
 		if op = b.transferWitnessOut(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {
 				break
@@ -311,7 +306,7 @@ func createTransferWitnessOperator(cs *candidateStores, b *balanceWitnessSchedul
 		b.retryQuota.ResetLimit(store)
 	} else {
 		b.Attenuate(store)
-		log.Debug("no operator created for selected stores", zap.String("scheduler", b.GetName()), zap.Uint64("transfer-out", store.GetID()))
+		log.Debug("no operator created for selected stores", zap.String("scheduler", b.Name()), zap.Uint64("transfer-out", store.GetID()))
 		cs.next()
 	}
 	return op
@@ -324,8 +319,8 @@ func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 	solver.Region = filter.SelectOneRegion(solver.RandWitnessRegions(solver.SourceStoreID(), b.conf.getRanges()),
 		collector, filter.NewRegionPendingFilter(), filter.NewRegionDownFilter())
 	if solver.Region == nil {
-		log.Debug("store has no witness", zap.String("scheduler", b.GetName()), zap.Uint64("store-id", solver.SourceStoreID()))
-		schedulerCounter.WithLabelValues(b.GetName(), "no-witness-region").Inc()
+		log.Debug("store has no witness", zap.String("scheduler", b.Name()), zap.Uint64("store-id", solver.SourceStoreID()))
+		newEventCounter(config.BalanceWitnessName, "no-witness-region").Inc()
 		return nil
 	}
 	solver.Step++
@@ -333,7 +328,7 @@ func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 	targets := solver.GetNonWitnessVoterStores(solver.Region)
 	finalFilters := b.filters
 	conf := solver.GetSchedulerConfig()
-	if witnessFilter := filter.NewPlacementWitnessSafeguard(b.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
+	if witnessFilter := filter.NewPlacementWitnessSafeguard(b.Name(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, solver.fit); witnessFilter != nil {
 		finalFilters = append(b.filters, witnessFilter)
 	}
 	targets = filter.SelectTargetStores(targets, finalFilters, conf, collector, b.filterCounter)
@@ -347,8 +342,8 @@ func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 			return op
 		}
 	}
-	log.Debug("region has no target store", zap.String("scheduler", b.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
-	schedulerCounter.WithLabelValues(b.GetName(), "no-target-store").Inc()
+	log.Debug("region has no target store", zap.String("scheduler", b.Name()), zap.Uint64("region-id", solver.Region.GetID()))
+	newEventCounter(config.BalanceWitnessName, "no-target-store").Inc()
 	return nil
 }
 
@@ -359,9 +354,9 @@ func (b *balanceWitnessScheduler) transferWitnessOut(solver *solver, collector *
 func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.Step++
 	defer func() { solver.Step-- }()
-	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(b.GetName()), solver.targetStoreScore(b.GetName())
-	if !solver.shouldBalance(b.GetName()) {
-		schedulerCounter.WithLabelValues(b.GetName(), "skip").Inc()
+	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(b.Name()), solver.targetStoreScore(b.Name())
+	if !solver.shouldBalance(b.Name()) {
+		newEventCounter(config.BalanceWitnessName, "skip").Inc()
 		if collector != nil {
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 		}
@@ -369,16 +364,16 @@ func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateMoveWitnessOperator(BalanceWitnessType, solver, solver.Region, solver.SourceStoreID(), solver.TargetStoreID())
+	op, err := operator.CreateMoveWitnessOperator(b.Name(), solver, solver.Region, solver.SourceStoreID(), solver.TargetStoreID())
 	if err != nil {
 		log.Debug("fail to create balance witness operator", errs.ZapError(err))
 		return nil
 	}
 	op.Counters = append(op.Counters,
-		schedulerCounter.WithLabelValues(b.GetName(), "new-operator"),
+		newEventCounter(config.BalanceWitnessName, "new-operator"),
 	)
 	op.FinishedCounters = append(op.FinishedCounters,
-		balanceDirectionCounter.WithLabelValues(b.GetName(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
+		balanceDirectionCounter.WithLabelValues(b.Name(), solver.SourceMetricLabel(), solver.TargetMetricLabel()),
 		b.counter.WithLabelValues("move-witness", solver.SourceMetricLabel()+"-out"),
 		b.counter.WithLabelValues("move-witness", solver.TargetMetricLabel()+"-in"),
 	)

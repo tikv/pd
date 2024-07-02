@@ -19,6 +19,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -112,5 +113,5 @@ func (conf *shuffleRegionSchedulerConfig) persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(ShuffleRegionName, data)
+	return conf.storage.SaveSchedulerConfig(config.ShuffleRegionName.String(), data)
 }

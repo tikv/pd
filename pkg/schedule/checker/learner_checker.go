@@ -41,6 +41,11 @@ func NewLearnerChecker(cluster sche.CheckerCluster) *LearnerChecker {
 	}
 }
 
+// Name returns the checker name.
+func (*LearnerChecker) Name() string {
+	return config.LearnerCheckerName.String()
+}
+
 // Check verifies a region's role, creating an Operator if need.
 func (l *LearnerChecker) Check(region *core.RegionInfo) *operator.Operator {
 	if l.IsPaused() {

@@ -20,6 +20,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -27,10 +28,6 @@ import (
 )
 
 const (
-	// TransferWitnessLeaderName is transfer witness leader scheduler name.
-	TransferWitnessLeaderName = "transfer-witness-leader-scheduler"
-	// TransferWitnessLeaderType is transfer witness leader scheduler type.
-	TransferWitnessLeaderType = "transfer-witness-leader"
 	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
 	transferWitnessLeaderBatchSize = 3
@@ -42,9 +39,9 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	transferWitnessLeaderCounter              = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "schedule")
-	transferWitnessLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "new-operator")
-	transferWitnessLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "no-target-store")
+	transferWitnessLeaderCounter              = newEventCounter(config.TransferWitnessLeaderName, "schedule")
+	transferWitnessLeaderNewOperatorCounter   = newEventCounter(config.TransferWitnessLeaderName, "new-operator")
+	transferWitnessLeaderNoTargetStoreCounter = newEventCounter(config.TransferWitnessLeaderName, "no-target-store")
 )
 
 type transferWitnessLeaderScheduler struct {
@@ -60,12 +57,8 @@ func newTransferWitnessLeaderScheduler(opController *operator.Controller) Schedu
 	}
 }
 
-func (*transferWitnessLeaderScheduler) GetName() string {
-	return TransferWitnessLeaderName
-}
-
-func (*transferWitnessLeaderScheduler) GetType() string {
-	return TransferWitnessLeaderType
+func (*transferWitnessLeaderScheduler) Name() string {
+	return config.TransferWitnessLeaderName.String()
 }
 
 func (*transferWitnessLeaderScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {
@@ -74,7 +67,7 @@ func (*transferWitnessLeaderScheduler) IsScheduleAllowed(sche.SchedulerCluster) 
 
 func (s *transferWitnessLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	transferWitnessLeaderCounter.Inc()
-	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), s.GetType(), cluster, transferWitnessLeaderBatchSize), nil
+	return s.scheduleTransferWitnessLeaderBatch(s.Name(), s.Name(), cluster, transferWitnessLeaderBatchSize), nil
 }
 
 func (s *transferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name, typ string, cluster sche.SchedulerCluster, batchSize int) []*operator.Operator {

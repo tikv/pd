@@ -20,6 +20,7 @@ import (
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/movingaverage"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -46,21 +47,21 @@ const (
 
 // DiagnosableSummaryFunc includes all implementations of plan.Summary.
 // And it also includes all schedulers which pd support to diagnose.
-var DiagnosableSummaryFunc = map[string]plan.Summary{
-	BalanceRegionName: plan.BalancePlanSummary,
-	BalanceLeaderName: plan.BalancePlanSummary,
+var DiagnosableSummaryFunc = map[config.CheckerSchedulerName]plan.Summary{
+	config.BalanceRegionName: plan.BalancePlanSummary,
+	config.BalanceLeaderName: plan.BalancePlanSummary,
 }
 
 // DiagnosticRecorder is used to manage diagnostic for one scheduler.
 type DiagnosticRecorder struct {
-	schedulerName string
+	schedulerName config.CheckerSchedulerName
 	config        sc.SchedulerConfigProvider
 	summaryFunc   plan.Summary
 	results       *cache.FIFO
 }
 
 // NewDiagnosticRecorder creates a new DiagnosticRecorder.
-func NewDiagnosticRecorder(name string, config sc.SchedulerConfigProvider) *DiagnosticRecorder {
+func NewDiagnosticRecorder(name config.CheckerSchedulerName, config sc.SchedulerConfigProvider) *DiagnosticRecorder {
 	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
 		return nil
@@ -135,7 +136,7 @@ func (d *DiagnosticRecorder) GetLastResult() *DiagnosticResult {
 		}
 	}
 	return &DiagnosticResult{
-		Name:      d.schedulerName,
+		Name:      d.schedulerName.String(),
 		Status:    firstStatus,
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
@@ -147,7 +148,7 @@ func (d *DiagnosticRecorder) SetResultFromStatus(status string) {
 	if d == nil {
 		return
 	}
-	result := &DiagnosticResult{Name: d.schedulerName, Timestamp: uint64(time.Now().Unix()), Status: status}
+	result := &DiagnosticResult{Name: d.schedulerName.String(), Timestamp: uint64(time.Now().Unix()), Status: status}
 	d.results.Put(result.Timestamp, result)
 }
 
@@ -161,11 +162,10 @@ func (d *DiagnosticRecorder) SetResultFromPlans(ops []*operator.Operator, plans 
 }
 
 func (d *DiagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
-	res := &DiagnosticResult{Name: d.schedulerName, Timestamp: ts, Status: Normal}
-	name := d.schedulerName
+	res := &DiagnosticResult{Name: d.schedulerName.String(), Timestamp: ts, Status: Normal}
 	// TODO: support more schedulers and checkers
-	switch name {
-	case BalanceRegionName, BalanceLeaderName:
+	switch d.schedulerName {
+	case config.BalanceRegionName, config.BalanceLeaderName:
 		if len(ops) != 0 {
 			res.Status = Scheduling
 			return res

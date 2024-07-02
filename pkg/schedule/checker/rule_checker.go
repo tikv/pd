@@ -103,9 +103,9 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 	}
 }
 
-// GetType returns RuleChecker's Type
-func (*RuleChecker) GetType() string {
-	return config.RuleCheckerName.Type()
+// Name returns the checker name.
+func (*RuleChecker) Name() string {
+	return config.RuleCheckerName.String()
 }
 
 // Check checks if the region matches placement rules and returns Operator to
@@ -401,7 +401,7 @@ func (c *RuleChecker) allowLeader(fit *placement.RegionFit, peer *metapb.Peer) b
 	if s == nil {
 		return false
 	}
-	stateFilter := &filter.StoreStateFilter{ActionScope: c.GetType(), TransferLeader: true}
+	stateFilter := &filter.StoreStateFilter{ActionScope: c.Name(), TransferLeader: true}
 	if !stateFilter.Target(c.cluster.GetCheckerConfig(), s).IsOK() {
 		return false
 	}
@@ -648,12 +648,12 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerType:    c.GetType(),
+		checkerType:    c.Name(),
 		cluster:        c.cluster,
 		isolationLevel: rule.IsolationLevel,
 		locationLabels: rule.LocationLabels,
 		region:         region,
-		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.GetType(), rule.LabelConstraints)},
+		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.Name(), rule.LabelConstraints)},
 		fastFailover:   fastFailover,
 	}
 }
