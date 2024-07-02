@@ -23,7 +23,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/client/testutil"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -84,6 +86,13 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	} else {
 		suite.tsoServer, suite.tsoServerCleanup = tests.StartSingleTSOTestServer(suite.ctx, re, backendEndpoints, tempurl.Alloc())
 		suite.tsoClientConn, suite.tsoClient = tso.MustNewGrpcClient(re, suite.tsoServer.GetAddr())
+		testutil.Eventually(re, func() bool {
+			am, err := suite.tsoServer.GetKeyspaceGroupManager().GetAllocatorManager(utils.DefaultKeyspaceGroupID)
+			if err != nil {
+				return false
+			}
+			return am.GetMember().IsLeaderElected()
+		})
 	}
 }
 

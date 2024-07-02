@@ -154,7 +154,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
 	clusterID := rand.Uint64()
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
-
 	legacySvcRootPath := path.Join("/pd", clusterIDStr)
 	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, clusterIDStr, "tso")
 	electionNamePrefix := "tso-server-" + clusterIDStr
@@ -1046,7 +1045,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	defaultPriority := mcsutils.DefaultKeyspaceGroupReplicaPriority
 	clusterID := rand.Uint64()
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
-
 	rootPath := path.Join("/pd", clusterIDStr)
 	cfg1 := suite.createConfig()
 	cfg2 := suite.createConfig()
