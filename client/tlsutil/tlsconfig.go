@@ -47,20 +47,11 @@ import (
 type TLSInfo struct {
 	CertFile           string
 	KeyFile            string
-	CAFile             string // TODO: deprecate this in v4
 	TrustedCAFile      string
-	ClientCertAuth     bool
-	CRLFile            string
 	InsecureSkipVerify bool
-
-	SkipClientSANVerify bool
 
 	// ServerName ensures the cert matches the given host in case of discovery / virtual hosting
 	ServerName string
-
-	// HandshakeFailure is optionally called when a connection fails to handshake. The
-	// connection will be closed immediately afterwards.
-	HandshakeFailure func(*tls.Conn, error)
 
 	// CipherSuites is a list of supported cipher suites.
 	// If empty, Go auto-populates it by default.
@@ -157,9 +148,6 @@ func (info TLSInfo) baseConfig() (*tls.Config, error) {
 // cafiles returns a list of CA file paths.
 func (info TLSInfo) cafiles() []string {
 	cs := make([]string, 0)
-	if info.CAFile != "" {
-		cs = append(cs, info.CAFile)
-	}
 	if info.TrustedCAFile != "" {
 		cs = append(cs, info.TrustedCAFile)
 	}
