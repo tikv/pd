@@ -151,12 +151,12 @@ func (handler *balanceWitnessHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	data, _ := io.ReadAll(r.Body)
 	r.Body.Close()
 	httpCode, v := handler.config.Update(data)
-	_ = handler.rd.JSON(w, httpCode, v)
+	handler.rd.JSON(w, httpCode, v)
 }
 
 func (handler *balanceWitnessHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	_ = handler.rd.JSON(w, http.StatusOK, conf)
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 type balanceWitnessScheduler struct {

@@ -468,31 +468,31 @@ func (m *ModeManager) tickUpdateState() {
 	case drStateSync:
 		// If hasMajority is false, the cluster is always unavailable. Switch to async won't help.
 		if !canSync && hasMajority {
-			m.drSwitchToAsyncWait(storeIDs[primaryUp])
+			_ = m.drSwitchToAsyncWait(storeIDs[primaryUp])
 		}
 	case drStateAsyncWait:
 		if canSync {
-			m.drSwitchToSync()
+			_ = m.drSwitchToSync()
 			break
 		}
 		if oldAvailableStores := m.drGetAvailableStores(); !reflect.DeepEqual(oldAvailableStores, storeIDs[primaryUp]) {
-			m.drSwitchToAsyncWait(storeIDs[primaryUp])
+			_ = m.drSwitchToAsyncWait(storeIDs[primaryUp])
 			break
 		}
 		if m.drCheckStoreStateUpdated(storeIDs[primaryUp]) {
-			m.drSwitchToAsync(storeIDs[primaryUp])
+			_ = m.drSwitchToAsync(storeIDs[primaryUp])
 		}
 	case drStateAsync:
 		if canSync && m.drDurationSinceAsyncStart() > m.config.DRAutoSync.WaitRecoverTimeout.Duration {
-			m.drSwitchToSyncRecover()
+			_ = m.drSwitchToSyncRecover()
 			break
 		}
 		if !reflect.DeepEqual(m.drGetAvailableStores(), storeIDs[primaryUp]) && m.drCheckStoreStateUpdated(storeIDs[primaryUp]) {
-			m.drSwitchToAsync(storeIDs[primaryUp])
+			_ = m.drSwitchToAsync(storeIDs[primaryUp])
 		}
 	case drStateSyncRecover:
 		if !canSync && hasMajority {
-			m.drSwitchToAsync(storeIDs[primaryUp])
+			_ = m.drSwitchToAsync(storeIDs[primaryUp])
 		} else {
 			m.updateProgress()
 			progress := m.estimateProgress()
@@ -500,7 +500,7 @@ func (m *ModeManager) tickUpdateState() {
 			drRecoverProgressGauge.Set(float64(progress))
 
 			if progress == 1.0 {
-				m.drSwitchToSync()
+				_ = m.drSwitchToSync()
 			} else {
 				m.updateRecoverProgress(progress)
 			}
