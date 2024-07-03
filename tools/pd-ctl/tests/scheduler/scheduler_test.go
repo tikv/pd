@@ -99,7 +99,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 }
 
 func (suite *schedulerTestSuite) TestScheduler() {
-	suite.env.RunTestInTwoModes(suite.checkScheduler)
+	suite.env.RunTestBasedOnMode(suite.checkScheduler)
 }
 
 func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
@@ -392,7 +392,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 }
 
 func (suite *schedulerTestSuite) TestSchedulerConfig() {
-	suite.env.RunTestInTwoModes(suite.checkSchedulerConfig)
+	suite.env.RunTestBasedOnMode(suite.checkSchedulerConfig)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestCluster) {
@@ -558,7 +558,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 }
 
 func (suite *schedulerTestSuite) TestHotRegionSchedulerConfig() {
-	suite.env.RunTestInTwoModes(suite.checkHotRegionSchedulerConfig)
+	suite.env.RunTestBasedOnMode(suite.checkHotRegionSchedulerConfig)
 }
 
 func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.TestCluster) {
@@ -725,7 +725,7 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
-	suite.env.RunTestInTwoModes(suite.checkSchedulerDiagnostic)
+	suite.env.RunTestBasedOnMode(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestCluster) {
