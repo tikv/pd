@@ -28,6 +28,7 @@ func TestControllerConfig(t *testing.T) {
 	cfgData := `
 [controller]
 ltb-max-wait-duration = "60s"
+ltb-token-rpc-max-delay = "500ms"
 degraded-mode-wait-duration = "2s"
 [controller.request-unit]
 read-base-cost = 1.0
@@ -42,8 +43,14 @@ read-cpu-ms-cost =  5.0
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
+<<<<<<< HEAD
 	re.Equal(cfg.Controller.DegradedModeWaitDuration.Duration, time.Second*2)
 	re.Equal(cfg.Controller.LTBMaxWaitDuration.Duration, time.Second*60)
+=======
+	re.Equal(2*time.Second, cfg.Controller.DegradedModeWaitDuration.Duration)
+	re.Equal(60*time.Second, cfg.Controller.LTBMaxWaitDuration.Duration)
+	re.Equal(500*time.Millisecond, cfg.Controller.LTBTokenRPCMaxDelay.Duration)
+>>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352))
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.CPUMsCost-5), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteCostPerByte-4), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteBaseCost-3), 1e-7)
