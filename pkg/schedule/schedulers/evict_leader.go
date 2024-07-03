@@ -220,7 +220,7 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRa
 	conf.Batch = batch
 	err := conf.persistLocked()
 	if err != nil && id != 0 {
-		conf.removeStoreLocked(id)
+		_, _ = conf.removeStoreLocked(id)
 	}
 	return err
 }
