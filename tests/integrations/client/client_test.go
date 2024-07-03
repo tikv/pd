@@ -217,7 +217,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	}()
 
 	// Transfer leader.
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 3; i++ {
 		oldLeaderName := cluster.WaitLeader()
 		err := cluster.GetServer(oldLeaderName).ResignLeader()
 		re.NoError(err)

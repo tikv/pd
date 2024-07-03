@@ -71,13 +71,13 @@ func (suite *tsoClientTestSuite) getBackendEndpoints() []string {
 	return strings.Split(suite.backendEndpoints, ",")
 }
 
-func TestLegacyTSOClient(t *testing.T) {
+func TestLegacyTSOClientSuite(t *testing.T) {
 	suite.Run(t, &tsoClientTestSuite{
 		legacy: true,
 	})
 }
 
-func TestMicroserviceTSOClient(t *testing.T) {
+func TestMicroserviceTSOClientSuite(t *testing.T) {
 	suite.Run(t, &tsoClientTestSuite{
 		legacy: false,
 	})

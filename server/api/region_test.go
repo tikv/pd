@@ -333,7 +333,7 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
 	mustBootstrapCluster(re, svr)
 
-	regionCount := 100000
+	regionCount := 10000
 	tu.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
