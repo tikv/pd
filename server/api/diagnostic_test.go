@@ -96,17 +96,17 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, cfg))
 	re.True(cfg.Schedule.EnableDiagnostic)
 
-	balanceRegionURL := suite.urlPrefix + "/" + sc.BalanceRegionName.String()
+	balanceRegionURL := suite.urlPrefix + "/" + sc.BalanceRegionScheduler.String()
 	result := &schedulers.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	re.NoError(err)
 	re.Equal("disabled", result.Status)
 
-	evictLeaderURL := suite.urlPrefix + "/" + sc.EvictLeaderName.String()
+	evictLeaderURL := suite.urlPrefix + "/" + sc.EvictLeaderScheduler.String()
 	re.NoError(tu.CheckGetJSON(testDialClient, evictLeaderURL, nil, tu.StatusNotOK(re)))
 
 	input := make(map[string]any)
-	input["name"] = sc.BalanceRegionName.String()
+	input["name"] = sc.BalanceRegionScheduler.String()
 	body, err := json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix, body, tu.StatusOK(re))
@@ -117,14 +117,14 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix+"/"+sc.BalanceRegionName.String(), pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix+"/"+sc.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	suite.checkStatus("paused", balanceRegionURL)
 
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix+"/"+sc.BalanceRegionName.String(), pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix+"/"+sc.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	suite.checkStatus("pending", balanceRegionURL)
 
@@ -133,7 +133,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	fmt.Println("after put region")
 	suite.checkStatus("normal", balanceRegionURL)
 
-	deleteURL := fmt.Sprintf("%s/%s", suite.schedulerPrefix, sc.BalanceRegionName.String())
+	deleteURL := fmt.Sprintf("%s/%s", suite.schedulerPrefix, sc.BalanceRegionScheduler.String())
 	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 	re.NoError(err)
 	suite.checkStatus("disabled", balanceRegionURL)

@@ -43,8 +43,8 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantHotRegionCounter     = counterWithEvent(config.GrantHotRegionName, "schedule")
-	grantHotRegionSkipCounter = counterWithEvent(config.GrantHotRegionName, "skip")
+	grantHotRegionCounter     = counterWithEvent(config.GrantHotRegionScheduler, "schedule")
+	grantHotRegionSkipCounter = counterWithEvent(config.GrantHotRegionScheduler, "skip")
 )
 
 type grantHotRegionSchedulerConfig struct {
@@ -98,7 +98,7 @@ func (conf *grantHotRegionSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.GrantHotRegionName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.GrantHotRegionScheduler.String(), data)
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {
@@ -138,7 +138,7 @@ func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHo
 }
 
 func (*grantHotRegionScheduler) Name() string {
-	return config.GrantHotRegionName.String()
+	return config.GrantHotRegionScheduler.String()
 }
 
 func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {

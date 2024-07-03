@@ -87,7 +87,7 @@ func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.EvictSlowTrendName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.EvictSlowTrendScheduler.String(), data)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
@@ -285,7 +285,7 @@ func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 func (*evictSlowTrendScheduler) Name() string {
-	return config.EvictSlowTrendName.String()
+	return config.EvictSlowTrendScheduler.String()
 }
 
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
@@ -374,7 +374,7 @@ func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 }
 
 func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
-	counterWithEvent(config.EvictSlowTrendName, "schedule").Inc()
+	counterWithEvent(config.EvictSlowTrendScheduler, "schedule").Inc()
 
 	var ops []*operator.Operator
 

@@ -21,91 +21,91 @@ import (
 )
 
 // TODO: rename to type
-type CheckerSchedulerName string
+type CheckerSchedulerType string
 
-func (n CheckerSchedulerName) String() string {
+func (n CheckerSchedulerType) String() string {
 	return string(n)
 }
 
 const (
-	// JointStateCheckerName is the name for joint state checker.
-	JointStateCheckerName CheckerSchedulerName = "joint-state-checker"
-	// LearnerCheckerName is the name for learner checker.
-	LearnerCheckerName CheckerSchedulerName = "learner-checker"
-	// SplitCheckerName is the name for split checker.
-	MergeCheckerName CheckerSchedulerName = "merge-checker"
-	// ReplicaCheckerName is the name for replica checker.
-	ReplicaCheckerName CheckerSchedulerName = "replica-checker"
-	// RuleCheckerName is the name for rule checker.
-	RuleCheckerName CheckerSchedulerName = "rule-checker"
-	// SplitCheckerName is the name for split checker.
-	SplitCheckerName CheckerSchedulerName = "split-checker"
+	// JointStateChecker is the name for joint state checker.
+	JointStateChecker CheckerSchedulerType = "joint-state-checker"
+	// LearnerChecker is the name for learner checker.
+	LearnerChecker CheckerSchedulerType = "learner-checker"
+	// MergeChecker is the name for split checker.
+	MergeChecker CheckerSchedulerType = "merge-checker"
+	// ReplicaChecker is the name for replica checker.
+	ReplicaChecker CheckerSchedulerType = "replica-checker"
+	// RuleChecker is the name for rule checker.
+	RuleChecker CheckerSchedulerType = "rule-checker"
+	// SplitChecker is the name for split checker.
+	SplitChecker CheckerSchedulerType = "split-checker"
 
-	// BalanceLeaderName is balance leader scheduler name.
-	BalanceLeaderName CheckerSchedulerName = "balance-leader-scheduler"
-	// BalanceRegionName is balance region scheduler name.
-	BalanceRegionName CheckerSchedulerName = "balance-region-scheduler"
-	// BalanceWitnessName is balance witness scheduler name.
-	BalanceWitnessName CheckerSchedulerName = "balance-witness-scheduler"
-	// EvictLeaderName is evict leader scheduler name.
-	EvictLeaderName CheckerSchedulerName = "evict-leader-scheduler"
-	// EvictSlowStoreName is evict leader scheduler name.
-	EvictSlowStoreName CheckerSchedulerName = "evict-slow-store-scheduler"
-	// EvictSlowTrendName is evict leader by slow trend scheduler name.
-	EvictSlowTrendName CheckerSchedulerName = "evict-slow-trend-scheduler"
-	// GrantLeaderName is grant leader scheduler name.
-	GrantLeaderName CheckerSchedulerName = "grant-leader-scheduler"
-	// GrantHotRegionName is grant hot region scheduler name.
-	GrantHotRegionName CheckerSchedulerName = "grant-hot-region-scheduler"
-	// HotRegionName is balance hot region scheduler name.
-	HotRegionName CheckerSchedulerName = "balance-hot-region-scheduler"
-	// RandomMergeName is random merge scheduler name.
-	RandomMergeName CheckerSchedulerName = "random-merge-scheduler"
-	// ScatterRangeName is scatter range scheduler name
-	ScatterRangeName CheckerSchedulerName = "scatter-range-scheduler"
-	// ShuffleHotRegionName is shuffle hot region scheduler name.
-	ShuffleHotRegionName CheckerSchedulerName = "shuffle-hot-region-scheduler"
-	// ShuffleLeaderName is shuffle leader scheduler name.
-	ShuffleLeaderName CheckerSchedulerName = "shuffle-leader-scheduler"
-	// ShuffleRegionName is shuffle region scheduler name.
-	ShuffleRegionName CheckerSchedulerName = "shuffle-region-scheduler"
-	// SplitBucketName is the split bucket name.
-	SplitBucketName CheckerSchedulerName = "split-bucket-scheduler"
-	// TransferWitnessLeaderName is transfer witness leader scheduler name.
-	TransferWitnessLeaderName CheckerSchedulerName = "transfer-witness-leader-scheduler"
-	// LabelName is label scheduler name.
-	LabelName CheckerSchedulerName = "label-scheduler"
+	// BalanceLeaderScheduler is balance leader scheduler name.
+	BalanceLeaderScheduler CheckerSchedulerType = "balance-leader-scheduler"
+	// BalanceRegionScheduler is balance region scheduler name.
+	BalanceRegionScheduler CheckerSchedulerType = "balance-region-scheduler"
+	// BalanceWitnessScheduler is balance witness scheduler name.
+	BalanceWitnessScheduler CheckerSchedulerType = "balance-witness-scheduler"
+	// EvictLeaderScheduler is evict leader scheduler name.
+	EvictLeaderScheduler CheckerSchedulerType = "evict-leader-scheduler"
+	// EvictSlowStoreScheduler is evict leader scheduler name.
+	EvictSlowStoreScheduler CheckerSchedulerType = "evict-slow-store-scheduler"
+	// EvictSlowTrendScheduler is evict leader by slow trend scheduler name.
+	EvictSlowTrendScheduler CheckerSchedulerType = "evict-slow-trend-scheduler"
+	// GrantLeaderScheduler is grant leader scheduler name.
+	GrantLeaderScheduler CheckerSchedulerType = "grant-leader-scheduler"
+	// GrantHotRegionScheduler is grant hot region scheduler name.
+	GrantHotRegionScheduler CheckerSchedulerType = "grant-hot-region-scheduler"
+	// HotRegionScheduler is balance hot region scheduler name.
+	HotRegionScheduler CheckerSchedulerType = "balance-hot-region-scheduler"
+	// RandomMergeScheduler is random merge scheduler name.
+	RandomMergeScheduler CheckerSchedulerType = "random-merge-scheduler"
+	// ScatterRangeScheduler is scatter range scheduler name
+	ScatterRangeScheduler CheckerSchedulerType = "scatter-range-scheduler"
+	// ShuffleHotRegionScheduler is shuffle hot region scheduler name.
+	ShuffleHotRegionScheduler CheckerSchedulerType = "shuffle-hot-region-scheduler"
+	// ShuffleLeaderScheduler is shuffle leader scheduler name.
+	ShuffleLeaderScheduler CheckerSchedulerType = "shuffle-leader-scheduler"
+	// ShuffleRegionScheduler is shuffle region scheduler name.
+	ShuffleRegionScheduler CheckerSchedulerType = "shuffle-region-scheduler"
+	// SplitBucketScheduler is the split bucket name.
+	SplitBucketScheduler CheckerSchedulerType = "split-bucket-scheduler"
+	// TransferWitnessLeaderScheduler is transfer witness leader scheduler name.
+	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
+	// LabelScheduler is label scheduler name.
+	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
 
-var string2SchedulerName = map[string]CheckerSchedulerName{
-	"balance-leader-scheduler":          BalanceLeaderName,
-	"balance-region-scheduler":          BalanceRegionName,
-	"balance-witness-scheduler":         BalanceWitnessName,
-	"evict-leader-scheduler":            EvictLeaderName,
-	"evict-slow-store-scheduler":        EvictSlowStoreName,
-	"evict-slow-trend-scheduler":        EvictSlowTrendName,
-	"grant-leader-scheduler":            GrantLeaderName,
-	"grant-hot-region-scheduler":        GrantHotRegionName,
-	"balance-hot-region-scheduler":      HotRegionName,
-	"random-merge-scheduler":            RandomMergeName,
-	"scatter-range-scheduler":           ScatterRangeName,
-	"shuffle-hot-region-scheduler":      ShuffleHotRegionName,
-	"shuffle-leader-scheduler":          ShuffleLeaderName,
-	"shuffle-region-scheduler":          ShuffleRegionName,
-	"split-bucket-scheduler":            SplitBucketName,
-	"transfer-witness-leader-scheduler": TransferWitnessLeaderName,
-	"label-scheduler":                   LabelName,
+var string2SchedulerName = map[string]CheckerSchedulerType{
+	"balance-leader-scheduler":          BalanceLeaderScheduler,
+	"balance-region-scheduler":          BalanceRegionScheduler,
+	"balance-witness-scheduler":         BalanceWitnessScheduler,
+	"evict-leader-scheduler":            EvictLeaderScheduler,
+	"evict-slow-store-scheduler":        EvictSlowStoreScheduler,
+	"evict-slow-trend-scheduler":        EvictSlowTrendScheduler,
+	"grant-leader-scheduler":            GrantLeaderScheduler,
+	"grant-hot-region-scheduler":        GrantHotRegionScheduler,
+	"balance-hot-region-scheduler":      HotRegionScheduler,
+	"random-merge-scheduler":            RandomMergeScheduler,
+	"scatter-range-scheduler":           ScatterRangeScheduler,
+	"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
+	"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
+	"shuffle-region-scheduler":          ShuffleRegionScheduler,
+	"split-bucket-scheduler":            SplitBucketScheduler,
+	"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
+	"label-scheduler":                   LabelScheduler,
 }
 
 func CheckSchedulerType(str string) error {
 	_, ok := string2SchedulerName[str]
-	if !ok && !strings.HasPrefix(str, ScatterRangeName.String()) {
+	if !ok && !strings.HasPrefix(str, ScatterRangeScheduler.String()) {
 		return errors.Errorf("unknown scheduler name: %s", str)
 	}
 	return nil
 }
 
-func ConvertSchedulerStr2Name(str string) (CheckerSchedulerName, error) {
+func ConvertSchedulerStr2Name(str string) (CheckerSchedulerType, error) {
 	name, ok := string2SchedulerName[str]
 	if ok {
 		return name, nil

@@ -42,8 +42,8 @@ import (
 )
 
 var (
-	writeSchedulerName config.CheckerSchedulerName = "write"
-	readSchedulerName  config.CheckerSchedulerName = "read"
+	writeSchedulerName config.CheckerSchedulerType = "write"
+	readSchedulerName  config.CheckerSchedulerType = "read"
 )
 
 func init() {
@@ -88,7 +88,7 @@ func TestUpgrade(t *testing.T) {
 	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
 	// new
-	sche, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionName, nil))
+	sche, err := CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionScheduler, nil))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetReadPriorities())
@@ -96,7 +96,7 @@ func TestUpgrade(t *testing.T) {
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.GetWritePeerPriorities())
 	re.Equal("v2", hb.conf.GetRankFormulaVersion())
 	// upgrade from json(null)
-	sche, err = CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+	sche, err = CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetReadPriorities())
@@ -105,7 +105,7 @@ func TestUpgrade(t *testing.T) {
 	re.Equal("v2", hb.conf.GetRankFormulaVersion())
 	// upgrade from < 5.2
 	config51 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"strict-picking-store":"true","enable-for-tiflash":"true"}`
-	sche, err = CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte(config51)))
+	sche, err = CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte(config51)))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
 	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.GetReadPriorities())
@@ -114,7 +114,7 @@ func TestUpgrade(t *testing.T) {
 	re.Equal("v1", hb.conf.GetRankFormulaVersion())
 	// upgrade from < 6.4
 	config54 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"read-priorities":["query","byte"],"write-leader-priorities":["query","byte"],"write-peer-priorities":["byte","key"],"strict-picking-store":"true","enable-for-tiflash":"true","forbid-rw-type":"none"}`
-	sche, err = CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte(config54)))
+	sche, err = CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte(config54)))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
 	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetReadPriorities())
@@ -140,7 +140,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		tc.PutStoreWithLabels(id)
 	}
 
-	sche, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+	sche, err := CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 
@@ -1887,7 +1887,7 @@ func checkHotCacheCheckRegionFlow(re *require.Assertions, testCase testHotCacheC
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
-	sche, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+	sche, err := CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	heartbeat := tc.AddLeaderRegionWithWriteInfo
@@ -1994,7 +1994,7 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+	sche, err := CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	leaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
@@ -2444,7 +2444,7 @@ func TestCompatibilityConfig(t *testing.T) {
 	defer cancel()
 
 	// From new or 3.x cluster, it will use new config
-	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionName, nil))
+	hb, err := CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionScheduler, nil))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.QueryDim, utils.ByteDim},
@@ -2453,8 +2453,8 @@ func TestCompatibilityConfig(t *testing.T) {
 	})
 
 	// Config file is not currently supported
-	hb, err = CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(),
-		ConfigSliceDecoder(config.HotRegionName, []string{"read-priorities=byte,query"}))
+	hb, err = CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(config.HotRegionScheduler, []string{"read-priorities=byte,query"}))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.QueryDim, utils.ByteDim},
@@ -2479,9 +2479,9 @@ func TestCompatibilityConfig(t *testing.T) {
 		"dst-tolerance-ratio":       1.05,
 	})
 	re.NoError(err)
-	err = storage.SaveSchedulerConfig(config.HotRegionName.String(), data)
+	err = storage.SaveSchedulerConfig(config.HotRegionScheduler.String(), data)
 	re.NoError(err)
-	hb, err = CreateScheduler(config.HotRegionName, oc, storage, ConfigJSONDecoder(data))
+	hb, err = CreateScheduler(config.HotRegionScheduler, oc, storage, ConfigJSONDecoder(data))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.ByteDim, utils.KeyDim},
@@ -2495,9 +2495,9 @@ func TestCompatibilityConfig(t *testing.T) {
 	cfg.WriteLeaderPriorities = []string{"query", "key"}
 	data, err = EncodeConfig(cfg)
 	re.NoError(err)
-	err = storage.SaveSchedulerConfig(config.HotRegionName.String(), data)
+	err = storage.SaveSchedulerConfig(config.HotRegionScheduler.String(), data)
 	re.NoError(err)
-	hb, err = CreateScheduler(config.HotRegionName, oc, storage, ConfigJSONDecoder(data))
+	hb, err = CreateScheduler(config.HotRegionScheduler, oc, storage, ConfigJSONDecoder(data))
 	re.NoError(err)
 	checkPriority(re, hb.(*hotScheduler), tc, [3][2]int{
 		{utils.KeyDim, utils.QueryDim},
@@ -2611,7 +2611,7 @@ func TestMaxZombieDuration(t *testing.T) {
 	re := require.New(t)
 	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
-	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionName, nil))
+	hb, err := CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionScheduler, nil))
 	re.NoError(err)
 	maxZombieDur := hb.(*hotScheduler).conf.getValidConf().MaxZombieRounds
 	testCases := []maxZombieDurTestCase{
@@ -2664,7 +2664,7 @@ func TestExpect(t *testing.T) {
 	re := require.New(t)
 	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
-	hb, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionName, nil))
+	hb, err := CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.HotRegionScheduler, nil))
 	re.NoError(err)
 	testCases := []struct {
 		initFunc       func(*balanceSolver)
@@ -2967,7 +2967,7 @@ func TestEncodeConfig(t *testing.T) {
 	re := require.New(t)
 	cancel, _, _, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(config.HotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
+	sche, err := CreateScheduler(config.HotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	data, err := sche.EncodeConfig()
 	re.NoError(err)

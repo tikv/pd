@@ -39,9 +39,9 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	transferWitnessLeaderCounter              = counterWithEvent(config.TransferWitnessLeaderName, "schedule")
-	transferWitnessLeaderNewOperatorCounter   = counterWithEvent(config.TransferWitnessLeaderName, "new-operator")
-	transferWitnessLeaderNoTargetStoreCounter = counterWithEvent(config.TransferWitnessLeaderName, "no-target-store")
+	transferWitnessLeaderCounter              = counterWithEvent(config.TransferWitnessLeaderScheduler, "schedule")
+	transferWitnessLeaderNewOperatorCounter   = counterWithEvent(config.TransferWitnessLeaderScheduler, "new-operator")
+	transferWitnessLeaderNoTargetStoreCounter = counterWithEvent(config.TransferWitnessLeaderScheduler, "no-target-store")
 )
 
 type transferWitnessLeaderScheduler struct {
@@ -58,7 +58,7 @@ func newTransferWitnessLeaderScheduler(opController *operator.Controller) Schedu
 }
 
 func (*transferWitnessLeaderScheduler) Name() string {
-	return config.TransferWitnessLeaderName.String()
+	return config.TransferWitnessLeaderScheduler.String()
 }
 
 func (*transferWitnessLeaderScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {

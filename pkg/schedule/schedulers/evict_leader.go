@@ -46,11 +46,11 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	evictLeaderCounter              = counterWithEvent(config.EvictLeaderName, "schedule")
-	evictLeaderNoLeaderCounter      = counterWithEvent(config.EvictLeaderName, "no-leader")
-	evictLeaderPickUnhealthyCounter = counterWithEvent(config.EvictLeaderName, "pick-unhealthy-region")
-	evictLeaderNoTargetStoreCounter = counterWithEvent(config.EvictLeaderName, "no-target-store")
-	evictLeaderNewOperatorCounter   = counterWithEvent(config.EvictLeaderName, "new-operator")
+	evictLeaderCounter              = counterWithEvent(config.EvictLeaderScheduler, "schedule")
+	evictLeaderNoLeaderCounter      = counterWithEvent(config.EvictLeaderScheduler, "no-leader")
+	evictLeaderPickUnhealthyCounter = counterWithEvent(config.EvictLeaderScheduler, "pick-unhealthy-region")
+	evictLeaderNoTargetStoreCounter = counterWithEvent(config.EvictLeaderScheduler, "no-target-store")
+	evictLeaderNewOperatorCounter   = counterWithEvent(config.EvictLeaderScheduler, "new-operator")
 )
 
 type evictLeaderSchedulerConfig struct {
@@ -112,7 +112,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.EvictLeaderName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.EvictLeaderScheduler.String(), data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -186,7 +186,7 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (*evictLeaderScheduler) Name() string {
-	return config.EvictLeaderName.String()
+	return config.EvictLeaderScheduler.String()
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -414,7 +414,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(config.EvictLeaderName.String()); err != nil {
+			if err := handler.config.removeSchedulerCb(config.EvictLeaderScheduler.String()); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

@@ -362,13 +362,13 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 		case <-ticker.C:
 			{
 				// If enabled, exit.
-				if exists, _ := c.schedulers.IsSchedulerExisted(config.EvictSlowTrendName.String()); exists {
+				if exists, _ := c.schedulers.IsSchedulerExisted(config.EvictSlowTrendScheduler.String()); exists {
 					return
 				}
 				// If the cluster was set up with `raft-kv2` engine, this cluster should
 				// enable `evict-slow-trend` scheduler as default.
 				if c.GetCluster().GetStoreConfig().IsRaftKV2() {
-					typ := config.EvictSlowTrendName
+					typ := config.EvictSlowTrendScheduler
 					args := []string{}
 
 					s, err := schedulers.CreateScheduler(typ, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(typ, args), c.schedulers.RemoveScheduler)
@@ -591,7 +591,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	go c.waitPluginUnload(pluginPath, name, ch)
 }
 
-func (c *Coordinator) waitPluginUnload(pluginPath string, schedulerName config.CheckerSchedulerName, ch chan string) {
+func (c *Coordinator) waitPluginUnload(pluginPath string, schedulerName config.CheckerSchedulerType, ch chan string) {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	// Get signal from channel which means user unload the plugin

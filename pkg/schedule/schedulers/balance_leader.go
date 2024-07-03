@@ -54,13 +54,13 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceLeaderScheduleCounter         = counterWithEvent(config.BalanceLeaderName, "schedule")
-	balanceLeaderNoLeaderRegionCounter   = counterWithEvent(config.BalanceLeaderName, "no-leader-region")
-	balanceLeaderRegionHotCounter        = counterWithEvent(config.BalanceLeaderName, "region-hot")
-	balanceLeaderNoTargetStoreCounter    = counterWithEvent(config.BalanceLeaderName, "no-target-store")
-	balanceLeaderNoFollowerRegionCounter = counterWithEvent(config.BalanceLeaderName, "no-follower-region")
-	balanceLeaderSkipCounter             = counterWithEvent(config.BalanceLeaderName, "skip")
-	balanceLeaderNewOpCounter            = counterWithEvent(config.BalanceLeaderName, "new-operator")
+	balanceLeaderScheduleCounter         = counterWithEvent(config.BalanceLeaderScheduler, "schedule")
+	balanceLeaderNoLeaderRegionCounter   = counterWithEvent(config.BalanceLeaderScheduler, "no-leader-region")
+	balanceLeaderRegionHotCounter        = counterWithEvent(config.BalanceLeaderScheduler, "region-hot")
+	balanceLeaderNoTargetStoreCounter    = counterWithEvent(config.BalanceLeaderScheduler, "no-target-store")
+	balanceLeaderNoFollowerRegionCounter = counterWithEvent(config.BalanceLeaderScheduler, "no-follower-region")
+	balanceLeaderSkipCounter             = counterWithEvent(config.BalanceLeaderScheduler, "skip")
+	balanceLeaderNewOpCounter            = counterWithEvent(config.BalanceLeaderScheduler, "new-operator")
 )
 
 type balanceLeaderSchedulerConfig struct {
@@ -125,7 +125,7 @@ func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.BalanceLeaderName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.BalanceLeaderScheduler.String(), data)
 }
 
 func (conf *balanceLeaderSchedulerConfig) getBatch() int {
@@ -189,7 +189,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		filterCounter: filter.NewCounter(config.BalanceLeaderName.String()),
+		filterCounter: filter.NewCounter(config.BalanceLeaderScheduler.String()),
 	}
 	for _, option := range options {
 		option(s)
@@ -215,8 +215,8 @@ func WithBalanceLeaderFilterCounterName(name string) BalanceLeaderCreateOption {
 	}
 }
 
-// WithBalanceLeaderName sets the name for the scheduler.
-func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
+// WithBalanceLeaderScheduler sets the name for the scheduler.
+func WithBalanceLeaderScheduler(name string) BalanceLeaderCreateOption {
 	return func(s *balanceLeaderScheduler) {
 		s.name = name
 	}
@@ -224,7 +224,7 @@ func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 
 func (l *balanceLeaderScheduler) Name() string {
 	if len(l.name) == 0 {
-		return config.BalanceLeaderName.String()
+		return config.BalanceLeaderScheduler.String()
 	}
 	return l.name
 }
@@ -559,7 +559,7 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateTransferLeaderOperator(config.BalanceLeaderName.String(), solver, solver.Region, solver.TargetStoreID(), []uint64{}, operator.OpLeader)
+	op, err := operator.CreateTransferLeaderOperator(config.BalanceLeaderScheduler.String(), solver, solver.Region, solver.TargetStoreID(), []uint64{}, operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		if collector != nil {

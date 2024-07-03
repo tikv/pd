@@ -32,14 +32,14 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceRegionScheduleCounter      = counterWithEvent(config.BalanceRegionName, "schedule")
-	balanceRegionNoRegionCounter      = counterWithEvent(config.BalanceRegionName, "no-region")
-	balanceRegionHotCounter           = counterWithEvent(config.BalanceRegionName, "region-hot")
-	balanceRegionNoLeaderCounter      = counterWithEvent(config.BalanceRegionName, "no-leader")
-	balanceRegionNewOpCounter         = counterWithEvent(config.BalanceRegionName, "new-operator")
-	balanceRegionSkipCounter          = counterWithEvent(config.BalanceRegionName, "skip")
-	balanceRegionCreateOpFailCounter  = counterWithEvent(config.BalanceRegionName, "create-operator-fail")
-	balanceRegionNoReplacementCounter = counterWithEvent(config.BalanceRegionName, "no-replacement")
+	balanceRegionScheduleCounter      = counterWithEvent(config.BalanceRegionScheduler, "schedule")
+	balanceRegionNoRegionCounter      = counterWithEvent(config.BalanceRegionScheduler, "no-region")
+	balanceRegionHotCounter           = counterWithEvent(config.BalanceRegionScheduler, "region-hot")
+	balanceRegionNoLeaderCounter      = counterWithEvent(config.BalanceRegionScheduler, "no-leader")
+	balanceRegionNewOpCounter         = counterWithEvent(config.BalanceRegionScheduler, "new-operator")
+	balanceRegionSkipCounter          = counterWithEvent(config.BalanceRegionScheduler, "skip")
+	balanceRegionCreateOpFailCounter  = counterWithEvent(config.BalanceRegionScheduler, "create-operator-fail")
+	balanceRegionNoReplacementCounter = counterWithEvent(config.BalanceRegionScheduler, "no-replacement")
 )
 
 type balanceRegionSchedulerConfig struct {
@@ -64,7 +64,7 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
-		filterCounter: filter.NewCounter(config.BalanceRegionName.String()),
+		filterCounter: filter.NewCounter(config.BalanceRegionScheduler.String()),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)
@@ -79,8 +79,8 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 // BalanceRegionCreateOption is used to create a scheduler with an option.
 type BalanceRegionCreateOption func(s *balanceRegionScheduler)
 
-// Withconfig.BalanceRegionName sets the name for the scheduler.
-func WithBalanceRegionName(name string) BalanceRegionCreateOption {
+// Withconfig.BalanceRegionScheduler sets the name for the scheduler.
+func WithBalanceRegionScheduler(name string) BalanceRegionCreateOption {
 	return func(s *balanceRegionScheduler) {
 		s.name = name
 	}
@@ -95,7 +95,7 @@ func WithBalanceRegionFilterCounterName(name string) BalanceRegionCreateOption {
 
 func (s *balanceRegionScheduler) Name() string {
 	if len(s.name) == 0 {
-		return config.BalanceRegionName.String()
+		return config.BalanceRegionScheduler.String()
 	}
 	return s.name
 }

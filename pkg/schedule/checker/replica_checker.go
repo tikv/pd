@@ -36,20 +36,20 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	replicaCheckerCounter                         = counterWithEvent(config.ReplicaCheckerName, "check")
-	replicaCheckerPausedCounter                   = counterWithEvent(config.ReplicaCheckerName, "paused")
-	replicaCheckerNewOpCounter                    = counterWithEvent(config.ReplicaCheckerName, "new-operator")
-	replicaCheckerNoTargetStoreCounter            = counterWithEvent(config.ReplicaCheckerName, "no-target-store")
-	replicaCheckerNoWorstPeerCounter              = counterWithEvent(config.ReplicaCheckerName, "no-worst-peer")
-	replicaCheckerCreateOpFailedCounter           = counterWithEvent(config.ReplicaCheckerName, "create-operator-failed")
-	replicaCheckerAllRightCounter                 = counterWithEvent(config.ReplicaCheckerName, "all-right")
-	replicaCheckerNotBetterCounter                = counterWithEvent(config.ReplicaCheckerName, "not-better")
-	replicaCheckerRemoveExtraOfflineFailedCounter = counterWithEvent(config.ReplicaCheckerName, "remove-extra-offline-replica-failed")
-	replicaCheckerRemoveExtraDownFailedCounter    = counterWithEvent(config.ReplicaCheckerName, "remove-extra-down-replica-failed")
-	replicaCheckerNoStoreOfflineCounter           = counterWithEvent(config.ReplicaCheckerName, "no-store-offline")
-	replicaCheckerNoStoreDownCounter              = counterWithEvent(config.ReplicaCheckerName, "no-store-down")
-	replicaCheckerReplaceOfflineFailedCounter     = counterWithEvent(config.ReplicaCheckerName, "replace-offline-replica-failed")
-	replicaCheckerReplaceDownFailedCounter        = counterWithEvent(config.ReplicaCheckerName, "replace-down-replica-failed")
+	replicaCheckerCounter                         = counterWithEvent(config.ReplicaChecker, "check")
+	replicaCheckerPausedCounter                   = counterWithEvent(config.ReplicaChecker, "paused")
+	replicaCheckerNewOpCounter                    = counterWithEvent(config.ReplicaChecker, "new-operator")
+	replicaCheckerNoTargetStoreCounter            = counterWithEvent(config.ReplicaChecker, "no-target-store")
+	replicaCheckerNoWorstPeerCounter              = counterWithEvent(config.ReplicaChecker, "no-worst-peer")
+	replicaCheckerCreateOpFailedCounter           = counterWithEvent(config.ReplicaChecker, "create-operator-failed")
+	replicaCheckerAllRightCounter                 = counterWithEvent(config.ReplicaChecker, "all-right")
+	replicaCheckerNotBetterCounter                = counterWithEvent(config.ReplicaChecker, "not-better")
+	replicaCheckerRemoveExtraOfflineFailedCounter = counterWithEvent(config.ReplicaChecker, "remove-extra-offline-replica-failed")
+	replicaCheckerRemoveExtraDownFailedCounter    = counterWithEvent(config.ReplicaChecker, "remove-extra-down-replica-failed")
+	replicaCheckerNoStoreOfflineCounter           = counterWithEvent(config.ReplicaChecker, "no-store-offline")
+	replicaCheckerNoStoreDownCounter              = counterWithEvent(config.ReplicaChecker, "no-store-down")
+	replicaCheckerReplaceOfflineFailedCounter     = counterWithEvent(config.ReplicaChecker, "replace-offline-replica-failed")
+	replicaCheckerReplaceDownFailedCounter        = counterWithEvent(config.ReplicaChecker, "replace-down-replica-failed")
 )
 
 // ReplicaChecker ensures region has the best replicas.
@@ -75,7 +75,7 @@ func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigPro
 
 // Name returns the checker name.
 func (*ReplicaChecker) Name() string {
-	return config.ReplicaCheckerName.String()
+	return config.ReplicaChecker.String()
 }
 
 // Check verifies a region's replicas, creating an operator.Operator if need.

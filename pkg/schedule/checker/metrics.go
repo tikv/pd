@@ -33,6 +33,6 @@ func init() {
 	prometheus.MustRegister(checkerCounter)
 }
 
-func counterWithEvent(checker config.CheckerSchedulerName, event string) prometheus.Counter {
+func counterWithEvent(checker config.CheckerSchedulerType, event string) prometheus.Counter {
 	return checkerCounter.WithLabelValues(checker.String(), event)
 }

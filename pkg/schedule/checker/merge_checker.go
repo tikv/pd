@@ -48,28 +48,28 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	mergeCheckerCounter                     = counterWithEvent(config.MergeCheckerName, "check")
-	mergeCheckerPausedCounter               = counterWithEvent(config.MergeCheckerName, "paused")
-	mergeCheckerRecentlySplitCounter        = counterWithEvent(config.MergeCheckerName, "recently-split")
-	mergeCheckerRecentlyStartCounter        = counterWithEvent(config.MergeCheckerName, "recently-start")
-	mergeCheckerNoLeaderCounter             = counterWithEvent(config.MergeCheckerName, "no-leader")
-	mergeCheckerNoNeedCounter               = counterWithEvent(config.MergeCheckerName, "no-need")
-	mergeCheckerUnhealthyRegionCounter      = counterWithEvent(config.MergeCheckerName, "unhealthy-region")
-	mergeCheckerAbnormalReplicaCounter      = counterWithEvent(config.MergeCheckerName, "abnormal-replica")
-	mergeCheckerHotRegionCounter            = counterWithEvent(config.MergeCheckerName, "hot-region")
-	mergeCheckerNoTargetCounter             = counterWithEvent(config.MergeCheckerName, "no-target")
-	mergeCheckerTargetTooLargeCounter       = counterWithEvent(config.MergeCheckerName, "target-too-large")
-	mergeCheckerSplitSizeAfterMergeCounter  = counterWithEvent(config.MergeCheckerName, "split-size-after-merge")
-	mergeCheckerSplitKeysAfterMergeCounter  = counterWithEvent(config.MergeCheckerName, "split-keys-after-merge")
-	mergeCheckerNewOpCounter                = counterWithEvent(config.MergeCheckerName, "new-operator")
-	mergeCheckerLargerSourceCounter         = counterWithEvent(config.MergeCheckerName, "larger-source")
-	mergeCheckerAdjNotExistCounter          = counterWithEvent(config.MergeCheckerName, "adj-not-exist")
-	mergeCheckerAdjRecentlySplitCounter     = counterWithEvent(config.MergeCheckerName, "adj-recently-split")
-	mergeCheckerAdjRegionHotCounter         = counterWithEvent(config.MergeCheckerName, "adj-region-hot")
-	mergeCheckerAdjDisallowMergeCounter     = counterWithEvent(config.MergeCheckerName, "adj-disallow-merge")
-	mergeCheckerAdjAbnormalPeerStoreCounter = counterWithEvent(config.MergeCheckerName, "adj-abnormal-peerstore")
-	mergeCheckerAdjSpecialPeerCounter       = counterWithEvent(config.MergeCheckerName, "adj-special-peer")
-	mergeCheckerAdjAbnormalReplicaCounter   = counterWithEvent(config.MergeCheckerName, "adj-abnormal-replica")
+	mergeCheckerCounter                     = counterWithEvent(config.MergeChecker, "check")
+	mergeCheckerPausedCounter               = counterWithEvent(config.MergeChecker, "paused")
+	mergeCheckerRecentlySplitCounter        = counterWithEvent(config.MergeChecker, "recently-split")
+	mergeCheckerRecentlyStartCounter        = counterWithEvent(config.MergeChecker, "recently-start")
+	mergeCheckerNoLeaderCounter             = counterWithEvent(config.MergeChecker, "no-leader")
+	mergeCheckerNoNeedCounter               = counterWithEvent(config.MergeChecker, "no-need")
+	mergeCheckerUnhealthyRegionCounter      = counterWithEvent(config.MergeChecker, "unhealthy-region")
+	mergeCheckerAbnormalReplicaCounter      = counterWithEvent(config.MergeChecker, "abnormal-replica")
+	mergeCheckerHotRegionCounter            = counterWithEvent(config.MergeChecker, "hot-region")
+	mergeCheckerNoTargetCounter             = counterWithEvent(config.MergeChecker, "no-target")
+	mergeCheckerTargetTooLargeCounter       = counterWithEvent(config.MergeChecker, "target-too-large")
+	mergeCheckerSplitSizeAfterMergeCounter  = counterWithEvent(config.MergeChecker, "split-size-after-merge")
+	mergeCheckerSplitKeysAfterMergeCounter  = counterWithEvent(config.MergeChecker, "split-keys-after-merge")
+	mergeCheckerNewOpCounter                = counterWithEvent(config.MergeChecker, "new-operator")
+	mergeCheckerLargerSourceCounter         = counterWithEvent(config.MergeChecker, "larger-source")
+	mergeCheckerAdjNotExistCounter          = counterWithEvent(config.MergeChecker, "adj-not-exist")
+	mergeCheckerAdjRecentlySplitCounter     = counterWithEvent(config.MergeChecker, "adj-recently-split")
+	mergeCheckerAdjRegionHotCounter         = counterWithEvent(config.MergeChecker, "adj-region-hot")
+	mergeCheckerAdjDisallowMergeCounter     = counterWithEvent(config.MergeChecker, "adj-disallow-merge")
+	mergeCheckerAdjAbnormalPeerStoreCounter = counterWithEvent(config.MergeChecker, "adj-abnormal-peerstore")
+	mergeCheckerAdjSpecialPeerCounter       = counterWithEvent(config.MergeChecker, "adj-special-peer")
+	mergeCheckerAdjAbnormalReplicaCounter   = counterWithEvent(config.MergeChecker, "adj-abnormal-replica")
 )
 
 // MergeChecker ensures region to merge with adjacent region when size is small
@@ -94,7 +94,7 @@ func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf conf
 
 // Name returns the checker name.
 func (*MergeChecker) Name() string {
-	return config.MergeCheckerName.String()
+	return config.MergeChecker.String()
 }
 
 // RecordRegionSplit put the recently split region into cache. MergeChecker

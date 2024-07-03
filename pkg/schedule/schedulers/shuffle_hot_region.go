@@ -37,9 +37,9 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleHotRegionCounter            = counterWithEvent(config.ShuffleHotRegionName, "schedule")
-	shuffleHotRegionNewOperatorCounter = counterWithEvent(config.ShuffleHotRegionName, "new-operator")
-	shuffleHotRegionSkipCounter        = counterWithEvent(config.ShuffleHotRegionName, "skip")
+	shuffleHotRegionCounter            = counterWithEvent(config.ShuffleHotRegionScheduler, "schedule")
+	shuffleHotRegionNewOperatorCounter = counterWithEvent(config.ShuffleHotRegionScheduler, "new-operator")
+	shuffleHotRegionSkipCounter        = counterWithEvent(config.ShuffleHotRegionScheduler, "skip")
 )
 
 type shuffleHotRegionSchedulerConfig struct {
@@ -61,7 +61,7 @@ func (conf *shuffleHotRegionSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.ShuffleHotRegionName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.ShuffleHotRegionScheduler.String(), data)
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) getLimit() uint64 {
@@ -98,7 +98,7 @@ func (s *shuffleHotRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Req
 }
 
 func (*shuffleHotRegionScheduler) Name() string {
-	return config.ShuffleHotRegionName.String()
+	return config.ShuffleHotRegionScheduler.String()
 }
 
 func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {

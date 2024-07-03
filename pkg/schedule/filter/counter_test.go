@@ -40,7 +40,7 @@ func TestString(t *testing.T) {
 
 func TestCounter(t *testing.T) {
 	re := require.New(t)
-	counter := NewCounter(config.BalanceLeaderName.String())
+	counter := NewCounter(config.BalanceLeaderScheduler.String())
 	counter.inc(source, storeStateTombstone, 1, 2)
 	counter.inc(target, storeStateTombstone, 1, 2)
 	re.Equal(1, counter.counter[source][storeStateTombstone][1][2])

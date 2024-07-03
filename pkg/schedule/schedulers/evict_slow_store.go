@@ -40,7 +40,7 @@ const (
 )
 
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
-var evictSlowStoreCounter = counterWithEvent(config.EvictSlowStoreName, "schedule")
+var evictSlowStoreCounter = counterWithEvent(config.EvictSlowStoreScheduler, "schedule")
 
 type evictSlowStoreSchedulerConfig struct {
 	syncutil.RWMutex
@@ -78,7 +78,7 @@ func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.EvictSlowStoreName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.EvictSlowStoreScheduler.String(), data)
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
@@ -188,7 +188,7 @@ func (s *evictSlowStoreScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 func (*evictSlowStoreScheduler) Name() string {
-	return config.EvictSlowStoreName.String()
+	return config.EvictSlowStoreScheduler.String()
 }
 
 func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {

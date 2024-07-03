@@ -23,7 +23,7 @@ import (
 func NewTestOptions() *config.PersistOptions {
 	// register default schedulers in case config check fail.
 	for _, d := range sc.DefaultSchedulers {
-		sc.RegisterScheduler(sc.CheckerSchedulerName(d.Type))
+		sc.RegisterScheduler(sc.CheckerSchedulerType(d.Type))
 	}
 	c := config.NewConfig()
 	c.Adjust(nil, false)

@@ -29,11 +29,11 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	labelCounter            = counterWithEvent(config.LabelName, "schedule")
-	labelNewOperatorCounter = counterWithEvent(config.LabelName, "new-operator")
-	labelNoTargetCounter    = counterWithEvent(config.LabelName, "no-target")
-	labelSkipCounter        = counterWithEvent(config.LabelName, "skip")
-	labelNoRegionCounter    = counterWithEvent(config.LabelName, "no-region")
+	labelCounter            = counterWithEvent(config.LabelScheduler, "schedule")
+	labelNewOperatorCounter = counterWithEvent(config.LabelScheduler, "new-operator")
+	labelNoTargetCounter    = counterWithEvent(config.LabelScheduler, "no-target")
+	labelSkipCounter        = counterWithEvent(config.LabelScheduler, "skip")
+	labelNoRegionCounter    = counterWithEvent(config.LabelScheduler, "no-region")
 )
 
 type labelSchedulerConfig struct {
@@ -57,7 +57,7 @@ func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerCo
 }
 
 func (*labelScheduler) Name() string {
-	return config.LabelName.String()
+	return config.LabelScheduler.String()
 }
 
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {

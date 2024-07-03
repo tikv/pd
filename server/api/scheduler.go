@@ -93,42 +93,42 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	switch schedulerName {
-	case config.BalanceLeaderName:
+	case config.BalanceLeaderScheduler:
 		if err := h.AddBalanceLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.BalanceWitnessName:
+	case config.BalanceWitnessScheduler:
 		if err := h.AddBalanceWitnessScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.TransferWitnessLeaderName:
+	case config.TransferWitnessLeaderScheduler:
 		if err := h.AddTransferWitnessLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.HotRegionName:
+	case config.HotRegionScheduler:
 		if err := h.AddBalanceHotRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.EvictSlowTrendName:
+	case config.EvictSlowTrendScheduler:
 		if err := h.AddEvictSlowTrendScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.BalanceRegionName:
+	case config.BalanceRegionScheduler:
 		if err := h.AddBalanceRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.LabelName:
+	case config.LabelScheduler:
 		if err := h.AddLabelScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.ScatterRangeName:
+	case config.ScatterRangeScheduler:
 		var args []string
 
 		collector := func(v string) {
@@ -153,7 +153,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-	case config.GrantLeaderName, config.EvictLeaderName:
+	case config.GrantLeaderScheduler, config.EvictLeaderScheduler:
 		storeID, ok := input["store_id"].(float64)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
@@ -170,22 +170,22 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 			return
 		}
-	case config.ShuffleLeaderName:
+	case config.ShuffleLeaderScheduler:
 		if err := h.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.ShuffleRegionName:
+	case config.ShuffleRegionScheduler:
 		if err := h.AddShuffleRegionScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.RandomMergeName:
+	case config.RandomMergeScheduler:
 		if err := h.AddRandomMergeScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.ShuffleHotRegionName:
+	case config.ShuffleHotRegionScheduler:
 		limit := uint64(1)
 		l, ok := input["limit"].(float64)
 		if ok {
@@ -195,17 +195,17 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.EvictSlowStoreName:
+	case config.EvictSlowStoreScheduler:
 		if err := h.AddEvictSlowStoreScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.SplitBucketName:
+	case config.SplitBucketScheduler:
 		if err := h.AddSplitBucketScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-	case config.GrantHotRegionName:
+	case config.GrantHotRegionScheduler:
 		leaderID, ok := input["store-leader-id"].(string)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing leader id")
@@ -239,11 +239,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 func (h *schedulerHandler) DeleteScheduler(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
-	case strings.HasPrefix(name, config.EvictLeaderName.String()) && name != config.EvictLeaderName.String():
-		h.redirectSchedulerDelete(w, name, config.EvictLeaderName.String())
+	case strings.HasPrefix(name, config.EvictLeaderScheduler.String()) && name != config.EvictLeaderScheduler.String():
+		h.redirectSchedulerDelete(w, name, config.EvictLeaderScheduler.String())
 		return
-	case strings.HasPrefix(name, config.GrantLeaderName.String()) && name != config.GrantLeaderName.String():
-		h.redirectSchedulerDelete(w, name, config.GrantLeaderName.String())
+	case strings.HasPrefix(name, config.GrantLeaderScheduler.String()) && name != config.GrantLeaderScheduler.String():
+		h.redirectSchedulerDelete(w, name, config.GrantLeaderScheduler.String())
 		return
 	default:
 		if err := config.CheckSchedulerType(name); err != nil {

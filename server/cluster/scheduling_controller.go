@@ -462,7 +462,7 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 	if sc.coordinator == nil {
 		return nil
 	}
-	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[config.EvictLeaderName.String()]
+	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[config.EvictLeaderScheduler.String()]
 	if !ok {
 		return
 	}

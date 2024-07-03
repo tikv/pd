@@ -34,12 +34,12 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	scatterRangeCounter                    = counterWithEvent(config.ScatterRangeName, "schedule")
-	scatterRangeNewOperatorCounter         = counterWithEvent(config.ScatterRangeName, "new-operator")
-	scatterRangeNewLeaderOperatorCounter   = counterWithEvent(config.ScatterRangeName, "new-leader-operator")
-	scatterRangeNewRegionOperatorCounter   = counterWithEvent(config.ScatterRangeName, "new-region-operator")
-	scatterRangeNoNeedBalanceRegionCounter = counterWithEvent(config.ScatterRangeName, "no-need-balance-region")
-	scatterRangeNoNeedBalanceLeaderCounter = counterWithEvent(config.ScatterRangeName, "no-need-balance-leader")
+	scatterRangeCounter                    = counterWithEvent(config.ScatterRangeScheduler, "schedule")
+	scatterRangeNewOperatorCounter         = counterWithEvent(config.ScatterRangeScheduler, "new-operator")
+	scatterRangeNewLeaderOperatorCounter   = counterWithEvent(config.ScatterRangeScheduler, "new-leader-operator")
+	scatterRangeNewRegionOperatorCounter   = counterWithEvent(config.ScatterRangeScheduler, "new-region-operator")
+	scatterRangeNoNeedBalanceRegionCounter = counterWithEvent(config.ScatterRangeScheduler, "no-need-balance-region")
+	scatterRangeNoNeedBalanceLeaderCounter = counterWithEvent(config.ScatterRangeScheduler, "no-need-balance-leader")
 )
 
 type scatterRangeSchedulerConfig struct {
@@ -105,7 +105,7 @@ func (conf *scatterRangeSchedulerConfig) GetEndKey() []byte {
 func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
 	conf.RLock()
 	defer conf.RUnlock()
-	return fmt.Sprintf("%s-%s", config.ScatterRangeName.String(), conf.RangeName)
+	return fmt.Sprintf("%s-%s", config.ScatterRangeScheduler.String(), conf.RangeName)
 }
 
 type scatterRangeScheduler struct {
@@ -131,13 +131,13 @@ func newScatterRangeScheduler(opController *operator.Controller, config *scatter
 		balanceLeader: newBalanceLeaderScheduler(
 			opController,
 			&balanceLeaderSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
-			WithBalanceLeaderName("scatter-range-leader"),
+			WithBalanceLeaderScheduler("scatter-range-leader"),
 			WithBalanceLeaderFilterCounterName("scatter-range-leader"),
 		),
 		balanceRegion: newBalanceRegionScheduler(
 			opController,
 			&balanceRegionSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
-			WithBalanceRegionName("scatter-range-region"),
+			WithBalanceRegionScheduler("scatter-range-region"),
 			WithBalanceRegionFilterCounterName("scatter-range-region"),
 		),
 	}

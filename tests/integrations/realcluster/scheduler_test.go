@@ -47,9 +47,9 @@ func TestTransferLeader(t *testing.T) {
 	}
 
 	// record scheduler
-	re.NoError(pdHTTPCli.CreateScheduler(ctx, sc.EvictLeaderName.String(), 1))
+	re.NoError(pdHTTPCli.CreateScheduler(ctx, sc.EvictLeaderScheduler.String(), 1))
 	defer func() {
-		re.NoError(pdHTTPCli.DeleteScheduler(ctx, sc.EvictLeaderName.String()))
+		re.NoError(pdHTTPCli.DeleteScheduler(ctx, sc.EvictLeaderScheduler.String()))
 	}()
 	res, err := pdHTTPCli.GetSchedulers(ctx)
 	re.NoError(err)
@@ -89,16 +89,16 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 	re.NotEmpty(regions.Regions)
 	region1 := regions.Regions[0]
 
-	err = pdHTTPCli.DeleteScheduler(ctx, sc.BalanceLeaderName.String())
+	err = pdHTTPCli.DeleteScheduler(ctx, sc.BalanceLeaderScheduler.String())
 	if err == nil {
 		defer func() {
-			pdHTTPCli.CreateScheduler(ctx, sc.BalanceLeaderName.String(), 0)
+			pdHTTPCli.CreateScheduler(ctx, sc.BalanceLeaderScheduler.String(), 0)
 		}()
 	}
 
-	re.NoError(pdHTTPCli.CreateScheduler(ctx, sc.GrantLeaderName.String(), uint64(region1.Leader.StoreID)))
+	re.NoError(pdHTTPCli.CreateScheduler(ctx, sc.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
-		pdHTTPCli.DeleteScheduler(ctx, sc.GrantLeaderName.String())
+		pdHTTPCli.DeleteScheduler(ctx, sc.GrantLeaderScheduler.String())
 	}()
 
 	// wait leader transfer
@@ -135,10 +135,10 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 	re.Equal(labelRule.RuleType, labelRules[1].RuleType)
 
 	// enable evict leader scheduler, and check it works
-	re.NoError(pdHTTPCli.DeleteScheduler(ctx, sc.GrantLeaderName.String()))
-	re.NoError(pdHTTPCli.CreateScheduler(ctx, sc.EvictLeaderName.String(), uint64(region1.Leader.StoreID)))
+	re.NoError(pdHTTPCli.DeleteScheduler(ctx, sc.GrantLeaderScheduler.String()))
+	re.NoError(pdHTTPCli.CreateScheduler(ctx, sc.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
-		pdHTTPCli.DeleteScheduler(ctx, sc.EvictLeaderName.String())
+		pdHTTPCli.DeleteScheduler(ctx, sc.EvictLeaderScheduler.String())
 	}()
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)
@@ -151,10 +151,10 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 		return true
 	}, testutil.WithWaitFor(time.Minute))
 
-	re.NoError(pdHTTPCli.DeleteScheduler(ctx, sc.EvictLeaderName.String()))
-	re.NoError(pdHTTPCli.CreateScheduler(ctx, sc.GrantLeaderName.String(), uint64(region1.Leader.StoreID)))
+	re.NoError(pdHTTPCli.DeleteScheduler(ctx, sc.EvictLeaderScheduler.String()))
+	re.NoError(pdHTTPCli.CreateScheduler(ctx, sc.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
-		pdHTTPCli.DeleteScheduler(ctx, sc.GrantLeaderName.String())
+		pdHTTPCli.DeleteScheduler(ctx, sc.GrantLeaderScheduler.String())
 	}()
 	testutil.Eventually(re, func() bool {
 		regions, err := pdHTTPCli.GetRegions(ctx)

@@ -28,10 +28,10 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleLeaderCounter              = counterWithEvent(config.ShuffleLeaderName, "schedule")
-	shuffleLeaderNewOperatorCounter   = counterWithEvent(config.ShuffleLeaderName, "new-operator")
-	shuffleLeaderNoTargetStoreCounter = counterWithEvent(config.ShuffleLeaderName, "no-target-store")
-	shuffleLeaderNoFollowerCounter    = counterWithEvent(config.ShuffleLeaderName, "no-follower")
+	shuffleLeaderCounter              = counterWithEvent(config.ShuffleLeaderScheduler, "schedule")
+	shuffleLeaderNewOperatorCounter   = counterWithEvent(config.ShuffleLeaderScheduler, "new-operator")
+	shuffleLeaderNoTargetStoreCounter = counterWithEvent(config.ShuffleLeaderScheduler, "no-target-store")
+	shuffleLeaderNoFollowerCounter    = counterWithEvent(config.ShuffleLeaderScheduler, "no-follower")
 )
 
 type shuffleLeaderSchedulerConfig struct {
@@ -49,8 +49,8 @@ type shuffleLeaderScheduler struct {
 // between stores.
 func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleLeaderSchedulerConfig) Scheduler {
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: config.ShuffleHotRegionName.String(), TransferLeader: true, OperatorLevel: constant.Low},
-		filter.NewSpecialUseFilter(config.ShuffleHotRegionName.String()),
+		&filter.StoreStateFilter{ActionScope: config.ShuffleHotRegionScheduler.String(), TransferLeader: true, OperatorLevel: constant.Low},
+		filter.NewSpecialUseFilter(config.ShuffleHotRegionScheduler.String()),
 	}
 	base := NewBaseScheduler(opController)
 	return &shuffleLeaderScheduler{
@@ -61,7 +61,7 @@ func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleL
 }
 
 func (*shuffleLeaderScheduler) Name() string {
-	return config.ShuffleHotRegionName.String()
+	return config.ShuffleHotRegionScheduler.String()
 }
 
 func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {

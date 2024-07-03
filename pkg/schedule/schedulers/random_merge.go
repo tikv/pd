@@ -31,12 +31,12 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	randomMergeCounter              = counterWithEvent(config.RandomMergeName, "schedule")
-	randomMergeNewOperatorCounter   = counterWithEvent(config.RandomMergeName, "new-operator")
-	randomMergeNoSourceStoreCounter = counterWithEvent(config.RandomMergeName, "no-source-store")
-	randomMergeNoRegionCounter      = counterWithEvent(config.RandomMergeName, "no-region")
-	randomMergeNoTargetStoreCounter = counterWithEvent(config.RandomMergeName, "no-target-store")
-	randomMergeNotAllowedCounter    = counterWithEvent(config.RandomMergeName, "not-allowed")
+	randomMergeCounter              = counterWithEvent(config.RandomMergeScheduler, "schedule")
+	randomMergeNewOperatorCounter   = counterWithEvent(config.RandomMergeScheduler, "new-operator")
+	randomMergeNoSourceStoreCounter = counterWithEvent(config.RandomMergeScheduler, "no-source-store")
+	randomMergeNoRegionCounter      = counterWithEvent(config.RandomMergeScheduler, "no-region")
+	randomMergeNoTargetStoreCounter = counterWithEvent(config.RandomMergeScheduler, "no-target-store")
+	randomMergeNotAllowedCounter    = counterWithEvent(config.RandomMergeScheduler, "not-allowed")
 )
 
 type randomMergeSchedulerConfig struct {
@@ -60,7 +60,7 @@ func newRandomMergeScheduler(opController *operator.Controller, conf *randomMerg
 }
 
 func (*randomMergeScheduler) Name() string {
-	return config.RandomMergeName.String()
+	return config.RandomMergeScheduler.String()
 }
 
 func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {

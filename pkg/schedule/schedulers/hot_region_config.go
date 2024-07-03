@@ -481,7 +481,7 @@ func (conf *hotRegionSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.HotRegionName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.HotRegionScheduler.String(), data)
 }
 
 func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCluster) bool {

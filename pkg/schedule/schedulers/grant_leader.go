@@ -38,9 +38,9 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantLeaderCounter            = counterWithEvent(config.GrantLeaderName, "schedule")
-	grantLeaderNoFollowerCounter  = counterWithEvent(config.GrantLeaderName, "no-follower")
-	grantLeaderNewOperatorCounter = counterWithEvent(config.GrantLeaderName, "new-operator")
+	grantLeaderCounter            = counterWithEvent(config.GrantLeaderScheduler, "schedule")
+	grantLeaderNoFollowerCounter  = counterWithEvent(config.GrantLeaderScheduler, "no-follower")
+	grantLeaderNewOperatorCounter = counterWithEvent(config.GrantLeaderScheduler, "new-operator")
 )
 
 type grantLeaderSchedulerConfig struct {
@@ -89,7 +89,7 @@ func (conf *grantLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.GrantLeaderName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.GrantLeaderScheduler.String(), data)
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -169,7 +169,7 @@ func (s *grantLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (*grantLeaderScheduler) Name() string {
-	return config.GrantLeaderName.String()
+	return config.GrantLeaderScheduler.String()
 }
 
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -322,7 +322,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(config.GrantLeaderName.String()); err != nil {
+			if err := handler.config.removeSchedulerCb(config.GrantLeaderScheduler.String()); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

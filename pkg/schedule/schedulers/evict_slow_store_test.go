@@ -58,9 +58,9 @@ func (suite *evictSlowStoreTestSuite) SetupTest() {
 
 	storage := storage.NewStorageWithMemoryBackend()
 	var err error
-	suite.es, err = CreateScheduler(config.EvictSlowStoreName, suite.oc, storage, ConfigSliceDecoder(config.EvictSlowStoreName, []string{}), nil)
+	suite.es, err = CreateScheduler(config.EvictSlowStoreScheduler, suite.oc, storage, ConfigSliceDecoder(config.EvictSlowStoreScheduler, []string{}), nil)
 	re.NoError(err)
-	suite.bs, err = CreateScheduler(config.BalanceLeaderName, suite.oc, storage, ConfigSliceDecoder(config.BalanceLeaderName, []string{}), nil)
+	suite.bs, err = CreateScheduler(config.BalanceLeaderScheduler, suite.oc, storage, ConfigSliceDecoder(config.BalanceLeaderScheduler, []string{}), nil)
 	re.NoError(err)
 }
 
@@ -80,7 +80,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	// Add evict leader scheduler to store 1
 	ops, _ := suite.es.Schedule(suite.tc, false)
 	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
-	re.Equal(config.EvictSlowStoreName.String(), ops[0].Desc())
+	re.Equal(config.EvictSlowStoreScheduler.String(), ops[0].Desc())
 	// Cannot balance leaders to store 1
 	ops, _ = suite.bs.Schedule(suite.tc, false)
 	re.Empty(ops)
@@ -107,7 +107,7 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	re.NoError(err)
 	valueStr := ""
 	for id, sche := range sches {
-		if strings.EqualFold(sche, config.EvictSlowStoreName.String()) {
+		if strings.EqualFold(sche, config.EvictSlowStoreScheduler.String()) {
 			valueStr = vs[id]
 		}
 	}

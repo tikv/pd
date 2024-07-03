@@ -47,8 +47,8 @@ const (
 // DiagnosableSummaryFunc includes all implementations of plan.Summary.
 // And it also includes all schedulers which pd support to diagnose.
 var DiagnosableSummaryFunc = map[string]plan.Summary{
-	config.BalanceRegionName.String(): plan.BalancePlanSummary,
-	config.BalanceLeaderName.String(): plan.BalancePlanSummary,
+	config.BalanceRegionScheduler.String(): plan.BalancePlanSummary,
+	config.BalanceLeaderScheduler.String(): plan.BalancePlanSummary,
 }
 
 // DiagnosticRecorder is used to manage diagnostic for one scheduler.
@@ -164,7 +164,7 @@ func (d *DiagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan
 	res := &DiagnosticResult{Name: d.schedulerName, Timestamp: ts, Status: Normal}
 	// TODO: support more schedulers and checkers
 	switch d.schedulerName {
-	case config.BalanceRegionName.String(), config.BalanceLeaderName.String():
+	case config.BalanceRegionScheduler.String(), config.BalanceLeaderScheduler.String():
 		if len(ops) != 0 {
 			res.Status = Scheduling
 			return res

@@ -29,12 +29,12 @@ import (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleRegionCounter                   = counterWithEvent(config.ShuffleRegionName, "schedule")
-	shuffleRegionNewOperatorCounter        = counterWithEvent(config.ShuffleRegionName, "new-operator")
-	shuffleRegionNoRegionCounter           = counterWithEvent(config.ShuffleRegionName, "no-region")
-	shuffleRegionNoNewPeerCounter          = counterWithEvent(config.ShuffleRegionName, "no-new-peer")
-	shuffleRegionCreateOperatorFailCounter = counterWithEvent(config.ShuffleRegionName, "create-operator-fail")
-	shuffleRegionNoSourceStoreCounter      = counterWithEvent(config.ShuffleRegionName, "no-source-store")
+	shuffleRegionCounter                   = counterWithEvent(config.ShuffleRegionScheduler, "schedule")
+	shuffleRegionNewOperatorCounter        = counterWithEvent(config.ShuffleRegionScheduler, "new-operator")
+	shuffleRegionNoRegionCounter           = counterWithEvent(config.ShuffleRegionScheduler, "no-region")
+	shuffleRegionNoNewPeerCounter          = counterWithEvent(config.ShuffleRegionScheduler, "no-new-peer")
+	shuffleRegionCreateOperatorFailCounter = counterWithEvent(config.ShuffleRegionScheduler, "create-operator-fail")
+	shuffleRegionNoSourceStoreCounter      = counterWithEvent(config.ShuffleRegionScheduler, "no-source-store")
 )
 
 type shuffleRegionScheduler struct {
@@ -47,8 +47,8 @@ type shuffleRegionScheduler struct {
 // between stores.
 func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleRegionSchedulerConfig) Scheduler {
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: config.ShuffleRegionName.String(), MoveRegion: true, OperatorLevel: constant.Low},
-		filter.NewSpecialUseFilter(config.ShuffleRegionName.String()),
+		&filter.StoreStateFilter{ActionScope: config.ShuffleRegionScheduler.String(), MoveRegion: true, OperatorLevel: constant.Low},
+		filter.NewSpecialUseFilter(config.ShuffleRegionScheduler.String()),
 	}
 	base := NewBaseScheduler(opController)
 	return &shuffleRegionScheduler{
@@ -63,7 +63,7 @@ func (s *shuffleRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (*shuffleRegionScheduler) Name() string {
-	return config.ShuffleRegionName.String()
+	return config.ShuffleRegionScheduler.String()
 }
 
 func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {

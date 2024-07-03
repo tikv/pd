@@ -50,7 +50,7 @@ func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
 			Count:   4,
 		},
 	})
-	lb, err := CreateScheduler(config.BalanceWitnessName, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.BalanceWitnessName, []string{"", ""}), nil)
+	lb, err := CreateScheduler(config.BalanceWitnessScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.BalanceWitnessScheduler, []string{"", ""}), nil)
 	re.NoError(err)
 	suite.lb = lb
 }

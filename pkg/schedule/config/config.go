@@ -568,10 +568,10 @@ type SchedulerConfig struct {
 // If these schedulers are not in the persistent configuration, they
 // will be created automatically when reloading.
 var DefaultSchedulers = SchedulerConfigs{
-	{Type: BalanceLeaderName.String()},
-	{Type: BalanceRegionName.String()},
-	{Type: HotRegionName.String()},
-	{Type: EvictSlowStoreName.String()},
+	{Type: BalanceLeaderScheduler.String()},
+	{Type: BalanceRegionScheduler.String()},
+	{Type: HotRegionScheduler.String()},
+	{Type: EvictSlowStoreScheduler.String()},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enabled by default.

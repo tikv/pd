@@ -36,8 +36,8 @@ type SplitChecker struct {
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	splitCheckerCounter       = counterWithEvent(config.SplitCheckerName, "check")
-	splitCheckerPausedCounter = counterWithEvent(config.SplitCheckerName, "paused")
+	splitCheckerCounter       = counterWithEvent(config.SplitChecker, "check")
+	splitCheckerPausedCounter = counterWithEvent(config.SplitChecker, "paused")
 )
 
 // NewSplitChecker creates a new SplitChecker.
@@ -51,7 +51,7 @@ func NewSplitChecker(cluster sche.CheckerCluster, ruleManager *placement.RuleMan
 
 // Name returns the checker name.
 func (*SplitChecker) Name() string {
-	return config.SplitCheckerName.String()
+	return config.SplitChecker.String()
 }
 
 // Check checks whether the region need to split and returns Operator to fix.

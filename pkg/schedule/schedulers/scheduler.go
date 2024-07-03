@@ -96,7 +96,7 @@ func ConfigJSONDecoder(data []byte) ConfigDecoder {
 }
 
 // ConfigSliceDecoder the default decode for the config.
-func ConfigSliceDecoder(name config.CheckerSchedulerName, args []string) ConfigDecoder {
+func ConfigSliceDecoder(name config.CheckerSchedulerType, args []string) ConfigDecoder {
 	builder, ok := schedulerArgsToDecoder[name]
 	if !ok {
 		return func(any) error {
@@ -110,13 +110,13 @@ func ConfigSliceDecoder(name config.CheckerSchedulerName, args []string) ConfigD
 type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
 
 var (
-	schedulerMap           = make(map[config.CheckerSchedulerName]CreateSchedulerFunc)
-	schedulerArgsToDecoder = make(map[config.CheckerSchedulerName]ConfigSliceDecoderBuilder)
+	schedulerMap           = make(map[config.CheckerSchedulerType]CreateSchedulerFunc)
+	schedulerArgsToDecoder = make(map[config.CheckerSchedulerType]ConfigSliceDecoderBuilder)
 )
 
 // RegisterScheduler binds a scheduler creator. It should be called in init()
 // func of a package.
-func RegisterScheduler(typ config.CheckerSchedulerName, createFn CreateSchedulerFunc) {
+func RegisterScheduler(typ config.CheckerSchedulerType, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[typ]; ok {
 		log.Fatal("duplicated scheduler", zap.Stringer("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
@@ -125,7 +125,7 @@ func RegisterScheduler(typ config.CheckerSchedulerName, createFn CreateScheduler
 
 // RegisterSliceDecoderBuilder convert arguments to config. It should be called in init()
 // func of package.
-func RegisterSliceDecoderBuilder(typ config.CheckerSchedulerName, builder ConfigSliceDecoderBuilder) {
+func RegisterSliceDecoderBuilder(typ config.CheckerSchedulerType, builder ConfigSliceDecoderBuilder) {
 	if _, ok := schedulerArgsToDecoder[typ]; ok {
 		log.Fatal("duplicated scheduler", zap.Stringer("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
@@ -135,7 +135,7 @@ func RegisterSliceDecoderBuilder(typ config.CheckerSchedulerName, builder Config
 
 // CreateScheduler creates a scheduler with registered creator func.
 func CreateScheduler(
-	typ config.CheckerSchedulerName,
+	typ config.CheckerSchedulerType,
 	oc *operator.Controller,
 	storage endpoint.ConfigStorage,
 	dec ConfigDecoder,

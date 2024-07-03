@@ -31,7 +31,7 @@ type LearnerChecker struct {
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	learnerCheckerPausedCounter = counterWithEvent(config.LearnerCheckerName, "paused")
+	learnerCheckerPausedCounter = counterWithEvent(config.LearnerChecker, "paused")
 )
 
 // NewLearnerChecker creates a learner checker.
@@ -43,7 +43,7 @@ func NewLearnerChecker(cluster sche.CheckerCluster) *LearnerChecker {
 
 // Name returns the checker name.
 func (*LearnerChecker) Name() string {
-	return config.LearnerCheckerName.String()
+	return config.LearnerChecker.String()
 }
 
 // Check verifies a region's role, creating an Operator if need.

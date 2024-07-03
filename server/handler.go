@@ -186,7 +186,7 @@ func (h *Handler) GetAllRequestHistoryHotRegion(request *HistoryHotRegionsReques
 }
 
 // AddScheduler adds a scheduler.
-func (h *Handler) AddScheduler(name sc.CheckerSchedulerName, args ...string) error {
+func (h *Handler) AddScheduler(name sc.CheckerSchedulerType, args ...string) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
@@ -248,87 +248,87 @@ func (h *Handler) RemoveScheduler(name string) error {
 
 // AddBalanceLeaderScheduler adds a balance-leader-scheduler.
 func (h *Handler) AddBalanceLeaderScheduler() error {
-	return h.AddScheduler(sc.BalanceLeaderName)
+	return h.AddScheduler(sc.BalanceLeaderScheduler)
 }
 
 // AddBalanceWitnessScheduler adds a balance-witness-scheduler.
 func (h *Handler) AddBalanceWitnessScheduler() error {
-	return h.AddScheduler(sc.BalanceWitnessName)
+	return h.AddScheduler(sc.BalanceWitnessScheduler)
 }
 
 // AddTransferWitnessLeaderScheduler adds a transfer-witness-leader-scheduler.
 func (h *Handler) AddTransferWitnessLeaderScheduler() error {
-	return h.AddScheduler(sc.TransferWitnessLeaderName)
+	return h.AddScheduler(sc.TransferWitnessLeaderScheduler)
 }
 
 // AddBalanceRegionScheduler adds a balance-region-scheduler.
 func (h *Handler) AddBalanceRegionScheduler() error {
-	return h.AddScheduler(sc.BalanceRegionName)
+	return h.AddScheduler(sc.BalanceRegionScheduler)
 }
 
 // AddBalanceHotRegionScheduler adds a balance-hot-region-scheduler.
 func (h *Handler) AddBalanceHotRegionScheduler() error {
-	return h.AddScheduler(sc.HotRegionName)
+	return h.AddScheduler(sc.HotRegionScheduler)
 }
 
 // AddEvictSlowTrendScheduler adds a evict-slow-trend-scheduler.
 func (h *Handler) AddEvictSlowTrendScheduler() error {
-	return h.AddScheduler(sc.EvictSlowTrendName)
+	return h.AddScheduler(sc.EvictSlowTrendScheduler)
 }
 
 // AddLabelScheduler adds a label-scheduler.
 func (h *Handler) AddLabelScheduler() error {
-	return h.AddScheduler(sc.LabelName)
+	return h.AddScheduler(sc.LabelScheduler)
 }
 
 // AddScatterRangeScheduler adds a balance-range-leader-scheduler
 func (h *Handler) AddScatterRangeScheduler(args ...string) error {
-	return h.AddScheduler(sc.ScatterRangeName, args...)
+	return h.AddScheduler(sc.ScatterRangeScheduler, args...)
 }
 
 // AddGrantLeaderScheduler adds a grant-leader-scheduler.
 func (h *Handler) AddGrantLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler(sc.GrantLeaderName, strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(sc.GrantLeaderScheduler, strconv.FormatUint(storeID, 10))
 }
 
 // AddEvictLeaderScheduler adds an evict-leader-scheduler.
 func (h *Handler) AddEvictLeaderScheduler(storeID uint64) error {
-	return h.AddScheduler(sc.EvictLeaderName, strconv.FormatUint(storeID, 10))
+	return h.AddScheduler(sc.EvictLeaderScheduler, strconv.FormatUint(storeID, 10))
 }
 
 // AddShuffleLeaderScheduler adds a shuffle-leader-scheduler.
 func (h *Handler) AddShuffleLeaderScheduler() error {
-	return h.AddScheduler(sc.ShuffleLeaderName)
+	return h.AddScheduler(sc.ShuffleLeaderScheduler)
 }
 
 // AddShuffleRegionScheduler adds a shuffle-region-scheduler.
 func (h *Handler) AddShuffleRegionScheduler() error {
-	return h.AddScheduler(sc.ShuffleRegionName)
+	return h.AddScheduler(sc.ShuffleRegionScheduler)
 }
 
 // AddShuffleHotRegionScheduler adds a shuffle-hot-region-scheduler.
 func (h *Handler) AddShuffleHotRegionScheduler(limit uint64) error {
-	return h.AddScheduler(sc.ShuffleHotRegionName, strconv.FormatUint(limit, 10))
+	return h.AddScheduler(sc.ShuffleHotRegionScheduler, strconv.FormatUint(limit, 10))
 }
 
 // AddEvictSlowStoreScheduler adds a evict-slow-store-scheduler.
 func (h *Handler) AddEvictSlowStoreScheduler() error {
-	return h.AddScheduler(sc.EvictSlowStoreName)
+	return h.AddScheduler(sc.EvictSlowStoreScheduler)
 }
 
 // AddSplitBucketScheduler adds a split-bucket-scheduler.
 func (h *Handler) AddSplitBucketScheduler() error {
-	return h.AddScheduler(sc.SplitBucketName)
+	return h.AddScheduler(sc.SplitBucketScheduler)
 }
 
 // AddRandomMergeScheduler adds a random-merge-scheduler.
 func (h *Handler) AddRandomMergeScheduler() error {
-	return h.AddScheduler(sc.RandomMergeName)
+	return h.AddScheduler(sc.RandomMergeScheduler)
 }
 
 // AddGrantHotRegionScheduler adds a grant-hot-region-scheduler
 func (h *Handler) AddGrantHotRegionScheduler(leaderID, peers string) error {
-	return h.AddScheduler(sc.GrantHotRegionName, leaderID, peers)
+	return h.AddScheduler(sc.GrantHotRegionScheduler, leaderID, peers)
 }
 
 // SetAllStoresLimit is used to set limit of all stores.
@@ -573,15 +573,15 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 }
 
 // AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
-func (h *Handler) AddEvictOrGrant(storeID float64, name sc.CheckerSchedulerName) (exist bool, err error) {
+func (h *Handler) AddEvictOrGrant(storeID float64, name sc.CheckerSchedulerType) (exist bool, err error) {
 	if exist, err = h.IsSchedulerExisted(name.String()); !exist {
 		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			return exist, err
 		}
 		switch name {
-		case sc.EvictLeaderName:
+		case sc.EvictLeaderScheduler:
 			err = h.AddEvictLeaderScheduler(uint64(storeID))
-		case sc.GrantLeaderName:
+		case sc.GrantLeaderScheduler:
 			err = h.AddGrantLeaderScheduler(uint64(storeID))
 		}
 		if err != nil {

@@ -38,10 +38,10 @@ import (
 )
 
 const noStoreInSchedulerInfo = "No store in user-evict-leader-scheduler-config"
-const evictLeaderName config.CheckerSchedulerName = "user-evict-leader-scheduler"
+const EvictLeaderScheduler config.CheckerSchedulerType = "user-evict-leader-scheduler"
 
 func init() {
-	schedulers.RegisterSliceDecoderBuilder(evictLeaderName, func(args []string) schedulers.ConfigDecoder {
+	schedulers.RegisterSliceDecoderBuilder(EvictLeaderScheduler, func(args []string) schedulers.ConfigDecoder {
 		return func(v any) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -64,7 +64,7 @@ func init() {
 		}
 	})
 
-	schedulers.RegisterScheduler(evictLeaderName, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(string) error) (schedulers.Scheduler, error) {
+	schedulers.RegisterScheduler(EvictLeaderScheduler, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(string) error) (schedulers.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -75,8 +75,8 @@ func init() {
 }
 
 // SchedulerType returns the type of the scheduler
-func SchedulerType() config.CheckerSchedulerName {
-	return evictLeaderName
+func SchedulerType() config.CheckerSchedulerType {
+	return EvictLeaderScheduler
 }
 
 // SchedulerArgs returns the args for the scheduler
@@ -126,7 +126,7 @@ func (conf *evictLeaderSchedulerConfig) Persist() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(evictLeaderName.String(), data)
+	return conf.storage.SaveSchedulerConfig(EvictLeaderScheduler.String(), data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -162,7 +162,7 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 func (*evictLeaderScheduler) Name() string {
-	return evictLeaderName.String()
+	return EvictLeaderScheduler.String()
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -211,12 +211,12 @@ func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 			continue
 		}
 		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: evictLeaderName.String(), TransferLeader: true, OperatorLevel: constant.Urgent}).
+			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: EvictLeaderScheduler.String(), TransferLeader: true, OperatorLevel: constant.Urgent}).
 			RandomPick()
 		if target == nil {
 			continue
 		}
-		op, err := operator.CreateTransferLeaderOperator(evictLeaderName.String(), cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(EvictLeaderScheduler.String(), cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue

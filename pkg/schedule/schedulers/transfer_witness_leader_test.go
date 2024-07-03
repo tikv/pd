@@ -39,7 +39,7 @@ func TestTransferWitnessLeader(t *testing.T) {
 	// Add regions 1 with leader in stores 1
 	tc.AddLeaderRegion(1, 1, 2, 3)
 
-	sl, err := CreateScheduler(config.TransferWitnessLeaderName, oc, storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := CreateScheduler(config.TransferWitnessLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	RecvRegionInfo(sl) <- tc.GetRegion(1)
 	re.True(sl.IsScheduleAllowed(tc))
@@ -54,7 +54,7 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
-	sl, err := CreateScheduler(config.TransferWitnessLeaderName, oc, storage.NewStorageWithMemoryBackend(), nil)
+	sl, err := CreateScheduler(config.TransferWitnessLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 
 	// Add stores 1, 2, 3

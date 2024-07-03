@@ -44,16 +44,16 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	splitBucketDisableCounter            = counterWithEvent(config.SplitBucketName, "bucket-disable")
-	splitBuckerSplitLimitCounter         = counterWithEvent(config.SplitBucketName, "split-limit")
-	splitBucketScheduleCounter           = counterWithEvent(config.SplitBucketName, "schedule")
-	splitBucketNoRegionCounter           = counterWithEvent(config.SplitBucketName, "no-region")
-	splitBucketRegionTooSmallCounter     = counterWithEvent(config.SplitBucketName, "region-too-small")
-	splitBucketOperatorExistCounter      = counterWithEvent(config.SplitBucketName, "operator-exist")
-	splitBucketKeyRangeNotMatchCounter   = counterWithEvent(config.SplitBucketName, "key-range-not-match")
-	splitBucketNoSplitKeysCounter        = counterWithEvent(config.SplitBucketName, "no-split-keys")
-	splitBucketCreateOperatorFailCounter = counterWithEvent(config.SplitBucketName, "create-operator-fail")
-	splitBucketNewOperatorCounter        = counterWithEvent(config.SplitBucketName, "new-operator")
+	splitBucketDisableCounter            = counterWithEvent(config.SplitBucketScheduler, "bucket-disable")
+	splitBuckerSplitLimitCounter         = counterWithEvent(config.SplitBucketScheduler, "split-limit")
+	splitBucketScheduleCounter           = counterWithEvent(config.SplitBucketScheduler, "schedule")
+	splitBucketNoRegionCounter           = counterWithEvent(config.SplitBucketScheduler, "no-region")
+	splitBucketRegionTooSmallCounter     = counterWithEvent(config.SplitBucketScheduler, "region-too-small")
+	splitBucketOperatorExistCounter      = counterWithEvent(config.SplitBucketScheduler, "operator-exist")
+	splitBucketKeyRangeNotMatchCounter   = counterWithEvent(config.SplitBucketScheduler, "key-range-not-match")
+	splitBucketNoSplitKeysCounter        = counterWithEvent(config.SplitBucketScheduler, "no-split-keys")
+	splitBucketCreateOperatorFailCounter = counterWithEvent(config.SplitBucketScheduler, "create-operator-fail")
+	splitBucketNewOperatorCounter        = counterWithEvent(config.SplitBucketScheduler, "new-operator")
 )
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
@@ -83,7 +83,7 @@ func (conf *splitBucketSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(config.SplitBucketName.String(), data)
+	return conf.storage.SaveSchedulerConfig(config.SplitBucketScheduler.String(), data)
 }
 
 func (conf *splitBucketSchedulerConfig) getDegree() int {
@@ -177,7 +177,7 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 
 // Name returns the name of the split bucket scheduler.
 func (*splitBucketScheduler) Name() string {
-	return config.SplitBucketName.String()
+	return config.SplitBucketScheduler.String()
 }
 
 func (s *splitBucketScheduler) ReloadConfig() error {

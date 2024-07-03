@@ -69,40 +69,40 @@ var (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	hotSchedulerCounter                     = counterWithEvent(config.HotRegionName, "schedule")
-	hotSchedulerSkipCounter                 = counterWithEvent(config.HotRegionName, "skip")
-	hotSchedulerSearchRevertRegionsCounter  = counterWithEvent(config.HotRegionName, "search_revert_regions")
-	hotSchedulerNotSameEngineCounter        = counterWithEvent(config.HotRegionName, "not_same_engine")
-	hotSchedulerNoRegionCounter             = counterWithEvent(config.HotRegionName, "no_region")
-	hotSchedulerUnhealthyReplicaCounter     = counterWithEvent(config.HotRegionName, "unhealthy_replica")
-	hotSchedulerAbnormalReplicaCounter      = counterWithEvent(config.HotRegionName, "abnormal_replica")
-	hotSchedulerCreateOperatorFailedCounter = counterWithEvent(config.HotRegionName, "create_operator_failed")
-	hotSchedulerNewOperatorCounter          = counterWithEvent(config.HotRegionName, "new_operator")
-	hotSchedulerSnapshotSenderLimitCounter  = counterWithEvent(config.HotRegionName, "snapshot_sender_limit")
+	hotSchedulerCounter                     = counterWithEvent(config.HotRegionScheduler, "schedule")
+	hotSchedulerSkipCounter                 = counterWithEvent(config.HotRegionScheduler, "skip")
+	hotSchedulerSearchRevertRegionsCounter  = counterWithEvent(config.HotRegionScheduler, "search_revert_regions")
+	hotSchedulerNotSameEngineCounter        = counterWithEvent(config.HotRegionScheduler, "not_same_engine")
+	hotSchedulerNoRegionCounter             = counterWithEvent(config.HotRegionScheduler, "no_region")
+	hotSchedulerUnhealthyReplicaCounter     = counterWithEvent(config.HotRegionScheduler, "unhealthy_replica")
+	hotSchedulerAbnormalReplicaCounter      = counterWithEvent(config.HotRegionScheduler, "abnormal_replica")
+	hotSchedulerCreateOperatorFailedCounter = counterWithEvent(config.HotRegionScheduler, "create_operator_failed")
+	hotSchedulerNewOperatorCounter          = counterWithEvent(config.HotRegionScheduler, "new_operator")
+	hotSchedulerSnapshotSenderLimitCounter  = counterWithEvent(config.HotRegionScheduler, "snapshot_sender_limit")
 
 	// counter related with the split region
-	hotSchedulerNotFoundSplitKeysCounter          = counterWithEvent(config.HotRegionName, "not_found_split_keys")
-	hotSchedulerRegionBucketsNotHotCounter        = counterWithEvent(config.HotRegionName, "region_buckets_not_hot")
-	hotSchedulerOnlyOneBucketsHotCounter          = counterWithEvent(config.HotRegionName, "only_one_buckets_hot")
-	hotSchedulerHotBucketNotValidCounter          = counterWithEvent(config.HotRegionName, "hot_buckets_not_valid")
-	hotSchedulerRegionBucketsSingleHotSpotCounter = counterWithEvent(config.HotRegionName, "region_buckets_single_hot_spot")
-	hotSchedulerSplitSuccessCounter               = counterWithEvent(config.HotRegionName, "split_success")
-	hotSchedulerNeedSplitBeforeScheduleCounter    = counterWithEvent(config.HotRegionName, "need_split_before_move_peer")
-	hotSchedulerRegionTooHotNeedSplitCounter      = counterWithEvent(config.HotRegionName, "region_is_too_hot_need_split")
+	hotSchedulerNotFoundSplitKeysCounter          = counterWithEvent(config.HotRegionScheduler, "not_found_split_keys")
+	hotSchedulerRegionBucketsNotHotCounter        = counterWithEvent(config.HotRegionScheduler, "region_buckets_not_hot")
+	hotSchedulerOnlyOneBucketsHotCounter          = counterWithEvent(config.HotRegionScheduler, "only_one_buckets_hot")
+	hotSchedulerHotBucketNotValidCounter          = counterWithEvent(config.HotRegionScheduler, "hot_buckets_not_valid")
+	hotSchedulerRegionBucketsSingleHotSpotCounter = counterWithEvent(config.HotRegionScheduler, "region_buckets_single_hot_spot")
+	hotSchedulerSplitSuccessCounter               = counterWithEvent(config.HotRegionScheduler, "split_success")
+	hotSchedulerNeedSplitBeforeScheduleCounter    = counterWithEvent(config.HotRegionScheduler, "need_split_before_move_peer")
+	hotSchedulerRegionTooHotNeedSplitCounter      = counterWithEvent(config.HotRegionScheduler, "region_is_too_hot_need_split")
 
-	hotSchedulerMoveLeaderCounter     = counterWithEvent(config.HotRegionName, moveLeader.String())
-	hotSchedulerMovePeerCounter       = counterWithEvent(config.HotRegionName, movePeer.String())
-	hotSchedulerTransferLeaderCounter = counterWithEvent(config.HotRegionName, transferLeader.String())
+	hotSchedulerMoveLeaderCounter     = counterWithEvent(config.HotRegionScheduler, moveLeader.String())
+	hotSchedulerMovePeerCounter       = counterWithEvent(config.HotRegionScheduler, movePeer.String())
+	hotSchedulerTransferLeaderCounter = counterWithEvent(config.HotRegionScheduler, transferLeader.String())
 
-	readSkipAllDimUniformStoreCounter    = counterWithEvent(config.HotRegionName, "read-skip-all-dim-uniform-store")
-	writeSkipAllDimUniformStoreCounter   = counterWithEvent(config.HotRegionName, "write-skip-all-dim-uniform-store")
-	readSkipByteDimUniformStoreCounter   = counterWithEvent(config.HotRegionName, "read-skip-byte-uniform-store")
-	writeSkipByteDimUniformStoreCounter  = counterWithEvent(config.HotRegionName, "write-skip-byte-uniform-store")
-	readSkipKeyDimUniformStoreCounter    = counterWithEvent(config.HotRegionName, "read-skip-key-uniform-store")
-	writeSkipKeyDimUniformStoreCounter   = counterWithEvent(config.HotRegionName, "write-skip-key-uniform-store")
-	readSkipQueryDimUniformStoreCounter  = counterWithEvent(config.HotRegionName, "read-skip-query-uniform-store")
-	writeSkipQueryDimUniformStoreCounter = counterWithEvent(config.HotRegionName, "write-skip-query-uniform-store")
-	pendingOpFailsStoreCounter           = counterWithEvent(config.HotRegionName, "pending-op-fails")
+	readSkipAllDimUniformStoreCounter    = counterWithEvent(config.HotRegionScheduler, "read-skip-all-dim-uniform-store")
+	writeSkipAllDimUniformStoreCounter   = counterWithEvent(config.HotRegionScheduler, "write-skip-all-dim-uniform-store")
+	readSkipByteDimUniformStoreCounter   = counterWithEvent(config.HotRegionScheduler, "read-skip-byte-uniform-store")
+	writeSkipByteDimUniformStoreCounter  = counterWithEvent(config.HotRegionScheduler, "write-skip-byte-uniform-store")
+	readSkipKeyDimUniformStoreCounter    = counterWithEvent(config.HotRegionScheduler, "read-skip-key-uniform-store")
+	writeSkipKeyDimUniformStoreCounter   = counterWithEvent(config.HotRegionScheduler, "write-skip-key-uniform-store")
+	readSkipQueryDimUniformStoreCounter  = counterWithEvent(config.HotRegionScheduler, "read-skip-query-uniform-store")
+	writeSkipQueryDimUniformStoreCounter = counterWithEvent(config.HotRegionScheduler, "write-skip-query-uniform-store")
+	pendingOpFailsStoreCounter           = counterWithEvent(config.HotRegionScheduler, "pending-op-fails")
 )
 
 type baseHotScheduler struct {
@@ -246,7 +246,7 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 }
 
 func (*hotScheduler) Name() string {
-	return config.HotRegionName.String()
+	return config.HotRegionScheduler.String()
 }
 
 func (h *hotScheduler) EncodeConfig() ([]byte, error) {

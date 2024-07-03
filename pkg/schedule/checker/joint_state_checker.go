@@ -32,11 +32,11 @@ type JointStateChecker struct {
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	jointCheckCounter                 = counterWithEvent(config.JointStateCheckerName, "check")
-	jointCheckerPausedCounter         = counterWithEvent(config.JointStateCheckerName, "paused")
-	jointCheckerFailedCounter         = counterWithEvent(config.JointStateCheckerName, "create-operator-fail")
-	jointCheckerNewOpCounter          = counterWithEvent(config.JointStateCheckerName, "new-operator")
-	jointCheckerTransferLeaderCounter = counterWithEvent(config.JointStateCheckerName, "transfer-leader")
+	jointCheckCounter                 = counterWithEvent(config.JointStateChecker, "check")
+	jointCheckerPausedCounter         = counterWithEvent(config.JointStateChecker, "paused")
+	jointCheckerFailedCounter         = counterWithEvent(config.JointStateChecker, "create-operator-fail")
+	jointCheckerNewOpCounter          = counterWithEvent(config.JointStateChecker, "new-operator")
+	jointCheckerTransferLeaderCounter = counterWithEvent(config.JointStateChecker, "transfer-leader")
 )
 
 // NewJointStateChecker creates a joint state checker.
@@ -48,7 +48,7 @@ func NewJointStateChecker(cluster sche.CheckerCluster) *JointStateChecker {
 
 // Name returns the checker name.
 func (*JointStateChecker) Name() string {
-	return config.JointStateCheckerName.String()
+	return config.JointStateChecker.String()
 }
 
 // Check verifies a region's role, creating an Operator if need.

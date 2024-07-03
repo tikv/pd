@@ -1404,10 +1404,10 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
-	api.MustAddScheduler(re, leaderServer.GetAddr(), sc.EvictLeaderName.String(), map[string]any{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), sc.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
-	api.MustAddScheduler(re, leaderServer.GetAddr(), sc.EvictLeaderName.String(), map[string]any{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), sc.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 2,
 	})
 	// Check scheduler updated.
@@ -1462,14 +1462,14 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 func checkEvictLeaderSchedulerExist(re *require.Assertions, schedulersController *schedulers.Controller, exist bool) {
 	testutil.Eventually(re, func() bool {
 		if !exist {
-			return schedulersController.GetScheduler(sc.EvictLeaderName.String()) == nil
+			return schedulersController.GetScheduler(sc.EvictLeaderScheduler.String()) == nil
 		}
-		return schedulersController.GetScheduler(sc.EvictLeaderName.String()) != nil
+		return schedulersController.GetScheduler(sc.EvictLeaderScheduler.String()) != nil
 	})
 }
 
 func checkEvictLeaderStoreIDs(re *require.Assertions, schedulersController *schedulers.Controller, expected []uint64) {
-	handler, ok := schedulersController.GetSchedulerHandlers()[sc.EvictLeaderName.String()]
+	handler, ok := schedulersController.GetSchedulerHandlers()[sc.EvictLeaderScheduler.String()]
 	re.True(ok)
 	h, ok := handler.(interface {
 		EvictStoreIDs() []uint64

@@ -56,7 +56,7 @@ func TestShuffleLeader(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
-	sl, err := CreateScheduler(config.ShuffleLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleLeaderName, []string{"", ""}))
+	sl, err := CreateScheduler(config.ShuffleLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleLeaderScheduler, []string{"", ""}))
 	re.NoError(err)
 	ops, _ := sl.Schedule(tc, false)
 	re.Empty(ops)
@@ -94,7 +94,7 @@ func TestRejectLeader(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 1, 3)
 
 	// The label scheduler transfers leader out of store1.
-	sl, err := CreateScheduler(config.LabelName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.LabelName, []string{"", ""}))
+	sl, err := CreateScheduler(config.LabelScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.LabelScheduler, []string{"", ""}))
 	re.NoError(err)
 	ops, _ := sl.Schedule(tc, false)
 	operatorutil.CheckTransferLeaderFrom(re, ops[0], operator.OpLeader, 1)
@@ -106,13 +106,13 @@ func TestRejectLeader(t *testing.T) {
 
 	// As store3 is disconnected, store1 rejects leader. Balancer will not create
 	// any operators.
-	bs, err := CreateScheduler(config.BalanceLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.BalanceLeaderName, []string{"", ""}))
+	bs, err := CreateScheduler(config.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.BalanceLeaderScheduler, []string{"", ""}))
 	re.NoError(err)
 	ops, _ = bs.Schedule(tc, false)
 	re.Empty(ops)
 
 	// Can't evict leader from store2, neither.
-	el, err := CreateScheduler(config.EvictLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderName, []string{"2"}), func(string) error { return nil })
+	el, err := CreateScheduler(config.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderScheduler, []string{"2"}), func(string) error { return nil })
 	re.NoError(err)
 	ops, _ = el.Schedule(tc, false)
 	re.Empty(ops)
@@ -138,7 +138,7 @@ func TestRemoveRejectLeader(t *testing.T) {
 	defer cancel()
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 1)
-	el, err := CreateScheduler(config.EvictLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderName, []string{"1"}), func(string) error { return nil })
+	el, err := CreateScheduler(config.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	tc.DeleteStore(tc.GetStore(1))
 	succ, _ := el.(*evictLeaderScheduler).conf.removeStore(1)
@@ -158,7 +158,7 @@ func checkBalance(re *require.Assertions, enablePlacementRules bool) {
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3, labels...)
-	hb, err := CreateScheduler(config.ShuffleHotRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleHotRegionName, []string{"", ""}))
+	hb, err := CreateScheduler(config.ShuffleHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleHotRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	// Add stores 1, 2, 3, 4, 5, 6  with hot peer counts 3, 2, 2, 2, 0, 0.
 	tc.AddLabelsStore(1, 3, map[string]string{"zone": "z1", "host": "h1"})
@@ -230,7 +230,7 @@ func TestShuffleRegion(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
-	sl, err := CreateScheduler(config.ShuffleRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleRegionName, []string{"", ""}))
+	sl, err := CreateScheduler(config.ShuffleRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
@@ -294,7 +294,7 @@ func TestShuffleRegionRole(t *testing.T) {
 	}, peers[0])
 	tc.PutRegion(region)
 
-	sl, err := CreateScheduler(config.ShuffleRegionName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleRegionName, []string{"", ""}))
+	sl, err := CreateScheduler(config.ShuffleRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.ShuffleRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 
 	conf := sl.(*shuffleRegionScheduler).conf
@@ -314,8 +314,8 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	defer cancel()
 
 	storage := storage.NewStorageWithMemoryBackend()
-	cd := ConfigSliceDecoder(config.BalanceRegionName, []string{"", ""})
-	bs, err := CreateScheduler(config.BalanceRegionName, oc, storage, cd)
+	cd := ConfigSliceDecoder(config.BalanceRegionScheduler, []string{"", ""})
+	bs, err := CreateScheduler(config.BalanceRegionScheduler, oc, storage, cd)
 	re.NoError(err)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
@@ -365,8 +365,8 @@ func TestSpecialUseReserved(t *testing.T) {
 	defer cancel()
 
 	storage := storage.NewStorageWithMemoryBackend()
-	cd := ConfigSliceDecoder(config.BalanceRegionName, []string{"", ""})
-	bs, err := CreateScheduler(config.BalanceRegionName, oc, storage, cd)
+	cd := ConfigSliceDecoder(config.BalanceRegionScheduler, []string{"", ""})
+	bs, err := CreateScheduler(config.BalanceRegionScheduler, oc, storage, cd)
 	re.NoError(err)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
@@ -399,7 +399,7 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetEnablePlacementRules(true)
-	lb, err := CreateScheduler(config.BalanceLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.BalanceLeaderName, []string{"", ""}))
+	lb, err := CreateScheduler(config.BalanceLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.BalanceLeaderScheduler, []string{"", ""}))
 	re.NoError(err)
 
 	tc.AddLeaderStore(1, 1)
