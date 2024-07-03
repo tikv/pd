@@ -173,6 +173,7 @@ func NewResourceGroupController(
 	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig))
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
 	controller.safeRuConfig.Store(controller.ruConfig)
+	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 	return controller, nil
 }
 
@@ -181,12 +182,17 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 	if err != nil {
 		return nil, err
 	}
+	config := DefaultConfig()
+	defer config.Adjust()
 	kvs := resp.GetKvs()
 	if len(kvs) == 0 {
 		log.Warn("[resource group controller] server does not save config, load config failed")
-		return DefaultConfig(), nil
+		return config, nil
 	}
+<<<<<<< HEAD
 	config := &Config{}
+=======
+>>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352))
 	err = json.Unmarshal(kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
@@ -289,7 +295,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
-
 			case <-emergencyTokenAcquisitionTicker.C:
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			/* channels */
@@ -371,6 +376,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
 					}
+					config.Adjust()
 					c.ruConfig = GenerateRUConfig(config)
 
 					// Stay compatible with serverless
@@ -384,7 +390,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
-
 			case gc := <-c.tokenBucketUpdateChan:
 				now := gc.run.now
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx, now)
