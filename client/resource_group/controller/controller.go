@@ -38,20 +38,13 @@ import (
 )
 
 const (
-<<<<<<< HEAD
-	controllerConfigPath    = "resource_group/controller"
-	maxRetry                = 10
-	retryInterval           = 50 * time.Millisecond
-	maxNotificationChanLen  = 200
-	needTokensAmplification = 1.1
-	trickleReserveDuration  = 1250 * time.Millisecond
-=======
 	controllerConfigPath     = "resource_group/controller"
+	maxRetry                 = 10
+	retryInterval            = 50 * time.Millisecond
 	maxNotificationChanLen   = 200
 	needTokensAmplification  = 1.1
 	trickleReserveDuration   = 1250 * time.Millisecond
 	slowNotifyFilterDuration = 10 * time.Millisecond
->>>>>>> 49f9b115c (client/controller: record context error and add slowlog about token bucket (#8344))
 
 	watchRetryInterval = 30 * time.Second
 )
