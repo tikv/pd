@@ -18,12 +18,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 type diagnosticHandler struct {
@@ -42,15 +38,7 @@ func newDiagnosticHandler(svr *server.Server, rd *render.Render) *diagnosticHand
 
 func (h *diagnosticHandler) GetDiagnosticResult(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
-	schedulerName, err := config.ConvertSchedulerStr2Name(name)
-	if err != nil {
-		log.Error("failed to convert scheduler name",
-			zap.String("scheduler", name),
-			errs.ZapError(err))
-		h.rd.JSON(w, http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
-		return
-	}
-	result, err := h.handler.GetDiagnosticResult(schedulerName)
+	result, err := h.handler.GetDiagnosticResult(name)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

@@ -246,15 +246,14 @@ func (h *schedulerHandler) DeleteScheduler(w http.ResponseWriter, r *http.Reques
 		h.redirectSchedulerDelete(w, name, config.GrantLeaderName.String())
 		return
 	default:
-		schedulerName, err := config.ConvertSchedulerStr2Name(name)
-		if err != nil {
-			log.Error("failed to convert scheduler name",
+		if err := config.CheckSchedulerType(name); err != nil {
+			log.Error("failed to check scheduler type",
 				zap.String("scheduler", name),
 				errs.ZapError(err))
 			h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 			return
 		}
-		if err := h.RemoveScheduler(schedulerName); err != nil {
+		if err := h.RemoveScheduler(name); err != nil {
 			h.handleErr(w, err)
 			return
 		}

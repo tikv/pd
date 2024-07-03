@@ -1462,14 +1462,14 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 func checkEvictLeaderSchedulerExist(re *require.Assertions, schedulersController *schedulers.Controller, exist bool) {
 	testutil.Eventually(re, func() bool {
 		if !exist {
-			return schedulersController.GetScheduler(sc.EvictLeaderName) == nil
+			return schedulersController.GetScheduler(sc.EvictLeaderName.String()) == nil
 		}
-		return schedulersController.GetScheduler(sc.EvictLeaderName) != nil
+		return schedulersController.GetScheduler(sc.EvictLeaderName.String()) != nil
 	})
 }
 
 func checkEvictLeaderStoreIDs(re *require.Assertions, schedulersController *schedulers.Controller, expected []uint64) {
-	handler, ok := schedulersController.GetSchedulerHandlers()[sc.EvictLeaderName]
+	handler, ok := schedulersController.GetSchedulerHandlers()[sc.EvictLeaderName.String()]
 	re.True(ok)
 	h, ok := handler.(interface {
 		EvictStoreIDs() []uint64

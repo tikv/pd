@@ -201,14 +201,13 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		}
 		// Ensure the scheduler config could be updated as soon as possible.
 		if schedulersController := cw.getSchedulersController(); schedulersController != nil {
-			schedulerName, err := sc.ConvertSchedulerStr2Name(name)
-			if err != nil {
-				log.Error("failed to convert scheduler name",
+			if err := sc.CheckSchedulerType(name); err != nil {
+				log.Error("failed to check scheduler type",
 					zap.String("scheduler", name),
 					errs.ZapError(err))
 				return errs.ErrSchedulerNotFound.GenWithStackByArgs()
 			}
-			return schedulersController.ReloadSchedulerConfig(schedulerName)
+			return schedulersController.ReloadSchedulerConfig(name)
 		}
 		return nil
 	}

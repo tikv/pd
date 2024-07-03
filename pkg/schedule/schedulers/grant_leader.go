@@ -48,7 +48,7 @@ type grantLeaderSchedulerConfig struct {
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
-	removeSchedulerCb func(name config.CheckerSchedulerName) error
+	removeSchedulerCb func(string) error
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
@@ -322,7 +322,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(config.GrantLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(config.GrantLeaderName.String()); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

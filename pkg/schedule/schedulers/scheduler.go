@@ -107,7 +107,7 @@ func ConfigSliceDecoder(name config.CheckerSchedulerName, args []string) ConfigD
 }
 
 // CreateSchedulerFunc is for creating scheduler.
-type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(config.CheckerSchedulerName) error) (Scheduler, error)
+type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
 
 var (
 	schedulerMap           = make(map[config.CheckerSchedulerName]CreateSchedulerFunc)
@@ -139,7 +139,7 @@ func CreateScheduler(
 	oc *operator.Controller,
 	storage endpoint.ConfigStorage,
 	dec ConfigDecoder,
-	removeSchedulerCb ...func(config.CheckerSchedulerName) error,
+	removeSchedulerCb ...func(string) error,
 ) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {

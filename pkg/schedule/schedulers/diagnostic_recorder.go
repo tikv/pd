@@ -46,21 +46,21 @@ const (
 
 // DiagnosableSummaryFunc includes all implementations of plan.Summary.
 // And it also includes all schedulers which pd support to diagnose.
-var DiagnosableSummaryFunc = map[config.CheckerSchedulerName]plan.Summary{
-	config.BalanceRegionName: plan.BalancePlanSummary,
-	config.BalanceLeaderName: plan.BalancePlanSummary,
+var DiagnosableSummaryFunc = map[string]plan.Summary{
+	config.BalanceRegionName.String(): plan.BalancePlanSummary,
+	config.BalanceLeaderName.String(): plan.BalancePlanSummary,
 }
 
 // DiagnosticRecorder is used to manage diagnostic for one scheduler.
 type DiagnosticRecorder struct {
-	schedulerName config.CheckerSchedulerName
+	schedulerName string
 	config        config.SchedulerConfigProvider
 	summaryFunc   plan.Summary
 	results       *cache.FIFO
 }
 
 // NewDiagnosticRecorder creates a new DiagnosticRecorder.
-func NewDiagnosticRecorder(name config.CheckerSchedulerName, config config.SchedulerConfigProvider) *DiagnosticRecorder {
+func NewDiagnosticRecorder(name string, config config.SchedulerConfigProvider) *DiagnosticRecorder {
 	summaryFunc, ok := DiagnosableSummaryFunc[name]
 	if !ok {
 		return nil
@@ -135,7 +135,7 @@ func (d *DiagnosticRecorder) GetLastResult() *DiagnosticResult {
 		}
 	}
 	return &DiagnosticResult{
-		Name:      d.schedulerName.String(),
+		Name:      d.schedulerName,
 		Status:    firstStatus,
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
@@ -147,7 +147,7 @@ func (d *DiagnosticRecorder) SetResultFromStatus(status string) {
 	if d == nil {
 		return
 	}
-	result := &DiagnosticResult{Name: d.schedulerName.String(), Timestamp: uint64(time.Now().Unix()), Status: status}
+	result := &DiagnosticResult{Name: d.schedulerName, Timestamp: uint64(time.Now().Unix()), Status: status}
 	d.results.Put(result.Timestamp, result)
 }
 
@@ -161,10 +161,10 @@ func (d *DiagnosticRecorder) SetResultFromPlans(ops []*operator.Operator, plans 
 }
 
 func (d *DiagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan, ts uint64) *DiagnosticResult {
-	res := &DiagnosticResult{Name: d.schedulerName.String(), Timestamp: ts, Status: Normal}
+	res := &DiagnosticResult{Name: d.schedulerName, Timestamp: ts, Status: Normal}
 	// TODO: support more schedulers and checkers
 	switch d.schedulerName {
-	case config.BalanceRegionName, config.BalanceLeaderName:
+	case config.BalanceRegionName.String(), config.BalanceLeaderName.String():
 		if len(ops) != 0 {
 			res.Status = Scheduling
 			return res

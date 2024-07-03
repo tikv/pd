@@ -362,7 +362,7 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 		case <-ticker.C:
 			{
 				// If enabled, exit.
-				if exists, _ := c.schedulers.IsSchedulerExisted(config.EvictSlowTrendName); exists {
+				if exists, _ := c.schedulers.IsSchedulerExisted(config.EvictSlowTrendName.String()); exists {
 					return
 				}
 				// If the cluster was set up with `raft-kv2` engine, this cluster should
@@ -599,7 +599,7 @@ func (c *Coordinator) waitPluginUnload(pluginPath string, schedulerName config.C
 		select {
 		case action := <-ch:
 			if action == PluginUnload {
-				err := c.schedulers.RemoveScheduler(schedulerName)
+				err := c.schedulers.RemoveScheduler(schedulerName.String())
 				if err != nil {
 					log.Error("can not remove scheduler", zap.Stringer("scheduler", schedulerName), errs.ZapError(err))
 				} else {
@@ -844,7 +844,7 @@ func (c *Coordinator) GetCluster() sche.ClusterInformer {
 }
 
 // GetDiagnosticResult returns the diagnostic result.
-func (c *Coordinator) GetDiagnosticResult(name config.CheckerSchedulerName) (*schedulers.DiagnosticResult, error) {
+func (c *Coordinator) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
 	return c.diagnosticManager.GetDiagnosticResult(name)
 }
 

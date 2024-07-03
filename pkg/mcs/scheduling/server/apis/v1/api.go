@@ -33,7 +33,6 @@ import (
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/response"
-	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -45,7 +44,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 // APIPathPrefix is the prefix of the API path.
@@ -575,19 +573,11 @@ func getSchedulerConfigByName(c *gin.Context) {
 	}
 	handlers := sc.GetSchedulerHandlers()
 	name := c.Param("name")
-	schedulerName, err := config.ConvertSchedulerStr2Name(name)
-	if err != nil {
-		log.Error("failed to convert scheduler name",
-			zap.String("scheduler", name),
-			errs.ZapError(err))
+	if _, ok := handlers[name]; !ok {
 		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
 		return
 	}
-	if _, ok := handlers[schedulerName]; !ok {
-		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
-		return
-	}
-	isDisabled, err := sc.IsSchedulerDisabled(schedulerName)
+	isDisabled, err := sc.IsSchedulerDisabled(name)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
@@ -597,7 +587,7 @@ func getSchedulerConfigByName(c *gin.Context) {
 		return
 	}
 	c.Request.URL.Path = "/list"
-	handlers[schedulerName].ServeHTTP(c.Writer, c.Request)
+	handlers[name].ServeHTTP(c.Writer, c.Request)
 }
 
 // @Tags     schedulers
@@ -609,15 +599,7 @@ func getSchedulerConfigByName(c *gin.Context) {
 func getDiagnosticResult(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 	name := c.Param("name")
-	schedulerName, err := config.ConvertSchedulerStr2Name(name)
-	if err != nil {
-		log.Error("failed to convert scheduler name",
-			zap.String("scheduler", name),
-			errs.ZapError(err))
-		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
-		return
-	}
-	result, err := handler.GetDiagnosticResult(schedulerName)
+	result, err := handler.GetDiagnosticResult(name)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return

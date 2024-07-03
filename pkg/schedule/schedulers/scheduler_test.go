@@ -112,7 +112,7 @@ func TestRejectLeader(t *testing.T) {
 	re.Empty(ops)
 
 	// Can't evict leader from store2, neither.
-	el, err := CreateScheduler(config.EvictLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderName, []string{"2"}), func(config.CheckerSchedulerName) error { return nil })
+	el, err := CreateScheduler(config.EvictLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderName, []string{"2"}), func(string) error { return nil })
 	re.NoError(err)
 	ops, _ = el.Schedule(tc, false)
 	re.Empty(ops)
@@ -138,7 +138,7 @@ func TestRemoveRejectLeader(t *testing.T) {
 	defer cancel()
 	tc.AddRegionStore(1, 0)
 	tc.AddRegionStore(2, 1)
-	el, err := CreateScheduler(config.EvictLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderName, []string{"1"}), func(config.CheckerSchedulerName) error { return nil })
+	el, err := CreateScheduler(config.EvictLeaderName, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(config.EvictLeaderName, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	tc.DeleteStore(tc.GetStore(1))
 	succ, _ := el.(*evictLeaderScheduler).conf.removeStore(1)

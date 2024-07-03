@@ -372,9 +372,9 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 		sc.HotRegionName,
 	}
 	checkDisabled := func(name sc.CheckerSchedulerName, shouldDisabled bool) {
-		re.NotNil(schedulersController.GetScheduler(name), name)
+		re.NotNil(schedulersController.GetScheduler(name.String()), name)
 		testutil.Eventually(re, func() bool {
-			disabled, err := schedulersController.IsSchedulerDisabled(name)
+			disabled, err := schedulersController.IsSchedulerDisabled(name.String())
 			re.NoError(err, name)
 			return disabled == shouldDisabled
 		})
@@ -394,14 +394,14 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 func checkEvictLeaderSchedulerExist(re *require.Assertions, schedulersController *schedulers.Controller, exist bool) {
 	testutil.Eventually(re, func() bool {
 		if !exist {
-			return schedulersController.GetScheduler(sc.EvictLeaderName) == nil
+			return schedulersController.GetScheduler(sc.EvictLeaderName.String()) == nil
 		}
-		return schedulersController.GetScheduler(sc.EvictLeaderName) != nil
+		return schedulersController.GetScheduler(sc.EvictLeaderName.String()) != nil
 	})
 }
 
 func checkEvictLeaderStoreIDs(re *require.Assertions, schedulersController *schedulers.Controller, expected []uint64) {
-	handler, ok := schedulersController.GetSchedulerHandlers()[sc.EvictLeaderName]
+	handler, ok := schedulersController.GetSchedulerHandlers()[sc.EvictLeaderName.String()]
 	re.True(ok)
 	h, ok := handler.(interface {
 		EvictStoreIDs() []uint64

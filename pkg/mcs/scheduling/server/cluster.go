@@ -329,21 +329,21 @@ func (c *Cluster) updateScheduler() {
 					errs.ZapError(err))
 				continue
 			}
-			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
+			if existed, _ := schedulersController.IsSchedulerExisted(s.Name()); existed {
 				log.Info("scheduler has already existed, skip adding it",
-					zap.Stringer("scheduler", name),
+					zap.String("scheduler", s.Name()),
 					zap.Strings("scheduler-args", scheduler.Args))
 				continue
 			}
 			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
 				log.Error("failed to add scheduler",
-					zap.Stringer("scheduler", name),
+					zap.String("scheduler", s.Name()),
 					zap.Strings("scheduler-args", scheduler.Args),
 					errs.ZapError(err))
 				continue
 			}
 			log.Info("add scheduler successfully",
-				zap.Stringer("scheduler-name", name),
+				zap.String("scheduler", s.Name()),
 				zap.Strings("scheduler-args", scheduler.Args))
 		}
 		// Remove the deleted schedulers.
@@ -356,12 +356,11 @@ func (c *Cluster) updateScheduler() {
 			}
 			if err := schedulersController.RemoveScheduler(name); err != nil {
 				log.Error("failed to remove scheduler",
-					zap.Stringer("scheduler-name", name),
+					zap.String("scheduler", name),
 					errs.ZapError(err))
 				continue
 			}
-			log.Info("remove scheduler successfully",
-				zap.Stringer("scheduler-name", name))
+			log.Info("remove scheduler successfully", zap.String("scheduler", name))
 		}
 	}
 }

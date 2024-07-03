@@ -98,7 +98,7 @@ func (h *Handler) GetRaftCluster() (*cluster.RaftCluster, error) {
 }
 
 // IsSchedulerExisted returns whether scheduler is existed.
-func (h *Handler) IsSchedulerExisted(name sc.CheckerSchedulerName) (bool, error) {
+func (h *Handler) IsSchedulerExisted(name string) (bool, error) {
 	rc, err := h.GetRaftCluster()
 	if err != nil {
 		return false, err
@@ -192,7 +192,7 @@ func (h *Handler) AddScheduler(name sc.CheckerSchedulerName, args ...string) err
 		return err
 	}
 
-	var removeSchedulerCb func(sc.CheckerSchedulerName) error
+	var removeSchedulerCb func(string) error
 	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveSchedulerHandler
 	} else {
@@ -225,22 +225,22 @@ func (h *Handler) AddScheduler(name sc.CheckerSchedulerName, args ...string) err
 }
 
 // RemoveScheduler removes a scheduler by name.
-func (h *Handler) RemoveScheduler(name sc.CheckerSchedulerName) error {
+func (h *Handler) RemoveScheduler(name string) error {
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
 		if err = c.RemoveSchedulerHandler(name); err != nil {
-			log.Error("can not remove scheduler handler", zap.Stringer("scheduler", name), errs.ZapError(err))
+			log.Error("can not remove scheduler handler", zap.String("scheduler", name), errs.ZapError(err))
 		} else {
-			log.Info("remove scheduler handler successfully", zap.Stringer("scheduler", name))
+			log.Info("remove scheduler handler successfully", zap.String("scheduler", name))
 		}
 	} else {
 		if err = c.RemoveScheduler(name); err != nil {
-			log.Error("can not remove scheduler", zap.Stringer("scheduler", name), errs.ZapError(err))
+			log.Error("can not remove scheduler", zap.String("scheduler", name), errs.ZapError(err))
 		} else {
-			log.Info("remove scheduler successfully", zap.Stringer("scheduler", name))
+			log.Info("remove scheduler successfully", zap.String("scheduler", name))
 		}
 	}
 	return err
@@ -394,7 +394,7 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.GetSchedulerHandlers() {
-		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name.String())
+		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
@@ -574,7 +574,7 @@ func (h *Handler) redirectSchedulerUpdate(name string, storeID float64) error {
 
 // AddEvictOrGrant add evict leader scheduler or grant leader scheduler.
 func (h *Handler) AddEvictOrGrant(storeID float64, name sc.CheckerSchedulerName) (exist bool, err error) {
-	if exist, err = h.IsSchedulerExisted(name); !exist {
+	if exist, err = h.IsSchedulerExisted(name.String()); !exist {
 		if err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			return exist, err
 		}

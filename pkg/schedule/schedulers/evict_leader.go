@@ -58,7 +58,7 @@ type evictLeaderSchedulerConfig struct {
 	storage           endpoint.ConfigStorage
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
-	removeSchedulerCb func(config.CheckerSchedulerName) error
+	removeSchedulerCb func(string) error
 }
 
 func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
@@ -414,7 +414,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(config.EvictLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(config.EvictLeaderName.String()); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

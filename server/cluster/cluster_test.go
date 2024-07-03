@@ -364,7 +364,7 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	err = cluster.RemoveStore(3, false)
 	re.Error(err)
 	re.Contains(err.Error(), string(errs.ErrNoStoreForRegionLeader.RFCCode()))
-	re.NoError(cluster.RemoveScheduler(sc.EvictLeaderName))
+	re.NoError(cluster.RemoveScheduler(sc.EvictLeaderName.String()))
 	re.NoError(cluster.RemoveStore(3, false))
 }
 
@@ -2451,10 +2451,10 @@ func TestDispatch(t *testing.T) {
 	waitOperator(re, co, 1)
 	controller := co.GetSchedulersController()
 	operatorutil.CheckTransferPeer(re, co.GetOperatorController().GetOperator(1), operator.OpKind(0), 4, 1)
-	re.NoError(controller.RemoveScheduler(sc.BalanceRegionName))
+	re.NoError(controller.RemoveScheduler(sc.BalanceRegionName.String()))
 	waitOperator(re, co, 2)
 	operatorutil.CheckTransferLeader(re, co.GetOperatorController().GetOperator(2), operator.OpKind(0), 4, 2)
-	re.NoError(controller.RemoveScheduler(sc.BalanceLeaderName))
+	re.NoError(controller.RemoveScheduler(sc.BalanceLeaderName.String()))
 
 	stream := mockhbstream.NewHeartbeatStream()
 
@@ -3024,10 +3024,10 @@ func TestAddScheduler(t *testing.T) {
 	defer cleanup()
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), len(sc.DefaultSchedulers))
-	re.NoError(controller.RemoveScheduler(sc.BalanceLeaderName))
-	re.NoError(controller.RemoveScheduler(sc.BalanceRegionName))
-	re.NoError(controller.RemoveScheduler(sc.HotRegionName))
-	re.NoError(controller.RemoveScheduler(sc.EvictSlowStoreName))
+	re.NoError(controller.RemoveScheduler(sc.BalanceLeaderName.String()))
+	re.NoError(controller.RemoveScheduler(sc.BalanceRegionName.String()))
+	re.NoError(controller.RemoveScheduler(sc.HotRegionName.String()))
+	re.NoError(controller.RemoveScheduler(sc.EvictSlowStoreName.String()))
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3058,7 +3058,7 @@ func TestAddScheduler(t *testing.T) {
 	gls, err := schedulers.CreateScheduler(sc.GrantLeaderName, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(sc.GrantLeaderName, []string{"0"}), controller.RemoveScheduler)
 	re.NoError(err)
 	re.Error(controller.AddScheduler(gls))
-	re.Error(controller.RemoveScheduler(sc.CheckerSchedulerName(gls.Name())))
+	re.Error(controller.RemoveScheduler(gls.Name()))
 
 	gls, err = schedulers.CreateScheduler(sc.GrantLeaderName, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(sc.GrantLeaderName, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
@@ -3119,10 +3119,10 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+2)
 
 	// remove all default schedulers
-	re.NoError(controller.RemoveScheduler(sc.BalanceLeaderName))
-	re.NoError(controller.RemoveScheduler(sc.BalanceRegionName))
-	re.NoError(controller.RemoveScheduler(sc.HotRegionName))
-	re.NoError(controller.RemoveScheduler(sc.EvictSlowStoreName))
+	re.NoError(controller.RemoveScheduler(sc.BalanceLeaderName.String()))
+	re.NoError(controller.RemoveScheduler(sc.BalanceRegionName.String()))
+	re.NoError(controller.RemoveScheduler(sc.HotRegionName.String()))
+	re.NoError(controller.RemoveScheduler(sc.EvictSlowStoreName.String()))
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
@@ -3180,7 +3180,7 @@ func TestPersistScheduler(t *testing.T) {
 	// the scheduler option should contain 9 items
 	// the `hot scheduler` are disabled
 	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount+3)
-	re.NoError(controller.RemoveScheduler(sc.GrantLeaderName))
+	re.NoError(controller.RemoveScheduler(sc.GrantLeaderName.String()))
 	// the scheduler that is not enable by default will be completely deleted
 	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount+2)
 	re.Len(controller.GetSchedulerNames(), 4)
@@ -3197,7 +3197,7 @@ func TestPersistScheduler(t *testing.T) {
 	co.Run()
 	controller = co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), 4)
-	re.NoError(controller.RemoveScheduler(sc.EvictLeaderName))
+	re.NoError(controller.RemoveScheduler(sc.EvictLeaderName.String()))
 	re.Len(controller.GetSchedulerNames(), 3)
 }
 
@@ -3230,11 +3230,11 @@ func TestRemoveScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+1)
 
 	// remove all schedulers
-	re.NoError(controller.RemoveScheduler(sc.BalanceLeaderName))
-	re.NoError(controller.RemoveScheduler(sc.BalanceRegionName))
-	re.NoError(controller.RemoveScheduler(sc.HotRegionName))
-	re.NoError(controller.RemoveScheduler(sc.GrantLeaderName))
-	re.NoError(controller.RemoveScheduler(sc.EvictSlowStoreName))
+	re.NoError(controller.RemoveScheduler(sc.BalanceLeaderName.String()))
+	re.NoError(controller.RemoveScheduler(sc.BalanceRegionName.String()))
+	re.NoError(controller.RemoveScheduler(sc.HotRegionName.String()))
+	re.NoError(controller.RemoveScheduler(sc.GrantLeaderName.String()))
+	re.NoError(controller.RemoveScheduler(sc.EvictSlowStoreName.String()))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
@@ -3308,14 +3308,14 @@ func TestPauseScheduler(t *testing.T) {
 	_, err := controller.IsSchedulerAllowed("test")
 	re.Error(err)
 	controller.PauseOrResumeScheduler(sc.BalanceLeaderName.String(), 60)
-	paused, _ := controller.IsSchedulerPaused(sc.BalanceLeaderName)
+	paused, _ := controller.IsSchedulerPaused(sc.BalanceLeaderName.String())
 	re.True(paused)
-	pausedAt, err := controller.GetPausedSchedulerDelayAt(sc.BalanceLeaderName)
+	pausedAt, err := controller.GetPausedSchedulerDelayAt(sc.BalanceLeaderName.String())
 	re.NoError(err)
-	resumeAt, err := controller.GetPausedSchedulerDelayUntil(sc.BalanceLeaderName)
+	resumeAt, err := controller.GetPausedSchedulerDelayUntil(sc.BalanceLeaderName.String())
 	re.NoError(err)
 	re.Equal(int64(60), resumeAt-pausedAt)
-	allowed, _ := controller.IsSchedulerAllowed(sc.BalanceLeaderName)
+	allowed, _ := controller.IsSchedulerAllowed(sc.BalanceLeaderName.String())
 	re.False(allowed)
 }
 

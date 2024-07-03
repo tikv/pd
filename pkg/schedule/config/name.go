@@ -14,8 +14,13 @@
 
 package config
 
-import "github.com/pingcap/errors"
+import (
+	"strings"
 
+	"github.com/pingcap/errors"
+)
+
+// TODO: rename to type
 type CheckerSchedulerName string
 
 func (n CheckerSchedulerName) String() string {
@@ -92,10 +97,18 @@ var string2SchedulerName = map[string]CheckerSchedulerName{
 	"label-scheduler":                   LabelName,
 }
 
+func CheckSchedulerType(str string) error {
+	_, ok := string2SchedulerName[str]
+	if !ok && !strings.HasPrefix(str, ScatterRangeName.String()) {
+		return errors.Errorf("unknown scheduler name: %s", str)
+	}
+	return nil
+}
+
 func ConvertSchedulerStr2Name(str string) (CheckerSchedulerName, error) {
 	name, ok := string2SchedulerName[str]
-	if !ok {
-		return "", errors.Errorf("unknown scheduler name: %s", str)
+	if ok {
+		return name, nil
 	}
-	return name, nil
+	return "", errors.Errorf("unknown scheduler name: %s", str)
 }

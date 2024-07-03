@@ -64,7 +64,7 @@ func init() {
 		}
 	})
 
-	schedulers.RegisterScheduler(evictLeaderName, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(config.CheckerSchedulerName) error) (schedulers.Scheduler, error) {
+	schedulers.RegisterScheduler(evictLeaderName, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(string) error) (schedulers.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err

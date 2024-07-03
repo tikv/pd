@@ -53,11 +53,11 @@ func init() {
 	// disable denoising in test.
 	statistics.Denoising = false
 	statisticsInterval = 0
-	RegisterScheduler(writeSchedulerName, func(opController *operator.Controller, _ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(config.CheckerSchedulerName) error) (Scheduler, error) {
+	RegisterScheduler(writeSchedulerName, func(opController *operator.Controller, _ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		cfg := initHotRegionScheduleConfig()
 		return newHotWriteScheduler(opController, cfg), nil
 	})
-	RegisterScheduler(readSchedulerName, func(opController *operator.Controller, _ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(config.CheckerSchedulerName) error) (Scheduler, error) {
+	RegisterScheduler(readSchedulerName, func(opController *operator.Controller, _ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		return newHotReadScheduler(opController, initHotRegionScheduleConfig()), nil
 	})
 }
