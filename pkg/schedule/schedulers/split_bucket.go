@@ -23,6 +23,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -112,7 +114,7 @@ type splitBucketHandler struct {
 
 func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := h.conf.Clone()
-	_ = h.rd.JSON(w, http.StatusOK, conf)
+	h.rd.JSON(w, http.StatusOK, conf)
 }
 
 func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -123,33 +125,35 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	data, err := io.ReadAll(r.Body)
 	defer r.Body.Close()
 	if err != nil {
-		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	if err := json.Unmarshal(data, h.conf); err != nil {
-		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		h.conf.persistLocked()
-		_ = rd.Text(w, http.StatusOK, "Config is updated.")
+		if err := h.conf.persistLocked(); err != nil {
+			log.Warn("failed to save config", errs.ZapError(err))
+		}
+		rd.Text(w, http.StatusOK, "Config is updated.")
 		return
 	}
 
 	m := make(map[string]any)
 	if err := json.Unmarshal(data, &m); err != nil {
-		_ = rd.JSON(w, http.StatusInternalServerError, err.Error())
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ok := reflectutil.FindSameFieldByJSON(h.conf, m)
 	if ok {
-		_ = rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
+		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
 		return
 	}
 
-	_ = rd.Text(w, http.StatusBadRequest, "Config item is not found.")
+	rd.Text(w, http.StatusBadRequest, "Config item is not found.")
 }
 
 func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {

@@ -75,7 +75,7 @@ func (suite *hotTestSuite) TearDownTest() {
 }
 
 func (suite *hotTestSuite) TestHot() {
-	suite.env.RunTestInTwoModes(suite.checkHot)
+	suite.env.RunTestBasedOnMode(suite.checkHot)
 }
 
 func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
@@ -245,7 +245,7 @@ func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 }
 
 func (suite *hotTestSuite) TestHotWithStoreID() {
-	suite.env.RunTestInTwoModes(suite.checkHotWithStoreID)
+	suite.env.RunTestBasedOnMode(suite.checkHotWithStoreID)
 }
 
 func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
@@ -312,7 +312,7 @@ func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
 }
 
 func (suite *hotTestSuite) TestHotWithoutHotPeer() {
-	suite.env.RunTestInTwoModes(suite.checkHotWithoutHotPeer)
+	suite.env.RunTestBasedOnMode(suite.checkHotWithoutHotPeer)
 }
 
 func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) {

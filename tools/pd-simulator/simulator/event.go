@@ -131,7 +131,7 @@ func (e *WriteFlowOnSpot) Run(raft *RaftEngine, tickCount int64) bool {
 		region := raft.GetRegionByKey([]byte(key))
 		simutil.Logger.Debug("search the region", zap.Reflect("region", region.GetMeta()))
 		if region == nil {
-			simutil.Logger.Error("region not found for key", zap.String("key", key))
+			simutil.Logger.Error("region not found for key", zap.String("key", key), zap.Any("byte(key)", []byte(key)))
 			continue
 		}
 		raft.updateRegionStore(region, size)

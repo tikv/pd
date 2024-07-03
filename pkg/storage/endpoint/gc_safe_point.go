@@ -100,7 +100,9 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 		}
 
 		if ssp.ExpiredAt < now.Unix() {
-			se.Remove(key)
+			if err := se.Remove(key); err != nil {
+				log.Error("failed to remove expired service safepoint", errs.ZapError(err))
+			}
 			continue
 		}
 		if ssp.SafePoint < min.SafePoint {

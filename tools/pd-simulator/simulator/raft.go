@@ -30,13 +30,12 @@ import (
 // RaftEngine records all raft information.
 type RaftEngine struct {
 	syncutil.RWMutex
-	regionsInfo       *core.RegionsInfo
-	conn              *Connection
-	regionChange      map[uint64][]uint64
-	regionSplitSize   int64
-	regionSplitKeys   int64
-	storeConfig       *config.SimConfig
-	useTiDBEncodedKey bool
+	regionsInfo     *core.RegionsInfo
+	conn            *Connection
+	regionChange    map[uint64][]uint64
+	regionSplitSize int64
+	regionSplitKeys int64
+	storeConfig     *config.SimConfig
 }
 
 // NewRaftEngine creates the initialized raft with the configuration.
@@ -49,14 +48,7 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimCo
 		regionSplitKeys: conf.RegionSplitKeys,
 		storeConfig:     storeConfig,
 	}
-	var splitKeys []string
-	if conf.TableNumber > 0 {
-		splitKeys = simutil.GenerateTableKeys(conf.TableNumber, len(conf.Regions)-1)
-		r.useTiDBEncodedKey = true
-	} else {
-		splitKeys = simutil.GenerateKeys(len(conf.Regions) - 1)
-	}
-
+	splitKeys := simutil.GenerateTableKeys(conf.TableNumber, len(conf.Regions)-1)
 	for i, region := range conf.Regions {
 		meta := &metapb.Region{
 			Id:          region.ID,
@@ -133,14 +125,9 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 		}
 	}
 
-	var splitKey []byte
-	if r.useTiDBEncodedKey {
-		splitKey, err = simutil.GenerateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
-		if err != nil {
-			simutil.Logger.Fatal("Generate TiDB encoded split key failed", zap.Error(err))
-		}
-	} else {
-		splitKey = simutil.GenerateSplitKey(region.GetStartKey(), region.GetEndKey())
+	splitKey, err := simutil.GenerateTiDBEncodedSplitKey(region.GetStartKey(), region.GetEndKey())
+	if err != nil {
+		simutil.Logger.Fatal("Generate TiDB encoded split key failed", zap.Error(err))
 	}
 	left := region.Clone(
 		core.WithNewRegionID(ids[len(ids)-1]),
@@ -162,6 +149,7 @@ func (r *RaftEngine) stepSplit(region *core.RegionInfo) {
 	r.SetRegion(right)
 	r.SetRegion(left)
 	simutil.Logger.Debug("region split",
+		zap.Uint64("node-id", region.GetLeader().GetStoreId()),
 		zap.Uint64("region-id", region.GetID()),
 		zap.Reflect("origin", region.GetMeta()),
 		zap.Reflect("left", left.GetMeta()),

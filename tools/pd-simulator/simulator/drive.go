@@ -176,8 +176,13 @@ func (d *Driver) Tick() {
 	d.wg.Wait()
 }
 
+var HaltSchedule = false
+
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
+	if !HaltSchedule {
+		return false
+	}
 	length := uint64(len(d.conn.Nodes) + 1)
 	var stores []*metapb.Store
 	for index, s := range d.conn.Nodes {
