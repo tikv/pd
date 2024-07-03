@@ -562,7 +562,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := mcsutils.GetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
+		expectedPrimary := mcsutils.AttachExpectedPrimaryFlag(gta.member.Client(), gta.member.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `/ms/primary/transfer` API.
 		if expectedPrimary != "" && expectedPrimary != gta.member.MemberValue() {
@@ -703,7 +703,7 @@ func (gta *GlobalTSOAllocator) primaryWatch(ctx context.Context, exitPrimary cha
 	}
 	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
 		// 1. modify the expected primary flag to the new primary.
-		mcsutils.SetExpectedPrimary(gta.member.Client(), gta.member.GetLeaderPath())
+		mcsutils.MarkExpectedPrimaryFlag(gta.member.Client(), gta.member.GetLeaderPath())
 		// 2. modify memory status.
 		gta.member.UnsetLeader()
 		defer log.Info("tso primary exit the primary watch loop")

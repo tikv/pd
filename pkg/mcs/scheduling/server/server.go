@@ -249,7 +249,7 @@ func (s *Server) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := utils.GetExpectedPrimary(s.GetClient(), s.participant.GetLeaderPath())
+		expectedPrimary := utils.AttachExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `/ms/primary/transfer` API.
 		if expectedPrimary != "" && expectedPrimary != s.participant.MemberValue() {
@@ -358,7 +358,7 @@ func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 	}
 	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
 		// 1. modify the expected primary flag to the new primary.
-		utils.SetExpectedPrimary(s.participant.Client(), s.participant.GetLeaderPath())
+		utils.MarkExpectedPrimaryFlag(s.participant.Client(), s.participant.GetLeaderPath())
 		// 2. modify memory status.
 		s.participant.UnsetLeader()
 		defer log.Info("scheduling primary exit the primary watch loop")

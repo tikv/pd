@@ -164,7 +164,7 @@ func (m *Participant) UnsetLeader() {
 // EnableLeader declares the member itself to be the leader.
 func (m *Participant) EnableLeader() {
 	m.setLeader(m.member)
-	utils.RemoveExpectedPrimary(m.client, m.GetLeaderPath())
+	utils.ClearPrimaryExpectationFlag(m.client, m.GetLeaderPath())
 }
 
 // GetLeaderPath returns the path of the leader.

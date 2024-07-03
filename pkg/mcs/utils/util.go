@@ -52,13 +52,13 @@ const (
 	ClusterIDPath = "/pd/cluster_id"
 	// retryInterval is the interval to retry.
 	retryInterval = time.Second
-	// ExpectedPrimary is the path to store the expected primary , ONLY Triggered BY `/ms/primary/transfer` API.
+	// ExpectedPrimaryFlag is the flag to indicate the expected primary, ONLY marked BY `/ms/primary/transfer` API.
 	// This flag likes a fence to avoid exited 2 primaries in the cluster simultaneously.
 	// 1. Since follower will campaign a new primary when it found the `leader_key` is deleted.
 	// **We can ensure `expected_primary` is set before deleting the `leader_key`.**
-	// 2. Old primary will set `expected_primary` firstly,
+	// 2. Old primary will mark `expected_primary` firstly,
 	// then delete the `leader_key` which will trigger the follower to campaign a new primary.
-	ExpectedPrimary = "expected_primary"
+	ExpectedPrimaryFlag = "expected_primary"
 )
 
 // InitClusterID initializes the cluster ID.
@@ -78,25 +78,25 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)
 }
 
-// GetExpectedPrimary indicates API has changed the primary.
-func GetExpectedPrimary(client *clientv3.Client, leaderPath string) string {
-	primary, err := etcdutil.GetValue(client, strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))
+// AttachExpectedPrimaryFlag attaches the expected primary flag.
+func AttachExpectedPrimaryFlag(client *clientv3.Client, leaderPath string) string {
+	primary, err := etcdutil.GetValue(client, strings.Join([]string{leaderPath, ExpectedPrimaryFlag}, "/"))
 	if err != nil {
-		log.Error("get expected primary key error", errs.ZapError(err))
+		log.Error("get expected primary flag error", errs.ZapError(err))
 		return ""
 	}
 
 	return string(primary)
 }
 
-// RemoveExpectedPrimary removes the expected primary key.
+// ClearPrimaryExpectationFlag clears the expected primary flag.
 // - removed when campaign new primary successfully.
 // - removed when appoint new primary by API.
-func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
-	log.Info("remove expected primary key", zap.String("leader-path", leaderPath))
+func ClearPrimaryExpectationFlag(client *clientv3.Client, leaderPath string) {
+	log.Info("remove expected primary flag", zap.String("primary-path", leaderPath))
 	// remove expected leader key
 	resp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"))).
+		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimaryFlag}, "/"))).
 		Commit()
 	if err != nil || !resp.Succeeded {
 		log.Error("change expected primary error", errs.ZapError(err))
@@ -104,9 +104,9 @@ func RemoveExpectedPrimary(client *clientv3.Client, leaderPath string) {
 	}
 }
 
-// SetExpectedPrimary sets the expected primary key when the current primary has exited.
-func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
-	log.Info("set expected primary key", zap.String("leader-path", leaderPath))
+// MarkExpectedPrimaryFlag marks the expected primary flag when the current primary has exited.
+func MarkExpectedPrimaryFlag(client *clientv3.Client, leaderPath string) {
+	log.Info("set expected primary flag", zap.String("leader-path", leaderPath))
 	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
 	if err != nil {
 		log.Error("get primary key error", zap.Error(err))
@@ -120,7 +120,7 @@ func SetExpectedPrimary(client *clientv3.Client, leaderPath string) {
 	// write a flag to indicate the current primary has exited
 	resp, err := kv.NewSlowLogTxn(client).
 		Then(
-			clientv3.OpPut(strings.Join([]string{leaderPath, ExpectedPrimary}, "/"), string(leaderRaw), clientv3.WithLease(grantResp.ID)),
+			clientv3.OpPut(strings.Join([]string{leaderPath, ExpectedPrimaryFlag}, "/"), string(leaderRaw), clientv3.WithLease(grantResp.ID)),
 			// indicate the current primary has exited
 			clientv3.OpDelete(leaderPath)).
 		Commit()

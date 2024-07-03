@@ -158,7 +158,7 @@ func (m *EmbeddedEtcdMember) UnsetLeader() {
 // EnableLeader sets the member itself to a PD leader.
 func (m *EmbeddedEtcdMember) EnableLeader() {
 	m.setLeader(m.member)
-	utils.RemoveExpectedPrimary(m.client, m.GetLeaderPath())
+	utils.ClearPrimaryExpectationFlag(m.client, m.GetLeaderPath())
 }
 
 // GetLeaderPath returns the path of the PD leader.
