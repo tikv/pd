@@ -24,6 +24,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -35,6 +36,7 @@ import (
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
+	"go.uber.org/zap"
 )
 
 type schedulerTestSuite struct {
@@ -341,12 +343,13 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		"test", "test#", "?test",
 		/* TODO: to handle case like "tes&t", we need to modify the server's JSON render to unescape the HTML characters */
 	} {
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "scatter-range", "--format=raw", "a", "b", name}, nil)
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "scatter-range-scheduler", "--format=raw", "a", "b", name}, nil)
 		re.Contains(echo, "Success!")
-		schedulerName := fmt.Sprintf("scatter-range-%s", name)
+		schedulerName := fmt.Sprintf("scatter-range-scheduler-%s", name)
 		// test show scheduler
 		testutil.Eventually(re, func() bool {
 			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+			log.Warn("show scheduler", zap.String("echo", echo))
 			return strings.Contains(echo, schedulerName)
 		})
 		// test remove scheduler
@@ -380,7 +383,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	re.Contains(echo, "Success!")
 	cfg := leaderServer.GetServer().GetScheduleConfig()
 	origin := cfg.Schedulers
-	cfg.Schedulers = sc.SchedulerConfigs{{Type: "label", Disable: true}}
+	cfg.Schedulers = sc.SchedulerConfigs{{Type: "label-scheduler", Disable: true}}
 	err := leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
 	checkSchedulerWithStatusCommand("disabled", []string{"label-scheduler"})

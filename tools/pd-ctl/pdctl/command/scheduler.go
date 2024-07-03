@@ -422,7 +422,7 @@ func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 // NewScatterRangeSchedulerCommand returns a command to add a scatter-range-scheduler.
 func NewScatterRangeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "scatter-range [--format=raw|encode|hex] <start_key> <end_key> <range_name>",
+		Use:   "scatter-range-scheduler [--format=raw|encode|hex] <start_key> <end_key> <range_name>",
 		Short: "add a scheduler to scatter range",
 		Run:   addSchedulerForScatterRangeCommandFunc,
 	}
