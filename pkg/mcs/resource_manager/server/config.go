@@ -193,11 +193,11 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandlineString(flagSet, &c.ListenAddr, "listen-addr")
 	configutil.AdjustCommandlineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
-	return c.Adjust(meta, false)
+	return c.Adjust(meta)
 }
 
 // Adjust is used to adjust the resource manager configurations.
-func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
+func (c *Config) Adjust(meta *toml.MetaData) error {
 	configMetaData := configutil.NewConfigMetadata(meta)
 	warningMsgs := make([]string, 0)
 	if err := configMetaData.CheckUndecoded(); err != nil {
