@@ -144,6 +144,10 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	defer c.Unlock()
 
 	name := scheduler.Name()
+	if _, ok := c.schedulerHandlers[name]; ok {
+		return errs.ErrSchedulerExisted.FastGenByArgs()
+	}
+
 	c.schedulerHandlers[name] = scheduler
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
 		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.Name()), errs.ZapError(err))
