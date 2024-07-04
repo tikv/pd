@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/client/resource_group/controller"
 	"github.com/tikv/pd/pkg/mcs/resource_manager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 
@@ -1238,10 +1239,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	tokenRPCMaxDelay := 2 * time.Second
 	readBaseCost := 1.5
 	defaultCfg := controller.DefaultConfig()
-<<<<<<< HEAD:tests/integrations/mcs/resource_manager/resource_manager_test.go
-	// failpoint enableDegradedMode will setup and set it be 1s.
-	defaultCfg.DegradedModeWaitDuration.Duration = time.Second
-=======
 	expectCfg := server.ControllerConfig{
 		// failpoint enableDegradedMode will setup and set it be 1s.
 		DegradedModeWaitDuration: typeutil.NewDuration(time.Second),
@@ -1250,13 +1247,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 		RequestUnit:              server.RequestUnitConfig(defaultCfg.RequestUnit),
 		EnableControllerTraceLog: defaultCfg.EnableControllerTraceLog,
 	}
->>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352)):tests/integrations/mcs/resourcemanager/resource_manager_test.go
 	expectRUCfg := controller.GenerateRUConfig(defaultCfg)
+	expectRUCfg.DegradedModeWaitDuration = time.Second
 	// initial config verification
 	respString := sendRequest("GET", getAddr()+configURL, nil)
-	defaultString, err := json.Marshal(defaultCfg)
+	expectStr, err := json.Marshal(expectCfg)
 	re.NoError(err)
-	re.JSONEq(string(respString), string(defaultString))
+	re.JSONEq(string(respString), string(expectStr))
 	re.EqualValues(expectRUCfg, c1.GetConfig())
 
 	testCases := []struct {

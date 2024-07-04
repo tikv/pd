@@ -37,8 +37,6 @@ import (
 
 const (
 	controllerConfigPath    = "resource_group/controller"
-	maxRetry                = 10
-	retryInterval           = 50 * time.Millisecond
 	maxNotificationChanLen  = 200
 	needTokensAmplification = 1.1
 	trickleReserveDuration  = 1250 * time.Millisecond
@@ -97,6 +95,20 @@ func EnableSingleGroupByKeyspace() ResourceControlCreateOption {
 func WithMaxWaitDuration(d time.Duration) ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
 		controller.ruConfig.LTBMaxWaitDuration = d
+	}
+}
+
+// WithWaitRetryInterval is the option to set the retry interval when waiting for the token.
+func WithWaitRetryInterval(d time.Duration) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.WaitRetryInterval = d
+	}
+}
+
+// WithWaitRetryTimes is the option to set the times to retry when waiting for the token.
+func WithWaitRetryTimes(times int) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.ruConfig.WaitRetryTimes = times
 	}
 }
 
@@ -177,23 +189,14 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 	if err != nil {
 		return nil, err
 	}
-<<<<<<< HEAD
-	if len(resp.Kvs) == 0 {
-=======
 	config := DefaultConfig()
 	defer config.Adjust()
 	kvs := resp.GetKvs()
 	if len(kvs) == 0 {
->>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352))
 		log.Warn("[resource group controller] server does not save config, load config failed")
 		return config, nil
 	}
-<<<<<<< HEAD
-	config := &Config{}
-	err = json.Unmarshal(resp.Kvs[0].GetValue(), config)
-=======
 	err = json.Unmarshal(kvs[0].GetValue(), config)
->>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352))
 	if err != nil {
 		return nil, err
 	}
@@ -372,7 +375,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				}
 				for _, item := range resp {
 					cfgRevision = item.Kv.ModRevision
-					config := &Config{}
+					config := DefaultConfig()
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
 					}
@@ -1195,7 +1198,7 @@ func (gc *groupCostController) onRequestWait(
 		var i int
 		var d time.Duration
 	retryLoop:
-		for i = 0; i < maxRetry; i++ {
+		for i = 0; i < gc.mainCfg.WaitRetryTimes; i++ {
 			switch gc.mode {
 			case rmpb.GroupMode_RawMode:
 				res := make([]*Reservation, 0, len(requestResourceLimitTypeList))
@@ -1219,7 +1222,7 @@ func (gc *groupCostController) onRequestWait(
 				}
 			}
 			gc.metrics.requestRetryCounter.Inc()
-			time.Sleep(retryInterval)
+			time.Sleep(gc.mainCfg.WaitRetryInterval)
 		}
 		if err != nil {
 			if errs.ErrClientResourceGroupThrottled.Equal(err) {

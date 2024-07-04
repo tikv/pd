@@ -108,12 +108,6 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if rmc == nil {
 		return
 	}
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/config.go
-	rmc.RequestUnit.Adjust()
-
-	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
-	configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
-=======
 	rmc.RequestUnit.Adjust(meta.Child("request-unit"))
 	if !meta.IsDefined("degraded-mode-wait-duration") {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
@@ -124,7 +118,6 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("ltb-token-rpc-max-delay") {
 		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
 	}
->>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352)):pkg/mcs/resourcemanager/server/config.go
 	failpoint.Inject("enableDegradedMode", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
 	})
@@ -149,7 +142,7 @@ type RequestUnitConfig struct {
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
-func (ruc *RequestUnitConfig) Adjust() {
+func (ruc *RequestUnitConfig) Adjust(_ *configutil.ConfigMetaData) {
 	if ruc == nil {
 		return
 	}
