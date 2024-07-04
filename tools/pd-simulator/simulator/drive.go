@@ -228,8 +228,6 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 	config := d.raftEngine.storeConfig
 	regionInterval := uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
 	var wg sync.WaitGroup
-	// simulator don't need any schedulers util all regions send their heartbeat.
-	ChooseToHaltPDSchedule(true)
 	for {
 		select {
 		case tick := <-d.regionTickc:
@@ -240,6 +238,7 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 				}
 				wg.Wait()
 				schedule.Do(func() {
+					// simulator don't need any schedulers util all regions send their heartbeat.
 					ChooseToHaltPDSchedule(false)
 				})
 			}
