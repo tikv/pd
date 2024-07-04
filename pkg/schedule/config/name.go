@@ -110,5 +110,8 @@ func ConvertSchedulerStr2Name(str string) (CheckerSchedulerType, error) {
 	if ok {
 		return name, nil
 	}
+	if strings.HasPrefix(str, ScatterRangeScheduler.String()) {
+		return ScatterRangeScheduler, nil
+	}
 	return "", errors.Errorf("unknown scheduler name: %s", str)
 }

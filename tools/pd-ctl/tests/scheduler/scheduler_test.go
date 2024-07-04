@@ -544,6 +544,10 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-leader-scheduler"}, &conf1)
 		return conf1["batch"] == 3.
 	})
+	testutil.Eventually(re, func() bool {
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
+		return strings.Contains(echo, "balance-leader-scheduler")
+	})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.NotContains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-leader-scheduler"}, nil)

@@ -208,13 +208,13 @@ func (h *Handler) AddScheduler(name sc.CheckerSchedulerType, args ...string) err
 			log.Error("can not add scheduler handler", zap.String("scheduler", s.Name()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-		log.Info("add scheduler handler successfully", zap.Stringer("scheduler", name), zap.Strings("scheduler-args", args))
+		log.Info("add scheduler handler successfully", zap.String("scheduler", s.Name()), zap.Strings("scheduler-args", args))
 	} else {
 		if err = c.AddScheduler(s, args...); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler", s.Name()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-		log.Info("add scheduler successfully", zap.Stringer("scheduler", name), zap.Strings("scheduler-args", args))
+		log.Info("add scheduler successfully", zap.String("scheduler", s.Name()), zap.Strings("scheduler-args", args))
 	}
 	if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))

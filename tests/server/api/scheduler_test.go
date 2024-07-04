@@ -457,8 +457,8 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			},
 		},
 		{
-			name:        "scatter-range",
-			createdName: "scatter-range-test",
+			name:        "scatter-range-scheduler",
+			createdName: "scatter-range-scheduler-test",
 			args:        []arg{{"start_key", ""}, {"end_key", ""}, {"range_name", "test"}},
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string) {
@@ -531,6 +531,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		},
 	}
 	for _, testCase := range testCases {
+		suite.T().Logf("test %s", testCase.name)
 		input := make(map[string]any)
 		input["name"] = testCase.name
 		for _, a := range testCase.args {
@@ -549,6 +550,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	// test pause and resume all schedulers.
 	// add schedulers.
 	for _, testCase := range testCases {
+		suite.T().Logf("test %s", testCase.name)
 		input := make(map[string]any)
 		input["name"] = testCase.name
 		for _, a := range testCase.args {
@@ -572,6 +574,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	for _, testCase := range testCases {
+		suite.T().Logf("test %s", testCase.name)
 		createdName := testCase.createdName
 		if createdName == "" {
 			createdName = testCase.name
