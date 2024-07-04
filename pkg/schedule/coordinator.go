@@ -339,7 +339,7 @@ func (c *Coordinator) updateTickerIfNeeded(ticker *time.Ticker) {
 	if c.patrolRegionContext.getInterval() != newInterval {
 		c.patrolRegionContext.setInterval(newInterval)
 		ticker.Reset(newInterval)
-		log.Debug("coordinator starts patrol regions with new interval", zap.Duration("interval", newInterval))
+		log.Info("coordinator starts patrol regions with new interval", zap.Duration("interval", newInterval))
 	}
 }
 
