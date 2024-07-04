@@ -49,8 +49,8 @@ type shuffleLeaderScheduler struct {
 // between stores.
 func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleLeaderSchedulerConfig) Scheduler {
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: config.ShuffleHotRegionScheduler.String(), TransferLeader: true, OperatorLevel: constant.Low},
-		filter.NewSpecialUseFilter(config.ShuffleHotRegionScheduler.String()),
+		&filter.StoreStateFilter{ActionScope: config.ShuffleLeaderScheduler.String(), TransferLeader: true, OperatorLevel: constant.Low},
+		filter.NewSpecialUseFilter(config.ShuffleLeaderScheduler.String()),
 	}
 	base := NewBaseScheduler(opController)
 	return &shuffleLeaderScheduler{
@@ -61,7 +61,7 @@ func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleL
 }
 
 func (*shuffleLeaderScheduler) Name() string {
-	return config.ShuffleHotRegionScheduler.String()
+	return config.ShuffleLeaderScheduler.String()
 }
 
 func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {

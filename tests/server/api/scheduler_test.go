@@ -28,6 +28,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -536,7 +537,6 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	}
 
 	// test pause and resume all schedulers.
-
 	// add schedulers.
 	for _, testCase := range testCases {
 		input := make(map[string]any)
@@ -633,12 +633,13 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	name := "shuffle-leader-scheduler"
+	name := config.ShuffleLeaderScheduler.String()
 	input := make(map[string]any)
 	input["name"] = name
 	body, err := json.Marshal(input)
 	re.NoError(err)
 	addScheduler(re, urlPrefix, body)
+	suite.assertSchedulerExists(urlPrefix, name)
 
 	u := fmt.Sprintf("%s%s/api/v1/config/schedule", leaderAddr, apiPrefix)
 	var scheduleConfig sc.ScheduleConfig
@@ -646,7 +647,7 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	originSchedulers := scheduleConfig.Schedulers
-	scheduleConfig.Schedulers = sc.SchedulerConfigs{sc.SchedulerConfig{Type: "shuffle-leader", Disable: true}}
+	scheduleConfig.Schedulers = sc.SchedulerConfigs{sc.SchedulerConfig{Type: name, Disable: true}}
 	body, err = json.Marshal(scheduleConfig)
 	re.NoError(err)
 	err = tu.CheckPostJSON(tests.TestDialClient, u, body, tu.StatusOK(re))
