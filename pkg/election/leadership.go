@@ -173,10 +173,15 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	ls.setLease(newLease)
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
+		name, ok := val.(string)
+		if name == "" {
+			// return directly when not set the name
+			failpoint.Return(errors.Errorf("failed to grant lease"))
+		}
 		var member pdpb.Member
 		_ = member.Unmarshal([]byte(leaderData))
-		name, ok := val.(string)
 		if ok && member.Name == name {
+			// only return when the name is set and the name is equal to the leader name
 			failpoint.Return(errors.Errorf("failed to grant lease"))
 		}
 	})

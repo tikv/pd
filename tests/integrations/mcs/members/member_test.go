@@ -16,7 +16,6 @@ package members_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -292,17 +291,16 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 			}
 		}
 		// Mock the new primary can not grant leader which means the lease will expire
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", newPrimary)))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
 		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
 		re.NoError(err)
 
 		// Wait for the old primary exit and new primary campaign
+		// cannot check newPrimary isServing when skipGrantLeader is enabled
 		testutil.Eventually(re, func() bool {
 			return !nodes[primary].IsServing()
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-		// Wait for the new primary lease to expire which is `DefaultLeaderLease`
-		time.Sleep(4 * time.Second)
 		// TODO: Add campaign times check in mcs to avoid frequent campaign
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 		// Can still work after lease expired
@@ -339,17 +337,16 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 			}
 		}
 		// Mock the new primary can not grant leader which means the lease will expire
-		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", newPrimary)))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
 		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
 		re.NoError(err)
 
 		// Wait for the old primary exit and new primary campaign
+		// cannot check newPrimary isServing when skipGrantLeader is enabled
 		testutil.Eventually(re, func() bool {
 			return !nodes[primary].IsServing()
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-		// Wait for the new primary lease to expire which is `DefaultLeaderLease`
-		time.Sleep(4 * time.Second)
 		// TODO: Add campaign times check in mcs to avoid frequent campaign
 		// for now, close the current primary to mock the server down
 		nodes[newPrimary].Close()
