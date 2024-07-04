@@ -60,10 +60,6 @@ func newStableEnv(config *sc.SimConfig) *Case {
 	}
 
 	simCase.Checker = func(_ []*metapb.Store, _ *core.RegionsInfo, _ []info.StoreStats) bool {
-		if len(allStores) == 0 {
-			return false
-		}
-
 		return false
 	}
 	return &simCase
