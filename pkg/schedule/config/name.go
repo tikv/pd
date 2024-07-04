@@ -77,7 +77,7 @@ const (
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
 
-var string2SchedulerName = map[string]CheckerSchedulerType{
+var string2SchedulerType = map[string]CheckerSchedulerType{
 	"balance-leader-scheduler":          BalanceLeaderScheduler,
 	"balance-region-scheduler":          BalanceRegionScheduler,
 	"balance-witness-scheduler":         BalanceWitnessScheduler,
@@ -98,7 +98,7 @@ var string2SchedulerName = map[string]CheckerSchedulerType{
 }
 
 func CheckSchedulerType(str string) error {
-	_, ok := string2SchedulerName[str]
+	_, ok := string2SchedulerType[str]
 	if !ok && !strings.HasPrefix(str, ScatterRangeScheduler.String()) {
 		return errors.Errorf("unknown scheduler name: %s", str)
 	}
@@ -106,7 +106,7 @@ func CheckSchedulerType(str string) error {
 }
 
 func ConvertSchedulerStr2Name(str string) (CheckerSchedulerType, error) {
-	name, ok := string2SchedulerName[str]
+	name, ok := string2SchedulerType[str]
 	if ok {
 		return name, nil
 	}
