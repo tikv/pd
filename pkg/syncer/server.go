@@ -282,7 +282,10 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 					RegionLeaders: leaders,
 					Buckets:       buckets,
 				}
-				s.limit.WaitN(ctx, resp.Size())
+				if err := s.limit.WaitN(ctx, resp.Size()); err != nil {
+					log.Error("failed to wait rate limit", errs.ZapError(err))
+					return err
+				}
 				lastIndex += len(metas)
 				if err := stream.Send(resp); err != nil {
 					log.Error("failed to send sync region response", errs.ZapError(errs.ErrGRPCSend, err))

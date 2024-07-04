@@ -59,6 +59,8 @@ const (
 	defaultDegradedModeWaitDuration = time.Second * 0
 	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
 	defaultMaxWaitDuration = 30 * time.Second
+	// defaultLTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
+	defaultLTBTokenRPCMaxDelay = 1 * time.Second
 )
 
 // Config is the configuration for the resource manager.
@@ -99,6 +101,9 @@ type ControllerConfig struct {
 	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
 	LTBMaxWaitDuration typeutil.Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
 
+	// LTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
+	LTBTokenRPCMaxDelay typeutil.Duration `toml:"ltb-token-rpc-max-delay" json:"ltb-token-rpc-max-delay"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
@@ -118,6 +123,9 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("ltb-max-wait-duration") {
 		configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
+	}
+	if !meta.IsDefined("ltb-token-rpc-max-delay") {
+		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
 	}
 	failpoint.Inject("enableDegradedMode", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
@@ -237,7 +245,9 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	c.Security.Encryption.Adjust()
+	if err := c.Security.Encryption.Adjust(); err != nil {
+		return err
+	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
