@@ -227,7 +227,6 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRa
 
 func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 	conf.Lock()
-	keyRanges := conf.StoreIDWithRanges[id]
 	var resp any
 	last, err := conf.removeStoreLocked(id)
 	if err != nil {
@@ -235,6 +234,7 @@ func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 		return resp, err
 	}
 
+	keyRanges := conf.StoreIDWithRanges[id]
 	err = conf.persistLocked()
 	if err != nil {
 		conf.resetStoreLocked(id, keyRanges)
