@@ -20,6 +20,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
 func newRegionSplit(config *sc.SimConfig) *Case {
@@ -28,23 +29,33 @@ func newRegionSplit(config *sc.SimConfig) *Case {
 	allStores := make(map[uint64]struct{}, totalStore)
 
 	for i := 0; i < totalStore; i++ {
-		id := uint64(i)
+		storeID := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     id,
+			ID:     storeID,
 			Status: metapb.StoreState_Up,
 		})
-		allStores[id] = struct{}{}
+		allStores[storeID] = struct{}{}
 	}
-	peers := []*metapb.Peer{
-		{Id: 4, StoreId: 1},
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	peers := make([]*metapb.Peer, 0, replica)
+	for j := 0; j < replica; j++ {
+		peers = append(peers, &metapb.Peer{
+			Id:      simutil.IDAllocator.NextID(),
+			StoreId: uint64((j)%(totalStore-1) + 1),
+		})
 	}
-	simCase.Regions = append(simCase.Regions, Region{
-		ID:     5,
-		Peers:  peers,
-		Leader: peers[0],
-		Size:   1 * units.MiB,
-		Keys:   10000,
-	})
+	regionID := simutil.IDAllocator.NextID()
+	simCase.Regions = []Region{
+		{
+			ID:     regionID,
+			Peers:  peers,
+			Leader: peers[0],
+			Size:   1 * units.MiB,
+			Keys:   10000,
+		},
+	}
+	// update total region
+	config.TotalRegion = 1
 
 	simCase.RegionSplitSize = 128 * units.MiB
 	simCase.RegionSplitKeys = 10000

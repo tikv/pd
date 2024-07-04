@@ -44,6 +44,7 @@ import (
 const (
 	randomRegionMaxRetry = 10
 	scanRegionLimit      = 1000
+	CollectFactor        = 0.9
 )
 
 // errRegionIsStale is error info for region is stale.
@@ -746,7 +747,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 		regionID := region.GetID()
 		if logRunner != nil {
 			debug = func(msg string, fields ...zap.Field) {
-				_ = logRunner.RunTask(
+				logRunner.RunTask(
 					regionID,
 					"DebugLog",
 					func() {
@@ -755,7 +756,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				)
 			}
 			info = func(msg string, fields ...zap.Field) {
-				_ = logRunner.RunTask(
+				logRunner.RunTask(
 					regionID,
 					"InfoLog",
 					func() {
@@ -1477,7 +1478,7 @@ const (
 	PendingPeerInSubTree SubTreeRegionType = "pending"
 )
 
-// GetStoreRegions gets all RegionInfo with a given storeID
+// GetStoreRegionsByTypeInSubTree gets all RegionInfo with a given storeID
 func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTreeRegionType) ([]*RegionInfo, error) {
 	r.st.RLock()
 	var regions []*RegionInfo
@@ -1581,6 +1582,12 @@ func (r *RegionsInfo) GetNotFromStorageRegionsCntByStore(storeID uint64) int {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.getNotFromStorageRegionsCntByStoreLocked(storeID)
+}
+
+// IsStorePrepared checks if a store is prepared.
+// For each store, the number of active regions should be more than total region of the store * CollectFactor
+func (r *RegionsInfo) IsStorePrepared(storeID uint64) bool {
+	return float64(r.GetNotFromStorageRegionsCntByStore(storeID)) >= float64(r.GetStoreRegionCount(storeID))*CollectFactor
 }
 
 // getNotFromStorageRegionsCntByStoreLocked gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
@@ -2042,14 +2049,6 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ", ")
 }
 
-// String converts slice of bytes to string without copy.
-func String(b []byte) string {
-	if len(b) == 0 {
-		return ""
-	}
-	return unsafe.String(unsafe.SliceData(b), len(b))
-}
-
 // ToUpperASCIIInplace bytes.ToUpper but zero-cost
 func ToUpperASCIIInplace(s []byte) []byte {
 	hasLower := false
@@ -2088,7 +2087,7 @@ func HexRegionKey(key []byte) []byte {
 // HexRegionKeyStr converts region key to hex format. Used for formatting region in
 // logs.
 func HexRegionKeyStr(key []byte) string {
-	return String(HexRegionKey(key))
+	return typeutil.BytesToString(HexRegionKey(key))
 }
 
 // RegionToHexMeta converts a region meta's keys to hex format. Used for formatting
@@ -2209,4 +2208,12 @@ func NewTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...Regi
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}
 	return NewRegionInfo(metaRegion, leader, opts...)
+}
+
+// TraverseRegions executes a function on all regions.
+// ONLY for simulator now and function need to be self-locked.
+func (r *RegionsInfo) TraverseRegions(lockedFunc func(*RegionInfo)) {
+	for _, item := range r.regions {
+		lockedFunc(item.RegionInfo)
+	}
 }

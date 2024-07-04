@@ -76,9 +76,9 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 }
 
 // RegisterRESTHandler registers the service to REST server.
-func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error {
 	handler, group := SetUpRestHandler(s)
-	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	return apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 // GetManager returns the resource manager.
@@ -228,6 +228,8 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			log.Debug("finish token request from", zap.String("resource-group", resourceGroupName))
 			resps.Responses = append(resps.Responses, resp)
 		}
-		stream.Send(resps)
+		if err := stream.Send(resps); err != nil {
+			return errors.WithStack(err)
+		}
 	}
 }

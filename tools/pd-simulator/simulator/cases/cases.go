@@ -89,6 +89,7 @@ var IDAllocator idAllocator
 var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"balance-leader":            newBalanceLeader,
 	"redundant-balance-region":  newRedundantBalanceRegion,
+	"scale-in-out":              newScaleInOut,
 	"region-split":              newRegionSplit,
 	"region-merge":              newRegionMerge,
 	"hot-read":                  newHotRead,

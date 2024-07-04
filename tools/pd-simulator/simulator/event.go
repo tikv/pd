@@ -131,7 +131,7 @@ func (e *WriteFlowOnSpot) Run(raft *RaftEngine, tickCount int64) bool {
 		region := raft.GetRegionByKey([]byte(key))
 		simutil.Logger.Debug("search the region", zap.Reflect("region", region.GetMeta()))
 		if region == nil {
-			simutil.Logger.Error("region not found for key", zap.String("key", key))
+			simutil.Logger.Error("region not found for key", zap.String("key", key), zap.Any("byte(key)", []byte(key)))
 			continue
 		}
 		raft.updateRegionStore(region, size)
@@ -228,8 +228,8 @@ func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
 		node = nodes[uint64(e.ID)]
 	}
 	if node == nil {
-		simutil.Logger.Error("node is not existed", zap.Uint64("node-id", node.Id))
-		return false
+		simutil.Logger.Error("node is not existed")
+		return true
 	}
 	delete(raft.conn.Nodes, node.Id)
 	// delete store
@@ -240,8 +240,7 @@ func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
 	}
 	node.Stop()
 
-	regions := raft.GetRegions()
-	for _, region := range regions {
+	raft.TraverseRegions(func(region *core.RegionInfo) {
 		storeIDs := region.GetStoreIDs()
 		if _, ok := storeIDs[node.Id]; ok {
 			downPeer := &pdpb.PeerStats{
@@ -251,6 +250,6 @@ func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
 			region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
 			raft.SetRegion(region)
 		}
-	}
+	})
 	return true
 }

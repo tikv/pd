@@ -103,7 +103,7 @@ func (suite *configTestSuite) TearDownTest() {
 func (suite *configTestSuite) TestConfig() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
-	suite.env.RunTestInTwoModes(suite.checkConfig)
+	suite.env.RunTestBasedOnMode(suite.checkConfig)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
 }
 
@@ -365,7 +365,7 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 func (suite *configTestSuite) TestConfigForwardControl() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
-	suite.env.RunTestInTwoModes(suite.checkConfigForwardControl)
+	suite.env.RunTestBasedOnMode(suite.checkConfigForwardControl)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
 }
 
@@ -564,7 +564,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRules)
+	suite.env.RunTestBasedOnMode(suite.checkPlacementRules)
 }
 
 func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) {
@@ -630,7 +630,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+	suite.env.RunTestBasedOnMode(suite.checkPlacementRuleGroups)
 }
 
 func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestCluster) {
@@ -707,7 +707,7 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 }
 
 func (suite *configTestSuite) TestPlacementRuleBundle() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+	suite.env.RunTestBasedOnMode(suite.checkPlacementRuleBundle)
 }
 
 func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestCluster) {
@@ -950,7 +950,7 @@ func TestReplicationMode(t *testing.T) {
 }
 
 func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
-	suite.env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
+	suite.env.RunTestBasedOnMode(suite.checkUpdateDefaultReplicaConfig)
 }
 
 func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.TestCluster) {
@@ -1099,7 +1099,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 }
 
 func (suite *configTestSuite) TestPDServerConfig() {
-	suite.env.RunTestInTwoModes(suite.checkPDServerConfig)
+	suite.env.RunTestBasedOnMode(suite.checkPDServerConfig)
 }
 
 func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) {
@@ -1132,7 +1132,7 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 }
 
 func (suite *configTestSuite) TestMicroServiceConfig() {
-	suite.env.RunTestInTwoModes(suite.checkMicroServiceConfig)
+	suite.env.RunTestBasedOnMode(suite.checkMicroServiceConfig)
 }
 
 func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestCluster) {
@@ -1162,7 +1162,7 @@ func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestClust
 }
 
 func (suite *configTestSuite) TestRegionRules() {
-	suite.env.RunTestInTwoModes(suite.checkRegionRules)
+	suite.env.RunTestBasedOnMode(suite.checkRegionRules)
 }
 
 func (suite *configTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {
