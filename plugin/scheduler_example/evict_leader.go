@@ -259,7 +259,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
-				_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
@@ -275,27 +275,27 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = handler.config.Persist()
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
 func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	_ = handler.rd.JSON(w, http.StatusOK, conf)
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["store_id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -303,7 +303,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	defer handler.config.mu.Unlock()
 	_, exists := handler.config.StoreIDWitRanges[id]
 	if !exists {
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
+		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
 		return
 	}
 	delete(handler.config.StoreIDWitRanges, id)
@@ -312,7 +312,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	handler.config.mu.Unlock()
 	if err := handler.config.Persist(); err != nil {
 		handler.config.mu.Lock()
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	handler.config.mu.Lock()
@@ -321,7 +321,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	if len(handler.config.StoreIDWitRanges) == 0 {
 		resp = noStoreInSchedulerInfo
 	}
-	_ = handler.rd.JSON(w, http.StatusOK, resp)
+	handler.rd.JSON(w, http.StatusOK, resp)
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {

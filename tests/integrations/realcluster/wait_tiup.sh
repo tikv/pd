@@ -12,7 +12,7 @@ fi
 
 for ((i=0; i<${MAX_TIMES}; i++)); do
     sleep ${INTERVAL}
-    $TIUP_BIN_DIR playground display --tag pd_test
+    $TIUP_BIN_DIR playground display --tag pd_real_cluster_test
     if [ $? -eq 0 ]; then
         exit 0
     fi

@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/response"
@@ -305,6 +306,10 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 // @Router   /store/{id}/limit [post]
 func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
+	if version := rc.GetScheduleConfig().StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support set limit", version))
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -354,7 +359,9 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 			if typ == storelimit.RemovePeer {
 				key = fmt.Sprintf("remove-peer-%v", storeID)
 			}
-			h.handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second)
+			if err := h.handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second); err != nil {
+				log.Warn("failed to set store limit", errs.ZapError(err))
+			}
 			continue
 		}
 		if err := h.handler.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
@@ -405,6 +412,11 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores/limit [post]
 func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
+	cfg := h.GetScheduleConfig()
+	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support get limit", version))
+		return
+	}
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -485,7 +497,12 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores/limit [get]
 func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
-	limits := h.GetScheduleConfig().StoreLimit
+	cfg := h.GetScheduleConfig()
+	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support get limit", version))
+		return
+	}
+	limits := cfg.StoreLimit
 	includeTombstone := false
 	var err error
 	if includeStr := r.URL.Query().Get("include_tombstone"); includeStr != "" {

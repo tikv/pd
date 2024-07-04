@@ -24,6 +24,7 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
@@ -189,10 +190,12 @@ func (n *Node) regionHeartBeat(wg *sync.WaitGroup) {
 	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
-	regions := n.raftEngine.GetRegions()
-	for _, region := range regions {
+	n.raftEngine.TraverseRegions(func(region *core.RegionInfo) {
 		if region.GetLeader() != nil && region.GetLeader().GetStoreId() == n.Id {
 			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
+			if region == nil {
+				simutil.Logger.Fatal("region not found")
+			}
 			err := n.client.RegionHeartbeat(ctx, region)
 			if err != nil {
 				simutil.Logger.Info("report region heartbeat error",
@@ -202,7 +205,7 @@ func (n *Node) regionHeartBeat(wg *sync.WaitGroup) {
 			}
 			cancel()
 		}
-	}
+	})
 }
 
 func (n *Node) reportRegionChange() {
@@ -210,6 +213,10 @@ func (n *Node) reportRegionChange() {
 	for _, regionID := range regionIDs {
 		region := n.raftEngine.GetRegion(regionID)
 		ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
+		if region == nil {
+			simutil.Logger.Info("region not found",
+				zap.Uint64("region-id", regionID), zap.Uint64("node-id", n.Id))
+		}
 		err := n.client.RegionHeartbeat(ctx, region)
 		if err != nil {
 			simutil.Logger.Info("report region change heartbeat error",

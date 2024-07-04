@@ -40,11 +40,20 @@ const apiPrefix = "/pd"
 
 type scheduleTestSuite struct {
 	suite.Suite
-	env *tests.SchedulingTestEnvironment
+	env     *tests.SchedulingTestEnvironment
+	runMode tests.SchedulerMode
 }
 
-func TestScheduleTestSuite(t *testing.T) {
-	suite.Run(t, new(scheduleTestSuite))
+func TestPDSchedulingTestSuite(t *testing.T) {
+	suite.Run(t, &scheduleTestSuite{
+		runMode: tests.PDMode,
+	})
+}
+
+func TestAPISchedulingTestSuite(t *testing.T) {
+	suite.Run(t, &scheduleTestSuite{
+		runMode: tests.APIMode,
+	})
 }
 
 func (suite *scheduleTestSuite) SetupSuite() {
@@ -52,6 +61,7 @@ func (suite *scheduleTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.RunMode = suite.runMode
 }
 
 func (suite *scheduleTestSuite) TearDownSuite() {
@@ -62,7 +72,7 @@ func (suite *scheduleTestSuite) TearDownSuite() {
 }
 
 func (suite *scheduleTestSuite) TestOriginAPI() {
-	suite.env.RunTestInTwoModes(suite.checkOriginAPI)
+	suite.env.RunTestBasedOnMode(suite.checkOriginAPI)
 }
 
 func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
@@ -130,7 +140,7 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestAPI() {
-	suite.env.RunTestInTwoModes(suite.checkAPI)
+	suite.env.RunTestBasedOnMode(suite.checkAPI)
 }
 
 func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
@@ -616,7 +626,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestDisable() {
-	suite.env.RunTestInTwoModes(suite.checkDisable)
+	suite.env.RunTestBasedOnMode(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
@@ -724,7 +734,7 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 }
 
 func (suite *scheduleTestSuite) TestEmptySchedulers() {
-	suite.env.RunTestInTwoModes(suite.checkEmptySchedulers)
+	suite.env.RunTestBasedOnMode(suite.checkEmptySchedulers)
 }
 
 func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster) {

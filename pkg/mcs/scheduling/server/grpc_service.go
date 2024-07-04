@@ -336,9 +336,9 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 }
 
 // RegisterRESTHandler registers the service to REST server.
-func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error {
 	handler, group := SetUpRestHandler(s)
-	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	return apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 func (s *Service) errorHeader(err *schedulingpb.Error) *schedulingpb.ResponseHeader {
