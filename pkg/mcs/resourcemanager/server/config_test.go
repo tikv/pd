@@ -40,7 +40,7 @@ read-cpu-ms-cost =  5.0
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
-	err = cfg.Adjust(&meta, false)
+	err = cfg.Adjust(&meta)
 	re.NoError(err)
 
 	re.Equal(2*time.Second, cfg.Controller.DegradedModeWaitDuration.Duration)

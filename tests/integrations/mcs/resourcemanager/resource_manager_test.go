@@ -1448,8 +1448,6 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 		LTBTokenRPCMaxDelay:      typeutil.Duration(defaultCfg.LTBTokenRPCMaxDelay),
 		RequestUnit:              server.RequestUnitConfig(defaultCfg.RequestUnit),
 		EnableControllerTraceLog: defaultCfg.EnableControllerTraceLog,
-		RequestUnit:              server.RequestUnitConfig(defaultCfg.RequestUnit),
-		EnableControllerTraceLog: defaultCfg.EnableControllerTraceLog,
 	}
 	expectRUCfg := controller.GenerateRUConfig(defaultCfg)
 	expectRUCfg.DegradedModeWaitDuration = time.Second

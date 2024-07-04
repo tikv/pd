@@ -155,30 +155,30 @@ type RequestUnitConfig struct {
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
-func (ruc *RequestUnitConfig) Adjust() {
+func (ruc *RequestUnitConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if ruc == nil {
 		return
 	}
-	if ruc.ReadBaseCost == 0 {
-		ruc.ReadBaseCost = defaultReadBaseCost
+	if !meta.IsDefined("read-base-cost") {
+		configutil.AdjustFloat64(&ruc.ReadBaseCost, defaultReadBaseCost)
 	}
-	if ruc.ReadPerBatchBaseCost == 0 {
-		ruc.ReadPerBatchBaseCost = defaultReadPerBatchBaseCost
+	if !meta.IsDefined("read-per-batch-base-cost") {
+		configutil.AdjustFloat64(&ruc.ReadPerBatchBaseCost, defaultReadPerBatchBaseCost)
 	}
-	if ruc.ReadCostPerByte == 0 {
-		ruc.ReadCostPerByte = defaultReadCostPerByte
+	if !meta.IsDefined("read-cost-per-byte") {
+		configutil.AdjustFloat64(&ruc.ReadCostPerByte, defaultReadCostPerByte)
 	}
-	if ruc.WriteBaseCost == 0 {
-		ruc.WriteBaseCost = defaultWriteBaseCost
+	if !meta.IsDefined("write-base-cost") {
+		configutil.AdjustFloat64(&ruc.WriteBaseCost, defaultWriteBaseCost)
 	}
-	if ruc.WritePerBatchBaseCost == 0 {
-		ruc.WritePerBatchBaseCost = defaultWritePerBatchBaseCost
+	if !meta.IsDefined("write-per-batch-base-cost") {
+		configutil.AdjustFloat64(&ruc.WritePerBatchBaseCost, defaultWritePerBatchBaseCost)
 	}
-	if ruc.WriteCostPerByte == 0 {
-		ruc.WriteCostPerByte = defaultWriteCostPerByte
+	if !meta.IsDefined("write-cost-per-byte") {
+		configutil.AdjustFloat64(&ruc.WriteCostPerByte, defaultWriteCostPerByte)
 	}
-	if ruc.CPUMsCost == 0 {
-		ruc.CPUMsCost = defaultCPUMsCost
+	if !meta.IsDefined("read-cpu-ms-cost") {
+		configutil.AdjustFloat64(&ruc.CPUMsCost, defaultCPUMsCost)
 	}
 }
 
@@ -212,11 +212,11 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandLineString(flagSet, &c.ListenAddr, "listen-addr")
 	configutil.AdjustCommandLineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
-	return c.Adjust(meta, false)
+	return c.Adjust(meta)
 }
 
 // Adjust is used to adjust the resource manager configurations.
-func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
+func (c *Config) Adjust(meta *toml.MetaData) error {
 	configMetaData := configutil.NewConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())
