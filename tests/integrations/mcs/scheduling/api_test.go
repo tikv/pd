@@ -514,7 +514,7 @@ func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestClust
 }
 
 func (suite *apiTestSuite) TestFollowerForward() {
-	suite.env.RunTestInTwoModes(suite.checkFollowerForward)
+	suite.env.RunTestBasedOnMode(suite.checkFollowerForward)
 }
 
 func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {

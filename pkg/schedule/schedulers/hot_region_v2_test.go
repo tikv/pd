@@ -35,6 +35,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	sche, err := CreateScheduler(writeSchedulerName, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")
@@ -95,6 +96,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	sche, err := CreateScheduler(writeSchedulerName, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")
@@ -146,6 +148,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	sche, err := CreateScheduler(writeSchedulerName, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")
@@ -352,11 +355,9 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 
 	// Case1: Before #6827, we only use minHotRatio, so cannot schedule small hot region in this case.
 	// Because 10000 is larger than the length of hotRegions, so `filterHotPeers` will skip the topn calculation.
-	origin := topnPosition
 	topnPosition = 10000
 	ops := checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
 	re.Empty(ops)
-	topnPosition = origin
 
 	// Case2: After #6827, we use top10 as the threshold of minHotPeer.
 	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
@@ -401,7 +402,6 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 		tc.AddRegionWithReadInfo(hotRegionID+1, 1, bigHotRegionByte, 0, bigHotRegionQuery, utils.StoreHeartBeatReportInterval, []uint64{2, 3})
 	})
 	re.Empty(ops)
-	topnPosition = origin
 
 	// Case7: If there are more than topnPosition hot regions, but them are pending,
 	// we will schedule large hot region rather than small hot region, so there is no operator.
@@ -413,7 +413,6 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 		hb.regionPendings[hotRegionID+1] = &pendingInfluence{}
 	})
 	re.Empty(ops)
-	topnPosition = origin
 }
 
 func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLoad, lowLoad uint64,

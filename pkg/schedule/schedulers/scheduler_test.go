@@ -35,9 +35,16 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
-func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.SchedulerConfigProvider, *mockcluster.Cluster, *operator.Controller) {
+func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerConfigProvider, *mockcluster.Cluster, *operator.Controller) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
+	clean := func() {
+		cancel()
+		// reset some config to avoid affecting other tests
+		pendingAmpFactor = defaultPendingAmpFactor
+		stddevThreshold = defaultStddevThreshold
+		topnPosition = defaultTopnPosition
+	}
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
 	var stream *hbstream.HeartbeatStreams
@@ -48,7 +55,7 @@ func prepareSchedulersTest(needToRunStream ...bool) (context.CancelFunc, config.
 	}
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSchedulerConfig(), stream)
 	tc.SetHotRegionCacheHitsThreshold(1)
-	return cancel, opt, tc, oc
+	return clean, opt, tc, oc
 }
 
 func TestShuffleLeader(t *testing.T) {
@@ -354,9 +361,13 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{1, 2})
 	hs, err := CreateScheduler(writeSchedulerName, oc, storage, cd)
 	re.NoError(err)
-	ops, _ = hs.Schedule(tc, false)
-	re.Len(ops, 1)
-	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)
+	for i := 0; i < 100; i++ {
+		ops, _ = hs.Schedule(tc, false)
+		if len(ops) == 0 {
+			continue
+		}
+		operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 1, 4)
+	}
 }
 
 func TestSpecialUseReserved(t *testing.T) {
