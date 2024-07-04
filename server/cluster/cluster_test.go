@@ -2844,7 +2844,7 @@ func TestCheckCache(t *testing.T) {
 
 	// Add a peer with two replicas.
 	re.NoError(tc.addLeaderRegion(1, 2, 3))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/break-patrol", `return`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/break-patrol", `return`))
 
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.GetWaitGroup().Add(1)
@@ -2878,7 +2878,7 @@ func TestCheckCache(t *testing.T) {
 
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/break-patrol"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/break-patrol"))
 }
 
 func TestPatrolRegionConcurrency(t *testing.T) {
@@ -2907,7 +2907,7 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 	}
 
 	// test patrol region concurrency
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/break-patrol", `return`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/break-patrol", `return`))
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
 	testutil.Eventually(re, func() bool {
@@ -2927,7 +2927,9 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 		return len(oc.GetOperators()) >= mergeScheduleLimit
 	})
 	checkOperatorDuplicate(re, oc.GetOperators())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/break-patrol"))
+	co.GetSchedulersController().Wait()
+	co.GetWaitGroup().Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/break-patrol"))
 }
 
 func checkOperatorDuplicate(re *require.Assertions, ops []*operator.Operator) {
