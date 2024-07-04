@@ -52,15 +52,12 @@ const (
 	defaultTargetPeriod = 5 * time.Second
 	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
 	defaultMaxWaitDuration = 30 * time.Second
-<<<<<<< HEAD
-=======
 	// defaultLTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
 	defaultLTBTokenRPCMaxDelay = 1 * time.Second
 	// defaultWaitRetryTimes is the times to retry when waiting for the token.
 	defaultWaitRetryTimes = 20
 	// defaultWaitRetryInterval is the interval to retry when waiting for the token.
 	defaultWaitRetryInterval = 50 * time.Millisecond
->>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352))
 )
 
 const (
@@ -109,12 +106,9 @@ type BaseConfig struct {
 	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
 	LTBMaxWaitDuration Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
 
-<<<<<<< HEAD
-=======
 	// LTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
 	LTBTokenRPCMaxDelay Duration `toml:"ltb-token-rpc-max-delay" json:"ltb-token-rpc-max-delay"`
 
->>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352))
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
@@ -147,12 +141,6 @@ func (c *Config) Adjust() {
 // DefaultConfig returns the default resource manager controller configuration.
 func DefaultConfig() *Config {
 	return &Config{
-<<<<<<< HEAD
-		DegradedModeWaitDuration: NewDuration(defaultDegradedModeWaitDuration),
-		LTBMaxWaitDuration:       NewDuration(defaultMaxWaitDuration),
-		RequestUnit:              DefaultRequestUnitConfig(),
-		EnableControllerTraceLog: false,
-=======
 		BaseConfig: BaseConfig{
 			DegradedModeWaitDuration: NewDuration(defaultDegradedModeWaitDuration),
 			RequestUnit:              DefaultRequestUnitConfig(),
@@ -166,7 +154,6 @@ func DefaultConfig() *Config {
 				WaitRetryTimes:    defaultWaitRetryTimes,
 			},
 		},
->>>>>>> 6b25787af (resource_control: allow configuration of the maximum retry time for the local bucket (#8352))
 	}
 }
 
@@ -222,6 +209,8 @@ type RUConfig struct {
 
 	// some config for client
 	LTBMaxWaitDuration       time.Duration
+	WaitRetryInterval        time.Duration
+	WaitRetryTimes           int
 	DegradedModeWaitDuration time.Duration
 }
 
@@ -243,6 +232,8 @@ func GenerateRUConfig(config *Config) *RUConfig {
 		WriteBytesCost:           RequestUnit(config.RequestUnit.WriteCostPerByte),
 		CPUMsCost:                RequestUnit(config.RequestUnit.CPUMsCost),
 		LTBMaxWaitDuration:       config.LTBMaxWaitDuration.Duration,
+		WaitRetryInterval:        config.WaitRetryInterval.Duration,
+		WaitRetryTimes:           config.WaitRetryTimes,
 		DegradedModeWaitDuration: config.DegradedModeWaitDuration.Duration,
 	}
 }
