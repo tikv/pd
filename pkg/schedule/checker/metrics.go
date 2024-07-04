@@ -29,7 +29,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "checker",
 			Name:      "region_list",
-			Help:      "Number of region in waiting list",
+			Help:      "Number of region about different type.",
 		}, []string{"type"})
 
 	patrolCheckRegionsGauge = prometheus.NewGauge(

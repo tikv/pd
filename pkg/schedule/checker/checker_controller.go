@@ -52,6 +52,7 @@ var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
 	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
+	scanLimitGauge    = regionListGauge.WithLabelValues("scan_limit")
 )
 
 // Controller is used to manage all checkers.
@@ -561,7 +562,9 @@ func (p *PatrolRegionContext) setScanLimit(limit int) {
 }
 
 func calculateScanLimit(cluster sche.CheckerCluster) int {
-	return max(patrolScanRegionMinLimit, cluster.GetTotalRegionCount()/patrolRegionPartition)
+	scanlimit := max(patrolScanRegionMinLimit, cluster.GetTotalRegionCount()/patrolRegionPartition)
+	scanLimitGauge.Set(float64(scanlimit))
+	return scanlimit
 }
 
 func (p *PatrolRegionContext) getPatrolRegionsDuration() time.Duration {
