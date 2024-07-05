@@ -1141,3 +1141,32 @@ func TestCntRefAfterResetRegionCache(t *testing.T) {
 	regions.CheckAndPutRegion(region)
 	re.Equal(int32(2), region.GetRef())
 }
+
+func TestScanRegion(t *testing.T) {
+	re := require.New(t)
+	tree := newRegionTree()
+	// [a, b)
+	updateNewItem(tree, NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
+	regions, err := scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}, 0)
+	re.NoError(err)
+	re.Len(regions, 1)
+	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, 0)
+	re.NoError(err)
+	re.Len(regions, 1)
+
+	// [a, c)
+	updateNewItem(tree, NewTestRegionInfo(2, 1, []byte("b"), []byte("c")))
+	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, 0)
+	re.NoError(err)
+	re.Len(regions, 2)
+	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, 1)
+	re.NoError(err)
+	re.Len(regions, 1)
+
+	// [a, c), [d, e)
+	updateNewItem(tree, NewTestRegionInfo(3, 1, []byte("d"), []byte("e")))
+	_, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("e")}, 0)
+	re.Error(err)
+	_, err = scanRegion(tree, &KeyRange{StartKey: []byte("c"), EndKey: []byte("e")}, 0)
+	re.Error(err)
+}

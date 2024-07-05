@@ -1826,37 +1826,63 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 // BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
 // limit <= 0 means no limit.
 // The given key pairs should be non-overlapping.
-func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, limit int) []*RegionInfo {
-	r.t.RLock()
-	defer r.t.RUnlock()
-
+func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, limit int) ([]*RegionInfo, error) {
+	keyRanges.Merge()
 	krs := keyRanges.Ranges()
 	res := make([]*RegionInfo, 0, len(krs))
-	var lastRegion *RegionInfo
+
+	r.t.RLock()
+	defer r.t.RUnlock()
 	for _, keyRange := range krs {
 		if limit > 0 && len(res) >= limit {
-			return res
+			res = res[:limit]
+			return res, nil
 		}
-		if lastRegion != nil {
-			if lastRegion.Contains(keyRange.EndKey) {
-				continue
-			} else if lastRegion.Contains(keyRange.StartKey) {
-				keyRange.StartKey = lastRegion.GetEndKey()
-			}
+
+		regions, err := scanRegion(r.tree, keyRange, limit)
+		if err != nil {
+			return nil, err
 		}
-		r.tree.scanRange(keyRange.StartKey, func(region *RegionInfo) bool {
-			if len(keyRange.EndKey) > 0 && bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
-				return false
-			}
-			if limit > 0 && len(res) >= limit {
-				return false
-			}
-			lastRegion = region
-			res = append(res, region)
-			return true
-		})
+		res = append(res, regions...)
 	}
-	return res
+	return res, nil
+}
+
+func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int) ([]*RegionInfo, error) {
+	var (
+		res        []*RegionInfo
+		lastRegion = &RegionInfo{
+			meta: &metapb.Region{EndKey: keyRange.StartKey},
+		}
+		err error
+	)
+	regionTree.scanRange(keyRange.StartKey, func(region *RegionInfo) bool {
+		if len(keyRange.EndKey) > 0 && bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
+			return false
+		}
+		if limit > 0 && len(res) >= limit {
+			return false
+		}
+		if len(lastRegion.GetEndKey()) > 0 && !bytes.Equal(region.GetStartKey(), lastRegion.GetEndKey()) {
+			err = errors.Errorf("key range[%s, %s) found a hole region between region[%s, %s) and region[%s, %s)",
+				keyRange.StartKey, keyRange.EndKey, lastRegion.GetStartKey(), lastRegion.GetEndKey(), region.GetStartKey(), region.GetEndKey())
+			return false
+		}
+
+		lastRegion = region
+		res = append(res, region)
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(keyRange.EndKey) != 0 && bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) > 0 {
+		err = errors.Errorf("key range[%s, %s) has no corresponding region, the last region is [%s, %s)",
+			keyRange.StartKey, keyRange.EndKey, lastRegion.GetStartKey(), lastRegion.GetEndKey())
+		return nil, err
+	}
+	return res, nil
 }
 
 // ScanRegionWithIterator scans from the first region containing or behind start key,

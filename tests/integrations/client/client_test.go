@@ -2105,21 +2105,17 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		{StartKey: []byte{6}, EndKey: []byte{7}},
 		{StartKey: []byte{8}, EndKey: []byte{9}},
 	}, 3, []*metapb.Region{regions[0], regions[2], regions[4]})
-	check([]pd.KeyRange{
-		{StartKey: []byte{0}, EndKey: []byte{0, 1}}, // non-continuous ranges in a region
-		{StartKey: []byte{0, 2}, EndKey: []byte{0, 3}},
-		{StartKey: []byte{0, 3}, EndKey: []byte{0, 4}},
-		{StartKey: []byte{0, 5}, EndKey: []byte{0, 6}},
-		{StartKey: []byte{0, 7}, EndKey: []byte{3}},
-		{StartKey: []byte{4}, EndKey: []byte{5}},
-	}, 2, []*metapb.Region{regions[0], regions[1]})
 
 	// invalid ranges
-	_, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}}, 10)
-	re.Error(err, "invalid key range, start key > end key")
+	_, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: []byte{0, 1}}}, 10)
+	re.ErrorContains(err, "has no corresponding region")
+	_, err = suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0, 1}, EndKey: []byte{2}}}, 10)
+	re.ErrorContains(err, "found a hole region")
+	_, err = suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}}, 10)
+	re.ErrorContains(err, "invalid key range, start key > end key")
 	_, err = suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{2}},
 		{StartKey: []byte{1}, EndKey: []byte{3}},
 	}, 10)
-	re.Error(err, "invalid key range, ranges overlapped")
+	re.ErrorContains(err, "invalid key range, ranges overlapped")
 }

@@ -1680,7 +1680,10 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 		}
 		keyRanges.Append(reqRange.StartKey, reqRange.EndKey)
 	}
-	res := rc.BatchScanRegions(keyRanges, int(limit))
+	res, err := rc.BatchScanRegions(keyRanges, int(limit))
+	if err != nil {
+		return &pdpb.BatchScanRegionsResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())}, nil
+	}
 	regions := make([]*pdpb.Region, 0, len(res))
 	for _, r := range res {
 		leader := r.GetLeader()
