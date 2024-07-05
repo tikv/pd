@@ -44,6 +44,18 @@ var (
 	t8 = t0.Add(time.Duration(8) * d)
 )
 
+func resetTime() {
+	t0 = time.Now()
+	t1 = t0.Add(time.Duration(1) * d)
+	t2 = t0.Add(time.Duration(2) * d)
+	t3 = t0.Add(time.Duration(3) * d)
+	t4 = t0.Add(time.Duration(4) * d)
+	t5 = t0.Add(time.Duration(5) * d)
+	t6 = t0.Add(time.Duration(6) * d)
+	t7 = t0.Add(time.Duration(7) * d)
+	t8 = t0.Add(time.Duration(8) * d)
+}
+
 type request struct {
 	t   time.Time
 	n   float64
@@ -144,6 +156,7 @@ func TestNotify(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
+	resetTime()
 	ctx := context.Background()
 	ctx1, cancel1 := context.WithDeadline(ctx, t2)
 	re := require.New(t)
