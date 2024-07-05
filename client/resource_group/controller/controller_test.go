@@ -261,7 +261,9 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	// wait default group request token by PeriodicReport.
 	time.Sleep(2 * time.Second)
 	counter := c2.run.requestUnitTokens[0]
+	counter.limiter.mu.Lock()
 	counter.limiter.notify()
+	counter.limiter.mu.Unlock()
 	select {
 	case res := <-recTestGroupAcquireTokenRequest:
 		re.True(res)
