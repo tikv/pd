@@ -15,7 +15,6 @@
 package cases
 
 import (
-	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
@@ -23,23 +22,25 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 )
 
-// newStableEnv provides a stable environment for test.
-func newStableEnv(config *sc.SimConfig) *Case {
+func newScaleInOut(config *sc.SimConfig) *Case {
 	var simCase Case
 
 	totalStore := config.TotalStore
 	totalRegion := config.TotalRegion
-	allStores := make(map[uint64]struct{}, totalStore)
-	arrStoresID := make([]uint64, 0, totalStore)
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	if totalStore == 0 || totalRegion == 0 {
+		totalStore, totalRegion = 6, 4000
+	}
+
 	for i := 0; i < totalStore; i++ {
-		id := simutil.IDAllocator.NextID()
-		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     id,
+		s := &Store{
+			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
-		})
-		allStores[id] = struct{}{}
-		arrStoresID = append(arrStoresID, id)
+		}
+		if i%2 == 1 {
+			s.HasExtraUsedSpace = true
+		}
+		simCase.Stores = append(simCase.Stores, s)
 	}
 
 	for i := 0; i < totalRegion; i++ {
@@ -47,19 +48,35 @@ func newStableEnv(config *sc.SimConfig) *Case {
 		for j := 0; j < replica; j++ {
 			peers = append(peers, &metapb.Peer{
 				Id:      simutil.IDAllocator.NextID(),
-				StoreId: arrStoresID[(i+j)%totalStore],
+				StoreId: uint64((i+j)%totalStore + 1),
 			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     simutil.IDAllocator.NextID(),
+			ID:     IDAllocator.nextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * units.MiB,
-			Keys:   960000,
 		})
 	}
 
-	simCase.Checker = func(_ []*metapb.Store, _ *core.RegionsInfo, _ []info.StoreStats) bool {
+	scaleInTick := int64(totalRegion * 3 / totalStore)
+	addEvent := &AddNodesDescriptor{}
+	addEvent.Step = func(tick int64) uint64 {
+		if tick == scaleInTick {
+			return uint64(totalStore + 1)
+		}
+		return 0
+	}
+
+	removeEvent := &DeleteNodesDescriptor{}
+	removeEvent.Step = func(tick int64) uint64 {
+		if tick == scaleInTick*2 {
+			return uint64(totalStore + 1)
+		}
+		return 0
+	}
+	simCase.Events = []EventDescriptor{addEvent, removeEvent}
+
+	simCase.Checker = func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) bool {
 		return false
 	}
 	return &simCase

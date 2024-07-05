@@ -228,7 +228,7 @@ failpoint-disable: install-tools
 ut: pd-ut
 	@$(FAILPOINT_ENABLE)
 	# only run unit tests
-	./bin/pd-ut run --ignore tests --race
+	./bin/pd-ut run --ignore tests --race --junitfile ./junitfile
 	@$(CLEAN_UT_BINARY)
 	@$(FAILPOINT_DISABLE)
 
@@ -280,6 +280,7 @@ test-tso-consistency: install-tools
 REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
 
 test-real-cluster:
+	@ rm -rf ~/.tiup/data/pd_real_cluster_test
 	# testing with the real cluster...
 	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
 

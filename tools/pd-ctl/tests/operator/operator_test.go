@@ -57,7 +57,7 @@ func (suite *operatorTestSuite) TearDownSuite() {
 }
 
 func (suite *operatorTestSuite) TestOperator() {
-	suite.env.RunTestInTwoModes(suite.checkOperator)
+	suite.env.RunTestBasedOnMode(suite.checkOperator)
 }
 
 func (suite *operatorTestSuite) checkOperator(cluster *pdTests.TestCluster) {

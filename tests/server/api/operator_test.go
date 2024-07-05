@@ -55,7 +55,7 @@ func (suite *operatorTestSuite) TearDownSuite() {
 }
 
 func (suite *operatorTestSuite) TestAddRemovePeer() {
-	suite.env.RunTestInTwoModes(suite.checkAddRemovePeer)
+	suite.env.RunTestBasedOnMode(suite.checkAddRemovePeer)
 }
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
@@ -165,7 +165,7 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 }
 
 func (suite *operatorTestSuite) TestMergeRegionOperator() {
-	suite.env.RunTestInTwoModes(suite.checkMergeRegionOperator)
+	suite.env.RunTestBasedOnMode(suite.checkMergeRegionOperator)
 }
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
@@ -225,7 +225,7 @@ func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
 		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 3
 		})
-	env.RunTestInTwoModes(suite.checkTransferRegionWithPlacementRule)
+	env.RunTestBasedOnMode(suite.checkTransferRegionWithPlacementRule)
 	env.Cleanup()
 }
 
@@ -505,7 +505,7 @@ func (suite *operatorTestSuite) TestGetOperatorsAsObject() {
 		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 1
 		})
-	env.RunTestInTwoModes(suite.checkGetOperatorsAsObject)
+	env.RunTestBasedOnMode(suite.checkGetOperatorsAsObject)
 	env.Cleanup()
 }
 
@@ -602,7 +602,7 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 }
 
 func (suite *operatorTestSuite) TestRemoveOperators() {
-	suite.env.RunTestInTwoModes(suite.checkRemoveOperators)
+	suite.env.RunTestBasedOnMode(suite.checkRemoveOperators)
 }
 
 func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster) {

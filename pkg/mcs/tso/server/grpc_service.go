@@ -19,7 +19,6 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -79,9 +78,9 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 }
 
 // RegisterRESTHandler registers the service to REST server.
-func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error {
 	handler, group := SetUpRestHandler(s)
-	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	return apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 // Tso returns a stream of timestamps
@@ -164,7 +163,7 @@ func (s *Service) FindGroupByKeyspaceID(
 			Address: member.Address,
 			// TODO: watch the keyspace groups' primary serving address changes
 			// to get the latest primary serving addresses of all keyspace groups.
-			IsPrimary: strings.EqualFold(member.Address, am.GetLeaderAddr()),
+			IsPrimary: member.IsAddressEquivalent(am.GetLeaderAddr()),
 		})
 	}
 

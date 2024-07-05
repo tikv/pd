@@ -1433,12 +1433,14 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 
 	configURL := "/resource-manager/api/v1/config/controller"
 	waitDuration := 10 * time.Second
+	tokenRPCMaxDelay := 2 * time.Second
 	readBaseCost := 1.5
 	defaultCfg := controller.DefaultConfig()
 	expectCfg := server.ControllerConfig{
 		// failpoint enableDegradedMode will setup and set it be 1s.
 		DegradedModeWaitDuration: typeutil.NewDuration(time.Second),
 		LTBMaxWaitDuration:       typeutil.Duration(defaultCfg.LTBMaxWaitDuration),
+		LTBTokenRPCMaxDelay:      typeutil.Duration(defaultCfg.LTBTokenRPCMaxDelay),
 		RequestUnit:              server.RequestUnitConfig(defaultCfg.RequestUnit),
 		EnableControllerTraceLog: defaultCfg.EnableControllerTraceLog,
 	}
@@ -1460,6 +1462,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 			configJSON: fmt.Sprintf(`{"degraded-mode-wait-duration": "%v"}`, waitDuration),
 			value:      waitDuration,
 			expected:   func(ruConfig *controller.RUConfig) { ruConfig.DegradedModeWaitDuration = waitDuration },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"ltb-token-rpc-max-delay": "%v"}`, tokenRPCMaxDelay),
+			value:      waitDuration,
+			expected: func(ruConfig *controller.RUConfig) {
+				ruConfig.WaitRetryTimes = int(tokenRPCMaxDelay / ruConfig.WaitRetryInterval)
+			},
 		},
 		{
 			configJSON: fmt.Sprintf(`{"ltb-max-wait-duration": "%v"}`, waitDuration),
