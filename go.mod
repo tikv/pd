@@ -7,6 +7,8 @@ go 1.21
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
 
+replace github.com/pingcap/kvproto => github.com/okjiang/kvproto v0.0.0-20240708061752-38db8e83a21b
+
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1
