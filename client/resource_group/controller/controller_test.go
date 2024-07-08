@@ -142,13 +142,13 @@ type MockResourceGroupProvider struct {
 	mock.Mock
 }
 
-func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
-	args := m.Called(ctx, resourceGroupName, opts)
+func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string) (*rmpb.ResourceGroup, error) {
+	args := m.Called(ctx, resourceGroupName)
 	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
-	args := m.Called(ctx, opts)
+func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, error) {
+	args := m.Called(ctx)
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Error(1)
 }
 
