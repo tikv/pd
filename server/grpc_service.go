@@ -1680,7 +1680,7 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 		}
 		keyRanges.Append(reqRange.StartKey, reqRange.EndKey)
 	}
-	res, err := rc.BatchScanRegions(keyRanges, int(limit))
+	res, err := rc.BatchScanRegions(keyRanges, int(limit), request.OutputMustContainAllKeyRange)
 	if err != nil {
 		return &pdpb.BatchScanRegionsResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_REGIONS_NOT_CONTAIN_ALL_KEY_RANGE, err.Error())}, nil
 	}

@@ -7,7 +7,7 @@ go 1.21
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
 
-replace github.com/pingcap/kvproto => github.com/okjiang/kvproto v0.0.0-20240708061752-38db8e83a21b
+replace github.com/pingcap/kvproto => github.com/okjiang/kvproto v0.0.0-20240708081830-174112807173
 
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
@@ -175,7 +175,7 @@ require (
 	go.etcd.io/bbolt v1.3.9 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
-	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/multierr v1.11.0
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/crypto v0.21.0 // indirect
 	golang.org/x/image v0.10.0 // indirect

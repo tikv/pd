@@ -2,6 +2,8 @@ module github.com/tikv/pd/client
 
 go 1.21
 
+replace github.com/pingcap/kvproto => github.com/okjiang/kvproto v0.0.0-20240708081830-174112807173
+
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5

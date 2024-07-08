@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 )
 
@@ -1826,7 +1827,7 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 // BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
 // limit <= 0 means no limit.
 // The given key pairs should be non-overlapping.
-func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, limit int) ([]*RegionInfo, error) {
+func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
 	keyRanges.Merge()
 	krs := keyRanges.Ranges()
 	res := make([]*RegionInfo, 0, len(krs))
@@ -1841,7 +1842,14 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, limit int) ([]*Regi
 
 		regions, err := scanRegion(r.tree, keyRange, limit)
 		if err != nil {
-			return nil, err
+			log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange", outputMustContainAllKeyRange), zap.Error(err))
+			if outputMustContainAllKeyRange {
+				return nil, err
+			}
+		}
+		if len(res) > 0 && len(regions) > 0 && res[len(res)-1].meta.Id == regions[0].meta.Id {
+			// skip the region that has been scanned
+			regions = regions[1:]
 		}
 		res = append(res, regions...)
 	}
@@ -1864,25 +1872,20 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int) ([]*Regio
 			return false
 		}
 		if len(lastRegion.GetEndKey()) > 0 && !bytes.Equal(region.GetStartKey(), lastRegion.GetEndKey()) {
-			err = errors.Errorf("key range[%s, %s) found a hole region between region[%s, %s) and region[%s, %s)",
-				keyRange.StartKey, keyRange.EndKey, lastRegion.GetStartKey(), lastRegion.GetEndKey(), region.GetStartKey(), region.GetEndKey())
-			return false
+			err = multierr.Append(err, errors.Errorf("key range[%s, %s) found a hole region between region[%s, %s) and region[%s, %s)",
+				keyRange.StartKey, keyRange.EndKey, lastRegion.GetStartKey(), lastRegion.GetEndKey(), region.GetStartKey(), region.GetEndKey()))
 		}
 
 		lastRegion = region
 		res = append(res, region)
 		return true
 	})
-	if err != nil {
-		return nil, err
-	}
 
 	if len(keyRange.EndKey) != 0 && bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) > 0 {
-		err = errors.Errorf("key range[%s, %s) has no corresponding region, the last region is [%s, %s)",
-			keyRange.StartKey, keyRange.EndKey, lastRegion.GetStartKey(), lastRegion.GetEndKey())
-		return nil, err
+		err = multierr.Append(err, errors.Errorf("key range[%s, %s) has no corresponding region, the last region is [%s, %s)",
+			keyRange.StartKey, keyRange.EndKey, lastRegion.GetStartKey(), lastRegion.GetEndKey()))
 	}
-	return res, nil
+	return res, err
 }
 
 // ScanRegionWithIterator scans from the first region containing or behind start key,

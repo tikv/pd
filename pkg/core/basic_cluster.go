@@ -99,7 +99,7 @@ type RegionSetInformer interface {
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo
-	BatchScanRegions(keyRanges *KeyRanges, limit int) ([]*RegionInfo, error)
+	BatchScanRegions(keyRanges *KeyRanges, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error)
 }
 
 // StoreSetInformer provides access to a shared informer of stores.

@@ -2001,9 +2001,13 @@ func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old st
 }
 
 func (suite *clientTestSuite) TestBatchScanRegions() {
-	re := suite.Require()
-	regionLen := 10
-	regions := make([]*metapb.Region, 0, regionLen)
+	var (
+		re        = suite.Require()
+		ctx       = context.Background()
+		regionLen = 10
+		regions   = make([]*metapb.Region, 0, regionLen)
+	)
+
 	for i := 0; i < regionLen; i++ {
 		regionID := regionIDAllocator.alloc()
 		r := &metapb.Region{
@@ -2028,7 +2032,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 
 	// Wait for region heartbeats.
 	testutil.Eventually(re, func() bool {
-		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
+		scanRegions, err := suite.client.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
@@ -2049,39 +2053,45 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	suite.srv.GetRaftCluster().HandleRegionHeartbeat(region6)
 
 	t := suite.T()
+	var outputMustContainAllKeyRangeOptions []bool
 	check := func(ranges []pd.KeyRange, limit int, expect []*metapb.Region) {
 		for _, bucket := range []bool{false, true} {
-			var opts []pd.GetRegionOption
-			if bucket {
-				opts = append(opts, pd.WithBuckets())
-			}
-			scanRegions, err := suite.client.BatchScanRegions(context.Background(), ranges, limit, opts...)
-			re.NoError(err)
-			re.Len(scanRegions, len(expect))
-			t.Log("scanRegions", scanRegions)
-			t.Log("expect", expect)
-			for i := range expect {
-				re.Equal(expect[i], scanRegions[i].Meta)
-
-				if scanRegions[i].Meta.GetId() == region3.GetID() {
-					re.Equal(&metapb.Peer{}, scanRegions[i].Leader)
-				} else {
-					re.Equal(expect[i].Peers[0], scanRegions[i].Leader)
+			for _, outputMustContainAllKeyRange := range outputMustContainAllKeyRangeOptions {
+				var opts []pd.GetRegionOption
+				if bucket {
+					opts = append(opts, pd.WithBuckets())
 				}
-
-				if scanRegions[i].Meta.GetId() == region4.GetID() {
-					re.Equal([]*metapb.Peer{expect[i].Peers[1]}, scanRegions[i].DownPeers)
+				if outputMustContainAllKeyRange {
+					opts = append(opts, pd.WithOutputMustContainAllKeyRange())
 				}
+				scanRegions, err := suite.client.BatchScanRegions(ctx, ranges, limit, opts...)
+				re.NoError(err)
+				t.Log("scanRegions", scanRegions)
+				t.Log("expect", expect)
+				re.Len(scanRegions, len(expect))
+				for i := range expect {
+					re.Equal(expect[i], scanRegions[i].Meta)
 
-				if scanRegions[i].Meta.GetId() == region5.GetID() {
-					re.Equal([]*metapb.Peer{expect[i].Peers[1], expect[i].Peers[2]}, scanRegions[i].PendingPeers)
-				}
-
-				if scanRegions[i].Meta.GetId() == region6.GetID() {
-					if !bucket {
-						re.Nil(scanRegions[i].Buckets)
+					if scanRegions[i].Meta.GetId() == region3.GetID() {
+						re.Equal(&metapb.Peer{}, scanRegions[i].Leader)
 					} else {
-						re.Equal(scanRegions[i].Buckets, region6.GetBuckets())
+						re.Equal(expect[i].Peers[0], scanRegions[i].Leader)
+					}
+
+					if scanRegions[i].Meta.GetId() == region4.GetID() {
+						re.Equal([]*metapb.Peer{expect[i].Peers[1]}, scanRegions[i].DownPeers)
+					}
+
+					if scanRegions[i].Meta.GetId() == region5.GetID() {
+						re.Equal([]*metapb.Peer{expect[i].Peers[1], expect[i].Peers[2]}, scanRegions[i].PendingPeers)
+					}
+
+					if scanRegions[i].Meta.GetId() == region6.GetID() {
+						if !bucket {
+							re.Nil(scanRegions[i].Buckets)
+						} else {
+							re.Equal(scanRegions[i].Buckets, region6.GetBuckets())
+						}
 					}
 				}
 			}
@@ -2089,6 +2099,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	}
 
 	// valid ranges
+	outputMustContainAllKeyRangeOptions = []bool{false, true}
 	check([]pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10, regions)
 	check([]pd.KeyRange{{StartKey: []byte{1}, EndKey: nil}}, 5, regions[1:6])
 	check([]pd.KeyRange{
@@ -2106,14 +2117,39 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		{StartKey: []byte{8}, EndKey: []byte{9}},
 	}, 3, []*metapb.Region{regions[0], regions[2], regions[4]})
 
+	outputMustContainAllKeyRangeOptions = []bool{false}
+	check([]pd.KeyRange{
+		{StartKey: []byte{0}, EndKey: []byte{0, 1}}, // non-continuous ranges in a region
+		{StartKey: []byte{0, 2}, EndKey: []byte{0, 3}},
+		{StartKey: []byte{0, 3}, EndKey: []byte{0, 4}},
+		{StartKey: []byte{0, 5}, EndKey: []byte{0, 6}},
+		{StartKey: []byte{0, 7}, EndKey: []byte{3}},
+		{StartKey: []byte{4}, EndKey: []byte{5}},
+	}, 10, []*metapb.Region{regions[0], regions[1], regions[2], regions[4]})
+
 	// invalid ranges
-	_, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: []byte{0, 1}}}, 10)
+	_, err := suite.client.BatchScanRegions(
+		ctx,
+		[]pd.KeyRange{{StartKey: []byte{0}, EndKey: []byte{0, 1}}},
+		10,
+		pd.WithOutputMustContainAllKeyRange(),
+	)
 	re.ErrorContains(err, "has no corresponding region")
-	_, err = suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0, 1}, EndKey: []byte{2}}}, 10)
+	_, err = suite.client.BatchScanRegions(
+		ctx,
+		[]pd.KeyRange{{StartKey: []byte{0, 1}, EndKey: []byte{2}}},
+		10,
+		pd.WithOutputMustContainAllKeyRange(),
+	)
 	re.ErrorContains(err, "found a hole region")
-	_, err = suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}}, 10)
+	_, err = suite.client.BatchScanRegions(
+		ctx,
+		[]pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
+		10,
+		pd.WithOutputMustContainAllKeyRange(),
+	)
 	re.ErrorContains(err, "invalid key range, start key > end key")
-	_, err = suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{
+	_, err = suite.client.BatchScanRegions(ctx, []pd.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{2}},
 		{StartKey: []byte{1}, EndKey: []byte{3}},
 	}, 10)
