@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# ./ci-subtask.sh <TOTAL_TASK_N> <TASK_INDEX>
+# ./ci-subtask.sh <TASK_INDEX>
 
 ROOT_PATH_COV=$(pwd)/covprofile
 ROOT_PATH_JUNITFILE=$(pwd)/junitfile

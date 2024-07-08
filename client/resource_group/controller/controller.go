@@ -193,6 +193,7 @@ func NewResourceGroupController(
 	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig))
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
 	controller.safeRuConfig.Store(controller.ruConfig)
+	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 	return controller, nil
 }
 
@@ -201,12 +202,13 @@ func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Con
 	if err != nil {
 		return nil, err
 	}
+	config := DefaultConfig()
+	defer config.Adjust()
 	kvs := resp.GetKvs()
 	if len(kvs) == 0 {
 		log.Warn("[resource group controller] server does not save config, load config failed")
-		return DefaultConfig(), nil
+		return config, nil
 	}
-	config := DefaultConfig()
 	err = json.Unmarshal(kvs[0].GetValue(), config)
 	if err != nil {
 		return nil, err
@@ -309,7 +311,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
-
 			case <-emergencyTokenAcquisitionTicker.C:
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			/* channels */
@@ -329,9 +330,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case notifyMsg := <-c.lowTokenNotifyChan:
 				c.executeOnAllGroups((*groupCostController).updateRunState)
 				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
-				if len(c.run.currentRequests) == 0 {
-					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */, notifyMsg)
-				}
+				c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */, notifyMsg)
 				if c.run.inDegradedMode {
 					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				}
@@ -391,6 +390,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					if err := json.Unmarshal(item.Kv.Value, config); err != nil {
 						continue
 					}
+					config.Adjust()
 					c.ruConfig = GenerateRUConfig(config)
 
 					// Stay compatible with serverless
@@ -404,7 +404,6 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					}
 					log.Info("load resource controller config after config changed", zap.Reflect("config", config), zap.Reflect("ruConfig", c.ruConfig))
 				}
-
 			case gc := <-c.tokenBucketUpdateChan:
 				go gc.handleTokenBucketUpdateEvent(c.loopCtx)
 			}
@@ -1178,11 +1177,19 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 			switch selectTyp {
 			case periodicReport:
 				selected = selected || gc.shouldReportConsumption()
+				failpoint.Inject("triggerPeriodicReport", func(val failpoint.Value) {
+					selected = gc.name == val.(string)
+				})
 				fallthrough
 			case lowToken:
 				if counter.limiter.IsLowTokens() {
 					selected = true
 				}
+				failpoint.Inject("triggerLowRUReport", func(val failpoint.Value) {
+					if selectTyp == lowToken {
+						selected = gc.name == val.(string)
+					}
+				})
 			}
 			request := &rmpb.RequestUnitItem{
 				Type:  typ,
