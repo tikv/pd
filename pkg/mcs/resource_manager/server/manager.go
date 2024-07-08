@@ -120,7 +120,9 @@ func (m *Manager) Init(ctx context.Context) error {
 		return err
 	}
 	// Load resource group meta info from storage.
+	m.Lock()
 	m.groups = make(map[string]*ResourceGroup)
+	m.Unlock()
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {

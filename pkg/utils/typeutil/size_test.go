@@ -40,6 +40,8 @@ func TestSizeJSON(t *testing.T) {
 }
 
 func TestParseMbFromText(t *testing.T) {
+	const defaultValue = 2
+
 	t.Parallel()
 	re := require.New(t)
 	testCases := []struct {
@@ -47,18 +49,24 @@ func TestParseMbFromText(t *testing.T) {
 		size uint64
 	}{{
 		body: []string{"10Mib", "10MiB", "10M", "10MB"},
-		size: uint64(10),
+		size: 10,
 	}, {
 		body: []string{"10GiB", "10Gib", "10G", "10GB"},
-		size: uint64(10 * units.GiB / units.MiB),
+		size: 10 * units.GiB / units.MiB,
+	}, {
+		body: []string{"1024KiB", "1048576"},
+		size: 1,
+	}, {
+		body: []string{"100KiB", "1023KiB", "1048575", "0"},
+		size: 0,
 	}, {
 		body: []string{"10yiB", "10aib"},
-		size: uint64(1),
+		size: defaultValue,
 	}}
 
 	for _, testCase := range testCases {
 		for _, b := range testCase.body {
-			re.Equal(int(testCase.size), int(ParseMBFromText(b, 1)))
+			re.Equal(testCase.size, ParseMBFromText(b, defaultValue))
 		}
 	}
 }
