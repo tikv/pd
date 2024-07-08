@@ -166,14 +166,8 @@ func TestCancel(t *testing.T) {
 	checkTokens(re, lim1, t2, 7)
 	checkTokens(re, lim2, t2, 2)
 	d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
-<<<<<<< HEAD
-	re.Equal(d, 4*time.Second)
-	re.Error(err)
-=======
 	re.Error(err)
 	re.Equal(4*time.Second, d)
-	re.Contains(err.Error(), "estimated wait time 4s, ltb state is 1.00:-4.00")
->>>>>>> 85d650bf6 (controller: fix the low_ru request missed (#8368))
 	checkTokens(re, lim1, t3, 13)
 	checkTokens(re, lim2, t3, 3)
 	cancel1()
