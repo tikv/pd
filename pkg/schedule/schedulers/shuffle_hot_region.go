@@ -159,10 +159,14 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerClus
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleHotRegionCounter.Inc()
-	rw := s.randomRWType()
-	s.prepareForBalance(rw, cluster)
-	operators := s.randomSchedule(cluster, s.stLoadInfos[buildResourceType(rw, constant.LeaderKind)])
-	return operators, nil
+	typ := s.randomType()
+	s.prepareForBalance(typ, cluster)
+	switch typ {
+	case readLeader, writeLeader:
+		return s.randomSchedule(cluster, s.stLoadInfos[typ]), nil
+	default:
+	}
+	return nil, nil
 }
 
 func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {
@@ -234,7 +238,7 @@ func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *h
 	}
 	limit, ok := input["limit"].(float64)
 	if !ok {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, "invalid limit")
+		handler.rd.JSON(w, http.StatusBadRequest, "invalid limit")
 		return
 	}
 	handler.config.Lock()
@@ -243,16 +247,16 @@ func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *h
 	handler.config.Limit = uint64(limit)
 	err := handler.config.persistLocked()
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.Limit = previous
 		return
 	}
-	_ = handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
 func (handler *shuffleHotRegionHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	_ = handler.rd.JSON(w, http.StatusOK, conf)
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 func newShuffleHotRegionHandler(config *shuffleHotRegionSchedulerConfig) http.Handler {

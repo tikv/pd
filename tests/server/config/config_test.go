@@ -91,7 +91,7 @@ func (suite *configTestSuite) TearDownSuite() {
 }
 
 func (suite *configTestSuite) TestConfigAll() {
-	suite.env.RunTestInTwoModes(suite.checkConfigAll)
+	suite.env.RunTestBasedOnMode(suite.checkConfigAll)
 }
 
 func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
@@ -212,7 +212,7 @@ func (suite *configTestSuite) checkConfigAll(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestConfigSchedule() {
-	suite.env.RunTestInTwoModes(suite.checkConfigSchedule)
+	suite.env.RunTestBasedOnMode(suite.checkConfigSchedule)
 }
 
 func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
@@ -238,7 +238,7 @@ func (suite *configTestSuite) checkConfigSchedule(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestConfigReplication() {
-	suite.env.RunTestInTwoModes(suite.checkConfigReplication)
+	suite.env.RunTestBasedOnMode(suite.checkConfigReplication)
 }
 
 func (suite *configTestSuite) checkConfigReplication(cluster *tests.TestCluster) {
@@ -281,7 +281,7 @@ func (suite *configTestSuite) checkConfigReplication(cluster *tests.TestCluster)
 }
 
 func (suite *configTestSuite) TestConfigLabelProperty() {
-	suite.env.RunTestInTwoModes(suite.checkConfigLabelProperty)
+	suite.env.RunTestBasedOnMode(suite.checkConfigLabelProperty)
 }
 
 func (suite *configTestSuite) checkConfigLabelProperty(cluster *tests.TestCluster) {
@@ -333,7 +333,7 @@ func (suite *configTestSuite) checkConfigLabelProperty(cluster *tests.TestCluste
 }
 
 func (suite *configTestSuite) TestConfigDefault() {
-	suite.env.RunTestInTwoModes(suite.checkConfigDefault)
+	suite.env.RunTestBasedOnMode(suite.checkConfigDefault)
 }
 
 func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
@@ -377,7 +377,7 @@ func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestConfigPDServer() {
-	suite.env.RunTestInTwoModes(suite.checkConfigPDServer)
+	suite.env.RunTestBasedOnMode(suite.checkConfigPDServer)
 }
 
 func (suite *configTestSuite) checkConfigPDServer(cluster *tests.TestCluster) {
@@ -507,7 +507,7 @@ func createTTLUrl(url string, ttl int) string {
 }
 
 func (suite *configTestSuite) TestConfigTTL() {
-	suite.env.RunTestInTwoModes(suite.checkConfigTTL)
+	suite.env.RunTestBasedOnMode(suite.checkConfigTTL)
 }
 
 func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
@@ -568,7 +568,7 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 }
 
 func (suite *configTestSuite) TestTTLConflict() {
-	suite.env.RunTestInTwoModes(suite.checkTTLConflict)
+	suite.env.RunTestBasedOnMode(suite.checkTTLConflict)
 }
 
 func (suite *configTestSuite) checkTTLConflict(cluster *tests.TestCluster) {

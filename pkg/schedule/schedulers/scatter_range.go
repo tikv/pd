@@ -255,7 +255,7 @@ func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.
 	name, ok := input["range-name"].(string)
 	if ok {
 		if name != handler.config.GetRangeName() {
-			_ = handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Cannot change the range name, please delete this schedule").Error())
+			handler.rd.JSON(w, http.StatusInternalServerError, errors.New("Cannot change the range name, please delete this schedule").Error())
 			return
 		}
 		args = append(args, name)
@@ -278,19 +278,19 @@ func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.
 	}
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = handler.config.Persist()
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
-	_ = handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
 func (handler *scatterRangeHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	_ = handler.rd.JSON(w, http.StatusOK, conf)
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 func newScatterRangeHandler(config *scatterRangeSchedulerConfig) http.Handler {
