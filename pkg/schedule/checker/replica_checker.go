@@ -61,17 +61,17 @@ var (
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
 	PauseController
-	cluster           sche.CheckerCluster
-	conf              config.CheckerConfigProvider
-	regionWaitingList cache.Cache
+	cluster                 sche.CheckerCluster
+	conf                    config.CheckerConfigProvider
+	pendingProcessedRegions cache.Cache
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, regionWaitingList cache.Cache) *ReplicaChecker {
+func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, pendingProcessedRegions cache.Cache) *ReplicaChecker {
 	return &ReplicaChecker{
-		cluster:           cluster,
-		conf:              conf,
-		regionWaitingList: regionWaitingList,
+		cluster:                 cluster,
+		conf:                    conf,
+		pendingProcessedRegions: pendingProcessedRegions,
 	}
 }
 
@@ -179,7 +179,7 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		replicaCheckerNoTargetStoreCounter.Inc()
 		if filterByTempState {
-			r.regionWaitingList.Put(region.GetID(), nil)
+			r.pendingProcessedRegions.Put(region.GetID(), nil)
 		}
 		return nil
 	}
@@ -206,7 +206,7 @@ func (r *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *opera
 	old := r.strategy(region).SelectStoreToRemove(regionStores)
 	if old == 0 {
 		replicaCheckerNoWorstPeerCounter.Inc()
-		r.regionWaitingList.Put(region.GetID(), nil)
+		r.pendingProcessedRegions.Put(region.GetID(), nil)
 		return nil
 	}
 	op, err := operator.CreateRemovePeerOperator("remove-extra-replica", r.cluster, operator.OpReplica, region, old)
@@ -271,7 +271,7 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		}
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		if filterByTempState {
-			r.regionWaitingList.Put(region.GetID(), nil)
+			r.pendingProcessedRegions.Put(region.GetID(), nil)
 		}
 		return nil
 	}
