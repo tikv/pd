@@ -139,7 +139,7 @@ func (s *pdTSOStream) processRequests(
 		}
 		return
 	}
-	tsoBatchSendLatency.Observe(float64(time.Since(batchStartTime)))
+	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
 	resp, err := s.stream.Recv()
 	if err != nil {
 		if err == io.EOF {
@@ -195,7 +195,7 @@ func (s *tsoTSOStream) processRequests(
 		}
 		return
 	}
-	tsoBatchSendLatency.Observe(float64(time.Since(batchStartTime)))
+	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
 	resp, err := s.stream.Recv()
 	if err != nil {
 		if err == io.EOF {
