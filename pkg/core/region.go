@@ -1862,18 +1862,24 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int) ([]*Regio
 		lastRegion = &RegionInfo{
 			meta: &metapb.Region{EndKey: keyRange.StartKey},
 		}
-		err error
+		exceedLimit = func() bool { return limit > 0 && len(res) >= limit }
+		err         error
 	)
 	regionTree.scanRange(keyRange.StartKey, func(region *RegionInfo) bool {
-		if len(keyRange.EndKey) > 0 && bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
+		if len(keyRange.EndKey) > 0 && len(region.GetStartKey()) > 0 &&
+			bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
 			return false
 		}
-		if limit > 0 && len(res) >= limit {
+		if exceedLimit() {
 			return false
 		}
-		if len(lastRegion.GetEndKey()) > 0 && !bytes.Equal(region.GetStartKey(), lastRegion.GetEndKey()) {
-			err = multierr.Append(err, errors.Errorf("key range[%s, %s) found a hole region between region[%s, %s) and region[%s, %s)",
-				keyRange.StartKey, keyRange.EndKey, lastRegion.GetStartKey(), lastRegion.GetEndKey(), region.GetStartKey(), region.GetEndKey()))
+		if len(lastRegion.GetEndKey()) > 0 && len(region.GetStartKey()) > 0 &&
+			bytes.Compare(region.GetStartKey(), lastRegion.GetEndKey()) > 0 {
+			err = multierr.Append(err, errors.Errorf(
+				"key range[%x, %x) found a hole region between region[%x, %x) and region[%x, %x)",
+				keyRange.StartKey, keyRange.EndKey,
+				lastRegion.GetStartKey(), lastRegion.GetEndKey(),
+				region.GetStartKey(), region.GetEndKey()))
 		}
 
 		lastRegion = region
@@ -1881,9 +1887,13 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int) ([]*Regio
 		return true
 	})
 
-	if len(keyRange.EndKey) != 0 && bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) > 0 {
-		err = multierr.Append(err, errors.Errorf("key range[%s, %s) has no corresponding region, the last region is [%s, %s)",
-			keyRange.StartKey, keyRange.EndKey, lastRegion.GetStartKey(), lastRegion.GetEndKey()))
+	if !(exceedLimit()) && len(keyRange.EndKey) > 0 && len(lastRegion.GetEndKey()) > 0 &&
+		bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) < 0 {
+		err = multierr.Append(err, errors.Errorf(
+			"key range[%x, %x) found a hole region in the last, the last scanned region is [%x, %x), [%x, %x) is missing",
+			keyRange.StartKey, keyRange.EndKey,
+			lastRegion.GetStartKey(), lastRegion.GetEndKey(),
+			lastRegion.GetEndKey(), keyRange.EndKey))
 	}
 	return res, err
 }

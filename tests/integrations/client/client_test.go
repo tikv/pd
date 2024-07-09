@@ -2126,23 +2126,13 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		{StartKey: []byte{0, 7}, EndKey: []byte{3}},
 		{StartKey: []byte{4}, EndKey: []byte{5}},
 	}, 10, []*metapb.Region{regions[0], regions[1], regions[2], regions[4]})
+	outputMustContainAllKeyRangeOptions = []bool{false}
+	check([]pd.KeyRange{
+		{StartKey: []byte{9}, EndKey: []byte{10, 1}},
+	}, 10, []*metapb.Region{regions[9]})
 
 	// invalid ranges
 	_, err := suite.client.BatchScanRegions(
-		ctx,
-		[]pd.KeyRange{{StartKey: []byte{0}, EndKey: []byte{0, 1}}},
-		10,
-		pd.WithOutputMustContainAllKeyRange(),
-	)
-	re.ErrorContains(err, "has no corresponding region")
-	_, err = suite.client.BatchScanRegions(
-		ctx,
-		[]pd.KeyRange{{StartKey: []byte{0, 1}, EndKey: []byte{2}}},
-		10,
-		pd.WithOutputMustContainAllKeyRange(),
-	)
-	re.ErrorContains(err, "found a hole region")
-	_, err = suite.client.BatchScanRegions(
 		ctx,
 		[]pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
 		10,
@@ -2154,4 +2144,33 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		{StartKey: []byte{1}, EndKey: []byte{3}},
 	}, 10)
 	re.ErrorContains(err, "invalid key range, ranges overlapped")
+	_, err = suite.client.BatchScanRegions(
+		ctx,
+		[]pd.KeyRange{{StartKey: []byte{9}, EndKey: []byte{10, 1}}},
+		10,
+		pd.WithOutputMustContainAllKeyRange(),
+	)
+	re.ErrorContains(err, "found a hole region in the last")
+	req := &pdpb.RegionHeartbeatRequest{
+		Header: newHeader(suite.srv),
+		Region: &metapb.Region{
+			Id: 100,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{100},
+			EndKey:   []byte{101},
+			Peers:    peers,
+		},
+		Leader: peers[0],
+	}
+	re.NoError(suite.regionHeartbeat.Send(req))
+	_, err = suite.client.BatchScanRegions(
+		ctx,
+		[]pd.KeyRange{{StartKey: []byte{99}, EndKey: []byte{101}}},
+		10,
+		pd.WithOutputMustContainAllKeyRange(),
+	)
+	re.ErrorContains(err, "found a hole region between")
 }

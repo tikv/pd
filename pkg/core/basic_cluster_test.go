@@ -63,6 +63,26 @@ func TestMerge(t *testing.T) {
 				{StartKey: []byte("a"), EndKey: []byte("c")},
 			},
 		},
+		{
+			name: "boundless 1",
+			input: []*KeyRange{
+				{StartKey: nil, EndKey: []byte("b")},
+				{StartKey: []byte("b"), EndKey: []byte("c")},
+			},
+			expect: []*KeyRange{
+				{StartKey: nil, EndKey: []byte("c")},
+			},
+		},
+		{
+			name: "boundless 2",
+			input: []*KeyRange{
+				{StartKey: []byte("a"), EndKey: []byte("b")},
+				{StartKey: []byte("b"), EndKey: nil},
+			},
+			expect: []*KeyRange{
+				{StartKey: []byte("a"), EndKey: nil},
+			},
+		},
 	}
 
 	for _, tc := range testCases {
