@@ -61,17 +61,16 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimCo
 		if i < len(conf.Regions)-1 {
 			meta.EndKey = []byte(splitKeys[i])
 		}
-		regionSize := storeConfig.Coprocessor.RegionSplitSize
 		regionInfo := core.NewRegionInfo(
 			meta,
 			region.Leader,
-			core.SetApproximateSize(int64(regionSize)),
-			core.SetApproximateKeys(int64(storeConfig.Coprocessor.RegionSplitKey)),
+			core.SetApproximateSize(region.Size),
+			core.SetApproximateKeys(region.Keys),
 		)
 		r.SetRegion(regionInfo)
 		peers := region.Peers
 		for _, peer := range peers {
-			r.conn.Nodes[peer.StoreId].incUsedSize(uint64(regionSize))
+			r.conn.Nodes[peer.StoreId].incUsedSize(uint64(region.Size))
 		}
 	}
 
