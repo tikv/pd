@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -50,7 +51,7 @@ type Client interface {
 }
 
 const (
-	pdTimeout             = time.Second
+	pdTimeout             = 3 * time.Second
 	maxInitClusterRetries = 100
 	// retry to get leader URL
 	leaderChangedWaitTime = 100 * time.Millisecond
@@ -62,13 +63,13 @@ var (
 	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
 	PDHTTPClient         pdHttp.Client
 	SD                   pd.ServiceDiscovery
-	ClusterID            uint64
+	ClusterID            atomic.Uint64
 )
 
 // requestHeader returns a header for fixed ClusterID.
 func requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: ClusterID,
+		ClusterId: ClusterID.Load(),
 	}
 }
 
@@ -205,12 +206,11 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 	defer wg.Done()
 	for {
 		select {
-		case r := <-c.reportRegionHeartbeatCh:
-			if r == nil {
+		case region := <-c.reportRegionHeartbeatCh:
+			if region == nil {
 				simutil.Logger.Error("report nil regionHeartbeat error",
 					zap.String("tag", c.tag), zap.Error(errors.New("nil region")))
 			}
-			region := r.Clone()
 			request := &pdpb.RegionHeartbeatRequest{
 				Header:          requestHeader(),
 				Region:          region.GetMeta(),
@@ -281,9 +281,8 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	return nil
 }
 
-func (c *client) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error {
+func (c *client) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreStats) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
-	newStats := typeutil.DeepClone(stats, core.StoreStatsFactory)
 	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
 		Header: requestHeader(),
 		Stats:  newStats,
@@ -382,8 +381,8 @@ func getLeaderURL(ctx context.Context, conn *grpc.ClientConn) (string, *grpc.Cli
 	if members.GetHeader().GetError() != nil {
 		return "", nil, errors.New(members.GetHeader().GetError().String())
 	}
-	ClusterID = members.GetHeader().GetClusterId()
-	if ClusterID == 0 {
+	ClusterID.Store(members.GetHeader().GetClusterId())
+	if ClusterID.Load() == 0 {
 		return "", nil, errors.New("cluster id is 0")
 	}
 	if members.GetLeader() == nil {
@@ -413,9 +412,9 @@ func (rc *RetryClient) PutStore(ctx context.Context, store *metapb.Store) error 
 	return err
 }
 
-func (rc *RetryClient) StoreHeartbeat(ctx context.Context, stats *pdpb.StoreStats) error {
+func (rc *RetryClient) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreStats) error {
 	_, err := rc.requestWithRetry(func() (any, error) {
-		err := rc.client.StoreHeartbeat(ctx, stats)
+		err := rc.client.StoreHeartbeat(ctx, newStats)
 		return nil, err
 	})
 	return err
@@ -466,10 +465,10 @@ retry:
 			break retry
 		}
 	}
-	if ClusterID == 0 {
+	if ClusterID.Load() == 0 {
 		return "", nil, errors.WithStack(errFailInitClusterID)
 	}
-	simutil.Logger.Info("get cluster id successfully", zap.Uint64("cluster-id", ClusterID))
+	simutil.Logger.Info("get cluster id successfully", zap.Uint64("cluster-id", ClusterID.Load()))
 
 	// Check if the cluster is already bootstrapped.
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
@@ -543,7 +542,7 @@ func PutPDConfig(config *sc.PDConfig) error {
 }
 
 func ChooseToHaltPDSchedule(halt bool) {
-	HaltSchedule = halt
+	HaltSchedule.Store(halt)
 	PDHTTPClient.SetConfig(context.Background(), map[string]any{
 		"schedule.halt-scheduling": strconv.FormatBool(halt),
 	})
