@@ -29,3 +29,11 @@ var (
 func init() {
 	prometheus.MustRegister(checkerCounter)
 }
+
+const (
+	ruleChecker = "rule_checker"
+)
+
+func ruleCheckerCounterWithEvent(event string) prometheus.Counter {
+	return checkerCounter.WithLabelValues(ruleChecker, event)
+}

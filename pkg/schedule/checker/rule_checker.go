@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -35,11 +36,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	maxPendingListLen = 100000
-	ruleChecker       = "rule_checker"
-	ruleCheckerName   = "rule-checker"
-)
+const maxPendingListLen = 100000
 
 var (
 	errNoStoreToAdd        = errors.New("no store to add peer")
@@ -49,36 +46,36 @@ var (
 	errNoNewLeader         = errors.New("no new leader")
 	errRegionNoLeader      = errors.New("region no leader")
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	ruleCheckerCounter                            = checkerCounter.WithLabelValues(ruleChecker, "check")
-	ruleCheckerPausedCounter                      = checkerCounter.WithLabelValues(ruleChecker, "paused")
-	ruleCheckerRegionNoLeaderCounter              = checkerCounter.WithLabelValues(ruleChecker, "region-no-leader")
-	ruleCheckerGetCacheCounter                    = checkerCounter.WithLabelValues(ruleChecker, "get-cache")
-	ruleCheckerNeedSplitCounter                   = checkerCounter.WithLabelValues(ruleChecker, "need-split")
-	ruleCheckerSetCacheCounter                    = checkerCounter.WithLabelValues(ruleChecker, "set-cache")
-	ruleCheckerReplaceDownCounter                 = checkerCounter.WithLabelValues(ruleChecker, "replace-down")
-	ruleCheckerPromoteWitnessCounter              = checkerCounter.WithLabelValues(ruleChecker, "promote-witness")
-	ruleCheckerReplaceOfflineCounter              = checkerCounter.WithLabelValues(ruleChecker, "replace-offline")
-	ruleCheckerAddRulePeerCounter                 = checkerCounter.WithLabelValues(ruleChecker, "add-rule-peer")
-	ruleCheckerNoStoreAddCounter                  = checkerCounter.WithLabelValues(ruleChecker, "no-store-add")
-	ruleCheckerNoStoreThenTryReplace              = checkerCounter.WithLabelValues(ruleChecker, "no-store-then-try-replace")
-	ruleCheckerNoStoreReplaceCounter              = checkerCounter.WithLabelValues(ruleChecker, "no-store-replace")
-	ruleCheckerFixPeerRoleCounter                 = checkerCounter.WithLabelValues(ruleChecker, "fix-peer-role")
-	ruleCheckerFixLeaderRoleCounter               = checkerCounter.WithLabelValues(ruleChecker, "fix-leader-role")
-	ruleCheckerNotAllowLeaderCounter              = checkerCounter.WithLabelValues(ruleChecker, "not-allow-leader")
-	ruleCheckerFixFollowerRoleCounter             = checkerCounter.WithLabelValues(ruleChecker, "fix-follower-role")
-	ruleCheckerNoNewLeaderCounter                 = checkerCounter.WithLabelValues(ruleChecker, "no-new-leader")
-	ruleCheckerDemoteVoterRoleCounter             = checkerCounter.WithLabelValues(ruleChecker, "demote-voter-role")
-	ruleCheckerRecentlyPromoteToNonWitnessCounter = checkerCounter.WithLabelValues(ruleChecker, "recently-promote-to-non-witness")
-	ruleCheckerCancelSwitchToWitnessCounter       = checkerCounter.WithLabelValues(ruleChecker, "cancel-switch-to-witness")
-	ruleCheckerSetVoterWitnessCounter             = checkerCounter.WithLabelValues(ruleChecker, "set-voter-witness")
-	ruleCheckerSetLearnerWitnessCounter           = checkerCounter.WithLabelValues(ruleChecker, "set-learner-witness")
-	ruleCheckerSetVoterNonWitnessCounter          = checkerCounter.WithLabelValues(ruleChecker, "set-voter-non-witness")
-	ruleCheckerSetLearnerNonWitnessCounter        = checkerCounter.WithLabelValues(ruleChecker, "set-learner-non-witness")
-	ruleCheckerMoveToBetterLocationCounter        = checkerCounter.WithLabelValues(ruleChecker, "move-to-better-location")
-	ruleCheckerSkipRemoveOrphanPeerCounter        = checkerCounter.WithLabelValues(ruleChecker, "skip-remove-orphan-peer")
-	ruleCheckerRemoveOrphanPeerCounter            = checkerCounter.WithLabelValues(ruleChecker, "remove-orphan-peer")
-	ruleCheckerReplaceOrphanPeerCounter           = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer")
-	ruleCheckerReplaceOrphanPeerNoFitCounter      = checkerCounter.WithLabelValues(ruleChecker, "replace-orphan-peer-no-fit")
+	ruleCheckerCounter                            = ruleCheckerCounterWithEvent("check")
+	ruleCheckerPausedCounter                      = ruleCheckerCounterWithEvent("paused")
+	ruleCheckerRegionNoLeaderCounter              = ruleCheckerCounterWithEvent("region-no-leader")
+	ruleCheckerGetCacheCounter                    = ruleCheckerCounterWithEvent("get-cache")
+	ruleCheckerNeedSplitCounter                   = ruleCheckerCounterWithEvent("need-split")
+	ruleCheckerSetCacheCounter                    = ruleCheckerCounterWithEvent("set-cache")
+	ruleCheckerReplaceDownCounter                 = ruleCheckerCounterWithEvent("replace-down")
+	ruleCheckerPromoteWitnessCounter              = ruleCheckerCounterWithEvent("promote-witness")
+	ruleCheckerReplaceOfflineCounter              = ruleCheckerCounterWithEvent("replace-offline")
+	ruleCheckerAddRulePeerCounter                 = ruleCheckerCounterWithEvent("add-rule-peer")
+	ruleCheckerNoStoreAddCounter                  = ruleCheckerCounterWithEvent("no-store-add")
+	ruleCheckerNoStoreThenTryReplace              = ruleCheckerCounterWithEvent("no-store-then-try-replace")
+	ruleCheckerNoStoreReplaceCounter              = ruleCheckerCounterWithEvent("no-store-replace")
+	ruleCheckerFixPeerRoleCounter                 = ruleCheckerCounterWithEvent("fix-peer-role")
+	ruleCheckerFixLeaderRoleCounter               = ruleCheckerCounterWithEvent("fix-leader-role")
+	ruleCheckerNotAllowLeaderCounter              = ruleCheckerCounterWithEvent("not-allow-leader")
+	ruleCheckerFixFollowerRoleCounter             = ruleCheckerCounterWithEvent("fix-follower-role")
+	ruleCheckerNoNewLeaderCounter                 = ruleCheckerCounterWithEvent("no-new-leader")
+	ruleCheckerDemoteVoterRoleCounter             = ruleCheckerCounterWithEvent("demote-voter-role")
+	ruleCheckerRecentlyPromoteToNonWitnessCounter = ruleCheckerCounterWithEvent("recently-promote-to-non-witness")
+	ruleCheckerCancelSwitchToWitnessCounter       = ruleCheckerCounterWithEvent("cancel-switch-to-witness")
+	ruleCheckerSetVoterWitnessCounter             = ruleCheckerCounterWithEvent("set-voter-witness")
+	ruleCheckerSetLearnerWitnessCounter           = ruleCheckerCounterWithEvent("set-learner-witness")
+	ruleCheckerSetVoterNonWitnessCounter          = ruleCheckerCounterWithEvent("set-voter-non-witness")
+	ruleCheckerSetLearnerNonWitnessCounter        = ruleCheckerCounterWithEvent("set-learner-non-witness")
+	ruleCheckerMoveToBetterLocationCounter        = ruleCheckerCounterWithEvent("move-to-better-location")
+	ruleCheckerSkipRemoveOrphanPeerCounter        = ruleCheckerCounterWithEvent("skip-remove-orphan-peer")
+	ruleCheckerRemoveOrphanPeerCounter            = ruleCheckerCounterWithEvent("remove-orphan-peer")
+	ruleCheckerReplaceOrphanPeerCounter           = ruleCheckerCounterWithEvent("replace-orphan-peer")
+	ruleCheckerReplaceOrphanPeerNoFitCounter      = ruleCheckerCounterWithEvent("replace-orphan-peer-no-fit")
 )
 
 // RuleChecker fix/improve region by placement rules.
@@ -86,7 +83,6 @@ type RuleChecker struct {
 	PauseController
 	cluster            sche.CheckerCluster
 	ruleManager        *placement.RuleManager
-	name               string
 	regionWaitingList  cache.Cache
 	pendingList        cache.Cache
 	switchWitnessCache *cache.TTLUint64
@@ -98,7 +94,6 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 	return &RuleChecker{
 		cluster:            cluster,
 		ruleManager:        ruleManager,
-		name:               ruleCheckerName,
 		regionWaitingList:  regionWaitingList,
 		pendingList:        cache.NewDefaultCache(maxPendingListLen),
 		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
@@ -106,9 +101,9 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 	}
 }
 
-// GetType returns RuleChecker's Type
-func (*RuleChecker) GetType() string {
-	return ruleCheckerName
+// Name returns RuleChecker's name.
+func (*RuleChecker) Name() string {
+	return config.RuleChecker.String()
 }
 
 // Check checks if the region matches placement rules and returns Operator to
@@ -651,12 +646,12 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 
 func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerName:    c.name,
+		checkerName:    c.Name(),
 		cluster:        c.cluster,
 		isolationLevel: rule.IsolationLevel,
 		locationLabels: rule.LocationLabels,
 		region:         region,
-		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.name, rule.LabelConstraints)},
+		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.Name(), rule.LabelConstraints)},
 		fastFailover:   fastFailover,
 	}
 }
