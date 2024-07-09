@@ -453,6 +453,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
 	})
+	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
+	if err != nil {
+		return err
+	}
 	// Initialize an etcd storage as the default storage.
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
@@ -480,11 +484,6 @@ func (s *Server) startServer(ctx context.Context) error {
 				return err
 			}
 		}
-	}
-
-	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
-	if err != nil {
-		return err
 	}
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
