@@ -413,7 +413,7 @@ func TestHistoryHotRegions(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -530,7 +530,7 @@ func TestBuckets(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
