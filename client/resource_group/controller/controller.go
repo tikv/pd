@@ -330,9 +330,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case notifyMsg := <-c.lowTokenNotifyChan:
 				c.executeOnAllGroups((*groupCostController).updateRunState)
 				c.executeOnAllGroups((*groupCostController).updateAvgRequestResourcePerSec)
-				if len(c.run.currentRequests) == 0 {
-					c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */, notifyMsg)
-				}
+				c.collectTokenBucketRequests(c.loopCtx, FromLowRU, lowToken /* select low tokens resource group */, notifyMsg)
 				if c.run.inDegradedMode {
 					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				}
@@ -1179,11 +1177,19 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 			switch selectTyp {
 			case periodicReport:
 				selected = selected || gc.shouldReportConsumption()
+				failpoint.Inject("triggerPeriodicReport", func(val failpoint.Value) {
+					selected = gc.name == val.(string)
+				})
 				fallthrough
 			case lowToken:
 				if counter.limiter.IsLowTokens() {
 					selected = true
 				}
+				failpoint.Inject("triggerLowRUReport", func(val failpoint.Value) {
+					if selectTyp == lowToken {
+						selected = gc.name == val.(string)
+					}
+				})
 			}
 			request := &rmpb.RequestUnitItem{
 				Type:  typ,
