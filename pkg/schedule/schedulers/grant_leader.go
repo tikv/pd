@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 const (
@@ -123,7 +124,9 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
 	conf.Lock()
 	defer conf.Unlock()
-	conf.cluster.PauseLeaderTransfer(id)
+	if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
+		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
+	}
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
@@ -289,10 +292,14 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-	handler.config.BuildWithArgs(args)
+	err := handler.config.BuildWithArgs(args)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	handler.config.RLock()
 	defer handler.config.RUnlock()
-	err := saveSchedulerConfig(handler.config)
+	err = saveSchedulerConfig(handler.config)
 	if err != nil {
 		handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())

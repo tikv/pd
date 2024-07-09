@@ -346,8 +346,7 @@ func (h *Handler) SetAllStoresLimitTTL(ratePerMin float64, limitType storelimit.
 	if err != nil {
 		return err
 	}
-	c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
-	return nil
+	return c.SetAllStoresLimitTTL(limitType, ratePerMin, ttl)
 }
 
 // SetLabelStoresLimit is used to set limit of label stores.

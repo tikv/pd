@@ -60,7 +60,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rc.DropCacheRegion(regionID)
+	rc.RemoveRegionIfExist(regionID)
 	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer(regionID)
 	}
@@ -100,7 +100,7 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Remove region from cache.
-	rc.DropCacheRegion(regionID)
+	rc.RemoveRegionIfExist(regionID)
 	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer(regionID)
 	}
@@ -116,7 +116,7 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Request) {
 	var err error
 	rc := getCluster(r)
-	rc.DropCacheAllRegion()
+	rc.ResetRegionCache()
 	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer()
 	}
@@ -150,30 +150,30 @@ func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 
 func (h *adminHandler) MarkSnapshotRecovering(w http.ResponseWriter, _ *http.Request) {
 	if err := h.svr.MarkSnapshotRecovering(); err != nil {
-		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = h.rd.Text(w, http.StatusOK, "")
+	h.rd.Text(w, http.StatusOK, "")
 }
 
 func (h *adminHandler) IsSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
 	marked, err := h.svr.IsSnapshotRecovering(r.Context())
 	if err != nil {
-		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	type resStruct struct {
 		Marked bool `json:"marked"`
 	}
-	_ = h.rd.JSON(w, http.StatusOK, &resStruct{Marked: marked})
+	h.rd.JSON(w, http.StatusOK, &resStruct{Marked: marked})
 }
 
 func (h *adminHandler) UnmarkSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
 	if err := h.svr.UnmarkSnapshotRecovering(r.Context()); err != nil {
-		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = h.rd.Text(w, http.StatusOK, "")
+	h.rd.Text(w, http.StatusOK, "")
 }
 
 // RecoverAllocID recover base alloc id
@@ -185,34 +185,34 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 	}
 	idValue, ok := input["id"].(string)
 	if !ok || len(idValue) == 0 {
-		_ = h.rd.Text(w, http.StatusBadRequest, "invalid id value")
+		h.rd.Text(w, http.StatusBadRequest, "invalid id value")
 		return
 	}
 	newID, err := strconv.ParseUint(idValue, 10, 64)
 	if err != nil {
-		_ = h.rd.Text(w, http.StatusBadRequest, err.Error())
+		h.rd.Text(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	marked, err := h.svr.IsSnapshotRecovering(r.Context())
 	if err != nil {
-		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !marked {
-		_ = h.rd.Text(w, http.StatusForbidden, "can only recover alloc id when recovering mark marked")
+		h.rd.Text(w, http.StatusForbidden, "can only recover alloc id when recovering mark marked")
 		return
 	}
 
 	leader := h.svr.GetLeader()
 	if leader == nil {
-		_ = h.rd.Text(w, http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
+		h.rd.Text(w, http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 		return
 	}
 	if err = h.svr.RecoverAllocID(r.Context(), newID); err != nil {
-		_ = h.rd.Text(w, http.StatusInternalServerError, err.Error())
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 	}
 
-	_ = h.rd.Text(w, http.StatusOK, "")
+	h.rd.Text(w, http.StatusOK, "")
 }
 
 func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {

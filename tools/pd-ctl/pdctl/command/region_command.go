@@ -486,6 +486,7 @@ func NewRegionWithStoreCommand() *cobra.Command {
 		Short: "show the regions of a specific store",
 		Run:   showRegionWithStoreCommandFunc,
 	}
+	r.Flags().String("type", "all", "the type of the regions, could be 'all', 'leader', 'learner' or 'pending'")
 	return r
 }
 
@@ -496,6 +497,8 @@ func showRegionWithStoreCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	storeID := args[0]
 	prefix := regionsStorePrefix + "/" + storeID
+	flagType := cmd.Flag("type")
+	prefix += "?type=" + flagType.Value.String()
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get regions with the given storeID: %s\n", err)

@@ -14,7 +14,7 @@ require (
 	github.com/go-sql-driver/mysql v1.7.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20220801062533-2eaa32854a6c
-	github.com/pingcap/kvproto v0.0.0-20240403065636-c699538f7aa1
+	github.com/pingcap/kvproto v0.0.0-20240620063548-118a4cab53e4
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/client_model v0.6.0
@@ -125,7 +125,7 @@ require (
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20240326110213-9768844ff5d7 // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20240612100141-91f6c281e441 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -139,7 +139,7 @@ require (
 	github.com/shoenig/go-m1cpu v0.1.5 // indirect
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	github.com/smallnest/chanx v0.0.0-20221229104322-eb4c998d2072 // indirect
+	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99 // indirect
 	github.com/soheilhy/cmux v0.1.5 // indirect
 	github.com/spf13/cobra v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
@@ -168,7 +168,7 @@ require (
 	golang.org/x/crypto v0.21.0 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
 	golang.org/x/image v0.10.0 // indirect
-	golang.org/x/net v0.22.0 // indirect
+	golang.org/x/net v0.23.0 // indirect
 	golang.org/x/oauth2 v0.18.0 // indirect
 	golang.org/x/sync v0.6.0 // indirect
 	golang.org/x/sys v0.18.0 // indirect

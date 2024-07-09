@@ -15,6 +15,7 @@
 package core
 
 import (
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -90,6 +91,12 @@ func init() {
 	prometheus.MustRegister(AcquireRegionsLockWaitCount)
 }
 
+var tracerPool = &sync.Pool{
+	New: func() any {
+		return &regionHeartbeatProcessTracer{}
+	},
+}
+
 type saveCacheStats struct {
 	startTime              time.Time
 	lastCheckTime          time.Time
@@ -114,6 +121,7 @@ type RegionHeartbeatProcessTracer interface {
 	OnCollectRegionStatsFinished()
 	OnAllStageFinished()
 	LogFields() []zap.Field
+	Release()
 }
 
 type noopHeartbeatProcessTracer struct{}
@@ -138,6 +146,7 @@ func (*noopHeartbeatProcessTracer) OnAllStageFinished()           {}
 func (*noopHeartbeatProcessTracer) LogFields() []zap.Field {
 	return nil
 }
+func (*noopHeartbeatProcessTracer) Release() {}
 
 type regionHeartbeatProcessTracer struct {
 	startTime             time.Time
@@ -151,7 +160,7 @@ type regionHeartbeatProcessTracer struct {
 
 // NewHeartbeatProcessTracer returns a heartbeat process tracer.
 func NewHeartbeatProcessTracer() RegionHeartbeatProcessTracer {
-	return &regionHeartbeatProcessTracer{}
+	return tracerPool.Get().(*regionHeartbeatProcessTracer)
 }
 
 func (h *regionHeartbeatProcessTracer) Begin() {
@@ -253,4 +262,11 @@ func (h *regionHeartbeatProcessTracer) LogFields() []zap.Field {
 		zap.Duration("update-sub-tree-duration", h.saveCacheStats.updateSubTreeDuration),
 		zap.Duration("other-duration", h.OtherDuration),
 	}
+}
+
+// Release puts the tracer back into the pool.
+func (h *regionHeartbeatProcessTracer) Release() {
+	// Reset the fields of h to their zero values.
+	*h = regionHeartbeatProcessTracer{}
+	tracerPool.Put(h)
 }

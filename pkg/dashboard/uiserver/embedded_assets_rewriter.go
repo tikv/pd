@@ -28,6 +28,7 @@ import (
 var once sync.Once
 
 // Assets returns the Assets FileSystem of the dashboard UI
+// NOTE: if you see "undefined: assets" error, please run `make dashboard-ui` in the root directory of the repository.
 func Assets(cfg *config.Config) http.FileSystem {
 	once.Do(func() {
 		resPath := distroutil.MustGetResPath()

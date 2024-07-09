@@ -957,7 +957,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
-		resp, err := http.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
+		resp, err := tests.TestDialClient.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
 		resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -982,7 +982,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 
 		// Get Resource Group
-		resp, err = http.Get(getAddr(i) + "/resource-manager/api/v1/config/group/" + tcase.name)
+		resp, err = tests.TestDialClient.Get(getAddr(i) + "/resource-manager/api/v1/config/group/" + tcase.name)
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
@@ -995,7 +995,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
-			resp, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
+			resp, err := tests.TestDialClient.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
 			re.Equal(http.StatusOK, resp.StatusCode)
 			respString, err := io.ReadAll(resp.Body)
@@ -1023,7 +1023,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			}
 
 			// verify again
-			resp1, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
+			resp1, err := tests.TestDialClient.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
 			re.Equal(http.StatusOK, resp1.StatusCode)
 			respString1, err := io.ReadAll(resp1.Body)
@@ -1433,12 +1433,14 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 
 	configURL := "/resource-manager/api/v1/config/controller"
 	waitDuration := 10 * time.Second
+	tokenRPCMaxDelay := 2 * time.Second
 	readBaseCost := 1.5
 	defaultCfg := controller.DefaultConfig()
 	expectCfg := server.ControllerConfig{
 		// failpoint enableDegradedMode will setup and set it be 1s.
 		DegradedModeWaitDuration: typeutil.NewDuration(time.Second),
 		LTBMaxWaitDuration:       typeutil.Duration(defaultCfg.LTBMaxWaitDuration),
+		LTBTokenRPCMaxDelay:      typeutil.Duration(defaultCfg.LTBTokenRPCMaxDelay),
 		RequestUnit:              server.RequestUnitConfig(defaultCfg.RequestUnit),
 		EnableControllerTraceLog: defaultCfg.EnableControllerTraceLog,
 	}
@@ -1460,6 +1462,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 			configJSON: fmt.Sprintf(`{"degraded-mode-wait-duration": "%v"}`, waitDuration),
 			value:      waitDuration,
 			expected:   func(ruConfig *controller.RUConfig) { ruConfig.DegradedModeWaitDuration = waitDuration },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"ltb-token-rpc-max-delay": "%v"}`, tokenRPCMaxDelay),
+			value:      waitDuration,
+			expected: func(ruConfig *controller.RUConfig) {
+				ruConfig.WaitRetryTimes = int(tokenRPCMaxDelay / ruConfig.WaitRetryInterval)
+			},
 		},
 		{
 			configJSON: fmt.Sprintf(`{"ltb-max-wait-duration": "%v"}`, waitDuration),

@@ -149,24 +149,23 @@ func storeRegionWeightPath(storeID uint64) string {
 // RegionPath returns the region meta info key path with the given region ID.
 func RegionPath(regionID uint64) string {
 	var buf strings.Builder
+	buf.Grow(len(regionPathPrefix) + 1 + keyLen) // Preallocate memory
+
 	buf.WriteString(regionPathPrefix)
 	buf.WriteString("/")
 	s := strconv.FormatUint(regionID, 10)
-	if len(s) > keyLen {
-		s = s[len(s)-keyLen:]
-	} else {
-		b := make([]byte, keyLen)
+	b := make([]byte, keyLen)
+	copy(b, s)
+	if len(s) < keyLen {
 		diff := keyLen - len(s)
-		for i := 0; i < keyLen; i++ {
-			if i < diff {
-				b[i] = 48
-			} else {
-				b[i] = s[i-diff]
-			}
+		copy(b[diff:], s)
+		for i := 0; i < diff; i++ {
+			b[i] = '0'
 		}
-		s = string(b)
+	} else if len(s) > keyLen {
+		copy(b, s[len(s)-keyLen:])
 	}
-	buf.WriteString(s)
+	buf.Write(b)
 
 	return buf.String()
 }

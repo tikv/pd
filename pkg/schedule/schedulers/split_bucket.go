@@ -23,6 +23,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -112,7 +114,7 @@ type splitBucketHandler struct {
 
 func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := h.conf.Clone()
-	_ = h.rd.JSON(w, http.StatusOK, conf)
+	h.rd.JSON(w, http.StatusOK, conf)
 }
 
 func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +135,9 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		saveSchedulerConfig(h.conf)
+		if err := saveSchedulerConfig(h.conf); err != nil {
+			log.Warn("failed to save config", errs.ZapError(err))
+		}
 		rd.Text(w, http.StatusOK, "Config is updated.")
 		return
 	}
@@ -297,7 +301,7 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 			return nil
 		}
 		splitBucketNewOperatorCounter.Inc()
-		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)
+		op.SetAdditionalInfo("hot-degree", strconv.FormatInt(int64(splitBucket.HotDegree), 10))
 		return []*operator.Operator{op}
 	}
 	return nil

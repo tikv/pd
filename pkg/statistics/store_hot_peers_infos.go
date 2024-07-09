@@ -288,9 +288,10 @@ func summaryStoresLoadByEngine(
 func filterHotPeers(kind constant.ResourceKind, peers []*HotPeerStat) []*HotPeerStat {
 	ret := make([]*HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
-		if kind != constant.LeaderKind || peer.IsLeader() {
-			ret = append(ret, peer)
+		if kind == constant.LeaderKind && !peer.IsLeader() {
+			continue
 		}
+		ret = append(ret, peer)
 	}
 	return ret
 }

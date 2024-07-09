@@ -697,7 +697,7 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestReSortStores() {
 	suite.tc.AddLeaderStore(4, 100)
 	suite.tc.AddLeaderStore(5, 100)
 	suite.tc.AddLeaderStore(6, 0)
-	stores := suite.tc.Stores.GetStores()
+	stores := suite.tc.GetStores()
 	sort.Slice(stores, func(i, j int) bool {
 		return stores[i].GetID() < stores[j].GetID()
 	})

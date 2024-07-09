@@ -175,7 +175,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1})
 	// Update the scheduler by adding a store.
-	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(
+	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
 			Address:       "mock://2",

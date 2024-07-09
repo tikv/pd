@@ -80,13 +80,13 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
 		if !conf.validateLocked() {
-			json.Unmarshal(oldc, conf)
+			if err := json.Unmarshal(oldc, conf); err != nil {
+				return http.StatusInternalServerError, err.Error()
+			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		err := saveSchedulerConfig(conf)
-		if err != nil {
-			log.Error("failed to save balance-witness-scheduler config", errs.ZapError(err))
-			return http.StatusInternalServerError, err.Error()
+		if err := saveSchedulerConfig(conf); err != nil {
+			log.Warn("failed to persist config", zap.Error(err))
 		}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
 		return http.StatusOK, "Config is updated."
@@ -382,7 +382,7 @@ func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 		b.counter.WithLabelValues("move-witness", solver.SourceMetricLabel()+"-out"),
 		b.counter.WithLabelValues("move-witness", solver.TargetMetricLabel()+"-in"),
 	)
-	op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
-	op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
+	op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
+	op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 	return op
 }

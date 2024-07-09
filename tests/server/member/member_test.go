@@ -84,15 +84,13 @@ func TestMemberDelete(t *testing.T) {
 		{path: fmt.Sprintf("id/%d", members[1].GetServerID()), members: []*config.Config{leader.GetConfig()}},
 	}
 
-	httpClient := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{DisableKeepAlives: true}}
-	defer httpClient.CloseIdleConnections()
 	for _, table := range tables {
 		t.Log(time.Now(), "try to delete:", table.path)
 		testutil.Eventually(re, func() bool {
 			addr := leader.GetConfig().ClientUrls + "/pd/api/v1/members/" + table.path
 			req, err := http.NewRequest(http.MethodDelete, addr, http.NoBody)
 			re.NoError(err)
-			res, err := httpClient.Do(req)
+			res, err := tests.TestDialClient.Do(req)
 			re.NoError(err)
 			defer res.Body.Close()
 			// Check by status.
@@ -105,7 +103,7 @@ func TestMemberDelete(t *testing.T) {
 			}
 			// Check by member list.
 			cluster.WaitLeader()
-			if err = checkMemberList(re, *httpClient, leader.GetConfig().ClientUrls, table.members); err != nil {
+			if err = checkMemberList(re, leader.GetConfig().ClientUrls, table.members); err != nil {
 				t.Logf("check member fail: %v", err)
 				time.Sleep(time.Second)
 				return false
@@ -122,9 +120,9 @@ func TestMemberDelete(t *testing.T) {
 	}
 }
 
-func checkMemberList(re *require.Assertions, httpClient http.Client, clientURL string, configs []*config.Config) error {
+func checkMemberList(re *require.Assertions, clientURL string, configs []*config.Config) error {
 	addr := clientURL + "/pd/api/v1/members"
-	res, err := httpClient.Get(addr)
+	res, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	defer res.Body.Close()
 	buf, err := io.ReadAll(res.Body)
@@ -183,7 +181,7 @@ func TestLeaderPriority(t *testing.T) {
 
 func post(t *testing.T, re *require.Assertions, url string, body string) {
 	testutil.Eventually(re, func() bool {
-		res, err := http.Post(url, "", bytes.NewBufferString(body)) // #nosec
+		res, err := tests.TestDialClient.Post(url, "", bytes.NewBufferString(body)) // #nosec
 		re.NoError(err)
 		b, err := io.ReadAll(res.Body)
 		res.Body.Close()
@@ -330,20 +328,26 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 5)
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
+	// the 1st time campaign leader.
 	cluster.WaitLeader()
 	leader := cluster.GetLeader()
 	re.NotEmpty(cluster.GetLeader())
 
-	for i := 0; i < 3; i++ {
+	// need to prevent 3 times(including the above 1st time) campaign leader in 5 min.
+	for i := 0; i < 2; i++ {
 		cluster.GetLeaderServer().ResetPDLeader()
 		cluster.WaitLeader()
+		re.Equal(leader, cluster.GetLeader())
 	}
+	// check for the 4th time.
+	cluster.GetLeaderServer().ResetPDLeader()
+	cluster.WaitLeader()
 	// PD leader should be different from before because etcd leader changed.
 	re.NotEmpty(cluster.GetLeader())
 	re.NotEqual(leader, cluster.GetLeader())

@@ -105,7 +105,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Subsystem:   "request",
 			Name:        "tso_batch_send_latency",
 			ConstLabels: constLabels,
-			Buckets:     prometheus.ExponentialBuckets(1, 2, 34), // 1ns ~ 8s
+			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
 			Help:        "tso batch send latency",
 		})
 
@@ -128,6 +128,7 @@ var (
 	cmdDurationGetPrevRegion            prometheus.Observer
 	cmdDurationGetRegionByID            prometheus.Observer
 	cmdDurationScanRegions              prometheus.Observer
+	cmdDurationBatchScanRegions         prometheus.Observer
 	cmdDurationGetStore                 prometheus.Observer
 	cmdDurationGetAllStores             prometheus.Observer
 	cmdDurationUpdateGCSafePoint        prometheus.Observer
@@ -151,6 +152,7 @@ var (
 	cmdFailDurationGetPrevRegion              prometheus.Observer
 	cmdFailedDurationGetRegionByID            prometheus.Observer
 	cmdFailedDurationScanRegions              prometheus.Observer
+	cmdFailedDurationBatchScanRegions         prometheus.Observer
 	cmdFailedDurationGetStore                 prometheus.Observer
 	cmdFailedDurationGetAllStores             prometheus.Observer
 	cmdFailedDurationUpdateGCSafePoint        prometheus.Observer
@@ -174,6 +176,7 @@ func initCmdDurations() {
 	cmdDurationGetPrevRegion = cmdDuration.WithLabelValues("get_prev_region")
 	cmdDurationGetRegionByID = cmdDuration.WithLabelValues("get_region_byid")
 	cmdDurationScanRegions = cmdDuration.WithLabelValues("scan_regions")
+	cmdDurationBatchScanRegions = cmdDuration.WithLabelValues("batch_scan_regions")
 	cmdDurationGetStore = cmdDuration.WithLabelValues("get_store")
 	cmdDurationGetAllStores = cmdDuration.WithLabelValues("get_all_stores")
 	cmdDurationUpdateGCSafePoint = cmdDuration.WithLabelValues("update_gc_safe_point")
@@ -197,6 +200,7 @@ func initCmdDurations() {
 	cmdFailDurationGetPrevRegion = cmdFailedDuration.WithLabelValues("get_prev_region")
 	cmdFailedDurationGetRegionByID = cmdFailedDuration.WithLabelValues("get_region_byid")
 	cmdFailedDurationScanRegions = cmdFailedDuration.WithLabelValues("scan_regions")
+	cmdFailedDurationBatchScanRegions = cmdFailedDuration.WithLabelValues("batch_scan_regions")
 	cmdFailedDurationGetStore = cmdFailedDuration.WithLabelValues("get_store")
 	cmdFailedDurationGetAllStores = cmdFailedDuration.WithLabelValues("get_all_stores")
 	cmdFailedDurationUpdateGCSafePoint = cmdFailedDuration.WithLabelValues("update_gc_safe_point")

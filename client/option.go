@@ -51,12 +51,13 @@ const (
 // It provides the ability to change some PD client's options online from the outside.
 type option struct {
 	// Static options.
-	gRPCDialOptions  []grpc.DialOption
-	timeout          time.Duration
-	maxRetryTimes    int
-	enableForwarding bool
-	metricsLabels    prometheus.Labels
-	initMetrics      bool
+	gRPCDialOptions   []grpc.DialOption
+	timeout           time.Duration
+	maxRetryTimes     int
+	enableForwarding  bool
+	useTSOServerProxy bool
+	metricsLabels     prometheus.Labels
+	initMetrics       bool
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
