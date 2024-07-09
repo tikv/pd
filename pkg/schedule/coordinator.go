@@ -60,8 +60,8 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
-	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
+	pendingProcessedRegionsGauge = regionListGauge.WithLabelValues("pending_processed_regions")
+	priorityListGauge            = regionListGauge.WithLabelValues("priority_list")
 )
 
 // Coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -216,7 +216,7 @@ func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core
 
 func (c *Coordinator) checkPendingProcessedRegions() {
 	ids := c.checkers.GetPendingProcessedRegions()
-	waitingListGauge.Set(float64(len(ids)))
+	pendingProcessedRegionsGauge.Set(float64(len(ids)))
 	for _, id := range ids {
 		region := c.cluster.GetRegion(id)
 		c.tryAddOperators(region)
