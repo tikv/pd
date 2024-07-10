@@ -16,6 +16,7 @@ package simulator
 
 import (
 	"context"
+	"math/rand"
 	"net/http"
 	"net/http/pprof"
 	"path"
@@ -229,7 +230,7 @@ func (d *Driver) StoresHeartbeat(ctx context.Context) {
 }
 
 func (d *Driver) RegionsHeartbeat(ctx context.Context) {
-	// ensure only wait for first time heartbeat done
+	// ensure only wait for the first time heartbeat done
 	firstReport := true
 	config := d.raftEngine.storeConfig
 	regionInterval := uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
@@ -258,13 +259,18 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 				for _, n := range d.conn.Nodes {
 					if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 						healthyNodes[n.Store.GetId()] = false
-						simutil.Logger.Info("region heartbeat unhealthy node", zap.Uint64("node-id", n.Store.GetId()))
 					} else {
 						healthyNodes[n.Store.GetId()] = true
 					}
 				}
 				report := 0
 				for _, region := range regions {
+					hibernatePercent := d.simConfig.HibernatePercent
+					// using rand(0,100) to meet hibernatePercent
+					if !firstReport && rand.Intn(100) < hibernatePercent {
+						continue
+					}
+
 					if region.GetLeader() != nil {
 						storeID := region.GetLeader().GetStoreId()
 						if healthy, ok := healthyNodes[storeID]; !ok || !healthy {
