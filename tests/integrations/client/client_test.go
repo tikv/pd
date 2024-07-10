@@ -2166,11 +2166,15 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		Leader: peers[0],
 	}
 	re.NoError(suite.regionHeartbeat.Send(req))
-	_, err = suite.client.BatchScanRegions(
-		ctx,
-		[]pd.KeyRange{{StartKey: []byte{99}, EndKey: []byte{101}}},
-		10,
-		pd.WithOutputMustContainAllKeyRange(),
-	)
-	re.ErrorContains(err, "found a hole region between")
+
+	// Wait for region heartbeats.
+	testutil.Eventually(re, func() bool {
+		_, err = suite.client.BatchScanRegions(
+			ctx,
+			[]pd.KeyRange{{StartKey: []byte{9}, EndKey: []byte{101}}},
+			10,
+			pd.WithOutputMustContainAllKeyRange(),
+		)
+		return err != nil && strings.Contains(err.Error(), "found a hole region between")
+	})
 }
