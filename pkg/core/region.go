@@ -1827,23 +1827,29 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 // BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
 // limit <= 0 means no limit.
 // The given key pairs should be non-overlapping.
-func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
+func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error) {
 	keyRanges.Merge()
 	krs := keyRanges.Ranges()
 	res := make([]*RegionInfo, 0, len(krs))
 
+	scanOptions := &batchScanRegionsOptions{}
+	for _, opt := range opts {
+		opt(scanOptions)
+	}
+
 	r.t.RLock()
 	defer r.t.RUnlock()
 	for _, keyRange := range krs {
-		if limit > 0 && len(res) >= limit {
-			res = res[:limit]
+		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
+			res = res[:scanOptions.limit]
 			return res, nil
 		}
 
-		regions, err := scanRegion(r.tree, keyRange, limit)
+		regions, err := scanRegion(r.tree, keyRange, scanOptions.limit)
 		if err != nil {
-			log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange", outputMustContainAllKeyRange), zap.Error(err))
-			if outputMustContainAllKeyRange {
+			log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+				scanOptions.outputMustContainAllKeyRange), zap.Error(err))
+			if scanOptions.outputMustContainAllKeyRange {
 				return nil, err
 			}
 		}

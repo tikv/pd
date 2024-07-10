@@ -99,7 +99,29 @@ type RegionSetInformer interface {
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo
-	BatchScanRegions(keyRanges *KeyRanges, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error)
+	BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error)
+}
+
+type batchScanRegionsOptions struct {
+	limit                        int
+	outputMustContainAllKeyRange bool
+}
+
+// BatchScanRegionsOptionFunc is the option function for BatchScanRegions.
+type BatchScanRegionsOptionFunc func(*batchScanRegionsOptions)
+
+// WithLimit is an option for batchScanRegionsOptions.
+func WithLimit(limit int) BatchScanRegionsOptionFunc {
+	return func(opt *batchScanRegionsOptions) {
+		opt.limit = limit
+	}
+}
+
+// WithOutputMustContainAllKeyRange is an option for batchScanRegionsOptions.
+func WithOutputMustContainAllKeyRange() BatchScanRegionsOptionFunc {
+	return func(opt *batchScanRegionsOptions) {
+		opt.outputMustContainAllKeyRange = true
+	}
 }
 
 // StoreSetInformer provides access to a shared informer of stores.
