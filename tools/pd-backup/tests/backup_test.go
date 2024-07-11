@@ -36,7 +36,7 @@ func TestBackup(t *testing.T) {
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	urls := strings.Split(pdAddr, ",")
 	defer cluster.Destroy()
