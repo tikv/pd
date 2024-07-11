@@ -447,7 +447,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		log.Error("cannot load schedulers' config", zap.Int("retry-times", i), errs.ZapError(err))
 	}
 	if err != nil {
-		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
+		log.Panic("cannot load schedulers' config", errs.ZapError(err))
 	}
 	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
 	// The new way to create scheduler with the independent configuration.

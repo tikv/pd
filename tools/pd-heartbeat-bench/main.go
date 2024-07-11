@@ -114,7 +114,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	isBootstrapped, err := cli.IsBootstrapped(cctx, &pdpb.IsBootstrappedRequest{Header: header()})
 	cancel()
 	if err != nil {
-		log.Fatal("check if cluster has already bootstrapped failed", zap.Error(err))
+		log.Panic("check if cluster has already bootstrapped failed", zap.Error(err))
 	}
 	if isBootstrapped.GetBootstrapped() {
 		log.Info("already bootstrapped")
@@ -140,10 +140,10 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	resp, err := cli.Bootstrap(cctx, req)
 	cancel()
 	if err != nil {
-		log.Fatal("failed to bootstrap the cluster", zap.Error(err))
+		log.Panic("failed to bootstrap the cluster", zap.Error(err))
 	}
 	if resp.GetHeader().GetError() != nil {
-		log.Fatal("failed to bootstrap the cluster", zap.String("err", resp.GetHeader().GetError().String()))
+		log.Panic("failed to bootstrap the cluster", zap.String("err", resp.GetHeader().GetError().String()))
 	}
 	log.Info("bootstrapped")
 }
@@ -159,10 +159,10 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 		resp, err := cli.PutStore(cctx, &pdpb.PutStoreRequest{Header: header(), Store: store})
 		cancel()
 		if err != nil {
-			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.Error(err))
+			log.Panic("failed to put store", zap.Uint64("store-id", i), zap.Error(err))
 		}
 		if resp.GetHeader().GetError() != nil {
-			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
+			log.Panic("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
 		go func(ctx context.Context, storeID uint64) {
 			var heartbeatTicker = time.NewTicker(10 * time.Second)
@@ -325,11 +325,11 @@ func (rs *Regions) update(cfg *config.Config, options *config.Options) {
 func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClient, pdpb.PD_RegionHeartbeatClient) {
 	cli, err := newClient(ctx, cfg)
 	if err != nil {
-		log.Fatal("create client error", zap.Error(err))
+		log.Panic("create client error", zap.Error(err))
 	}
 	stream, err := cli.RegionHeartbeat(ctx)
 	if err != nil {
-		log.Fatal("create stream error", zap.Error(err))
+		log.Panic("create stream error", zap.Error(err))
 	}
 
 	go func() {
@@ -471,7 +471,7 @@ func main() {
 	case pflag.ErrHelp:
 		exit(0)
 	default:
-		log.Fatal("parse cmd flags error", zap.Error(err))
+		log.Panic("parse cmd flags error", zap.Error(err))
 	}
 
 	// New zap logger
@@ -479,7 +479,7 @@ func main() {
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
-		log.Fatal("initialize logger error", zap.Error(err))
+		log.Panic("initialize logger error", zap.Error(err))
 	}
 
 	maxVersion = cfg.InitEpochVer
@@ -501,7 +501,7 @@ func main() {
 	}()
 	cli, err := newClient(ctx, cfg)
 	if err != nil {
-		log.Fatal("create client error", zap.Error(err))
+		log.Panic("create client error", zap.Error(err))
 	}
 
 	initClusterID(ctx, cli)
@@ -715,7 +715,7 @@ func loadTLSConfig(cfg *config.Config) *tls.Config {
 		SSLKEYBytes:  keyData,
 	}.ToTLSConfig()
 	if err != nil {
-		log.Fatal("failed to load tlc config", zap.Error(err))
+		log.Panic("failed to load tlc config", zap.Error(err))
 	}
 
 	return tlsConf

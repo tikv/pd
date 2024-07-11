@@ -37,19 +37,19 @@ func Alloc() string {
 		}
 		time.Sleep(time.Second)
 	}
-	log.Fatal("failed to alloc test URL")
+	log.Panic("failed to alloc test URL")
 	return ""
 }
 
 func tryAllocTestURL() string {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		log.Fatal("listen failed", zap.Error(err))
+		log.Panic("listen failed", zap.Error(err))
 	}
 	addr := fmt.Sprintf("http://%s", l.Addr())
 	err = l.Close()
 	if err != nil {
-		log.Fatal("close failed", zap.Error(err))
+		log.Panic("close failed", zap.Error(err))
 	}
 
 	testAddrMutex.Lock()

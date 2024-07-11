@@ -65,7 +65,7 @@ type Service struct {
 func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 	server, ok := svr.(*Server)
 	if !ok {
-		log.Fatal("create tso server failed")
+		log.Panic("create tso server failed")
 	}
 	return &Service{
 		Server: server,

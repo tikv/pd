@@ -341,7 +341,7 @@ func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUr
 	data, err := leader.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal pd leader meet error", zap.Stringer("pd-leader", leader), errs.ZapError(errs.ErrMarshalLeader, err))
+		log.Panic("marshal pd leader meet error", zap.Stringer("pd-leader", leader), errs.ZapError(errs.ErrMarshalLeader, err))
 	}
 	m.member = leader
 	m.memberValue = string(data)

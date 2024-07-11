@@ -21,7 +21,6 @@ linters-settings:
     disabled-checks:
       - regexpMust
       - appendAssign
-      - exitAfterDefer
       - ifElseChain
   gosec:
     # To specify a set of rules to explicitly exclude.
@@ -215,3 +214,7 @@ issues:
     - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
       linters:
         - errcheck
+    - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
+      test: "exitAfterDefer"
+      linters:
+        - gocritic

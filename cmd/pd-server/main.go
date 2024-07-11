@@ -232,7 +232,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
-		log.Fatal("initialize logger error", errs.ZapError(err))
+		log.Panic("initialize logger error", errs.ZapError(err))
 	}
 	// Flushing any buffered log entries
 	defer log.Sync()
@@ -254,7 +254,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 
 	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
-		log.Fatal("join meet error", errs.ZapError(err))
+		log.Panic("join meet error", errs.ZapError(err))
 	}
 
 	// Creates server.
@@ -266,7 +266,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {
-		log.Fatal("create server failed", errs.ZapError(err))
+		log.Panic("create server failed", errs.ZapError(err))
 	}
 
 	sc := make(chan os.Signal, 1)
@@ -283,7 +283,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	}()
 
 	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", errs.ZapError(err))
+		log.Panic("run server failed", errs.ZapError(err))
 	}
 
 	<-ctx.Done()

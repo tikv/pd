@@ -82,7 +82,7 @@ func (m *Participant) InitInfo(p participant, rootPath string, leaderName string
 	data, err := p.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal leader meet error", zap.String("member-name", p.String()), errs.ZapError(errs.ErrMarshalLeader, err))
+		log.Panic("marshal leader meet error", zap.String("member-name", p.String()), errs.ZapError(errs.ErrMarshalLeader, err))
 	}
 	m.member = p
 	m.memberValue = string(data)

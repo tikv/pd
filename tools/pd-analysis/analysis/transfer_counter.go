@@ -97,7 +97,7 @@ func (c *TransferCounter) AddSource(regionID, sourceStoreID uint64) {
 		}
 		delete(c.regionMap, regionID)
 	} else {
-		log.Fatal("error when add sourceStore in transfer region map", zap.Uint64("source-store", sourceStoreID), zap.Uint64("region", regionID))
+		log.Panic("error when add sourceStore in transfer region map", zap.Uint64("source-store", sourceStoreID), zap.Uint64("region", regionID))
 	}
 }
 
@@ -239,7 +239,7 @@ func (c *TransferCounter) PrintResult() {
 	// Output csv file
 	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 	defer func() {
 		if err := fd.Close(); err != nil {
@@ -255,7 +255,7 @@ func (c *TransferCounter) PrintResult() {
 	buf := []byte(fdContent)
 	_, err = fd.Write(buf)
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 }
 

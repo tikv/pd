@@ -465,7 +465,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
-		log.Fatal("initialize logger error", errs.ZapError(err))
+		log.Panic("initialize logger error", errs.ZapError(err))
 	}
 	// Flushing any buffered log entries
 	log.Sync()
@@ -493,7 +493,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	}()
 
 	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", errs.ZapError(err))
+		log.Panic("run server failed", errs.ZapError(err))
 	}
 
 	<-ctx.Done()

@@ -115,7 +115,7 @@ func NewSingleServer(ctx context.Context, simConfig *sc.SimConfig) (*server.Serv
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
 	} else {
-		log.Fatal("setup logger error", zap.Error(err))
+		log.Panic("setup logger error", zap.Error(err))
 	}
 
 	s, err := server.CreateServer(ctx, simConfig.ServerConfig, nil, api.NewHandler)

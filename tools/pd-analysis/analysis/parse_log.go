@@ -130,10 +130,10 @@ func currentTime(layout string) func(content string) (time.Time, error) {
 	if pattern, ok := supportLayouts[layout]; ok {
 		r, err = regexp.Compile(pattern)
 		if err != nil {
-			log.Fatal(err)
+			log.Panic(err)
 		}
 	} else {
-		log.Fatal("unsupported time layout")
+		log.Panic("unsupported time layout")
 	}
 	return func(content string) (time.Time, error) {
 		result := r.FindStringSubmatch(content)

@@ -69,7 +69,7 @@ type Service struct {
 func NewService[T ConfigProvider](svr bs.Server) registry.RegistrableService {
 	server, ok := svr.(*Server)
 	if !ok {
-		log.Fatal("create scheduling server failed")
+		log.Panic("create scheduling server failed")
 	}
 	return &Service{
 		Server: server,

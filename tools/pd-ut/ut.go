@@ -150,7 +150,7 @@ func main() {
 	srv := alloc.RunHTTPServer()
 	defer func() {
 		if err := srv.Shutdown(context.Background()); err != nil {
-			log.Fatal("server shutdown error", zap.Error(err))
+			log.Panic("server shutdown error", zap.Error(err))
 		}
 	}()
 

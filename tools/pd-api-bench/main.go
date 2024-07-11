@@ -90,13 +90,13 @@ func main() {
 	case flag.ErrHelp:
 		exit(0)
 	default:
-		log.Fatal("parse cmd flags error", zap.Error(err))
+		log.Panic("parse cmd flags error", zap.Error(err))
 	}
 	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, logutil.RedactInfoLogOFF)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
-		log.Fatal("initialize logger error", zap.Error(err))
+		log.Panic("initialize logger error", zap.Error(err))
 	}
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
@@ -131,7 +131,7 @@ func main() {
 	}
 	err = cases.InitCluster(ctx, pdClis[0], httpClis[0])
 	if err != nil {
-		log.Fatal("InitCluster error", zap.Error(err))
+		log.Panic("InitCluster error", zap.Error(err))
 	}
 
 	coordinator := cases.NewCoordinator(ctx, httpClis, pdClis, etcdClis)
@@ -356,7 +356,7 @@ func newEtcdClient(cfg *config.Config) *clientv3.Client {
 		KeyPath:  cfg.KeyPath,
 	}.ToTLSConfig()
 	if err != nil {
-		log.Fatal("fail to create etcd client", zap.Error(err))
+		log.Panic("fail to create etcd client", zap.Error(err))
 		return nil
 	}
 	clientConfig := clientv3.Config{
@@ -367,7 +367,7 @@ func newEtcdClient(cfg *config.Config) *clientv3.Client {
 	}
 	client, err := clientv3.New(clientConfig)
 	if err != nil {
-		log.Fatal("fail to create pd client", zap.Error(err))
+		log.Panic("fail to create pd client", zap.Error(err))
 	}
 	return client
 }
@@ -387,7 +387,7 @@ func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 			}),
 		))
 	if err != nil {
-		log.Fatal("fail to create pd client", zap.Error(err))
+		log.Panic("fail to create pd client", zap.Error(err))
 	}
 	return pdCli
 }
@@ -415,7 +415,7 @@ func loadTLSConfig(cfg *config.Config) *tls.Config {
 		SSLKEYBytes:  keyData,
 	}.ToTLSConfig()
 	if err != nil {
-		log.Fatal("failed to load tlc config", zap.Error(err))
+		log.Panic("failed to load tlc config", zap.Error(err))
 	}
 
 	return tlsConf

@@ -404,7 +404,7 @@ func NewKeyspaceGroupManager(
 	cfg ServiceConfig,
 ) *KeyspaceGroupManager {
 	if mcsutils.MaxKeyspaceGroupCountInUse > mcsutils.MaxKeyspaceGroupCount {
-		log.Fatal("MaxKeyspaceGroupCountInUse is larger than MaxKeyspaceGroupCount",
+		log.Panic("MaxKeyspaceGroupCountInUse is larger than MaxKeyspaceGroupCount",
 			zap.Uint32("max-keyspace-group-count-in-use", mcsutils.MaxKeyspaceGroupCountInUse),
 			zap.Uint32("max-keyspace-group-count", mcsutils.MaxKeyspaceGroupCount))
 	}

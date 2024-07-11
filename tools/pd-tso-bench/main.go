@@ -106,7 +106,7 @@ func bench(mainCtx context.Context) {
 	for idx := range pdClients {
 		pdCli, err := createPDClient(mainCtx)
 		if err != nil {
-			log.Fatal(fmt.Sprintf("create pd client #%d failed: %v", idx, err))
+			log.Panic(fmt.Sprintf("create pd client #%d failed: %v", idx, err))
 		}
 		pdClients[idx] = pdCli
 	}
@@ -116,7 +116,7 @@ func bench(mainCtx context.Context) {
 	for idx, pdCli := range pdClients {
 		_, _, err := pdCli.GetLocalTS(ctx, *dcLocation)
 		if err != nil {
-			log.Fatal("get first time tso failed", zap.Int("client-number", idx), zap.Error(err))
+			log.Panic("get first time tso failed", zap.Int("client-number", idx), zap.Error(err))
 		}
 	}
 
@@ -406,7 +406,7 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 			time.Sleep(sleepIntervalOnFailure)
 		}
 		if err != nil {
-			log.Fatal(fmt.Sprintf("%v", err))
+			log.Panic(fmt.Sprintf("%v", err))
 		}
 		dur := time.Since(start) - time.Duration(i)*sleepIntervalOnFailure - totalSleepBeforeGetTS
 

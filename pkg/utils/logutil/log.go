@@ -90,7 +90,7 @@ func SetupLogger(
 // Commonly used with a `defer`.
 func LogPanic() {
 	if e := recover(); e != nil {
-		log.Fatal("panic", zap.Reflect("recover", e))
+		log.Panic("panic", zap.Reflect("recover", e))
 	}
 }
 

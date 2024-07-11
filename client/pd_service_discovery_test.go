@@ -107,10 +107,10 @@ func newTestServer(isLeader bool) *testServer {
 func (s *testServer) run() {
 	lis, err := net.Listen("tcp", s.addr)
 	if err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		log.Panicf("failed to serve: %v", err)
 	}
 	if err := s.grpcServer.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
+		log.Panicf("failed to serve: %v", err)
 	}
 }
 

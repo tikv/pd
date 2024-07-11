@@ -48,7 +48,7 @@ func RunHTTPServer() *http.Server {
 	srv := &http.Server{Addr: *statusAddress, Handler: engine.Handler(), ReadHeaderTimeout: 3 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal("server listen error", zap.Error(err))
+			log.Panic("server listen error", zap.Error(err))
 		}
 	}()
 

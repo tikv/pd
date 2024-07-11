@@ -158,7 +158,7 @@ func MemUsedCGroup() (uint64, error) {
 
 func mustNil(err error) {
 	if err != nil {
-		log.Fatal("unexpected error", zap.Error(err), zap.Stack("stack"))
+		log.Panic("unexpected error", zap.Error(err), zap.Stack("stack"))
 	}
 }
 

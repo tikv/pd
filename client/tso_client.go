@@ -232,7 +232,7 @@ func (c *tsoClient) GetTSOAllocatorServingURLByDCLocation(dcLocation string) (st
 func (c *tsoClient) GetTSOAllocatorClientConnByDCLocation(dcLocation string) (*grpc.ClientConn, string) {
 	url, ok := c.tsoAllocators.Load(dcLocation)
 	if !ok {
-		log.Fatal("[tso] the allocator leader should exist", zap.String("dc-location", dcLocation))
+		log.Panic("[tso] the allocator leader should exist", zap.String("dc-location", dcLocation))
 	}
 	cc, ok := c.svcDiscovery.GetClientConns().Load(url)
 	if !ok {

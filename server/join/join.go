@@ -95,7 +95,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := os.ReadFile(filePath)
 		if err != nil {
-			log.Fatal("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
+			log.Panic("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
 		}
 		cfg.InitialCluster = strings.TrimSpace(string(s))
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting

@@ -309,7 +309,7 @@ func newTestHotRegionStorage(pullInterval time.Duration,
 func PrintDirSize(path string) {
 	size, err := DirSizeB(path)
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
 	fmt.Printf("file size %d\n", size)
 }

@@ -196,7 +196,7 @@ func startGRPCServer(s server, l net.Listener) {
 	if s.IsClosed() {
 		log.Info("grpc server stopped")
 	} else {
-		log.Fatal("grpc server stopped unexpectedly", errs.ZapError(err))
+		log.Panic("grpc server stopped unexpectedly", errs.ZapError(err))
 	}
 }
 
@@ -209,7 +209,7 @@ func startHTTPServer(s server, l net.Listener) {
 	if s.IsClosed() {
 		log.Info("http server stopped")
 	} else {
-		log.Fatal("http server stopped unexpectedly", errs.ZapError(err))
+		log.Panic("http server stopped unexpectedly", errs.ZapError(err))
 	}
 }
 
@@ -249,7 +249,7 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 		if s.IsClosed() {
 			log.Info("mux stopped serving", errs.ZapError(err))
 		} else {
-			log.Fatal("mux stopped serving unexpectedly", errs.ZapError(err))
+			log.Panic("mux stopped serving unexpectedly", errs.ZapError(err))
 		}
 	}
 }
