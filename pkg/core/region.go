@@ -1881,7 +1881,7 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int) ([]*Regio
 		}
 		if len(lastRegion.GetEndKey()) > 0 && len(region.GetStartKey()) > 0 &&
 			bytes.Compare(region.GetStartKey(), lastRegion.GetEndKey()) > 0 {
-			err = multierr.Append(err, errors.Errorf(
+			err = multierr.Append(err, errs.ErrRegionNotAdjacent.FastGen(
 				"key range[%x, %x) found a hole region between region[%x, %x) and region[%x, %x)",
 				keyRange.StartKey, keyRange.EndKey,
 				lastRegion.GetStartKey(), lastRegion.GetEndKey(),
@@ -1895,11 +1895,16 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int) ([]*Regio
 
 	if !(exceedLimit()) && len(keyRange.EndKey) > 0 && len(lastRegion.GetEndKey()) > 0 &&
 		bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) < 0 {
-		err = multierr.Append(err, errors.Errorf(
+		err = multierr.Append(err, errs.ErrRegionNotAdjacent.FastGen(
 			"key range[%x, %x) found a hole region in the last, the last scanned region is [%x, %x), [%x, %x) is missing",
 			keyRange.StartKey, keyRange.EndKey,
 			lastRegion.GetStartKey(), lastRegion.GetEndKey(),
 			lastRegion.GetEndKey(), keyRange.EndKey))
+	}
+
+	const errLimit = 3
+	if multiErr := multierr.Errors(err); len(multiErr) > errLimit {
+		err = multierr.Combine(multiErr[:errLimit]...)
 	}
 	return res, err
 }

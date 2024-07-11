@@ -48,6 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"go.etcd.io/etcd/clientv3"
+	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -1687,7 +1688,14 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	}
 	res, err := rc.BatchScanRegions(keyRanges, scanOptions...)
 	if err != nil {
-		return &pdpb.BatchScanRegionsResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_REGIONS_NOT_CONTAIN_ALL_KEY_RANGE, err.Error())}, nil
+		if errs.ErrRegionNotAdjacent.Equal(multierr.Errors(err)[0]) {
+			return &pdpb.BatchScanRegionsResponse{
+				Header: s.wrapErrorToHeader(pdpb.ErrorType_REGIONS_NOT_CONTAIN_ALL_KEY_RANGE, err.Error()),
+			}, nil
+		}
+		return &pdpb.BatchScanRegionsResponse{
+			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
 	regions := make([]*pdpb.Region, 0, len(res))
 	for _, r := range res {

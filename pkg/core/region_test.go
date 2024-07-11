@@ -27,8 +27,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"go.uber.org/multierr"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -1145,54 +1147,64 @@ func TestCntRefAfterResetRegionCache(t *testing.T) {
 func TestScanRegion(t *testing.T) {
 	re := require.New(t)
 	tree := newRegionTree()
+	scanError := func(startKey, endKey []byte, limit int) ([]*RegionInfo, error) {
+		regions, err := scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit)
+		re.Error(err)
+		return regions, err
+	}
+	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
+		regions, err := scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit)
+		re.NoError(err)
+		return regions
+	}
 	// region1
 	// [a, b)
 	updateNewItem(tree, NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
-	regions, err := scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("b")}, 0)
-	re.NoError(err)
+	re.Len(scanNoError([]byte("a"), []byte("b"), 0), 1)
+	regions, _ := scanError([]byte("a"), []byte("c"), 0)
 	re.Len(regions, 1)
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, 0)
-	re.Error(err)
-	re.Len(regions, 1)
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, 1)
-	re.NoError(err)
-	re.Len(regions, 1)
+	re.Len(scanNoError([]byte("a"), []byte("c"), 1), 1)
 
 	// region1 | region2
 	// [a, b)  | [b, c)
 	updateNewItem(tree, NewTestRegionInfo(2, 1, []byte("b"), []byte("c")))
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, 0)
-	re.NoError(err)
-	re.Len(regions, 2)
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("c")}, 1)
-	re.NoError(err)
-	re.Len(regions, 1)
+	re.Len(scanNoError([]byte("a"), []byte("c"), 0), 2)
+	re.Len(scanNoError([]byte("a"), []byte("c"), 1), 1)
 
 	// region1 | region2 | region3
 	// [a, b)  | [b, c)  | [d, f)
 	updateNewItem(tree, NewTestRegionInfo(3, 1, []byte("d"), []byte("f")))
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("a"), EndKey: []byte("e")}, 0)
-	re.Error(err)
+	regions, _ = scanError([]byte("a"), []byte("e"), 0)
 	re.Len(regions, 3)
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("c"), EndKey: []byte("e")}, 0)
-	re.Error(err)
+	regions, _ = scanError([]byte("c"), []byte("e"), 0)
 	re.Len(regions, 1)
 	re.Equal(uint64(3), regions[0].GetID())
 
 	// region1 | region2 | region3 | region4
-	// [a, b)  | [b, c)  | [d, f)  | [f, +∞)
-	updateNewItem(tree, NewTestRegionInfo(4, 1, []byte("f"), nil))
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("c"), EndKey: []byte("g")}, 0)
-	re.Error(err)
+	// [a, b)  | [b, c)  | [d, f)  | [f, i)
+	updateNewItem(tree, NewTestRegionInfo(4, 1, []byte("f"), []byte("i")))
+	regions, _ = scanError([]byte("c"), []byte("g"), 0)
 	re.Len(regions, 2)
 	re.Equal(uint64(3), regions[0].GetID())
 	re.Equal(uint64(4), regions[1].GetID())
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("g"), EndKey: []byte("h")}, 0)
-	re.NoError(err)
+
+	regions = scanNoError([]byte("g"), []byte("h"), 0)
 	re.Len(regions, 1)
 	re.Equal(uint64(4), regions[0].GetID())
-	regions, err = scanRegion(tree, &KeyRange{StartKey: []byte("g"), EndKey: nil}, 0)
-	re.NoError(err)
-	re.Len(regions, 1)
-	re.Equal(uint64(4), regions[0].GetID())
+	// test multil error and error type
+	regions, err := scanError([]byte(string('a'-1)), []byte("g"), 0)
+	multiErr := multierr.Errors(err)
+	re.Len(multiErr, 2)
+	re.True(errs.ErrRegionNotAdjacent.Equal(multiErr[0]))
+	re.Len(regions, 4)
+
+	// region1 | region2 | region3 | region4 | region5 | region6
+	// [a, b)  | [b, c)  | [d, f)  | [f, i)  | [j, k)  | [l, +∞)]
+	updateNewItem(tree, NewTestRegionInfo(6, 1, []byte("l"), nil))
+	// test boundless
+	re.Len(scanNoError([]byte("m"), nil, 0), 1)
+	// test errLimit
+	_, err = scanError([]byte(string('a'-1)), []byte("m"), 0)
+	multiErr = multierr.Errors(err)
+	re.Len(multiErr, 3)
 }
