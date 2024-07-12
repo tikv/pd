@@ -444,21 +444,11 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
 	})
-<<<<<<< HEAD
-	regionStorage, err := storage.NewStorageWithLevelDBBackend(ctx, filepath.Join(s.cfg.DataDir, "region-meta"), s.encryptionKeyManager)
-=======
 	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
 		return err
 	}
-	// Initialize an etcd storage as the default storage.
-	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
-	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
-	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(
-		ctx,
-		filepath.Join(s.cfg.DataDir, "region-meta"),
-		s.encryptionKeyManager)
->>>>>>> c50993b2f (*: fix the initialization of encryption key manager (#8383))
+	regionStorage, err := storage.NewStorageWithLevelDBBackend(ctx, filepath.Join(s.cfg.DataDir, "region-meta"), s.encryptionKeyManager)
 	if err != nil {
 		return err
 	}
