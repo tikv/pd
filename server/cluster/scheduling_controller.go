@@ -417,7 +417,7 @@ func (sc *schedulingController) GetPendingProcessedRegions() []uint64 {
 	return sc.coordinator.GetCheckerController().GetPendingProcessedRegions()
 }
 
-// RemoveSuspectRegion removes region from suspect list.
+// RemovePendingProcessedRegion removes region from pending processed regions.
 func (sc *schedulingController) RemovePendingProcessedRegion(id uint64) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
