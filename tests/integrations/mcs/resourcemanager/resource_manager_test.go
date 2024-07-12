@@ -471,6 +471,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	group, err := controller.GetResourceGroup(rg.Name)
 	re.NoError(err)
 	re.Equal(rg, group)
+	// Delete the resource group and make sure it is tombstone.
 	resp, err = cli.DeleteResourceGroup(suite.ctx, rg.Name)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
@@ -479,6 +480,16 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		gc, err := controller.GetResourceGroup(rg.Name)
 		re.NoError(err)
 		return gc.GetName() == "default"
+	}, testutil.WithTickInterval(50*time.Millisecond))
+	// Add the resource group again.
+	resp, err = cli.AddResourceGroup(suite.ctx, rg)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	// Make sure the resource group can be set to active again.
+	testutil.Eventually(re, func() bool {
+		gc, err := controller.GetResourceGroup(rg.Name)
+		re.NoError(err)
+		return gc.GetName() == rg.Name
 	}, testutil.WithTickInterval(50*time.Millisecond))
 }
 

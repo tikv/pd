@@ -359,6 +359,11 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						}
 						if gc, ok := c.loadGroupController(group.Name); ok {
 							gc.modifyMeta(group)
+							// If the resource group is marked as tombstone before, set it as active again.
+							if swapped := gc.tombstone.CompareAndSwap(true, false); swapped {
+								resourceGroupStatusGauge.WithLabelValues(group.Name, gc.name).Set(1)
+								log.Info("[resource group controller] mark resource group as active", zap.String("name", group.Name))
+							}
 						}
 					case meta_storagepb.Event_DELETE:
 						if item.PrevKv != nil {
@@ -448,7 +453,7 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 	gc, ok := c.loadGroupController(name)
 	if ok {
 		// If the resource group is marked as tombstone, fallback to the default resource group.
-		if gc.tombstone.Load() {
+		if gc.tombstone.Load() && name != defaultResourceGroupName {
 			return c.tryGetResourceGroup(ctx, defaultResourceGroupName)
 		}
 		return gc, nil
@@ -597,12 +602,12 @@ func (c *ResourceGroupsController) OnResponse(
 ) (*rmpb.Consumption, error) {
 	gc, ok := c.loadGroupController(resourceGroupName)
 	if !ok {
-		// If the resource group does not exist, use the default resource group.
-		if resourceGroupName != defaultResourceGroupName {
-			return c.OnResponse(defaultResourceGroupName, req, resp)
-		}
 		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
 		return &rmpb.Consumption{}, nil
+	}
+	// If the resource group is marked as tombstone, fallback to the default resource group.
+	if gc.tombstone.Load() && resourceGroupName != defaultResourceGroupName {
+		return c.OnResponse(defaultResourceGroupName, req, resp)
 	}
 	return gc.onResponse(req, resp)
 }
