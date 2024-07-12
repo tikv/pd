@@ -51,7 +51,7 @@ func TestRequestFollower(t *testing.T) {
 	defer cluster.Destroy()
 
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	var followerServer *tests.TestServer
 	for _, s := range cluster.GetServers() {
@@ -94,7 +94,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	var leaderServer, nextLeaderServer *tests.TestServer
 	leaderServer = cluster.GetLeaderServer()
@@ -143,7 +143,7 @@ func TestLogicalOverflow(t *testing.T) {
 		defer cluster.Destroy()
 		re.NoError(err)
 		re.NoError(cluster.RunInitialServers())
-		cluster.WaitLeader()
+		re.NotEmpty(cluster.WaitLeader())
 
 		leaderServer := cluster.GetLeaderServer()
 		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())

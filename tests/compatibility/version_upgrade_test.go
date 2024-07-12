@@ -37,7 +37,7 @@ func TestStoreRegister(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
@@ -54,14 +54,14 @@ func TestStoreRegister(t *testing.T) {
 	_, err = svr.PutStore(context.Background(), putStoreRequest)
 	re.NoError(err)
 	// FIX ME: read v0.0.0 in sometime
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	version := leaderServer.GetClusterVersion()
 	// Restart all PDs.
 	err = cluster.StopAll()
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	leaderServer = cluster.GetLeaderServer()
 	re.NotNil(leaderServer)
@@ -91,7 +91,7 @@ func TestRollingUpgrade(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 

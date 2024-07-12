@@ -44,6 +44,18 @@ var (
 	t8 = t0.Add(time.Duration(8) * d)
 )
 
+func resetTime() {
+	t0 = time.Now()
+	t1 = t0.Add(time.Duration(1) * d)
+	t2 = t0.Add(time.Duration(2) * d)
+	t3 = t0.Add(time.Duration(3) * d)
+	t4 = t0.Add(time.Duration(4) * d)
+	t5 = t0.Add(time.Duration(5) * d)
+	t6 = t0.Add(time.Duration(6) * d)
+	t7 = t0.Add(time.Duration(7) * d)
+	t8 = t0.Add(time.Duration(8) * d)
+}
+
 type request struct {
 	t   time.Time
 	n   float64
@@ -144,6 +156,7 @@ func TestNotify(t *testing.T) {
 }
 
 func TestCancel(t *testing.T) {
+	resetTime()
 	ctx := context.Background()
 	ctx1, cancel1 := context.WithDeadline(ctx, t2)
 	re := require.New(t)
@@ -161,8 +174,8 @@ func TestCancel(t *testing.T) {
 	checkTokens(re, lim1, t2, 7)
 	checkTokens(re, lim2, t2, 2)
 	d, err := WaitReservations(ctx, t2, []*Reservation{r1, r2})
-	re.Equal(4*time.Second, d)
 	re.Error(err)
+	re.Equal(4*time.Second, d)
 	re.Contains(err.Error(), "estimated wait time 4s, ltb state is 1.00:-4.00")
 	checkTokens(re, lim1, t3, 13)
 	checkTokens(re, lim2, t3, 3)

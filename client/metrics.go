@@ -105,7 +105,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Subsystem:   "request",
 			Name:        "tso_batch_send_latency",
 			ConstLabels: constLabels,
-			Buckets:     prometheus.ExponentialBuckets(1, 2, 34), // 1ns ~ 8s
+			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
 			Help:        "tso batch send latency",
 		})
 

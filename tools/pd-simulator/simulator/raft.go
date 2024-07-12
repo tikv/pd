@@ -61,17 +61,16 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimCo
 		if i < len(conf.Regions)-1 {
 			meta.EndKey = []byte(splitKeys[i])
 		}
-		regionSize := storeConfig.Coprocessor.RegionSplitSize
 		regionInfo := core.NewRegionInfo(
 			meta,
 			region.Leader,
-			core.SetApproximateSize(int64(regionSize)),
-			core.SetApproximateKeys(int64(storeConfig.Coprocessor.RegionSplitKey)),
+			core.SetApproximateSize(region.Size),
+			core.SetApproximateKeys(region.Keys),
 		)
 		r.SetRegion(regionInfo)
 		peers := region.Peers
 		for _, peer := range peers {
-			r.conn.Nodes[peer.StoreId].incUsedSize(uint64(regionSize))
+			r.conn.Nodes[peer.StoreId].incUsedSize(uint64(region.Size))
 		}
 	}
 
@@ -83,10 +82,11 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimCo
 }
 
 func (r *RaftEngine) stepRegions() {
-	r.TraverseRegions(func(region *core.RegionInfo) {
+	regions := r.GetRegions()
+	for _, region := range regions {
 		r.stepLeader(region)
 		r.stepSplit(region)
-	})
+	}
 }
 
 func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
@@ -229,7 +229,10 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 func (r *RaftEngine) GetRegion(regionID uint64) *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	return r.regionsInfo.GetRegion(regionID)
+	if region := r.regionsInfo.GetRegion(regionID); region != nil {
+		return region.Clone()
+	}
+	return nil
 }
 
 // GetRegionChange returns a list of RegionID for a given store.
@@ -255,6 +258,13 @@ func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
 // TraverseRegions executes a function on all regions, and function need to be self-locked.
 func (r *RaftEngine) TraverseRegions(lockedFunc func(*core.RegionInfo)) {
 	r.regionsInfo.TraverseRegions(lockedFunc)
+}
+
+// GetRegions gets all RegionInfo from regionMap
+func (r *RaftEngine) GetRegions() []*core.RegionInfo {
+	r.RLock()
+	defer r.RUnlock()
+	return r.regionsInfo.GetRegions()
 }
 
 // SetRegion sets the RegionInfo with regionID
