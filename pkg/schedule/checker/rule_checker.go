@@ -27,11 +27,11 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 )
@@ -72,7 +72,7 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 
 // Name returns RuleChecker's name.
 func (*RuleChecker) Name() string {
-	return config.RuleChecker.String()
+	return types.RuleChecker.String()
 }
 
 // Check checks if the region matches placement rules and returns Operator to

@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"go.uber.org/zap"
 )
 
@@ -57,7 +58,7 @@ func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigPro
 
 // Name return ReplicaChecker's name.
 func (*ReplicaChecker) Name() string {
-	return config.ReplicaChecker.String()
+	return types.ReplicaChecker.String()
 }
 
 // Check verifies a region's replicas, creating an operator.Operator if need.
