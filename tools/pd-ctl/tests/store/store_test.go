@@ -46,7 +46,7 @@ func TestStoreLimitV2(t *testing.T) {
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -79,7 +79,7 @@ func TestStore(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -270,7 +270,7 @@ func TestStore(t *testing.T) {
 	re.NoError(leaderServer.Stop())
 	re.NoError(leaderServer.Run())
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
 	re.Equal(float64(20), storesLimit[1].AddPeer)
 	re.Equal(float64(20), storesLimit[1].RemovePeer)
@@ -528,7 +528,7 @@ func TestTombstoneStore(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -629,7 +629,7 @@ func TestStoreTLS(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	cmd := ctl.GetRootCmd()
 
 	stores := []*response.StoreInfo{
