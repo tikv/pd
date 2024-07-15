@@ -676,11 +676,11 @@ func (bs *balanceSolver) filterUniformStoreV1() (string, bool) {
 		return "all-dim", true
 	}
 	if isUniformFirstPriority && (bs.cur.progressiveRank == 1 || bs.cur.progressiveRank == 3) {
-		// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
+		// If first priority dim is enough uniform, 1 is unnecessary and maybe lead to worse balance for second priority dim
 		return dimToString(bs.firstPriority), true
 	}
 	if isUniformSecondPriority && bs.cur.progressiveRank == 2 {
-		// If second priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for first priority dim
+		// If second priority dim is enough uniform, 2 is unnecessary and maybe lead to worse balance for first priority dim
 		return dimToString(bs.secondPriority), true
 	}
 	return "", false
@@ -1242,7 +1242,7 @@ func (bs *balanceSolver) calcProgressiveRankV1() {
 
 	if bs.resourceTy == writeLeader {
 		// For write leader, only compare the first priority.
-		// If the first priority is better, the progressiveRank is -3.
+		// If the first priority is better, the progressiveRank is 3.
 		// Because it is not a solution that needs to be optimized.
 		if bs.isBetterForWriteLeader() {
 			bs.cur.progressiveRank = 3
