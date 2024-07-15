@@ -656,7 +656,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	re.NoError(err)
 	suite.cluster = cluster
 	suite.endpoints = runServer(re, cluster)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	suite.regionID = regionIDAllocator.alloc()

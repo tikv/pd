@@ -33,7 +33,7 @@ func TestRemoveFailedStores(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	err = cluster.GetLeaderServer().BootstrapCluster()
 	re.NoError(err)
 	pdAddr := cluster.GetConfig().GetClientURL()

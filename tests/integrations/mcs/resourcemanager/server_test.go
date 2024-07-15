@@ -43,6 +43,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.NoError(err)
 
 	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	leader := cluster.GetServer(leaderName)
 
 	s, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())

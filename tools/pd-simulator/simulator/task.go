@@ -517,20 +517,25 @@ func processSnapshot(n *Node, stat *snapshotStat, speed uint64) bool {
 		return true
 	}
 	if stat.status == pending {
-		if stat.action == generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
+		n.statsMutex.RLock()
+		sendSnapshot, receiveSnapshot := n.stats.SendingSnapCount, n.stats.ReceivingSnapCount
+		n.statsMutex.RUnlock()
+		if stat.action == generate && sendSnapshot > maxSnapGeneratorPoolSize {
 			return false
 		}
-		if stat.action == receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
+		if stat.action == receive && receiveSnapshot > maxSnapReceivePoolSize {
 			return false
 		}
 		stat.status = running
 		stat.generateStart = time.Now()
+		n.statsMutex.Lock()
 		// If the statement is true, it will start to send or Receive the snapshot.
 		if stat.action == generate {
 			n.stats.SendingSnapCount++
 		} else {
 			n.stats.ReceivingSnapCount++
 		}
+		n.statsMutex.Unlock()
 	}
 
 	// store should Generate/Receive snapshot by chunk size.
@@ -548,11 +553,13 @@ func processSnapshot(n *Node, stat *snapshotStat, speed uint64) bool {
 		totalSec := uint64(time.Since(stat.start).Seconds()) * speed
 		generateSec := uint64(time.Since(stat.generateStart).Seconds()) * speed
 		n.registerSnapStats(generateSec, 0, totalSec)
+		n.statsMutex.Lock()
 		if stat.action == generate {
 			n.stats.SendingSnapCount--
 		} else {
 			n.stats.ReceivingSnapCount--
 		}
+		n.statsMutex.Unlock()
 	}
 	return true
 }
