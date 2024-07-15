@@ -454,22 +454,24 @@ func (suite *httpClientTestSuite) TestAccelerateSchedule() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 	raftCluster := suite.cluster.GetLeaderServer().GetRaftCluster()
-	suspectRegions := raftCluster.GetSuspectRegions()
-	re.Empty(suspectRegions)
+	pendingProcessedRegions := raftCluster.GetPendingProcessedRegions()
+	re.Empty(pendingProcessedRegions)
 	err := client.AccelerateSchedule(ctx, pd.NewKeyRange([]byte("a1"), []byte("a2")))
 	re.NoError(err)
-	suspectRegions = raftCluster.GetSuspectRegions()
-	re.Len(suspectRegions, 1)
-	raftCluster.ClearSuspectRegions()
-	suspectRegions = raftCluster.GetSuspectRegions()
-	re.Empty(suspectRegions)
+	pendingProcessedRegions = raftCluster.GetPendingProcessedRegions()
+	re.Len(pendingProcessedRegions, 1)
+	for _, id := range pendingProcessedRegions {
+		raftCluster.RemovePendingProcessedRegion(id)
+	}
+	pendingProcessedRegions = raftCluster.GetPendingProcessedRegions()
+	re.Empty(pendingProcessedRegions)
 	err = client.AccelerateScheduleInBatch(ctx, []*pd.KeyRange{
 		pd.NewKeyRange([]byte("a1"), []byte("a2")),
 		pd.NewKeyRange([]byte("a2"), []byte("a3")),
 	})
 	re.NoError(err)
-	suspectRegions = raftCluster.GetSuspectRegions()
-	re.Len(suspectRegions, 2)
+	pendingProcessedRegions = raftCluster.GetPendingProcessedRegions()
+	re.Len(pendingProcessedRegions, 2)
 }
 
 func (suite *httpClientTestSuite) TestConfig() {
