@@ -66,12 +66,13 @@ type taskID struct {
 }
 
 type ConcurrentRunner struct {
+	ctx                context.Context
+	cancel             context.CancelFunc
 	name               string
 	limiter            *ConcurrencyLimiter
 	maxPendingDuration time.Duration
 	taskChan           chan *Task
 	pendingMu          sync.Mutex
-	stopChan           chan struct{}
 	wg                 sync.WaitGroup
 	pendingTaskCount   map[string]int
 	pendingTasks       []*Task
@@ -80,8 +81,11 @@ type ConcurrentRunner struct {
 }
 
 // NewConcurrentRunner creates a new ConcurrentRunner.
-func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDuration time.Duration) *ConcurrentRunner {
+func NewConcurrentRunner(ctx context.Context, name string, limiter *ConcurrencyLimiter, maxPendingDuration time.Duration) *ConcurrentRunner {
+	ctx, cancel := context.WithCancel(ctx)
 	s := &ConcurrentRunner{
+		ctx:                ctx,
+		cancel:             cancel,
 		name:               name,
 		limiter:            limiter,
 		maxPendingDuration: maxPendingDuration,
@@ -104,7 +108,6 @@ func WithRetained(retained bool) TaskOption {
 
 // Start starts the runner.
 func (cr *ConcurrentRunner) Start() {
-	cr.stopChan = make(chan struct{})
 	cr.wg.Add(1)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -118,11 +121,11 @@ func (cr *ConcurrentRunner) Start() {
 					if err != nil {
 						continue
 					}
-					go cr.run(task, token)
+					go cr.run(cr.ctx, task, token)
 				} else {
-					go cr.run(task, nil)
+					go cr.run(cr.ctx, task, nil)
 				}
-			case <-cr.stopChan:
+			case <-cr.ctx.Done():
 				cr.pendingMu.Lock()
 				cr.pendingTasks = make([]*Task, 0, initialCapacity)
 				cr.pendingMu.Unlock()
@@ -144,8 +147,13 @@ func (cr *ConcurrentRunner) Start() {
 	}()
 }
 
-func (cr *ConcurrentRunner) run(task *Task, token *TaskToken) {
+func (cr *ConcurrentRunner) run(ctx context.Context, task *Task, token *TaskToken) {
 	start := time.Now()
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
 	task.f()
 	if token != nil {
 		cr.limiter.ReleaseToken(token)
@@ -173,7 +181,7 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 
 // Stop stops the runner.
 func (cr *ConcurrentRunner) Stop() {
-	close(cr.stopChan)
+	cr.cancel()
 	cr.wg.Wait()
 }
 
