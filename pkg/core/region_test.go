@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"go.uber.org/multierr"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -1145,19 +1144,19 @@ func TestCntRefAfterResetRegionCache(t *testing.T) {
 }
 
 func TestScanRegion(t *testing.T) {
-	re := require.New(t)
-	tree := newRegionTree()
 	var (
-		regions []*RegionInfo
-		err     error
+		re                   = require.New(t)
+		tree                 = newRegionTree()
+		needContainAllRanges = true
+		regions              []*RegionInfo
+		err                  error
 	)
-	scanError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit)
+	scanError := func(startKey, endKey []byte, limit int) {
+		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.Error(err)
-		return regions
 	}
 	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit)
+		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.NoError(err)
 		return regions
 	}
@@ -1165,7 +1164,7 @@ func TestScanRegion(t *testing.T) {
 	// [a, b)
 	updateNewItem(tree, NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
 	re.Len(scanNoError([]byte("a"), []byte("b"), 0), 1)
-	re.Len(scanError([]byte("a"), []byte("c"), 0), 1)
+	scanError([]byte("a"), []byte("c"), 0)
 	re.Len(scanNoError([]byte("a"), []byte("c"), 1), 1)
 
 	// region1 | region2
@@ -1177,33 +1176,28 @@ func TestScanRegion(t *testing.T) {
 	// region1 | region2 | region3
 	// [a, b)  | [b, c)  | [d, f)
 	updateNewItem(tree, NewTestRegionInfo(3, 1, []byte("d"), []byte("f")))
-	re.Len(scanError([]byte("a"), []byte("e"), 0), 3)
-	re.Len(scanError([]byte("c"), []byte("e"), 0), 1)
-	re.Equal(uint64(3), regions[0].GetID())
+	scanError([]byte("a"), []byte("e"), 0)
+	scanError([]byte("c"), []byte("e"), 0)
 
 	// region1 | region2 | region3 | region4
 	// [a, b)  | [b, c)  | [d, f)  | [f, i)
 	updateNewItem(tree, NewTestRegionInfo(4, 1, []byte("f"), []byte("i")))
-	re.Len(scanError([]byte("c"), []byte("g"), 0), 2)
-	re.Equal(uint64(3), regions[0].GetID())
-	re.Equal(uint64(4), regions[1].GetID())
-
+	scanError([]byte("c"), []byte("g"), 0)
 	re.Len(scanNoError([]byte("g"), []byte("h"), 0), 1)
 	re.Equal(uint64(4), regions[0].GetID())
-	// test multil error and error type
+	// test error type
 	scanError([]byte(string('a'-1)), []byte("g"), 0)
-	multiErr := multierr.Errors(err)
-	re.Len(multiErr, 2)
-	re.True(errs.ErrRegionNotAdjacent.Equal(multiErr[0]))
-	re.Len(regions, 4)
+	re.True(errs.ErrRegionNotAdjacent.Equal(err))
 
 	// region1 | region2 | region3 | region4 | region5 | region6
 	// [a, b)  | [b, c)  | [d, f)  | [f, i)  | [j, k)  | [l, +∞)]
 	updateNewItem(tree, NewTestRegionInfo(6, 1, []byte("l"), nil))
 	// test boundless
 	re.Len(scanNoError([]byte("m"), nil, 0), 1)
-	// test errLimit
-	scanError([]byte(string('a'-1)), []byte("m"), 0)
-	multiErr = multierr.Errors(err)
-	re.Len(multiErr, 3)
+
+	// ********** needContainAllRanges = false **********
+	// Tests that previously reported errors will no longer report errors.
+	needContainAllRanges = false
+	re.Len(scanNoError([]byte("a"), []byte("e"), 0), 3)
+	re.Len(scanNoError([]byte("c"), []byte("e"), 0), 1)
 }
