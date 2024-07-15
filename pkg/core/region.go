@@ -2265,8 +2265,10 @@ func NewTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...Regi
 }
 
 // TraverseRegions executes a function on all regions.
-// ONLY for simulator now and function need to be self-locked.
+// ONLY for simulator now and only for READ.
 func (r *RegionsInfo) TraverseRegions(lockedFunc func(*RegionInfo)) {
+	r.t.RLock()
+	defer r.t.RUnlock()
 	for _, item := range r.regions {
 		lockedFunc(item.RegionInfo)
 	}

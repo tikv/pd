@@ -78,6 +78,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
+	re.NotNil(leader)
 	waitLeader(re, suite.client, leader.GetAddr())
 
 	suite.initGroups = []*rmpb.ResourceGroup{
@@ -1046,7 +1047,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		serverList = append(serverList, s)
 	}
 	re.NoError(tests.RunServers(serverList))
-	suite.cluster.WaitLeader()
+	re.NotEmpty(suite.cluster.WaitLeader())
 	// re-connect client as well
 	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)

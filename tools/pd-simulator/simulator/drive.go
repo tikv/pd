@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -122,7 +123,7 @@ func (d *Driver) allocID() error {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	rootPath := path.Join("/pd", strconv.FormatUint(ClusterID, 10))
+	rootPath := path.Join("/pd", strconv.FormatUint(ClusterID.Load(), 10))
 	allocIDPath := path.Join(rootPath, "alloc_id")
 	_, err = etcdClient.Put(ctx, allocIDPath, string(typeutil.Uint64ToBytes(maxID+1000)))
 	if err != nil {
@@ -176,24 +177,20 @@ func (d *Driver) Tick() {
 	d.wg.Wait()
 }
 
-var HaltSchedule = false
+var HaltSchedule atomic.Bool
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	if !HaltSchedule {
+	if !HaltSchedule.Load() {
 		return false
 	}
-	length := uint64(len(d.conn.Nodes) + 1)
+	var stats []info.StoreStats
 	var stores []*metapb.Store
-	for index, s := range d.conn.Nodes {
-		if index >= length {
-			length = index + 1
-		}
+	for _, s := range d.conn.Nodes {
+		s.statsMutex.RLock()
 		stores = append(stores, s.Store)
-	}
-	stats := make([]info.StoreStats, length)
-	for index, node := range d.conn.Nodes {
-		stats[index] = *node.stats
+		stats = append(stats, *s.stats)
+		s.statsMutex.RUnlock()
 	}
 	return d.simCase.Checker(stores, d.raftEngine.regionsInfo, stats)
 }
@@ -252,11 +249,13 @@ func (d *Driver) GetBootstrapInfo(r *RaftEngine) (*metapb.Store, *metapb.Region,
 
 func (d *Driver) updateNodeAvailable() {
 	for storeID, n := range d.conn.Nodes {
+		n.statsMutex.Lock()
 		if n.hasExtraUsedSpace {
 			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID)) - uint64(d.simConfig.RaftStore.ExtraUsedSpace)
 		} else {
 			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID))
 		}
+		n.statsMutex.Unlock()
 	}
 }
 

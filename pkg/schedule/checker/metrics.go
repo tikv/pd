@@ -29,3 +29,113 @@ var (
 func init() {
 	prometheus.MustRegister(checkerCounter)
 }
+
+const (
+	// NOTE: these types are different from pkg/schedule/config/type.go,
+	// they are only used for prometheus metrics to keep the compatibility.
+	ruleChecker       = "rule_checker"
+	jointStateChecker = "joint_state_checker"
+	learnerChecker    = "learner_checker"
+	mergeChecker      = "merge_checker"
+	replicaChecker    = "replica_checker"
+	splitChecker      = "split_checker"
+)
+
+func ruleCheckerCounterWithEvent(event string) prometheus.Counter {
+	return checkerCounter.WithLabelValues(ruleChecker, event)
+}
+
+func jointStateCheckerCounterWithEvent(event string) prometheus.Counter {
+	return checkerCounter.WithLabelValues(jointStateChecker, event)
+}
+
+func mergeCheckerCounterWithEvent(event string) prometheus.Counter {
+	return checkerCounter.WithLabelValues(mergeChecker, event)
+}
+
+func replicaCheckerCounterWithEvent(event string) prometheus.Counter {
+	return checkerCounter.WithLabelValues(replicaChecker, event)
+}
+
+// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+var (
+	ruleCheckerCounter                            = ruleCheckerCounterWithEvent("check")
+	ruleCheckerPausedCounter                      = ruleCheckerCounterWithEvent("paused")
+	ruleCheckerRegionNoLeaderCounter              = ruleCheckerCounterWithEvent("region-no-leader")
+	ruleCheckerGetCacheCounter                    = ruleCheckerCounterWithEvent("get-cache")
+	ruleCheckerNeedSplitCounter                   = ruleCheckerCounterWithEvent("need-split")
+	ruleCheckerSetCacheCounter                    = ruleCheckerCounterWithEvent("set-cache")
+	ruleCheckerReplaceDownCounter                 = ruleCheckerCounterWithEvent("replace-down")
+	ruleCheckerPromoteWitnessCounter              = ruleCheckerCounterWithEvent("promote-witness")
+	ruleCheckerReplaceOfflineCounter              = ruleCheckerCounterWithEvent("replace-offline")
+	ruleCheckerAddRulePeerCounter                 = ruleCheckerCounterWithEvent("add-rule-peer")
+	ruleCheckerNoStoreAddCounter                  = ruleCheckerCounterWithEvent("no-store-add")
+	ruleCheckerNoStoreThenTryReplace              = ruleCheckerCounterWithEvent("no-store-then-try-replace")
+	ruleCheckerNoStoreReplaceCounter              = ruleCheckerCounterWithEvent("no-store-replace")
+	ruleCheckerFixPeerRoleCounter                 = ruleCheckerCounterWithEvent("fix-peer-role")
+	ruleCheckerFixLeaderRoleCounter               = ruleCheckerCounterWithEvent("fix-leader-role")
+	ruleCheckerNotAllowLeaderCounter              = ruleCheckerCounterWithEvent("not-allow-leader")
+	ruleCheckerFixFollowerRoleCounter             = ruleCheckerCounterWithEvent("fix-follower-role")
+	ruleCheckerNoNewLeaderCounter                 = ruleCheckerCounterWithEvent("no-new-leader")
+	ruleCheckerDemoteVoterRoleCounter             = ruleCheckerCounterWithEvent("demote-voter-role")
+	ruleCheckerRecentlyPromoteToNonWitnessCounter = ruleCheckerCounterWithEvent("recently-promote-to-non-witness")
+	ruleCheckerCancelSwitchToWitnessCounter       = ruleCheckerCounterWithEvent("cancel-switch-to-witness")
+	ruleCheckerSetVoterWitnessCounter             = ruleCheckerCounterWithEvent("set-voter-witness")
+	ruleCheckerSetLearnerWitnessCounter           = ruleCheckerCounterWithEvent("set-learner-witness")
+	ruleCheckerSetVoterNonWitnessCounter          = ruleCheckerCounterWithEvent("set-voter-non-witness")
+	ruleCheckerSetLearnerNonWitnessCounter        = ruleCheckerCounterWithEvent("set-learner-non-witness")
+	ruleCheckerMoveToBetterLocationCounter        = ruleCheckerCounterWithEvent("move-to-better-location")
+	ruleCheckerSkipRemoveOrphanPeerCounter        = ruleCheckerCounterWithEvent("skip-remove-orphan-peer")
+	ruleCheckerRemoveOrphanPeerCounter            = ruleCheckerCounterWithEvent("remove-orphan-peer")
+	ruleCheckerReplaceOrphanPeerCounter           = ruleCheckerCounterWithEvent("replace-orphan-peer")
+	ruleCheckerReplaceOrphanPeerNoFitCounter      = ruleCheckerCounterWithEvent("replace-orphan-peer-no-fit")
+
+	jointCheckCounter                 = jointStateCheckerCounterWithEvent("check")
+	jointCheckerPausedCounter         = jointStateCheckerCounterWithEvent("paused")
+	jointCheckerFailedCounter         = jointStateCheckerCounterWithEvent("create-operator-fail")
+	jointCheckerNewOpCounter          = jointStateCheckerCounterWithEvent("new-operator")
+	jointCheckerTransferLeaderCounter = jointStateCheckerCounterWithEvent("transfer-leader")
+
+	learnerCheckerPausedCounter = checkerCounter.WithLabelValues(learnerChecker, "paused")
+
+	mergeCheckerCounter                     = mergeCheckerCounterWithEvent("check")
+	mergeCheckerPausedCounter               = mergeCheckerCounterWithEvent("paused")
+	mergeCheckerRecentlySplitCounter        = mergeCheckerCounterWithEvent("recently-split")
+	mergeCheckerRecentlyStartCounter        = mergeCheckerCounterWithEvent("recently-start")
+	mergeCheckerNoLeaderCounter             = mergeCheckerCounterWithEvent("no-leader")
+	mergeCheckerNoNeedCounter               = mergeCheckerCounterWithEvent("no-need")
+	mergeCheckerUnhealthyRegionCounter      = mergeCheckerCounterWithEvent("unhealthy-region")
+	mergeCheckerAbnormalReplicaCounter      = mergeCheckerCounterWithEvent("abnormal-replica")
+	mergeCheckerHotRegionCounter            = mergeCheckerCounterWithEvent("hot-region")
+	mergeCheckerNoTargetCounter             = mergeCheckerCounterWithEvent("no-target")
+	mergeCheckerTargetTooLargeCounter       = mergeCheckerCounterWithEvent("target-too-large")
+	mergeCheckerSplitSizeAfterMergeCounter  = mergeCheckerCounterWithEvent("split-size-after-merge")
+	mergeCheckerSplitKeysAfterMergeCounter  = mergeCheckerCounterWithEvent("split-keys-after-merge")
+	mergeCheckerNewOpCounter                = mergeCheckerCounterWithEvent("new-operator")
+	mergeCheckerLargerSourceCounter         = mergeCheckerCounterWithEvent("larger-source")
+	mergeCheckerAdjNotExistCounter          = mergeCheckerCounterWithEvent("adj-not-exist")
+	mergeCheckerAdjRecentlySplitCounter     = mergeCheckerCounterWithEvent("adj-recently-split")
+	mergeCheckerAdjRegionHotCounter         = mergeCheckerCounterWithEvent("adj-region-hot")
+	mergeCheckerAdjDisallowMergeCounter     = mergeCheckerCounterWithEvent("adj-disallow-merge")
+	mergeCheckerAdjAbnormalPeerStoreCounter = mergeCheckerCounterWithEvent("adj-abnormal-peerstore")
+	mergeCheckerAdjSpecialPeerCounter       = mergeCheckerCounterWithEvent("adj-special-peer")
+	mergeCheckerAdjAbnormalReplicaCounter   = mergeCheckerCounterWithEvent("adj-abnormal-replica")
+
+	replicaCheckerCounter                         = replicaCheckerCounterWithEvent("check")
+	replicaCheckerPausedCounter                   = replicaCheckerCounterWithEvent("paused")
+	replicaCheckerNewOpCounter                    = replicaCheckerCounterWithEvent("new-operator")
+	replicaCheckerNoTargetStoreCounter            = replicaCheckerCounterWithEvent("no-target-store")
+	replicaCheckerNoWorstPeerCounter              = replicaCheckerCounterWithEvent("no-worst-peer")
+	replicaCheckerCreateOpFailedCounter           = replicaCheckerCounterWithEvent("create-operator-failed")
+	replicaCheckerAllRightCounter                 = replicaCheckerCounterWithEvent("all-right")
+	replicaCheckerNotBetterCounter                = replicaCheckerCounterWithEvent("not-better")
+	replicaCheckerRemoveExtraOfflineFailedCounter = replicaCheckerCounterWithEvent("remove-extra-offline-replica-failed")
+	replicaCheckerRemoveExtraDownFailedCounter    = replicaCheckerCounterWithEvent("remove-extra-down-replica-failed")
+	replicaCheckerNoStoreOfflineCounter           = replicaCheckerCounterWithEvent("no-store-offline")
+	replicaCheckerNoStoreDownCounter              = replicaCheckerCounterWithEvent("no-store-down")
+	replicaCheckerReplaceOfflineFailedCounter     = replicaCheckerCounterWithEvent("replace-offline-replica-failed")
+	replicaCheckerReplaceDownFailedCounter        = replicaCheckerCounterWithEvent("replace-down-replica-failed")
+
+	splitCheckerCounter       = checkerCounter.WithLabelValues(splitChecker, "check")
+	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitChecker, "paused")
+)

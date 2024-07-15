@@ -82,10 +82,11 @@ func NewRaftEngine(conf *cases.Case, conn *Connection, storeConfig *config.SimCo
 }
 
 func (r *RaftEngine) stepRegions() {
-	r.TraverseRegions(func(region *core.RegionInfo) {
+	regions := r.GetRegions()
+	for _, region := range regions {
 		r.stepLeader(region)
 		r.stepSplit(region)
-	})
+	}
 }
 
 func (r *RaftEngine) stepLeader(region *core.RegionInfo) {
@@ -228,7 +229,10 @@ func (r *RaftEngine) electNewLeader(region *core.RegionInfo) *metapb.Peer {
 func (r *RaftEngine) GetRegion(regionID uint64) *core.RegionInfo {
 	r.RLock()
 	defer r.RUnlock()
-	return r.regionsInfo.GetRegion(regionID)
+	if region := r.regionsInfo.GetRegion(regionID); region != nil {
+		return region.Clone()
+	}
+	return nil
 }
 
 // GetRegionChange returns a list of RegionID for a given store.
@@ -254,6 +258,13 @@ func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
 // TraverseRegions executes a function on all regions, and function need to be self-locked.
 func (r *RaftEngine) TraverseRegions(lockedFunc func(*core.RegionInfo)) {
 	r.regionsInfo.TraverseRegions(lockedFunc)
+}
+
+// GetRegions gets all RegionInfo from regionMap
+func (r *RaftEngine) GetRegions() []*core.RegionInfo {
+	r.RLock()
+	defer r.RUnlock()
+	return r.regionsInfo.GetRegions()
 }
 
 // SetRegion sets the RegionInfo with regionID

@@ -41,7 +41,7 @@ func TestWatcher(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pd1 := cluster.GetLeaderServer()
 	re.NotNil(pd1)
 
@@ -49,7 +49,7 @@ func TestWatcher(t *testing.T) {
 	re.NoError(err)
 	err = pd2.Run()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	time.Sleep(5 * time.Second)
 	pd3, err := cluster.Join(ctx)
@@ -61,7 +61,7 @@ func TestWatcher(t *testing.T) {
 	re.Equal(pd1.GetConfig().Name, pd3.GetLeader().GetName())
 	err = pd1.Stop()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	re.Equal(pd2.GetConfig().Name, pd2.GetLeader().GetName())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
 	testutil.Eventually(re, func() bool {
@@ -79,7 +79,7 @@ func TestWatcherCompacted(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pd1 := cluster.GetLeaderServer()
 	re.NotNil(pd1)
 	client := pd1.GetEtcdClient()
