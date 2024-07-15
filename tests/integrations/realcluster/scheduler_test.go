@@ -111,7 +111,7 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 			}
 		}
 		return true
-	}, testutil.WithWaitFor(time.Minute))
+	}, testutil.WithWaitFor(90*time.Second))
 
 	// disable schedule for region1
 	labelRule := &pd.LabelRule{
@@ -149,7 +149,7 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 			}
 		}
 		return true
-	}, testutil.WithWaitFor(time.Minute))
+	}, testutil.WithWaitFor(90*time.Second))
 
 	re.NoError(pdHTTPCli.DeleteScheduler(ctx, schedulers.EvictLeaderName))
 	re.NoError(pdHTTPCli.CreateScheduler(ctx, schedulers.GrantLeaderName, uint64(region1.Leader.StoreID)))
@@ -168,7 +168,7 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 			}
 		}
 		return true
-	}, testutil.WithWaitFor(time.Minute))
+	}, testutil.WithWaitFor(90*time.Second))
 
 	pdHTTPCli.PatchRegionLabelRules(ctx, &pd.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
 	labelRules, err = pdHTTPCli.GetAllRegionLabelRules(ctx)
@@ -184,5 +184,5 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 			}
 		}
 		return true
-	}, testutil.WithWaitFor(time.Minute))
+	}, testutil.WithWaitFor(90*time.Second))
 }
