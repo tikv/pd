@@ -478,17 +478,18 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	// Make sure the resource group is watched by the controller and marked as tombstone.
 	testutil.Eventually(re, func() bool {
 		gc, err := controller.GetResourceGroup(rg.Name)
-		re.NoError(err)
-		return gc.GetName() == "default"
+		return err.Error() == fmt.Sprintf("%s does not exist", rg.Name) && gc == nil
 	}, testutil.WithTickInterval(50*time.Millisecond))
 	// Add the resource group again.
 	resp, err = cli.AddResourceGroup(suite.ctx, rg)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
-	// Make sure the resource group can be set to active again.
+	// Make sure the resource group can be get by the controller again.
 	testutil.Eventually(re, func() bool {
 		gc, err := controller.GetResourceGroup(rg.Name)
-		re.NoError(err)
+		if err != nil {
+			re.ErrorContains(err, fmt.Sprintf("%s does not exist", rg.Name))
+		}
 		return gc.GetName() == rg.Name
 	}, testutil.WithTickInterval(50*time.Millisecond))
 }
