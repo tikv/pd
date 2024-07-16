@@ -161,7 +161,7 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 		{15000, 12500, -27500, defaultTrickleMs},
 		{12500, 11250, -28750, defaultTrickleMs},
 		{11250, 10625, -29375, defaultTrickleMs},
-		// PR_PER_SEC is close to 2000, RU_PER_SEC =  assignedTokens / TrickleTime.
+		// RU_PER_SEC is close to 2000, RU_PER_SEC =  assignedTokens / TrickleTime.
 		{10625, 10312.5, -29687.5, defaultTrickleMs},
 		{10312.5, 10156.25, -29843.75, defaultTrickleMs},
 		{10156.25, 10078.125, -29921.875, defaultTrickleMs},
