@@ -102,7 +102,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 					return []*operator.Operator{op}
 				}
-				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
+				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.Name(), operator.OpReplica.String()).Inc()
 				c.pendingProcessedRegions.Put(region.GetID(), nil)
 			}
 		}
@@ -114,7 +114,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
-			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
+			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.Name(), operator.OpReplica.String()).Inc()
 			c.pendingProcessedRegions.Put(region.GetID(), nil)
 		}
 	}
