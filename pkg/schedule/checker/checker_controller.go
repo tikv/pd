@@ -38,8 +38,8 @@ import (
 
 const (
 	checkSuspectRangesInterval = 100 * time.Millisecond
-	// DefaultWaitingCacheSize is the default length of waiting list.
-	DefaultWaitingCacheSize = 100000
+	// DefaultPendingRegionCacheSize is the default length of waiting list.
+	DefaultPendingRegionCacheSize = 100000
 	// For 1,024,000 regions, patrolScanRegionLimit is 1000, which is max(patrolScanRegionMinLimit, 1,024,000/patrolRegionPartition)
 	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
 	patrolScanRegionMinLimit = 128
@@ -75,8 +75,9 @@ type Controller struct {
 
 // NewController create a new Controller.
 func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
-	pendingProcessedRegions := cache.NewDefaultCache(DefaultWaitingCacheSize)
+	pendingProcessedRegions := cache.NewDefaultCache(DefaultPendingRegionCacheSize)
 	return &Controller{
+		ctx:                     ctx,
 		cluster:                 cluster,
 		conf:                    conf,
 		opController:            opController,
