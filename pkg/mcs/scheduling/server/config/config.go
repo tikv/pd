@@ -146,10 +146,8 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	c.Security.Encryption.Adjust()
-
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = utils.DefaultLogFormat
+	if err := c.Security.Encryption.Adjust(); err != nil {
+		return err
 	}
 
 	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
@@ -164,6 +162,8 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
 }
 
 // GetName returns the Name
@@ -683,6 +683,10 @@ func (o *PersistConfig) SetSplitMergeInterval(splitMergeInterval time.Duration) 
 	v.SplitMergeInterval = typeutil.Duration{Duration: splitMergeInterval}
 	o.SetScheduleConfig(v)
 }
+
+// SetSchedulingAllowanceStatus sets the scheduling allowance status to help distinguish the source of the halt.
+// TODO: support this metrics for the scheduling service in the future.
+func (*PersistConfig) SetSchedulingAllowanceStatus(bool, string) {}
 
 // SetHaltScheduling set HaltScheduling.
 func (o *PersistConfig) SetHaltScheduling(halt bool, _ string) {

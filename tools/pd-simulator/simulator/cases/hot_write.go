@@ -15,37 +15,43 @@
 package cases
 
 import (
-	"math/rand"
-
+	"fmt"
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newHotWrite() *Case {
-	var simCase Case
+var hotWriteStore uint64 = 1
 
-	storeNum, regionNum := getStoreNum(), getRegionNum()
+func newHotWrite(config *sc.SimConfig) *Case {
+	var simCase Case
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	allStores := make(map[uint64]struct{}, totalStore)
 	// Initialize the cluster
-	for i := 1; i <= storeNum; i++ {
+	for i := 0; i < totalStore; i++ {
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
-		storeIDs := rand.Perm(storeNum)
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      simutil.IDAllocator.NextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   96 * units.MiB,
@@ -53,14 +59,20 @@ func newHotWrite() *Case {
 		})
 	}
 
+	// select the first store as hot write store.
+	for store := range allStores {
+		hotWriteStore = store
+		break
+	}
+
 	// Events description
-	// select regions on store 1 as hot write regions.
-	selectStoreNum := storeNum
-	writeFlow := make(map[uint64]int64, selectStoreNum)
+	// select regions on `hotWriteStore` as hot write regions.
+	selectRegionNum := totalStore
+	writeFlow := make(map[uint64]int64, selectRegionNum)
 	for _, r := range simCase.Regions {
-		if r.Leader.GetStoreId() == 1 {
+		if r.Leader.GetStoreId() == hotWriteStore {
 			writeFlow[r.ID] = 2 * units.MiB
-			if len(writeFlow) == selectStoreNum {
+			if len(writeFlow) == selectRegionNum {
 				break
 			}
 		}
@@ -69,24 +81,31 @@ func newHotWrite() *Case {
 	e.Step = func(int64) map[uint64]int64 {
 		return writeFlow
 	}
-
 	simCase.Events = []EventDescriptor{e}
-
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		leaderCount := make([]int, storeNum)
-		peerCount := make([]int, storeNum)
-		for id := range writeFlow {
-			region := regions.GetRegion(id)
-			leaderCount[int(region.GetLeader().GetStoreId()-1)]++
-			for _, p := range region.GetPeers() {
-				peerCount[int(p.GetStoreId()-1)]++
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				if store.Id == hotWriteStore {
+					simutil.Logger.Error(fmt.Sprintf("hot store %d is removed", hotReadStore))
+					return true
+				}
+				delete(allStores, store.GetId())
 			}
 		}
-		simutil.Logger.Info("current hot region counts", zap.Reflect("leader", leaderCount), zap.Reflect("peer", peerCount))
+
+		leaderCount := make(map[uint64]int, len(allStores))
+		peerCount := make(map[uint64]int, totalStore)
+		for id := range writeFlow {
+			region := regions.GetRegion(id)
+			leaderCount[region.GetLeader().GetStoreId()]++
+			for _, p := range region.GetPeers() {
+				peerCount[p.GetStoreId()]++
+			}
+		}
 
 		// check count diff <= 2.
-		var minLeader, maxLeader, minPeer, maxPeer int
+		var minLeader, maxLeader, minPeer, maxPeer uint64
 		for i := range leaderCount {
 			if leaderCount[i] > leaderCount[maxLeader] {
 				maxLeader = i

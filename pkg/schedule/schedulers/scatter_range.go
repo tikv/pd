@@ -138,11 +138,13 @@ func newScatterRangeScheduler(opController *operator.Controller, config *scatter
 			opController,
 			&balanceLeaderSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
 			WithBalanceLeaderName("scatter-range-leader"),
+			WithBalanceLeaderFilterCounterName("scatter-range-leader"),
 		),
 		balanceRegion: newBalanceRegionScheduler(
 			opController,
 			&balanceRegionSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
 			WithBalanceRegionName("scatter-range-region"),
+			WithBalanceRegionFilterCounterName("scatter-range-region"),
 		),
 	}
 	return scheduler
@@ -274,8 +276,12 @@ func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.
 	} else {
 		args = append(args, string(handler.config.GetEndKey()))
 	}
-	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
+	err := handler.config.BuildWithArgs(args)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err = handler.config.Persist()
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}

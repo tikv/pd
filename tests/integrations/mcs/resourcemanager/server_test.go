@@ -43,6 +43,7 @@ func TestResourceManagerServer(t *testing.T) {
 	re.NoError(err)
 
 	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	leader := cluster.GetServer(leaderName)
 
 	s, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
@@ -63,7 +64,7 @@ func TestResourceManagerServer(t *testing.T) {
 	// Test registered REST HTTP Handler
 	url := addr + "/resource-manager/api/v1/config"
 	{
-		resp, err := http.Get(url + "/groups")
+		resp, err := tests.TestDialClient.Get(url + "/groups")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -78,13 +79,13 @@ func TestResourceManagerServer(t *testing.T) {
 		}
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
-		resp, err := http.Post(url+"/group", "application/json", strings.NewReader(string(createJSON)))
+		resp, err := tests.TestDialClient.Post(url+"/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
 	}
 	{
-		resp, err := http.Get(url + "/group/pingcap")
+		resp, err := tests.TestDialClient.Get(url + "/group/pingcap")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -95,7 +96,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	// Test metrics handler
 	{
-		resp, err := http.Get(addr + "/metrics")
+		resp, err := tests.TestDialClient.Get(addr + "/metrics")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -106,7 +107,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	// Test status handler
 	{
-		resp, err := http.Get(addr + "/status")
+		resp, err := tests.TestDialClient.Get(addr + "/status")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)

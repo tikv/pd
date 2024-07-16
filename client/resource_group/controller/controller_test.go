@@ -24,8 +24,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/errs"
 )
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
@@ -44,7 +49,7 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 			JobTypes: []string{"lightning", "br"},
 		},
 	}
-	ch1 := make(chan struct{})
+	ch1 := make(chan notifyMsg)
 	ch2 := make(chan *groupCostController)
 	gc, err := newGroupCostController(group, DefaultRUConfig(), ch1, ch2)
 	re.NoError(err)
@@ -54,7 +59,6 @@ func createTestGroupCostController(re *require.Assertions) *groupCostController 
 func TestGroupControlBurstable(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
-	gc.initRunState()
 	args := tokenBucketReconfigureArgs{
 		NewRate:  1000,
 		NewBurst: -1,
@@ -69,7 +73,6 @@ func TestGroupControlBurstable(t *testing.T) {
 func TestRequestAndResponseConsumption(t *testing.T) {
 	re := require.New(t)
 	gc := createTestGroupCostController(re)
-	gc.initRunState()
 	testCases := []struct {
 		req  *TestRequestInfo
 		resp *TestResponseInfo
@@ -116,4 +119,206 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
 	}
+}
+
+func TestResourceGroupThrottledError(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+	req := &TestRequestInfo{
+		isWrite:    true,
+		writeBytes: 10000000,
+	}
+	// The group is throttled
+	_, _, _, _, err := gc.onRequestWait(context.TODO(), req)
+	re.Error(err)
+	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
+}
+
+// MockResourceGroupProvider is a mock implementation of the ResourceGroupProvider interface.
+type MockResourceGroupProvider struct {
+	mock.Mock
+}
+
+func newMockResourceGroupProvider() *MockResourceGroupProvider {
+	mockProvider := &MockResourceGroupProvider{}
+	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil)
+	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
+	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
+	return mockProvider
+}
+
+func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+	args := m.Called(ctx, resourceGroupName, opts)
+	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
+	args := m.Called(ctx, opts)
+	return args.Get(0).([]*rmpb.ResourceGroup), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error) {
+	args := m.Called(ctx, metaGroup)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error) {
+	args := m.Called(ctx, metaGroup)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
+	args := m.Called(ctx, resourceGroupName)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error) {
+	args := m.Called(ctx, request)
+	return args.Get(0).([]*rmpb.TokenBucketResponse), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
+	args := m.Called(ctx)
+	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...pd.OpOption) (chan []*meta_storagepb.Event, error) {
+	args := m.Called(ctx, key, opts)
+	return args.Get(0).(chan []*meta_storagepb.Event), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ...pd.OpOption) (*meta_storagepb.GetResponse, error) {
+	args := m.Called(ctx, key, opts)
+	return args.Get(0).(*meta_storagepb.GetResponse), args.Error(1)
+}
+
+func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport", fmt.Sprintf("return(\"%s\")", defaultResourceGroupName)))
+	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport")
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport", fmt.Sprintf("return(\"%s\")", "test-group")))
+	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport")
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil)
+	controller.Start(ctx)
+
+	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+	testResourceGroup := &rmpb.ResourceGroup{Name: "test-group", Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+	mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultResourceGroup, nil)
+	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+
+	c1, err := controller.tryGetResourceGroup(ctx, defaultResourceGroupName)
+	re.NoError(err)
+	re.Equal(defaultResourceGroup, c1.meta)
+
+	c2, err := controller.tryGetResourceGroup(ctx, "test-group")
+	re.NoError(err)
+	re.Equal(testResourceGroup, c2.meta)
+
+	var expectResp []*rmpb.TokenBucketResponse
+	recTestGroupAcquireTokenRequest := make(chan bool)
+	mockProvider.On("AcquireTokenBuckets", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		request := args.Get(1).(*rmpb.TokenBucketsRequest)
+		var responses []*rmpb.TokenBucketResponse
+		for _, req := range request.Requests {
+			if req.ResourceGroupName == defaultResourceGroupName {
+				// no response the default group request, that's mean `len(c.run.currentRequests) != 0` always.
+				time.Sleep(100 * time.Second)
+				responses = append(responses, &rmpb.TokenBucketResponse{
+					ResourceGroupName: defaultResourceGroupName,
+					GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
+						{
+							GrantedTokens: &rmpb.TokenBucket{
+								Tokens: 100000,
+							},
+						},
+					},
+				})
+			} else {
+				responses = append(responses, &rmpb.TokenBucketResponse{
+					ResourceGroupName: req.ResourceGroupName,
+					GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
+						{
+							GrantedTokens: &rmpb.TokenBucket{
+								Tokens: 100000,
+							},
+						},
+					},
+				})
+			}
+		}
+		// receive test-group request
+		if len(request.Requests) == 1 && request.Requests[0].ResourceGroupName == "test-group" {
+			recTestGroupAcquireTokenRequest <- true
+		}
+		expectResp = responses
+	}).Return(expectResp, nil)
+	// wait default group request token by PeriodicReport.
+	time.Sleep(2 * time.Second)
+	counter := c2.run.requestUnitTokens[0]
+	counter.limiter.mu.Lock()
+	counter.limiter.notify()
+	counter.limiter.mu.Unlock()
+	select {
+	case res := <-recTestGroupAcquireTokenRequest:
+		re.True(res)
+	case <-time.After(5 * time.Second):
+		re.Fail("timeout")
+	}
+}
+
+func TestGetController(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mockProvider := newMockResourceGroupProvider()
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil)
+	controller.Start(ctx)
+
+	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+	testResourceGroup := &rmpb.ResourceGroup{Name: "test-group", Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
+	mockProvider.On("GetResourceGroup", mock.Anything, defaultResourceGroupName, mock.Anything).Return(defaultResourceGroup, nil)
+	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+	mockProvider.On("GetResourceGroup", mock.Anything, "test-group-non-existent", mock.Anything).Return((*rmpb.ResourceGroup)(nil), nil)
+
+	c, err := controller.GetResourceGroup("test-group-non-existent")
+	re.Error(err)
+	re.Nil(c)
+	c, err = controller.GetResourceGroup(defaultResourceGroupName)
+	re.NoError(err)
+	re.Equal(defaultResourceGroup, c)
+	c, err = controller.GetResourceGroup("test-group")
+	re.NoError(err)
+	re.Equal(testResourceGroup, c)
+	_, _, _, _, err = controller.OnRequestWait(ctx, "test-group", &TestRequestInfo{})
+	re.NoError(err)
+	_, err = controller.OnResponse("test-group", &TestRequestInfo{}, &TestResponseInfo{})
+	re.NoError(err)
+	// Mark the tombstone manually to test the fallback case.
+	gc, err := controller.tryGetResourceGroup(ctx, "test-group")
+	re.NoError(err)
+	gc.tombstone.Store(true)
+	c, err = controller.GetResourceGroup("test-group")
+	re.NoError(err)
+	re.Equal(defaultResourceGroup, c)
+	_, _, _, _, err = controller.OnRequestWait(ctx, "test-group", &TestRequestInfo{})
+	re.NoError(err)
+	_, err = controller.OnResponse("test-group", &TestRequestInfo{}, &TestResponseInfo{})
+	re.NoError(err)
+	// Mark the default group tombstone manually to test the fallback case.
+	gc, err = controller.tryGetResourceGroup(ctx, defaultResourceGroupName)
+	re.NoError(err)
+	gc.tombstone.Store(true)
+	c, err = controller.GetResourceGroup(defaultResourceGroupName)
+	re.NoError(err)
+	re.Equal(defaultResourceGroup, c)
+	_, _, _, _, err = controller.OnRequestWait(ctx, defaultResourceGroupName, &TestRequestInfo{})
+	re.NoError(err)
+	_, err = controller.OnResponse(defaultResourceGroupName, &TestRequestInfo{}, &TestResponseInfo{})
+	re.NoError(err)
 }

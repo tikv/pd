@@ -34,10 +34,11 @@ import (
 )
 
 const (
-	defaultCampaignTimesSlot   = 10
-	watchLoopUnhealthyTimeout  = 60 * time.Second
-	campaignTimesRecordTimeout = 5 * time.Minute
+	defaultCampaignTimesSlot  = 10
+	watchLoopUnhealthyTimeout = 60 * time.Second
 )
+
+var campaignTimesRecordTimeout = 5 * time.Minute
 
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
@@ -114,6 +115,7 @@ func (ls *Leadership) GetLeaderKey() string {
 }
 
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
+// Need to make sure `AddCampaignTimes` is called before this function.
 func (ls *Leadership) GetCampaignTimesNum() int {
 	if ls == nil {
 		return 0
@@ -129,8 +131,8 @@ func (ls *Leadership) ResetCampaignTimes() {
 	ls.campaignTimes = make([]time.Time, 0, defaultCampaignTimesSlot)
 }
 
-// addCampaignTimes is used to add the campaign times of the leader.
-func (ls *Leadership) addCampaignTimes() {
+// AddCampaignTimes is used to add the campaign times of the leader.
+func (ls *Leadership) AddCampaignTimes() {
 	if ls == nil {
 		return
 	}
@@ -138,7 +140,7 @@ func (ls *Leadership) addCampaignTimes() {
 		if time.Since(ls.campaignTimes[i]) > campaignTimesRecordTimeout {
 			// remove the time which is more than `campaignTimesRecordTimeout`
 			// array is sorted by time
-			ls.campaignTimes = ls.campaignTimes[i:]
+			ls.campaignTimes = ls.campaignTimes[i+1:]
 			break
 		}
 	}
@@ -148,7 +150,6 @@ func (ls *Leadership) addCampaignTimes() {
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
-	ls.addCampaignTimes()
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
 	newLease := &lease{
@@ -160,7 +161,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
 		var member pdpb.Member
-		member.Unmarshal([]byte(leaderData))
+		_ = member.Unmarshal([]byte(leaderData))
 		name, ok := val.(string)
 		if ok && member.Name == name {
 			failpoint.Return(errors.Errorf("failed to grant lease"))

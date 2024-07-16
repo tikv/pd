@@ -333,7 +333,7 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
 	mustBootstrapCluster(re, svr)
 
-	regionCount := 100000
+	regionCount := 10000
 	tu.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
@@ -468,6 +468,41 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	for i, v := range regionIDs {
 		re.Equal(regions.Regions[i].ID, v)
 	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&format=hex", suite.urlPrefix, hex.EncodeToString([]byte("b")))
+	regionIDs = []uint64{3, 4, 5, 99}
+	regions = &response.RegionsInfo{}
+	err = tu.ReadGetJSON(re, testDialClient, url, regions)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
+	for i, v := range regionIDs {
+		re.Equal(regions.Regions[i].ID, v)
+	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s&format=hex",
+		suite.urlPrefix, hex.EncodeToString([]byte("b")), hex.EncodeToString([]byte("g")))
+	regionIDs = []uint64{3, 4}
+	regions = &response.RegionsInfo{}
+	err = tu.ReadGetJSON(re, testDialClient, url, regions)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
+	for i, v := range regionIDs {
+		re.Equal(regions.Regions[i].ID, v)
+	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s&format=hex",
+		suite.urlPrefix, hex.EncodeToString([]byte("b")), hex.EncodeToString([]byte{0xFF, 0xFF, 0xCC}))
+	regionIDs = []uint64{3, 4, 5, 99}
+	regions = &response.RegionsInfo{}
+	err = tu.ReadGetJSON(re, testDialClient, url, regions)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
+	for i, v := range regionIDs {
+		re.Equal(regions.Regions[i].ID, v)
+	}
+	// test invalid key
+	url = fmt.Sprintf("%s/regions/key?key=%s&format=hex", suite.urlPrefix, "invalid")
+	err = tu.CheckGetJSON(testDialClient, url, nil,
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringEqual(re, "\"encoding/hex: invalid byte: U+0069 'i'\"\n"))
+	re.NoError(err)
 }
 
 // Start a new test suite to prevent from being interfered by other tests.

@@ -43,7 +43,7 @@ func TestSimpleJoin(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	pd1 := cluster.GetServer("pd1")
 	client := pd1.GetEtcdClient()
@@ -92,7 +92,7 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
@@ -125,7 +125,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
 
@@ -155,7 +155,7 @@ func TestFailedPDJoinsPreviousCluster(t *testing.T) {
 	re.NoError(err)
 
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	// Join the second PD.
 	pd2, err := cluster.Join(ctx)

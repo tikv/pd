@@ -234,6 +234,7 @@ const (
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
+	defaultLogLevel  = "info"
 
 	defaultServerMemoryLimit          = 0
 	minServerMemoryLimit              = 0
@@ -466,10 +467,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.MicroService.adjust(configMetaData.Child("micro-service"))
 
-	c.Security.Encryption.Adjust()
-
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = defaultLogFormat
+	if err := c.Security.Encryption.Adjust(); err != nil {
+		return err
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
@@ -481,6 +480,8 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, defaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, defaultLogLevel)
 }
 
 // Clone returns a cloned configuration.
@@ -580,7 +581,9 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
 	}
-	c.migrateConfigurationFromFile(meta)
+	if err := c.migrateConfigurationFromFile(meta); err != nil {
+		return err
+	}
 	return c.Validate()
 }
 

@@ -129,7 +129,9 @@ func (m *Manager) Init(ctx context.Context) error {
 		return err
 	}
 	// Load resource group meta info from storage.
+	m.Lock()
 	m.groups = make(map[string]*ResourceGroup)
+	m.Unlock()
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
@@ -347,7 +349,9 @@ func (m *Manager) persistResourceGroupRunningState() {
 		m.RLock()
 		group, ok := m.groups[keys[idx]]
 		if ok {
-			group.persistStates(m.storage)
+			if err := group.persistStates(m.storage); err != nil {
+				log.Error("persist resource group state failed", zap.Error(err))
+			}
 		}
 		m.RUnlock()
 	}

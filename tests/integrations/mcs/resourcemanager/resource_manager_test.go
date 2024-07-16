@@ -78,6 +78,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
+	re.NotNil(leader)
 	waitLeader(re, suite.client, leader.GetAddr())
 
 	suite.initGroups = []*rmpb.ResourceGroup{
@@ -269,7 +270,8 @@ func (suite *resourceManagerClientTestSuite) TestWatchResourceGroup() {
 		testutil.Eventually(re, func() bool {
 			name := groupNamePrefix + strconv.Itoa(i)
 			meta = controller.GetActiveResourceGroup(name)
-			return meta == nil
+			// The deleted resource group may not be immediately removed from the controller.
+			return meta == nil || meta.Name == "default"
 		}, testutil.WithTickInterval(50*time.Millisecond))
 	}
 }
@@ -401,8 +403,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		CPUMsCost:        1,
 	}
 
-	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg, controller.EnableSingleGroupByKeyspace())
+	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
 	controller.Start(suite.ctx)
+	defer controller.Stop()
 
 	testCases := []struct {
 		resourceGroupName string
@@ -463,9 +466,31 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	wreq := tcs.makeWriteRequest()
 	_, _, _, _, err = controller.OnRequestWait(suite.ctx, rg.Name, wreq)
 	re.Error(err)
-	time.Sleep(time.Millisecond * 200)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate"))
-	controller.Stop()
+
+	group, err := controller.GetResourceGroup(rg.Name)
+	re.NoError(err)
+	re.Equal(rg, group)
+	// Delete the resource group and make sure it is tombstone.
+	resp, err = cli.DeleteResourceGroup(suite.ctx, rg.Name)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	// Make sure the resource group is watched by the controller and marked as tombstone.
+	testutil.Eventually(re, func() bool {
+		gc, err := controller.GetResourceGroup(rg.Name)
+		re.NoError(err)
+		return gc.GetName() == "default"
+	}, testutil.WithTickInterval(50*time.Millisecond))
+	// Add the resource group again.
+	resp, err = cli.AddResourceGroup(suite.ctx, rg)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	// Make sure the resource group can be set to active again.
+	testutil.Eventually(re, func() bool {
+		gc, err := controller.GetResourceGroup(rg.Name)
+		re.NoError(err)
+		return gc.GetName() == rg.Name
+	}, testutil.WithTickInterval(50*time.Millisecond))
 }
 
 // TestSwitchBurst is used to test https://github.com/tikv/pd/issues/6209
@@ -957,7 +982,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
-		resp, err := http.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
+		resp, err := tests.TestDialClient.Post(getAddr(i)+"/resource-manager/api/v1/config/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
 		resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -982,7 +1007,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		}
 
 		// Get Resource Group
-		resp, err = http.Get(getAddr(i) + "/resource-manager/api/v1/config/group/" + tcase.name)
+		resp, err = tests.TestDialClient.Get(getAddr(i) + "/resource-manager/api/v1/config/group/" + tcase.name)
 		re.NoError(err)
 		re.Equal(http.StatusOK, resp.StatusCode)
 		respString, err := io.ReadAll(resp.Body)
@@ -995,7 +1020,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 
 		// Last one, Check list and delete all resource groups
 		if i == len(testCasesSet1)-1 {
-			resp, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
+			resp, err := tests.TestDialClient.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
 			re.Equal(http.StatusOK, resp.StatusCode)
 			respString, err := io.ReadAll(resp.Body)
@@ -1023,7 +1048,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 			}
 
 			// verify again
-			resp1, err := http.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
+			resp1, err := tests.TestDialClient.Get(getAddr(i) + "/resource-manager/api/v1/config/groups")
 			re.NoError(err)
 			re.Equal(http.StatusOK, resp1.StatusCode)
 			respString1, err := io.ReadAll(resp1.Body)
@@ -1046,7 +1071,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 		serverList = append(serverList, s)
 	}
 	re.NoError(tests.RunServers(serverList))
-	suite.cluster.WaitLeader()
+	re.NotEmpty(suite.cluster.WaitLeader())
 	// re-connect client as well
 	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
@@ -1276,6 +1301,11 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 	resp, err := cli.AddResourceGroup(suite.ctx, group)
 	re.NoError(err)
 	re.Contains(resp, "Success!")
+	group2 := *group
+	group2.Name = "tombstone_test"
+	resp, err = cli.AddResourceGroup(suite.ctx, &group2)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/fastCleanup", `return(true)`))
 	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
@@ -1298,9 +1328,19 @@ func (suite *resourceManagerClientTestSuite) TestRemoveStaleResourceGroup() {
 		controller.OnResponse(group.Name, rreq, rres)
 		time.Sleep(100 * time.Microsecond)
 	}
-	time.Sleep(1 * time.Second)
+	testutil.Eventually(re, func() bool {
+		meta := controller.GetActiveResourceGroup(group.Name)
+		return meta == nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
-	re.Nil(controller.GetActiveResourceGroup(group.Name))
+	// Mock server deleted the resource group
+	resp, err = cli.DeleteResourceGroup(suite.ctx, group2.Name)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	testutil.Eventually(re, func() bool {
+		meta := controller.GetActiveResourceGroup(group2.Name)
+		return meta == nil
+	}, testutil.WithTickInterval(50*time.Millisecond))
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/fastCleanup"))
 	controller.Stop()
@@ -1433,12 +1473,14 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 
 	configURL := "/resource-manager/api/v1/config/controller"
 	waitDuration := 10 * time.Second
+	tokenRPCMaxDelay := 2 * time.Second
 	readBaseCost := 1.5
 	defaultCfg := controller.DefaultConfig()
 	expectCfg := server.ControllerConfig{
 		// failpoint enableDegradedMode will setup and set it be 1s.
 		DegradedModeWaitDuration: typeutil.NewDuration(time.Second),
 		LTBMaxWaitDuration:       typeutil.Duration(defaultCfg.LTBMaxWaitDuration),
+		LTBTokenRPCMaxDelay:      typeutil.Duration(defaultCfg.LTBTokenRPCMaxDelay),
 		RequestUnit:              server.RequestUnitConfig(defaultCfg.RequestUnit),
 		EnableControllerTraceLog: defaultCfg.EnableControllerTraceLog,
 	}
@@ -1460,6 +1502,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 			configJSON: fmt.Sprintf(`{"degraded-mode-wait-duration": "%v"}`, waitDuration),
 			value:      waitDuration,
 			expected:   func(ruConfig *controller.RUConfig) { ruConfig.DegradedModeWaitDuration = waitDuration },
+		},
+		{
+			configJSON: fmt.Sprintf(`{"ltb-token-rpc-max-delay": "%v"}`, tokenRPCMaxDelay),
+			value:      waitDuration,
+			expected: func(ruConfig *controller.RUConfig) {
+				ruConfig.WaitRetryTimes = int(tokenRPCMaxDelay / ruConfig.WaitRetryInterval)
+			},
 		},
 		{
 			configJSON: fmt.Sprintf(`{"ltb-max-wait-duration": "%v"}`, waitDuration),
