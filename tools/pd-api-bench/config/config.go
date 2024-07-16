@@ -96,18 +96,21 @@ func (c *Config) Parse(arguments []string) error {
 // InitCoordinator set case config from config itself.
 func (c *Config) InitCoordinator(co *cases.Coordinator) {
 	for name, cfg := range c.HTTP {
+		cfg := cfg
 		err := co.SetHTTPCase(name, &cfg)
 		if err != nil {
 			log.Error("create HTTP case failed", zap.Error(err))
 		}
 	}
 	for name, cfg := range c.GRPC {
+		cfg := cfg
 		err := co.SetGRPCCase(name, &cfg)
 		if err != nil {
 			log.Error("create gRPC case failed", zap.Error(err))
 		}
 	}
 	for name, cfg := range c.ETCD {
+		cfg := cfg
 		err := co.SetETCDCase(name, &cfg)
 		if err != nil {
 			log.Error("create etcd case failed", zap.Error(err))

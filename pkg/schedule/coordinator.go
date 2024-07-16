@@ -23,7 +23,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -90,8 +89,8 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 		cluster:               cluster,
 		prepareChecker:        newPrepareChecker(),
 		checkers:              checkers,
-		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddSuspectRegions),
-		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddSuspectRegions),
+		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddPendingProcessedRegions),
+		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddPendingProcessedRegions),
 		schedulers:            schedulers,
 		opController:          opController,
 		hbStreams:             hbStreams,
@@ -112,11 +111,6 @@ func (c *Coordinator) AreSchedulersInitialized() bool {
 	c.RLock()
 	defer c.RUnlock()
 	return c.schedulersInitialized
-}
-
-// GetWaitingRegions returns the regions in the waiting list.
-func (c *Coordinator) GetWaitingRegions() []*cache.Item {
-	return c.checkers.GetWaitingRegions()
 }
 
 // IsPendingRegion returns if the region is in the pending list.

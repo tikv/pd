@@ -240,7 +240,8 @@ func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
 	}
 	node.Stop()
 
-	raft.TraverseRegions(func(region *core.RegionInfo) {
+	regions := raft.GetRegions()
+	for _, region := range regions {
 		storeIDs := region.GetStoreIDs()
 		if _, ok := storeIDs[node.Id]; ok {
 			downPeer := &pdpb.PeerStats{
@@ -250,6 +251,6 @@ func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
 			region = region.Clone(core.WithDownPeers(append(region.GetDownPeers(), downPeer)))
 			raft.SetRegion(region)
 		}
-	})
+	}
 	return true
 }

@@ -40,7 +40,7 @@ func TestRegionKeyFormat(t *testing.T) {
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	url := cluster.GetConfig().GetClientURL()
 	store := &metapb.Store{
 		Id:            1,
@@ -66,7 +66,7 @@ func TestRegion(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -270,7 +270,7 @@ func TestRegionNoLeader(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	url := cluster.GetConfig().GetClientURL()
 	stores := []*metapb.Store{
 		{

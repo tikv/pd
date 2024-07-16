@@ -46,7 +46,7 @@ func TestHotRegionStorage(t *testing.T) {
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -154,7 +154,7 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	stores := []*metapb.Store{
 		{
 			Id:            1,
@@ -246,7 +246,7 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	stores := []*metapb.Store{
 		{
 			Id:            1,

@@ -50,49 +50,46 @@ const (
 var (
 	denyCheckersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("checkers", "deny")
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
-	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
-	scanLimitGauge    = regionListGauge.WithLabelValues("scan_limit")
+	pendingProcessedRegionsGauge = regionListGauge.WithLabelValues("pending_processed_regions")
+	priorityListGauge            = regionListGauge.WithLabelValues("priority_list")
+	scanLimitGauge               = regionListGauge.WithLabelValues("scan_limit")
 )
 
 // Controller is used to manage all checkers.
 type Controller struct {
-	ctx                 context.Context
-	cluster             sche.CheckerCluster
-	conf                config.CheckerConfigProvider
-	opController        *operator.Controller
-	learnerChecker      *LearnerChecker
-	replicaChecker      *ReplicaChecker
-	ruleChecker         *RuleChecker
-	splitChecker        *SplitChecker
-	mergeChecker        *MergeChecker
-	jointStateChecker   *JointStateChecker
-	priorityInspector   *PriorityInspector
-	regionWaitingList   cache.Cache
-	suspectRegions      *cache.TTLUint64 // suspectRegions are regions that may need fix
-	suspectKeyRanges    *cache.TTLString // suspect key-range regions that may need fix
-	patrolRegionContext *PatrolRegionContext
+	ctx                     context.Context
+	cluster                 sche.CheckerCluster
+	conf                    config.CheckerConfigProvider
+	opController            *operator.Controller
+	learnerChecker          *LearnerChecker
+	replicaChecker          *ReplicaChecker
+	ruleChecker             *RuleChecker
+	splitChecker            *SplitChecker
+	mergeChecker            *MergeChecker
+	jointStateChecker       *JointStateChecker
+	priorityInspector       *PriorityInspector
+	pendingProcessedRegions cache.Cache
+	suspectKeyRanges        *cache.TTLString // suspect key-range regions that may need fix
+	patrolRegionContext     *PatrolRegionContext
 }
 
 // NewController create a new Controller.
 func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
-	regionWaitingList := cache.NewDefaultCache(DefaultWaitingCacheSize)
+	pendingProcessedRegions := cache.NewDefaultCache(DefaultWaitingCacheSize)
 	return &Controller{
-		ctx:                 ctx,
-		cluster:             cluster,
-		conf:                conf,
-		opController:        opController,
-		learnerChecker:      NewLearnerChecker(cluster),
-		replicaChecker:      NewReplicaChecker(cluster, conf, regionWaitingList),
-		ruleChecker:         NewRuleChecker(ctx, cluster, ruleManager, regionWaitingList),
-		splitChecker:        NewSplitChecker(cluster, ruleManager, labeler),
-		mergeChecker:        NewMergeChecker(ctx, cluster, conf),
-		jointStateChecker:   NewJointStateChecker(cluster),
-		priorityInspector:   NewPriorityInspector(cluster, conf),
-		regionWaitingList:   regionWaitingList,
-		suspectRegions:      cache.NewIDTTL(ctx, time.Minute, 3*time.Minute),
-		suspectKeyRanges:    cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
-		patrolRegionContext: &PatrolRegionContext{},
+		cluster:                 cluster,
+		conf:                    conf,
+		opController:            opController,
+		learnerChecker:          NewLearnerChecker(cluster),
+		replicaChecker:          NewReplicaChecker(cluster, conf, pendingProcessedRegions),
+		ruleChecker:             NewRuleChecker(ctx, cluster, ruleManager, pendingProcessedRegions),
+		splitChecker:            NewSplitChecker(cluster, ruleManager, labeler),
+		mergeChecker:            NewMergeChecker(ctx, cluster, conf),
+		jointStateChecker:       NewJointStateChecker(cluster),
+		priorityInspector:       NewPriorityInspector(cluster, conf),
+		pendingProcessedRegions: pendingProcessedRegions,
+		suspectKeyRanges:        cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
+		patrolRegionContext:     &PatrolRegionContext{},
 	}
 }
 
@@ -129,10 +126,8 @@ func (c *Controller) PatrolRegions() {
 
 			// Check priority regions first.
 			c.checkPriorityRegions()
-			// Check suspect regions first.
-			c.checkSuspectRegions()
-			// Check regions in the waiting list
-			c.checkWaitingRegions()
+			// Check pending processed regions first.
+			c.checkPendingProcessedRegions()
 
 			key, regions = c.checkRegions(key)
 			if len(regions) == 0 {
@@ -207,22 +202,6 @@ func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.
 	return
 }
 
-func (c *Controller) checkSuspectRegions() {
-	for _, id := range c.GetSuspectRegions() {
-		region := c.cluster.GetRegion(id)
-		c.patrolRegionContext.regionChan <- region
-	}
-}
-
-func (c *Controller) checkWaitingRegions() {
-	items := c.GetWaitingRegions()
-	waitingListGauge.Set(float64(len(items)))
-	for _, item := range items {
-		region := c.cluster.GetRegion(item.Key)
-		c.patrolRegionContext.regionChan <- region
-	}
-}
-
 // checkPriorityRegions checks priority regions
 func (c *Controller) checkPriorityRegions() {
 	items := c.GetPriorityRegions()
@@ -245,6 +224,15 @@ func (c *Controller) checkPriorityRegions() {
 	}
 	for _, v := range removes {
 		c.RemovePriorityRegions(v)
+	}
+}
+
+func (c *Controller) checkPendingProcessedRegions() {
+	ids := c.GetPendingProcessedRegions()
+	pendingProcessedRegionsGauge.Set(float64(len(ids)))
+	for _, id := range ids {
+		region := c.cluster.GetRegion(id)
+		c.tryAddOperators(region)
 	}
 }
 
@@ -281,8 +269,8 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 					return []*operator.Operator{op}
 				}
-				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.GetType(), operator.OpReplica.String()).Inc()
-				c.regionWaitingList.Put(region.GetID(), nil)
+				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.Name(), operator.OpReplica.String()).Inc()
+				c.pendingProcessedRegions.Put(region.GetID(), nil)
 			}
 		}
 	} else {
@@ -293,8 +281,8 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
-			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.GetType(), operator.OpReplica.String()).Inc()
-			c.regionWaitingList.Put(region.GetID(), nil)
+			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.Name(), operator.OpReplica.String()).Inc()
+			c.pendingProcessedRegions.Put(region.GetID(), nil)
 		}
 	}
 	// skip the joint checker, split checker and rule checker when region label is set to "schedule=deny".
@@ -326,8 +314,7 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 	}
 	id := region.GetID()
 	if c.opController.GetOperator(id) != nil {
-		c.RemoveWaitingRegion(id)
-		c.RemoveSuspectRegion(id)
+		c.RemovePendingProcessedRegion(id)
 		return
 	}
 	ops := c.CheckRegion(region)
@@ -337,10 +324,9 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 
 	if !c.opController.ExceedStoreLimit(ops...) {
 		c.opController.AddWaitingOperator(ops...)
-		c.RemoveWaitingRegion(id)
-		c.RemoveSuspectRegion(id)
+		c.RemovePendingProcessedRegion(id)
 	} else {
-		c.AddWaitingRegion(region)
+		c.AddPendingProcessedRegions(id)
 	}
 }
 
@@ -354,19 +340,25 @@ func (c *Controller) GetRuleChecker() *RuleChecker {
 	return c.ruleChecker
 }
 
-// GetWaitingRegions returns the regions in the waiting list.
-func (c *Controller) GetWaitingRegions() []*cache.Item {
-	return c.regionWaitingList.Elems()
+// GetPendingProcessedRegions returns the pending processed regions in the cache.
+func (c *Controller) GetPendingProcessedRegions() []uint64 {
+	pendingRegions := make([]uint64, 0)
+	for _, item := range c.pendingProcessedRegions.Elems() {
+		pendingRegions = append(pendingRegions, item.Key)
+	}
+	return pendingRegions
 }
 
-// AddWaitingRegion returns the regions in the waiting list.
-func (c *Controller) AddWaitingRegion(region *core.RegionInfo) {
-	c.regionWaitingList.Put(region.GetID(), nil)
+// AddPendingProcessedRegions adds the pending processed region into the cache.
+func (c *Controller) AddPendingProcessedRegions(ids ...uint64) {
+	for _, id := range ids {
+		c.pendingProcessedRegions.Put(id, nil)
+	}
 }
 
-// RemoveWaitingRegion removes the region from the waiting list.
-func (c *Controller) RemoveWaitingRegion(id uint64) {
-	c.regionWaitingList.Remove(id)
+// RemovePendingProcessedRegion removes the pending processed region from the cache.
+func (c *Controller) RemovePendingProcessedRegion(id uint64) {
+	c.pendingProcessedRegions.Remove(id)
 }
 
 // GetPriorityRegions returns the region in priority queue
@@ -404,33 +396,15 @@ func (c *Controller) CheckSuspectRanges() {
 			for _, region := range regions {
 				regionIDList = append(regionIDList, region.GetID())
 			}
-
 			// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
 			// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
 			lastRegion := regions[len(regions)-1]
 			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
 				c.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
 			}
-			c.AddSuspectRegions(regionIDList...)
+			c.AddPendingProcessedRegions(regionIDList...)
 		}
 	}
-}
-
-// AddSuspectRegions adds regions to suspect list.
-func (c *Controller) AddSuspectRegions(regionIDs ...uint64) {
-	for _, regionID := range regionIDs {
-		c.suspectRegions.Put(regionID, nil)
-	}
-}
-
-// GetSuspectRegions gets all suspect regions.
-func (c *Controller) GetSuspectRegions() []uint64 {
-	return c.suspectRegions.GetAllID()
-}
-
-// RemoveSuspectRegion removes region from suspect list.
-func (c *Controller) RemoveSuspectRegion(id uint64) {
-	c.suspectRegions.Remove(id)
 }
 
 // AddSuspectKeyRange adds the key range with the its ruleID as the key
@@ -458,11 +432,6 @@ func (c *Controller) PopOneSuspectKeyRange() ([2][]byte, bool) {
 // ClearSuspectKeyRanges clears the suspect keyRanges, only for unit test
 func (c *Controller) ClearSuspectKeyRanges() {
 	c.suspectKeyRanges.Clear()
-}
-
-// ClearSuspectRegions clears the suspect regions, only for unit test
-func (c *Controller) ClearSuspectRegions() {
-	c.suspectRegions.Clear()
 }
 
 // IsPendingRegion returns true if the given region is in the pending list.

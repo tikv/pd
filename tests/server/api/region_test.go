@@ -165,9 +165,9 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 	err := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
 		tu.StatusOK(re))
 	re.NoError(err)
-	idList := leader.GetRaftCluster().GetSuspectRegions()
+	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
+		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
 	}
 	re.Len(idList, 2, len(idList))
 }
@@ -201,9 +201,9 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 	err := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", urlPrefix), []byte(body),
 		tu.StatusOK(re))
 	re.NoError(err)
-	idList := leader.GetRaftCluster().GetSuspectRegions()
+	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
+		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
 	}
 	re.Len(idList, 4)
 }

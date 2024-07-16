@@ -33,14 +33,6 @@ type SplitChecker struct {
 	labeler     *labeler.RegionLabeler
 }
 
-const splitCheckerName = "split_checker"
-
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	splitCheckerCounter       = checkerCounter.WithLabelValues(splitCheckerName, "check")
-	splitCheckerPausedCounter = checkerCounter.WithLabelValues(splitCheckerName, "paused")
-)
-
 // NewSplitChecker creates a new SplitChecker.
 func NewSplitChecker(cluster sche.CheckerCluster, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler) *SplitChecker {
 	return &SplitChecker{

@@ -79,6 +79,7 @@ func (suite *tsoConsistencyTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
