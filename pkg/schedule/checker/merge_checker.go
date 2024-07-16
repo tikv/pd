@@ -88,13 +88,14 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
+
 	expireTime := m.startTime.Add(m.conf.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		mergeCheckerRecentlyStartCounter.Inc()
 		return nil
 	}
 
-	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
 	if m.splitCache.Exists(region.GetID()) {
 		mergeCheckerRecentlySplitCounter.Inc()
 		return nil
