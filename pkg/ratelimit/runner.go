@@ -43,7 +43,7 @@ const (
 // Runner is the interface for running tasks.
 type Runner interface {
 	RunTask(id uint64, name string, f func(), opts ...TaskOption) error
-	Start()
+	Start(ctx context.Context)
 	Stop()
 }
 
@@ -81,11 +81,8 @@ type ConcurrentRunner struct {
 }
 
 // NewConcurrentRunner creates a new ConcurrentRunner.
-func NewConcurrentRunner(ctx context.Context, name string, limiter *ConcurrencyLimiter, maxPendingDuration time.Duration) *ConcurrentRunner {
-	ctx, cancel := context.WithCancel(ctx)
+func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDuration time.Duration) *ConcurrentRunner {
 	s := &ConcurrentRunner{
-		ctx:                ctx,
-		cancel:             cancel,
 		name:               name,
 		limiter:            limiter,
 		maxPendingDuration: maxPendingDuration,
@@ -107,7 +104,8 @@ func WithRetained(retained bool) TaskOption {
 }
 
 // Start starts the runner.
-func (cr *ConcurrentRunner) Start() {
+func (cr *ConcurrentRunner) Start(ctx context.Context) {
+	cr.ctx, cr.cancel = context.WithCancel(ctx)
 	cr.wg.Add(1)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -246,7 +244,7 @@ func (*SyncRunner) RunTask(_ uint64, _ string, f func(), _ ...TaskOption) error 
 }
 
 // Start starts the runner.
-func (*SyncRunner) Start() {}
+func (*SyncRunner) Start(context.Context) {}
 
 // Stop stops the runner.
 func (*SyncRunner) Stop() {}

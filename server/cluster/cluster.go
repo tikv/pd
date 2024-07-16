@@ -204,9 +204,9 @@ func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.Ba
 		etcdClient:      etcdClient,
 		BasicCluster:    basicCluster,
 		storage:         storage,
-		heartbeatRunner: ratelimit.NewConcurrentRunner(ctx, heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		miscRunner:      ratelimit.NewConcurrentRunner(ctx, miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		logRunner:       ratelimit.NewConcurrentRunner(ctx, logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 	}
 }
 
@@ -364,9 +364,9 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.startGCTuner()
 
 	c.running = true
-	c.heartbeatRunner.Start()
-	c.miscRunner.Start()
-	c.logRunner.Start()
+	c.heartbeatRunner.Start(c.ctx)
+	c.miscRunner.Start(c.ctx)
+	c.logRunner.Start(c.ctx)
 	return nil
 }
 
