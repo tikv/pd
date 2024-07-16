@@ -38,6 +38,7 @@ import (
 )
 
 const (
+	defaultResourceGroupName = "default"
 	controllerConfigPath     = "resource_group/controller"
 	maxNotificationChanLen   = 200
 	needTokensAmplification  = 1.1
@@ -356,22 +357,32 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						if err = proto.Unmarshal(item.Kv.Value, group); err != nil {
 							continue
 						}
-						if item, ok := c.groupsController.Load(group.Name); ok {
-							gc := item.(*groupCostController)
+						if gc, ok := c.loadGroupController(group.Name); ok {
 							gc.modifyMeta(group)
+							// If the resource group is marked as tombstone before, set it as active again.
+							if swapped := gc.tombstone.CompareAndSwap(true, false); swapped {
+								resourceGroupStatusGauge.WithLabelValues(group.Name, gc.name).Set(1)
+								log.Info("[resource group controller] mark resource group as active", zap.String("name", group.Name))
+							}
 						}
 					case meta_storagepb.Event_DELETE:
 						if item.PrevKv != nil {
 							if err = proto.Unmarshal(item.PrevKv.Value, group); err != nil {
 								continue
 							}
-							if _, ok := c.groupsController.LoadAndDelete(group.Name); ok {
+							// Do not delete the resource group immediately, just mark it as tombstone.
+							// For the requests that are still in progress, fallback to the default resource group.
+							if gc, ok := c.loadGroupController(group.Name); ok {
+								gc.tombstone.Store(true)
 								resourceGroupStatusGauge.DeleteLabelValues(group.Name, group.Name)
+								resourceGroupStatusGauge.WithLabelValues(group.Name, defaultResourceGroupName).Set(1)
+								log.Info("[resource group controller] mark resource group as tombstone", zap.String("name", group.Name))
 							}
 						} else {
 							// Prev-kv is compacted means there must have been a delete event before this event,
 							// which means that this is just a duplicated event, so we can just ignore it.
-							log.Info("previous key-value pair has been compacted", zap.String("required-key", string(item.Kv.Key)), zap.String("value", string(item.Kv.Value)))
+							log.Info("[resource group controller] previous key-value pair has been compacted",
+								zap.String("required-key", string(item.Kv.Key)), zap.String("value", string(item.Kv.Value)))
 						}
 					}
 				}
@@ -420,12 +431,32 @@ func (c *ResourceGroupsController) Stop() error {
 	return nil
 }
 
+// loadGroupController just wraps the `Load` method of `sync.Map`.
+func (c *ResourceGroupsController) loadGroupController(name string) (*groupCostController, bool) {
+	tmp, ok := c.groupsController.Load(name)
+	if !ok {
+		return nil, false
+	}
+	return tmp.(*groupCostController), true
+}
+
+// loadOrStoreGroupController just wraps the `LoadOrStore` method of `sync.Map`.
+func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *groupCostController) (*groupCostController, bool) {
+	tmp, loaded := c.groupsController.LoadOrStore(name, gc)
+	return tmp.(*groupCostController), loaded
+}
+
 // tryGetResourceGroup will try to get the resource group controller from local cache first,
 // if the local cache misses, it will then call gRPC to fetch the resource group info from server.
 func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name string) (*groupCostController, error) {
 	// Get from the local cache first.
-	if tmp, ok := c.groupsController.Load(name); ok {
-		return tmp.(*groupCostController), nil
+	gc, ok := c.loadGroupController(name)
+	if ok {
+		// If the resource group is marked as tombstone, fallback to the default resource group.
+		if gc.tombstone.Load() && name != defaultResourceGroupName {
+			return c.tryGetResourceGroup(ctx, defaultResourceGroupName)
+		}
+		return gc, nil
 	}
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
@@ -436,24 +467,21 @@ func (c *ResourceGroupsController) tryGetResourceGroup(ctx context.Context, name
 		return nil, errors.Errorf("%s does not exists", name)
 	}
 	// Check again to prevent initializing the same resource group concurrently.
-	if tmp, ok := c.groupsController.Load(name); ok {
-		gc := tmp.(*groupCostController)
+	if gc, ok = c.loadGroupController(name); ok {
 		return gc, nil
 	}
 	// Initialize the resource group controller.
-	gc, err := newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
+	gc, err = newGroupCostController(group, c.ruConfig, c.lowTokenNotifyChan, c.tokenBucketUpdateChan)
 	if err != nil {
 		return nil, err
 	}
-	// TODO: re-init the state if user change mode from RU to RAW mode.
-	gc.initRunState()
 	// Check again to prevent initializing the same resource group concurrently.
-	tmp, loaded := c.groupsController.LoadOrStore(group.GetName(), gc)
+	gc, loaded := c.loadOrStoreGroupController(group.Name, gc)
 	if !loaded {
 		resourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 		log.Info("[resource group controller] create resource group cost controller", zap.String("name", group.GetName()))
 	}
-	return tmp.(*groupCostController), nil
+	return gc, nil
 }
 
 func (c *ResourceGroupsController) cleanUpResourceGroup() {
@@ -465,14 +493,15 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		latestConsumption := *gc.mu.consumption
 		gc.mu.Unlock()
 		if equalRU(latestConsumption, *gc.run.consumption) {
-			if gc.tombstone {
+			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
 				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, defaultResourceGroupName)
 				return true
 			}
-			gc.tombstone = true
+			gc.inactive = true
 		} else {
-			gc.tombstone = false
+			gc.inactive = false
 		}
 		return true
 	})
@@ -498,12 +527,11 @@ func (c *ResourceGroupsController) handleTokenBucketResponse(resp []*rmpb.TokenB
 	c.run.inDegradedMode = false
 	for _, res := range resp {
 		name := res.GetResourceGroupName()
-		v, ok := c.groupsController.Load(name)
+		gc, ok := c.loadGroupController(name)
 		if !ok {
 			log.Warn("[resource group controller] a non-existent resource group was found when handle token response", zap.String("name", name))
 			continue
 		}
-		gc := v.(*groupCostController)
 		gc.handleTokenBucketResponse(res)
 	}
 }
@@ -572,12 +600,16 @@ func (c *ResourceGroupsController) OnRequestWait(
 func (c *ResourceGroupsController) OnResponse(
 	resourceGroupName string, req RequestInfo, resp ResponseInfo,
 ) (*rmpb.Consumption, error) {
-	tmp, ok := c.groupsController.Load(resourceGroupName)
+	gc, ok := c.loadGroupController(resourceGroupName)
 	if !ok {
 		log.Warn("[resource group controller] resource group name does not exist", zap.String("name", resourceGroupName))
 		return &rmpb.Consumption{}, nil
 	}
-	return tmp.(*groupCostController).onResponse(req, resp)
+	// If the resource group is marked as tombstone, fallback to the default resource group.
+	if gc.tombstone.Load() && resourceGroupName != defaultResourceGroupName {
+		return c.OnResponse(defaultResourceGroupName, req, resp)
+	}
+	return gc.onResponse(req, resp)
 }
 
 // IsBackgroundRequest If the resource group has background jobs, we should not record consumption and wait for it.
@@ -594,8 +626,7 @@ func (c *ResourceGroupsController) IsBackgroundRequest(ctx context.Context,
 func (c *ResourceGroupsController) checkBackgroundSettings(ctx context.Context, bg *rmpb.BackgroundSettings, requestResource string) bool {
 	// fallback to default resource group.
 	if bg == nil {
-		resourceGroupName := "default"
-		gc, err := c.tryGetResourceGroup(ctx, resourceGroupName)
+		gc, err := c.tryGetResourceGroup(ctx, defaultResourceGroupName)
 		if err != nil {
 			return false
 		}
@@ -681,7 +712,10 @@ type groupCostController struct {
 		requestUnitTokens map[rmpb.RequestUnitType]*tokenCounter
 	}
 
-	tombstone bool
+	// tombstone is set to true when the resource group is deleted.
+	tombstone atomic.Bool
+	// inactive is set to true when the resource group has not been updated for a long time.
+	inactive bool
 }
 
 type groupMetricsCollection struct {
@@ -774,6 +808,8 @@ func newGroupCostController(
 	gc.mu.consumption = &rmpb.Consumption{}
 	gc.mu.storeCounter = make(map[uint64]*rmpb.Consumption)
 	gc.mu.globalCounter = &rmpb.Consumption{}
+	// TODO: re-init the state if user change mode from RU to RAW mode.
+	gc.initRunState()
 	return gc, nil
 }
 
@@ -1359,14 +1395,14 @@ func (gc *groupCostController) onResponse(
 	return delta, nil
 }
 
-// GetActiveResourceGroup is used to get action resource group.
+// GetActiveResourceGroup is used to get active resource group.
 // This is used for test only.
 func (c *ResourceGroupsController) GetActiveResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
-	tmp, ok := c.groupsController.Load(resourceGroupName)
-	if !ok {
+	gc, ok := c.loadGroupController(resourceGroupName)
+	if !ok || gc.tombstone.Load() {
 		return nil
 	}
-	return tmp.(*groupCostController).getMeta()
+	return gc.getMeta()
 }
 
 // This is used for test only.

@@ -228,14 +228,14 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 			code:  http.StatusNotFound,
 		},
 	}
-	for _, testCase := range testCases {
+	for i, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		var resp placement.Rule
 		url := fmt.Sprintf("%s/rule/%s/%s", urlPrefix, testCase.rule.GroupID, testCase.rule.ID)
 		if testCase.found {
 			tu.Eventually(re, func() bool {
 				err = tu.ReadGetJSON(re, tests.TestDialClient, url, &resp)
-				return compareRule(&resp, &testCase.rule)
+				return compareRule(&resp, &testCases[i].rule)
 			})
 		} else {
 			err = tu.CheckGetJSON(tests.TestDialClient, url, nil, tu.Status(re, testCase.code))
