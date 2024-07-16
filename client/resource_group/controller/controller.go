@@ -451,6 +451,12 @@ func (c *ResourceGroupsController) loadOrStoreGroupController(name string, gc *g
 	return tmp.(*groupCostController), loaded
 }
 
+// NewResourceGroupNotExistErr returns a new error that indicates the resource group does not exist.
+// It's exported for testing.
+func NewResourceGroupNotExistErr(name string) error {
+	return errors.Errorf("%s does not exist", name)
+}
+
 // tryGetResourceGroupController will try to get the resource group controller from local cache first.
 // If the local cache misses, it will then call gRPC to fetch the resource group info from the remote server.
 // If `useTombstone` is true, it will return the resource group controller even if it is marked as tombstone.
@@ -461,7 +467,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	gc, ok := c.loadGroupController(name)
 	if ok {
 		if !useTombstone && gc.tombstone.Load() {
-			return nil, errors.Errorf("%s does not exists", name)
+			return nil, NewResourceGroupNotExistErr(name)
 		}
 		return gc, nil
 	}
@@ -471,7 +477,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return nil, err
 	}
 	if group == nil {
-		return nil, errors.Errorf("%s does not exist", name)
+		return nil, NewResourceGroupNotExistErr(name)
 	}
 	// Check again to prevent initializing the same resource group concurrently.
 	if gc, ok = c.loadGroupController(name); ok {
@@ -498,7 +504,6 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 	if !ok {
 		return
 	}
-	// Skip if the deleted resource group is the default resource group.
 	// The default resource group controller should never be deleted.
 	if name == defaultResourceGroupName {
 		return
@@ -523,8 +528,8 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 	}
 	gc.tombstone.Store(true)
 	c.groupsController.Store(name, gc)
-	resourceGroupStatusGauge.DeleteLabelValues(name, name)
-	resourceGroupStatusGauge.WithLabelValues(name, defaultResourceGroupName).Set(1)
+	// Its metrics will be deleted in the cleanup process.
+	resourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
 	log.Info("[resource group controller] default resource group controller cost created for tombstone",
 		zap.String("name", name))
 }
@@ -541,7 +546,6 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
 				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
-				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, defaultResourceGroupName)
 				return true
 			}
 			gc.inactive = true

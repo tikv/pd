@@ -403,9 +403,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		CPUMsCost:        1,
 	}
 
-	controller, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
-	controller.Start(suite.ctx)
-	defer controller.Stop()
+	rgsController, _ := controller.NewResourceGroupController(suite.ctx, 1, cli, cfg)
+	rgsController.Start(suite.ctx)
+	defer rgsController.Stop()
 
 	testCases := []struct {
 		resourceGroupName string
@@ -445,13 +445,13 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				rres := cas.tcs[i].makeReadResponse()
 				wres := cas.tcs[i].makeWriteResponse()
 				startTime := time.Now()
-				_, _, _, _, err := controller.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
+				_, _, _, _, err := rgsController.OnRequestWait(suite.ctx, cas.resourceGroupName, rreq)
 				re.NoError(err)
-				_, _, _, _, err = controller.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
+				_, _, _, _, err = rgsController.OnRequestWait(suite.ctx, cas.resourceGroupName, wreq)
 				re.NoError(err)
 				sum += time.Since(startTime)
-				controller.OnResponse(cas.resourceGroupName, rreq, rres)
-				controller.OnResponse(cas.resourceGroupName, wreq, wres)
+				rgsController.OnResponse(cas.resourceGroupName, rreq, rres)
+				rgsController.OnResponse(cas.resourceGroupName, wreq, wres)
 				time.Sleep(1000 * time.Microsecond)
 			}
 			re.LessOrEqual(sum, buffDuration+cas.tcs[i].waitDuration)
@@ -464,11 +464,11 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate", "return(true)"))
 	tcs := tokenConsumptionPerSecond{rruTokensAtATime: 1, wruTokensAtATime: 900000000, times: 1, waitDuration: 0}
 	wreq := tcs.makeWriteRequest()
-	_, _, _, _, err = controller.OnRequestWait(suite.ctx, rg.Name, wreq)
+	_, _, _, _, err = rgsController.OnRequestWait(suite.ctx, rg.Name, wreq)
 	re.Error(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerUpdate"))
 
-	group, err := controller.GetResourceGroup(rg.Name)
+	group, err := rgsController.GetResourceGroup(rg.Name)
 	re.NoError(err)
 	re.Equal(rg, group)
 	// Delete the resource group and make sure it is tombstone.
@@ -476,9 +476,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	re.NoError(err)
 	re.Contains(resp, "Success!")
 	// Make sure the resource group is watched by the controller and marked as tombstone.
+	expectedErr := controller.NewResourceGroupNotExistErr(rg.Name)
 	testutil.Eventually(re, func() bool {
-		gc, err := controller.GetResourceGroup(rg.Name)
-		return err.Error() == fmt.Sprintf("%s does not exist", rg.Name) && gc == nil
+		gc, err := rgsController.GetResourceGroup(rg.Name)
+		return err.Error() == expectedErr.Error() && gc == nil
 	}, testutil.WithTickInterval(50*time.Millisecond))
 	// Add the resource group again.
 	resp, err = cli.AddResourceGroup(suite.ctx, rg)
@@ -486,9 +487,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	re.Contains(resp, "Success!")
 	// Make sure the resource group can be get by the controller again.
 	testutil.Eventually(re, func() bool {
-		gc, err := controller.GetResourceGroup(rg.Name)
+		gc, err := rgsController.GetResourceGroup(rg.Name)
 		if err != nil {
-			re.ErrorContains(err, fmt.Sprintf("%s does not exist", rg.Name))
+			re.EqualError(err, expectedErr.Error())
 		}
 		return gc.GetName() == rg.Name
 	}, testutil.WithTickInterval(50*time.Millisecond))
