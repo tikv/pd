@@ -85,6 +85,7 @@ func (suite *mergeCheckerTestSuite) SetupTest() {
 }
 
 func (suite *mergeCheckerTestSuite) TearDownTest() {
+	gcInterval = time.Minute
 	suite.cancel()
 }
 
