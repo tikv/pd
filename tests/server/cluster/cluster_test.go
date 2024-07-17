@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -183,6 +184,10 @@ func TestDamagedRegion(t *testing.T) {
 }
 
 func TestRegionStatistics(t *testing.T) {
+	beforeTimes := member.ChangeFrequencyTimes(10)
+	defer func() {
+		member.ChangeFrequencyTimes(beforeTimes)
+	}()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -238,7 +243,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regions, 1)
 
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	leaderServer = tc.GetLeaderServer()
 	leaderName = leaderServer.GetServer().Name()
 	rc = leaderServer.GetRaftCluster()
@@ -255,11 +260,11 @@ func TestRegionStatistics(t *testing.T) {
 	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
 
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	leaderServer = tc.GetLeaderServer()
 	leaderName = leaderServer.GetServer().Name()
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	rc = tc.GetLeaderServer().GetRaftCluster()
 	r = rc.GetRegion(region.Id)
 	re.NotNil(r)
@@ -1642,6 +1647,10 @@ func TestMinResolvedTS(t *testing.T) {
 
 // See https://github.com/tikv/pd/issues/4941
 func TestTransferLeaderBack(t *testing.T) {
+	beforeTimes := member.ChangeFrequencyTimes(10)
+	defer func() {
+		member.ChangeFrequencyTimes(beforeTimes)
+	}()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -254,6 +255,10 @@ func TestPrepareChecker(t *testing.T) {
 
 // ref: https://github.com/tikv/pd/issues/6988
 func TestPrepareCheckerWithTransferLeader(t *testing.T) {
+	beforeTimes := member.ChangeFrequencyTimes(10)
+	defer func() {
+		member.ChangeFrequencyTimes(beforeTimes)
+	}()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -298,7 +303,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
-	re.NotEqual(leaderServer.GetLeader().GetName(), cluster.WaitLeader())
+	re.NotEqual(leaderServer.GetServer().Name(), cluster.WaitLeader())
 	rc = cluster.GetLeaderServer().GetServer().GetRaftCluster()
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))

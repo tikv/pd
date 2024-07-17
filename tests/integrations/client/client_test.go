@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/tso"
@@ -165,6 +166,10 @@ func TestClientLeaderChange(t *testing.T) {
 }
 
 func TestLeaderTransferAndMoveCluster(t *testing.T) {
+	beforeTimes := member.ChangeFrequencyTimes(10)
+	defer func() {
+		member.ChangeFrequencyTimes(beforeTimes)
+	}()
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
