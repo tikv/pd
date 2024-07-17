@@ -33,16 +33,6 @@ const (
 	ShuffleRegionType = "shuffle-region"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleRegionCounter                   = schedulerCounter.WithLabelValues(ShuffleRegionName, "schedule")
-	shuffleRegionNewOperatorCounter        = schedulerCounter.WithLabelValues(ShuffleRegionName, "new-operator")
-	shuffleRegionNoRegionCounter           = schedulerCounter.WithLabelValues(ShuffleRegionName, "no-region")
-	shuffleRegionNoNewPeerCounter          = schedulerCounter.WithLabelValues(ShuffleRegionName, "no-new-peer")
-	shuffleRegionCreateOperatorFailCounter = schedulerCounter.WithLabelValues(ShuffleRegionName, "create-operator-fail")
-	shuffleRegionNoSourceStoreCounter      = schedulerCounter.WithLabelValues(ShuffleRegionName, "no-source-store")
-)
-
 type shuffleRegionScheduler struct {
 	*BaseScheduler
 	conf    *shuffleRegionSchedulerConfig

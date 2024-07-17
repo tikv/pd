@@ -47,15 +47,6 @@ const (
 	lastStoreDeleteInfo  = "The last store has been deleted"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	evictLeaderCounter              = schedulerCounter.WithLabelValues(EvictLeaderName, "schedule")
-	evictLeaderNoLeaderCounter      = schedulerCounter.WithLabelValues(EvictLeaderName, "no-leader")
-	evictLeaderPickUnhealthyCounter = schedulerCounter.WithLabelValues(EvictLeaderName, "pick-unhealthy-region")
-	evictLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(EvictLeaderName, "no-target-store")
-	evictLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(EvictLeaderName, "new-operator")
-)
-
 type evictLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	storage           endpoint.ConfigStorage

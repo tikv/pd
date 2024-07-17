@@ -43,9 +43,6 @@ const (
 	slowStoreRecoverThreshold = 1
 )
 
-// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
-
 type evictSlowStoreSchedulerConfig struct {
 	syncutil.RWMutex
 	cluster *core.BasicCluster
