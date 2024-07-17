@@ -60,6 +60,14 @@ type balanceWitnessSchedulerConfig struct {
 	Batch int `json:"batch"`
 }
 
+func (conf *balanceWitnessSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
+}
+
+func (*balanceWitnessSchedulerConfig) getSchedulerName() string {
+	return BalanceWitnessName
+}
+
 func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
@@ -77,7 +85,7 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		if err := conf.persistLocked(); err != nil {
+		if err := saveSchedulerConfig(conf); err != nil {
 			log.Warn("failed to persist config", zap.Error(err))
 		}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
@@ -107,14 +115,6 @@ func (conf *balanceWitnessSchedulerConfig) Clone() *balanceWitnessSchedulerConfi
 		Ranges: ranges,
 		Batch:  conf.Batch,
 	}
-}
-
-func (conf *balanceWitnessSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(BalanceWitnessName, data)
 }
 
 func (conf *balanceWitnessSchedulerConfig) getBatch() int {

@@ -148,7 +148,7 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	}
 
 	c.schedulerHandlers[name] = scheduler
-	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
+	if err := c.saveSchedulerConfig(scheduler); err != nil {
 		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
@@ -204,7 +204,7 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.Scheduler.GetName()] = s
-	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
+	if err := c.saveSchedulerConfig(scheduler); err != nil {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
@@ -415,6 +415,14 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 // GetAllSchedulerConfigs returns all scheduler configs.
 func (c *Controller) GetAllSchedulerConfigs() ([]string, []string, error) {
 	return c.storage.LoadAllSchedulerConfigs()
+}
+
+func (c *Controller) saveSchedulerConfig(s Scheduler) error {
+	data, err := s.EncodeConfig()
+	if err != nil {
+		return err
+	}
+	return c.storage.SaveSchedulerConfig(s.GetName(), data)
 }
 
 // ScheduleController is used to manage a scheduler.

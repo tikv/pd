@@ -20,7 +20,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -96,22 +95,12 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 	}
 }
 
-func (conf *evictLeaderSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
-	conf.RLock()
-	defer conf.RUnlock()
-	data, err := EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
 func (*evictLeaderSchedulerConfig) getSchedulerName() string {
 	return EvictLeaderName
+}
+
+func (conf *evictLeaderSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -384,7 +373,9 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	err = handler.config.Persist()
+	handler.config.RLock()
+	defer handler.config.RUnlock()
+	err = saveSchedulerConfig(handler.config)
 	if err != nil {
 		handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -410,7 +401,9 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {
-		err = handler.config.Persist()
+		handler.config.RLock()
+		defer handler.config.RUnlock()
+		err = saveSchedulerConfig(handler.config)
 		if err != nil {
 			handler.config.resetStore(id, keyRanges)
 			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())

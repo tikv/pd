@@ -453,7 +453,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	}
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
-		if err := conf.persistLocked(); err != nil {
+		if err := saveSchedulerConfig(conf); err != nil {
 			log.Warn("failed to persist config", zap.Error(err))
 		}
 		log.Info("hot-region-scheduler config is updated", zap.String("old", string(oldc)), zap.String("new", string(newc)))
@@ -475,12 +475,12 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	rd.Text(w, http.StatusBadRequest, "Config item is not found.")
 }
 
-func (conf *hotRegionSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(HotRegionName, data)
+func (conf *hotRegionSchedulerConfig) getStorage() endpoint.ConfigStorage {
+	return conf.storage
+}
+
+func (*hotRegionSchedulerConfig) getSchedulerName() string {
+	return HotRegionName
 }
 
 func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCluster) bool {
