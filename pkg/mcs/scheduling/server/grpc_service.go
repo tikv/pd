@@ -322,7 +322,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	// If region splits during the scheduling process, regions with abnormal
 	// status may be left, and these regions need to be checked with higher
 	// priority.
-	c.GetCoordinator().GetCheckerController().AddSuspectRegions(recordRegions...)
+	c.GetCoordinator().GetCheckerController().AddPendingProcessedRegions(recordRegions...)
 
 	return &schedulingpb.AskBatchSplitResponse{
 		Header: s.header(),

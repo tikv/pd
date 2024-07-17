@@ -42,13 +42,6 @@ const (
 	GrantLeaderType = "grant-leader"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantLeaderCounter            = schedulerCounter.WithLabelValues(GrantLeaderName, "schedule")
-	grantLeaderNoFollowerCounter  = schedulerCounter.WithLabelValues(GrantLeaderName, "no-follower")
-	grantLeaderNewOperatorCounter = schedulerCounter.WithLabelValues(GrantLeaderName, "new-operator")
-)
-
 type grantLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	storage           endpoint.ConfigStorage

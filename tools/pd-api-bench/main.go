@@ -255,6 +255,7 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
+			cfg := cfg
 			co.SetHTTPCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
@@ -272,6 +273,7 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
+			cfg := cfg
 			co.SetGRPCCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
@@ -289,6 +291,7 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
+			cfg := cfg
 			co.SetETCDCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
