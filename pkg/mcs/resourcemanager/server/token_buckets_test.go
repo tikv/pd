@@ -154,14 +154,14 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 		globalBucketTokensAfterAssign float64
 		expectedTrickleMs             int64
 	}{
-		/* requestTokens, assignedTokens, globalBucketTokensAfterAssign, trickleTime */
+		/* requestTokens, assignedTokens, globalBucketTokensAfterAssign, TrickleMs  */
 		{50000, 50000, 0, 0},
 		{50000, 30000, -20000, defaultTrickleMs},
 		{30000, 15000, -25000, defaultTrickleMs},
 		{15000, 12500, -27500, defaultTrickleMs},
 		{12500, 11250, -28750, defaultTrickleMs},
 		{11250, 10625, -29375, defaultTrickleMs},
-		// RU_PER_SEC is close to 2000, RU_PER_SEC =  assignedTokens / TrickleTime.
+		// RU_PER_SEC is close to 2000, RU_PER_SEC =  assignedTokens / TrickleMs / 1000.
 		{10625, 10312.5, -29687.5, defaultTrickleMs},
 		{10312.5, 10156.25, -29843.75, defaultTrickleMs},
 		{10156.25, 10078.125, -29921.875, defaultTrickleMs},
