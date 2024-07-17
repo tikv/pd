@@ -1199,10 +1199,10 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []KeyRange, limit 
 		pbRanges = append(pbRanges, &pdpb.KeyRange{StartKey: r.StartKey, EndKey: r.EndKey})
 	}
 	req := &pdpb.BatchScanRegionsRequest{
-		Header:                       c.requestHeader(),
-		NeedBuckets:                  options.needBuckets,
-		Ranges:                       pbRanges,
-		Limit:                        int32(limit),
+		Header:             c.requestHeader(),
+		NeedBuckets:        options.needBuckets,
+		Ranges:             pbRanges,
+		Limit:              int32(limit),
 		ContainAllKeyRange: options.outputMustContainAllKeyRange,
 	}
 	serviceClient, cctx := c.getRegionAPIClientAndContext(scanCtx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
