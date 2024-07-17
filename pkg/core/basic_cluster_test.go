@@ -20,7 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMerge(t *testing.T) {
+func TestMergeKeyRanges(t *testing.T) {
 	re := require.New(t)
 
 	testCases := []struct {
