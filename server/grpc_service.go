@@ -1683,7 +1683,7 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	}
 
 	scanOptions := []core.BatchScanRegionsOptionFunc{core.WithLimit(int(limit))}
-	if request.OutputMustContainAllKeyRange {
+	if request.ContainAllKeyRange {
 		scanOptions = append(scanOptions, core.WithOutputMustContainAllKeyRange())
 	}
 	res, err := rc.BatchScanRegions(keyRanges, scanOptions...)

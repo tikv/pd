@@ -1203,7 +1203,7 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []KeyRange, limit 
 		NeedBuckets:                  options.needBuckets,
 		Ranges:                       pbRanges,
 		Limit:                        int32(limit),
-		OutputMustContainAllKeyRange: options.outputMustContainAllKeyRange,
+		ContainAllKeyRange: options.outputMustContainAllKeyRange,
 	}
 	serviceClient, cctx := c.getRegionAPIClientAndContext(scanCtx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
 	if serviceClient == nil {
