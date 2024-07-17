@@ -64,7 +64,8 @@ func collectCoverProfileFile() {
 		}
 		if err := w1.Flush(); err != nil {
 			fmt.Println("flush data to cover profile file error:", err)
-			os.Exit(-1)
+			w.Close()
+			os.Exit(-1) //nolint: gocritic
 		}
 	}
 }
@@ -81,7 +82,8 @@ func collectOneCoverProfileFile(result map[string]*cover.Profile, file os.DirEnt
 	profs, err := cover.ParseProfilesFromReader(f)
 	if err != nil {
 		fmt.Println("parse cover profile file error:", err)
-		os.Exit(-1)
+		f.Close()
+		os.Exit(-1) //nolint: gocritic
 	}
 	mergeProfile(result, profs)
 }

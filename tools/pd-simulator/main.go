@@ -190,6 +190,7 @@ EXIT:
 		simulator.SD.Close()
 	}
 	if simResult != "OK" {
-		os.Exit(1)
+		tick.Stop()
+		os.Exit(1) //nolint:gocritic
 	}
 }

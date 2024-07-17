@@ -149,7 +149,8 @@ func loop(persistentFlags *pflag.FlagSet, readlineCompleter readline.AutoComplet
 			continue
 		}
 		if line == "exit" {
-			os.Exit(0)
+			l.Close()
+			os.Exit(0) //nolint:gocritic
 		}
 		args, err := shellwords.Parse(line)
 		if err != nil {

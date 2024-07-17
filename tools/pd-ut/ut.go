@@ -187,7 +187,10 @@ func main() {
 		}
 	}
 	if !isSucceed {
-		os.Exit(1)
+		if len(coverFileTempDir) > 0 {
+			os.RemoveAll(coverFileTempDir)
+		}
+		os.Exit(1) //nolint:gocritic
 	}
 }
 
