@@ -497,8 +497,7 @@ type balanceSolver struct {
 	maxPeerNum    int
 	minHotDegree  int
 
-	// The rank correlation function used according to the version
-	rank rank
+	rank
 }
 
 func (bs *balanceSolver) init() {
@@ -512,7 +511,7 @@ func (bs *balanceSolver) init() {
 	case "v1":
 		bs.rank = initRankV1(bs)
 	default:
-		bs.rank = initRankV2(bs, bs.greatDecRatio)
+		bs.rank = initRankV2(bs)
 	}
 
 	// Init store load detail according to the type.

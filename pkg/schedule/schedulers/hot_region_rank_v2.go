@@ -41,8 +41,8 @@ type balanceChecker struct {
 	balancedRatio    float64
 }
 
-// rankV2Ratios is used to calculate the balanced state.
-// every rankV2Ratios only effect one dim.
+// rankRatios is used to calculate the balanced state.
+// every rankRatios only effect one dim.
 
 // There are three states of balance: balanced, pre-balanced, and unbalanced.
 // It is determined by the ratio of the high and low values of the two stores.
@@ -102,8 +102,8 @@ type rankV2 struct {
 	secondPriorityRatios *rankRatios
 }
 
-func initRankV2(bs *balanceSolver, balanceRatio float64) *rankV2 {
-	firstPriorityRatios := newRankRatios(balanceRatio, firstPriorityPerceivedRatio, firstPriorityMinHotRatio)
+func initRankV2(bs *balanceSolver) *rankV2 {
+	firstPriorityRatios := newRankRatios(bs.greatDecRatio, firstPriorityPerceivedRatio, firstPriorityMinHotRatio)
 	return &rankV2{
 		balanceSolver:        bs,
 		firstPriorityRatios:  firstPriorityRatios,
@@ -128,9 +128,7 @@ func (r *rankV2) checkByPriorityAndTolerance(loads []float64, f func(int) bool) 
 	}
 }
 
-// pickCheckPolicyV2 will set checkByPriorityAndTolerance to the corresponding function.
-// Note: PolicyV2 will search more possible solutions than PolicyV1.
-// so it allows to schedule when any of the two dimensions is not balanced.
+// checkHistoryLoadsByPriority checks the history loads by priority.
 func (r *rankV2) checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool) bool {
 	switch {
 	case r.resourceTy == writeLeader:
@@ -140,7 +138,7 @@ func (r *rankV2) checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool
 	}
 }
 
-// filterUniformStoreV2 filters stores by stddev.
+// filterUniformStore filters stores by stddev.
 // stddev is the standard deviation of the store's load for all stores.
 func (r *rankV2) filterUniformStore() (string, bool) {
 	if !r.enableExpectation() {
@@ -190,7 +188,7 @@ func (r *rankV2) setSearchRevertRegions() {
 	}
 }
 
-// calcProgressiveRankV2 calculates `r.cur.progressiveRank`.
+// calcProgressiveRank calculates `r.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 // isBetter: score > 0
 // isNotWorsened: score == 0
