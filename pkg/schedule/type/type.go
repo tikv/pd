@@ -70,3 +70,25 @@ const (
 	// LabelScheduler is label scheduler name.
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
+
+// SchedulerTypeCompatibleMap temporarily exists for compatibility.
+// TODO: remove it after all components use CheckerSchedulerType.
+var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
+	BalanceLeaderScheduler:         "balance-leader",
+	BalanceRegionScheduler:         "balance-region",
+	BalanceWitnessScheduler:        "balance-witness",
+	EvictLeaderScheduler:           "evict-leader",
+	EvictSlowStoreScheduler:        "evict-slow-store",
+	EvictSlowTrendScheduler:        "evict-slow-trend",
+	GrantLeaderScheduler:           "grant-leader",
+	GrantHotRegionScheduler:        "grant-hot-region",
+	HotRegionScheduler:             "hot-region",
+	RandomMergeScheduler:           "random-merge",
+	ScatterRangeScheduler:          "scatter-range",
+	ShuffleHotRegionScheduler:      "shuffle-hot-region",
+	ShuffleLeaderScheduler:         "shuffle-leader",
+	ShuffleRegionScheduler:         "shuffle-region",
+	SplitBucketScheduler:           "split-bucket",
+	TransferWitnessLeaderScheduler: "transfer-witness-leader",
+	LabelScheduler:                 "label",
+}
