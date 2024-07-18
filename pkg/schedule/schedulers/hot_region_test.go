@@ -2936,7 +2936,7 @@ func TestExpect(t *testing.T) {
 		if testCase.rankVersion == "v1" {
 			bs.rank = initRankV1(bs)
 		} else {
-			bs.rank = initRankV2(bs, hb.(*hotScheduler).conf.GetGreatDecRatio())
+			bs.rank = initRankV2(bs)
 		}
 
 		bs.sche.conf.StrictPickingStore = testCase.strict
