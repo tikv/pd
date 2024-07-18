@@ -77,6 +77,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
@@ -173,6 +174,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	pdLeader := cluster.GetServer(leaderName)
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
@@ -226,6 +228,7 @@ func TestWaitAPIServiceReady(t *testing.T) {
 		err = cluster.RunInitialServers()
 		re.NoError(err)
 		leaderName := cluster.WaitLeader()
+		re.NotEmpty(leaderName)
 		pdLeader := cluster.GetServer(leaderName)
 		return cluster, pdLeader.GetAddr()
 	}
@@ -283,6 +286,7 @@ func NewAPIServerForward(re *require.Assertions) APIServerForward {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
@@ -557,6 +561,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())

@@ -70,6 +70,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
@@ -116,6 +117,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NotEqual(uint64(0), id)
 	suite.cluster.ResignLeader()
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	time.Sleep(time.Second)
@@ -635,6 +637,7 @@ func (suite *multipleServerTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())

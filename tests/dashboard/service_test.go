@@ -131,7 +131,7 @@ func (suite *dashboardTestSuite) testDashboard(re *require.Assertions, internalP
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	servers := cluster.GetServers()
 	leader := cluster.GetLeaderServer()
 	leaderAddr := leader.GetAddr()

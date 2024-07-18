@@ -34,15 +34,6 @@ const (
 	LabelType = "label"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	labelCounter            = schedulerCounter.WithLabelValues(LabelName, "schedule")
-	labelNewOperatorCounter = schedulerCounter.WithLabelValues(LabelName, "new-operator")
-	labelNoTargetCounter    = schedulerCounter.WithLabelValues(LabelName, "no-target")
-	labelSkipCounter        = schedulerCounter.WithLabelValues(LabelName, "skip")
-	labelNoRegionCounter    = schedulerCounter.WithLabelValues(LabelName, "no-region")
-)
-
 type labelSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
