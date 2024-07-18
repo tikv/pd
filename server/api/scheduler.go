@@ -90,13 +90,16 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return
 	}
-	args := []string{}
+	var args []string
+	collector := func(v string) {
+		if args == nil {
+			args = []string{}
+		}
+		args = append(args, v)
+	}
 
 	switch tp {
 	case types.ScatterRangeScheduler:
-		collector := func(v string) {
-			args = append(args, v)
-		}
 		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -135,14 +138,14 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		args = append(args, strconv.FormatUint(uint64(storeID), 10))
+		collector(strconv.FormatUint(uint64(storeID), 10))
 	case types.ShuffleHotRegionScheduler:
 		limit := uint64(1)
 		l, ok := input["limit"].(float64)
 		if ok {
 			limit = uint64(l)
 		}
-		args = append(args, strconv.FormatUint(limit, 10))
+		collector(strconv.FormatUint(limit, 10))
 	case types.GrantHotRegionScheduler:
 		leaderID, ok := input["store-leader-id"].(string)
 		if !ok {
@@ -154,7 +157,8 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
 			return
 		}
-		args = append(args, leaderID, peerIDs)
+		collector(leaderID)
+		collector(peerIDs)
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {
