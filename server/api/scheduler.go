@@ -85,7 +85,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	tp := types.CheckerSchedulerType(name)
+	tp, ok := types.SchedulerStr2Type[name]
+	if !ok {
+		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
+		return
+	}
 	args := []string{}
 
 	switch tp {
@@ -151,9 +155,6 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		args = append(args, leaderID, peerIDs)
-	default:
-		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
-		return
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {

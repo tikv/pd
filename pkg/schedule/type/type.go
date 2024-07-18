@@ -92,3 +92,24 @@ var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
 	TransferWitnessLeaderScheduler: "transfer-witness-leader",
 	LabelScheduler:                 "label",
 }
+
+var SchedulerStr2Type = map[string]CheckerSchedulerType{
+	"balance-leader-scheduler":     BalanceLeaderScheduler,
+	"balance-region-scheduler":     BalanceRegionScheduler,
+	"balance-witness-scheduler":    BalanceWitnessScheduler,
+	"evict-leader-scheduler":       EvictLeaderScheduler,
+	"evict-slow-store-scheduler":   EvictSlowStoreScheduler,
+	"evict-slow-trend-scheduler":   EvictSlowTrendScheduler,
+	"grant-leader-scheduler":       GrantLeaderScheduler,
+	"grant-hot-region-scheduler":   GrantHotRegionScheduler,
+	"balance-hot-region-scheduler": HotRegionScheduler,
+	"random-merge-scheduler":       RandomMergeScheduler,
+	// TODO: update to `scatter-range-scheduler`
+	"scatter-range":                     ScatterRangeScheduler,
+	"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
+	"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
+	"shuffle-region-scheduler":          ShuffleRegionScheduler,
+	"split-bucket-scheduler":            SplitBucketScheduler,
+	"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
+	"label-scheduler":                   LabelScheduler,
+}
