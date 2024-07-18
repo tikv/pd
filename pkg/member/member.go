@@ -43,10 +43,9 @@ const (
 	// The timeout to wait transfer etcd leader to complete.
 	moveLeaderTimeout          = 5 * time.Second
 	dcLocationConfigEtcdPrefix = "dc-location"
+	// If the campaign times is more than this value in `campaignTimesRecordTimeout`, the PD will resign and campaign again.
+	campaignLeaderFrequencyTimes = 3
 )
-
-// If the campaign times is more than this value in `campaignTimesRecordTimeout`, the PD will resign and campaign again.
-var campaignLeaderFrequencyTimes = 3
 
 // EmbeddedEtcdMember is used for the election related logic. It implements Member interface.
 type EmbeddedEtcdMember struct {
@@ -188,7 +187,13 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
 	})
 
-	if m.leadership.GetCampaignTimesNum() > campaignLeaderFrequencyTimes {
+	checkTimes := campaignLeaderFrequencyTimes
+	failpoint.Inject("changeFrequencyTimes", func(val failpoint.Value) {
+		if v, ok := val.(int); ok {
+			checkTimes = v
+		}
+	})
+	if m.leadership.GetCampaignTimesNum() > checkTimes {
 		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
 			return err
 		}
@@ -554,13 +559,4 @@ func (m *EmbeddedEtcdMember) SetMemberGitHash(id uint64, gitHash string) error {
 // Close gracefully shuts down all servers/listeners.
 func (m *EmbeddedEtcdMember) Close() {
 	m.Etcd().Close()
-}
-
-// ChangeFrequencyTimes changes the frequency check times of campaign leader.
-// ONLY used for test to make the test more stable.
-// PLEASE flash back this value after using.
-func ChangeFrequencyTimes(times int) int {
-	before := campaignLeaderFrequencyTimes
-	campaignLeaderFrequencyTimes = times
-	return before
 }

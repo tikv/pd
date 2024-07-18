@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	mcs "github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -652,11 +651,11 @@ func (suite *multipleServerTestSuite) TearDownSuite() {
 }
 
 func (suite *multipleServerTestSuite) TestReElectLeader() {
-	beforeTimes := member.ChangeFrequencyTimes(10)
-	defer func() {
-		member.ChangeFrequencyTimes(beforeTimes)
-	}()
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()

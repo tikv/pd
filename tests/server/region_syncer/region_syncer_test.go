@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -255,11 +254,11 @@ func TestPrepareChecker(t *testing.T) {
 
 // ref: https://github.com/tikv/pd/issues/6988
 func TestPrepareCheckerWithTransferLeader(t *testing.T) {
-	beforeTimes := member.ChangeFrequencyTimes(10)
-	defer func() {
-		member.ChangeFrequencyTimes(beforeTimes)
-	}()
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))

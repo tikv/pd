@@ -19,9 +19,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -107,11 +107,11 @@ func TestCommand(t *testing.T) {
 }
 
 func TestMonotonicID(t *testing.T) {
-	beforeTimes := member.ChangeFrequencyTimes(10)
-	defer func() {
-		member.ChangeFrequencyTimes(beforeTimes)
-	}()
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 2)

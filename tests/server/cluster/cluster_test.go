@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -184,11 +183,11 @@ func TestDamagedRegion(t *testing.T) {
 }
 
 func TestRegionStatistics(t *testing.T) {
-	beforeTimes := member.ChangeFrequencyTimes(10)
-	defer func() {
-		member.ChangeFrequencyTimes(beforeTimes)
-	}()
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 3)
@@ -1647,11 +1646,11 @@ func TestMinResolvedTS(t *testing.T) {
 
 // See https://github.com/tikv/pd/issues/4941
 func TestTransferLeaderBack(t *testing.T) {
-	beforeTimes := member.ChangeFrequencyTimes(10)
-	defer func() {
-		member.ChangeFrequencyTimes(beforeTimes)
-	}()
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 2)
