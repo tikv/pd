@@ -34,10 +34,10 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20240620063548-118a4cab53e4
+	github.com/pingcap/kvproto v0.0.0-20240716095229-5f7ffec83ea7
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
-	github.com/pingcap/tidb-dashboard v0.0.0-20240612100141-91f6c281e441
+	github.com/pingcap/tidb-dashboard v0.0.0-20240718034516-e6e78c7c120b
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/common v0.51.1
 	github.com/sasha-s/go-deadlock v0.2.0
@@ -173,7 +173,7 @@ require (
 	go.etcd.io/bbolt v1.3.9 // indirect
 	go.uber.org/dig v1.9.0 // indirect
 	go.uber.org/fx v1.12.0 // indirect
-	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/multierr v1.11.0
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/crypto v0.21.0 // indirect
 	golang.org/x/image v0.10.0 // indirect
