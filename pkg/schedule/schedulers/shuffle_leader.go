@@ -32,14 +32,6 @@ const (
 	ShuffleLeaderType = "shuffle-leader"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleLeaderCounter              = schedulerCounter.WithLabelValues(ShuffleLeaderName, "schedule")
-	shuffleLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(ShuffleLeaderName, "new-operator")
-	shuffleLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(ShuffleLeaderName, "no-target-store")
-	shuffleLeaderNoFollowerCounter    = schedulerCounter.WithLabelValues(ShuffleLeaderName, "no-follower")
-)
-
 type shuffleLeaderSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
