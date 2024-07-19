@@ -679,6 +679,8 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		tmpFile := path.Join(coverFileTempDir, fileName)
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
+	// let the test run in the verbose mode.
+	args = append(args, "-test.v")
 	if strings.Contains(fn, "Suite") {
 		args = append(args, "-test.cpu", fmt.Sprint(parallel/2))
 	} else {
