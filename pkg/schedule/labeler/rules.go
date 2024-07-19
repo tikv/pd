@@ -114,10 +114,6 @@ type KeyRangeRule struct {
 	EndKeyHex   string `json:"end_key"`   // hex format end key, for marshal/unmarshal
 }
 
-func (r *KeyRangeRule) String() string {
-	return fmt.Sprintf("startKey: %s, endKey: %s", r.StartKeyHex, r.EndKeyHex)
-}
-
 // LabelRulePatch is the patch to update the label rules.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRulePatch struct {
