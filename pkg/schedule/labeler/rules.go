@@ -65,10 +65,11 @@ func (rule *LabelRule) String() string {
 		b.WriteString(l.String())
 		if i == len(rule.Labels)-1 {
 			b.WriteString("]")
+		} else {
+			b.WriteString(", ")
 		}
-		b.WriteString(", ")
 	}
-	b.WriteString("data: ")
+	b.WriteString(", data: ")
 	ranges := rule.Data.([]*KeyRangeRule)
 	for i, r := range ranges {
 		if i == 0 {
