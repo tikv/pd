@@ -673,14 +673,14 @@ func failureCases(input []JUnitTestCase) int {
 
 func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args := make([]string, 0, 10)
+	// let the test run in the verbose mode.
+	args = append(args, "-test.v")
 	exe := "./" + testFileName(pkg)
 	if coverProfile != "" {
 		fileName := strings.ReplaceAll(pkg, "/", "_") + "." + fn
 		tmpFile := path.Join(coverFileTempDir, fileName)
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
-	// let the test run in the verbose mode.
-	args = append(args, "-test.v")
 	if strings.Contains(fn, "Suite") {
 		args = append(args, "-test.cpu", fmt.Sprint(parallel/2))
 	} else {
