@@ -49,19 +49,19 @@ func checkPriorityRegionTest(re *require.Assertions, pc *PriorityInspector, tc *
 	region := tc.GetRegion(1)
 	opt := tc.GetCheckerConfig()
 	pc.Inspect(region)
-	re.Equal(0, pc.queue.Len())
+	re.Equal(0, pc.getQueueLen())
 
 	// case2: inspect region 2, it lacks one replica
 	region = tc.GetRegion(2)
 	pc.Inspect(region)
-	re.Equal(1, pc.queue.Len())
+	re.Equal(1, pc.getQueueLen())
 	// the region will not rerun after it checks
 	re.Empty(pc.GetPriorityRegions())
 
 	// case3: inspect region 3, it will has high priority
 	region = tc.GetRegion(3)
 	pc.Inspect(region)
-	re.Equal(2, pc.queue.Len())
+	re.Equal(2, pc.getQueueLen())
 	time.Sleep(opt.GetPatrolRegionInterval() * 10)
 	// region 3 has higher priority
 	ids := pc.GetPriorityRegions()
@@ -73,7 +73,7 @@ func checkPriorityRegionTest(re *require.Assertions, pc *PriorityInspector, tc *
 	tc.AddLeaderRegion(2, 2, 3, 1)
 	region = tc.GetRegion(2)
 	pc.Inspect(region)
-	re.Equal(1, pc.queue.Len())
+	re.Equal(1, pc.getQueueLen())
 
 	// case5: inspect region 3 again
 	region = tc.GetRegion(3)

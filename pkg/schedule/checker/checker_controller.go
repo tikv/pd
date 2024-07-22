@@ -15,10 +15,12 @@
 package checker
 
 import (
+	"bytes"
 	"context"
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -28,15 +30,28 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
-// DefaultCacheSize is the default length of waiting list.
-const DefaultCacheSize = 100000
+const (
+	checkSuspectRangesInterval = 100 * time.Millisecond
+	// DefaultPendingRegionCacheSize is the default length of waiting list.
+	DefaultPendingRegionCacheSize = 100000
+	// It takes about 1.3 minutes(1000000/128*10/60/1000) to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
+	patrolScanRegionLimit = 128
+)
 
-var denyCheckersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("checkers", "deny")
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	pendingProcessedRegionsGauge = regionListGauge.WithLabelValues("pending_processed_regions")
+	priorityListGauge            = regionListGauge.WithLabelValues("priority_list")
+	denyCheckersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("checkers", "deny")
+)
 
 // Controller is used to manage all checkers.
 type Controller struct {
+	ctx                     context.Context
 	cluster                 sche.CheckerCluster
 	conf                    config.CheckerConfigProvider
 	opController            *operator.Controller
@@ -49,12 +64,14 @@ type Controller struct {
 	priorityInspector       *PriorityInspector
 	pendingProcessedRegions cache.Cache
 	suspectKeyRanges        *cache.TTLString // suspect key-range regions that may need fix
+	patrolRegionContext     *PatrolRegionContext
 }
 
 // NewController create a new Controller.
 func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
-	pendingProcessedRegions := cache.NewDefaultCache(DefaultCacheSize)
+	pendingProcessedRegions := cache.NewDefaultCache(DefaultPendingRegionCacheSize)
 	return &Controller{
+		ctx:                     ctx,
 		cluster:                 cluster,
 		conf:                    conf,
 		opController:            opController,
@@ -67,10 +84,119 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		priorityInspector:       NewPriorityInspector(cluster, conf),
 		pendingProcessedRegions: pendingProcessedRegions,
 		suspectKeyRanges:        cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
+		patrolRegionContext:     &PatrolRegionContext{},
+	}
+}
+
+// PatrolRegions is used to scan regions.
+// The checkers will check these regions to decide if they need to do some operations.
+func (c *Controller) PatrolRegions() {
+	c.patrolRegionContext.init(c.cluster)
+	ticker := time.NewTicker(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
+	defer ticker.Stop()
+	var (
+		key     []byte
+		regions []*core.RegionInfo
+	)
+	for {
+		select {
+		case <-ticker.C:
+			c.updateTickerIfNeeded(ticker)
+		case <-c.ctx.Done():
+			patrolCheckRegionsGauge.Set(0)
+			c.patrolRegionContext.setPatrolRegionsDuration(0)
+			return
+		}
+		if c.cluster.IsSchedulingHalted() {
+			continue
+		}
+
+		// Check priority regions first.
+		c.checkPriorityRegions()
+		// Check pending processed regions first.
+		c.checkPendingProcessedRegions()
+
+		key, regions = c.checkRegions(key)
+		if len(regions) == 0 {
+			continue
+		}
+		// Updates the label level isolation statistics.
+		c.cluster.UpdateRegionsLabelLevelStats(regions)
+		if len(key) == 0 {
+			c.patrolRegionContext.roundUpdateMetrics()
+		}
+		failpoint.Inject("break-patrol", func() {
+			failpoint.Break()
+		})
+	}
+}
+
+func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {
+	// Note: we reset the ticker here to support updating configuration dynamically.
+	newInterval := c.cluster.GetCheckerConfig().GetPatrolRegionInterval()
+	if c.patrolRegionContext.interval != newInterval {
+		c.patrolRegionContext.interval = newInterval
+		ticker.Reset(newInterval)
+		log.Info("checkers starts patrol regions with new interval", zap.Duration("interval", newInterval))
+	}
+}
+
+// GetPatrolRegionsDuration returns the duration of the last patrol region round.
+func (c *Controller) GetPatrolRegionsDuration() time.Duration {
+	return c.patrolRegionContext.getPatrolRegionsDuration()
+}
+
+func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
+	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
+	if len(regions) == 0 {
+		// Resets the scan key.
+		key = nil
+		return
+	}
+
+	for _, region := range regions {
+		c.tryAddOperators(region)
+		key = region.GetEndKey()
+	}
+	return
+}
+
+func (c *Controller) checkPendingProcessedRegions() {
+	ids := c.GetPendingProcessedRegions()
+	pendingProcessedRegionsGauge.Set(float64(len(ids)))
+	for _, id := range ids {
+		region := c.cluster.GetRegion(id)
+		c.tryAddOperators(region)
+	}
+}
+
+// checkPriorityRegions checks priority regions
+func (c *Controller) checkPriorityRegions() {
+	items := c.GetPriorityRegions()
+	removes := make([]uint64, 0)
+	priorityListGauge.Set(float64(len(items)))
+	for _, id := range items {
+		region := c.cluster.GetRegion(id)
+		if region == nil {
+			removes = append(removes, id)
+			continue
+		}
+		ops := c.CheckRegion(region)
+		// it should skip if region needs to merge
+		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
+			continue
+		}
+		if !c.opController.ExceedStoreLimit(ops...) {
+			c.opController.AddWaitingOperator(ops...)
+		}
+	}
+	for _, v := range removes {
+		c.RemovePriorityRegions(v)
 	}
 }
 
 // CheckRegion will check the region and add a new operator if needed.
+// The function is exposed for test purpose.
 func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	// If PD has restarted, it needs to check learners added before and promote them.
 	// Don't check isRaftLearnerEnabled cause it maybe disable learner feature but there are still some learners to promote.
@@ -140,6 +266,29 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	return nil
 }
 
+func (c *Controller) tryAddOperators(region *core.RegionInfo) {
+	if region == nil {
+		// the region could be recent split, continue to wait.
+		return
+	}
+	id := region.GetID()
+	if c.opController.GetOperator(id) != nil {
+		c.RemovePendingProcessedRegion(id)
+		return
+	}
+	ops := c.CheckRegion(region)
+	if len(ops) == 0 {
+		return
+	}
+
+	if !c.opController.ExceedStoreLimit(ops...) {
+		c.opController.AddWaitingOperator(ops...)
+		c.RemovePendingProcessedRegion(id)
+	} else {
+		c.AddPendingProcessedRegions(id)
+	}
+}
+
 // GetMergeChecker returns the merge checker.
 func (c *Controller) GetMergeChecker() *MergeChecker {
 	return c.mergeChecker
@@ -179,6 +328,41 @@ func (c *Controller) GetPriorityRegions() []uint64 {
 // RemovePriorityRegions removes priority region from priority queue
 func (c *Controller) RemovePriorityRegions(id uint64) {
 	c.priorityInspector.RemovePriorityRegion(id)
+}
+
+// CheckSuspectRanges would pop one suspect key range group
+// The regions of new version key range and old version key range would be placed into
+// the suspect regions map
+func (c *Controller) CheckSuspectRanges() {
+	ticker := time.NewTicker(checkSuspectRangesInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			keyRange, success := c.PopOneSuspectKeyRange()
+			if !success {
+				continue
+			}
+			limit := 1024
+			regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
+			if len(regions) == 0 {
+				continue
+			}
+			regionIDList := make([]uint64, 0, len(regions))
+			for _, region := range regions {
+				regionIDList = append(regionIDList, region.GetID())
+			}
+			// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
+			// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
+			lastRegion := regions[len(regions)-1]
+			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
+				c.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
+			}
+			c.AddPendingProcessedRegions(regionIDList...)
+		}
+	}
 }
 
 // AddSuspectKeyRange adds the key range with the its ruleID as the key
@@ -232,4 +416,40 @@ func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 	default:
 		return nil, errs.ErrCheckerNotFound.FastGenByArgs()
 	}
+}
+
+// PatrolRegionContext is used to store the context of patrol regions.
+type PatrolRegionContext struct {
+	// config
+	interval time.Duration
+	// status
+	patrolRoundStartTime time.Time
+	mu                   struct {
+		syncutil.RWMutex
+		duration time.Duration
+	}
+}
+
+func (p *PatrolRegionContext) init(cluster sche.CheckerCluster) {
+	p.interval = cluster.GetCheckerConfig().GetPatrolRegionInterval()
+	p.patrolRoundStartTime = time.Now()
+}
+
+func (p *PatrolRegionContext) getPatrolRegionsDuration() time.Duration {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.mu.duration
+}
+
+func (p *PatrolRegionContext) setPatrolRegionsDuration(dur time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mu.duration = dur
+}
+
+func (p *PatrolRegionContext) roundUpdateMetrics() {
+	dur := time.Since(p.patrolRoundStartTime)
+	patrolCheckRegionsGauge.Set(dur.Seconds())
+	p.setPatrolRegionsDuration(dur)
+	p.patrolRoundStartTime = time.Now()
 }
