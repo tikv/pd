@@ -122,7 +122,7 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 		server.SetEnableLocalTSO(false)
 	}
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	// Re-request the global TSOs.
 	leaderServer := cluster.GetLeaderServer()

@@ -60,6 +60,7 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.clusterID = strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()

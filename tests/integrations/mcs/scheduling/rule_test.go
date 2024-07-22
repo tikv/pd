@@ -53,6 +53,7 @@ func (suite *ruleTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoint = suite.pdLeaderServer.GetAddr()
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())

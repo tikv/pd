@@ -100,5 +100,5 @@ type ErrClientGetResourceGroup struct {
 }
 
 func (e *ErrClientGetResourceGroup) Error() string {
-	return fmt.Sprintf("get resource group %v failed, %v", e.ResourceGroupName, e.Cause)
+	return fmt.Sprintf("get resource group %s failed, %s", e.ResourceGroupName, e.Cause)
 }

@@ -65,6 +65,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	err = s.apiCluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := s.apiCluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	s.apiLeader = s.apiCluster.GetServer(leaderName)
 	s.backendEndpoints = s.apiLeader.GetAddr()
 	re.NoError(s.apiLeader.BootstrapCluster())
