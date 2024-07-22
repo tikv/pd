@@ -29,7 +29,7 @@ import (
 )
 
 func init() {
-	cobra.EnablePrefixMatching = true
+	cobra.EnablePrefixMatching = false
 	cobra.EnableTraverseRunHooks = true
 }
 
