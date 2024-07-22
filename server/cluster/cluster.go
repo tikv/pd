@@ -364,9 +364,9 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.startGCTuner()
 
 	c.running = true
-	c.heartbeatRunner.Start()
-	c.miscRunner.Start()
-	c.logRunner.Start()
+	c.heartbeatRunner.Start(c.ctx)
+	c.miscRunner.Start(c.ctx)
+	c.logRunner.Start(c.ctx)
 	return nil
 }
 

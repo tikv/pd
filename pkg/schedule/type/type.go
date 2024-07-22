@@ -33,4 +33,40 @@ const (
 	RuleChecker CheckerSchedulerType = "rule-checker"
 	// SplitChecker is the name for split checker.
 	SplitChecker CheckerSchedulerType = "split-checker"
+
+	// BalanceLeaderScheduler is balance leader scheduler name.
+	BalanceLeaderScheduler CheckerSchedulerType = "balance-leader-scheduler"
+	// BalanceRegionScheduler is balance region scheduler name.
+	BalanceRegionScheduler CheckerSchedulerType = "balance-region-scheduler"
+	// BalanceWitnessScheduler is balance witness scheduler name.
+	BalanceWitnessScheduler CheckerSchedulerType = "balance-witness-scheduler"
+	// EvictLeaderScheduler is evict leader scheduler name.
+	EvictLeaderScheduler CheckerSchedulerType = "evict-leader-scheduler"
+	// EvictSlowStoreScheduler is evict leader scheduler name.
+	EvictSlowStoreScheduler CheckerSchedulerType = "evict-slow-store-scheduler"
+	// EvictSlowTrendScheduler is evict leader by slow trend scheduler name.
+	EvictSlowTrendScheduler CheckerSchedulerType = "evict-slow-trend-scheduler"
+	// GrantLeaderScheduler is grant leader scheduler name.
+	GrantLeaderScheduler CheckerSchedulerType = "grant-leader-scheduler"
+	// GrantHotRegionScheduler is grant hot region scheduler name.
+	GrantHotRegionScheduler CheckerSchedulerType = "grant-hot-region-scheduler"
+	// HotRegionScheduler is balance hot region scheduler name.
+	HotRegionScheduler CheckerSchedulerType = "balance-hot-region-scheduler"
+	// RandomMergeScheduler is random merge scheduler name.
+	RandomMergeScheduler CheckerSchedulerType = "random-merge-scheduler"
+	// ScatterRangeScheduler is scatter range scheduler name.
+	// TODO: update to `scatter-range-scheduler`
+	ScatterRangeScheduler CheckerSchedulerType = "scatter-range"
+	// ShuffleHotRegionScheduler is shuffle hot region scheduler name.
+	ShuffleHotRegionScheduler CheckerSchedulerType = "shuffle-hot-region-scheduler"
+	// ShuffleLeaderScheduler is shuffle leader scheduler name.
+	ShuffleLeaderScheduler CheckerSchedulerType = "shuffle-leader-scheduler"
+	// ShuffleRegionScheduler is shuffle region scheduler name.
+	ShuffleRegionScheduler CheckerSchedulerType = "shuffle-region-scheduler"
+	// SplitBucketScheduler is the split bucket name.
+	SplitBucketScheduler CheckerSchedulerType = "split-bucket-scheduler"
+	// TransferWitnessLeaderScheduler is transfer witness leader scheduler name.
+	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
+	// LabelScheduler is label scheduler name.
+	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )

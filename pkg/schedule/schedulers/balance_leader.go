@@ -55,17 +55,6 @@ const (
 	transferOut = "transfer-out"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceLeaderScheduleCounter         = schedulerCounter.WithLabelValues(BalanceLeaderName, "schedule")
-	balanceLeaderNoLeaderRegionCounter   = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-leader-region")
-	balanceLeaderRegionHotCounter        = schedulerCounter.WithLabelValues(BalanceLeaderName, "region-hot")
-	balanceLeaderNoTargetStoreCounter    = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-target-store")
-	balanceLeaderNoFollowerRegionCounter = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-follower-region")
-	balanceLeaderSkipCounter             = schedulerCounter.WithLabelValues(BalanceLeaderName, "skip")
-	balanceLeaderNewOpCounter            = schedulerCounter.WithLabelValues(BalanceLeaderName, "new-operator")
-)
-
 type balanceLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	storage endpoint.ConfigStorage

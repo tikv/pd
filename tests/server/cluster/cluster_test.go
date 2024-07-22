@@ -186,6 +186,10 @@ func TestDamagedRegion(t *testing.T) {
 
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 3)
@@ -240,7 +244,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regions, 1)
 
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	leaderServer = tc.GetLeaderServer()
 	leaderName = leaderServer.GetServer().Name()
 	rc = leaderServer.GetRaftCluster()
@@ -257,11 +261,11 @@ func TestRegionStatistics(t *testing.T) {
 	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
 
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	leaderServer = tc.GetLeaderServer()
 	leaderName = leaderServer.GetServer().Name()
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	rc = tc.GetLeaderServer().GetRaftCluster()
 	r = rc.GetRegion(region.Id)
 	re.NotNil(r)
@@ -1645,6 +1649,10 @@ func TestMinResolvedTS(t *testing.T) {
 // See https://github.com/tikv/pd/issues/4941
 func TestTransferLeaderBack(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 2)

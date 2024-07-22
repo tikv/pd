@@ -549,9 +549,9 @@ func (c *Cluster) StartBackgroundJobs() {
 	go c.runUpdateStoreStats()
 	go c.runCoordinator()
 	go c.runMetricsCollectionJob()
-	c.heartbeatRunner.Start()
-	c.miscRunner.Start()
-	c.logRunner.Start()
+	c.heartbeatRunner.Start(c.ctx)
+	c.miscRunner.Start(c.ctx)
+	c.logRunner.Start(c.ctx)
 	c.running.Store(true)
 }
 

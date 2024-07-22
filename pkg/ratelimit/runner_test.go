@@ -15,6 +15,7 @@
 package ratelimit
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ import (
 func TestConcurrentRunner(t *testing.T) {
 	t.Run("RunTask", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Second)
-		runner.Start()
+		runner.Start(context.TODO())
 		defer runner.Stop()
 
 		var wg sync.WaitGroup
@@ -47,7 +48,7 @@ func TestConcurrentRunner(t *testing.T) {
 
 	t.Run("MaxPendingDuration", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), 2*time.Millisecond)
-		runner.Start()
+		runner.Start(context.TODO())
 		defer runner.Stop()
 		var wg sync.WaitGroup
 		for i := 0; i < 10; i++ {
@@ -76,7 +77,7 @@ func TestConcurrentRunner(t *testing.T) {
 
 	t.Run("DuplicatedTask", func(t *testing.T) {
 		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
-		runner.Start()
+		runner.Start(context.TODO())
 		defer runner.Stop()
 		for i := 1; i < 11; i++ {
 			regionID := uint64(i)

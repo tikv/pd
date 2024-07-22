@@ -35,16 +35,6 @@ const (
 	RandomMergeType = "random-merge"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	randomMergeCounter              = schedulerCounter.WithLabelValues(RandomMergeName, "schedule")
-	randomMergeNewOperatorCounter   = schedulerCounter.WithLabelValues(RandomMergeName, "new-operator")
-	randomMergeNoSourceStoreCounter = schedulerCounter.WithLabelValues(RandomMergeName, "no-source-store")
-	randomMergeNoRegionCounter      = schedulerCounter.WithLabelValues(RandomMergeName, "no-region")
-	randomMergeNoTargetStoreCounter = schedulerCounter.WithLabelValues(RandomMergeName, "no-target-store")
-	randomMergeNotAllowedCounter    = schedulerCounter.WithLabelValues(RandomMergeName, "not-allowed")
-)
-
 type randomMergeSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`

@@ -47,12 +47,6 @@ const (
 	GrantHotRegionType = "grant-hot-region"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantHotRegionCounter     = schedulerCounter.WithLabelValues(GrantHotRegionName, "schedule")
-	grantHotRegionSkipCounter = schedulerCounter.WithLabelValues(GrantHotRegionName, "skip")
-)
-
 type grantHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	storage       endpoint.ConfigStorage
