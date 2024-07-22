@@ -36,18 +36,6 @@ const (
 	BalanceRegionType = "balance-region"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceRegionScheduleCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "schedule")
-	balanceRegionNoRegionCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "no-region")
-	balanceRegionHotCounter           = schedulerCounter.WithLabelValues(BalanceRegionName, "region-hot")
-	balanceRegionNoLeaderCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "no-leader")
-	balanceRegionNewOpCounter         = schedulerCounter.WithLabelValues(BalanceRegionName, "new-operator")
-	balanceRegionSkipCounter          = schedulerCounter.WithLabelValues(BalanceRegionName, "skip")
-	balanceRegionCreateOpFailCounter  = schedulerCounter.WithLabelValues(BalanceRegionName, "create-operator-fail")
-	balanceRegionNoReplacementCounter = schedulerCounter.WithLabelValues(BalanceRegionName, "no-replacement")
-)
-
 type balanceRegionSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`

@@ -159,11 +159,13 @@ var (
 	cmdFailedDurationUpdateServiceGCSafePoint prometheus.Observer
 	cmdFailedDurationLoadKeyspace             prometheus.Observer
 	cmdFailedDurationUpdateKeyspaceState      prometheus.Observer
-	requestDurationTSO                        prometheus.Observer
 	cmdFailedDurationGet                      prometheus.Observer
 	cmdFailedDurationPut                      prometheus.Observer
 	cmdFailedDurationUpdateGCSafePointV2      prometheus.Observer
 	cmdFailedDurationUpdateServiceSafePointV2 prometheus.Observer
+
+	requestDurationTSO       prometheus.Observer
+	requestFailedDurationTSO prometheus.Observer
 )
 
 func initCmdDurations() {
@@ -207,11 +209,13 @@ func initCmdDurations() {
 	cmdFailedDurationUpdateServiceGCSafePoint = cmdFailedDuration.WithLabelValues("update_service_gc_safe_point")
 	cmdFailedDurationLoadKeyspace = cmdFailedDuration.WithLabelValues("load_keyspace")
 	cmdFailedDurationUpdateKeyspaceState = cmdFailedDuration.WithLabelValues("update_keyspace_state")
-	requestDurationTSO = requestDuration.WithLabelValues("tso")
 	cmdFailedDurationGet = cmdFailedDuration.WithLabelValues("get")
 	cmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
 	cmdFailedDurationUpdateGCSafePointV2 = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
 	cmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
+
+	requestDurationTSO = requestDuration.WithLabelValues("tso")
+	requestFailedDurationTSO = requestDuration.WithLabelValues("tso-failed")
 }
 
 func registerMetrics() {

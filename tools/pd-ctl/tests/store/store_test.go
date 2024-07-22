@@ -339,9 +339,14 @@ func TestStore(t *testing.T) {
 	// store delete <store_id> command
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	re.Equal(metapb.StoreState_Up, storeInfo.Store.State)
-	args = []string{"-u", pdAddr, "store", "delete", "1"}
-	_, err = tests.ExecuteCommand(cmd, args...)
+	args = []string{"-u", pdAddr, "store", "remove", "1"} // it means remove-tombstone
+	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	re.NotContains(string(output), "Success")
+	args = []string{"-u", pdAddr, "store", "delete", "1"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success")
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
