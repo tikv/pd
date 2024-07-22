@@ -255,6 +255,10 @@ func TestPrepareChecker(t *testing.T) {
 // ref: https://github.com/tikv/pd/issues/6988
 func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
@@ -298,7 +302,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
-	re.NotEqual(leaderServer.GetLeader().GetName(), cluster.WaitLeader())
+	re.NotEqual(leaderServer.GetServer().Name(), cluster.WaitLeader())
 	rc = cluster.GetLeaderServer().GetServer().GetRaftCluster()
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
