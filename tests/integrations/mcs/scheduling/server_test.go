@@ -484,7 +484,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
-		return region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
+		return region != nil && region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
 			region.GetKeysRead() == 200 && region.GetKeysWritten() == 100 && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
 			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
