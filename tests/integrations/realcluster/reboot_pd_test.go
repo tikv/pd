@@ -16,6 +16,7 @@ package realcluster
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"testing"
 
@@ -26,6 +27,8 @@ import (
 func restartTiUP() {
 	log.Info("start to restart TiUP")
 	cmd := exec.Command("make", "deploy")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	err := cmd.Run()
 	if err != nil {
 		panic(err)
