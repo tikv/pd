@@ -18,7 +18,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
@@ -204,20 +206,25 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		clientUrls = append(clientUrls, targetAddr)
 		// Add a header to the response, it is used to mark whether the request has been forwarded to the micro service.
 		w.Header().Add(apiutil.XForwardedToMicroServiceHeader, "true")
-	} else {
-		leader := h.s.GetMember().GetLeader()
+	} else if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) == 0 {
+		leader := h.waitForLeader(r)
+		// The leader has not been elected yet.
 		if leader == nil {
-			http.Error(w, "no leader", http.StatusServiceUnavailable)
+			http.Error(w, errs.ErrRedirectNoLeader.FastGenByArgs().Error(), http.StatusServiceUnavailable)
+			return
+		}
+		// If the leader is the current server now, we can handle the request directly.
+		if h.s.GetMember().IsLeader() || leader.GetName() == h.s.Name() {
+			next(w, r)
 			return
 		}
 		clientUrls = leader.GetClientUrls()
-		// Prevent more than one redirection among PD/API servers.
-		if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
-			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
-			http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
-			return
-		}
 		r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
+	} else {
+		// Prevent more than one redirection among PD/API servers.
+		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
+		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
+		return
 	}
 
 	urls := make([]url.URL, 0, len(clientUrls))
@@ -232,4 +239,39 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 	client := h.s.GetHTTPClient()
 	apiutil.NewCustomReverseProxies(client, urls).ServeHTTP(w, r)
+}
+
+const (
+	backoffMaxDelay = 3 * time.Second
+	backoffInterval = 100 * time.Millisecond
+)
+
+// If current server does not have a leader, backoff to increase the chance of success.
+func (h *redirector) waitForLeader(r *http.Request) (leader *pdpb.Member) {
+	var (
+		interval = backoffInterval
+		maxDelay = backoffMaxDelay
+		curDelay = time.Duration(0)
+	)
+	for {
+		leader = h.s.GetMember().GetLeader()
+		if leader != nil {
+			return
+		}
+		select {
+		case <-time.After(interval):
+			curDelay += interval
+			if curDelay >= maxDelay {
+				return
+			}
+			interval *= 2
+			if curDelay+interval > maxDelay {
+				interval = maxDelay - curDelay
+			}
+		case <-r.Context().Done():
+			return
+		case <-h.s.Context().Done():
+			return
+		}
+	}
 }

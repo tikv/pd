@@ -36,18 +36,6 @@ const (
 	BalanceRegionType = "balance-region"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceRegionScheduleCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "schedule")
-	balanceRegionNoRegionCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "no-region")
-	balanceRegionHotCounter           = schedulerCounter.WithLabelValues(BalanceRegionName, "region-hot")
-	balanceRegionNoLeaderCounter      = schedulerCounter.WithLabelValues(BalanceRegionName, "no-leader")
-	balanceRegionNewOpCounter         = schedulerCounter.WithLabelValues(BalanceRegionName, "new-operator")
-	balanceRegionSkipCounter          = schedulerCounter.WithLabelValues(BalanceRegionName, "skip")
-	balanceRegionCreateOpFailCounter  = schedulerCounter.WithLabelValues(BalanceRegionName, "create-operator-fail")
-	balanceRegionNoReplacementCounter = schedulerCounter.WithLabelValues(BalanceRegionName, "no-replacement")
-)
-
 type balanceRegionSchedulerConfig struct {
 	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
@@ -92,6 +80,13 @@ func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	}
 }
 
+// WithBalanceRegionFilterCounterName sets the filter counter name for the scheduler.
+func WithBalanceRegionFilterCounterName(name string) BalanceRegionCreateOption {
+	return func(s *balanceRegionScheduler) {
+		s.filterCounter.SetScope(name)
+	}
+}
+
 func (s *balanceRegionScheduler) GetName() string {
 	return s.conf.Name
 }
@@ -114,6 +109,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster
 
 func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := plan.NewBalanceSchedulerPlan()
+	defer s.filterCounter.Flush()
 	var collector *plan.Collector
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
@@ -217,7 +213,6 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		}
 		s.retryQuota.Attenuate(solver.Source)
 	}
-	s.filterCounter.Flush()
 	s.retryQuota.GC(stores)
 	return nil, collector.GetPlans()
 }
@@ -278,8 +273,8 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		op.FinishedCounters = append(op.FinishedCounters,
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 		)
-		op.AdditionalInfos["sourceScore"] = strconv.FormatFloat(solver.sourceScore, 'f', 2, 64)
-		op.AdditionalInfos["targetScore"] = strconv.FormatFloat(solver.targetScore, 'f', 2, 64)
+		op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
+		op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 		return op
 	}
 

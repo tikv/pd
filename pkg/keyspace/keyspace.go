@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
@@ -321,14 +322,19 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	}
 	defer func() {
 		if err != nil {
-			cl.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID)
+			if err := cl.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID); err != nil {
+				log.Warn("[keyspace] failed to delete region label for keyspace",
+					zap.Uint32("keyspace-id", id),
+					zap.Error(err),
+				)
+			}
 		}
 	}()
 
 	if waitRegionSplit {
 		ranges := keyspaceRule.Data.([]*labeler.KeyRangeRule)
 		if len(ranges) < 2 {
-			log.Warn("[keyspace] failed to split keyspace region with insufficient range", zap.Any("label-rule", keyspaceRule))
+			log.Warn("[keyspace] failed to split keyspace region with insufficient range", logutil.ZapRedactString("label-rule", keyspaceRule.String()))
 			return ErrRegionSplitFailed
 		}
 		rawLeftBound, rawRightBound := ranges[0].StartKey, ranges[0].EndKey
@@ -343,20 +349,20 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		for {
 			select {
 			case <-ticker.C:
-				regionsInfo := manager.cluster.GetBasicCluster().RegionsInfo
-				region := regionsInfo.GetRegionByKey(rawLeftBound)
+				c := manager.cluster.GetBasicCluster()
+				region := c.GetRegionByKey(rawLeftBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), rawLeftBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(rawRightBound)
+				region = c.GetRegionByKey(rawRightBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), rawRightBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(txnLeftBound)
+				region = c.GetRegionByKey(txnLeftBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), txnLeftBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(txnRightBound)
+				region = c.GetRegionByKey(txnRightBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), txnRightBound) {
 					continue
 				}
@@ -377,7 +383,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 
 	log.Info("[keyspace] added region label for keyspace",
 		zap.Uint32("keyspace-id", id),
-		zap.Any("label-rule", keyspaceRule),
+		logutil.ZapRedactString("label-rule", keyspaceRule.String()),
 		zap.Duration("takes", time.Since(start)),
 	)
 	return

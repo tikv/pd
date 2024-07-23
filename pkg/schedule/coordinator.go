@@ -24,7 +24,6 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
@@ -46,13 +45,13 @@ import (
 const (
 	runSchedulerCheckInterval  = 3 * time.Second
 	checkSuspectRangesInterval = 100 * time.Millisecond
-	collectFactor              = 0.9
 	collectTimeout             = 5 * time.Minute
 	maxLoadConfigRetries       = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	patrolScanRegionLimit = 128 // It takes about 14 minutes to iterate 1 million regions.
+	// It takes about 1.3 minutes(1000000/128*10/60/1000) to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
+	patrolScanRegionLimit = 128
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
@@ -61,8 +60,8 @@ const (
 
 var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	waitingListGauge  = regionListGauge.WithLabelValues("waiting_list")
-	priorityListGauge = regionListGauge.WithLabelValues("priority_list")
+	pendingProcessedRegionsGauge = regionListGauge.WithLabelValues("pending_processed_regions")
+	priorityListGauge            = regionListGauge.WithLabelValues("priority_list")
 )
 
 // Coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -101,8 +100,8 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 		cluster:               cluster,
 		prepareChecker:        newPrepareChecker(),
 		checkers:              checkers,
-		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddSuspectRegions),
-		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddSuspectRegions),
+		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddPendingProcessedRegions),
+		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddPendingProcessedRegions),
 		schedulers:            schedulers,
 		opController:          opController,
 		hbStreams:             hbStreams,
@@ -141,11 +140,6 @@ func (c *Coordinator) AreSchedulersInitialized() bool {
 	return c.schedulersInitialized
 }
 
-// GetWaitingRegions returns the regions in the waiting list.
-func (c *Coordinator) GetWaitingRegions() []*cache.Item {
-	return c.checkers.GetWaitingRegions()
-}
-
 // IsPendingRegion returns if the region is in the pending list.
 func (c *Coordinator) IsPendingRegion(region uint64) bool {
 	return c.checkers.IsPendingRegion(region)
@@ -178,16 +172,14 @@ func (c *Coordinator) PatrolRegions() {
 			log.Info("patrol regions has been stopped")
 			return
 		}
-		if c.isSchedulingHalted() {
+		if c.cluster.IsSchedulingHalted() {
 			continue
 		}
 
 		// Check priority regions first.
 		c.checkPriorityRegions()
-		// Check suspect regions first.
-		c.checkSuspectRegions()
-		// Check regions in the waiting list
-		c.checkWaitingRegions()
+		// Check pending processed regions first.
+		c.checkPendingProcessedRegions()
 
 		key, regions = c.checkRegions(key)
 		if len(regions) == 0 {
@@ -207,10 +199,6 @@ func (c *Coordinator) PatrolRegions() {
 	}
 }
 
-func (c *Coordinator) isSchedulingHalted() bool {
-	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
-}
-
 func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
 	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
 	if len(regions) == 0 {
@@ -226,18 +214,11 @@ func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core
 	return
 }
 
-func (c *Coordinator) checkSuspectRegions() {
-	for _, id := range c.checkers.GetSuspectRegions() {
+func (c *Coordinator) checkPendingProcessedRegions() {
+	ids := c.checkers.GetPendingProcessedRegions()
+	pendingProcessedRegionsGauge.Set(float64(len(ids)))
+	for _, id := range ids {
 		region := c.cluster.GetRegion(id)
-		c.tryAddOperators(region)
-	}
-}
-
-func (c *Coordinator) checkWaitingRegions() {
-	items := c.checkers.GetWaitingRegions()
-	waitingListGauge.Set(float64(len(items)))
-	for _, item := range items {
-		region := c.cluster.GetRegion(item.Key)
 		c.tryAddOperators(region)
 	}
 }
@@ -302,7 +283,7 @@ func (c *Coordinator) checkSuspectRanges() {
 			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
 				c.checkers.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
 			}
-			c.checkers.AddSuspectRegions(regionIDList...)
+			c.checkers.AddPendingProcessedRegions(regionIDList...)
 		}
 	}
 }
@@ -314,8 +295,7 @@ func (c *Coordinator) tryAddOperators(region *core.RegionInfo) {
 	}
 	id := region.GetID()
 	if c.opController.GetOperator(id) != nil {
-		c.checkers.RemoveWaitingRegion(id)
-		c.checkers.RemoveSuspectRegion(id)
+		c.checkers.RemovePendingProcessedRegion(id)
 		return
 	}
 	ops := c.checkers.CheckRegion(region)
@@ -325,10 +305,9 @@ func (c *Coordinator) tryAddOperators(region *core.RegionInfo) {
 
 	if !c.opController.ExceedStoreLimit(ops...) {
 		c.opController.AddWaitingOperator(ops...)
-		c.checkers.RemoveWaitingRegion(id)
-		c.checkers.RemoveSuspectRegion(id)
+		c.checkers.RemovePendingProcessedRegion(id)
 	} else {
-		c.checkers.AddWaitingRegion(region)
+		c.checkers.AddPendingProcessedRegions(id)
 	}
 }
 

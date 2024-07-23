@@ -273,10 +273,15 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
+	err := handler.config.BuildWithArgs(args)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err = handler.config.Persist()
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
@@ -297,23 +302,26 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	handler.config.mu.Lock()
 	defer handler.config.mu.Unlock()
 	_, exists := handler.config.StoreIDWitRanges[id]
-	if exists {
-		delete(handler.config.StoreIDWitRanges, id)
-		handler.config.cluster.ResumeLeaderTransfer(id)
-
-		handler.config.mu.Unlock()
-		handler.config.Persist()
-		handler.config.mu.Lock()
-
-		var resp any
-		if len(handler.config.StoreIDWitRanges) == 0 {
-			resp = noStoreInSchedulerInfo
-		}
-		handler.rd.JSON(w, http.StatusOK, resp)
+	if !exists {
+		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
 		return
 	}
+	delete(handler.config.StoreIDWitRanges, id)
+	handler.config.cluster.ResumeLeaderTransfer(id)
 
-	handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
+	handler.config.mu.Unlock()
+	if err := handler.config.Persist(); err != nil {
+		handler.config.mu.Lock()
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	handler.config.mu.Lock()
+
+	var resp any
+	if len(handler.config.StoreIDWitRanges) == 0 {
+		resp = noStoreInSchedulerInfo
+	}
+	handler.rd.JSON(w, http.StatusOK, resp)
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {

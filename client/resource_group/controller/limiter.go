@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
@@ -74,13 +75,27 @@ type Limiter struct {
 	// last is the last time the limiter's tokens field was updated
 	last                time.Time
 	notifyThreshold     float64
-	lowTokensNotifyChan chan<- struct{}
+	lowTokensNotifyChan chan<- notifyMsg
 	// To prevent too many chan sent, the notifyThreshold is set to 0 after notify.
 	// So the notifyThreshold cannot show whether the limiter is in the low token state,
 	// isLowProcess is used to check it.
 	isLowProcess bool
 	// remainingNotifyTimes is used to limit notify when the speed limit is already set.
 	remainingNotifyTimes int
+	name                 string
+
+	// metrics
+	metrics *limiterMetricsCollection
+}
+
+// notifyMsg is a message to notify the low token state.
+type notifyMsg struct {
+	startTime time.Time
+}
+
+// limiterMetricsCollection is a collection of metrics for a limiter.
+type limiterMetricsCollection struct {
+	lowTokenNotifyCounter prometheus.Counter
 }
 
 // Limit returns the maximum overall event rate.
@@ -92,7 +107,7 @@ func (lim *Limiter) Limit() Limit {
 
 // NewLimiter returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan<- struct{}) *Limiter {
+func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotifyChan chan<- notifyMsg) *Limiter {
 	lim := &Limiter{
 		limit:               r,
 		last:                now,
@@ -106,14 +121,18 @@ func NewLimiter(now time.Time, r Limit, b int64, tokens float64, lowTokensNotify
 
 // NewLimiterWithCfg returns a new Limiter that allows events up to rate r and permits
 // bursts of at most b tokens.
-func NewLimiterWithCfg(now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- struct{}) *Limiter {
+func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArgs, lowTokensNotifyChan chan<- notifyMsg) *Limiter {
 	lim := &Limiter{
+		name:                name,
 		limit:               Limit(cfg.NewRate),
 		last:                now,
 		tokens:              cfg.NewTokens,
 		burst:               cfg.NewBurst,
 		notifyThreshold:     cfg.NotifyThreshold,
 		lowTokensNotifyChan: lowTokensNotifyChan,
+	}
+	lim.metrics = &limiterMetricsCollection{
+		lowTokenNotifyCounter: lowTokenRequestNotifyCounter.WithLabelValues(lim.name),
 	}
 	log.Debug("new limiter", zap.String("limiter", fmt.Sprintf("%+v", lim)))
 	return lim
@@ -130,6 +149,7 @@ type Reservation struct {
 	// This is the Limit at reservation time, it can change later.
 	limit           Limit
 	remainingTokens float64
+	err             error
 }
 
 // OK returns whether the limiter can provide the requested number of tokens
@@ -204,7 +224,8 @@ func (lim *Limiter) Reserve(ctx context.Context, waitDuration time.Duration, now
 	select {
 	case <-ctx.Done():
 		return &Reservation{
-			ok: false,
+			ok:  false,
+			err: ctx.Err(),
 		}
 	default:
 	}
@@ -224,6 +245,14 @@ func (lim *Limiter) SetupNotificationThreshold(threshold float64) {
 	lim.notifyThreshold = threshold
 }
 
+// SetName sets the name of the limiter.
+func (lim *Limiter) SetName(name string) *Limiter {
+	lim.mu.Lock()
+	defer lim.mu.Unlock()
+	lim.name = name
+	return lim
+}
+
 // notify tries to send a non-blocking notification on notifyCh and disables
 // further notifications (until the next Reconfigure or StartNotification).
 func (lim *Limiter) notify() {
@@ -233,7 +262,10 @@ func (lim *Limiter) notify() {
 	lim.notifyThreshold = 0
 	lim.isLowProcess = true
 	select {
-	case lim.lowTokensNotifyChan <- struct{}{}:
+	case lim.lowTokensNotifyChan <- notifyMsg{startTime: time.Now()}:
+		if lim.metrics != nil {
+			lim.metrics.lowTokenNotifyCounter.Inc()
+		}
 	default:
 	}
 }
@@ -330,6 +362,8 @@ func (lim *Limiter) AvailableTokens(now time.Time) float64 {
 	return tokens
 }
 
+const reserveWarnLogInterval = 10 * time.Millisecond
+
 // reserveN is a helper method for Reserve.
 // maxFutureReserve specifies the maximum reservation wait duration allowed.
 // reserveN returns Reservation, not *Reservation.
@@ -376,16 +410,20 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
-		log.Warn("[resource group controller] cannot reserve enough tokens",
-			zap.Duration("need-wait-duration", waitDuration),
-			zap.Duration("max-wait-duration", maxFutureReserve),
-			zap.Float64("current-ltb-tokens", lim.tokens),
-			zap.Float64("current-ltb-rate", float64(lim.limit)),
-			zap.Float64("request-tokens", n),
-			zap.Float64("notify-threshold", lim.notifyThreshold),
-			zap.Bool("is-low-process", lim.isLowProcess),
-			zap.Int64("burst", lim.burst),
-			zap.Int("remaining-notify-times", lim.remainingNotifyTimes))
+		// print log if the limiter cannot reserve for a while.
+		if time.Since(lim.last) > reserveWarnLogInterval {
+			log.Warn("[resource group controller] cannot reserve enough tokens",
+				zap.Duration("need-wait-duration", waitDuration),
+				zap.Duration("max-wait-duration", maxFutureReserve),
+				zap.Float64("current-ltb-tokens", lim.tokens),
+				zap.Float64("current-ltb-rate", float64(lim.limit)),
+				zap.Float64("request-tokens", n),
+				zap.Float64("notify-threshold", lim.notifyThreshold),
+				zap.Bool("is-low-process", lim.isLowProcess),
+				zap.Int64("burst", lim.burst),
+				zap.Int("remaining-notify-times", lim.remainingNotifyTimes),
+				zap.String("name", lim.name))
+		}
 		lim.last = last
 		if lim.limit == 0 {
 			lim.notify()
@@ -465,6 +503,9 @@ func WaitReservations(ctx context.Context, now time.Time, reservations []*Reserv
 	for _, res := range reservations {
 		if !res.ok {
 			cancel()
+			if res.err != nil {
+				return res.needWaitDuration, res.err
+			}
 			return res.needWaitDuration, errs.ErrClientResourceGroupThrottled.FastGenByArgs(res.needWaitDuration, res.limit, res.remainingTokens)
 		}
 		delay := res.DelayFrom(now)

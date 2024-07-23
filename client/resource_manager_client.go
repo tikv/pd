@@ -16,7 +16,6 @@ package pd
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -35,10 +34,6 @@ const (
 	modify                     actionType = 1
 	groupSettingsPathPrefix               = "resource_group/settings"
 	controllerConfigPathPrefix            = "resource_group/controller"
-	// errNotPrimary is returned when the requested server is not primary.
-	errNotPrimary = "not primary"
-	// errNotLeader is returned when the requested server is not pd leader.
-	errNotLeader = "not leader"
 )
 
 // GroupSettingsPathPrefixBytes is used to watch or get resource groups.
@@ -83,7 +78,7 @@ func (c *client) resourceManagerClient() (rmpb.ResourceManagerClient, error) {
 
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *client) gRPCErrorHandler(err error) {
-	if strings.Contains(err.Error(), errNotPrimary) || strings.Contains(err.Error(), errNotLeader) {
+	if errs.IsLeaderChange(err) {
 		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
 	}
 }
@@ -324,7 +319,9 @@ func (c *client) handleResourceTokenDispatcher(dispatcherCtx context.Context, tb
 		// If the stream is nil or the leader has changed, try to reconnect.
 		if toReconnect {
 			connection.reset()
-			c.tryResourceManagerConnect(dispatcherCtx, &connection)
+			if err := c.tryResourceManagerConnect(dispatcherCtx, &connection); err != nil {
+				log.Error("[resource_manager] try to connect token leader failed", errs.ZapError(err))
+			}
 			log.Info("[resource_manager] token leader may change, try to reconnect the stream")
 			stream, streamCtx = connection.stream, connection.ctx
 		}

@@ -263,7 +263,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	args := []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, tsoAddrs[0]}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "invalid num of nodes")
+	re.Contains(string(output), "Success!")
 	args = []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, "", ""}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)

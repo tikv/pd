@@ -25,42 +25,42 @@ import (
 
 func TestConcurrentRunner(t *testing.T) {
 	t.Run("RunTask", func(t *testing.T) {
-		limiter := NewConcurrencyLimiter(1)
-		runner := NewConcurrentRunner("test", time.Second)
-		runner.Start()
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Second)
+		runner.Start(context.TODO())
 		defer runner.Stop()
 
 		var wg sync.WaitGroup
 		for i := 0; i < 10; i++ {
 			time.Sleep(50 * time.Millisecond)
 			wg.Add(1)
-			err := runner.RunTask(context.Background(), TaskOpts{
-				TaskName: "test1",
-				Limit:    limiter,
-			}, func(context.Context) {
-				defer wg.Done()
-				time.Sleep(100 * time.Millisecond)
-			})
+			err := runner.RunTask(
+				uint64(i),
+				"test1",
+				func() {
+					defer wg.Done()
+					time.Sleep(100 * time.Millisecond)
+				},
+			)
 			require.NoError(t, err)
 		}
 		wg.Wait()
 	})
 
 	t.Run("MaxPendingDuration", func(t *testing.T) {
-		limiter := NewConcurrencyLimiter(1)
-		runner := NewConcurrentRunner("test", 2*time.Millisecond)
-		runner.Start()
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), 2*time.Millisecond)
+		runner.Start(context.TODO())
 		defer runner.Stop()
 		var wg sync.WaitGroup
 		for i := 0; i < 10; i++ {
 			wg.Add(1)
-			err := runner.RunTask(context.Background(), TaskOpts{
-				TaskName: "test2",
-				Limit:    limiter,
-			}, func(context.Context) {
-				defer wg.Done()
-				time.Sleep(100 * time.Millisecond)
-			})
+			err := runner.RunTask(
+				uint64(i),
+				"test2",
+				func() {
+					defer wg.Done()
+					time.Sleep(100 * time.Millisecond)
+				},
+			)
 			if err != nil {
 				wg.Done()
 				// task 0 running
@@ -73,5 +73,30 @@ func TestConcurrentRunner(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 		}
 		wg.Wait()
+	})
+
+	t.Run("DuplicatedTask", func(t *testing.T) {
+		runner := NewConcurrentRunner("test", NewConcurrencyLimiter(1), time.Minute)
+		runner.Start(context.TODO())
+		defer runner.Stop()
+		for i := 1; i < 11; i++ {
+			regionID := uint64(i)
+			if i == 10 {
+				regionID = 4
+			}
+			err := runner.RunTask(
+				regionID,
+				"test3",
+				func() {
+					time.Sleep(time.Second)
+				},
+			)
+			require.NoError(t, err)
+			time.Sleep(1 * time.Millisecond)
+		}
+
+		updatedSubmitted := runner.pendingTasks[1].submittedAt
+		lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
+		require.Greater(t, updatedSubmitted, lastSubmitted)
 	})
 }

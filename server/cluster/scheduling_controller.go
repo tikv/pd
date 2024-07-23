@@ -195,7 +195,7 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	// collect hot cache metrics
 	sc.hotStat.CollectMetrics()
 	// collect the lock metrics
-	sc.RegionsInfo.CollectWaitLockMetrics()
+	sc.CollectWaitLockMetrics()
 }
 
 func (sc *schedulingController) removeStoreStatistics(storeID uint64) {
@@ -403,25 +403,25 @@ func (sc *schedulingController) PauseOrResumeChecker(name string, t int64) error
 	return sc.coordinator.PauseOrResumeChecker(name, t)
 }
 
-// AddSuspectRegions adds regions to suspect list.
-func (sc *schedulingController) AddSuspectRegions(regionIDs ...uint64) {
+// AddPendingProcessedRegions adds regions to suspect list.
+func (sc *schedulingController) AddPendingProcessedRegions(regionIDs ...uint64) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	sc.coordinator.GetCheckerController().AddSuspectRegions(regionIDs...)
+	sc.coordinator.GetCheckerController().AddPendingProcessedRegions(regionIDs...)
 }
 
-// GetSuspectRegions gets all suspect regions.
-func (sc *schedulingController) GetSuspectRegions() []uint64 {
+// GetPendingProcessedRegions gets all suspect regions.
+func (sc *schedulingController) GetPendingProcessedRegions() []uint64 {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	return sc.coordinator.GetCheckerController().GetSuspectRegions()
+	return sc.coordinator.GetCheckerController().GetPendingProcessedRegions()
 }
 
-// RemoveSuspectRegion removes region from suspect list.
-func (sc *schedulingController) RemoveSuspectRegion(id uint64) {
+// RemovePendingProcessedRegion removes region from pending processed regions.
+func (sc *schedulingController) RemovePendingProcessedRegion(id uint64) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	sc.coordinator.GetCheckerController().RemoveSuspectRegion(id)
+	sc.coordinator.GetCheckerController().RemovePendingProcessedRegion(id)
 }
 
 // PopOneSuspectKeyRange gets one suspect keyRange group.
@@ -438,13 +438,6 @@ func (sc *schedulingController) ClearSuspectKeyRanges() {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	sc.coordinator.GetCheckerController().ClearSuspectKeyRanges()
-}
-
-// ClearSuspectRegions clears the suspect regions, only for unit test
-func (sc *schedulingController) ClearSuspectRegions() {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-	sc.coordinator.GetCheckerController().ClearSuspectRegions()
 }
 
 // AddSuspectKeyRange adds the key range with the its ruleID as the key

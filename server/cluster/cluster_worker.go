@@ -39,16 +39,21 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	if c.GetScheduleConfig().EnableHeartbeatBreakdownMetrics {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
-	var runner ratelimit.Runner
-	runner = syncRunner
+	defer tracer.Release()
+	var taskRunner, miscRunner, logRunner ratelimit.Runner
+	taskRunner, miscRunner, logRunner = syncRunner, syncRunner, syncRunner
 	if c.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
-		runner = c.taskRunner
+		taskRunner = c.heartbeatRunner
+		miscRunner = c.miscRunner
+		logRunner = c.logRunner
 	}
+
 	ctx := &core.MetaProcessContext{
 		Context:    c.ctx,
-		Limiter:    c.hbConcurrencyLimiter,
 		Tracer:     tracer,
-		TaskRunner: runner,
+		TaskRunner: taskRunner,
+		MiscRunner: miscRunner,
+		LogRunner:  logRunner,
 	}
 	tracer.Begin()
 	if err := c.processRegionHeartbeat(ctx, region); err != nil {
@@ -66,7 +71,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 
 // HandleAskSplit handles the split request.
 func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSplitResponse, error) {
-	if c.isSchedulingHalted() {
+	if c.IsSchedulingHalted() {
 		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
@@ -109,13 +114,9 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 	return split, nil
 }
 
-func (c *RaftCluster) isSchedulingHalted() bool {
-	return c.opt.IsSchedulingHalted()
-}
-
 // HandleAskBatchSplit handles the batch split request.
 func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*pdpb.AskBatchSplitResponse, error) {
-	if c.isSchedulingHalted() {
+	if c.IsSchedulingHalted() {
 		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
 	if !c.opt.IsTikvRegionSplitEnabled() {
@@ -164,7 +165,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	// If region splits during the scheduling process, regions with abnormal
 	// status may be left, and these regions need to be checked with higher
 	// priority.
-	c.AddSuspectRegions(recordRegions...)
+	c.AddPendingProcessedRegions(recordRegions...)
 
 	resp := &pdpb.AskBatchSplitResponse{Ids: splitIDs}
 
@@ -237,7 +238,7 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 	err := checkSplitRegions(regions)
 	if err != nil {
 		log.Warn("report batch split region is invalid",
-			zap.Stringer("region-meta", hrm),
+			logutil.ZapRedactStringer("region-meta", hrm),
 			errs.ZapError(err))
 		return nil, err
 	}
@@ -246,7 +247,7 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 	hrm = core.RegionsToHexMeta(regions[:last])
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Stringer("origin", hrm),
+		logutil.ZapRedactStringer("origin", hrm),
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }

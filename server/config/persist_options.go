@@ -795,7 +795,9 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{Config: &Config{}}
 	// Pass nil to initialize cfg to default values (all items undefined)
-	cfg.Adjust(nil, true)
+	if err := cfg.Adjust(nil, true); err != nil {
+		return err
+	}
 
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
@@ -987,11 +989,8 @@ func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clien
 
 var haltSchedulingStatus = schedulingAllowanceStatusGauge.WithLabelValues("halt-scheduling")
 
-// SetHaltScheduling set HaltScheduling.
-func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
-	v := o.GetScheduleConfig().Clone()
-	v.HaltScheduling = halt
-	o.SetScheduleConfig(v)
+// SetSchedulingAllowanceStatus sets the scheduling allowance status to help distinguish the source of the halt.
+func (*PersistOptions) SetSchedulingAllowanceStatus(halt bool, source string) {
 	if halt {
 		haltSchedulingStatus.Set(1)
 		schedulingAllowanceStatusGauge.WithLabelValues(source).Set(1)
@@ -999,6 +998,14 @@ func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
 		haltSchedulingStatus.Set(0)
 		schedulingAllowanceStatusGauge.WithLabelValues(source).Set(0)
 	}
+}
+
+// SetHaltScheduling set HaltScheduling.
+func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
+	v := o.GetScheduleConfig().Clone()
+	v.HaltScheduling = halt
+	o.SetScheduleConfig(v)
+	o.SetSchedulingAllowanceStatus(halt, source)
 }
 
 // IsSchedulingHalted returns if PD scheduling is halted.

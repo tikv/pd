@@ -442,9 +442,15 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.rootPath = endpoint.PDRootPath(clusterID)
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
-	s.member.SetMemberDeployPath(s.member.ID())
-	s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion)
-	s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash)
+	if err := s.member.SetMemberDeployPath(s.member.ID()); err != nil {
+		return err
+	}
+	if err := s.member.SetMemberBinaryVersion(s.member.ID(), versioninfo.PDReleaseVersion); err != nil {
+		return err
+	}
+	if err := s.member.SetMemberGitHash(s.member.ID(), versioninfo.PDGitHash); err != nil {
+		return err
+	}
 	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -452,6 +458,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
 	})
+	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
+	if err != nil {
+		return err
+	}
 	// Initialize an etcd storage as the default storage.
 	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
 	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
@@ -479,11 +489,6 @@ func (s *Server) startServer(ctx context.Context) error {
 				return err
 			}
 		}
-	}
-
-	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
-	if err != nil {
-		return err
 	}
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
@@ -1042,6 +1047,7 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
+// This function is exported to be used by the API.
 func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -1060,6 +1066,8 @@ func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 			errs.ZapError(err))
 		return err
 	}
+	// Update the scheduling halt status at the same time.
+	s.persistOptions.SetSchedulingAllowanceStatus(cfg.HaltScheduling, "manually")
 	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
@@ -1552,8 +1560,6 @@ func (s *Server) UpdateGRPCServiceRateLimiter(serviceLabel string, opts ...ratel
 
 // GetClusterStatus gets cluster status.
 func (s *Server) GetClusterStatus() (*cluster.Status, error) {
-	s.cluster.Lock()
-	defer s.cluster.Unlock()
 	return s.cluster.LoadClusterStatus()
 }
 
@@ -1685,7 +1691,9 @@ func (s *Server) leaderLoop() {
 						zap.String("current-leader-member-id", types.ID(etcdLeader).String()),
 						zap.String("transferee-member-id", types.ID(s.member.ID()).String()),
 					)
-					s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID())
+					if err := s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID()); err != nil {
+						log.Error("failed to move etcd leader", errs.ZapError(err))
+					}
 				}
 			}
 			log.Info("skip campaigning of pd leader and check later",

@@ -42,6 +42,7 @@ import (
 	"go.etcd.io/etcd/pkg/types"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 )
 
 const (
@@ -229,7 +230,14 @@ func StartGRPCAndHTTPServers(s server, serverReadyChan chan<- struct{}, l net.Li
 		httpListener = mux.Match(cmux.HTTP1())
 	}
 
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		// Allow clients send consecutive pings in every 5 seconds.
+		// The default value of MinTime is 5 minutes,
+		// which is too long compared with 10 seconds of TiKV's pd client keepalive time.
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime: 5 * time.Second,
+		}),
+	)
 	s.SetGRPCServer(grpcServer)
 	s.RegisterGRPCService(grpcServer)
 	diagnosticspb.RegisterDiagnosticsServer(grpcServer, s)
@@ -266,7 +274,9 @@ func StopHTTPServer(s server) {
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
-		s.GetHTTPServer().Shutdown(ctx)
+		if err := s.GetHTTPServer().Shutdown(ctx); err != nil {
+			log.Error("http server graceful shutdown failed", errs.ZapError(err))
+		}
 	}()
 
 	select {
@@ -274,7 +284,9 @@ func StopHTTPServer(s server) {
 	case <-ctx.Done():
 		// Took too long, manually close open transports
 		log.Warn("http server graceful shutdown timeout, forcing close")
-		s.GetHTTPServer().Close()
+		if err := s.GetHTTPServer().Close(); err != nil {
+			log.Warn("http server close failed", errs.ZapError(err))
+		}
 		// concurrent Graceful Shutdown should be interrupted
 		<-ch
 	}

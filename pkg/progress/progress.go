@@ -130,47 +130,50 @@ func (m *Manager) UpdateProgress(progress string, current, remaining float64, is
 	m.Lock()
 	defer m.Unlock()
 
-	if p, exist := m.progresses[progress]; exist {
-		for _, op := range opts {
-			op(p)
-		}
-		p.remaining = remaining
-		if p.total < remaining {
-			p.total = remaining
-		}
+	p, exist := m.progresses[progress]
+	if !exist {
+		return
+	}
 
-		p.history.PushBack(current)
+	for _, op := range opts {
+		op(p)
+	}
+	p.remaining = remaining
+	if p.total < remaining {
+		p.total = remaining
+	}
+
+	p.history.PushBack(current)
+	p.currentWindowLength++
+
+	// try to move `front` into correct place.
+	for p.currentWindowLength > p.windowLength {
+		p.front = p.front.Next()
+		p.currentWindowLength--
+	}
+	for p.currentWindowLength < p.windowLength && p.front.Prev() != nil {
+		p.front = p.front.Prev()
 		p.currentWindowLength++
+	}
 
-		// try to move `front` into correct place.
-		for p.currentWindowLength > p.windowLength {
-			p.front = p.front.Next()
-			p.currentWindowLength--
-		}
-		for p.currentWindowLength < p.windowLength && p.front.Prev() != nil {
-			p.front = p.front.Prev()
-			p.currentWindowLength++
-		}
+	for p.history.Len() > p.windowCapacity {
+		p.history.Remove(p.history.Front())
+	}
 
-		for p.history.Len() > p.windowCapacity {
-			p.history.Remove(p.history.Front())
-		}
-
-		// It means it just init and we haven't update the progress
-		if p.history.Len() <= 1 {
-			p.lastSpeed = 0
-		} else if isInc {
-			// the value increases, e.g., [1, 2, 3]
-			p.lastSpeed = (current - p.front.Value.(float64)) /
-				(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
-		} else {
-			// the value decreases, e.g., [3, 2, 1]
-			p.lastSpeed = (p.front.Value.(float64) - current) /
-				(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
-		}
-		if p.lastSpeed < 0 {
-			p.lastSpeed = 0
-		}
+	// It means it just init and we haven't update the progress
+	if p.history.Len() <= 1 {
+		p.lastSpeed = 0
+	} else if isInc {
+		// the value increases, e.g., [1, 2, 3]
+		p.lastSpeed = (current - p.front.Value.(float64)) /
+			(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
+	} else {
+		// the value decreases, e.g., [3, 2, 1]
+		p.lastSpeed = (p.front.Value.(float64) - current) /
+			(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
+	}
+	if p.lastSpeed < 0 {
+		p.lastSpeed = 0
 	}
 }
 
@@ -201,39 +204,40 @@ func (m *Manager) GetProgresses(filter func(p string) bool) []string {
 	m.RLock()
 	defer m.RUnlock()
 
-	processes := []string{}
+	progresses := make([]string, 0, len(m.progresses))
 	for p := range m.progresses {
 		if filter(p) {
-			processes = append(processes, p)
+			progresses = append(progresses, p)
 		}
 	}
-	return processes
+	return progresses
 }
 
 // Status returns the current progress status of a give name.
-func (m *Manager) Status(progress string) (process, leftSeconds, currentSpeed float64, err error) {
+func (m *Manager) Status(progressName string) (progress, leftSeconds, currentSpeed float64, err error) {
 	m.RLock()
 	defer m.RUnlock()
 
-	if p, exist := m.progresses[progress]; exist {
-		process = 1 - p.remaining/p.total
-		if process < 0 {
-			process = 0
-			err = errs.ErrProgressWrongStatus.FastGenByArgs(fmt.Sprintf("the remaining: %v is larger than the total: %v", p.remaining, p.total))
-			return
-		}
-		currentSpeed = p.lastSpeed
-		// When the progress is newly added, there is no last speed.
-		if p.lastSpeed == 0 && p.history.Len() <= 1 {
-			currentSpeed = 0
-		}
-
-		leftSeconds = p.remaining / currentSpeed
-		if math.IsNaN(leftSeconds) || math.IsInf(leftSeconds, 0) {
-			leftSeconds = math.MaxFloat64
-		}
+	p, exist := m.progresses[progressName]
+	if !exist {
+		err = errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the progress: %s", progressName))
 		return
 	}
-	err = errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the progress: %s", progress))
+	progress = 1 - p.remaining/p.total
+	if progress < 0 {
+		progress = 0
+		err = errs.ErrProgressWrongStatus.FastGenByArgs(fmt.Sprintf("the remaining: %v is larger than the total: %v", p.remaining, p.total))
+		return
+	}
+	currentSpeed = p.lastSpeed
+	// When the progress is newly added, there is no last speed.
+	if p.lastSpeed == 0 && p.history.Len() <= 1 {
+		currentSpeed = 0
+	}
+
+	leftSeconds = p.remaining / currentSpeed
+	if math.IsNaN(leftSeconds) || math.IsInf(leftSeconds, 0) {
+		leftSeconds = math.MaxFloat64
+	}
 	return
 }

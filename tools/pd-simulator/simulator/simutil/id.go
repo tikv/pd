@@ -1,4 +1,4 @@
-// Copyright 2019 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,21 +14,26 @@
 
 package simutil
 
-// CaseConfig is to save flags
-type CaseConfig struct {
-	StoreNum                    int
-	RegionNum                   int
-	EnableTransferRegionCounter bool
+// IDAllocator is used to alloc unique ID.
+type idAllocator struct {
+	id uint64
 }
 
-// CaseConfigure is an global instance for CaseConfig
-var CaseConfigure *CaseConfig
-
-// InitCaseConfig is to init caseConfigure
-func InitCaseConfig(storeNum, regionNum int, enableTransferRegionCounter bool) {
-	CaseConfigure = &CaseConfig{
-		StoreNum:                    storeNum,
-		RegionNum:                   regionNum,
-		EnableTransferRegionCounter: enableTransferRegionCounter,
-	}
+// NextID gets the next unique ID.
+func (a *idAllocator) NextID() uint64 {
+	a.id++
+	return a.id
 }
+
+// ResetID resets the IDAllocator.
+func (a *idAllocator) ResetID() {
+	a.id = 0
+}
+
+// GetID gets the current ID.
+func (a *idAllocator) GetID() uint64 {
+	return a.id
+}
+
+// IDAllocator is used to alloc unique ID.
+var IDAllocator idAllocator

@@ -139,9 +139,11 @@ func (s *pdTSOStream) processRequests(
 		}
 		return
 	}
-	tsoBatchSendLatency.Observe(float64(time.Since(batchStartTime)))
+	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
 	resp, err := s.stream.Recv()
+	duration := time.Since(start).Seconds()
 	if err != nil {
+		requestFailedDurationTSO.Observe(duration)
 		if err == io.EOF {
 			err = errs.ErrClientTSOStreamClosed
 		} else {
@@ -149,7 +151,7 @@ func (s *pdTSOStream) processRequests(
 		}
 		return
 	}
-	requestDurationTSO.Observe(time.Since(start).Seconds())
+	requestDurationTSO.Observe(duration)
 	tsoBatchSize.Observe(float64(count))
 
 	if resp.GetCount() != uint32(count) {
@@ -195,9 +197,11 @@ func (s *tsoTSOStream) processRequests(
 		}
 		return
 	}
-	tsoBatchSendLatency.Observe(float64(time.Since(batchStartTime)))
+	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
 	resp, err := s.stream.Recv()
+	duration := time.Since(start).Seconds()
 	if err != nil {
+		requestFailedDurationTSO.Observe(duration)
 		if err == io.EOF {
 			err = errs.ErrClientTSOStreamClosed
 		} else {
@@ -205,7 +209,7 @@ func (s *tsoTSOStream) processRequests(
 		}
 		return
 	}
-	requestDurationTSO.Observe(time.Since(start).Seconds())
+	requestDurationTSO.Observe(duration)
 	tsoBatchSize.Observe(float64(count))
 
 	if resp.GetCount() != uint32(count) {

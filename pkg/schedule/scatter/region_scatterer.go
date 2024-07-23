@@ -255,7 +255,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 					continue
 				}
 				failpoint.Inject("scatterHbStreamsDrain", func() {
-					r.opController.GetHBStreams().Drain(1)
+					_ = r.opController.GetHBStreams().Drain(1)
 					r.opController.RemoveOperator(op, operator.AdminStop)
 				})
 			}
@@ -399,8 +399,8 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	if op != nil {
 		scatterSuccessCounter.Inc()
 		r.Put(targetPeers, targetLeader, group)
-		op.AdditionalInfos["group"] = group
-		op.AdditionalInfos["leader-picked-count"] = strconv.FormatUint(leaderStorePickedCount, 10)
+		op.SetAdditionalInfo("group", group)
+		op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
 		op.SetPriorityLevel(constant.High)
 	}
 	return op, nil

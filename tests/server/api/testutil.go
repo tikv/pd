@@ -23,19 +23,13 @@ import (
 	"path"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/tests"
 )
 
 const (
 	schedulersPrefix      = "/pd/api/v1/schedulers"
 	schedulerConfigPrefix = "/pd/api/v1/scheduler-config"
 )
-
-// dialClient used to dial http request.
-var dialClient = &http.Client{
-	Transport: &http.Transport{
-		DisableKeepAlives: true,
-	},
-}
 
 // MustAddScheduler adds a scheduler with HTTP API.
 func MustAddScheduler(
@@ -53,7 +47,7 @@ func MustAddScheduler(
 	httpReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s", serverAddr, schedulersPrefix), bytes.NewBuffer(data))
 	re.NoError(err)
 	// Send request.
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)
@@ -65,7 +59,7 @@ func MustAddScheduler(
 func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName string) {
 	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), http.NoBody)
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
@@ -84,7 +78,7 @@ func MustCallSchedulerConfigAPI(
 	args = append([]string{schedulerConfigPrefix, schedulerName}, args...)
 	httpReq, err := http.NewRequest(method, fmt.Sprintf("%s%s", serverAddr, path.Join(args...)), bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	data, err = io.ReadAll(resp.Body)

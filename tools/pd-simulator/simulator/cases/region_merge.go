@@ -15,36 +15,40 @@
 package cases
 
 import (
-	"math/rand"
-
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newRegionMerge() *Case {
+func newRegionMerge(config *sc.SimConfig) *Case {
 	var simCase Case
-	// Initialize the cluster
-	storeNum, regionNum := getStoreNum(), getRegionNum()
-	for i := 1; i <= storeNum; i++ {
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	allStores := make(map[uint64]struct{}, totalStore)
+
+	for i := 0; i < totalStore; i++ {
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 
-	for i := 0; i < storeNum*regionNum/3; i++ {
-		storeIDs := rand.Perm(storeNum)
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      simutil.IDAllocator.NextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
 			Size:   10 * units.MiB,
@@ -52,18 +56,19 @@ func newRegionMerge() *Case {
 		})
 	}
 	// Checker description
-	threshold := 0.05
 	mergeRatio := 4 // when max-merge-region-size is 20, per region will reach 40MB
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
-		sum := 0
-		regionCounts := make([]int, 0, storeNum)
-		for i := 1; i <= storeNum; i++ {
-			regionCount := regions.GetStoreRegionCount(uint64(i))
-			regionCounts = append(regionCounts, regionCount)
-			sum += regionCount
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
+			}
 		}
-		simutil.Logger.Info("current counts", zap.Ints("region", regionCounts), zap.Int64("average region size", regions.GetAverageRegionSize()))
-		return isUniform(sum, storeNum*regionNum/mergeRatio, threshold)
+
+		currentPeerCount := 0
+		for storeID := range allStores {
+			currentPeerCount += regions.GetStoreRegionCount(storeID)
+		}
+		return isUniform(currentPeerCount, totalRegion*replica/mergeRatio)
 	}
 	return &simCase
 }

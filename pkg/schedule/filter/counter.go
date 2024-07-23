@@ -188,6 +188,10 @@ func NewCounter(scope string) *Counter {
 	return &Counter{counter: counter, scope: scope}
 }
 
+func (c *Counter) SetScope(scope string) {
+	c.scope = scope
+}
+
 // Add adds the filter counter.
 func (c *Counter) inc(action action, filterType filterType, sourceID uint64, targetID uint64) {
 	if _, ok := c.counter[action][filterType][sourceID]; !ok {

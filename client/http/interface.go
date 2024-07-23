@@ -49,7 +49,10 @@ type Client interface {
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
+	DeleteStore(context.Context, uint64) error
 	SetStoreLabels(context.Context, int64, map[string]string) error
+	DeleteStoreLabel(ctx context.Context, storeID int64, labelKey string) error
+	GetHealthStatus(context.Context) ([]Health, error)
 	/* Config-related interfaces */
 	GetConfig(context.Context) (map[string]any, error)
 	SetConfig(context.Context, map[string]any, ...float64) error
@@ -63,6 +66,7 @@ type Client interface {
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
@@ -79,6 +83,10 @@ type Client interface {
 	DeletePlacementRuleGroupByID(context.Context, string) error
 	GetAllRegionLabelRules(context.Context) ([]*LabelRule, error)
 	GetRegionLabelRulesByIDs(context.Context, []string) ([]*LabelRule, error)
+	// `SetRegionLabelRule` sets the label rule for a region.
+	// When a label rule (deny scheduler) is set,
+	//  1. All schedulers will be disabled except for the evict-leader-scheduler.
+	//  2. The merge-checker will be disabled, preventing these regions from being merged.
 	SetRegionLabelRule(context.Context, *LabelRule) error
 	PatchRegionLabelRules(context.Context, *LabelRulePatch) error
 	/* Scheduling-related interfaces */
@@ -337,6 +345,33 @@ func (c *client) SetStoreLabels(ctx context.Context, storeID int64, storeLabels 
 		WithBody(jsonInput))
 }
 
+// DeleteStoreLabel deletes the labels of a store.
+func (c *client) DeleteStoreLabel(ctx context.Context, storeID int64, labelKey string) error {
+	jsonInput, err := json.Marshal(labelKey)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteStoreLabelName).
+		WithURI(LabelByStoreID(storeID)).
+		WithMethod(http.MethodDelete).
+		WithBody(jsonInput))
+}
+
+// GetHealthStatus gets the health status of the cluster.
+func (c *client) GetHealthStatus(ctx context.Context) ([]Health, error) {
+	var healths []Health
+	err := c.request(ctx, newRequestInfo().
+		WithName(getHealthStatusName).
+		WithURI(health).
+		WithMethod(http.MethodGet).
+		WithResp(&healths))
+	if err != nil {
+		return nil, err
+	}
+	return healths, nil
+}
+
 // GetConfig gets the configurations.
 func (c *client) GetConfig(ctx context.Context) (map[string]any, error) {
 	var config map[string]any
@@ -423,6 +458,14 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*StoreInfo, erro
 		return nil, err
 	}
 	return &store, nil
+}
+
+// DeleteStore deletes the store by ID.
+func (c *client) DeleteStore(ctx context.Context, storeID uint64) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteStoreName).
+		WithURI(StoreByID(storeID)).
+		WithMethod(http.MethodDelete))
 }
 
 // GetClusterVersion gets the cluster version.
@@ -736,6 +779,14 @@ func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint6
 		WithURI(Schedulers).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
+}
+
+// DeleteScheduler deletes a scheduler from PD cluster.
+func (c *client) DeleteScheduler(ctx context.Context, name string) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(deleteSchedulerName).
+		WithURI(SchedulerByName(name)).
+		WithMethod(http.MethodDelete))
 }
 
 // AccelerateSchedule accelerates the scheduling of the regions within the given key range.

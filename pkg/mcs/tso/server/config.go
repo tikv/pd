@@ -224,19 +224,15 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	c.Security.Encryption.Adjust()
-
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = utils.DefaultLogFormat
-	}
-
-	return nil
+	return c.Security.Encryption.Adjust()
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
 }
 
 // Validate is used to validate if some configurations are right.

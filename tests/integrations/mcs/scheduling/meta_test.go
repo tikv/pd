@@ -55,6 +55,7 @@ func (suite *metaTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
 }
@@ -79,7 +80,7 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	)
 	re.NoError(err)
 	for i := uint64(1); i <= 4; i++ {
-		suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(
+		suite.pdLeaderServer.GetServer().GetRaftCluster().PutMetaStore(
 			&metapb.Store{Id: i, Address: fmt.Sprintf("mock-%d", i), State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano()},
 		)
 	}
@@ -102,7 +103,7 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	})
 
 	// test synchronized store labels
-	suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(
+	suite.pdLeaderServer.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{Id: 5, Address: "mock-5", State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(), Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}}},
 	)
 	testutil.Eventually(re, func() bool {

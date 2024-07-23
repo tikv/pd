@@ -14,218 +14,45 @@
 
 package core
 
-import (
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/utils/syncutil"
-)
+import "bytes"
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
-	Stores struct {
-		mu syncutil.RWMutex
-		*StoresInfo
-	}
-
+	*StoresInfo
 	*RegionsInfo
 }
 
 // NewBasicCluster creates a BasicCluster.
 func NewBasicCluster() *BasicCluster {
 	return &BasicCluster{
-		Stores: struct {
-			mu syncutil.RWMutex
-			*StoresInfo
-		}{StoresInfo: NewStoresInfo()},
-
+		StoresInfo:  NewStoresInfo(),
 		RegionsInfo: NewRegionsInfo(),
 	}
 }
 
-/* Stores read operations */
-
-// GetStores returns all Stores in the cluster.
-func (bc *BasicCluster) GetStores() []*StoreInfo {
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	return bc.Stores.GetStores()
-}
-
-// GetMetaStores gets a complete set of metapb.Store.
-func (bc *BasicCluster) GetMetaStores() []*metapb.Store {
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	return bc.Stores.GetMetaStores()
-}
-
-// GetStore searches for a store by ID.
-func (bc *BasicCluster) GetStore(storeID uint64) *StoreInfo {
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	return bc.Stores.GetStore(storeID)
-}
-
-// GetRegionStores returns all Stores that contains the region's peer.
-func (bc *BasicCluster) GetRegionStores(region *RegionInfo) []*StoreInfo {
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	var Stores []*StoreInfo
-	for id := range region.GetStoreIDs() {
-		if store := bc.Stores.GetStore(id); store != nil {
-			Stores = append(Stores, store)
-		}
-	}
-	return Stores
-}
-
-// GetNonWitnessVoterStores returns all Stores that contains the non-witness's voter peer.
-func (bc *BasicCluster) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	var Stores []*StoreInfo
-	for id := range region.GetNonWitnessVoters() {
-		if store := bc.Stores.GetStore(id); store != nil {
-			Stores = append(Stores, store)
-		}
-	}
-	return Stores
-}
-
-// GetFollowerStores returns all Stores that contains the region's follower peer.
-func (bc *BasicCluster) GetFollowerStores(region *RegionInfo) []*StoreInfo {
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	var Stores []*StoreInfo
-	for id := range region.GetFollowers() {
-		if store := bc.Stores.GetStore(id); store != nil {
-			Stores = append(Stores, store)
-		}
-	}
-	return Stores
-}
-
-// GetLeaderStore returns all Stores that contains the region's leader peer.
-func (bc *BasicCluster) GetLeaderStore(region *RegionInfo) *StoreInfo {
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
-}
-
-// GetStoreCount returns the total count of storeInfo.
-func (bc *BasicCluster) GetStoreCount() int {
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	return bc.Stores.GetStoreCount()
-}
-
-/* Stores Write operations */
-
-// PauseLeaderTransfer prevents the store from been selected as source or
-// target store of TransferLeader.
-func (bc *BasicCluster) PauseLeaderTransfer(storeID uint64) error {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	return bc.Stores.PauseLeaderTransfer(storeID)
-}
-
-// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
-// as source or target of TransferLeader again.
-func (bc *BasicCluster) ResumeLeaderTransfer(storeID uint64) {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	bc.Stores.ResumeLeaderTransfer(storeID)
-}
-
-// SlowStoreEvicted marks a store as a slow store and prevents transferring
-// leader to the store
-func (bc *BasicCluster) SlowStoreEvicted(storeID uint64) error {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	return bc.Stores.SlowStoreEvicted(storeID)
-}
-
-// SlowTrendEvicted marks a store as a slow store by trend and prevents transferring
-// leader to the store
-func (bc *BasicCluster) SlowTrendEvicted(storeID uint64) error {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	return bc.Stores.SlowTrendEvicted(storeID)
-}
-
-// SlowTrendRecovered cleans the evicted by slow trend state of a store.
-func (bc *BasicCluster) SlowTrendRecovered(storeID uint64) {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	bc.Stores.SlowTrendRecovered(storeID)
-}
-
-// SlowStoreRecovered cleans the evicted state of a store.
-func (bc *BasicCluster) SlowStoreRecovered(storeID uint64) {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	bc.Stores.SlowStoreRecovered(storeID)
-}
-
-// ResetStoreLimit resets the limit for a specific store.
-func (bc *BasicCluster) ResetStoreLimit(storeID uint64, limitType storelimit.Type, ratePerSec ...float64) {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	bc.Stores.ResetStoreLimit(storeID, limitType, ratePerSec...)
-}
-
 // UpdateStoreStatus updates the information of the store.
 func (bc *BasicCluster) UpdateStoreStatus(storeID uint64) {
-	leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize := bc.RegionsInfo.GetStoreStats(storeID)
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	bc.Stores.UpdateStoreStatus(storeID, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize)
-}
-
-// PutStore put a store.
-func (bc *BasicCluster) PutStore(store *StoreInfo) {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	bc.Stores.SetStore(store)
-}
-
-// ResetStores resets the store cache.
-func (bc *BasicCluster) ResetStores() {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	bc.Stores.StoresInfo = NewStoresInfo()
-}
-
-// DeleteStore deletes a store.
-func (bc *BasicCluster) DeleteStore(store *StoreInfo) {
-	bc.Stores.mu.Lock()
-	defer bc.Stores.mu.Unlock()
-	bc.Stores.DeleteStore(store)
+	leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize := bc.GetStoreStats(storeID)
+	bc.StoresInfo.UpdateStoreStatus(storeID, leaderCount, regionCount, witnessCount, learnerCount, pendingPeerCount, leaderRegionSize, regionSize)
 }
 
 /* Regions read operations */
 
 // GetLeaderStoreByRegionID returns the leader store of the given region.
 func (bc *BasicCluster) GetLeaderStoreByRegionID(regionID uint64) *StoreInfo {
-	region := bc.RegionsInfo.GetRegion(regionID)
+	region := bc.GetRegion(regionID)
 	if region == nil || region.GetLeader() == nil {
 		return nil
 	}
 
-	bc.Stores.mu.RLock()
-	defer bc.Stores.mu.RUnlock()
-	return bc.Stores.GetStore(region.GetLeader().GetStoreId())
+	return bc.GetStore(region.GetLeader().GetStoreId())
 }
 
 func (bc *BasicCluster) getWriteRate(
 	f func(storeID uint64) (bytesRate, keysRate float64),
 ) (storeIDs []uint64, bytesRates, keysRates []float64) {
-	bc.Stores.mu.RLock()
-	count := len(bc.Stores.stores)
-	storeIDs = make([]uint64, 0, count)
-	for _, store := range bc.Stores.stores {
-		storeIDs = append(storeIDs, store.GetID())
-	}
-	bc.Stores.mu.RUnlock()
+	storeIDs = bc.GetStoreIDs()
+	count := len(storeIDs)
 	bytesRates = make([]float64, 0, count)
 	keysRates = make([]float64, 0, count)
 	for _, id := range storeIDs {
@@ -238,12 +65,12 @@ func (bc *BasicCluster) getWriteRate(
 
 // GetStoresLeaderWriteRate get total write rate of each store's leaders.
 func (bc *BasicCluster) GetStoresLeaderWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
-	return bc.getWriteRate(bc.RegionsInfo.GetStoreLeaderWriteRate)
+	return bc.getWriteRate(bc.GetStoreLeaderWriteRate)
 }
 
 // GetStoresWriteRate get total write rate of each store's regions.
 func (bc *BasicCluster) GetStoresWriteRate() (storeIDs []uint64, bytesRates, keysRates []float64) {
-	return bc.getWriteRate(bc.RegionsInfo.GetStoreWriteRate)
+	return bc.getWriteRate(bc.GetStoreWriteRate)
 }
 
 // UpdateAllStoreStatus updates the information of all stores.
@@ -272,6 +99,29 @@ type RegionSetInformer interface {
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo
+	BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error)
+}
+
+type batchScanRegionsOptions struct {
+	limit                        int
+	outputMustContainAllKeyRange bool
+}
+
+// BatchScanRegionsOptionFunc is the option function for BatchScanRegions.
+type BatchScanRegionsOptionFunc func(*batchScanRegionsOptions)
+
+// WithLimit is an option for batchScanRegionsOptions.
+func WithLimit(limit int) BatchScanRegionsOptionFunc {
+	return func(opt *batchScanRegionsOptions) {
+		opt.limit = limit
+	}
+}
+
+// WithOutputMustContainAllKeyRange is an option for batchScanRegionsOptions.
+func WithOutputMustContainAllKeyRange() BatchScanRegionsOptionFunc {
+	return func(opt *batchScanRegionsOptions) {
+		opt.outputMustContainAllKeyRange = true
+	}
 }
 
 // StoreSetInformer provides access to a shared informer of stores.
@@ -310,9 +160,16 @@ func NewKeyRange(startKey, endKey string) KeyRange {
 	}
 }
 
-// KeyRanges is a slice of KeyRange.
+// KeyRanges is a slice of monotonically increasing KeyRange.
 type KeyRanges struct {
 	krs []*KeyRange
+}
+
+// NewKeyRangesWithSize creates a KeyRanges with the hint size.
+func NewKeyRangesWithSize(size int) *KeyRanges {
+	return &KeyRanges{
+		krs: make([]*KeyRange, 0, size),
+	}
 }
 
 // Append appends a KeyRange.
@@ -329,4 +186,31 @@ func (rs *KeyRanges) Ranges() []*KeyRange {
 		return nil
 	}
 	return rs.krs
+}
+
+// Merge merges the continuous KeyRanges.
+func (rs *KeyRanges) Merge() {
+	if len(rs.krs) == 0 {
+		return
+	}
+	merged := make([]*KeyRange, 0, len(rs.krs))
+	start := rs.krs[0].StartKey
+	end := rs.krs[0].EndKey
+	for _, kr := range rs.krs[1:] {
+		if bytes.Equal(end, kr.StartKey) {
+			end = kr.EndKey
+		} else {
+			merged = append(merged, &KeyRange{
+				StartKey: start,
+				EndKey:   end,
+			})
+			start = kr.StartKey
+			end = kr.EndKey
+		}
+	}
+	merged = append(merged, &KeyRange{
+		StartKey: start,
+		EndKey:   end,
+	})
+	rs.krs = merged
 }
