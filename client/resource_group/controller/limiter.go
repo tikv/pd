@@ -406,7 +406,9 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	}
 	// Update state
 	if ok {
-		lim.last = now
+		if lim.last.Before(now) {
+			lim.last = now
+		}
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
@@ -424,7 +426,9 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 				zap.Int("remaining-notify-times", lim.remainingNotifyTimes),
 				zap.String("name", lim.name))
 		}
-		lim.last = last
+		if lim.last.Before(now) {
+			lim.last = last
+		}
 		if lim.limit == 0 {
 			lim.notify()
 		} else if lim.remainingNotifyTimes > 0 {
