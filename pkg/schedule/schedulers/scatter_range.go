@@ -38,16 +38,6 @@ const (
 	ScatterRangeName = "scatter-range"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	scatterRangeCounter                    = schedulerCounter.WithLabelValues(ScatterRangeName, "schedule")
-	scatterRangeNewOperatorCounter         = schedulerCounter.WithLabelValues(ScatterRangeName, "new-operator")
-	scatterRangeNewLeaderOperatorCounter   = schedulerCounter.WithLabelValues(ScatterRangeName, "new-leader-operator")
-	scatterRangeNewRegionOperatorCounter   = schedulerCounter.WithLabelValues(ScatterRangeName, "new-region-operator")
-	scatterRangeNoNeedBalanceRegionCounter = schedulerCounter.WithLabelValues(ScatterRangeName, "no-need-balance-region")
-	scatterRangeNoNeedBalanceLeaderCounter = schedulerCounter.WithLabelValues(ScatterRangeName, "no-need-balance-leader")
-)
-
 type scatterRangeSchedulerConfig struct {
 	syncutil.RWMutex
 	storage   endpoint.ConfigStorage
