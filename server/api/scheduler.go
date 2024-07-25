@@ -92,9 +92,6 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 	var args []string
 	collector := func(v string) {
-		if args == nil {
-			args = []string{}
-		}
 		args = append(args, v)
 	}
 
