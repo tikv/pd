@@ -335,7 +335,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 ) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
-	logControllerTrace("[resource group controller] before reconfigure", zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", args.NotifyThreshold), zap.Int64("old-burst", lim.burst))
+	logControllerTrace("[resource group controller] before reconfigure", zap.String("name", lim.name), zap.Float64("old-tokens", lim.tokens), zap.Float64("old-rate", float64(lim.limit)), zap.Float64("old-notify-threshold", args.NotifyThreshold), zap.Int64("old-burst", lim.burst))
 	if args.NewBurst < 0 {
 		lim.last = now
 		lim.tokens = args.NewTokens
@@ -351,7 +351,7 @@ func (lim *Limiter) Reconfigure(now time.Time,
 		opt(lim)
 	}
 	lim.maybeNotify()
-	logControllerTrace("[resource group controller] after reconfigure", zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.limit)), zap.Float64("notify-threshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
+	logControllerTrace("[resource group controller] after reconfigure", zap.String("name", lim.name), zap.Float64("tokens", lim.tokens), zap.Float64("rate", float64(lim.limit)), zap.Float64("notify-threshold", args.NotifyThreshold), zap.Int64("burst", lim.burst))
 }
 
 // AvailableTokens decreases the amount of tokens currently available.
@@ -360,6 +360,14 @@ func (lim *Limiter) AvailableTokens(now time.Time) float64 {
 	defer lim.mu.Unlock()
 	_, _, tokens := lim.advance(now)
 	return tokens
+}
+
+func (lim *Limiter) updateLast(t time.Time) {
+	// make sure lim.last is monotonic
+	// see issue: https://github.com/tikv/pd/issues/8435.
+	if lim.last.Before(t) {
+		lim.last = t
+	}
 }
 
 const reserveWarnLogInterval = 10 * time.Millisecond
@@ -406,7 +414,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 	}
 	// Update state
 	if ok {
-		lim.last = now
+		lim.updateLast(now)
 		lim.tokens = tokens
 		lim.maybeNotify()
 	} else {
@@ -424,7 +432,7 @@ func (lim *Limiter) reserveN(now time.Time, n float64, maxFutureReserve time.Dur
 				zap.Int("remaining-notify-times", lim.remainingNotifyTimes),
 				zap.String("name", lim.name))
 		}
-		lim.last = last
+		lim.updateLast(last)
 		if lim.limit == 0 {
 			lim.notify()
 		} else if lim.remainingNotifyTimes > 0 {
