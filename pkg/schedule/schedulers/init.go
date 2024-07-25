@@ -75,7 +75,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = BalanceRegionName
 			return nil
 		}
 	})
@@ -370,7 +369,6 @@ func schedulersRegister() {
 				}
 				conf.Limit = limit
 			}
-			conf.Name = ShuffleHotRegionName
 			return nil
 		}
 	})

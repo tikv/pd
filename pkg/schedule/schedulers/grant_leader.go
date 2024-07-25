@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -82,18 +83,13 @@ func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 }
 
 func (conf *grantLeaderSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
 	conf.RLock()
 	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*grantLeaderSchedulerConfig) getSchedulerName() string {
-	return GrantLeaderName
+	return conf.storage.SaveSchedulerConfig(types.GrantLeaderScheduler.String(), data)
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {

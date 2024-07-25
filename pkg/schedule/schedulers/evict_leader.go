@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -87,7 +88,6 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 }
 
 func (conf *evictLeaderSchedulerConfig) persistLocked() error {
-	name := conf.getSchedulerName()
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
@@ -95,11 +95,7 @@ func (conf *evictLeaderSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*evictLeaderSchedulerConfig) getSchedulerName() string {
-	return EvictLeaderName
+	return conf.storage.SaveSchedulerConfig(types.EvictLeaderScheduler.String(), data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {

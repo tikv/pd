@@ -27,6 +27,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -86,7 +87,6 @@ func (conf *evictSlowTrendSchedulerConfig) Clone() *evictSlowTrendSchedulerConfi
 }
 
 func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
-	name := EvictSlowTrendName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
@@ -94,7 +94,7 @@ func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(types.EvictSlowTrendScheduler.String(), data)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {

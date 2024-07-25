@@ -38,7 +38,6 @@ const (
 )
 
 type balanceRegionSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -46,6 +45,7 @@ type balanceRegionSchedulerConfig struct {
 type balanceRegionScheduler struct {
 	*BaseScheduler
 	*retryQuota
+	name          string
 	conf          *balanceRegionSchedulerConfig
 	filters       []filter.Filter
 	filterCounter *filter.Counter
@@ -58,8 +58,8 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 	scheduler := &balanceRegionScheduler{
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
+		name:          types.BalanceRegionScheduler.String(),
 		conf:          conf,
-		filterCounter: filter.NewCounter(types.BalanceRegionScheduler.String()),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)
@@ -68,6 +68,7 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(scheduler.GetName()),
 	}
+	scheduler.filterCounter = filter.NewCounter(scheduler.GetName())
 	return scheduler
 }
 
@@ -77,19 +78,12 @@ type BalanceRegionCreateOption func(s *balanceRegionScheduler)
 // WithBalanceRegionName sets the name for the scheduler.
 func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	return func(s *balanceRegionScheduler) {
-		s.conf.Name = name
-	}
-}
-
-// WithBalanceRegionFilterCounterName sets the filter counter name for the scheduler.
-func WithBalanceRegionFilterCounterName(name string) BalanceRegionCreateOption {
-	return func(s *balanceRegionScheduler) {
-		s.filterCounter.SetScope(name)
+		s.name = name
 	}
 }
 
 func (s *balanceRegionScheduler) GetName() string {
-	return s.conf.Name
+	return s.name
 }
 
 func (*balanceRegionScheduler) GetType() string {

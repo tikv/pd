@@ -124,18 +124,13 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 }
 
 func (conf *evictLeaderSchedulerConfig) Persist() error {
-	name := conf.getScheduleName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedulers.EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*evictLeaderSchedulerConfig) getScheduleName() string {
-	return EvictLeaderName
+	return conf.storage.SaveSchedulerConfig(EvictLeaderName, data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {

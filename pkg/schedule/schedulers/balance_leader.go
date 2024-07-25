@@ -180,10 +180,9 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 	s := &balanceLeaderScheduler{
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
-		name:          BalanceLeaderName,
+		name:          types.BalanceLeaderScheduler.String(),
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		filterCounter: filter.NewCounter(types.BalanceLeaderScheduler.String()),
 	}
 	for _, option := range options {
 		option(s)
@@ -192,6 +191,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.High},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
+	s.filterCounter = filter.NewCounter(s.GetName())
 	return s
 }
 
@@ -201,13 +201,6 @@ func (l *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 
 // BalanceLeaderCreateOption is used to create a scheduler with an option.
 type BalanceLeaderCreateOption func(s *balanceLeaderScheduler)
-
-// WithBalanceLeaderFilterCounterName sets the filter counter name for the scheduler.
-func WithBalanceLeaderFilterCounterName(name string) BalanceLeaderCreateOption {
-	return func(s *balanceLeaderScheduler) {
-		s.filterCounter.SetScope(name)
-	}
-}
 
 // WithBalanceLeaderName sets the name for the scheduler.
 func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {

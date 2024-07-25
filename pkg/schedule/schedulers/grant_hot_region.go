@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -92,18 +93,13 @@ func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfi
 }
 
 func (conf *grantHotRegionSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
 	conf.RLock()
 	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*grantHotRegionSchedulerConfig) getSchedulerName() string {
-	return GrantHotRegionName
+	return conf.storage.SaveSchedulerConfig(types.GrantHotRegionScheduler.String(), data)
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {

@@ -163,7 +163,6 @@ func (handler *balanceWitnessHandler) ListConfig(w http.ResponseWriter, _ *http.
 type balanceWitnessScheduler struct {
 	*BaseScheduler
 	*retryQuota
-	name          string
 	conf          *balanceWitnessSchedulerConfig
 	handler       http.Handler
 	filters       []filter.Filter
@@ -178,7 +177,6 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 	s := &balanceWitnessScheduler{
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
-		name:          BalanceWitnessName,
 		conf:          conf,
 		handler:       newBalanceWitnessHandler(conf),
 		counter:       balanceWitnessCounter,
@@ -208,15 +206,8 @@ func WithBalanceWitnessCounter(counter *prometheus.CounterVec) BalanceWitnessCre
 	}
 }
 
-// WithBalanceWitnessName sets the name for the scheduler.
-func WithBalanceWitnessName(name string) BalanceWitnessCreateOption {
-	return func(s *balanceWitnessScheduler) {
-		s.name = name
-	}
-}
-
 func (b *balanceWitnessScheduler) GetName() string {
-	return b.name
+	return types.BalanceWitnessScheduler.String()
 }
 
 func (*balanceWitnessScheduler) GetType() string {

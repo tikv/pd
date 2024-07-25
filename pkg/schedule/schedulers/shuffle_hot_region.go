@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -44,30 +45,23 @@ const (
 type shuffleHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	storage endpoint.ConfigStorage
-	Name    string `json:"name"`
 	Limit   uint64 `json:"limit"`
-}
-
-func (conf *shuffleHotRegionSchedulerConfig) getSchedulerName() string {
-	return conf.Name
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) Clone() *shuffleHotRegionSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &shuffleHotRegionSchedulerConfig{
-		Name:  conf.Name,
 		Limit: conf.Limit,
 	}
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) persistLocked() error {
-	name := conf.getSchedulerName()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(types.ShuffleHotRegionScheduler.String(), data)
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) getLimit() uint64 {
@@ -104,7 +98,7 @@ func (s *shuffleHotRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Req
 }
 
 func (s *shuffleHotRegionScheduler) GetName() string {
-	return s.conf.Name
+	return ShuffleHotRegionName
 }
 
 func (*shuffleHotRegionScheduler) GetType() string {
