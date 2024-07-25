@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"go.uber.org/zap"
 )
 
@@ -58,7 +59,7 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 		BaseScheduler: base,
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
-		filterCounter: filter.NewCounter(filter.BalanceRegion.String()),
+		filterCounter: filter.NewCounter(types.BalanceRegionScheduler.String()),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)

@@ -70,3 +70,46 @@ const (
 	// LabelScheduler is label scheduler name.
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
+
+// SchedulerTypeCompatibleMap temporarily exists for compatibility.
+// TODO: remove it after all components use CheckerSchedulerType.
+var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
+	BalanceLeaderScheduler:         "balance-leader",
+	BalanceRegionScheduler:         "balance-region",
+	BalanceWitnessScheduler:        "balance-witness",
+	EvictLeaderScheduler:           "evict-leader",
+	EvictSlowStoreScheduler:        "evict-slow-store",
+	EvictSlowTrendScheduler:        "evict-slow-trend",
+	GrantLeaderScheduler:           "grant-leader",
+	GrantHotRegionScheduler:        "grant-hot-region",
+	HotRegionScheduler:             "hot-region",
+	RandomMergeScheduler:           "random-merge",
+	ScatterRangeScheduler:          "scatter-range",
+	ShuffleHotRegionScheduler:      "shuffle-hot-region",
+	ShuffleLeaderScheduler:         "shuffle-leader",
+	ShuffleRegionScheduler:         "shuffle-region",
+	SplitBucketScheduler:           "split-bucket",
+	TransferWitnessLeaderScheduler: "transfer-witness-leader",
+	LabelScheduler:                 "label",
+}
+
+var SchedulerStr2Type = map[string]CheckerSchedulerType{
+	"balance-leader-scheduler":     BalanceLeaderScheduler,
+	"balance-region-scheduler":     BalanceRegionScheduler,
+	"balance-witness-scheduler":    BalanceWitnessScheduler,
+	"evict-leader-scheduler":       EvictLeaderScheduler,
+	"evict-slow-store-scheduler":   EvictSlowStoreScheduler,
+	"evict-slow-trend-scheduler":   EvictSlowTrendScheduler,
+	"grant-leader-scheduler":       GrantLeaderScheduler,
+	"grant-hot-region-scheduler":   GrantHotRegionScheduler,
+	"balance-hot-region-scheduler": HotRegionScheduler,
+	"random-merge-scheduler":       RandomMergeScheduler,
+	// TODO: update to `scatter-range-scheduler`
+	"scatter-range":                     ScatterRangeScheduler,
+	"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
+	"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
+	"shuffle-region-scheduler":          ShuffleRegionScheduler,
+	"split-bucket-scheduler":            SplitBucketScheduler,
+	"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
+	"label-scheduler":                   LabelScheduler,
+}

@@ -42,7 +42,7 @@ const (
 
 // Runner is the interface for running tasks.
 type Runner interface {
-	RunTask(id uint64, name string, f func(), opts ...TaskOption) error
+	RunTask(id uint64, name string, f func(context.Context), opts ...TaskOption) error
 	Start(ctx context.Context)
 	Stop()
 }
@@ -51,7 +51,7 @@ type Runner interface {
 type Task struct {
 	id          uint64
 	submittedAt time.Time
-	f           func()
+	f           func(context.Context)
 	name        string
 	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
 	retained bool
@@ -152,7 +152,7 @@ func (cr *ConcurrentRunner) run(ctx context.Context, task *Task, token *TaskToke
 		return
 	default:
 	}
-	task.f()
+	task.f(ctx)
 	if token != nil {
 		cr.limiter.ReleaseToken(token)
 		cr.processPendingTasks()
@@ -184,7 +184,7 @@ func (cr *ConcurrentRunner) Stop() {
 }
 
 // RunTask runs the task asynchronously.
-func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(), opts ...TaskOption) error {
+func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Context), opts ...TaskOption) error {
 	task := &Task{
 		id:          id,
 		name:        name,
@@ -238,8 +238,8 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (*SyncRunner) RunTask(_ uint64, _ string, f func(), _ ...TaskOption) error {
-	f()
+func (*SyncRunner) RunTask(_ uint64, _ string, f func(context.Context), _ ...TaskOption) error {
+	f(context.Background())
 	return nil
 }
 

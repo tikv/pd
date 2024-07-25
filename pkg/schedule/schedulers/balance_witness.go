@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -181,7 +182,7 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 		conf:          conf,
 		handler:       newBalanceWitnessHandler(conf),
 		counter:       balanceWitnessCounter,
-		filterCounter: filter.NewCounter(filter.BalanceWitness.String()),
+		filterCounter: filter.NewCounter(types.BalanceWitnessScheduler.String()),
 	}
 	for _, option := range options {
 		option(s)
