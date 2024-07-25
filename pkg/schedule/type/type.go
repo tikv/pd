@@ -71,8 +71,9 @@ const (
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
 
-// SchedulerTypeCompatibleMap temporarily exists for compatibility.
-// TODO: remove it after all components use CheckerSchedulerType.
+// SchedulerTypeCompatibleMap exists for compatibility.
+//  1. It is used in the `PersistOptions` and `PersistConfig“. These two structs
+//     are persisted in the storage, so we need to keep the compatibility.
 var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
 	BalanceLeaderScheduler:         "balance-leader",
 	BalanceRegionScheduler:         "balance-region",
