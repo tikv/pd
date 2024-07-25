@@ -76,7 +76,7 @@ func (*RuleChecker) Name() string {
 }
 
 // GetType returns RuleChecker's type.
-func (c *RuleChecker) GetType() types.CheckerSchedulerType {
+func (*RuleChecker) GetType() types.CheckerSchedulerType {
 	return types.RuleChecker
 }
 
