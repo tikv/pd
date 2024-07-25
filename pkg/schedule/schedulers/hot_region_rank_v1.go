@@ -67,11 +67,11 @@ func (r *rankV1) filterUniformStore() (string, bool) {
 		return "all-dim", true
 	}
 	if isUniformFirstPriority && (r.cur.progressiveRank == 1 || r.cur.progressiveRank == 3) {
-		// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
+		// If first priority dim is enough uniform, rank 1 is unnecessary and maybe lead to worse balance for second priority dim
 		return utils.DimToString(r.firstPriority), true
 	}
 	if isUniformSecondPriority && r.cur.progressiveRank == 2 {
-		// If second priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for first priority dim
+		// If second priority dim is enough uniform, rank 2 is unnecessary and maybe lead to worse balance for first priority dim
 		return utils.DimToString(r.secondPriority), true
 	}
 	return "", false
