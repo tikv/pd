@@ -113,29 +113,22 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 		return errors.Errorf("failed to get cluster ID: %v", err)
 	}
 
-	var primaryKey string
+	var primaryPath string
 	switch serviceName {
 	case utils.SchedulingServiceName:
-		primaryKey = endpoint.SchedulingPrimaryPath(clusterID)
+		primaryPath = endpoint.SchedulingPrimaryPath(clusterID)
 	case utils.TSOServiceName:
 		tsoRootPath := endpoint.TSOSvcRootPath(clusterID)
-		primaryKey = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
+		primaryPath = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
 	}
 
-	// remove possible residual value.
-	utils.ClearPrimaryExpectationFlag(client, primaryKey)
-
-	// grant the primary lease to the new primary.
 	grantResp, err := client.Grant(client.Ctx(), utils.DefaultLeaderLease)
 	if err != nil {
-		return errors.Errorf("failed to grant lease for %s, err: %v", serviceName, err)
+		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
 	}
-	// update primary key to notify old primary server.
-	putResp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(primaryKey, primaryIDs[nextPrimaryID], clientv3.WithLease(grantResp.ID))).
-		Commit()
-	if err != nil || !putResp.Succeeded {
-		return errors.Errorf("failed to write primary flag for %s, err: %v", serviceName, err)
+	_, err = utils.MarkExpectedPrimaryFlag(client, primaryPath, primaryIDs[nextPrimaryID], grantResp.ID)
+	if err != nil {
+		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
 	}
 	return nil
 }

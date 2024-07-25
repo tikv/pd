@@ -30,12 +30,12 @@ func TestLease(t *testing.T) {
 	defer clean()
 
 	// Create the lease.
-	lease1 := &lease{
+	lease1 := &Lease{
 		Purpose: "test_lease_1",
 		client:  client,
 		lease:   clientv3.NewLease(client),
 	}
-	lease2 := &lease{
+	lease2 := &Lease{
 		Purpose: "test_lease_2",
 		client:  client,
 		lease:   clientv3.NewLease(client),
@@ -95,7 +95,7 @@ func TestLeaseKeepAlive(t *testing.T) {
 	defer clean()
 
 	// Create the lease.
-	lease := &lease{
+	lease := &Lease{
 		Purpose: "test_lease",
 		client:  client,
 		lease:   clientv3.NewLease(client),

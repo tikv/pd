@@ -41,6 +41,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -56,12 +57,12 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -306,12 +307,18 @@ func (s *Server) campaignLeader() {
 			cb()
 		}
 	}()
+	// check expected primary and watch the primary.
+	exitPrimary := make(chan struct{})
+	expectedLease, revision, err := s.keepExpectedPrimaryAlive(ctx)
+	if err != nil {
+		log.Error("prepare primary watch error", errs.ZapError(err))
+		return
+	}
+	go s.expectedPrimaryWatch(ctx, expectedLease, revision+1, exitPrimary)
 	s.participant.EnableLeader()
+
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
-
-	exitPrimary := make(chan struct{})
-	go s.primaryWatch(ctx, exitPrimary)
 
 	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -334,42 +341,44 @@ func (s *Server) campaignLeader() {
 	}
 }
 
-// primaryWatch watches `/ms/primary/transfer` API whether changed the primary.
-// 1. modify the expected primary flag to the new primary
-// 2. modify memory status
-// 3. exit the primary watch loop
-// 4. delete the leader key
-func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
-	resp, err := etcdutil.EtcdKVGet(s.participant.GetLeadership().GetClient(), s.participant.GetLeaderPath())
-	if err != nil || resp == nil || len(resp.Kvs) == 0 {
-		log.Error("scheduling primary getting the primary meets error", errs.ZapError(err))
-		return
+// keepExpectedPrimaryAlive keeps the expected primary alive.
+// We use lease to keep `expected primary` healthy.
+// ONLY reset by the following conditions:
+// - changed by`/ms/primary/transfer` API.
+// - server closed.
+func (s *Server) keepExpectedPrimaryAlive(ctx context.Context) (*election.Leadership, int64, error) {
+	const propose = "scheduling-primary-watch"
+	lease := election.NewLease(s.GetClient(), propose)
+	if err := lease.Grant(s.cfg.LeaderLease); err != nil {
+		log.Error("grant lease for expected primary error", errs.ZapError(err))
+		return nil, 0, err
 	}
-	log.Info("scheduling primary start to watch the primary", zap.Stringer("scheduling-primary", s.participant.GetLeader()))
-	// Watch will keep looping and never return unless the primary has changed.
-	s.participant.GetLeadership().SetPrimaryWatch(true)
-	s.participant.GetLeadership().Watch(ctx, resp.Kvs[0].ModRevision+1)
-	s.participant.GetLeadership().SetPrimaryWatch(false)
-
-	// only `/ms/primary/transfer` API update primary will set `leaderPath` to the expected primary.
-	curPrimary, err := etcdutil.GetValue(s.participant.Client(), s.participant.GetLeaderPath())
+	revision, err := utils.MarkExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath(), s.participant.MemberValue(),
+		lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {
-		log.Error("scheduling primary getting the leader meets error", errs.ZapError(err))
-		return
+		log.Error("mark expected primary error", errs.ZapError(err))
+		return nil, 0, err
 	}
-	if curPrimary != nil && resp.Kvs[0].Value != nil && !strings.Contains(string(resp.Kvs[0].Value), string(curPrimary)) {
-		// 1. modify the expected primary flag to the new primary.
-		utils.MarkExpectedPrimaryFlag(s.participant.Client(), s.participant.GetLeaderPath())
-		// 2. modify memory status.
-		s.participant.UnsetLeader()
-		defer log.Info("scheduling primary exit the primary watch loop")
-		select {
-		case <-ctx.Done():
-			return
-		// 3. exit the primary watch loop, 4.`exitPrimary` will help delete the leader key.
-		case exitPrimary <- struct{}{}:
-			return
-		}
+	// Keep alive the current primary leadership to indicate that the server is still alive.
+	// Watch the expected primary path to check whether the expected primary has changed.
+	expectedPrimary := election.NewLeadership(s.GetClient(), utils.ExpectedPrimaryPath(s.participant.GetLeaderPath()), propose)
+	expectedPrimary.SetLease(lease)
+	expectedPrimary.Keep(ctx)
+	return expectedPrimary, revision, nil
+}
+
+// expectedPrimaryWatch watches `/ms/primary/transfer` API whether changed the expected primary.
+func (s *Server) expectedPrimaryWatch(ctx context.Context, expectedPrimary *election.Leadership, revision int64, exitPrimary chan struct{}) {
+	log.Info("scheduling primary start to watch the expected primary", zap.String("scheduling-primary", s.participant.MemberValue()))
+	expectedPrimary.SetPrimaryWatch(true)
+	expectedPrimary.Watch(ctx, revision)
+	expectedPrimary.Reset()
+	defer log.Info("scheduling primary exit the expected primary watch loop")
+	select {
+	case <-ctx.Done():
+		return
+	case exitPrimary <- struct{}{}:
+		return
 	}
 }
 

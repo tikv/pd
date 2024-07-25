@@ -87,17 +87,18 @@ func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadersh
 	return leadership
 }
 
-// getLease gets the lease of leadership, only if leadership is valid,
+// GetLease gets the lease of leadership, only if leadership is valid,
 // i.e. the owner is a true leader, the lease is not nil.
-func (ls *Leadership) getLease() *lease {
+func (ls *Leadership) GetLease() *Lease {
 	l := ls.lease.Load()
 	if l == nil {
 		return nil
 	}
-	return l.(*lease)
+	return l.(*Lease)
 }
 
-func (ls *Leadership) setLease(lease *lease) {
+// SetLease sets the lease of leadership.
+func (ls *Leadership) SetLease(lease *Lease) {
 	ls.lease.Store(lease)
 }
 
@@ -165,12 +166,12 @@ func (ls *Leadership) AddCampaignTimes() {
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
-	newLease := &lease{
+	newLease := &Lease{
 		Purpose: ls.purpose,
 		client:  ls.client,
 		lease:   clientv3.NewLease(ls.client),
 	}
-	ls.setLease(newLease)
+	ls.SetLease(newLease)
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
 		name, ok := val.(string)
@@ -218,12 +219,12 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	ls.keepAliveCancelFuncLock.Lock()
 	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
 	ls.keepAliveCancelFuncLock.Unlock()
-	go ls.getLease().KeepAlive(ls.keepAliveCtx)
+	go ls.GetLease().KeepAlive(ls.keepAliveCtx)
 }
 
 // Check returns whether the leadership is still available.
 func (ls *Leadership) Check() bool {
-	return ls != nil && ls.getLease() != nil && !ls.getLease().IsExpired()
+	return ls != nil && ls.GetLease() != nil && !ls.GetLease().IsExpired()
 }
 
 // LeaderTxn returns txn() with a leader comparison to guarantee that
@@ -410,7 +411,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 // Reset does some defer jobs such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
-	if ls == nil || ls.getLease() == nil {
+	if ls == nil || ls.GetLease() == nil {
 		return
 	}
 	ls.keepAliveCancelFuncLock.Lock()
@@ -418,6 +419,6 @@ func (ls *Leadership) Reset() {
 		ls.keepAliveCancelFunc()
 	}
 	ls.keepAliveCancelFuncLock.Unlock()
-	ls.getLease().Close()
+	ls.GetLease().Close()
 	ls.SetPrimaryWatch(false)
 }

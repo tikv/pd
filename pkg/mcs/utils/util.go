@@ -16,6 +16,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -78,9 +79,14 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)
 }
 
+// ExpectedPrimaryPath formats the primary path with the expected primary flag.
+func ExpectedPrimaryPath(primaryPath string) string {
+	return fmt.Sprintf("%s/%s", primaryPath, ExpectedPrimaryFlag)
+}
+
 // AttachExpectedPrimaryFlag attaches the expected primary flag.
-func AttachExpectedPrimaryFlag(client *clientv3.Client, leaderPath string) string {
-	primary, err := etcdutil.GetValue(client, strings.Join([]string{leaderPath, ExpectedPrimaryFlag}, "/"))
+func AttachExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string {
+	primary, err := etcdutil.GetValue(client, ExpectedPrimaryPath(primaryPath))
 	if err != nil {
 		log.Error("get expected primary flag error", errs.ZapError(err))
 		return ""
@@ -89,46 +95,18 @@ func AttachExpectedPrimaryFlag(client *clientv3.Client, leaderPath string) strin
 	return string(primary)
 }
 
-// ClearPrimaryExpectationFlag clears the expected primary flag.
-// - removed when campaign new primary successfully.
-// - removed when appoint new primary by API.
-func ClearPrimaryExpectationFlag(client *clientv3.Client, leaderPath string) {
-	log.Info("remove expected primary flag", zap.String("primary-path", leaderPath))
-	// remove expected leader key
-	resp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpDelete(strings.Join([]string{leaderPath, ExpectedPrimaryFlag}, "/"))).
-		Commit()
-	if err != nil || !resp.Succeeded {
-		log.Error("change expected primary error", errs.ZapError(err))
-		return
-	}
-}
-
-// MarkExpectedPrimaryFlag marks the expected primary flag when the current primary has exited.
-func MarkExpectedPrimaryFlag(client *clientv3.Client, leaderPath string) {
-	log.Info("set expected primary flag", zap.String("leader-path", leaderPath))
-	// We have updated new primary(server's addr) in `leaderPath` by `/ms/primary/transfer` API.
-	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
-	if err != nil {
-		log.Error("get primary key error", zap.Error(err))
-		return
-	}
-	grantResp, err := client.Grant(client.Ctx(), DefaultLeaderLease)
-	if err != nil {
-		log.Error("grant lease for expected primary error", errs.ZapError(err))
-		return
-	}
+// MarkExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
+func MarkExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
+	log.Info("set expected primary flag", zap.String("leader-path", ExpectedPrimaryPath(primaryPath)))
 	// write a flag to indicate the current primary has exited
 	resp, err := kv.NewSlowLogTxn(client).
-		Then(
-			clientv3.OpPut(strings.Join([]string{leaderPath, ExpectedPrimaryFlag}, "/"), string(leaderRaw), clientv3.WithLease(grantResp.ID)),
-			// indicate the current primary has exited
-			clientv3.OpDelete(leaderPath)).
+		Then(clientv3.OpPut(ExpectedPrimaryPath(primaryPath), leaderRaw, clientv3.WithLease(leaseID))).
 		Commit()
 	if err != nil || !resp.Succeeded {
-		log.Error("change expected primary error", errs.ZapError(err))
-		return
+		log.Error("mark expected primary error", errs.ZapError(err))
+		return 0, err
 	}
+	return resp.Header.Revision, nil
 }
 
 // PromHandler is a handler to get prometheus metrics.
