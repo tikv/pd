@@ -31,7 +31,6 @@ type ServiceRegistryEntry struct {
 	GitHash        string `json:"git-hash"`
 	DeployPath     string `json:"deploy-path"`
 	StartTimestamp int64  `json:"start-timestamp"`
-	MemberValue    []byte `json:"member-value"`
 }
 
 // Serialize this service registry entry

@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -252,7 +253,7 @@ func (s *Server) primaryElectionLoop() {
 		expectedPrimary := utils.AttachExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `/ms/primary/transfer` API.
-		if expectedPrimary != "" && expectedPrimary != s.participant.MemberValue() {
+		if expectedPrimary != "" && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
@@ -356,7 +357,7 @@ func (s *Server) primaryWatch(ctx context.Context, exitPrimary chan struct{}) {
 		log.Error("scheduling primary getting the leader meets error", errs.ZapError(err))
 		return
 	}
-	if curPrimary != nil && resp.Kvs[0].Value != nil && string(curPrimary) != string(resp.Kvs[0].Value) {
+	if curPrimary != nil && resp.Kvs[0].Value != nil && !strings.Contains(string(resp.Kvs[0].Value), string(curPrimary)) {
 		// 1. modify the expected primary flag to the new primary.
 		utils.MarkExpectedPrimaryFlag(s.participant.Client(), s.participant.GetLeaderPath())
 		// 2. modify memory status.
@@ -503,7 +504,6 @@ func (s *Server) startServer() (err error) {
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
 	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
-	s.serviceID.MemberValue = []byte(s.participant.MemberValue())
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)

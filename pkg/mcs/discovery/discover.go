@@ -96,14 +96,9 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 	}
 
 	var primaryIDs []string
-	var memberValues []string
 	for _, member := range entries {
 		if (newPrimary == "" && member.ServiceAddr != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
-			if string(member.MemberValue) == "" {
-				return errors.New(fmt.Sprintf("member %s value is empty", member.Name))
-			}
-			memberValues = append(memberValues, string(member.MemberValue))
 		}
 	}
 	if len(primaryIDs) == 0 {
@@ -137,7 +132,7 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 	}
 	// update primary key to notify old primary server.
 	putResp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(primaryKey, memberValues[nextPrimaryID], clientv3.WithLease(grantResp.ID))).
+		Then(clientv3.OpPut(primaryKey, primaryIDs[nextPrimaryID], clientv3.WithLease(grantResp.ID))).
 		Commit()
 	if err != nil || !putResp.Succeeded {
 		return errors.Errorf("failed to write primary flag for %s, err: %v", serviceName, err)

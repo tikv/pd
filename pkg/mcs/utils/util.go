@@ -107,6 +107,7 @@ func ClearPrimaryExpectationFlag(client *clientv3.Client, leaderPath string) {
 // MarkExpectedPrimaryFlag marks the expected primary flag when the current primary has exited.
 func MarkExpectedPrimaryFlag(client *clientv3.Client, leaderPath string) {
 	log.Info("set expected primary flag", zap.String("leader-path", leaderPath))
+	// We have updated new primary(server's addr) in `leaderPath` by `/ms/primary/transfer` API.
 	leaderRaw, err := etcdutil.GetValue(client, leaderPath)
 	if err != nil {
 		log.Error("get primary key error", zap.Error(err))

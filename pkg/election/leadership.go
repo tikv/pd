@@ -397,7 +397,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				// ONLY `/ms/primary/transfer` API update primary will meet this condition.
 				if ev.Type == mvccpb.PUT && ls.IsPrimary() {
 					log.Info("current leadership is updated", zap.Int64("revision", wresp.Header.Revision),
-						zap.String("leader-key", ls.leaderKey), zap.Any("value", ls.leaderValue),
+						zap.String("leader-key", ls.leaderKey), zap.ByteString("cur-value", ev.Kv.Value),
 						zap.String("purpose", ls.purpose))
 					return
 				}
