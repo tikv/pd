@@ -148,8 +148,8 @@ func TestRemoveRejectLeader(t *testing.T) {
 	el, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	tc.DeleteStore(tc.GetStore(1))
-	succ, _ := el.(*evictLeaderScheduler).conf.removeStore(1)
-	re.True(succ)
+	_, err = el.(*evictLeaderScheduler).conf.removeStoreLocked(1)
+	re.NoError(err)
 }
 
 func TestShuffleHotRegionScheduleBalance(t *testing.T) {

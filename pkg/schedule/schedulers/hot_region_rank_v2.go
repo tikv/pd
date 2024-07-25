@@ -31,14 +31,6 @@ const (
 	secondPriorityMinHotRatio    = 0.03 // PeerRate needs to be greater than 3% lowRate
 )
 
-// isAvailable returns the solution is available.
-// If the solution has no revertRegion, progressiveRank should > 0.
-// If the solution has some revertRegion, progressiveRank should equal to 4 or 3.
-func isAvailableV2(s *solution) bool {
-	// TODO: Test if revert region can be enabled for 1.
-	return s.progressiveRank >= 3 || (s.progressiveRank > 0 && s.revertRegion == nil)
-}
-
 type balanceChecker struct {
 	// We use the following example to illustrate the calculation process.
 	// Suppose preBalancedRatio is 0.9, balancedRatio is 0.95.
@@ -49,8 +41,8 @@ type balanceChecker struct {
 	balancedRatio    float64
 }
 
-// rankV2Ratios is used to calculate the balanced state.
-// every rankV2Ratios only effect one dim.
+// rankRatios is used to calculate the balanced state.
+// every rankRatios only effect one dim.
 
 // There are three states of balance: balanced, pre-balanced, and unbalanced.
 // It is determined by the ratio of the high and low values of the two stores.
@@ -59,7 +51,7 @@ type balanceChecker struct {
 // If the ratio is between the two, it is considered to be in the pre-balanced state.
 
 // TODO: Unified with stddevThreshold.
-type rankV2Ratios struct {
+type rankRatios struct {
 	// futureChecker is used to calculate the balanced state after the operator is completed.
 	// It is stricter than the currentChecker.
 	futureChecker *balanceChecker
@@ -75,7 +67,7 @@ type rankV2Ratios struct {
 	minHotRatio float64
 }
 
-func newRankV2Ratios(balancedRatio, perceivedRatio, minHotRatio float64) *rankV2Ratios {
+func newRankRatios(balancedRatio, perceivedRatio, minHotRatio float64) *rankRatios {
 	// limit 0.7 <= balancedRatio <= 0.95
 	if balancedRatio < 0.7 {
 		balancedRatio = 0.7
@@ -95,7 +87,7 @@ func newRankV2Ratios(balancedRatio, perceivedRatio, minHotRatio float64) *rankV2
 		preBalancedRatio: futureStateChecker.preBalancedRatio - 0.03,
 	}
 
-	rs := &rankV2Ratios{
+	rs := &rankRatios{
 		futureChecker:  futureStateChecker,
 		currentChecker: currentStateChecker,
 		perceivedRatio: perceivedRatio, minHotRatio: minHotRatio}
@@ -103,54 +95,69 @@ func newRankV2Ratios(balancedRatio, perceivedRatio, minHotRatio float64) *rankV2
 	return rs
 }
 
-func (bs *balanceSolver) initRankV2() {
-	bs.firstPriorityV2Ratios = newRankV2Ratios(bs.sche.conf.GetGreatDecRatio(), firstPriorityPerceivedRatio, firstPriorityMinHotRatio)
-	// The second priority is less demanding. Set the preBalancedRatio of the first priority to the balancedRatio of the second dimension.
-	bs.secondPriorityV2Ratios = newRankV2Ratios(bs.firstPriorityV2Ratios.futureChecker.preBalancedRatio, secondPriorityPerceivedRatio, secondPriorityMinHotRatio)
+type rankV2 struct {
+	*balanceSolver
 
-	bs.isAvailable = isAvailableV2
-	bs.filterUniformStore = bs.filterUniformStoreV2
-	bs.needSearchRevertRegions = bs.needSearchRevertRegionsV2
-	bs.setSearchRevertRegions = bs.setSearchRevertRegionsV2
-	bs.calcProgressiveRank = bs.calcProgressiveRankV2
-	bs.betterThan = bs.betterThanV2
-	bs.rankToDimString = bs.rankToDimStringV2
-	bs.pickCheckPolicyV2()
+	firstPriorityRatios  *rankRatios
+	secondPriorityRatios *rankRatios
 }
 
-// pickCheckPolicyV2 will set checkByPriorityAndTolerance to the corresponding function.
-// Note: PolicyV2 will search more possible solutions than PolicyV1.
-// so it allows to schedule when any of the two dimensions is not balanced.
-func (bs *balanceSolver) pickCheckPolicyV2() {
-	switch {
-	case bs.resourceTy == writeLeader:
-		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceFirstOnly
-		bs.checkHistoryLoadsByPriority = bs.checkHistoryLoadsByPriorityAndToleranceFirstOnly
-	default:
-		bs.checkByPriorityAndTolerance = bs.checkByPriorityAndToleranceAnyOf
-		bs.checkHistoryLoadsByPriority = bs.checkHistoryByPriorityAndToleranceAnyOf
+func initRankV2(bs *balanceSolver) *rankV2 {
+	firstPriorityRatios := newRankRatios(bs.greatDecRatio, firstPriorityPerceivedRatio, firstPriorityMinHotRatio)
+	// The second priority is less demanding. Set the preBalancedRatio of the first priority to the balancedRatio of the second dimension.
+	return &rankV2{
+		balanceSolver:        bs,
+		firstPriorityRatios:  firstPriorityRatios,
+		secondPriorityRatios: newRankRatios(firstPriorityRatios.futureChecker.preBalancedRatio, secondPriorityPerceivedRatio, secondPriorityMinHotRatio),
 	}
 }
 
-// filterUniformStoreV2 filters stores by stddev.
+// isAvailable returns the solution is available.
+// If the solution has no revertRegion, progressiveRank should > 0.
+// If the solution has some revertRegion, progressiveRank should equal to 4 or 3.
+func (*rankV2) isAvailable(s *solution) bool {
+	// TODO: Test if revert region can be enabled for 1.
+	return s.progressiveRank >= 3 || (s.progressiveRank > 0 && s.revertRegion == nil)
+}
+
+func (r *rankV2) checkByPriorityAndTolerance(loads []float64, f func(int) bool) bool {
+	switch {
+	case r.resourceTy == writeLeader:
+		return r.checkByPriorityAndToleranceFirstOnly(loads, f)
+	default:
+		return r.checkByPriorityAndToleranceAnyOf(loads, f)
+	}
+}
+
+// checkHistoryLoadsByPriority checks the history loads by priority.
+func (r *rankV2) checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool) bool {
+	switch {
+	case r.resourceTy == writeLeader:
+		return r.checkHistoryLoadsByPriorityAndToleranceFirstOnly(loads, f)
+	default:
+		return r.checkHistoryByPriorityAndToleranceAnyOf(loads, f)
+	}
+}
+
+// filterUniformStore filters stores by stddev.
 // stddev is the standard deviation of the store's load for all stores.
-func (bs *balanceSolver) filterUniformStoreV2() (string, bool) {
-	if !bs.enableExpectation() {
+func (r *rankV2) filterUniformStore() (string, bool) {
+	if !r.enableExpectation() {
 		return "", false
 	}
 	// Because region is available for src and dst, so stddev is the same for both, only need to calculate one.
-	isUniformFirstPriority, isUniformSecondPriority := bs.isUniformFirstPriority(bs.cur.srcStore), bs.isUniformSecondPriority(bs.cur.srcStore)
+	isUniformFirstPriority, isUniformSecondPriority := r.isUniformFirstPriority(r.cur.srcStore), r.isUniformSecondPriority(r.cur.srcStore)
 	if isUniformFirstPriority && isUniformSecondPriority {
 		// If both dims are enough uniform, any schedule is unnecessary.
 		return "all-dim", true
 	}
-	if isUniformFirstPriority && (bs.cur.progressiveRank == 2 || bs.cur.progressiveRank == 3) {
-		// If first priority dim is enough uniform, 2 is unnecessary and maybe lead to worse balance for second priority dim
-		return utils.DimToString(bs.firstPriority), true
+	if isUniformFirstPriority && (r.cur.progressiveRank == 2 || r.cur.progressiveRank == 3) {
+		// If first priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for second priority dim
+		return utils.DimToString(r.firstPriority), true
 	}
-	if isUniformSecondPriority && bs.cur.progressiveRank == 1 {
-		// If second priority dim is enough uniform, 1 is unnecessary and maybe lead to worse balance for first priority dim
-		return utils.DimToString(bs.secondPriority), true
+	if isUniformSecondPriority && r.cur.progressiveRank == 1 {
+		// If second priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for first priority dim
+		return utils.DimToString(r.secondPriority), true
 	}
 	return "", false
 }
@@ -161,28 +168,28 @@ func (bs *balanceSolver) filterUniformStoreV2() (string, bool) {
 // * The current best solution is not good enough.
 //   - The current best solution has progressiveRank > 2 , but contain revert regions.
 //   - The current best solution has progressiveRank <= 2.
-func (bs *balanceSolver) needSearchRevertRegionsV2() bool {
-	if !bs.sche.searchRevertRegions[bs.resourceTy] {
+func (r *rankV2) needSearchRevertRegions() bool {
+	if !r.sche.searchRevertRegions[r.resourceTy] {
 		return false
 	}
-	return (bs.cur.progressiveRank == 2 || bs.cur.progressiveRank == 0) &&
-		(bs.best == nil || bs.best.progressiveRank <= 2 || bs.best.revertRegion != nil)
+	return (r.cur.progressiveRank == 2 || r.cur.progressiveRank == 0) &&
+		(r.best == nil || r.best.progressiveRank <= -2 || r.best.revertRegion != nil)
 }
 
-func (bs *balanceSolver) setSearchRevertRegionsV2() {
+func (r *rankV2) setSearchRevertRegions() {
 	// The next solve is allowed to search-revert-regions only when the following conditions are met.
 	// * No best solution was found this time.
 	// * The progressiveRank of the best solution == 2. (first is better, second is worsened)
 	// * The best solution contain revert regions.
-	searchRevertRegions := bs.best == nil || bs.best.progressiveRank == 2 || bs.best.revertRegion != nil
-	bs.sche.searchRevertRegions[bs.resourceTy] = searchRevertRegions
+	searchRevertRegions := r.best == nil || r.best.progressiveRank == 2 || r.best.revertRegion != nil
+	r.sche.searchRevertRegions[r.resourceTy] = searchRevertRegions
 	if searchRevertRegions {
-		event := fmt.Sprintf("%s-%s-allow-search-revert-regions", bs.rwTy.String(), bs.opTy.String())
-		schedulerCounter.WithLabelValues(bs.sche.GetName(), event).Inc()
+		event := fmt.Sprintf("%s-%s-allow-search-revert-regions", r.rwTy.String(), r.opTy.String())
+		schedulerCounter.WithLabelValues(r.sche.GetName(), event).Inc()
 	}
 }
 
-// calcProgressiveRankV2 calculates `bs.cur.progressiveRank`.
+// calcProgressiveRank calculates `r.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
 // isBetter: score < 0
 // isNotWorsened: score == 0
@@ -191,48 +198,48 @@ func (bs *balanceSolver) setSearchRevertRegionsV2() {
 // |   isBetter                         | 4        | 3             | 2         |
 // |   isNotWorsened                    | 1        | -1            | -1         |
 // |   isWorsened                       | 0        | -1            | -1         |
-func (bs *balanceSolver) calcProgressiveRankV2() {
-	bs.cur.progressiveRank = -1
-	bs.cur.calcPeersRate(bs.firstPriority, bs.secondPriority)
-	if bs.cur.getPeersRateFromCache(bs.firstPriority) < bs.getMinRate(bs.firstPriority) &&
-		bs.cur.getPeersRateFromCache(bs.secondPriority) < bs.getMinRate(bs.secondPriority) {
+func (r *rankV2) calcProgressiveRank() {
+	r.cur.progressiveRank = -1
+	r.cur.calcPeersRate(r.firstPriority, r.secondPriority)
+	if r.cur.getPeersRateFromCache(r.firstPriority) < r.getMinRate(r.firstPriority) &&
+		r.cur.getPeersRateFromCache(r.secondPriority) < r.getMinRate(r.secondPriority) {
 		return
 	}
 
-	if bs.resourceTy == writeLeader {
+	if r.resourceTy == writeLeader {
 		// For write leader, only compare the first priority.
 		// If the first priority is better, the progressiveRank is 3.
 		// Because it is not a solution that needs to be optimized.
-		if bs.getScoreByPriorities(bs.firstPriority, bs.firstPriorityV2Ratios) > 0 {
-			bs.cur.progressiveRank = 3
+		if r.getScoreByPriorities(r.firstPriority, r.firstPriorityRatios) > 0 {
+			r.cur.progressiveRank = 3
 		}
 		return
 	}
 
-	firstScore := bs.getScoreByPriorities(bs.firstPriority, bs.firstPriorityV2Ratios)
-	secondScore := bs.getScoreByPriorities(bs.secondPriority, bs.secondPriorityV2Ratios)
-	bs.cur.firstScore, bs.cur.secondScore = firstScore, secondScore
+	firstScore := r.getScoreByPriorities(r.firstPriority, r.firstPriorityRatios)
+	secondScore := r.getScoreByPriorities(r.secondPriority, r.secondPriorityRatios)
+	r.cur.firstScore, r.cur.secondScore = firstScore, secondScore
 	switch {
 	case firstScore > 0 && secondScore > 0:
 		// If belonging to the case, all two dim will be more balanced, the best choice.
-		bs.cur.progressiveRank = 4
+		r.cur.progressiveRank = 4
 	case firstScore > 0 && secondScore == 0:
 		// If belonging to the case, the first priority dim will be more balanced, the second priority dim will be not worsened.
-		bs.cur.progressiveRank = 3
+		r.cur.progressiveRank = 3
 	case firstScore > 0:
 		// If belonging to the case, the first priority dim will be more balanced, ignore the second priority dim.
-		bs.cur.progressiveRank = 2
+		r.cur.progressiveRank = 2
 	case firstScore == 0 && secondScore > 0:
 		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
-		bs.cur.progressiveRank = 1
+		r.cur.progressiveRank = 1
 	case secondScore > 0:
 		// If belonging to the case, the second priority dim will be more balanced, ignore the first priority dim.
 		// It's a solution that cannot be used directly, but can be optimized.
-		bs.cur.progressiveRank = 0
+		r.cur.progressiveRank = 0
 	}
 }
 
-func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
+func (r *rankV2) getScoreByPriorities(dim int, rs *rankRatios) int {
 	// For unbalanced state,
 	// roughly speaking, as long as the diff is reduced, it is either better or not worse.
 	// To distinguish the small regions, the one where the diff is reduced too little is defined as not worse,
@@ -260,17 +267,17 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 	// * f: maxBetterRate < peersRate <= maxNotWorsenedRate  ====> score == -1
 	// * g: peersRate > maxNotWorsenedRate                   ====> score == -2
 
-	srcRate, dstRate := bs.cur.getExtremeLoad(dim)
-	srcPendingRate, dstPendingRate := bs.cur.getPendingLoad(dim)
-	peersRate := bs.cur.getPeersRateFromCache(dim)
+	srcRate, dstRate := r.cur.getExtremeLoad(dim)
+	srcPendingRate, dstPendingRate := r.cur.getPendingLoad(dim)
+	peersRate := r.cur.getPeersRateFromCache(dim)
 	highRate, lowRate := srcRate, dstRate
-	topnHotPeer := bs.nthHotPeer[bs.cur.srcStore.GetID()][dim]
+	topnHotPeer := r.nthHotPeer[r.cur.srcStore.GetID()][dim]
 	reverse := false
 	if srcRate < dstRate {
 		highRate, lowRate = dstRate, srcRate
 		peersRate = -peersRate
 		reverse = true
-		topnHotPeer = bs.nthHotPeer[bs.cur.dstStore.GetID()][dim]
+		topnHotPeer = r.nthHotPeer[r.cur.dstStore.GetID()][dim]
 	}
 	topnRate := math.MaxFloat64
 	if topnHotPeer != nil {
@@ -301,8 +308,8 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		// (highRate-maxNotWorsenedRate) / (lowRate+maxNotWorsenedRate) = futureChecker.balancedRatio
 		maxNotWorsenedRate := (highRate - lowRate*rs.futureChecker.balancedRatio) / (1.0 + rs.futureChecker.balancedRatio)
 
-		if minNotWorsenedRate > -bs.getMinRate(dim) { // use min rate as 0 value
-			minNotWorsenedRate = -bs.getMinRate(dim)
+		if minNotWorsenedRate > -r.getMinRate(dim) { // use min rate as 0 value
+			minNotWorsenedRate = -r.getMinRate(dim)
 		}
 
 		if peersRate >= minNotWorsenedRate && peersRate <= maxNotWorsenedRate {
@@ -357,8 +364,8 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		minNotWorsenedRate = (highRate*rs.futureChecker.preBalancedRatio - lowRate) / (1.0 + rs.futureChecker.preBalancedRatio)
 		// (highRate-maxNotWorsenedRate) / (lowRate+maxNotWorsenedRate) = futureChecker.preBalancedRatio
 		maxNotWorsenedRate = (highRate - lowRate*rs.futureChecker.preBalancedRatio) / (1.0 + rs.futureChecker.preBalancedRatio)
-		if minNotWorsenedRate > -bs.getMinRate(dim) { // use min rate as 0 value
-			minNotWorsenedRate = -bs.getMinRate(dim)
+		if minNotWorsenedRate > -r.getMinRate(dim) { // use min rate as 0 value
+			minNotWorsenedRate = -r.getMinRate(dim)
 		}
 		// When approaching the balanced state, wait for pending influence to zero before scheduling to reduce jitter.
 		// From pre-balanced state to balanced state, we don't need other more schedule.
@@ -401,13 +408,13 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 		maxBetterRate = maxBalancedRate + rs.perceivedRatio*(highRate-lowRate-maxBalancedRate-minBetterRate)
 
 		maxNotWorsenedRate = maxBalancedRate + rs.perceivedRatio*(highRate-lowRate-maxBalancedRate-minNotWorsenedRate)
-		minNotWorsenedRate = -bs.getMinRate(dim) // use min rate as 0 value
+		minNotWorsenedRate = -r.getMinRate(dim) // use min rate as 0 value
 	}
 
 	switch {
 	case minBetterRate <= peersRate && peersRate <= maxBetterRate:
 		// Positive score requires some restrictions.
-		if peersRate >= bs.getMinRate(dim) && bs.isTolerance(dim, reverse) &&
+		if peersRate >= r.getMinRate(dim) && r.isTolerance(dim, reverse) &&
 			(!pendingRateLimit || math.Abs(srcPendingRate)+math.Abs(dstPendingRate) < 1 /*byte*/) { // avoid with pending influence when approaching the balanced state
 			switch {
 			case peersRate < minBalancedRate:
@@ -429,43 +436,43 @@ func (bs *balanceSolver) getScoreByPriorities(dim int, rs *rankV2Ratios) int {
 }
 
 // betterThan checks if `bs.cur` is a better solution than `old`.
-func (bs *balanceSolver) betterThanV2(old *solution) bool {
-	if old == nil || bs.cur.progressiveRank >= splitProgressiveRank {
+func (r *rankV2) betterThan(old *solution) bool {
+	if old == nil || r.cur.progressiveRank >= splitProgressiveRank {
 		return true
 	}
-	if bs.cur.progressiveRank != old.progressiveRank {
+	if r.cur.progressiveRank != old.progressiveRank {
 		// Bigger rank is better.
-		return bs.cur.progressiveRank > old.progressiveRank
+		return r.cur.progressiveRank > old.progressiveRank
 	}
-	if (bs.cur.revertRegion == nil) != (old.revertRegion == nil) {
+	if (r.cur.revertRegion == nil) != (old.revertRegion == nil) {
 		// Fewer revertRegions are better.
-		return bs.cur.revertRegion == nil
+		return r.cur.revertRegion == nil
 	}
 
-	if r := bs.compareSrcStore(bs.cur.srcStore, old.srcStore); r < 0 {
+	if r := r.compareSrcStore(r.cur.srcStore, old.srcStore); r < 0 {
 		return true
 	} else if r > 0 {
 		return false
 	}
 
-	if r := bs.compareDstStore(bs.cur.dstStore, old.dstStore); r < 0 {
+	if r := r.compareDstStore(r.cur.dstStore, old.dstStore); r < 0 {
 		return true
 	} else if r > 0 {
 		return false
 	}
 
-	if bs.cur.mainPeerStat != old.mainPeerStat {
+	if r.cur.mainPeerStat != old.mainPeerStat {
 		// We will firstly consider ensuring converge faster, secondly reduce oscillation
-		if bs.resourceTy == writeLeader {
-			return getRkCmpByPriorityV2(bs.firstPriority, bs.cur.firstScore, old.firstScore,
-				bs.cur.getPeersRateFromCache(bs.firstPriority), old.getPeersRateFromCache(bs.firstPriority)) > 0
+		if r.resourceTy == writeLeader {
+			return getRkCmpByPriority(r.firstPriority, r.cur.firstScore, old.firstScore,
+				r.cur.getPeersRateFromCache(r.firstPriority), old.getPeersRateFromCache(r.firstPriority)) > 0
 		}
 
-		firstCmp := getRkCmpByPriorityV2(bs.firstPriority, bs.cur.firstScore, old.firstScore,
-			bs.cur.getPeersRateFromCache(bs.firstPriority), old.getPeersRateFromCache(bs.firstPriority))
-		secondCmp := getRkCmpByPriorityV2(bs.secondPriority, bs.cur.secondScore, old.secondScore,
-			bs.cur.getPeersRateFromCache(bs.secondPriority), old.getPeersRateFromCache(bs.secondPriority))
-		switch bs.cur.progressiveRank {
+		firstCmp := getRkCmpByPriority(r.firstPriority, r.cur.firstScore, old.firstScore,
+			r.cur.getPeersRateFromCache(r.firstPriority), old.getPeersRateFromCache(r.firstPriority))
+		secondCmp := getRkCmpByPriority(r.secondPriority, r.cur.secondScore, old.secondScore,
+			r.cur.getPeersRateFromCache(r.secondPriority), old.getPeersRateFromCache(r.secondPriority))
+		switch r.cur.progressiveRank {
 		case 4, 3, 2: // firstPriority
 			if firstCmp != 0 {
 				return firstCmp > 0
@@ -482,7 +489,7 @@ func (bs *balanceSolver) betterThanV2(old *solution) bool {
 	return false
 }
 
-func getRkCmpByPriorityV2(dim int, curScore, oldScore int, curPeersRate, oldPeersRate float64) int {
+func getRkCmpByPriority(dim int, curScore, oldScore int, curPeersRate, oldPeersRate float64) int {
 	switch {
 	case curScore > oldScore:
 		return 1
@@ -500,16 +507,16 @@ func getRkCmpByPriorityV2(dim int, curScore, oldScore int, curPeersRate, oldPeer
 	}
 }
 
-func (bs *balanceSolver) rankToDimStringV2() string {
-	switch bs.cur.progressiveRank {
+func (r *rankV2) rankToDimString() string {
+	switch r.cur.progressiveRank {
 	case 4:
 		return "all"
 	case 3:
-		return utils.DimToString(bs.firstPriority)
+		return utils.DimToString(r.firstPriority)
 	case 2:
-		return utils.DimToString(bs.firstPriority) + "-only"
+		return utils.DimToString(r.firstPriority) + "-only"
 	case 1:
-		return utils.DimToString(bs.secondPriority)
+		return utils.DimToString(r.secondPriority)
 	default:
 		return "none"
 	}

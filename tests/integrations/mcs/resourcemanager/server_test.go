@@ -25,6 +25,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/grpcutil"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -49,6 +50,7 @@ func TestResourceManagerServer(t *testing.T) {
 	s, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
 	addr := s.GetAddr()
 	defer cleanup()
+	tests.WaitForPrimaryServing(re, map[string]bs.Server{addr: s})
 
 	// Test registered GRPC Service
 	cc, err := grpcutil.GetClientConn(ctx, addr, nil)

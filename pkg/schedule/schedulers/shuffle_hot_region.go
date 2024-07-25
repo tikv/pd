@@ -41,13 +41,6 @@ const (
 	ShuffleHotRegionType = "shuffle-hot-region"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleHotRegionCounter            = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "schedule")
-	shuffleHotRegionNewOperatorCounter = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "new-operator")
-	shuffleHotRegionSkipCounter        = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "skip")
-)
-
 type shuffleHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	storage endpoint.ConfigStorage
