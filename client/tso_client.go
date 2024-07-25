@@ -350,8 +350,6 @@ type tsoConnectionContext struct {
 	// Current URL of the stream connection.
 	streamURL string
 	// Current stream to send gRPC requests.
-	//   - `pdpb.PD_TsoClient` for a leader/follower in the PD cluster.
-	//   - `tsopb.TSO_TsoClient` for a primary/secondary in the TSO cluster.
 	stream *tsoStream
 }
 

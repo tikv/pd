@@ -174,7 +174,10 @@ func (s tsoTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 
 type tsoStream struct {
 	serverURL string
-	stream    grpcTSOStreamAdapter
+	// The internal gRPC stream.
+	//   - `pdpb.PD_TsoClient` for a leader/follower in the PD cluster.
+	//   - `tsopb.TSO_TsoClient` for a primary/secondary in the TSO cluster.
+	stream grpcTSOStreamAdapter
 }
 
 func (s *tsoStream) getServerURL() string {
