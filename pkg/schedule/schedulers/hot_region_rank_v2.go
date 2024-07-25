@@ -104,6 +104,7 @@ type rankV2 struct {
 
 func initRankV2(bs *balanceSolver) *rankV2 {
 	firstPriorityRatios := newRankRatios(bs.greatDecRatio, firstPriorityPerceivedRatio, firstPriorityMinHotRatio)
+	// The second priority is less demanding. Set the preBalancedRatio of the first priority to the balancedRatio of the second dimension.
 	return &rankV2{
 		balanceSolver:        bs,
 		firstPriorityRatios:  firstPriorityRatios,
