@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -92,7 +93,7 @@ type baseHotScheduler struct {
 }
 
 func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.Duration, sampleInterval time.Duration) *baseHotScheduler {
-	base := NewBaseScheduler(opController)
+	base := NewBaseScheduler(opController, types.HotRegionScheduler)
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
 		regionPendings: make(map[uint64]*pendingInfluence),
@@ -212,14 +213,6 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 	return ret
 }
 
-func (h *hotScheduler) GetName() string {
-	return h.name
-}
-
-func (*hotScheduler) GetType() string {
-	return HotRegionType
-}
-
 func (h *hotScheduler) EncodeConfig() ([]byte, error) {
 	return h.conf.EncodeConfig()
 }
@@ -279,7 +272,7 @@ func (h *hotScheduler) GetNextInterval(time.Duration) time.Duration {
 func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetSchedulerConfig().GetHotRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(h.GetType(), operator.OpHotRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(h.GetType(), operator.OpHotRegion)
 	}
 	return allowed
 }

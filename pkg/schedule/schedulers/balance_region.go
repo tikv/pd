@@ -54,9 +54,8 @@ type balanceRegionScheduler struct {
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
 func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) Scheduler {
-	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
-		BaseScheduler: base,
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceRegionScheduler),
 		retryQuota:    newRetryQuota(),
 		name:          types.BalanceRegionScheduler.String(),
 		conf:          conf,
@@ -82,14 +81,6 @@ func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	}
 }
 
-func (s *balanceRegionScheduler) GetName() string {
-	return s.name
-}
-
-func (*balanceRegionScheduler) GetType() string {
-	return BalanceRegionType
-}
-
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
@@ -97,7 +88,7 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRegion)
 	}
 	return allowed
 }

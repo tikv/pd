@@ -28,6 +28,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
@@ -154,7 +155,7 @@ func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
 }
 
 func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucketSchedulerConfig) *splitBucketScheduler {
-	base := NewBaseScheduler(opController)
+	base := NewBaseScheduler(opController, types.SplitBucketScheduler)
 	handler := newSplitBucketHandler(conf)
 	ret := &splitBucketScheduler{
 		BaseScheduler: base,
@@ -162,16 +163,6 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 		handler:       handler,
 	}
 	return ret
-}
-
-// GetName returns the name of the split bucket scheduler.
-func (*splitBucketScheduler) GetName() string {
-	return SplitBucketName
-}
-
-// GetType returns the type of the split bucket scheduler.
-func (*splitBucketScheduler) GetType() string {
-	return SplitBucketType
 }
 
 func (s *splitBucketScheduler) ReloadConfig() error {
@@ -207,7 +198,7 @@ func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.getSplitLimit()
 	if !allowed {
 		splitBuckerSplitLimitCounter.Inc()
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpSplit.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpSplit)
 	}
 	return allowed
 }

@@ -138,14 +138,6 @@ func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHo
 	return ret
 }
 
-func (*grantHotRegionScheduler) GetName() string {
-	return GrantHotRegionName
-}
-
-func (*grantHotRegionScheduler) GetType() string {
-	return GrantHotRegionType
-}
-
 func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
@@ -176,10 +168,10 @@ func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
 	if !regionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRegion)
 	}
 	if !leaderAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return regionAllowed && leaderAllowed
 }

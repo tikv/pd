@@ -295,14 +295,6 @@ func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*evictSlowTrendScheduler) GetName() string {
-	return EvictSlowTrendName
-}
-
-func (*evictSlowTrendScheduler) GetType() string {
-	return EvictSlowTrendType
-}
-
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
@@ -374,7 +366,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 		return nil
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
 func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
@@ -383,7 +375,7 @@ func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	}
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
@@ -459,7 +451,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	handler := newEvictSlowTrendHandler(conf)
 	return &evictSlowTrendScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler),
 		conf:          conf,
 		handler:       handler,
 	}

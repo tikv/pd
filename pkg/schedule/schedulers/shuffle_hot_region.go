@@ -84,6 +84,7 @@ type shuffleHotRegionScheduler struct {
 func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuffleHotRegionSchedulerConfig) Scheduler {
 	base := newBaseHotScheduler(opController,
 		statistics.DefaultHistorySampleDuration, statistics.DefaultHistorySampleInterval)
+	base.tp = types.ShuffleHotRegionScheduler
 	handler := newShuffleHotRegionHandler(conf)
 	ret := &shuffleHotRegionScheduler{
 		baseHotScheduler: base,
@@ -95,14 +96,6 @@ func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuff
 
 func (s *shuffleHotRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
-}
-
-func (s *shuffleHotRegionScheduler) GetName() string {
-	return ShuffleHotRegionName
-}
-
-func (*shuffleHotRegionScheduler) GetType() string {
-	return ShuffleHotRegionType
 }
 
 func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -133,13 +126,13 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerClus
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
 	if !hotRegionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpHotRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpHotRegion)
 	}
 	if !regionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRegion)
 	}
 	if !leaderAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }

@@ -193,14 +193,6 @@ func (s *evictSlowStoreScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*evictSlowStoreScheduler) GetName() string {
-	return EvictSlowStoreName
-}
-
-func (*evictSlowStoreScheduler) GetType() string {
-	return EvictSlowStoreType
-}
-
 func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
@@ -267,14 +259,14 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if s.conf.evictStore() != 0 {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 		if !allowed {
-			operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+			operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 		}
 		return allowed
 	}
@@ -336,7 +328,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	handler := newEvictSlowStoreHandler(conf)
 	return &evictSlowStoreScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler),
 		conf:          conf,
 		handler:       handler,
 	}

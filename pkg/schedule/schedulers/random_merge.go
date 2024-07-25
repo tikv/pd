@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 )
 
 const (
@@ -36,7 +37,6 @@ const (
 )
 
 type randomMergeSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -49,19 +49,11 @@ type randomMergeScheduler struct {
 // newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
 // then merges them.
 func newRandomMergeScheduler(opController *operator.Controller, conf *randomMergeSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController)
+	base := NewBaseScheduler(opController, types.RandomMergeScheduler)
 	return &randomMergeScheduler{
 		BaseScheduler: base,
 		conf:          conf,
 	}
-}
-
-func (s *randomMergeScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*randomMergeScheduler) GetType() string {
-	return RandomMergeType
 }
 
 func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
@@ -71,7 +63,7 @@ func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetSchedulerConfig().GetMergeScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpMerge.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpMerge)
 	}
 	return allowed
 }
@@ -80,7 +72,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 	randomMergeCounter.Inc()
 
 	store := filter.NewCandidates(cluster.GetStores()).
-		FilterSource(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true, OperatorLevel: constant.Low}).
+		FilterSource(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.Low}).
 		RandomPick()
 	if store == nil {
 		randomMergeNoSourceStoreCounter.Inc()

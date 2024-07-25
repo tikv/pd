@@ -166,7 +166,6 @@ func (handler *balanceLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.R
 type balanceLeaderScheduler struct {
 	*BaseScheduler
 	*retryQuota
-	name          string
 	conf          *balanceLeaderSchedulerConfig
 	handler       http.Handler
 	filters       []filter.Filter
@@ -176,11 +175,9 @@ type balanceLeaderScheduler struct {
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
 // each store balanced.
 func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) Scheduler {
-	base := NewBaseScheduler(opController)
 	s := &balanceLeaderScheduler{
-		BaseScheduler: base,
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceLeaderScheduler),
 		retryQuota:    newRetryQuota(),
-		name:          types.BalanceLeaderScheduler.String(),
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
 	}
@@ -207,14 +204,6 @@ func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 	return func(s *balanceLeaderScheduler) {
 		s.name = name
 	}
-}
-
-func (l *balanceLeaderScheduler) GetName() string {
-	return l.name
-}
-
-func (*balanceLeaderScheduler) GetType() string {
-	return BalanceLeaderType
 }
 
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -245,7 +234,7 @@ func (l *balanceLeaderScheduler) ReloadConfig() error {
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(l.GetType(), operator.OpLeader)
 	}
 	return allowed
 }

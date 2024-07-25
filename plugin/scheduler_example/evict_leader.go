@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -42,6 +43,8 @@ const (
 	// EvictLeaderType is evict leader scheduler type.
 	EvictLeaderType        = "user-evict-leader"
 	noStoreInSchedulerInfo = "No store in user-evict-leader-scheduler-config"
+
+	UserEvictLeaderScheduler types.CheckerSchedulerType = "user-evict-leader-scheduler"
 )
 
 func init() {
@@ -152,7 +155,7 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedulers.Scheduler {
-	base := schedulers.NewBaseScheduler(opController)
+	base := schedulers.NewBaseScheduler(opController, UserEvictLeaderScheduler)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
@@ -163,14 +166,6 @@ func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeade
 
 func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
-}
-
-func (*evictLeaderScheduler) GetName() string {
-	return EvictLeaderName
-}
-
-func (*evictLeaderScheduler) GetType() string {
-	return EvictLeaderType
 }
 
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
@@ -202,7 +197,7 @@ func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }

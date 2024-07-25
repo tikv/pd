@@ -281,7 +281,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = LabelName
 			return nil
 		}
 	})
@@ -306,7 +305,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = RandomMergeName
 			return nil
 		}
 	})

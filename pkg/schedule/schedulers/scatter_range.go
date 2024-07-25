@@ -25,6 +25,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -115,7 +116,7 @@ type scatterRangeScheduler struct {
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
 func newScatterRangeScheduler(opController *operator.Controller, config *scatterRangeSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController)
+	base := NewBaseScheduler(opController, types.ScatterRangeScheduler)
 
 	name := config.getSchedulerName()
 	handler := newScatterRangeHandler(config)
@@ -142,14 +143,6 @@ func newScatterRangeScheduler(opController *operator.Controller, config *scatter
 
 func (l *scatterRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.handler.ServeHTTP(w, r)
-}
-
-func (l *scatterRangeScheduler) GetName() string {
-	return l.name
-}
-
-func (*scatterRangeScheduler) GetType() string {
-	return ScatterRangeType
 }
 
 func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
@@ -185,7 +178,7 @@ func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 func (l *scatterRangeScheduler) allowBalanceLeader(cluster sche.SchedulerCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(l.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
@@ -193,7 +186,7 @@ func (l *scatterRangeScheduler) allowBalanceLeader(cluster sche.SchedulerCluster
 func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.SchedulerCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(l.GetType(), operator.OpRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(l.GetType(), operator.OpRegion)
 	}
 	return allowed
 }
