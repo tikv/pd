@@ -29,9 +29,10 @@ func initRankV1(r *balanceSolver) *rankV1 {
 }
 
 // isAvailable returns the solution is available.
-// The solution should have no revertRegion and progressiveRank > 0.
+// The solution should progressiveRank > 0.
+// v1 does not support revert regions, so no need to check revertRegions.
 func (*rankV1) isAvailable(s *solution) bool {
-	return s.progressiveRank > 0 && s.revertRegion == nil
+	return s.progressiveRank > 0
 }
 
 func (r *rankV1) checkByPriorityAndTolerance(loads []float64, f func(int) bool) bool {
