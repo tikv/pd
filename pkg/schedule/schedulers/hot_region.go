@@ -410,7 +410,7 @@ type solution struct {
 	cachedPeersRate []float64
 
 	// progressiveRank measures the contribution for balance.
-	// The smaller the rank, the better this solution is.
+	// The bigger the rank, the better this solution is.
 	// If progressiveRank >= 0, this solution makes thing better.
 	// 0 indicates that this is a solution that cannot be used directly, but can be optimized.
 	// -1 indicates that this is a non-optimizable solution.
