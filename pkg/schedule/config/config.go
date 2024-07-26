@@ -30,7 +30,7 @@ const (
 	DefaultMaxReplicas            = 3
 	defaultMaxSnapshotCount       = 64
 	defaultMaxPendingPeerCount    = 64
-	defaultMaxMergeRegionSize     = 20
+	defaultMaxMergeRegionSize     = 96
 	defaultLeaderScheduleLimit    = 4
 	defaultRegionScheduleLimit    = 2048
 	defaultWitnessScheduleLimit   = 4
