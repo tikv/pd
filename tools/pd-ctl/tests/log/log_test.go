@@ -45,7 +45,7 @@ func (suite *logTestSuite) SetupSuite() {
 	suite.cluster, err = pdTests.NewTestCluster(suite.ctx, 3)
 	re.NoError(err)
 	re.NoError(suite.cluster.RunInitialServers())
-	suite.cluster.WaitLeader()
+	re.NotEmpty(suite.cluster.WaitLeader())
 	suite.pdAddrs = suite.cluster.GetConfig().GetClientURLs()
 
 	store := &metapb.Store{

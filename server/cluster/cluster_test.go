@@ -2848,7 +2848,7 @@ func TestCheckCache(t *testing.T) {
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
-	re.Len(co.GetCheckerController().GetWaitingRegions(), 1)
+	re.Len(co.GetCheckerController().GetPendingProcessedRegions(), 1)
 
 	// cancel the replica-schedule-limit restriction
 	cfg := tc.GetScheduleConfig()
@@ -2858,14 +2858,14 @@ func TestCheckCache(t *testing.T) {
 	co.PatrolRegions()
 	oc := co.GetOperatorController()
 	re.Len(oc.GetOperators(), 1)
-	re.Empty(co.GetCheckerController().GetWaitingRegions())
+	re.Empty(co.GetCheckerController().GetPendingProcessedRegions())
 
 	// case 2: operator cannot be created due to store limit restriction
 	oc.RemoveOperator(oc.GetOperator(1))
 	tc.SetStoreLimit(1, storelimit.AddPeer, 0)
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
-	re.Len(co.GetCheckerController().GetWaitingRegions(), 1)
+	re.Len(co.GetCheckerController().GetPendingProcessedRegions(), 1)
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
@@ -2873,7 +2873,7 @@ func TestCheckCache(t *testing.T) {
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
 	re.Len(oc.GetOperators(), 1)
-	re.Empty(co.GetCheckerController().GetWaitingRegions())
+	re.Empty(co.GetCheckerController().GetPendingProcessedRegions())
 
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()

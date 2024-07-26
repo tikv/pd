@@ -14,6 +14,8 @@
 
 package core
 
+import "bytes"
+
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
 	*StoresInfo
@@ -97,7 +99,29 @@ type RegionSetInformer interface {
 	GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo)
 	ScanRegions(startKey, endKey []byte, limit int) []*RegionInfo
 	GetRegionByKey(regionKey []byte) *RegionInfo
-	BatchScanRegions(keyRanges *KeyRanges, limit int) []*RegionInfo
+	BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error)
+}
+
+type batchScanRegionsOptions struct {
+	limit                        int
+	outputMustContainAllKeyRange bool
+}
+
+// BatchScanRegionsOptionFunc is the option function for BatchScanRegions.
+type BatchScanRegionsOptionFunc func(*batchScanRegionsOptions)
+
+// WithLimit is an option for batchScanRegionsOptions.
+func WithLimit(limit int) BatchScanRegionsOptionFunc {
+	return func(opt *batchScanRegionsOptions) {
+		opt.limit = limit
+	}
+}
+
+// WithOutputMustContainAllKeyRange is an option for batchScanRegionsOptions.
+func WithOutputMustContainAllKeyRange() BatchScanRegionsOptionFunc {
+	return func(opt *batchScanRegionsOptions) {
+		opt.outputMustContainAllKeyRange = true
+	}
 }
 
 // StoreSetInformer provides access to a shared informer of stores.
@@ -136,7 +160,7 @@ func NewKeyRange(startKey, endKey string) KeyRange {
 	}
 }
 
-// KeyRanges is a slice of KeyRange.
+// KeyRanges is a slice of monotonically increasing KeyRange.
 type KeyRanges struct {
 	krs []*KeyRange
 }
@@ -162,4 +186,31 @@ func (rs *KeyRanges) Ranges() []*KeyRange {
 		return nil
 	}
 	return rs.krs
+}
+
+// Merge merges the continuous KeyRanges.
+func (rs *KeyRanges) Merge() {
+	if len(rs.krs) == 0 {
+		return
+	}
+	merged := make([]*KeyRange, 0, len(rs.krs))
+	start := rs.krs[0].StartKey
+	end := rs.krs[0].EndKey
+	for _, kr := range rs.krs[1:] {
+		if bytes.Equal(end, kr.StartKey) {
+			end = kr.EndKey
+		} else {
+			merged = append(merged, &KeyRange{
+				StartKey: start,
+				EndKey:   end,
+			})
+			start = kr.StartKey
+			end = kr.EndKey
+		}
+	}
+	merged = append(merged, &KeyRange{
+		StartKey: start,
+		EndKey:   end,
+	})
+	rs.krs = merged
 }

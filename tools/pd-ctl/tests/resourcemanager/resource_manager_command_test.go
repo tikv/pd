@@ -47,7 +47,7 @@ func (s *testResourceManagerSuite) SetupSuite() {
 	re.NoError(err)
 	s.cluster = cluster
 	s.cluster.RunInitialServers()
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	s.pdAddr = cluster.GetConfig().GetClientURL()
 }
 

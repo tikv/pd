@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -750,7 +751,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				logRunner.RunTask(
 					regionID,
 					"DebugLog",
-					func() {
+					func(context.Context) {
 						d(msg, fields...)
 					},
 				)
@@ -759,7 +760,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				logRunner.RunTask(
 					regionID,
 					"InfoLog",
-					func() {
+					func(context.Context) {
 						i(msg, fields...)
 					},
 				)
@@ -1826,37 +1827,91 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 // BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
 // limit <= 0 means no limit.
 // The given key pairs should be non-overlapping.
-func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, limit int) []*RegionInfo {
-	r.t.RLock()
-	defer r.t.RUnlock()
-
+func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error) {
+	keyRanges.Merge()
 	krs := keyRanges.Ranges()
 	res := make([]*RegionInfo, 0, len(krs))
-	var lastRegion *RegionInfo
-	for _, keyRange := range krs {
-		if limit > 0 && len(res) >= limit {
-			return res
-		}
-		if lastRegion != nil {
-			if lastRegion.Contains(keyRange.EndKey) {
-				continue
-			} else if lastRegion.Contains(keyRange.StartKey) {
-				keyRange.StartKey = lastRegion.GetEndKey()
-			}
-		}
-		r.tree.scanRange(keyRange.StartKey, func(region *RegionInfo) bool {
-			if len(keyRange.EndKey) > 0 && bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
-				return false
-			}
-			if limit > 0 && len(res) >= limit {
-				return false
-			}
-			lastRegion = region
-			res = append(res, region)
-			return true
-		})
+
+	scanOptions := &batchScanRegionsOptions{}
+	for _, opt := range opts {
+		opt(scanOptions)
 	}
-	return res
+
+	r.t.RLock()
+	defer r.t.RUnlock()
+	for _, keyRange := range krs {
+		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
+			res = res[:scanOptions.limit]
+			return res, nil
+		}
+
+		regions, err := scanRegion(r.tree, keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
+		if err != nil {
+			return nil, err
+		}
+		if len(res) > 0 && len(regions) > 0 && res[len(res)-1].meta.Id == regions[0].meta.Id {
+			// skip the region that has been scanned
+			regions = regions[1:]
+		}
+		res = append(res, regions...)
+	}
+	return res, nil
+}
+
+func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
+	var (
+		res        []*RegionInfo
+		lastRegion = &RegionInfo{
+			meta: &metapb.Region{EndKey: keyRange.StartKey},
+		}
+		exceedLimit = func() bool { return limit > 0 && len(res) >= limit }
+		err         error
+	)
+	regionTree.scanRange(keyRange.StartKey, func(region *RegionInfo) bool {
+		if len(keyRange.EndKey) > 0 && len(region.GetStartKey()) > 0 &&
+			bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
+			return false
+		}
+		if exceedLimit() {
+			return false
+		}
+		if len(lastRegion.GetEndKey()) > 0 && len(region.GetStartKey()) > 0 &&
+			bytes.Compare(region.GetStartKey(), lastRegion.GetEndKey()) > 0 {
+			err = errs.ErrRegionNotAdjacent.FastGen(
+				"key range[%x, %x) found a hole region between region[%x, %x) and region[%x, %x)",
+				keyRange.StartKey, keyRange.EndKey,
+				lastRegion.GetStartKey(), lastRegion.GetEndKey(),
+				region.GetStartKey(), region.GetEndKey())
+			log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+				outputMustContainAllKeyRange), zap.Error(err))
+			if outputMustContainAllKeyRange {
+				return false
+			}
+		}
+
+		lastRegion = region
+		res = append(res, region)
+		return true
+	})
+	if outputMustContainAllKeyRange && err != nil {
+		return nil, err
+	}
+
+	if !(exceedLimit()) && len(keyRange.EndKey) > 0 && len(lastRegion.GetEndKey()) > 0 &&
+		bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) < 0 {
+		err = errs.ErrRegionNotAdjacent.FastGen(
+			"key range[%x, %x) found a hole region in the last, the last scanned region is [%x, %x), [%x, %x) is missing",
+			keyRange.StartKey, keyRange.EndKey,
+			lastRegion.GetStartKey(), lastRegion.GetEndKey(),
+			lastRegion.GetEndKey(), keyRange.EndKey)
+		log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+			outputMustContainAllKeyRange), zap.Error(err))
+		if outputMustContainAllKeyRange {
+			return nil, err
+		}
+	}
+
+	return res, nil
 }
 
 // ScanRegionWithIterator scans from the first region containing or behind start key,

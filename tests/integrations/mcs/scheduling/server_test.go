@@ -70,6 +70,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
@@ -116,6 +117,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NotEqual(uint64(0), id)
 	suite.cluster.ResignLeader()
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	time.Sleep(time.Second)
@@ -482,7 +484,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
-		return region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
+		return region != nil && region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
 			region.GetKeysRead() == 200 && region.GetKeysWritten() == 100 && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
 			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
@@ -635,6 +637,7 @@ func (suite *multipleServerTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
@@ -649,6 +652,10 @@ func (suite *multipleServerTestSuite) TearDownSuite() {
 
 func (suite *multipleServerTestSuite) TestReElectLeader() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()

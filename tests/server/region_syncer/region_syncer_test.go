@@ -48,7 +48,7 @@ func TestRegionSyncer(t *testing.T) {
 	re.NoError(err)
 
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 
 	re.NoError(leaderServer.BootstrapCluster())
@@ -140,7 +140,7 @@ func TestRegionSyncer(t *testing.T) {
 
 	err = leaderServer.Stop()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer = cluster.GetLeaderServer()
 	testutil.Eventually(re, func() bool {
 		return !leaderServer.GetServer().GetRaftCluster().GetRegionSyncer().IsRunning()
@@ -169,7 +169,7 @@ func TestFullSyncWithAddMember(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	rc := leaderServer.GetServer().GetRaftCluster()
@@ -213,7 +213,7 @@ func TestPrepareChecker(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	rc := leaderServer.GetServer().GetRaftCluster()
@@ -255,6 +255,10 @@ func TestPrepareChecker(t *testing.T) {
 // ref: https://github.com/tikv/pd/issues/6988
 func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
@@ -264,7 +268,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	rc := leaderServer.GetServer().GetRaftCluster()
@@ -298,7 +302,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
-	re.NotEqual(leaderServer.GetLeader().GetName(), cluster.WaitLeader())
+	re.NotEqual(leaderServer.GetServer().Name(), cluster.WaitLeader())
 	rc = cluster.GetLeaderServer().GetServer().GetRaftCluster()
 	re.True(rc.IsPrepared())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
