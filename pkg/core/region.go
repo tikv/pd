@@ -1897,7 +1897,17 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMus
 		return nil, err
 	}
 
-	if !(exceedLimit()) && len(keyRange.EndKey) > 0 && len(lastRegion.GetEndKey()) > 0 &&
+	if exceedLimit() {
+		return res, nil
+	}
+
+	log.Info("just for test",
+		logutil.ZapRedactStringer("meta-region", RegionToHexMeta(lastRegion.GetMeta())),
+		zap.ByteString("key-range.start-key", HexRegionKey(keyRange.StartKey)),
+		zap.ByteString("key-range.end-key", HexRegionKey(keyRange.EndKey)),
+	)
+
+	if len(keyRange.EndKey) > 0 && len(lastRegion.GetEndKey()) > 0 &&
 		bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) < 0 {
 		err = errs.ErrRegionNotAdjacent.FastGen(
 			"key range[%x, %x) found a hole region in the last, the last scanned region is [%x, %x), [%x, %x) is missing",
