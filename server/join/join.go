@@ -154,7 +154,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	var addResp *clientv3.MemberAddResponse
 
-	failpoint.Inject("add-member-failed", func() {
+	failpoint.Inject("addMemberFailed", func() {
 		listMemberRetryTimes = 2
 		failpoint.Goto("LabelSkipAddMember")
 	})

@@ -125,7 +125,7 @@ func (c *Controller) PatrolRegions() {
 		if len(key) == 0 {
 			c.patrolRegionContext.roundUpdateMetrics()
 		}
-		failpoint.Inject("break-patrol", func() {
+		failpoint.Inject("breakPatrol", func() {
 			failpoint.Break()
 		})
 	}
