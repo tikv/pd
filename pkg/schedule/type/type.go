@@ -33,4 +33,83 @@ const (
 	RuleChecker CheckerSchedulerType = "rule-checker"
 	// SplitChecker is the name for split checker.
 	SplitChecker CheckerSchedulerType = "split-checker"
+
+	// BalanceLeaderScheduler is balance leader scheduler name.
+	BalanceLeaderScheduler CheckerSchedulerType = "balance-leader-scheduler"
+	// BalanceRegionScheduler is balance region scheduler name.
+	BalanceRegionScheduler CheckerSchedulerType = "balance-region-scheduler"
+	// BalanceWitnessScheduler is balance witness scheduler name.
+	BalanceWitnessScheduler CheckerSchedulerType = "balance-witness-scheduler"
+	// EvictLeaderScheduler is evict leader scheduler name.
+	EvictLeaderScheduler CheckerSchedulerType = "evict-leader-scheduler"
+	// EvictSlowStoreScheduler is evict leader scheduler name.
+	EvictSlowStoreScheduler CheckerSchedulerType = "evict-slow-store-scheduler"
+	// EvictSlowTrendScheduler is evict leader by slow trend scheduler name.
+	EvictSlowTrendScheduler CheckerSchedulerType = "evict-slow-trend-scheduler"
+	// GrantLeaderScheduler is grant leader scheduler name.
+	GrantLeaderScheduler CheckerSchedulerType = "grant-leader-scheduler"
+	// GrantHotRegionScheduler is grant hot region scheduler name.
+	GrantHotRegionScheduler CheckerSchedulerType = "grant-hot-region-scheduler"
+	// HotRegionScheduler is balance hot region scheduler name.
+	HotRegionScheduler CheckerSchedulerType = "balance-hot-region-scheduler"
+	// RandomMergeScheduler is random merge scheduler name.
+	RandomMergeScheduler CheckerSchedulerType = "random-merge-scheduler"
+	// ScatterRangeScheduler is scatter range scheduler name.
+	// TODO: update to `scatter-range-scheduler`
+	ScatterRangeScheduler CheckerSchedulerType = "scatter-range"
+	// ShuffleHotRegionScheduler is shuffle hot region scheduler name.
+	ShuffleHotRegionScheduler CheckerSchedulerType = "shuffle-hot-region-scheduler"
+	// ShuffleLeaderScheduler is shuffle leader scheduler name.
+	ShuffleLeaderScheduler CheckerSchedulerType = "shuffle-leader-scheduler"
+	// ShuffleRegionScheduler is shuffle region scheduler name.
+	ShuffleRegionScheduler CheckerSchedulerType = "shuffle-region-scheduler"
+	// SplitBucketScheduler is the split bucket name.
+	SplitBucketScheduler CheckerSchedulerType = "split-bucket-scheduler"
+	// TransferWitnessLeaderScheduler is transfer witness leader scheduler name.
+	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
+	// LabelScheduler is label scheduler name.
+	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
+
+// SchedulerTypeCompatibleMap temporarily exists for compatibility.
+// TODO: remove it after all components use CheckerSchedulerType.
+var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
+	BalanceLeaderScheduler:         "balance-leader",
+	BalanceRegionScheduler:         "balance-region",
+	BalanceWitnessScheduler:        "balance-witness",
+	EvictLeaderScheduler:           "evict-leader",
+	EvictSlowStoreScheduler:        "evict-slow-store",
+	EvictSlowTrendScheduler:        "evict-slow-trend",
+	GrantLeaderScheduler:           "grant-leader",
+	GrantHotRegionScheduler:        "grant-hot-region",
+	HotRegionScheduler:             "hot-region",
+	RandomMergeScheduler:           "random-merge",
+	ScatterRangeScheduler:          "scatter-range",
+	ShuffleHotRegionScheduler:      "shuffle-hot-region",
+	ShuffleLeaderScheduler:         "shuffle-leader",
+	ShuffleRegionScheduler:         "shuffle-region",
+	SplitBucketScheduler:           "split-bucket",
+	TransferWitnessLeaderScheduler: "transfer-witness-leader",
+	LabelScheduler:                 "label",
+}
+
+var SchedulerStr2Type = map[string]CheckerSchedulerType{
+	"balance-leader-scheduler":     BalanceLeaderScheduler,
+	"balance-region-scheduler":     BalanceRegionScheduler,
+	"balance-witness-scheduler":    BalanceWitnessScheduler,
+	"evict-leader-scheduler":       EvictLeaderScheduler,
+	"evict-slow-store-scheduler":   EvictSlowStoreScheduler,
+	"evict-slow-trend-scheduler":   EvictSlowTrendScheduler,
+	"grant-leader-scheduler":       GrantLeaderScheduler,
+	"grant-hot-region-scheduler":   GrantHotRegionScheduler,
+	"balance-hot-region-scheduler": HotRegionScheduler,
+	"random-merge-scheduler":       RandomMergeScheduler,
+	// TODO: update to `scatter-range-scheduler`
+	"scatter-range":                     ScatterRangeScheduler,
+	"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
+	"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
+	"shuffle-region-scheduler":          ShuffleRegionScheduler,
+	"split-bucket-scheduler":            SplitBucketScheduler,
+	"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
+	"label-scheduler":                   LabelScheduler,
+}

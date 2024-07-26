@@ -46,6 +46,8 @@ const (
 	mergeOptionValueDeny = "deny"
 )
 
+var gcInterval = time.Minute
+
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	PauseController
@@ -57,7 +59,7 @@ type MergeChecker struct {
 
 // NewMergeChecker creates a merge checker.
 func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *MergeChecker {
-	splitCache := cache.NewIDTTL(ctx, time.Minute, conf.GetSplitMergeInterval())
+	splitCache := cache.NewIDTTL(ctx, gcInterval, conf.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
 		conf:       conf,
@@ -88,13 +90,16 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	// update the split cache.
+	// It must be called before the following merge checker logic.
+	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
+
 	expireTime := m.startTime.Add(m.conf.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		mergeCheckerRecentlyStartCounter.Inc()
 		return nil
 	}
 
-	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
 	if m.splitCache.Exists(region.GetID()) {
 		mergeCheckerRecentlySplitCounter.Inc()
 		return nil

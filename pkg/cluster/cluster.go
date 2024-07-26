@@ -15,6 +15,8 @@
 package cluster
 
 import (
+	"context"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -56,8 +58,13 @@ func HandleStatsAsync(c Cluster, region *core.RegionInfo) {
 }
 
 // HandleOverlaps handles the overlap regions.
-func HandleOverlaps(c Cluster, overlaps []*core.RegionInfo) {
+func HandleOverlaps(ctx context.Context, c Cluster, overlaps []*core.RegionInfo) {
 	for _, item := range overlaps {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if c.GetRegionStats() != nil {
 			c.GetRegionStats().ClearDefunctRegion(item.GetID())
 		}
@@ -67,7 +74,7 @@ func HandleOverlaps(c Cluster, overlaps []*core.RegionInfo) {
 }
 
 // Collect collects the cluster information.
-func Collect(c Cluster, region *core.RegionInfo, hasRegionStats bool) {
+func Collect(ctx context.Context, c Cluster, region *core.RegionInfo, hasRegionStats bool) {
 	if hasRegionStats {
 		// get region again from root tree. make sure the observed region is the latest.
 		bc := c.GetBasicCluster()
@@ -77,6 +84,11 @@ func Collect(c Cluster, region *core.RegionInfo, hasRegionStats bool) {
 		region = bc.GetRegion(region.GetID())
 		if region == nil {
 			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
 		c.GetRegionStats().Observe(region, c.GetBasicCluster().GetRegionStores(region))
 	}
