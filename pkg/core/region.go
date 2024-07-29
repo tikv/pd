@@ -45,6 +45,7 @@ import (
 const (
 	randomRegionMaxRetry = 10
 	scanRegionLimit      = 1000
+	CollectFactor        = 0.9
 )
 
 // errRegionIsStale is error info for region is stale.
@@ -56,7 +57,6 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
-	term              uint64
 	meta              *metapb.Region
 	learners          []*metapb.Peer
 	witnesses         []*metapb.Peer
@@ -64,6 +64,7 @@ type RegionInfo struct {
 	leader            *metapb.Peer
 	downPeers         []*pdpb.PeerStats
 	pendingPeers      []*metapb.Peer
+	term              uint64
 	cpuUsage          uint64
 	writtenBytes      uint64
 	writtenKeys       uint64
@@ -137,26 +138,22 @@ func NewRegionInfo(region *metapb.Region, leader *metapb.Peer, opts ...RegionCre
 
 // classifyVoterAndLearner sorts out voter and learner from peers into different slice.
 func classifyVoterAndLearner(region *RegionInfo) {
-	learners := make([]*metapb.Peer, 0, 1)
-	voters := make([]*metapb.Peer, 0, len(region.meta.Peers))
-	witnesses := make([]*metapb.Peer, 0, 1)
+	region.learners = make([]*metapb.Peer, 0, 1)
+	region.voters = make([]*metapb.Peer, 0, len(region.meta.Peers))
+	region.witnesses = make([]*metapb.Peer, 0, 1)
 	for _, p := range region.meta.Peers {
 		if IsLearner(p) {
-			learners = append(learners, p)
+			region.learners = append(region.learners, p)
 		} else {
-			voters = append(voters, p)
+			region.voters = append(region.voters, p)
 		}
-		// Whichever peer role can be a witness
 		if IsWitness(p) {
-			witnesses = append(witnesses, p)
+			region.witnesses = append(region.witnesses, p)
 		}
 	}
-	sort.Sort(peerSlice(learners))
-	sort.Sort(peerSlice(voters))
-	sort.Sort(peerSlice(witnesses))
-	region.learners = learners
-	region.voters = voters
-	region.witnesses = witnesses
+	sort.Sort(peerSlice(region.learners))
+	sort.Sort(peerSlice(region.voters))
+	sort.Sort(peerSlice(region.witnesses))
 }
 
 // peersEqualTo returns true when the peers are not changed, which may caused by: the region leader not changed,
@@ -214,7 +211,7 @@ type RegionHeartbeatRequest interface {
 }
 
 // RegionFromHeartbeat constructs a Region from region heartbeat.
-func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateOption) *RegionInfo {
+func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, flowRoundDivisor int) *RegionInfo {
 	// Convert unit to MB.
 	// If region isn't empty and less than 1MB, use 1MB instead.
 	// The size of empty region will be correct by the previous RegionInfo.
@@ -224,20 +221,21 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateO
 	}
 
 	region := &RegionInfo{
-		term:            heartbeat.GetTerm(),
-		meta:            heartbeat.GetRegion(),
-		leader:          heartbeat.GetLeader(),
-		downPeers:       heartbeat.GetDownPeers(),
-		pendingPeers:    heartbeat.GetPendingPeers(),
-		writtenBytes:    heartbeat.GetBytesWritten(),
-		writtenKeys:     heartbeat.GetKeysWritten(),
-		readBytes:       heartbeat.GetBytesRead(),
-		readKeys:        heartbeat.GetKeysRead(),
-		approximateSize: int64(regionSize),
-		approximateKeys: int64(heartbeat.GetApproximateKeys()),
-		interval:        heartbeat.GetInterval(),
-		queryStats:      heartbeat.GetQueryStats(),
-		source:          Heartbeat,
+		term:             heartbeat.GetTerm(),
+		meta:             heartbeat.GetRegion(),
+		leader:           heartbeat.GetLeader(),
+		downPeers:        heartbeat.GetDownPeers(),
+		pendingPeers:     heartbeat.GetPendingPeers(),
+		writtenBytes:     heartbeat.GetBytesWritten(),
+		writtenKeys:      heartbeat.GetKeysWritten(),
+		readBytes:        heartbeat.GetBytesRead(),
+		readKeys:         heartbeat.GetKeysRead(),
+		approximateSize:  int64(regionSize),
+		approximateKeys:  int64(heartbeat.GetApproximateKeys()),
+		interval:         heartbeat.GetInterval(),
+		queryStats:       heartbeat.GetQueryStats(),
+		source:           Heartbeat,
+		flowRoundDivisor: uint64(flowRoundDivisor),
 	}
 
 	// scheduling service doesn't need the following fields.
@@ -245,10 +243,6 @@ func RegionFromHeartbeat(heartbeat RegionHeartbeatRequest, opts ...RegionCreateO
 		region.approximateKvSize = int64(h.GetApproximateKvSize() / units.MiB)
 		region.replicationStatus = h.GetReplicationStatus()
 		region.cpuUsage = h.GetCpuUsage()
-	}
-
-	for _, opt := range opts {
-		opt(region)
 	}
 
 	if region.writtenKeys >= ImpossibleFlowSize || region.writtenBytes >= ImpossibleFlowSize {
@@ -751,21 +745,22 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 		logRunner := ctx.LogRunner
 		// print log asynchronously
 		debug, info := d, i
+		regionID := region.GetID()
 		if logRunner != nil {
 			debug = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
-					ctx.Context,
+					regionID,
 					"DebugLog",
-					func(_ context.Context) {
+					func(context.Context) {
 						d(msg, fields...)
 					},
 				)
 			}
 			info = func(msg string, fields ...zap.Field) {
 				logRunner.RunTask(
-					ctx.Context,
+					regionID,
 					"InfoLog",
-					func(_ context.Context) {
+					func(context.Context) {
 						i(msg, fields...)
 					},
 				)
@@ -957,11 +952,11 @@ func (r *RegionsInfo) getRegionLocked(regionID uint64) *RegionInfo {
 func (r *RegionsInfo) CheckAndPutRegion(region *RegionInfo) []*RegionInfo {
 	r.t.Lock()
 	origin := r.getRegionLocked(region.GetID())
-	var ols []*regionItem
+	var ols []*RegionInfo
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
-	err := check(region, origin, convertItemsToRegions(ols))
+	err := check(region, origin, ols)
 	if err != nil {
 		log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 		// return the state region to delete.
@@ -988,25 +983,17 @@ func (r *RegionsInfo) PreCheckPutRegion(region *RegionInfo) (*RegionInfo, []*Reg
 	return origin, overlaps, err
 }
 
-func convertItemsToRegions(items []*regionItem) []*RegionInfo {
-	regions := make([]*RegionInfo, 0, len(items))
-	for _, item := range items {
-		regions = append(regions, item.RegionInfo)
-	}
-	return regions
-}
-
 // AtomicCheckAndPutRegion checks if the region is valid to put, if valid then put.
 func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *RegionInfo) ([]*RegionInfo, error) {
 	tracer := ctx.Tracer
 	r.t.Lock()
-	var ols []*regionItem
+	var ols []*RegionInfo
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
 	tracer.OnCheckOverlapsFinished()
-	err := check(region, origin, convertItemsToRegions(ols))
+	err := check(region, origin, ols)
 	if err != nil {
 		r.t.Unlock()
 		tracer.OnValidateRegionFinished()
@@ -1026,13 +1013,13 @@ func (r *RegionsInfo) AtomicCheckAndPutRegion(ctx *MetaProcessContext, region *R
 func (r *RegionsInfo) CheckAndPutRootTree(ctx *MetaProcessContext, region *RegionInfo) ([]*RegionInfo, error) {
 	tracer := ctx.Tracer
 	r.t.Lock()
-	var ols []*regionItem
+	var ols []*RegionInfo
 	origin := r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
 		ols = r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
 	tracer.OnCheckOverlapsFinished()
-	err := check(region, origin, convertItemsToRegions(ols))
+	err := check(region, origin, ols)
 	if err != nil {
 		r.t.Unlock()
 		tracer.OnValidateRegionFinished()
@@ -1123,7 +1110,7 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 		if len(overlaps) == 0 {
 			// If the range has changed but the overlapped regions are not provided, collect them by `[]*regionItem`.
 			for _, item := range r.getOverlapRegionFromOverlapTreeLocked(region) {
-				r.removeRegionFromSubTreeLocked(item.RegionInfo)
+				r.removeRegionFromSubTreeLocked(item)
 			}
 		} else {
 			// Remove all provided overlapped regions from the subtrees.
@@ -1164,7 +1151,7 @@ func (r *RegionsInfo) updateSubTreeLocked(rangeChanged bool, overlaps []*RegionI
 	setPeers(r.pendingPeers, region.GetPendingPeers())
 }
 
-func (r *RegionsInfo) getOverlapRegionFromOverlapTreeLocked(region *RegionInfo) []*regionItem {
+func (r *RegionsInfo) getOverlapRegionFromOverlapTreeLocked(region *RegionInfo) []*RegionInfo {
 	return r.overlapTree.overlaps(&regionItem{RegionInfo: region})
 }
 
@@ -1174,9 +1161,7 @@ func (r *RegionsInfo) GetRelevantRegions(region *RegionInfo) (origin *RegionInfo
 	defer r.t.RUnlock()
 	origin = r.getRegionLocked(region.GetID())
 	if origin == nil || !bytes.Equal(origin.GetStartKey(), region.GetStartKey()) || !bytes.Equal(origin.GetEndKey(), region.GetEndKey()) {
-		for _, item := range r.tree.overlaps(&regionItem{RegionInfo: region}) {
-			overlaps = append(overlaps, item.RegionInfo)
-		}
+		return origin, r.tree.overlaps(&regionItem{RegionInfo: region})
 	}
 	return
 }
@@ -1211,7 +1196,7 @@ func (r *RegionsInfo) SetRegion(region *RegionInfo) (*RegionInfo, []*RegionInfo,
 	return r.setRegionLocked(region, false)
 }
 
-func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol ...*regionItem) (*RegionInfo, []*RegionInfo, bool) {
+func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol ...*RegionInfo) (*RegionInfo, []*RegionInfo, bool) {
 	var (
 		item   *regionItem // Pointer to the *RegionInfo of this ID.
 		origin *RegionInfo
@@ -1311,7 +1296,7 @@ func (r *RegionsInfo) TreeLen() int {
 }
 
 // GetOverlaps returns the regions which are overlapped with the specified region range.
-func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*regionItem {
+func (r *RegionsInfo) GetOverlaps(region *RegionInfo) []*RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	return r.tree.overlaps(&regionItem{RegionInfo: region})
@@ -1494,7 +1479,7 @@ const (
 	PendingPeerInSubTree SubTreeRegionType = "pending"
 )
 
-// GetStoreRegions gets all RegionInfo with a given storeID
+// GetStoreRegionsByTypeInSubTree gets all RegionInfo with a given storeID
 func (r *RegionsInfo) GetStoreRegionsByTypeInSubTree(storeID uint64, typ SubTreeRegionType) ([]*RegionInfo, error) {
 	r.st.RLock()
 	var regions []*RegionInfo
@@ -1598,6 +1583,12 @@ func (r *RegionsInfo) GetNotFromStorageRegionsCntByStore(storeID uint64) int {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.getNotFromStorageRegionsCntByStoreLocked(storeID)
+}
+
+// IsStorePrepared checks if a store is prepared.
+// For each store, the number of active regions should be more than total region of the store * CollectFactor
+func (r *RegionsInfo) IsStorePrepared(storeID uint64) bool {
+	return float64(r.GetNotFromStorageRegionsCntByStore(storeID)) >= float64(r.GetStoreRegionCount(storeID))*CollectFactor
 }
 
 // getNotFromStorageRegionsCntByStoreLocked gets the `NotFromStorageRegionsCnt` count of a store's leader, follower and learner by storeID.
@@ -1833,6 +1824,96 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 	return res
 }
 
+// BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
+// limit <= 0 means no limit.
+// The given key pairs should be non-overlapping.
+func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error) {
+	keyRanges.Merge()
+	krs := keyRanges.Ranges()
+	res := make([]*RegionInfo, 0, len(krs))
+
+	scanOptions := &batchScanRegionsOptions{}
+	for _, opt := range opts {
+		opt(scanOptions)
+	}
+
+	r.t.RLock()
+	defer r.t.RUnlock()
+	for _, keyRange := range krs {
+		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
+			res = res[:scanOptions.limit]
+			return res, nil
+		}
+
+		regions, err := scanRegion(r.tree, keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
+		if err != nil {
+			return nil, err
+		}
+		if len(res) > 0 && len(regions) > 0 && res[len(res)-1].meta.Id == regions[0].meta.Id {
+			// skip the region that has been scanned
+			regions = regions[1:]
+		}
+		res = append(res, regions...)
+	}
+	return res, nil
+}
+
+func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
+	var (
+		res        []*RegionInfo
+		lastRegion = &RegionInfo{
+			meta: &metapb.Region{EndKey: keyRange.StartKey},
+		}
+		exceedLimit = func() bool { return limit > 0 && len(res) >= limit }
+		err         error
+	)
+	regionTree.scanRange(keyRange.StartKey, func(region *RegionInfo) bool {
+		if len(keyRange.EndKey) > 0 && len(region.GetStartKey()) > 0 &&
+			bytes.Compare(region.GetStartKey(), keyRange.EndKey) >= 0 {
+			return false
+		}
+		if exceedLimit() {
+			return false
+		}
+		if len(lastRegion.GetEndKey()) > 0 && len(region.GetStartKey()) > 0 &&
+			bytes.Compare(region.GetStartKey(), lastRegion.GetEndKey()) > 0 {
+			err = errs.ErrRegionNotAdjacent.FastGen(
+				"key range[%x, %x) found a hole region between region[%x, %x) and region[%x, %x)",
+				keyRange.StartKey, keyRange.EndKey,
+				lastRegion.GetStartKey(), lastRegion.GetEndKey(),
+				region.GetStartKey(), region.GetEndKey())
+			log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+				outputMustContainAllKeyRange), zap.Error(err))
+			if outputMustContainAllKeyRange {
+				return false
+			}
+		}
+
+		lastRegion = region
+		res = append(res, region)
+		return true
+	})
+	if outputMustContainAllKeyRange && err != nil {
+		return nil, err
+	}
+
+	if !(exceedLimit()) && len(keyRange.EndKey) > 0 && len(lastRegion.GetEndKey()) > 0 &&
+		bytes.Compare(lastRegion.GetEndKey(), keyRange.EndKey) < 0 {
+		err = errs.ErrRegionNotAdjacent.FastGen(
+			"key range[%x, %x) found a hole region in the last, the last scanned region is [%x, %x), [%x, %x) is missing",
+			keyRange.StartKey, keyRange.EndKey,
+			lastRegion.GetStartKey(), lastRegion.GetEndKey(),
+			lastRegion.GetEndKey(), keyRange.EndKey)
+		log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+			outputMustContainAllKeyRange), zap.Error(err))
+		if outputMustContainAllKeyRange {
+			return nil, err
+		}
+	}
+
+	return res, nil
+}
+
 // ScanRegionWithIterator scans from the first region containing or behind start key,
 // until iterator returns false.
 func (r *RegionsInfo) ScanRegionWithIterator(startKey []byte, iterator func(region *RegionInfo) bool) {
@@ -2023,14 +2104,6 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ", ")
 }
 
-// String converts slice of bytes to string without copy.
-func String(b []byte) string {
-	if len(b) == 0 {
-		return ""
-	}
-	return unsafe.String(unsafe.SliceData(b), len(b))
-}
-
 // ToUpperASCIIInplace bytes.ToUpper but zero-cost
 func ToUpperASCIIInplace(s []byte) []byte {
 	hasLower := false
@@ -2069,7 +2142,7 @@ func HexRegionKey(key []byte) []byte {
 // HexRegionKeyStr converts region key to hex format. Used for formatting region in
 // logs.
 func HexRegionKeyStr(key []byte) string {
-	return String(HexRegionKey(key))
+	return typeutil.BytesToString(HexRegionKey(key))
 }
 
 // RegionToHexMeta converts a region meta's keys to hex format. Used for formatting

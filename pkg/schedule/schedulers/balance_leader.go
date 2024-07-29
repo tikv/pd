@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -55,17 +56,6 @@ const (
 	transferOut = "transfer-out"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	balanceLeaderScheduleCounter         = schedulerCounter.WithLabelValues(BalanceLeaderName, "schedule")
-	balanceLeaderNoLeaderRegionCounter   = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-leader-region")
-	balanceLeaderRegionHotCounter        = schedulerCounter.WithLabelValues(BalanceLeaderName, "region-hot")
-	balanceLeaderNoTargetStoreCounter    = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-target-store")
-	balanceLeaderNoFollowerRegionCounter = schedulerCounter.WithLabelValues(BalanceLeaderName, "no-follower-region")
-	balanceLeaderSkipCounter             = schedulerCounter.WithLabelValues(BalanceLeaderName, "skip")
-	balanceLeaderNewOpCounter            = schedulerCounter.WithLabelValues(BalanceLeaderName, "new-operator")
-)
-
 type balanceLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	storage endpoint.ConfigStorage
@@ -86,10 +76,14 @@ func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, any) {
 	newConfig, _ := json.Marshal(conf)
 	if !bytes.Equal(oldConfig, newConfig) {
 		if !conf.validateLocked() {
-			json.Unmarshal(oldConfig, conf)
+			if err := json.Unmarshal(oldConfig, conf); err != nil {
+				return http.StatusInternalServerError, err.Error()
+			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		conf.persistLocked()
+		if err := conf.persistLocked(); err != nil {
+			log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
+		}
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
 		return http.StatusOK, "Config is updated."
 	}
@@ -189,7 +183,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		name:          BalanceLeaderName,
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
+		filterCounter: filter.NewCounter(types.BalanceLeaderScheduler.String()),
 	}
 	for _, option := range options {
 		option(s)

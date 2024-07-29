@@ -16,8 +16,8 @@ package cases
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
@@ -45,7 +45,7 @@ type Region struct {
 }
 
 // CheckerFunc checks if the scheduler is finished.
-type CheckerFunc func(*core.RegionsInfo, []info.StoreStats) bool
+type CheckerFunc func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) bool
 
 // Case represents a test suite for simulator.
 type Case struct {
@@ -57,7 +57,7 @@ type Case struct {
 	TableNumber     int
 
 	Checker CheckerFunc // To check the schedule is finished.
-	Rules   []*placement.Rule
+	Rules   []*pdHttp.Rule
 	Labels  typeutil.StringSlice
 }
 
@@ -89,6 +89,7 @@ var IDAllocator idAllocator
 var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"balance-leader":            newBalanceLeader,
 	"redundant-balance-region":  newRedundantBalanceRegion,
+	"scale-in-out":              newScaleInOut,
 	"region-split":              newRegionSplit,
 	"region-merge":              newRegionMerge,
 	"hot-read":                  newHotRead,
@@ -100,6 +101,7 @@ var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"diagnose-label-not-match1": newLabelNotMatch1,
 	"diagnose-label-isolation1": newLabelIsolation1,
 	"diagnose-label-isolation2": newLabelIsolation2,
+	"stable":                    newStableEnv,
 }
 
 // NewCase creates a new case.

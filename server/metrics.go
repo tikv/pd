@@ -45,7 +45,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat_latency_seconds",
 			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"address", "store"})
 
 	metadataGauge = prometheus.NewGaugeVec(

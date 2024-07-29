@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"strconv"
 	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -74,7 +75,12 @@ func (e *eventHandler) createEvent(w http.ResponseWriter, r *http.Request) {
 		e.er.addEvent(&AddNode{})
 		return
 	case "down-node":
-		e.er.addEvent(&DownNode{})
+		id := r.URL.Query().Get("node-id")
+		var ID int
+		if len(id) != 0 {
+			ID, _ = strconv.Atoi(id)
+		}
+		e.er.addEvent(&DownNode{ID: ID})
 		return
 	default:
 	}
@@ -125,7 +131,7 @@ func (e *WriteFlowOnSpot) Run(raft *RaftEngine, tickCount int64) bool {
 		region := raft.GetRegionByKey([]byte(key))
 		simutil.Logger.Debug("search the region", zap.Reflect("region", region.GetMeta()))
 		if region == nil {
-			simutil.Logger.Error("region not found for key", zap.String("key", key))
+			simutil.Logger.Error("region not found for key", zap.String("key", key), zap.Any("byte(key)", []byte(key)))
 			continue
 		}
 		raft.updateRegionStore(region, size)
@@ -182,7 +188,7 @@ func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 		Capacity: uint64(config.RaftStore.Capacity),
 		Version:  config.StoreVersion,
 	}
-	n, err := NewNode(s, raft.conn.pdAddr, config)
+	n, err := NewNode(s, config)
 	if err != nil {
 		simutil.Logger.Error("create node failed", zap.Error(err))
 		return false
@@ -190,6 +196,8 @@ func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 
 	raft.conn.Nodes[s.ID] = n
 	n.raftEngine = raft
+	n.client = NewRetryClient(n)
+
 	err = n.Start()
 	if err != nil {
 		delete(raft.conn.Nodes, s.ID)
@@ -200,22 +208,36 @@ func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 }
 
 // DownNode deletes nodes.
-type DownNode struct{}
+type DownNode struct {
+	ID int
+}
 
 // Run implements the event interface.
-func (*DownNode) Run(raft *RaftEngine, _ int64) bool {
-	nodes := raft.conn.getNodes()
+func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
+	nodes := raft.conn.Nodes
 	if len(nodes) == 0 {
 		simutil.Logger.Error("can not find any node")
 		return false
 	}
-	i := rand.Intn(len(nodes))
-	node := nodes[i]
+	var node *Node
+	if e.ID == 0 {
+		arrNodes := raft.conn.getNodes()
+		i := rand.Intn(len(arrNodes))
+		node = nodes[arrNodes[i].Store.GetId()]
+	} else {
+		node = nodes[uint64(e.ID)]
+	}
 	if node == nil {
-		simutil.Logger.Error("node is not existed", zap.Uint64("node-id", node.Id))
-		return false
+		simutil.Logger.Error("node is not existed")
+		return true
 	}
 	delete(raft.conn.Nodes, node.Id)
+	// delete store
+	err := PDHTTPClient.DeleteStore(context.Background(), node.Id)
+	if err != nil {
+		simutil.Logger.Error("put store failed", zap.Uint64("node-id", node.Id), zap.Error(err))
+		return false
+	}
 	node.Stop()
 
 	regions := raft.GetRegions()

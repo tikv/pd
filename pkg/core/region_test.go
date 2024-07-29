@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 )
@@ -156,18 +157,19 @@ func TestSortedEqual(t *testing.T) {
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 	}
 
+	flowRoundDivisor := 3
 	// test RegionFromHeartbeat
 	for _, testCase := range testCases {
 		regionA := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 			Region:       &metapb.Region{Id: 100, Peers: pickPeers(testCase.idsA)},
 			DownPeers:    pickPeerStats(testCase.idsA),
 			PendingPeers: pickPeers(testCase.idsA),
-		})
+		}, flowRoundDivisor)
 		regionB := RegionFromHeartbeat(&pdpb.RegionHeartbeatRequest{
 			Region:       &metapb.Region{Id: 100, Peers: pickPeers(testCase.idsB)},
 			DownPeers:    pickPeerStats(testCase.idsB),
 			PendingPeers: pickPeers(testCase.idsB),
-		})
+		}, flowRoundDivisor)
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetVoters(), regionB.GetVoters()))
 		re.Equal(testCase.isEqual, SortedPeersEqual(regionA.GetPendingPeers(), regionB.GetPendingPeers()))
@@ -730,7 +732,7 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 
 func TestGetRegionSizeByRange(t *testing.T) {
 	regions := NewRegionsInfo()
-	nums := 1000010
+	nums := 100001
 	for i := 0; i < nums; i++ {
 		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
 		endKey := []byte(fmt.Sprintf("%20d", i+1))
@@ -950,9 +952,10 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 		PendingPeers:    []*metapb.Peer{peers[1]},
 		DownPeers:       []*pdpb.PeerStats{{Peer: peers[2], DownSeconds: 100}},
 	}
+	flowRoundDivisor := 3
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		RegionFromHeartbeat(regionReq)
+		RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	}
 }
 
@@ -1138,4 +1141,63 @@ func TestCntRefAfterResetRegionCache(t *testing.T) {
 	re.Zero(region.GetRef())
 	regions.CheckAndPutRegion(region)
 	re.Equal(int32(2), region.GetRef())
+}
+
+func TestScanRegion(t *testing.T) {
+	var (
+		re                   = require.New(t)
+		tree                 = newRegionTree()
+		needContainAllRanges = true
+		regions              []*RegionInfo
+		err                  error
+	)
+	scanError := func(startKey, endKey []byte, limit int) {
+		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		re.Error(err)
+	}
+	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
+		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		re.NoError(err)
+		return regions
+	}
+	// region1
+	// [a, b)
+	updateNewItem(tree, NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
+	re.Len(scanNoError([]byte("a"), []byte("b"), 0), 1)
+	scanError([]byte("a"), []byte("c"), 0)
+	re.Len(scanNoError([]byte("a"), []byte("c"), 1), 1)
+
+	// region1 | region2
+	// [a, b)  | [b, c)
+	updateNewItem(tree, NewTestRegionInfo(2, 1, []byte("b"), []byte("c")))
+	re.Len(scanNoError([]byte("a"), []byte("c"), 0), 2)
+	re.Len(scanNoError([]byte("a"), []byte("c"), 1), 1)
+
+	// region1 | region2 | region3
+	// [a, b)  | [b, c)  | [d, f)
+	updateNewItem(tree, NewTestRegionInfo(3, 1, []byte("d"), []byte("f")))
+	scanError([]byte("a"), []byte("e"), 0)
+	scanError([]byte("c"), []byte("e"), 0)
+
+	// region1 | region2 | region3 | region4
+	// [a, b)  | [b, c)  | [d, f)  | [f, i)
+	updateNewItem(tree, NewTestRegionInfo(4, 1, []byte("f"), []byte("i")))
+	scanError([]byte("c"), []byte("g"), 0)
+	re.Len(scanNoError([]byte("g"), []byte("h"), 0), 1)
+	re.Equal(uint64(4), regions[0].GetID())
+	// test error type
+	scanError([]byte(string('a'-1)), []byte("g"), 0)
+	re.True(errs.ErrRegionNotAdjacent.Equal(err))
+
+	// region1 | region2 | region3 | region4 | region5 | region6
+	// [a, b)  | [b, c)  | [d, f)  | [f, i)  | [j, k)  | [l, +∞)]
+	updateNewItem(tree, NewTestRegionInfo(6, 1, []byte("l"), nil))
+	// test boundless
+	re.Len(scanNoError([]byte("m"), nil, 0), 1)
+
+	// ********** needContainAllRanges = false **********
+	// Tests that previously reported errors will no longer report errors.
+	needContainAllRanges = false
+	re.Len(scanNoError([]byte("a"), []byte("e"), 0), 3)
+	re.Len(scanNoError([]byte("c"), []byte("e"), 0), 1)
 }

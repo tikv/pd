@@ -115,17 +115,18 @@ type RegionInfo struct {
 	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
 	Peers       []MetaPeer          `json:"peers,omitempty"`
 
-	Leader          MetaPeer      `json:"leader,omitempty"`
-	DownPeers       []PDPeerStats `json:"down_peers,omitempty"`
-	PendingPeers    []MetaPeer    `json:"pending_peers,omitempty"`
-	CPUUsage        uint64        `json:"cpu_usage"`
-	WrittenBytes    uint64        `json:"written_bytes"`
-	ReadBytes       uint64        `json:"read_bytes"`
-	WrittenKeys     uint64        `json:"written_keys"`
-	ReadKeys        uint64        `json:"read_keys"`
-	ApproximateSize int64         `json:"approximate_size"`
-	ApproximateKeys int64         `json:"approximate_keys"`
-	Buckets         []string      `json:"buckets,omitempty"`
+	Leader            MetaPeer      `json:"leader,omitempty"`
+	DownPeers         []PDPeerStats `json:"down_peers,omitempty"`
+	PendingPeers      []MetaPeer    `json:"pending_peers,omitempty"`
+	CPUUsage          uint64        `json:"cpu_usage"`
+	WrittenBytes      uint64        `json:"written_bytes"`
+	ReadBytes         uint64        `json:"read_bytes"`
+	WrittenKeys       uint64        `json:"written_keys"`
+	ReadKeys          uint64        `json:"read_keys"`
+	ApproximateSize   int64         `json:"approximate_size"`
+	ApproximateKeys   int64         `json:"approximate_keys"`
+	ApproximateKvSize int64         `json:"approximate_kv_size"`
+	Buckets           []string      `json:"buckets,omitempty"`
 
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
 }
@@ -173,6 +174,7 @@ func InitRegion(r *core.RegionInfo, s *RegionInfo) *RegionInfo {
 	s.ReadKeys = r.GetKeysRead()
 	s.ApproximateSize = r.GetApproximateSize()
 	s.ApproximateKeys = r.GetApproximateKeys()
+	s.ApproximateKvSize = r.GetApproximateKvSize()
 	s.ReplicationStatus = fromPBReplicationStatus(r.GetReplicationStatus())
 	s.Buckets = nil
 

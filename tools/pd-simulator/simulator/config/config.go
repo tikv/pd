@@ -21,8 +21,8 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/docker/go-units"
+	pdHttp "github.com/tikv/pd/client/http"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -36,6 +36,7 @@ const (
 	defaultTotalStore                  = 3
 	defaultTotalRegion                 = 1000
 	defaultEnableTransferRegionCounter = false
+	defaultHibernatePercent            = 0
 	// store
 	defaultStoreIOMBPerSecond = 40
 	defaultStoreHeartbeat     = 10 * time.Second
@@ -62,6 +63,7 @@ type SimConfig struct {
 	TotalRegion                 int               `toml:"total-region"`
 	EnableTransferRegionCounter bool              `toml:"enable-transfer-region-counter"`
 	SimTickInterval             typeutil.Duration `toml:"sim-tick-interval"`
+	HibernatePercent            int               `toml:"hibernate-percent"`
 	// store
 	StoreIOMBPerSecond int64       `toml:"store-io-per-second"`
 	StoreVersion       string      `toml:"store-version"`
@@ -107,6 +109,7 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustDuration(&sc.SimTickInterval, defaultSimTickInterval)
 	configutil.AdjustInt(&sc.TotalStore, defaultTotalStore)
 	configutil.AdjustInt(&sc.TotalRegion, defaultTotalRegion)
+	configutil.AdjustInt(&sc.HibernatePercent, defaultHibernatePercent)
 	configutil.AdjustBool(&sc.EnableTransferRegionCounter, defaultEnableTransferRegionCounter)
 	configutil.AdjustInt64(&sc.StoreIOMBPerSecond, defaultStoreIOMBPerSecond)
 	configutil.AdjustString(&sc.StoreVersion, versioninfo.PDReleaseVersion)
@@ -133,6 +136,6 @@ func (sc *SimConfig) Speed() uint64 {
 
 // PDConfig saves some config which may be changed in PD.
 type PDConfig struct {
-	PlacementRules []*placement.Rule
+	PlacementRules []*pdHttp.Rule
 	LocationLabels typeutil.StringSlice
 }

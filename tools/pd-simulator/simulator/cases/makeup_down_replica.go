@@ -69,7 +69,7 @@ func newMakeupDownReplicas(config *sc.SimConfig) *Case {
 	}
 	simCase.Events = []EventDescriptor{e}
 
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
+	simCase.Checker = func(_ []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
 		if !down {
 			return false
 		}

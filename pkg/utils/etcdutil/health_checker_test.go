@@ -35,6 +35,8 @@ func check(re *require.Assertions, testCases []*testCase) {
 		probeCh := make(chan healthProbe, len(tc.healthProbes))
 		for _, probe := range tc.healthProbes {
 			probeCh <- probe
+			// Mock that all the endpoints are healthy.
+			checker.healthyClients.LoadOrStore(probe.ep, &healthyClient{})
 		}
 		close(probeCh)
 		// Pick and filter the endpoints.
@@ -360,4 +362,28 @@ func TestLatencyPick(t *testing.T) {
 		},
 	}
 	check(re, testCases)
+}
+
+func TestUpdateEvictedEpsAfterRemoval(t *testing.T) {
+	re := require.New(t)
+	var (
+		checker   = &healthChecker{}
+		lastEps   = []string{"A", "B", "C"}
+		pickedEps = []string{"A", "C"}
+	)
+	// All endpoints are healthy.
+	for _, ep := range lastEps {
+		checker.healthyClients.Store(ep, &healthyClient{})
+	}
+	checker.updateEvictedEps(lastEps, pickedEps)
+	// B should be evicted.
+	_, ok := checker.evictedEps.Load("B")
+	re.True(ok)
+	// Remove the endpoint B to mock member removal.
+	checker.healthyClients.Delete("B")
+	checker.evictedEps.Delete("B")
+	checker.updateEvictedEps(lastEps, pickedEps)
+	// B should not be evicted since it has been removed.
+	_, ok = checker.evictedEps.Load("B")
+	re.False(ok)
 }

@@ -28,11 +28,6 @@ type LearnerChecker struct {
 	cluster sche.CheckerCluster
 }
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	learnerCheckerPausedCounter = checkerCounter.WithLabelValues("learner_checker", "paused")
-)
-
 // NewLearnerChecker creates a learner checker.
 func NewLearnerChecker(cluster sche.CheckerCluster) *LearnerChecker {
 	return &LearnerChecker{

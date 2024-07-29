@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
@@ -66,7 +67,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) allocID() uint32 {
 	return uint32(id)
 }
 
-func TestTSOKeyspaceGroupManager(t *testing.T) {
+func TestTSOKeyspaceGroupManagerSuite(t *testing.T) {
 	suite.Run(t, &tsoKeyspaceGroupManagerTestSuite{})
 }
 
@@ -81,6 +82,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
 	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 2, suite.pdLeaderServer.GetAddr())
@@ -467,8 +469,8 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 				errMsg := err.Error()
 				// Ignore the errors caused by the split and context cancellation.
 				if strings.Contains(errMsg, "context canceled") ||
-					strings.Contains(errMsg, "not leader") ||
-					strings.Contains(errMsg, "not served") ||
+					strings.Contains(errMsg, clierrs.NotLeaderErr) ||
+					strings.Contains(errMsg, clierrs.NotServedErr) ||
 					strings.Contains(errMsg, "ErrKeyspaceNotAssigned") ||
 					strings.Contains(errMsg, "ErrKeyspaceGroupIsMerging") {
 					continue

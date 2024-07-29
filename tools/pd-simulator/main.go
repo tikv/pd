@@ -111,7 +111,7 @@ func run(simCase string, simConfig *sc.SimConfig) {
 
 // NewSingleServer creates a pd server for simulator.
 func NewSingleServer(ctx context.Context, simConfig *sc.SimConfig) (*server.Server, testutil.CleanupFunc) {
-	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps)
+	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps, simConfig.ServerConfig.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
 	} else {
@@ -148,9 +148,12 @@ func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimCon
 	}
 	tickInterval := simConfig.SimTickInterval.Duration
 
+	ctx, cancel := context.WithCancel(context.Background())
 	tick := time.NewTicker(tickInterval)
 	defer tick.Stop()
 	sc := make(chan os.Signal, 1)
+	// halt scheduling
+	simulator.ChooseToHaltPDSchedule(true)
 	signal.Notify(sc,
 		syscall.SIGHUP,
 		syscall.SIGINT,
@@ -158,6 +161,10 @@ func simStart(pdAddr, statusAddress string, simCase string, simConfig *sc.SimCon
 		syscall.SIGQUIT)
 
 	simResult := "FAIL"
+
+	go driver.StoresHeartbeat(ctx)
+	go driver.RegionsHeartbeat(ctx)
+	go driver.StepRegions(ctx)
 
 EXIT:
 	for {
@@ -173,6 +180,7 @@ EXIT:
 		}
 	}
 
+	cancel()
 	driver.Stop()
 	if len(clean) != 0 && clean[0] != nil {
 		clean[0]()
@@ -183,6 +191,10 @@ EXIT:
 		analysis.GetTransferCounter().PrintResult()
 	}
 
+	if simulator.PDHTTPClient != nil {
+		simulator.PDHTTPClient.Close()
+		simulator.SD.Close()
+	}
 	if simResult != "OK" {
 		os.Exit(1)
 	}

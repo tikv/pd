@@ -40,13 +40,6 @@ const (
 	transferWitnessLeaderRecvMaxRegionSize = 10000
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	transferWitnessLeaderCounter              = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "schedule")
-	transferWitnessLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "new-operator")
-	transferWitnessLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "no-target-store")
-)
-
 type transferWitnessLeaderScheduler struct {
 	*BaseScheduler
 	regions chan *core.RegionInfo

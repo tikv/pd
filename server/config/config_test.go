@@ -30,12 +30,13 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/configutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 func TestSecurity(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
-	re.False(cfg.Security.RedactInfoLog)
+	re.Equal(logutil.RedactInfoLogOFF, cfg.Security.RedactInfoLog)
 }
 
 func TestTLS(t *testing.T) {

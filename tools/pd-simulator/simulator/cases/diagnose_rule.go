@@ -19,6 +19,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
@@ -30,15 +31,15 @@ import (
 func newRule1(_ *sc.SimConfig) *Case {
 	var simCase Case
 
-	simCase.Rules = make([]*placement.Rule, 0)
-	simCase.Rules = append(simCase.Rules, &placement.Rule{
+	simCase.Rules = make([]*pdHttp.Rule, 0)
+	simCase.Rules = append(simCase.Rules, &pdHttp.Rule{
 		GroupID:     "test1",
 		ID:          "test1",
 		StartKeyHex: "",
 		EndKeyHex:   "",
-		Role:        placement.Learner,
+		Role:        pdHttp.Learner,
 		Count:       1,
-		LabelConstraints: []placement.LabelConstraint{
+		LabelConstraints: []pdHttp.LabelConstraint{
 			{
 				Key:    "region",
 				Op:     "in",
@@ -46,14 +47,14 @@ func newRule1(_ *sc.SimConfig) *Case {
 			},
 		},
 		LocationLabels: []string{"host"},
-	}, &placement.Rule{
+	}, &pdHttp.Rule{
 		GroupID:     placement.DefaultGroupID,
 		ID:          placement.DefaultRuleID,
 		StartKeyHex: "",
 		EndKeyHex:   "",
-		Role:        placement.Voter,
+		Role:        pdHttp.Voter,
 		Count:       5,
-		LabelConstraints: []placement.LabelConstraint{
+		LabelConstraints: []pdHttp.LabelConstraint{
 			{
 				Key:    "region",
 				Op:     "in",
@@ -64,12 +65,14 @@ func newRule1(_ *sc.SimConfig) *Case {
 	})
 
 	storeNum, regionNum := 9, 300
+	allStores := make(map[uint64]struct{}, storeNum)
 	for i := 0; i < storeNum; i++ {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 	simCase.Stores[0].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}, {Key: "idc", Value: "idc1"}}
 	simCase.Stores[1].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}, {Key: "idc", Value: "idc1"}}
@@ -99,24 +102,30 @@ func newRule1(_ *sc.SimConfig) *Case {
 		})
 	}
 
-	storesLastUpdateTime := make([]int64, storeNum+1)
-	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
+	storesLastUpdateTime := make(map[uint64]int64, storeNum)
+	storeLastAvailable := make(map[uint64]uint64, storeNum)
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
+			}
+		}
+
 		res := true
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
-		for i := 1; i <= storeNum; i++ {
-			available := stats[i].GetAvailable()
+		for storeID := range allStores {
+			available := stats[storeID].GetAvailable()
 			storesAvailable = append(storesAvailable, available)
-			if curTime-storesLastUpdateTime[i] > 360 {
-				if storeLastAvailable[i] != available {
+			if curTime-storesLastUpdateTime[storeID] > 360 {
+				if storeLastAvailable[storeID] != available {
 					res = false
 				}
-				if stats[i].ToCompactionSize != 0 {
+				if stats[storeID].ToCompactionSize != 0 {
 					res = false
 				}
-				storesLastUpdateTime[i] = curTime
-				storeLastAvailable[i] = available
+				storesLastUpdateTime[storeID] = curTime
+				storeLastAvailable[storeID] = available
 			} else {
 				res = false
 			}
@@ -130,16 +139,16 @@ func newRule1(_ *sc.SimConfig) *Case {
 func newRule2(_ *sc.SimConfig) *Case {
 	var simCase Case
 
-	simCase.Rules = make([]*placement.Rule, 0)
+	simCase.Rules = make([]*pdHttp.Rule, 0)
 	simCase.Rules = append(simCase.Rules,
-		&placement.Rule{
+		&pdHttp.Rule{
 			GroupID:     "test1",
 			ID:          "test1",
 			StartKeyHex: "",
 			EndKeyHex:   "",
-			Role:        placement.Leader,
+			Role:        pdHttp.Leader,
 			Count:       1,
-			LabelConstraints: []placement.LabelConstraint{
+			LabelConstraints: []pdHttp.LabelConstraint{
 				{
 					Key:    "region",
 					Op:     "in",
@@ -149,12 +158,14 @@ func newRule2(_ *sc.SimConfig) *Case {
 		})
 
 	storeNum, regionNum := 6, 300
+	allStores := make(map[uint64]struct{}, storeNum)
 	for i := 0; i < storeNum; i++ {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 	simCase.Stores[0].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region1"}}
 	simCase.Stores[1].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region1"}}
@@ -180,22 +191,28 @@ func newRule2(_ *sc.SimConfig) *Case {
 
 	storesLastUpdateTime := make([]int64, storeNum+1)
 	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(_ *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
+			}
+		}
+
 		res := true
 		curTime := time.Now().Unix()
 		storesAvailable := make([]uint64, 0, storeNum+1)
-		for i := 1; i <= storeNum; i++ {
-			available := stats[i].GetAvailable()
+		for storeID := range allStores {
+			available := stats[storeID].GetAvailable()
 			storesAvailable = append(storesAvailable, available)
-			if curTime-storesLastUpdateTime[i] > 360 {
-				if storeLastAvailable[i] != available {
+			if curTime-storesLastUpdateTime[storeID] > 360 {
+				if storeLastAvailable[storeID] != available {
 					res = false
 				}
-				if stats[i].ToCompactionSize != 0 {
+				if stats[storeID].ToCompactionSize != 0 {
 					res = false
 				}
-				storesLastUpdateTime[i] = curTime
-				storeLastAvailable[i] = available
+				storesLastUpdateTime[storeID] = curTime
+				storeLastAvailable[storeID] = available
 			} else {
 				res = false
 			}

@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	types "github.com/tikv/pd/pkg/schedule/type"
 )
 
 func TestString(t *testing.T) {
@@ -39,7 +40,7 @@ func TestString(t *testing.T) {
 
 func TestCounter(t *testing.T) {
 	re := require.New(t)
-	counter := NewCounter(BalanceLeader.String())
+	counter := NewCounter(types.BalanceLeaderScheduler.String())
 	counter.inc(source, storeStateTombstone, 1, 2)
 	counter.inc(target, storeStateTombstone, 1, 2)
 	re.Equal(1, counter.counter[source][storeStateTombstone][1][2])

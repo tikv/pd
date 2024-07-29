@@ -45,7 +45,7 @@ func (*testServiceRegistry) RegisterGRPCService(g *grpc.Server) {
 	grpc_testing.RegisterTestServiceServer(g, &grpc_testing.UnimplementedTestServiceServer{})
 }
 
-func (*testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+func (*testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error {
 	group := apiutil.APIServiceGroup{
 		Name:       "my-http-service",
 		Version:    "v1alpha1",
@@ -56,7 +56,7 @@ func (*testServiceRegistry) RegisterRESTHandler(userDefineHandlers map[string]ht
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Hello World!"))
 	})
-	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	return apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 func newTestServiceRegistry(_ bs.Server) registry.RegistrableService {

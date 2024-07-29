@@ -28,13 +28,14 @@ import (
 )
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -1.
+	// This is a test that searchRevertRegions finds a solution of rank 1.
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")
@@ -68,7 +69,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re.True(hb.searchRevertRegions[writePeer])
 	// Two operators can be generated when RankFormulaVersion == "v2".
 	ops, _ = hb.Schedule(tc, false)
-	/* The revert region is currently disabled for the -1 case.
+	/* The revert region is currently disabled for the rank 1 case.
 	re.Len(ops, 2)
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
@@ -88,13 +89,14 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -3.
+	// This is a test that searchRevertRegions finds a solution of rank 3.
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")
@@ -139,13 +141,14 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -2.
+	// This is a test that searchRevertRegions finds a solution of rank 2.
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
+	hb.types = []resourceType{writePeer}
 	hb.conf.SetDstToleranceRatio(0.0)
 	hb.conf.SetSrcToleranceRatio(0.0)
 	hb.conf.SetRankFormulaVersion("v1")
@@ -239,7 +242,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re.True(hb.searchRevertRegions[readLeader])
 	// Two operators can be generated when RankFormulaVersion == "v2".
 	ops, _ = hb.Schedule(tc, false)
-	/* The revert region is currently disabled for the -1 case.
+	/* The revert region is currently disabled for the rank 1 case.
 	re.Len(ops, 2)
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
 	operatorutil.CheckTransferLeader(re, ops[1], operator.OpHotRegion, 5, 2)
@@ -352,11 +355,9 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 
 	// Case1: Before #6827, we only use minHotRatio, so cannot schedule small hot region in this case.
 	// Because 10000 is larger than the length of hotRegions, so `filterHotPeers` will skip the topn calculation.
-	origin := topnPosition
 	topnPosition = 10000
 	ops := checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
 	re.Empty(ops)
-	topnPosition = origin
 
 	// Case2: After #6827, we use top10 as the threshold of minHotPeer.
 	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
@@ -401,7 +402,6 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 		tc.AddRegionWithReadInfo(hotRegionID+1, 1, bigHotRegionByte, 0, bigHotRegionQuery, utils.StoreHeartBeatReportInterval, []uint64{2, 3})
 	})
 	re.Empty(ops)
-	topnPosition = origin
 
 	// Case7: If there are more than topnPosition hot regions, but them are pending,
 	// we will schedule large hot region rather than small hot region, so there is no operator.
@@ -413,7 +413,6 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 		hb.regionPendings[hotRegionID+1] = &pendingInfluence{}
 	})
 	re.Empty(ops)
-	topnPosition = origin
 }
 
 func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLoad, lowLoad uint64,

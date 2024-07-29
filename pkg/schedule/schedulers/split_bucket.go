@@ -23,6 +23,8 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -41,20 +43,6 @@ const (
 	// defaultHotDegree is the default hot region threshold.
 	defaultHotDegree  = 3
 	defaultSplitLimit = 10
-)
-
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	splitBucketDisableCounter            = schedulerCounter.WithLabelValues(SplitBucketName, "bucket-disable")
-	splitBuckerSplitLimitCounter         = schedulerCounter.WithLabelValues(SplitBucketName, "split-limit")
-	splitBucketScheduleCounter           = schedulerCounter.WithLabelValues(SplitBucketName, "schedule")
-	splitBucketNoRegionCounter           = schedulerCounter.WithLabelValues(SplitBucketName, "no-region")
-	splitBucketRegionTooSmallCounter     = schedulerCounter.WithLabelValues(SplitBucketName, "region-too-small")
-	splitBucketOperatorExistCounter      = schedulerCounter.WithLabelValues(SplitBucketName, "operator-exist")
-	splitBucketKeyRangeNotMatchCounter   = schedulerCounter.WithLabelValues(SplitBucketName, "key-range-not-match")
-	splitBucketNoSplitKeysCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "no-split-keys")
-	splitBucketCreateOperatorFailCounter = schedulerCounter.WithLabelValues(SplitBucketName, "create-operator-fail")
-	splitBucketNewOperatorCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "new-operator")
 )
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
@@ -112,7 +100,7 @@ type splitBucketHandler struct {
 
 func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := h.conf.Clone()
-	_ = h.rd.JSON(w, http.StatusOK, conf)
+	h.rd.JSON(w, http.StatusOK, conf)
 }
 
 func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +121,9 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		h.conf.persistLocked()
+		if err := h.conf.persistLocked(); err != nil {
+			log.Warn("failed to save config", errs.ZapError(err))
+		}
 		rd.Text(w, http.StatusOK, "Config is updated.")
 		return
 	}

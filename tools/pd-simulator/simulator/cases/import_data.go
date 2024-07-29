@@ -36,13 +36,15 @@ func newImportData(config *sc.SimConfig) *Case {
 	totalStore := config.TotalStore
 	totalRegion := config.TotalRegion
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
-
+	allStores := make(map[uint64]struct{}, totalStore)
 	// Initialize the cluster
 	for i := 0; i < totalStore; i++ {
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 
 	for i := 0; i < totalRegion; i++ {
@@ -83,7 +85,13 @@ func newImportData(config *sc.SimConfig) *Case {
 	checkCount := uint64(0)
 	var newRegionCount [][3]int
 	var allRegionCount [][3]int
-	simCase.Checker = func(regions *core.RegionsInfo, _ []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
+			}
+		}
+
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
 		leaderTotal := 0
@@ -115,9 +123,9 @@ func newImportData(config *sc.SimConfig) *Case {
 				tableLeaderLog = fmt.Sprintf("%s [store %d]:%.2f%%", tableLeaderLog, storeID, float64(leaderCount)/float64(leaderTotal)*100)
 			}
 		}
-		for storeID := 1; storeID <= 10; storeID++ {
-			if peerCount, ok := peerDist[uint64(storeID)]; ok {
-				newRegionCount = append(newRegionCount, [3]int{storeID, int(checkCount), peerCount})
+		for storeID := range allStores {
+			if peerCount, ok := peerDist[storeID]; ok {
+				newRegionCount = append(newRegionCount, [3]int{int(storeID), int(checkCount), peerCount})
 				tablePeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", tablePeerLog, storeID, float64(peerCount)/float64(peerTotal)*100)
 			}
 		}
@@ -126,7 +134,7 @@ func newImportData(config *sc.SimConfig) *Case {
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
 		isEnd := false
 		var regionProps []float64
-		for storeID := uint64(1); storeID <= 10; storeID++ {
+		for storeID := range allStores {
 			totalLeaderLog = fmt.Sprintf("%s [store %d]:%.2f%%", totalLeaderLog, storeID, float64(regions.GetStoreLeaderCount(storeID))/float64(regionTotal)*100)
 			regionProp := float64(regions.GetStoreRegionCount(storeID)) / float64(regionTotal*3) * 100
 			regionProps = append(regionProps, regionProp)

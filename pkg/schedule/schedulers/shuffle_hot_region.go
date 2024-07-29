@@ -41,13 +41,6 @@ const (
 	ShuffleHotRegionType = "shuffle-hot-region"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleHotRegionCounter            = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "schedule")
-	shuffleHotRegionNewOperatorCounter = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "new-operator")
-	shuffleHotRegionSkipCounter        = schedulerCounter.WithLabelValues(ShuffleHotRegionName, "skip")
-)
-
 type shuffleHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	storage endpoint.ConfigStorage
@@ -159,10 +152,14 @@ func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerClus
 
 func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleHotRegionCounter.Inc()
-	rw := s.randomRWType()
-	s.prepareForBalance(rw, cluster)
-	operators := s.randomSchedule(cluster, s.stLoadInfos[buildResourceType(rw, constant.LeaderKind)])
-	return operators, nil
+	typ := s.randomType()
+	s.prepareForBalance(typ, cluster)
+	switch typ {
+	case readLeader, writeLeader:
+		return s.randomSchedule(cluster, s.stLoadInfos[typ]), nil
+	default:
+	}
+	return nil, nil
 }
 
 func (s *shuffleHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, loadDetail map[uint64]*statistics.StoreLoadDetail) []*operator.Operator {

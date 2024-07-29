@@ -210,7 +210,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		leader := h.waitForLeader(r)
 		// The leader has not been elected yet.
 		if leader == nil {
-			http.Error(w, "no leader", http.StatusServiceUnavailable)
+			http.Error(w, errs.ErrRedirectNoLeader.FastGenByArgs().Error(), http.StatusServiceUnavailable)
 			return
 		}
 		// If the leader is the current server now, we can handle the request directly.
@@ -222,7 +222,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	} else {
 		// Prevent more than one redirection among PD/API servers.
-		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirect))
+		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
 		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
 		return
 	}
@@ -270,7 +270,7 @@ func (h *redirector) waitForLeader(r *http.Request) (leader *pdpb.Member) {
 			}
 		case <-r.Context().Done():
 			return
-		case <-h.s.LoopContext().Done():
+		case <-h.s.Context().Done():
 			return
 		}
 	}

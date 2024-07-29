@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -72,10 +73,14 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
 		if !conf.validateLocked() {
-			json.Unmarshal(oldc, conf)
+			if err := json.Unmarshal(oldc, conf); err != nil {
+				return http.StatusInternalServerError, err.Error()
+			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		conf.persistLocked()
+		if err := conf.persistLocked(); err != nil {
+			log.Warn("failed to persist config", zap.Error(err))
+		}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
 		return http.StatusOK, "Config is updated."
 	}
@@ -177,7 +182,7 @@ func newBalanceWitnessScheduler(opController *operator.Controller, conf *balance
 		conf:          conf,
 		handler:       newBalanceWitnessHandler(conf),
 		counter:       balanceWitnessCounter,
-		filterCounter: filter.NewCounter(filter.BalanceWitness.String()),
+		filterCounter: filter.NewCounter(types.BalanceWitnessScheduler.String()),
 	}
 	for _, option := range options {
 		option(s)

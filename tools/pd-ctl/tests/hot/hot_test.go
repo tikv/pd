@@ -75,7 +75,7 @@ func (suite *hotTestSuite) TearDownTest() {
 }
 
 func (suite *hotTestSuite) TestHot() {
-	suite.env.RunTestInTwoModes(suite.checkHot)
+	suite.env.RunTestBasedOnMode(suite.checkHot)
 }
 
 func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
@@ -191,7 +191,13 @@ func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 				region := core.NewRegionInfo(&metapb.Region{
 					Id: hotRegionID,
 				}, leader)
-				hotStat.CheckReadAsync(statistics.NewCheckReadPeerTask(region, []*metapb.Peer{leader}, loads, reportInterval))
+				checkReadPeerTask := func(cache *statistics.HotPeerCache) {
+					stats := cache.CheckPeerFlow(region, []*metapb.Peer{leader}, loads, reportInterval)
+					for _, stat := range stats {
+						cache.UpdateStat(stat)
+					}
+				}
+				hotStat.CheckReadAsync(checkReadPeerTask)
 				testutil.Eventually(re, func() bool {
 					hotPeerStat := getHotPeerStat(utils.Read, hotRegionID, hotStoreID)
 					return hotPeerStat != nil
@@ -239,7 +245,7 @@ func (suite *hotTestSuite) checkHot(cluster *pdTests.TestCluster) {
 }
 
 func (suite *hotTestSuite) TestHotWithStoreID() {
-	suite.env.RunTestInTwoModes(suite.checkHotWithStoreID)
+	suite.env.RunTestBasedOnMode(suite.checkHotWithStoreID)
 }
 
 func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
@@ -306,7 +312,7 @@ func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
 }
 
 func (suite *hotTestSuite) TestHotWithoutHotPeer() {
-	suite.env.RunTestInTwoModes(suite.checkHotWithoutHotPeer)
+	suite.env.RunTestBasedOnMode(suite.checkHotWithoutHotPeer)
 }
 
 func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) {
@@ -407,7 +413,7 @@ func TestHistoryHotRegions(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -524,7 +530,7 @@ func TestBuckets(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 

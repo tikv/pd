@@ -15,7 +15,6 @@
 package statistics
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/tikv/pd/pkg/core"
@@ -151,7 +150,7 @@ func summaryStoresLoadByEngine(
 ) []*StoreLoadDetail {
 	loadDetail := make([]*StoreLoadDetail, 0, len(storeInfos))
 	allStoreLoadSum := make([]float64, utils.DimLen)
-	allStoreHistoryLoadSum := make([][]float64, utils.DimLen)
+	allStoreHistoryLoadSum := make([][]float64, utils.DimLen) // row: dim, column: time
 	allStoreCount := 0
 	allHotPeersCount := 0
 
@@ -166,49 +165,37 @@ func summaryStoresLoadByEngine(
 		// Find all hot peers first
 		var hotPeers []*HotPeerStat
 		peerLoadSum := make([]float64, utils.DimLen)
-		// TODO: To remove `filterHotPeers`, we need to:
-		// HotLeaders consider `Write{Bytes,Keys}`, so when we schedule `writeLeader`, all peers are leader.
+		// For hot leaders, we need to calculate the sum of the leader's write and read flow rather than the all peers.
 		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
 			for i := range peerLoadSum {
 				peerLoadSum[i] += peer.GetLoad(i)
 			}
 			hotPeers = append(hotPeers, peer.Clone())
 		}
-		{
-			// Metric for debug.
-			// TODO: pre-allocate gauge metrics
-			ty := "byte-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[utils.ByteDim])
-			ty = "key-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[utils.KeyDim])
-			ty = "query-rate-" + rwTy.String() + "-" + kind.String()
-			hotPeerSummary.WithLabelValues(ty, fmt.Sprintf("%v", id)).Set(peerLoadSum[utils.QueryDim])
-		}
-		loads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
+		currentLoads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
 
 		var historyLoads [][]float64
 		if storesHistoryLoads != nil {
-			historyLoads = storesHistoryLoads.Get(id, rwTy, kind)
-			for i, loads := range historyLoads {
-				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
-					allStoreHistoryLoadSum[i] = make([]float64, len(loads))
+			for i, historyLoads := range storesHistoryLoads.Get(id, rwTy, kind) {
+				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(historyLoads) {
+					allStoreHistoryLoadSum[i] = make([]float64, len(historyLoads))
 				}
-				for j, load := range loads {
-					allStoreHistoryLoadSum[i][j] += load
+				for j, historyLoad := range historyLoads {
+					allStoreHistoryLoadSum[i][j] += historyLoad
 				}
 			}
-			storesHistoryLoads.Add(id, rwTy, kind, loads)
+			storesHistoryLoads.Add(id, rwTy, kind, currentLoads)
 		}
 
 		for i := range allStoreLoadSum {
-			allStoreLoadSum[i] += loads[i]
+			allStoreLoadSum[i] += currentLoads[i]
 		}
 		allStoreCount += 1
 		allHotPeersCount += len(hotPeers)
 
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&StoreLoad{
-			Loads:        loads,
+			Loads:        currentLoads,
 			Count:        float64(len(hotPeers)),
 			HistoryLoads: historyLoads,
 		}).ToLoadPred(rwTy, info.PendingSum)
@@ -231,8 +218,8 @@ func summaryStoresLoadByEngine(
 		expectLoads[i] = allStoreLoadSum[i] / float64(allStoreCount)
 	}
 
-	// todo: remove some the max value or min value to avoid the effect of extreme value.
-	expectHistoryLoads := make([][]float64, utils.DimLen)
+	// TODO: remove some the max value or min value to avoid the effect of extreme value.
+	expectHistoryLoads := make([][]float64, utils.DimLen) // row: dim, column: time
 	for i := range allStoreHistoryLoadSum {
 		expectHistoryLoads[i] = make([]float64, len(allStoreHistoryLoadSum[i]))
 		for j := range allStoreHistoryLoadSum[i] {
@@ -285,11 +272,19 @@ func summaryStoresLoadByEngine(
 	return loadDetail
 }
 
+// filterHotPeers filters hot peers according to kind.
+// If kind is RegionKind, all hot peers will be returned.
+// If kind is LeaderKind, only leader hot peers will be returned.
 func filterHotPeers(kind constant.ResourceKind, peers []*HotPeerStat) []*HotPeerStat {
 	ret := make([]*HotPeerStat, 0, len(peers))
 	for _, peer := range peers {
-		if kind != constant.LeaderKind || peer.IsLeader() {
+		switch kind {
+		case constant.RegionKind:
 			ret = append(ret, peer)
+		case constant.LeaderKind:
+			if peer.IsLeader() {
+				ret = append(ret, peer)
+			}
 		}
 	}
 	return ret

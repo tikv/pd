@@ -102,7 +102,7 @@ func TestMemberDelete(t *testing.T) {
 				return true
 			}
 			// Check by member list.
-			cluster.WaitLeader()
+			re.NotEmpty(cluster.WaitLeader())
 			if err = checkMemberList(re, leader.GetConfig().ClientUrls, table.members); err != nil {
 				t.Logf("check member fail: %v", err)
 				time.Sleep(time.Second)
@@ -159,7 +159,7 @@ func TestLeaderPriority(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	leader1, err := cluster.GetServer("pd1").GetEtcdLeader()
 	re.NoError(err)
@@ -216,6 +216,7 @@ func TestLeaderResign(t *testing.T) {
 	re.NoError(err)
 
 	leader1 := cluster.WaitLeader()
+	re.NotEmpty(leader1)
 	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
 
 	post(t, re, addr1+"/pd/api/v1/leader/resign", "")
@@ -239,6 +240,7 @@ func TestLeaderResignWithBlock(t *testing.T) {
 	re.NoError(err)
 
 	leader1 := cluster.WaitLeader()
+	re.NotEmpty(leader1)
 	addr1 := cluster.GetServer(leader1).GetConfig().ClientUrls
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/raftclusterIsBusy", `pause`))
@@ -261,6 +263,7 @@ func TestPDLeaderLostWhileEtcdLeaderIntact(t *testing.T) {
 	re.NoError(err)
 
 	leader1 := cluster.WaitLeader()
+	re.NotEmpty(leader1)
 	memberID := cluster.GetLeaderServer().GetLeader().GetMemberId()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/leaderLoopCheckAgain", fmt.Sprintf("return(\"%d\")", memberID)))
@@ -295,7 +298,7 @@ func TestMoveLeader(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	var wg sync.WaitGroup
 	wg.Add(5)
@@ -342,12 +345,12 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	// need to prevent 3 times(including the above 1st time) campaign leader in 5 min.
 	for i := 0; i < 2; i++ {
 		cluster.GetLeaderServer().ResetPDLeader()
-		cluster.WaitLeader()
+		re.NotEmpty(cluster.WaitLeader())
 		re.Equal(leader, cluster.GetLeader())
 	}
 	// check for the 4th time.
 	cluster.GetLeaderServer().ResetPDLeader()
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	// PD leader should be different from before because etcd leader changed.
 	re.NotEmpty(cluster.GetLeader())
 	re.NotEqual(leader, cluster.GetLeader())
@@ -363,14 +366,14 @@ func TestGrantLeaseFailed(t *testing.T) {
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeader()
 	re.NotEmpty(cluster.GetLeader())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", leader)))
 
 	for i := 0; i < 3; i++ {
 		cluster.GetLeaderServer().ResetPDLeader()
-		cluster.WaitLeader()
+		re.NotEmpty(cluster.WaitLeader())
 	}
 	// PD leader should be different from before because etcd leader changed.
 	re.NotEmpty(cluster.GetLeader())

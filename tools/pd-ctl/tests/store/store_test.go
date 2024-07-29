@@ -38,6 +38,38 @@ import (
 	"go.etcd.io/etcd/pkg/transport"
 )
 
+func TestStoreLimitV2(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	defer cluster.Destroy()
+
+	// store command
+	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+
+	args = []string{"-u", pdAddr, "store", "limit"}
+	output, err := tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "not support get limit")
+
+	args = []string{"-u", pdAddr, "store", "limit", "1", "10"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "not support set limit")
+}
+
 func TestStore(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -47,7 +79,7 @@ func TestStore(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -238,7 +270,7 @@ func TestStore(t *testing.T) {
 	re.NoError(leaderServer.Stop())
 	re.NoError(leaderServer.Run())
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	storesLimit := leaderServer.GetPersistOptions().GetAllStoresLimit()
 	re.Equal(float64(20), storesLimit[1].AddPeer)
 	re.Equal(float64(20), storesLimit[1].RemovePeer)
@@ -307,9 +339,14 @@ func TestStore(t *testing.T) {
 	// store delete <store_id> command
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	re.Equal(metapb.StoreState_Up, storeInfo.Store.State)
-	args = []string{"-u", pdAddr, "store", "delete", "1"}
-	_, err = tests.ExecuteCommand(cmd, args...)
+	args = []string{"-u", pdAddr, "store", "remove", "1"} // it means remove-tombstone
+	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	re.NotContains(string(output), "Success")
+	args = []string{"-u", pdAddr, "store", "delete", "1"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success")
 	args = []string{"-u", pdAddr, "store", "1"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
@@ -496,7 +533,7 @@ func TestTombstoneStore(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -597,7 +634,7 @@ func TestStoreTLS(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	cmd := ctl.GetRootCmd()
 
 	stores := []*response.StoreInfo{

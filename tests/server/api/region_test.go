@@ -97,7 +97,7 @@ func (suite *regionTestSuite) TearDownTest() {
 func (suite *regionTestSuite) TestSplitRegions() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkSplitRegions)
+	env.RunTestBasedOnMode(suite.checkSplitRegions)
 	env.Cleanup()
 }
 
@@ -138,7 +138,7 @@ func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
-	suite.env.RunTestInTwoModes(suite.checkAccelerateRegionsScheduleInRange)
+	suite.env.RunTestBasedOnMode(suite.checkAccelerateRegionsScheduleInRange)
 }
 
 func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tests.TestCluster) {
@@ -165,15 +165,15 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 	err := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule", urlPrefix), []byte(body),
 		tu.StatusOK(re))
 	re.NoError(err)
-	idList := leader.GetRaftCluster().GetSuspectRegions()
+	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
+		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
 	}
 	re.Len(idList, 2, len(idList))
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
-	suite.env.RunTestInTwoModes(suite.checkAccelerateRegionsScheduleInRanges)
+	suite.env.RunTestBasedOnMode(suite.checkAccelerateRegionsScheduleInRanges)
 }
 
 func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *tests.TestCluster) {
@@ -201,9 +201,9 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 	err := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/accelerate-schedule/batch", urlPrefix), []byte(body),
 		tu.StatusOK(re))
 	re.NoError(err)
-	idList := leader.GetRaftCluster().GetSuspectRegions()
+	idList := leader.GetRaftCluster().GetPendingProcessedRegions()
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetSuspectRegions()
+		idList = sche.GetCluster().GetCoordinator().GetCheckerController().GetPendingProcessedRegions()
 	}
 	re.Len(idList, 4)
 }
@@ -211,7 +211,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 func (suite *regionTestSuite) TestScatterRegions() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestInTwoModes(suite.checkScatterRegions)
+	env.RunTestBasedOnMode(suite.checkScatterRegions)
 	env.Cleanup()
 }
 
@@ -258,7 +258,7 @@ func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
-	suite.env.RunTestInTwoModes(suite.checkRegionsReplicated)
+	suite.env.RunTestBasedOnMode(suite.checkRegionsReplicated)
 }
 
 func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster) {

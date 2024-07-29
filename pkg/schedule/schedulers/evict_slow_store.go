@@ -43,9 +43,6 @@ const (
 	slowStoreRecoverThreshold = 1
 )
 
-// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
-
 type evictSlowStoreSchedulerConfig struct {
 	syncutil.RWMutex
 	cluster *core.BasicCluster
@@ -97,6 +94,10 @@ func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 		return nil
 	}
 	return []core.KeyRange{core.NewKeyRange("", "")}
+}
+
+func (*evictSlowStoreSchedulerConfig) getBatch() int {
+	return EvictLeaderBatchSize
 }
 
 func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
@@ -266,7 +267,7 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf)
 }
 
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
@@ -282,7 +283,6 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 
 func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
-	var ops []*operator.Operator
 
 	if s.conf.evictStore() != 0 {
 		store := cluster.GetStore(s.conf.evictStore())
@@ -298,7 +298,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			return s.schedulerEvictLeader(cluster), nil
 		}
 		s.cleanupEvictLeader(cluster)
-		return ops, nil
+		return nil, nil
 	}
 
 	var slowStore *core.StoreInfo
@@ -311,14 +311,14 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
 			// Do nothing if there is more than one slow store.
 			if slowStore != nil {
-				return ops, nil
+				return nil, nil
 			}
 			slowStore = store
 		}
 	}
 
 	if slowStore == nil || slowStore.GetSlowScore() < slowStoreEvictThreshold {
-		return ops, nil
+		return nil, nil
 	}
 
 	// If there is only one slow store, evict leaders from that store.
@@ -327,7 +327,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 	err := s.prepareEvictLeader(cluster, slowStore.GetID())
 	if err != nil {
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
-		return ops, nil
+		return nil, nil
 	}
 	return s.schedulerEvictLeader(cluster), nil
 }

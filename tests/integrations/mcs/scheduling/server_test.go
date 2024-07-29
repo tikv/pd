@@ -70,6 +70,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
@@ -116,6 +117,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re.NotEqual(uint64(0), id)
 	suite.cluster.ResignLeader()
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	time.Sleep(time.Second)
@@ -482,7 +484,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
-		return region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
+		return region != nil && region.GetBytesRead() == 20 && region.GetBytesWritten() == 10 &&
 			region.GetKeysRead() == 200 && region.GetKeysWritten() == 100 && region.GetTerm() == 1 &&
 			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
 			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
@@ -635,6 +637,7 @@ func (suite *multipleServerTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
@@ -649,6 +652,10 @@ func (suite *multipleServerTestSuite) TearDownSuite() {
 
 func (suite *multipleServerTestSuite) TestReElectLeader() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+	}()
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
@@ -674,4 +681,73 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 
 	rc = suite.pdLeader.GetServer().GetRaftCluster()
 	rc.IsPrepared()
+}
+
+func (suite *serverTestSuite) TestOnlineProgress() {
+	re := suite.Require()
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://%d", i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	regionLen := 1000
+	regions := tests.InitRegions(regionLen)
+	for _, region := range regions {
+		err = rc.HandleRegionHeartbeat(region)
+		re.NoError(err)
+	}
+	time.Sleep(2 * time.Second)
+
+	// add a new store
+	resp, err := s.PutStore(
+		context.Background(), &pdpb.PutStoreRequest{
+			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+			Store: &metapb.Store{
+				Id:      4,
+				Address: fmt.Sprintf("mock://%d", 4),
+				State:   metapb.StoreState_Up,
+				Version: "7.0.0",
+			},
+		},
+	)
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+
+	time.Sleep(2 * time.Second)
+	for i, r := range regions {
+		if i < 50 {
+			r.GetMeta().Peers[2].StoreId = 4
+			r.GetMeta().RegionEpoch.ConfVer = 2
+			r.GetMeta().RegionEpoch.Version = 2
+			err = rc.HandleRegionHeartbeat(r)
+			re.NoError(err)
+		}
+	}
+	time.Sleep(2 * time.Second)
+	action, progress, ls, cs, err := rc.GetProgressByID("4")
+	re.Equal("preparing", action)
+	re.NotEmpty(progress)
+	re.NotEmpty(cs)
+	re.NotEmpty(ls)
+	re.NoError(err)
+	suite.TearDownSuite()
+	suite.SetupSuite()
 }

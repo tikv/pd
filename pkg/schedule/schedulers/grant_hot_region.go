@@ -47,12 +47,6 @@ const (
 	GrantHotRegionType = "grant-hot-region"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	grantHotRegionCounter     = schedulerCounter.WithLabelValues(GrantHotRegionName, "schedule")
-	grantHotRegionSkipCounter = schedulerCounter.WithLabelValues(GrantHotRegionName, "skip")
-)
-
 type grantHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	storage       endpoint.ConfigStorage
@@ -210,39 +204,39 @@ func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	}
 	ids, ok := input["store-id"].(string)
 	if !ok {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
+		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
 		return
 	}
 	storeIDs := make([]uint64, 0)
 	for _, v := range strings.Split(ids, ",") {
 		id, err := strconv.ParseUint(v, 10, 64)
 		if err != nil {
-			_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
+			handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
 			return
 		}
 		storeIDs = append(storeIDs, id)
 	}
 	leaderID, err := strconv.ParseUint(input["store-leader-id"].(string), 10, 64)
 	if err != nil {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
+		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
 		return
 	}
 	if !handler.config.setStore(leaderID, storeIDs) {
-		_ = handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
+		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
 		return
 	}
 
 	if err = handler.config.Persist(); err != nil {
 		handler.config.SetStoreLeaderID(0)
-		_ = handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	_ = handler.rd.JSON(w, http.StatusOK, nil)
+	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
 func (handler *grantHotRegionHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
-	_ = handler.rd.JSON(w, http.StatusOK, conf)
+	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
 func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handler {
@@ -258,13 +252,13 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 
 func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantHotRegionCounter.Inc()
-	rw := s.randomRWType()
-	s.prepareForBalance(rw, cluster)
-	return s.dispatch(rw, cluster), nil
+	typ := s.randomType()
+	s.prepareForBalance(typ, cluster)
+	return s.dispatch(typ, cluster), nil
 }
 
-func (s *grantHotRegionScheduler) dispatch(typ utils.RWType, cluster sche.SchedulerCluster) []*operator.Operator {
-	stLoadInfos := s.stLoadInfos[buildResourceType(typ, constant.RegionKind)]
+func (s *grantHotRegionScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) []*operator.Operator {
+	stLoadInfos := s.stLoadInfos[typ]
 	infos := make([]*statistics.StoreLoadDetail, len(stLoadInfos))
 	index := 0
 	for _, info := range stLoadInfos {
