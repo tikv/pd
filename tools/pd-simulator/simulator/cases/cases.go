@@ -101,6 +101,7 @@ var CaseMap = map[string]func(*config.SimConfig) *Case{
 	"diagnose-label-not-match1": newLabelNotMatch1,
 	"diagnose-label-isolation1": newLabelIsolation1,
 	"diagnose-label-isolation2": newLabelIsolation2,
+	"stable":                    newStableEnv,
 }
 
 // NewCase creates a new case.

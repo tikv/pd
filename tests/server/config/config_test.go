@@ -530,10 +530,12 @@ func (suite *configTestSuite) checkConfigTTL(cluster *tests.TestCluster) {
 	assertTTLConfig(re, cluster, false)
 
 	// test cleaning up
-	err = tu.CheckPostJSON(tests.TestDialClient, createTTLUrl(urlPrefix, 5), postData, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, createTTLUrl(urlPrefix, 5), postData,
+		tu.StatusOK(re), tu.StringEqual(re, "\"The ttl config is updated.\"\n"))
 	re.NoError(err)
 	assertTTLConfig(re, cluster, true)
-	err = tu.CheckPostJSON(tests.TestDialClient, createTTLUrl(urlPrefix, 0), postData, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, createTTLUrl(urlPrefix, 0), postData,
+		tu.StatusOK(re), tu.StatusOK(re), tu.StringEqual(re, "\"The ttl config is deleted.\"\n"))
 	re.NoError(err)
 	assertTTLConfig(re, cluster, false)
 

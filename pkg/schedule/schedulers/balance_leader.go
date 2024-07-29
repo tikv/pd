@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -182,7 +183,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 		name:          BalanceLeaderName,
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
-		filterCounter: filter.NewCounter(filter.BalanceLeader.String()),
+		filterCounter: filter.NewCounter(types.BalanceLeaderScheduler.String()),
 	}
 	for _, option := range options {
 		option(s)
