@@ -4,7 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"testing"
 
 	"github.com/pingcap/errors"
@@ -41,9 +41,9 @@ func TestToTLSConfig(t *testing.T) {
 
 	re := require.New(t)
 	tlsConfig := TLSConfig{
-		KeyPath:  path.Join(certPath, "pd-server-key.pem"),
-		CertPath: path.Join(certPath, "pd-server.pem"),
-		CAPath:   path.Join(certPath, "ca.pem"),
+		KeyPath:  filepath.Join(certPath, "pd-server-key.pem"),
+		CertPath: filepath.Join(certPath, "pd-server.pem"),
+		CAPath:   filepath.Join(certPath, "ca.pem"),
 	}
 	// test without bytes
 	_, err := tlsConfig.ToTLSConfig()

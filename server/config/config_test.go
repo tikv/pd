@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -123,7 +123,7 @@ func TestValidation(t *testing.T) {
 	cfg := NewConfig()
 	re.NoError(cfg.Adjust(nil, false))
 
-	cfg.Log.File.Filename = path.Join(cfg.DataDir, "test")
+	cfg.Log.File.Filename = filepath.Join(cfg.DataDir, "test")
 	re.Error(cfg.Validate())
 
 	// check schedule config
