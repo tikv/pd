@@ -40,7 +40,6 @@ linters-settings:
     # To specify a set of rules to explicitly exclude.
     # Available rules: https://github.com/securego/gosec#available-rules
     excludes:
-      - G402
       - G404
       # TODO: enable G115 after fixing the issues
       - G115
