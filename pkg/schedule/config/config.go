@@ -27,10 +27,15 @@ import (
 
 const (
 	// DefaultMaxReplicas is the default number of replicas for each region.
-	DefaultMaxReplicas            = 3
-	defaultMaxSnapshotCount       = 64
-	defaultMaxPendingPeerCount    = 64
-	defaultMaxMergeRegionSize     = 96
+	DefaultMaxReplicas         = 3
+	defaultMaxSnapshotCount    = 64
+	defaultMaxPendingPeerCount = 64
+	// defaultMaxMergeRegionSize is the default maximum size of region when regions can be merged.
+	// After https://github.com/tikv/tikv/issues/17309, the default value is enlarged from 20 to 54,
+	// to make it compatible with the default value of region size of tikv. To avoid triggering
+	// too many merge operations when upgrading, the old value is kept in the configuration file.
+	oldDefaultMaxMergeRegionSize  = 20
+	defaultMaxMergeRegionSize     = 54
 	defaultLeaderScheduleLimit    = 4
 	defaultRegionScheduleLimit    = 2048
 	defaultWitnessScheduleLimit   = 4
@@ -332,6 +337,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	if !meta.IsDefined("max-pending-peer-count") {
 		configutil.AdjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
 	}
+	// If the MaxMergeRegionSize is set, use the old value to avoid triggering too many
+	// merge operations when upgrading.
+	configutil.AdjustUint64(&c.MaxMergeRegionKeys, oldDefaultMaxMergeRegionSize)
 	if !meta.IsDefined("max-merge-region-size") {
 		configutil.AdjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
 	}
