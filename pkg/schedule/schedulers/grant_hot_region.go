@@ -129,6 +129,7 @@ type grantHotRegionScheduler struct {
 func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHotRegionSchedulerConfig) *grantHotRegionScheduler {
 	base := newBaseHotScheduler(opController,
 		statistics.DefaultHistorySampleDuration, statistics.DefaultHistorySampleInterval)
+	base.tp = types.GrantHotRegionScheduler
 	handler := newGrantHotRegionHandler(conf)
 	ret := &grantHotRegionScheduler{
 		baseHotScheduler: base,

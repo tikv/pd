@@ -93,7 +93,7 @@ type baseHotScheduler struct {
 }
 
 func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.Duration, sampleInterval time.Duration) *baseHotScheduler {
-	base := NewBaseScheduler(opController, types.HotRegionScheduler)
+	base := NewBaseScheduler(opController, types.BalanceHotRegionScheduler)
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
 		regionPendings: make(map[uint64]*pendingInfluence),
