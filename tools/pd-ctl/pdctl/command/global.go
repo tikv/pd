@@ -108,12 +108,7 @@ var dialClient = &http.Client{
 	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, pdControlCallerID),
 }
 
-<<<<<<< HEAD
-// RequireHTTPSClient creates a HTTPS client if the related flags are set
-func RequireHTTPSClient(cmd *cobra.Command, args []string) error {
-=======
 func parseTLSConfig(cmd *cobra.Command) (*tls.Config, error) {
->>>>>>> d44d7212b (ctl: fix https client panic (#8239))
 	caPath, err := cmd.Flags().GetString("cacert")
 	if err != nil || len(caPath) == 0 {
 		return nil, err
