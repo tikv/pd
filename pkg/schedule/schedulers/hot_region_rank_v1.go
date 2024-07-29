@@ -29,9 +29,10 @@ func initRankV1(r *balanceSolver) *rankV1 {
 }
 
 // isAvailable returns the solution is available.
-// The solution should have no revertRegion and progressiveRank < 0.
+// The solution should progressiveRank > 0.
+// v1 does not support revert regions, so no need to check revertRegions.
 func (*rankV1) isAvailable(s *solution) bool {
-	return s.progressiveRank < 0
+	return s.progressiveRank > 0
 }
 
 func (r *rankV1) checkByPriorityAndTolerance(loads []float64, f func(int) bool) bool {
@@ -66,12 +67,12 @@ func (r *rankV1) filterUniformStore() (string, bool) {
 		// If both dims are enough uniform, any schedule is unnecessary.
 		return "all-dim", true
 	}
-	if isUniformFirstPriority && (r.cur.progressiveRank == -1 || r.cur.progressiveRank == -3) {
-		// If first priority dim is enough uniform, -1 is unnecessary and maybe lead to worse balance for second priority dim
+	if isUniformFirstPriority && (r.cur.progressiveRank == 1 || r.cur.progressiveRank == 3) {
+		// If first priority dim is enough uniform, rank 1 is unnecessary and maybe lead to worse balance for second priority dim
 		return utils.DimToString(r.firstPriority), true
 	}
-	if isUniformSecondPriority && r.cur.progressiveRank == -2 {
-		// If second priority dim is enough uniform, -2 is unnecessary and maybe lead to worse balance for first priority dim
+	if isUniformSecondPriority && r.cur.progressiveRank == 2 {
+		// If second priority dim is enough uniform, rank 2 is unnecessary and maybe lead to worse balance for first priority dim
 		return utils.DimToString(r.secondPriority), true
 	}
 	return "", false
@@ -79,12 +80,12 @@ func (r *rankV1) filterUniformStore() (string, bool) {
 
 // calcProgressiveRank calculates `r.cur.progressiveRank`.
 // See the comments of `solution.progressiveRank` for more about progressive rank.
-// | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened |
-// |   isBetter                         | -4       | -3            | -1 / 0   |
-// |   isNotWorsened                    | -2       | 1             | 1        |
-// |   Worsened                         | 0        | 1             | 1        |
+// | ↓ firstPriority \ secondPriority → | isBetter | isNotWorsened | Worsened  |
+// |   isBetter                         | 4        | 3             | 1         |
+// |   isNotWorsened                    | 2        | -1            | -1        |
+// |   Worsened                         | 0        | -1            | -1        |
 func (r *rankV1) calcProgressiveRank() {
-	r.cur.progressiveRank = 1
+	r.cur.progressiveRank = -1
 	r.cur.calcPeersRate(r.firstPriority, r.secondPriority)
 	if r.cur.getPeersRateFromCache(r.firstPriority) < r.getMinRate(r.firstPriority) &&
 		r.cur.getPeersRateFromCache(r.secondPriority) < r.getMinRate(r.secondPriority) {
@@ -93,10 +94,10 @@ func (r *rankV1) calcProgressiveRank() {
 
 	if r.resourceTy == writeLeader {
 		// For write leader, only compare the first priority.
-		// If the first priority is better, the progressiveRank is -3.
+		// If the first priority is better, the progressiveRank is 3.
 		// Because it is not a solution that needs to be optimized.
 		if r.isBetterForWriteLeader() {
-			r.cur.progressiveRank = -3
+			r.cur.progressiveRank = 3
 		}
 		return
 	}
@@ -107,16 +108,16 @@ func (r *rankV1) calcProgressiveRank() {
 	switch {
 	case isFirstBetter && isSecondBetter:
 		// If belonging to the case, all two dim will be more balanced, the best choice.
-		r.cur.progressiveRank = -4
+		r.cur.progressiveRank = 4
 	case isFirstBetter && isSecondNotWorsened:
 		// If belonging to the case, the first priority dim will be more balanced, the second priority dim will be not worsened.
-		r.cur.progressiveRank = -3
+		r.cur.progressiveRank = 3
 	case isFirstNotWorsened && isSecondBetter:
 		// If belonging to the case, the first priority dim will be not worsened, the second priority dim will be more balanced.
-		r.cur.progressiveRank = -2
+		r.cur.progressiveRank = 2
 	case isFirstBetter:
 		// If belonging to the case, the first priority dim will be more balanced, ignore the second priority dim.
-		r.cur.progressiveRank = -1
+		r.cur.progressiveRank = 1
 	case isSecondBetter:
 		// If belonging to the case, the second priority dim will be more balanced, ignore the first priority dim.
 		// It's a solution that cannot be used directly, but can be optimized.
@@ -126,12 +127,12 @@ func (r *rankV1) calcProgressiveRank() {
 
 // betterThan checks if `r.cur` is a better solution than `old`.
 func (r *rankV1) betterThan(old *solution) bool {
-	if old == nil || r.cur.progressiveRank <= splitProgressiveRank {
+	if old == nil || r.cur.progressiveRank >= splitProgressiveRank {
 		return true
 	}
 	if r.cur.progressiveRank != old.progressiveRank {
-		// Smaller rank is better.
-		return r.cur.progressiveRank < old.progressiveRank
+		// Bigger rank is better.
+		return r.cur.progressiveRank > old.progressiveRank
 	}
 	if (r.cur.revertRegion == nil) != (old.revertRegion == nil) {
 		// Fewer revertRegions are better.
@@ -159,24 +160,28 @@ func (r *rankV1) betterThan(old *solution) bool {
 		// We will firstly consider ensuring converge faster, secondly reduce oscillation
 		firstCmp, secondCmp := r.getRkCmpPriorities(old)
 		switch r.cur.progressiveRank {
-		case -4: // isBetter(firstPriority) && isBetter(secondPriority)
+		case 4: // isBetter(firstPriority) && isBetter(secondPriority)
+			// Both are better, prefer the one with higher first priority rate.
+			// If the first priority rate is the similar, prefer the one with higher second priority rate.
 			if firstCmp != 0 {
 				return firstCmp > 0
 			}
 			return secondCmp > 0
-		case -3: // isBetter(firstPriority) && isNotWorsened(secondPriority)
+		case 3: // isBetter(firstPriority) && isNotWorsened(secondPriority)
+			// The first priority is better, prefer the one with higher first priority rate.
 			if firstCmp != 0 {
 				return firstCmp > 0
 			}
 			// prefer smaller second priority rate, to reduce oscillation
 			return secondCmp < 0
-		case -2: // isNotWorsened(firstPriority) && isBetter(secondPriority)
+		case 2: // isNotWorsened(firstPriority) && isBetter(secondPriority)
+			// The second priority is better, prefer the one with higher second priority rate.
 			if secondCmp != 0 {
 				return secondCmp > 0
 			}
 			// prefer smaller first priority rate, to reduce oscillation
 			return firstCmp < 0
-		case -1: // isBetter(firstPriority)
+		case 1: // isBetter(firstPriority)
 			return firstCmp > 0
 			// TODO: The smaller the difference between the value and the expectation, the better.
 		}
@@ -193,21 +198,24 @@ func (r *rankV1) getRkCmpPriorities(old *solution) (firstCmp int, secondCmp int)
 
 func (r *rankV1) rankToDimString() string {
 	switch r.cur.progressiveRank {
-	case -4:
+	case 4:
 		return "all"
-	case -3:
+	case 3:
 		return utils.DimToString(r.firstPriority)
-	case -2:
+	case 2:
 		return utils.DimToString(r.secondPriority)
-	case -1:
+	case 1:
 		return utils.DimToString(r.firstPriority) + "-only"
 	default:
 		return "none"
 	}
 }
 
-func (*rankV1) needSearchRevertRegions() bool { return false }
-func (*rankV1) setSearchRevertRegions()       {}
+func (*rankV1) needSearchRevertRegions() bool {
+	return false
+}
+
+func (*rankV1) setSearchRevertRegions() {}
 
 func (r *rankV1) isBetterForWriteLeader() bool {
 	srcRate, dstRate := r.cur.getExtremeLoad(r.firstPriority)

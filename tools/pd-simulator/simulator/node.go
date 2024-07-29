@@ -129,7 +129,6 @@ func (n *Node) Tick(wg *sync.WaitGroup) {
 	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
-	n.stepHeartBeat()
 	n.stepCompaction()
 	n.stepTask()
 	n.tick++
@@ -154,29 +153,14 @@ func (n *Node) stepTask() {
 	}
 }
 
-var schedulerCheck sync.Once
-
-func (n *Node) stepHeartBeat() {
-	config := n.raftEngine.storeConfig
-
-	period := uint64(config.RaftStore.StoreHeartBeatInterval.Duration / config.SimTickInterval.Duration)
-	if n.tick%period == 0 {
-		n.storeHeartBeat()
-	}
-	period = uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
-	if n.tick%period == 0 {
-		n.regionHeartBeat()
-		schedulerCheck.Do(func() { ChooseToHaltPDSchedule(false) })
-	}
-}
-
 func (n *Node) stepCompaction() {
 	if n.tick%compactionDelayPeriod == 0 {
 		n.compaction()
 	}
 }
 
-func (n *Node) storeHeartBeat() {
+func (n *Node) storeHeartBeat(wg *sync.WaitGroup) {
+	defer wg.Done()
 	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
 		return
 	}
@@ -205,26 +189,16 @@ func (n *Node) compaction() {
 	n.stats.ToCompactionSize = 0
 }
 
-func (n *Node) regionHeartBeat() {
-	if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
-		return
+func (n *Node) regionHeartBeat(region *core.RegionInfo) {
+	ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
+	err := n.client.RegionHeartbeat(ctx, region)
+	if err != nil {
+		simutil.Logger.Info("report region heartbeat error",
+			zap.Uint64("node-id", n.Id),
+			zap.Uint64("region-id", region.GetID()),
+			zap.Error(err))
 	}
-	n.raftEngine.TraverseRegions(func(region *core.RegionInfo) {
-		if region.GetLeader() != nil && region.GetLeader().GetStoreId() == n.Id {
-			ctx, cancel := context.WithTimeout(n.ctx, pdTimeout)
-			if region == nil {
-				simutil.Logger.Fatal("region not found")
-			}
-			err := n.client.RegionHeartbeat(ctx, region.Clone())
-			if err != nil {
-				simutil.Logger.Info("report region heartbeat error",
-					zap.Uint64("node-id", n.Id),
-					zap.Uint64("region-id", region.GetID()),
-					zap.Error(err))
-			}
-			cancel()
-		}
-	})
+	cancel()
 }
 
 func (n *Node) reportRegionChange() {

@@ -51,7 +51,7 @@ const (
 	HotRegionType           = "hot-region"
 	splitHotReadBuckets     = "split-hot-read-region"
 	splitHotWriteBuckets    = "split-hot-write-region"
-	splitProgressiveRank    = int64(-5)
+	splitProgressiveRank    = 5
 	minHotScheduleInterval  = time.Second
 	maxHotScheduleInterval  = 20 * time.Second
 	defaultPendingAmpFactor = 2.0
@@ -128,6 +128,7 @@ func (h *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.Sche
 	switch typ {
 	case readLeader, readPeer:
 		// update read statistics
+		// avoid to update read statistics frequently
 		if time.Since(h.updateReadTime) >= statisticsInterval {
 			regionRead := cluster.RegionReadStats()
 			prepare(regionRead, utils.Read, constant.LeaderKind)
@@ -136,6 +137,7 @@ func (h *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.Sche
 		}
 	case writeLeader, writePeer:
 		// update write statistics
+		// avoid to update write statistics frequently
 		if time.Since(h.updateWriteTime) >= statisticsInterval {
 			regionWrite := cluster.RegionWriteStats()
 			prepare(regionWrite, utils.Write, constant.LeaderKind)
@@ -401,10 +403,10 @@ type solution struct {
 	cachedPeersRate []float64
 
 	// progressiveRank measures the contribution for balance.
-	// The smaller the rank, the better this solution is.
-	// If progressiveRank <= 0, this solution makes thing better.
+	// The bigger the rank, the better this solution is.
+	// If progressiveRank >= 0, this solution makes thing better.
 	// 0 indicates that this is a solution that cannot be used directly, but can be optimized.
-	// 1 indicates that this is a non-optimizable solution.
+	// -1 indicates that this is a non-optimizable solution.
 	// See `calcProgressiveRank` for more about progressive rank.
 	progressiveRank int64
 	// only for rank v2
@@ -476,6 +478,7 @@ type balanceSolver struct {
 	best *solution
 	ops  []*operator.Operator
 
+	// maxSrc and minDst are used to calculate the rank.
 	maxSrc   *statistics.StoreLoad
 	minDst   *statistics.StoreLoad
 	rankStep *statistics.StoreLoad
