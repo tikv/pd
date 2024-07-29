@@ -314,17 +314,17 @@ func TestServiceClientScheme(t *testing.T) {
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
 	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(modifyURLScheme("127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(modifyURLScheme("127.0.0.1:2379", &tls.Config{MinVersion: tls.VersionTLS12}), modifyURLScheme("127.0.0.1:2379", &tls.Config{MinVersion: tls.VersionTLS12}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(modifyURLScheme("https://127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(modifyURLScheme("https://127.0.0.1:2379", &tls.Config{MinVersion: tls.VersionTLS12}), modifyURLScheme("127.0.0.1:2379", &tls.Config{MinVersion: tls.VersionTLS12}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", &tls.Config{MinVersion: tls.VersionTLS12}), modifyURLScheme("127.0.0.1:2379", &tls.Config{MinVersion: tls.VersionTLS12}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
 }
 
 func TestSchemeFunction(t *testing.T) {
 	re := require.New(t)
-	tlsCfg := &tls.Config{}
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
 
 	endpoints1 := []string{
 		"http://tc-pd:2379",

@@ -51,7 +51,7 @@ func TestIsEnableHttps(t *testing.T) {
 	httpClient = &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
-			TLSClientConfig:   &tls.Config{},
+			TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
 		},
 	}
 	re.False(IsEnableHTTPS(httpClient))
