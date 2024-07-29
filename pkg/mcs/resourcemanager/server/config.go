@@ -59,6 +59,8 @@ const (
 	defaultDegradedModeWaitDuration = time.Second * 0
 	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
 	defaultMaxWaitDuration = 30 * time.Second
+	// defaultLTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
+	defaultLTBTokenRPCMaxDelay = 1 * time.Second
 )
 
 // Config is the configuration for the resource manager.
@@ -99,6 +101,9 @@ type ControllerConfig struct {
 	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
 	LTBMaxWaitDuration typeutil.Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
 
+	// LTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
+	LTBTokenRPCMaxDelay typeutil.Duration `toml:"ltb-token-rpc-max-delay" json:"ltb-token-rpc-max-delay"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
@@ -112,10 +117,16 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if rmc == nil {
 		return
 	}
-	rmc.RequestUnit.Adjust()
-
-	configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
-	configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
+	rmc.RequestUnit.Adjust(meta.Child("request-unit"))
+	if !meta.IsDefined("degraded-mode-wait-duration") {
+		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, defaultDegradedModeWaitDuration)
+	}
+	if !meta.IsDefined("ltb-max-wait-duration") {
+		configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
+	}
+	if !meta.IsDefined("ltb-token-rpc-max-delay") {
+		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
+	}
 	failpoint.Inject("enableDegradedMode", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
 	})
@@ -144,30 +155,30 @@ type RequestUnitConfig struct {
 }
 
 // Adjust adjusts the configuration and initializes it with the default value if necessary.
-func (ruc *RequestUnitConfig) Adjust() {
+func (ruc *RequestUnitConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if ruc == nil {
 		return
 	}
-	if ruc.ReadBaseCost == 0 {
-		ruc.ReadBaseCost = defaultReadBaseCost
+	if !meta.IsDefined("read-base-cost") {
+		configutil.AdjustFloat64(&ruc.ReadBaseCost, defaultReadBaseCost)
 	}
-	if ruc.ReadPerBatchBaseCost == 0 {
-		ruc.ReadPerBatchBaseCost = defaultReadPerBatchBaseCost
+	if !meta.IsDefined("read-per-batch-base-cost") {
+		configutil.AdjustFloat64(&ruc.ReadPerBatchBaseCost, defaultReadPerBatchBaseCost)
 	}
-	if ruc.ReadCostPerByte == 0 {
-		ruc.ReadCostPerByte = defaultReadCostPerByte
+	if !meta.IsDefined("read-cost-per-byte") {
+		configutil.AdjustFloat64(&ruc.ReadCostPerByte, defaultReadCostPerByte)
 	}
-	if ruc.WriteBaseCost == 0 {
-		ruc.WriteBaseCost = defaultWriteBaseCost
+	if !meta.IsDefined("write-base-cost") {
+		configutil.AdjustFloat64(&ruc.WriteBaseCost, defaultWriteBaseCost)
 	}
-	if ruc.WritePerBatchBaseCost == 0 {
-		ruc.WritePerBatchBaseCost = defaultWritePerBatchBaseCost
+	if !meta.IsDefined("write-per-batch-base-cost") {
+		configutil.AdjustFloat64(&ruc.WritePerBatchBaseCost, defaultWritePerBatchBaseCost)
 	}
-	if ruc.WriteCostPerByte == 0 {
-		ruc.WriteCostPerByte = defaultWriteCostPerByte
+	if !meta.IsDefined("write-cost-per-byte") {
+		configutil.AdjustFloat64(&ruc.WriteCostPerByte, defaultWriteCostPerByte)
 	}
-	if ruc.CPUMsCost == 0 {
-		ruc.CPUMsCost = defaultCPUMsCost
+	if !meta.IsDefined("read-cpu-ms-cost") {
+		configutil.AdjustFloat64(&ruc.CPUMsCost, defaultCPUMsCost)
 	}
 }
 
@@ -201,11 +212,11 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	configutil.AdjustCommandLineString(flagSet, &c.ListenAddr, "listen-addr")
 	configutil.AdjustCommandLineString(flagSet, &c.AdvertiseListenAddr, "advertise-listen-addr")
 
-	return c.Adjust(meta, false)
+	return c.Adjust(meta)
 }
 
 // Adjust is used to adjust the resource manager configurations.
-func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
+func (c *Config) Adjust(meta *toml.MetaData) error {
 	configMetaData := configutil.NewConfigMetadata(meta)
 	if err := configMetaData.CheckUndecoded(); err != nil {
 		c.WarningMsgs = append(c.WarningMsgs, err.Error())

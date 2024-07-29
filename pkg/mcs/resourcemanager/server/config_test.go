@@ -28,6 +28,7 @@ func TestControllerConfig(t *testing.T) {
 	cfgData := `
 [controller]
 ltb-max-wait-duration = "60s"
+ltb-token-rpc-max-delay = "500ms"
 degraded-mode-wait-duration = "2s"
 [controller.request-unit]
 read-base-cost = 1.0
@@ -39,11 +40,12 @@ read-cpu-ms-cost =  5.0
 	cfg := NewConfig()
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
-	err = cfg.Adjust(&meta, false)
+	err = cfg.Adjust(&meta)
 	re.NoError(err)
 
-	re.Equal(time.Second*2, cfg.Controller.DegradedModeWaitDuration.Duration)
-	re.Equal(time.Second*60, cfg.Controller.LTBMaxWaitDuration.Duration)
+	re.Equal(2*time.Second, cfg.Controller.DegradedModeWaitDuration.Duration)
+	re.Equal(60*time.Second, cfg.Controller.LTBMaxWaitDuration.Duration)
+	re.Equal(500*time.Millisecond, cfg.Controller.LTBTokenRPCMaxDelay.Duration)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.CPUMsCost-5), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteCostPerByte-4), 1e-7)
 	re.LessOrEqual(math.Abs(cfg.Controller.RequestUnit.WriteBaseCost-3), 1e-7)
