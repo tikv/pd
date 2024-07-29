@@ -107,7 +107,6 @@ func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
 
 type scatterRangeScheduler struct {
 	*BaseScheduler
-	name          string
 	config        *scatterRangeSchedulerConfig
 	balanceLeader Scheduler
 	balanceRegion Scheduler
@@ -118,13 +117,11 @@ type scatterRangeScheduler struct {
 func newScatterRangeScheduler(opController *operator.Controller, config *scatterRangeSchedulerConfig) Scheduler {
 	base := NewBaseScheduler(opController, types.ScatterRangeScheduler)
 
-	name := config.getSchedulerName()
 	handler := newScatterRangeHandler(config)
 	scheduler := &scatterRangeScheduler{
 		BaseScheduler: base,
 		config:        config,
 		handler:       handler,
-		name:          name,
 		balanceLeader: newBalanceLeaderScheduler(
 			opController,
 			&balanceLeaderSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
@@ -138,6 +135,7 @@ func newScatterRangeScheduler(opController *operator.Controller, config *scatter
 			WithBalanceRegionName("scatter-range-region"),
 		),
 	}
+	scheduler.name = config.getSchedulerName()
 	return scheduler
 }
 
