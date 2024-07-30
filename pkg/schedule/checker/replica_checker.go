@@ -61,6 +61,7 @@ func (*ReplicaChecker) Name() string {
 	return types.ReplicaChecker.String()
 }
 
+// GetType return ReplicaChecker's type.
 func (*ReplicaChecker) GetType() types.CheckerSchedulerType {
 	return types.ReplicaChecker
 }

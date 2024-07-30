@@ -92,6 +92,7 @@ func init() {
 	prometheus.MustRegister(storeLimitCostCounter)
 }
 
+// IncOperatorLimitCounter increases the counter of operator meeting limit.
 func IncOperatorLimitCounter(typ types.CheckerSchedulerType, kind OpKind) {
 	operatorLimitCounter.WithLabelValues(typ.String(), kind.String()).Inc()
 }
