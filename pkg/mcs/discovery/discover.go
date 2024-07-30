@@ -15,7 +15,6 @@
 package discovery
 
 import (
-	"fmt"
 	"math/rand"
 	"strconv"
 	"time"
@@ -92,7 +91,7 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 
 	// Do nothing when I am the only member of cluster.
 	if len(entries) == 1 {
-		return errors.New(fmt.Sprintf("no valid secondary to transfer primary, the only member is %s", entries[0].Name))
+		return errors.Errorf("no valid secondary to transfer primary, the only member is %s", entries[0].Name)
 	}
 
 	var primaryIDs []string
@@ -102,7 +101,7 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 		}
 	}
 	if len(primaryIDs) == 0 {
-		return errors.New(fmt.Sprintf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary))
+		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary)
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))

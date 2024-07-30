@@ -251,7 +251,7 @@ func (s *Server) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := utils.AttachExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
+		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `/ms/primary/transfer` API.
 		if expectedPrimary != "" && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
@@ -347,8 +347,8 @@ func (s *Server) campaignLeader() {
 // - changed by`/ms/primary/transfer` API.
 // - server closed.
 func (s *Server) keepExpectedPrimaryAlive(ctx context.Context) (*election.Leadership, int64, error) {
-	const propose = "scheduling-primary-watch"
-	lease := election.NewLease(s.GetClient(), propose)
+	const purpose = "scheduling-primary-watch"
+	lease := election.NewLease(s.GetClient(), purpose)
 	if err := lease.Grant(s.cfg.LeaderLease); err != nil {
 		log.Error("grant lease for expected primary error", errs.ZapError(err))
 		return nil, 0, err
@@ -361,7 +361,7 @@ func (s *Server) keepExpectedPrimaryAlive(ctx context.Context) (*election.Leader
 	}
 	// Keep alive the current primary leadership to indicate that the server is still alive.
 	// Watch the expected primary path to check whether the expected primary has changed.
-	expectedPrimary := election.NewLeadership(s.GetClient(), utils.ExpectedPrimaryPath(s.participant.GetLeaderPath()), propose)
+	expectedPrimary := election.NewLeadership(s.GetClient(), utils.ExpectedPrimaryPath(s.participant.GetLeaderPath()), purpose)
 	expectedPrimary.SetLease(lease)
 	expectedPrimary.Keep(ctx)
 	return expectedPrimary, revision, nil

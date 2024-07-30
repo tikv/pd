@@ -564,7 +564,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := mcsutils.AttachExpectedPrimaryFlag(gta.member.Client(), gta.member.GetLeaderPath())
+		expectedPrimary := mcsutils.GetExpectedPrimaryFlag(gta.member.Client(), gta.member.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `/ms/primary/transfer` API.
 		if expectedPrimary != "" && !strings.Contains(gta.member.MemberValue(), expectedPrimary) {
@@ -690,9 +690,9 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 // - changed by`/ms/primary/transfer` API.
 // - server closed.
 func (gta *GlobalTSOAllocator) keepExpectedPrimaryAlive(ctx context.Context) (*election.Leadership, int64, error) {
-	const propose = "tso-primary-watch"
+	const purpose = "tso-primary-watch"
 	cli := gta.member.Client()
-	newLease := election.NewLease(cli, propose)
+	newLease := election.NewLease(cli, purpose)
 	if err := newLease.Grant(gta.am.leaderLease); err != nil {
 		return nil, 0, err
 	}
@@ -705,7 +705,7 @@ func (gta *GlobalTSOAllocator) keepExpectedPrimaryAlive(ctx context.Context) (*e
 	}
 	// Keep alive the current primary leadership to indicate that the server is still alive.
 	// Watch the expected primary path to check whether the expected primary has changed.
-	expectedLease := election.NewLeadership(cli, mcsutils.ExpectedPrimaryPath(gta.member.GetLeaderPath()), propose)
+	expectedLease := election.NewLeadership(cli, mcsutils.ExpectedPrimaryPath(gta.member.GetLeaderPath()), purpose)
 	expectedLease.SetLease(newLease)
 	expectedLease.Keep(ctx)
 	return expectedLease, revision, nil

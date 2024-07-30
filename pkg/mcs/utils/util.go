@@ -84,8 +84,8 @@ func ExpectedPrimaryPath(primaryPath string) string {
 	return fmt.Sprintf("%s/%s", primaryPath, ExpectedPrimaryFlag)
 }
 
-// AttachExpectedPrimaryFlag attaches the expected primary flag.
-func AttachExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string {
+// GetExpectedPrimaryFlag gets the expected primary flag.
+func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string {
 	primary, err := etcdutil.GetValue(client, ExpectedPrimaryPath(primaryPath))
 	if err != nil {
 		log.Error("get expected primary flag error", errs.ZapError(err))
