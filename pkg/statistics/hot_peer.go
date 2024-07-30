@@ -41,7 +41,7 @@ func newDimStat(reportInterval time.Duration) *dimStat {
 	}
 }
 
-func (d *dimStat) Add(delta float64, interval time.Duration) {
+func (d *dimStat) add(delta float64, interval time.Duration) {
 	d.Lock()
 	defer d.Unlock()
 	d.lastIntervalSum += int(interval.Seconds())
@@ -74,13 +74,13 @@ func (d *dimStat) clearLastAverage() {
 	d.lastDelta = 0
 }
 
-func (d *dimStat) Get() float64 {
+func (d *dimStat) get() float64 {
 	d.RLock()
 	defer d.RUnlock()
 	return d.rolling.Get()
 }
 
-func (d *dimStat) Clone() *dimStat {
+func (d *dimStat) clone() *dimStat {
 	d.RLock()
 	defer d.RUnlock()
 	return &dimStat{
@@ -162,7 +162,7 @@ func (stat *HotPeerStat) GetActionType() utils.ActionType {
 // GetLoad returns denoising load if possible.
 func (stat *HotPeerStat) GetLoad(dim int) float64 {
 	if stat.rollingLoads != nil {
-		return math.Round(stat.rollingLoads[dim].Get())
+		return math.Round(stat.rollingLoads[dim].get())
 	}
 	return math.Round(stat.Loads[dim])
 }
@@ -172,7 +172,7 @@ func (stat *HotPeerStat) GetLoads() []float64 {
 	if stat.rollingLoads != nil {
 		ret := make([]float64, len(stat.rollingLoads))
 		for dim := range ret {
-			ret[dim] = math.Round(stat.rollingLoads[dim].Get())
+			ret[dim] = math.Round(stat.rollingLoads[dim].get())
 		}
 		return ret
 	}
