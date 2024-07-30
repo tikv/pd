@@ -215,4 +215,5 @@ issues:
       linters:
         - errcheck
   include:
+    # remove the comment after the path is ready
     # - EXC0012
