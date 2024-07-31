@@ -67,6 +67,8 @@ type Participant struct {
 	campaignChecker atomic.Value // Store as leadershipCheckFunc
 	// lastLeaderUpdatedTime is the last time when the leader is updated.
 	lastLeaderUpdatedTime atomic.Value
+	// expectedPrimaryLease is the expected lease for the primary.
+	expectedPrimaryLease atomic.Value // stored as *election.Lease
 }
 
 // NewParticipant create a new Participant.
@@ -154,8 +156,8 @@ func (m *Participant) setLeader(member participant) {
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
-// UnsetLeader unsets the member's leader.
-func (m *Participant) UnsetLeader() {
+// unsetLeader unsets the member's leader.
+func (m *Participant) unsetLeader() {
 	leader := NewParticipantByService(m.serviceName)
 	m.leader.Store(leader)
 	m.lastLeaderUpdatedTime.Store(time.Now())
@@ -264,14 +266,14 @@ func (m *Participant) CheckLeader() (ElectionLeader, bool) {
 func (m *Participant) WatchLeader(ctx context.Context, leader participant, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(ctx, revision)
-	m.UnsetLeader()
+	m.unsetLeader()
 }
 
 // ResetLeader is used to reset the member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
 func (m *Participant) ResetLeader() {
 	m.leadership.Reset()
-	m.UnsetLeader()
+	m.unsetLeader()
 }
 
 // IsSameLeader checks whether a server is the leader itself.
@@ -372,6 +374,20 @@ func (m *Participant) campaignCheck() bool {
 // SetCampaignChecker sets the pre-campaign checker.
 func (m *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
 	m.campaignChecker.Store(checker)
+}
+
+// SetExpectedPrimaryLease sets the expected lease for the primary.
+func (m *Participant) SetExpectedPrimaryLease(lease *election.Lease) {
+	m.expectedPrimaryLease.Store(lease)
+}
+
+// GetExpectedPrimaryLease gets the expected lease for the primary.
+func (m *Participant) GetExpectedPrimaryLease() *election.Lease {
+	l := m.expectedPrimaryLease.Load()
+	if l == nil {
+		return nil
+	}
+	return l.(*election.Lease)
 }
 
 // NewParticipantByService creates a new participant by service name.

@@ -41,7 +41,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -62,7 +61,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -253,7 +251,7 @@ func (s *Server) primaryElectionLoop() {
 		// To make sure the expected primary(if existed) and new primary are on the same server.
 		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
-		// expected primary ONLY SET BY `/ms/primary/transfer` API.
+		// expected primary ONLY SET BY `{service}/primary/transfer` API.
 		if expectedPrimary != "" && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
@@ -309,12 +307,13 @@ func (s *Server) campaignLeader() {
 	}()
 	// check expected primary and watch the primary.
 	exitPrimary := make(chan struct{})
-	expectedLease, revision, err := s.keepExpectedPrimaryAlive(ctx)
+	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
+		s.cfg.LeaderLease, s.participant.GetLeaderPath(), s.participant.MemberValue(), utils.SchedulingServiceName)
 	if err != nil {
-		log.Error("prepare primary watch error", errs.ZapError(err))
+		log.Error("prepare scheduling primary watch error", errs.ZapError(err))
 		return
 	}
-	go s.expectedPrimaryWatch(ctx, expectedLease, revision+1, exitPrimary)
+	s.participant.SetExpectedPrimaryLease(lease)
 	s.participant.EnableLeader()
 
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
@@ -338,47 +337,6 @@ func (s *Server) campaignLeader() {
 			log.Info("no longer be primary because primary have been updated, the scheduling primary will step down")
 			return
 		}
-	}
-}
-
-// keepExpectedPrimaryAlive keeps the expected primary alive.
-// We use lease to keep `expected primary` healthy.
-// ONLY reset by the following conditions:
-// - changed by`/ms/primary/transfer` API.
-// - server closed.
-func (s *Server) keepExpectedPrimaryAlive(ctx context.Context) (*election.Leadership, int64, error) {
-	const purpose = "scheduling-primary-watch"
-	lease := election.NewLease(s.GetClient(), purpose)
-	if err := lease.Grant(s.cfg.LeaderLease); err != nil {
-		log.Error("grant lease for expected primary error", errs.ZapError(err))
-		return nil, 0, err
-	}
-	revision, err := utils.MarkExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath(), s.participant.MemberValue(),
-		lease.ID.Load().(clientv3.LeaseID))
-	if err != nil {
-		log.Error("mark expected primary error", errs.ZapError(err))
-		return nil, 0, err
-	}
-	// Keep alive the current primary leadership to indicate that the server is still alive.
-	// Watch the expected primary path to check whether the expected primary has changed.
-	expectedPrimary := election.NewLeadership(s.GetClient(), utils.ExpectedPrimaryPath(s.participant.GetLeaderPath()), purpose)
-	expectedPrimary.SetLease(lease)
-	expectedPrimary.Keep(ctx)
-	return expectedPrimary, revision, nil
-}
-
-// expectedPrimaryWatch watches `/ms/primary/transfer` API whether changed the expected primary.
-func (s *Server) expectedPrimaryWatch(ctx context.Context, expectedPrimary *election.Leadership, revision int64, exitPrimary chan struct{}) {
-	log.Info("scheduling primary start to watch the expected primary", zap.String("scheduling-primary", s.participant.MemberValue()))
-	expectedPrimary.SetPrimaryWatch(true)
-	expectedPrimary.Watch(ctx, revision)
-	expectedPrimary.Reset()
-	defer log.Info("scheduling primary exit the expected primary watch loop")
-	select {
-	case <-ctx.Done():
-		return
-	case exitPrimary <- struct{}{}:
-		return
 	}
 }
 

@@ -103,7 +103,6 @@ type Client interface {
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]MicroServiceMember, error)
 	GetMicroServicePrimary(context.Context, string) (string, error)
-	TransferMicroServicePrimary(context.Context, string, string) error
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
@@ -958,22 +957,6 @@ func (c *client) GetMicroServicePrimary(ctx context.Context, service string) (st
 		WithMethod(http.MethodGet).
 		WithResp(&primary))
 	return primary, err
-}
-
-func (c *client) TransferMicroServicePrimary(ctx context.Context, service, newPrimary string) error {
-	reqData, err := json.Marshal(struct {
-		NewPrimary string `json:"new_primary"`
-	}{
-		NewPrimary: newPrimary,
-	})
-	if err != nil {
-		return errors.Trace(err)
-	}
-	return c.request(ctx, newRequestInfo().
-		WithName(transferMicroServicePrimaryName).
-		WithURI(MicroServicePrimaryTransfer(service)).
-		WithMethod(http.MethodPost).
-		WithBody(reqData))
 }
 
 // GetPDVersion gets the release version of the PD binary.

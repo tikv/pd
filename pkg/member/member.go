@@ -148,8 +148,8 @@ func (m *EmbeddedEtcdMember) setLeader(member *pdpb.Member) {
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
-// UnsetLeader unsets the member's PD leader.
-func (m *EmbeddedEtcdMember) UnsetLeader() {
+// unsetLeader unsets the member's PD leader.
+func (m *EmbeddedEtcdMember) unsetLeader() {
 	m.leader.Store(&pdpb.Member{})
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
@@ -270,14 +270,14 @@ func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
 func (m *EmbeddedEtcdMember) WatchLeader(ctx context.Context, leader *pdpb.Member, revision int64) {
 	m.setLeader(leader)
 	m.leadership.Watch(ctx, revision)
-	m.UnsetLeader()
+	m.unsetLeader()
 }
 
 // ResetLeader is used to reset the PD member's current leadership.
 // Basically it will reset the leader lease and unset leader info.
 func (m *EmbeddedEtcdMember) ResetLeader() {
 	m.leadership.Reset()
-	m.UnsetLeader()
+	m.unsetLeader()
 }
 
 // CheckPriority checks whether the etcd leader should be moved according to the priority.

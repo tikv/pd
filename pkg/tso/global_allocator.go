@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -81,8 +80,10 @@ type GlobalTSOAllocator struct {
 	// for global TSO synchronization
 	am *AllocatorManager
 	// for election use
-	member          ElectionMember
-	timestampOracle *timestampOracle
+	member ElectionMember
+	// expectedPrimaryLease is used to store the expected primary lease.
+	expectedPrimaryLease atomic.Value // store as *election.LeaderLease
+	timestampOracle      *timestampOracle
 	// syncRTT is the RTT duration a SyncMaxTS RPC call will cost,
 	// which is used to estimate the MaxTS in a Global TSO generation
 	// to reduce the gRPC network IO latency.
@@ -566,7 +567,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		// To make sure the expected primary(if existed) and new primary are on the same server.
 		expectedPrimary := mcsutils.GetExpectedPrimaryFlag(gta.member.Client(), gta.member.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
-		// expected primary ONLY SET BY `/ms/primary/transfer` API.
+		// expected primary ONLY SET BY `{service}/primary/transfer` API.
 		if expectedPrimary != "" && !strings.Contains(gta.member.MemberValue(), expectedPrimary) {
 			log.Info("skip campaigning of tso primary and check later",
 				zap.String("server-name", gta.member.Name()),
@@ -639,12 +640,13 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 
 	// check expected primary and watch the primary.
 	exitPrimary := make(chan struct{})
-	expectedLease, revision, err := gta.keepExpectedPrimaryAlive(ctx)
+	lease, err := mcsutils.KeepExpectedPrimaryAlive(ctx, gta.member.Client(), exitPrimary,
+		gta.am.leaderLease, gta.member.GetLeaderPath(), gta.member.MemberValue(), mcsutils.TSOServiceName)
 	if err != nil {
-		log.Error("prepare primary watch error", errs.ZapError(err))
+		log.Error("prepare tso primary watch error", errs.ZapError(err))
 		return
 	}
-	go gta.expectedPrimaryWatch(ctx, expectedLease, revision+1, exitPrimary)
+	gta.expectedPrimaryLease.Store(lease)
 	gta.member.EnableLeader()
 
 	tsoLabel := fmt.Sprintf("TSO Service Group %d", gta.getGroupID())
@@ -684,48 +686,13 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	}
 }
 
-// keepExpectedPrimaryAlive keeps the expected primary alive.
-// We use lease to keep `expected primary` healthy.
-// ONLY reset by the following conditions:
-// - changed by`/ms/primary/transfer` API.
-// - server closed.
-func (gta *GlobalTSOAllocator) keepExpectedPrimaryAlive(ctx context.Context) (*election.Leadership, int64, error) {
-	const purpose = "tso-primary-watch"
-	cli := gta.member.Client()
-	newLease := election.NewLease(cli, purpose)
-	if err := newLease.Grant(gta.am.leaderLease); err != nil {
-		return nil, 0, err
+// GetExpectedPrimaryLease returns the expected primary lease.
+func (gta *GlobalTSOAllocator) GetExpectedPrimaryLease() *election.Lease {
+	l := gta.expectedPrimaryLease.Load()
+	if l == nil {
+		return nil
 	}
-
-	revision, err := mcsutils.MarkExpectedPrimaryFlag(cli, gta.member.GetLeaderPath(), gta.member.MemberValue(),
-		newLease.ID.Load().(clientv3.LeaseID))
-	if err != nil {
-		log.Error("mark expected primary error", errs.ZapError(err))
-		return nil, 0, err
-	}
-	// Keep alive the current primary leadership to indicate that the server is still alive.
-	// Watch the expected primary path to check whether the expected primary has changed.
-	expectedLease := election.NewLeadership(cli, mcsutils.ExpectedPrimaryPath(gta.member.GetLeaderPath()), purpose)
-	expectedLease.SetLease(newLease)
-	expectedLease.Keep(ctx)
-	return expectedLease, revision, nil
-}
-
-// primaryWatch watches `/ms/primary/transfer` API whether changed the expected primary.
-func (gta *GlobalTSOAllocator) expectedPrimaryWatch(ctx context.Context, expectedLease *election.Leadership, revision int64, exitPrimary chan struct{}) {
-	log.Info("tso primary start to watch the primary",
-		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-		zap.String("campaign-tso-primary-name", gta.member.Name()))
-	expectedLease.SetPrimaryWatch(true)
-	expectedLease.Watch(ctx, revision)
-	expectedLease.Reset()
-	defer log.Info("tso primary exit the primary watch loop")
-	select {
-	case <-ctx.Done():
-		return
-	case exitPrimary <- struct{}{}:
-		return
-	}
+	return l.(*election.Lease)
 }
 
 func (gta *GlobalTSOAllocator) getMetrics() *tsoMetrics {

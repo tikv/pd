@@ -15,7 +15,11 @@
 package members_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -158,10 +162,6 @@ func (suite *memberTestSuite) TestCampaignPrimaryWhileServerClose() {
 
 func (suite *memberTestSuite) TestTransferPrimary() {
 	re := suite.Require()
-	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
-	re.NoError(err)
-	re.NotEmpty(primary)
-
 	supportedServices := []string{"tso", "scheduling"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
@@ -173,10 +173,17 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		}
 
 		// Test resign primary by random
-		primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
-		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, "")
+
+		newPrimaryData := make(map[string]any)
+		newPrimaryData["new_primary"] = ""
+		data, _ := json.Marshal(newPrimaryData)
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		resp.Body.Close()
 
 		testutil.Eventually(re, func() bool {
 			for _, member := range nodes {
@@ -187,7 +194,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			return false
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Test transfer primary to a specific node
@@ -198,10 +205,16 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 				break
 			}
 		}
-		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		newPrimaryData["new_primary"] = newPrimary
+		data, _ = json.Marshal(newPrimaryData)
+		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		resp.Body.Close()
 
 		testutil.Eventually(re, func() bool {
+			println("newPrimary", newPrimary, nodes[newPrimary].IsServing())
 			return nodes[newPrimary].IsServing()
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
@@ -211,17 +224,18 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 
 		// Test transfer primary to a non-exist node
 		newPrimary = "http://"
-		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
-		re.Error(err)
+		newPrimaryData["new_primary"] = newPrimary
+		data, _ = json.Marshal(newPrimaryData)
+		resp, err = tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+			"application/json", bytes.NewBuffer(data))
+		re.NoError(err)
+		re.Equal(http.StatusInternalServerError, resp.StatusCode)
+		resp.Body.Close()
 	}
 }
 
 func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 	re := suite.Require()
-	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
-	re.NoError(err)
-	re.NotEmpty(primary)
-
 	supportedServices := []string{"tso", "scheduling"}
 	for _, service := range supportedServices {
 		var nodes map[string]bs.Server
@@ -243,8 +257,14 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 				break
 			}
 		}
-		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		newPrimaryData := make(map[string]any)
+		newPrimaryData["new_primary"] = newPrimary
+		data, _ := json.Marshal(newPrimaryData)
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		resp.Body.Close()
 
 		tests.WaitForPrimaryServing(re, nodes)
 		newPrimary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
@@ -292,8 +312,14 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		}
 		// Mock the new primary can not grant leader which means the lease will expire
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
-		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		newPrimaryData := make(map[string]any)
+		newPrimaryData["new_primary"] = newPrimary
+		data, _ := json.Marshal(newPrimaryData)
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		resp.Body.Close()
 
 		// Wait for the old primary exit and new primary campaign
 		// cannot check newPrimary isServing when skipGrantLeader is enabled
@@ -338,8 +364,14 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		}
 		// Mock the new primary can not grant leader which means the lease will expire
 		re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", `return()`))
-		err = suite.pdClient.TransferMicroServicePrimary(suite.ctx, service, newPrimary)
+		newPrimaryData := make(map[string]any)
+		newPrimaryData["new_primary"] = ""
+		data, _ := json.Marshal(newPrimaryData)
+		resp, err := tests.TestDialClient.Post(fmt.Sprintf("%s/%s/api/v1/primary/transfer", primary, service),
+			"application/json", bytes.NewBuffer(data))
 		re.NoError(err)
+		re.Equal(http.StatusOK, resp.StatusCode)
+		resp.Body.Close()
 
 		// Wait for the old primary exit and new primary campaign
 		// cannot check newPrimary isServing when skipGrantLeader is enabled

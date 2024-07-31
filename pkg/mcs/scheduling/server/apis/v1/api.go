@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/response"
@@ -119,6 +120,7 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterHotspotRouter()
 	s.RegisterRegionsRouter()
 	s.RegisterStoresRouter()
+	s.RegisterPrimaryRouter()
 	return s
 }
 
@@ -223,6 +225,12 @@ func (s *Service) RegisterConfigRouter() {
 	regions := router.Group("regions")
 	regions.GET("/:id/label/:key", getRegionLabelByKey)
 	regions.GET("/:id/labels", getRegionLabels)
+}
+
+// RegisterPrimaryRouter registers the router of the config handler.
+func (s *Service) RegisterPrimaryRouter() {
+	router := s.root.Group("primary")
+	router.POST("transfer", transferPrimary)
 }
 
 // @Tags     admin
@@ -1476,4 +1484,33 @@ func getRegionByID(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/json", b)
+}
+
+// TransferPrimary transfers the primary member.
+// @Tags     primary
+// @Summary  Transfer the primary member of the specified service.
+// @Produce  json
+// @Param    service     path    string  true  "service name"
+// @Param    new_primary body   string  false "new primary name"
+// @Success  200  string  string
+// @Router   /primary/transfer [post]
+func transferPrimary(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	var input map[string]string
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	newPrimary := ""
+	if v, ok := input["new_primary"]; ok {
+		newPrimary = v
+	}
+
+	if err := discovery.TransferPrimary(svr.GetClient(), svr.GetParticipant().GetExpectedPrimaryLease(),
+		mcsutils.SchedulingServiceName, svr.GetAddr(), newPrimary, 0); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, "success")
 }

@@ -77,7 +77,6 @@ const (
 	getMinResolvedTSByStoresIDsName         = "GetMinResolvedTSByStoresIDs"
 	getMicroServiceMembersName              = "GetMicroServiceMembers"
 	getMicroServicePrimaryName              = "GetMicroServicePrimary"
-	transferMicroServicePrimaryName         = "TransferMicroServicePrimary"
 	getPDVersionName                        = "GetPDVersion"
 	resetTSName                             = "ResetTS"
 	resetBaseAllocIDName                    = "ResetBaseAllocID"

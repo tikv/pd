@@ -48,6 +48,7 @@ type Lease struct {
 	expireTime   atomic.Value
 }
 
+// NewLease creates a new Lease instance.
 func NewLease(client *clientv3.Client, purpose string) *Lease {
 	return &Lease{
 		Purpose: purpose,
@@ -117,6 +118,7 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
+	defer log.Info("lease keep alive stopped", zap.String("purpose", l.Purpose))
 
 	var maxExpire time.Time
 	timer := time.NewTimer(l.leaseTimeout)

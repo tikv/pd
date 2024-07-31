@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -82,8 +83,13 @@ func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistr
 }
 
 // TransferPrimary transfers the primary of the specified service.
-func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimary string, keyspaceGroupID uint32) error {
-	log.Info("transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimary), zap.String("to", newPrimary))
+// keyspaceGroupID is optional, only used for TSO service.
+func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName,
+	oldPrimaryAddr, newPrimary string, keyspaceGroupID uint32) error {
+	if lease == nil {
+		return errors.New("current lease is nil, please check leadership")
+	}
+	log.Info("try to transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimaryAddr), zap.String("to", newPrimary))
 	entries, err := GetMSMembers(serviceName, client)
 	if err != nil {
 		return err
@@ -96,12 +102,13 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 
 	var primaryIDs []string
 	for _, member := range entries {
-		if (newPrimary == "" && member.ServiceAddr != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
+		// TODO: judged by `addr` and `name` now, should unify them to `name` in the future.
+		if (newPrimary == "" && member.ServiceAddr != oldPrimaryAddr) || (newPrimary != "" && member.Name == newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 		}
 	}
 	if len(primaryIDs) == 0 {
-		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary)
+		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimaryAddr, newPrimary)
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -112,6 +119,17 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 		return errors.Errorf("failed to get cluster ID: %v", err)
 	}
 
+	// update expected primary flag
+	grantResp, err := client.Grant(client.Ctx(), utils.DefaultLeaderLease)
+	if err != nil {
+		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
+	}
+
+	// revoke current primary's lease to ensure keepalive goroutine of primary exits.
+	if err := lease.Close(); err != nil {
+		return errors.Errorf("failed to revoke current primary's lease: %v", err)
+	}
+
 	var primaryPath string
 	switch serviceName {
 	case utils.SchedulingServiceName:
@@ -119,11 +137,6 @@ func TransferPrimary(client *clientv3.Client, serviceName, oldPrimary, newPrimar
 	case utils.TSOServiceName:
 		tsoRootPath := endpoint.TSOSvcRootPath(clusterID)
 		primaryPath = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
-	}
-
-	grantResp, err := client.Grant(client.Ctx(), utils.DefaultLeaderLease)
-	if err != nil {
-		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
 	}
 	_, err = utils.MarkExpectedPrimaryFlag(client, primaryPath, primaryIDs[nextPrimaryID], grantResp.ID)
 	if err != nil {

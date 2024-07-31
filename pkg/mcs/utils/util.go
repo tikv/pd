@@ -16,7 +16,6 @@ package utils
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -33,7 +32,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -53,13 +51,6 @@ const (
 	ClusterIDPath = "/pd/cluster_id"
 	// retryInterval is the interval to retry.
 	retryInterval = time.Second
-	// ExpectedPrimaryFlag is the flag to indicate the expected primary, ONLY marked BY `/ms/primary/transfer` API.
-	// This flag likes a fence to avoid exited 2 primaries in the cluster simultaneously.
-	// 1. Since follower will campaign a new primary when it found the `leader_key` is deleted.
-	// **We can ensure `expected_primary` is set before deleting the `leader_key`.**
-	// 2. Old primary will mark `expected_primary` firstly,
-	// then delete the `leader_key` which will trigger the follower to campaign a new primary.
-	ExpectedPrimaryFlag = "expected_primary"
 )
 
 // InitClusterID initializes the cluster ID.
@@ -77,36 +68,6 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 		}
 	}
 	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)
-}
-
-// ExpectedPrimaryPath formats the primary path with the expected primary flag.
-func ExpectedPrimaryPath(primaryPath string) string {
-	return fmt.Sprintf("%s/%s", primaryPath, ExpectedPrimaryFlag)
-}
-
-// GetExpectedPrimaryFlag gets the expected primary flag.
-func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string {
-	primary, err := etcdutil.GetValue(client, ExpectedPrimaryPath(primaryPath))
-	if err != nil {
-		log.Error("get expected primary flag error", errs.ZapError(err))
-		return ""
-	}
-
-	return string(primary)
-}
-
-// MarkExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
-func MarkExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
-	log.Info("set expected primary flag", zap.String("leader-path", ExpectedPrimaryPath(primaryPath)))
-	// write a flag to indicate the current primary has exited
-	resp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(ExpectedPrimaryPath(primaryPath), leaderRaw, clientv3.WithLease(leaseID))).
-		Commit()
-	if err != nil || !resp.Succeeded {
-		log.Error("mark expected primary error", errs.ZapError(err))
-		return 0, err
-	}
-	return resp.Header.Revision, nil
 }
 
 // PromHandler is a handler to get prometheus metrics.
