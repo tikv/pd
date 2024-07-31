@@ -53,6 +53,7 @@ type Config struct {
 	ReportRatio       float64 `toml:"report-ratio" json:"report-ratio"`
 	Sample            bool    `toml:"sample" json:"sample"`
 	Round             int     `toml:"round" json:"round"`
+	MetricsAddr       string  `toml:"metrics-addr" json:"metrics-addr"`
 }
 
 // NewConfig return a set of settings.
@@ -69,6 +70,7 @@ func NewConfig() *Config {
 	fs.StringVar(&cfg.Security.CertPath, "cert", "", "path of file that contains X509 certificate in PEM format")
 	fs.StringVar(&cfg.Security.KeyPath, "key", "", "path of file that contains X509 key in PEM format")
 	fs.Uint64Var(&cfg.InitEpochVer, "epoch-ver", 1, "the initial epoch version value")
+	fs.StringVar(&cfg.MetricsAddr, "metrics-addr", "127.0.0.1:9090", "the address to pull metrics")
 
 	return cfg
 }

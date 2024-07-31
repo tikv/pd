@@ -186,7 +186,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 		streamCtx context.Context
 		cancel    context.CancelFunc
 		streamURL string
-		stream    tsoStream
+		stream    *tsoStream
 	)
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(option.timeout)
@@ -393,7 +393,7 @@ func chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext
 }
 
 func (td *tsoDispatcher) processRequests(
-	stream tsoStream, dcLocation string, tbc *tsoBatchController,
+	stream *tsoStream, dcLocation string, tbc *tsoBatchController,
 ) error {
 	var (
 		requests     = tbc.getCollectedRequests()
