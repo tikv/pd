@@ -84,7 +84,7 @@ func (h *historyBuffer) firstIndex() uint64 {
 	return h.index - uint64(h.len())
 }
 
-func (h *historyBuffer) Record(r *core.RegionInfo) {
+func (h *historyBuffer) record(r *core.RegionInfo) {
 	h.Lock()
 	defer h.Unlock()
 	syncIndexGauge.Set(float64(h.index))
@@ -101,7 +101,7 @@ func (h *historyBuffer) Record(r *core.RegionInfo) {
 	}
 }
 
-func (h *historyBuffer) RecordsFrom(index uint64) []*core.RegionInfo {
+func (h *historyBuffer) recordsFrom(index uint64) []*core.RegionInfo {
 	h.RLock()
 	defer h.RUnlock()
 	var pos int
@@ -117,7 +117,7 @@ func (h *historyBuffer) RecordsFrom(index uint64) []*core.RegionInfo {
 	return records
 }
 
-func (h *historyBuffer) ResetWithIndex(index uint64) {
+func (h *historyBuffer) resetWithIndex(index uint64) {
 	h.Lock()
 	defer h.Unlock()
 	h.index = index
@@ -126,7 +126,7 @@ func (h *historyBuffer) ResetWithIndex(index uint64) {
 	h.flushCount = defaultFlushCount
 }
 
-func (h *historyBuffer) GetNextIndex() uint64 {
+func (h *historyBuffer) getNextIndex() uint64 {
 	h.RLock()
 	defer h.RUnlock()
 	return h.index
