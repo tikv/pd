@@ -44,7 +44,8 @@ import (
 const (
 	randomRegionMaxRetry = 10
 	scanRegionLimit      = 1000
-	CollectFactor        = 0.9
+	// CollectFactor is the factor of collected region heartbeat.
+	CollectFactor = 0.9
 )
 
 // errRegionIsStale is error info for region is stale.
