@@ -40,6 +40,7 @@ const (
 	DefaultPendingRegionCacheSize = 100000
 	// It takes about 1.3 minutes(1000000/128*10/60/1000) to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
 	patrolScanRegionLimit = 128
+	suspectRegionLimit    = 1024
 )
 
 var (
@@ -92,16 +93,15 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 // The checkers will check these regions to decide if they need to do some operations.
 func (c *Controller) PatrolRegions() {
 	c.patrolRegionContext.init(c.cluster)
-	ticker := time.NewTicker(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
-	defer ticker.Stop()
+	defer c.patrolRegionContext.stop()
 	var (
 		key     []byte
 		regions []*core.RegionInfo
 	)
 	for {
 		select {
-		case <-ticker.C:
-			c.updateTickerIfNeeded(ticker)
+		case <-c.patrolRegionContext.ticker.C:
+			c.patrolRegionContext.updateTickerIfNeeded()
 		case <-c.ctx.Done():
 			patrolCheckRegionsGauge.Set(0)
 			c.patrolRegionContext.setPatrolRegionsDuration(0)
@@ -128,16 +128,6 @@ func (c *Controller) PatrolRegions() {
 		failpoint.Inject("breakPatrol", func() {
 			failpoint.Break()
 		})
-	}
-}
-
-func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {
-	// Note: we reset the ticker here to support updating configuration dynamically.
-	newInterval := c.cluster.GetCheckerConfig().GetPatrolRegionInterval()
-	if c.patrolRegionContext.interval != newInterval {
-		c.patrolRegionContext.interval = newInterval
-		ticker.Reset(newInterval)
-		log.Info("checkers starts patrol regions with new interval", zap.Duration("interval", newInterval))
 	}
 }
 
@@ -345,8 +335,7 @@ func (c *Controller) CheckSuspectRanges() {
 			if !success {
 				continue
 			}
-			limit := 1024
-			regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
+			regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], suspectRegionLimit)
 			if len(regions) == 0 {
 				continue
 			}
@@ -420,6 +409,8 @@ func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 
 // PatrolRegionContext is used to store the context of patrol regions.
 type PatrolRegionContext struct {
+	cluster sche.CheckerCluster
+	ticker  *time.Ticker
 	// config
 	interval time.Duration
 	// status
@@ -431,8 +422,26 @@ type PatrolRegionContext struct {
 }
 
 func (p *PatrolRegionContext) init(cluster sche.CheckerCluster) {
+	p.cluster = cluster
 	p.interval = cluster.GetCheckerConfig().GetPatrolRegionInterval()
 	p.patrolRoundStartTime = time.Now()
+	p.ticker = time.NewTicker(p.interval)
+}
+
+func (p *PatrolRegionContext) stop() {
+	if p.ticker != nil {
+		p.ticker.Stop()
+	}
+}
+
+func (p *PatrolRegionContext) updateTickerIfNeeded() {
+	// Note: we reset the ticker here to support updating configuration dynamically.
+	newInterval := p.cluster.GetCheckerConfig().GetPatrolRegionInterval()
+	if p.interval != newInterval {
+		p.interval = newInterval
+		p.ticker.Reset(newInterval)
+		log.Info("checkers starts patrol regions with new interval", zap.Duration("interval", newInterval))
+	}
 }
 
 func (p *PatrolRegionContext) getPatrolRegionsDuration() time.Duration {
