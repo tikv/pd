@@ -121,7 +121,7 @@ func (m *Manager) Init(ctx context.Context) error {
 		return err
 	}
 	if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
-		log.Error("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
+		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
 
 	// re-save the config to make sure the config has been persisted.
