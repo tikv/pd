@@ -93,7 +93,7 @@ go tool cover --func=xxx`
 
 var (
 	modulePath           = "github.com/tikv/pd"
-	integrationsTestPath = "tests/integrations"
+	integrationsTestPath = filepath.Join("tests", "integrations")
 )
 
 var (
@@ -675,7 +675,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args := make([]string, 0, 10)
 	// let the test run in the verbose mode.
 	args = append(args, "-test.v")
-	exe := "./" + testFileName(pkg)
+	exe := filepath.Join(".", testFileName(pkg))
 	if coverProfile != "" {
 		fileName := strings.ReplaceAll(pkg, "/", "_") + "." + fn
 		tmpFile := filepath.Join(coverFileTempDir, fileName)
@@ -746,9 +746,9 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
 	// workPath just like `/pd/tests/integrations`
-	xprogPath := filepath.Join(workDir, "bin/xprog")
+	xprogPath := filepath.Join(workDir, "bin", "xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
-		xprogPath = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin/xprog")
+		xprogPath = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin", "prog")
 	}
 	packages := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {
@@ -829,7 +829,7 @@ func testFileFullPath(pkg string) string {
 }
 
 func listNewTestCases(pkg string) []string {
-	exe := "./" + testFileName(pkg)
+	exe := filepath.Join(".", testFileName(pkg))
 
 	// core.test -test.list Test
 	cmd := exec.Command(exe, "-test.list", "Test")

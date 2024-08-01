@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	certPath   = "../../../tests/integrations/client/"
-	certScript = "cert_opt.sh"
+	certPath   = filepath.Join("..", "..", "..", "tests", "integrations", "client") + string(filepath.Separator)
+	certScript = filepath.Join("..", "..", "..", "tests", "integrations", "client", "cert_opt.sh")
 )
 
 func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
@@ -30,11 +30,11 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 }
 
 func TestToTLSConfig(t *testing.T) {
-	if err := exec.Command(certPath+certScript, "generate", certPath).Run(); err != nil {
+	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := exec.Command(certPath+certScript, "cleanup", certPath).Run(); err != nil {
+		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
 			t.Fatal(err)
 		}
 	}()

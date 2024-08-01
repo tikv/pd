@@ -37,25 +37,25 @@ import (
 )
 
 var (
-	certPath        = "./cert"
-	certExpiredPath = "./cert-expired"
-	certScript      = "./cert_opt.sh"
+	certPath        = filepath.Join(".", "cert")
+	certExpiredPath = filepath.Join(".", "cert-expired")
+	certScript      = filepath.Join(".", "cert_opt.sh")
 	testTLSInfo     = transport.TLSInfo{
-		KeyFile:       "./cert/pd-server-key.pem",
-		CertFile:      "./cert/pd-server.pem",
-		TrustedCAFile: "./cert/ca.pem",
+		KeyFile:       filepath.Join(".", "cert", "pd-server-key.pem"),
+		CertFile:      filepath.Join(".", "cert", "pd-server.pem"),
+		TrustedCAFile: filepath.Join(".", "cert", "ca.pem"),
 	}
 
 	testClientTLSInfo = transport.TLSInfo{
-		KeyFile:       "./cert/client-key.pem",
-		CertFile:      "./cert/client.pem",
-		TrustedCAFile: "./cert/ca.pem",
+		KeyFile:       filepath.Join(".", "cert", "client-key.pem"),
+		CertFile:      filepath.Join(".", "cert", "client.pem"),
+		TrustedCAFile: filepath.Join(".", "cert", "ca.pem"),
 	}
 
 	testTLSInfoExpired = transport.TLSInfo{
-		KeyFile:       "./cert-expired/pd-server-key.pem",
-		CertFile:      "./cert-expired/pd-server.pem",
-		TrustedCAFile: "./cert-expired/ca.pem",
+		KeyFile:       filepath.Join(".", "cert-expired", "pd-server-key.pem"),
+		CertFile:      filepath.Join(".", "cert-expired", "pd-server.pem"),
+		TrustedCAFile: filepath.Join(".", "cert-expired", "ca.pem"),
 	}
 )
 
