@@ -1697,6 +1697,19 @@ func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
 	return nil
 }
 
+func (c *RaftCluster) isStorePrepared() bool {
+	for _, store := range c.GetStores() {
+		if !store.IsPreparing() && !store.IsServing() {
+			continue
+		}
+		storeID := store.GetID()
+		if !c.IsStorePrepared(storeID) {
+			return false
+		}
+	}
+	return true
+}
+
 func (c *RaftCluster) checkStores() {
 	var offlineStores []*metapb.Store
 	var upStoreCount int
@@ -1728,7 +1741,7 @@ func (c *RaftCluster) checkStores() {
 						zap.Int("region-count", c.GetTotalRegionCount()),
 						errs.ZapError(err))
 				}
-			} else if c.IsPrepared() {
+			} else if c.IsPrepared() || (c.IsServiceIndependent(mcsutils.SchedulingServiceName) && c.isStorePrepared()) {
 				threshold := c.getThreshold(stores, store)
 				regionSize := float64(store.GetRegionSize())
 				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))

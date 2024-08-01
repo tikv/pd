@@ -17,6 +17,7 @@ package typeutil
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -77,4 +78,14 @@ func AreStringSlicesEquivalent(a, b []string) bool {
 // Float64Equal checks if two float64 are equal.
 func Float64Equal(a, b float64) bool {
 	return math.Abs(a-b) <= 1e-6
+}
+
+// EqualBaseURLs compares two URLs without scheme.
+func EqualBaseURLs(url1, url2 string) bool {
+	return TrimScheme(url1) == TrimScheme(url2)
+}
+
+// TrimScheme trims the scheme from the URL.
+func TrimScheme(s string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://")
 }

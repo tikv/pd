@@ -318,6 +318,102 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	}
 }
 
+func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
+	re := suite.Require()
+	// add three nodes.
+	nodes := make(map[string]bs.Server)
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
+	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount+1; i++ {
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		cleanups = append(cleanups, cleanup)
+		nodes[s.GetAddr()] = s
+	}
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// create a keyspace group.
+	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(1),
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	code := suite.tryCreateKeyspaceGroup(re, kgs)
+	re.Equal(http.StatusOK, code)
+
+	// alloc nodes for the keyspace group
+	var kg *endpoint.KeyspaceGroup
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
+		return code == http.StatusOK && kg != nil && len(kg.Members) == utils.DefaultKeyspaceGroupReplicaCount
+	})
+	stopNode := kg.Members[0].Address
+	// close one of members
+	nodes[stopNode].Close()
+
+	// the member list will be updated
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
+		for _, member := range kg.Members {
+			if member.Address == stopNode {
+				return false
+			}
+		}
+		return code == http.StatusOK && kg != nil && len(kg.Members) == utils.DefaultKeyspaceGroupReplicaCount
+	})
+}
+
+func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
+	re := suite.Require()
+	// add one tso server
+	nodes := make(map[string]bs.Server)
+	oldTSOServer, cleanupOldTSOserver := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanupOldTSOserver()
+	nodes[oldTSOServer.GetAddr()] = oldTSOServer
+
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// create a keyspace group.
+	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(1),
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	code := suite.tryCreateKeyspaceGroup(re, kgs)
+	re.Equal(http.StatusOK, code)
+
+	// alloc nodes for the keyspace group
+	var kg *endpoint.KeyspaceGroup
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
+		return code == http.StatusOK && kg != nil && len(kg.Members) == 1
+	})
+	stopNode := kg.Members[0].Address
+	// close old tso server
+	nodes[stopNode].Close()
+
+	// create a new tso server
+	newTSOServer, cleanupNewTSOServer := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanupNewTSOServer()
+	nodes[newTSOServer.GetAddr()] = newTSOServer
+
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// the member list will be updated
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
+		if len(kg.Members) != 0 && kg.Members[0].Address == stopNode {
+			return false
+		}
+		return code == http.StatusOK && kg != nil && len(kg.Members) == 1
+	})
+}
+
 func (suite *keyspaceGroupTestSuite) tryAllocNodesForKeyspaceGroup(re *require.Assertions, id int, request *handlers.AllocNodesForKeyspaceGroupParams) ([]endpoint.KeyspaceGroupMember, int) {
 	data, err := json.Marshal(request)
 	re.NoError(err)
