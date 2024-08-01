@@ -98,12 +98,12 @@ type splitBucketHandler struct {
 	rd   *render.Render
 }
 
-func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
+func (h *splitBucketHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := h.conf.Clone()
 	h.rd.JSON(w, http.StatusOK, conf)
 }
 
-func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (h *splitBucketHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	h.conf.Lock()
 	defer h.conf.Unlock()
 	rd := render.New(render.Options{IndentJSON: true})
@@ -148,8 +148,8 @@ func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
 		rd:   render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
 	return router
 }
 
