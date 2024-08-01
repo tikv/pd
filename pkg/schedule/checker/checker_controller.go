@@ -159,7 +159,7 @@ func (c *Controller) PatrolRegions() {
 				start = time.Now()
 				c.scanLimit = calculateScanLimit(c.cluster)
 			}
-			failpoint.Inject("break-patrol", func() {
+			failpoint.Inject("breakPatrol", func() {
 				time.Sleep(100 * time.Millisecond) // ensure the regions are handled by the workers
 				failpoint.Return()
 			})

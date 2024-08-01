@@ -2878,7 +2878,7 @@ func TestCheckCache(t *testing.T) {
 
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/break-patrol"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
 }
 
 func TestPatrolRegionConcurrency(t *testing.T) {
@@ -2907,7 +2907,7 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 	}
 
 	// test patrol region concurrency
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/break-patrol", `return`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
 	testutil.Eventually(re, func() bool {
