@@ -28,7 +28,7 @@ import (
 )
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -1.
+	// This is a test that searchRevertRegions finds a solution of rank 1.
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -69,7 +69,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re.True(hb.searchRevertRegions[writePeer])
 	// Two operators can be generated when RankFormulaVersion == "v2".
 	ops, _ = hb.Schedule(tc, false)
-	/* The revert region is currently disabled for the -1 case.
+	/* The revert region is currently disabled for the rank 1 case.
 	re.Len(ops, 2)
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
@@ -89,7 +89,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -3.
+	// This is a test that searchRevertRegions finds a solution of rank 3.
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -141,7 +141,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -2.
+	// This is a test that searchRevertRegions finds a solution of rank 2.
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
@@ -242,7 +242,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re.True(hb.searchRevertRegions[readLeader])
 	// Two operators can be generated when RankFormulaVersion == "v2".
 	ops, _ = hb.Schedule(tc, false)
-	/* The revert region is currently disabled for the -1 case.
+	/* The revert region is currently disabled for the rank 1 case.
 	re.Len(ops, 2)
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
 	operatorutil.CheckTransferLeader(re, ops[1], operator.OpHotRegion, 5, 2)

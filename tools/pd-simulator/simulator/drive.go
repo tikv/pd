@@ -16,6 +16,7 @@ package simulator
 
 import (
 	"context"
+	"math/rand"
 	"net/http"
 	"net/http/pprof"
 	"path"
@@ -47,12 +48,18 @@ type Driver struct {
 	pdAddr        string
 	statusAddress string
 	simCase       *cases.Case
-	tickCount     int64
 	eventRunner   *EventRunner
 	raftEngine    *RaftEngine
 	conn          *Connection
 	simConfig     *config.SimConfig
 	pdConfig      *config.PDConfig
+
+	tick struct {
+		count      int64
+		region     chan int64
+		store      chan int64
+		stepRegion chan int64
+	}
 }
 
 // NewDriver returns a driver.
@@ -64,17 +71,22 @@ func NewDriver(pdAddr, statusAddress, caseName string, simConfig *config.SimConf
 	pdConfig := &config.PDConfig{}
 	pdConfig.PlacementRules = simCase.Rules
 	pdConfig.LocationLabels = simCase.Labels
-	return &Driver{
+	driver := Driver{
 		pdAddr:        pdAddr,
 		statusAddress: statusAddress,
 		simCase:       simCase,
 		simConfig:     simConfig,
 		pdConfig:      pdConfig,
-	}, nil
+	}
+	driver.tick.stepRegion = make(chan int64, 1)
+	driver.tick.region = make(chan int64, 1)
+	driver.tick.store = make(chan int64, 1)
+	return &driver, nil
 }
 
 // Prepare initializes cluster information, bootstraps cluster and starts nodes.
 func (d *Driver) Prepare() error {
+	simutil.Logger.Info("prepare cluster")
 	conn, err := NewConnection(d.simCase, d.simConfig)
 	if err != nil {
 		return err
@@ -166,15 +178,136 @@ func (d *Driver) updateNodesClient() error {
 
 // Tick invokes nodes' Tick.
 func (d *Driver) Tick() {
-	d.tickCount++
-	d.raftEngine.stepRegions()
-	d.eventRunner.Tick(d.tickCount)
-	for _, n := range d.conn.Nodes {
-		n.reportRegionChange()
-		d.wg.Add(1)
-		go n.Tick(&d.wg)
+	d.tick.count++
+	curTick := d.tick.count
+	go func() {
+		d.tick.stepRegion <- curTick
+	}()
+	go func() {
+		d.tick.region <- curTick
+	}()
+	go func() {
+		d.tick.store <- curTick
+	}()
+}
+
+func (d *Driver) StepRegions(ctx context.Context) {
+	for {
+		select {
+		case tick := <-d.tick.stepRegion:
+			d.raftEngine.stepRegions()
+			d.eventRunner.Tick(tick)
+			for _, n := range d.conn.Nodes {
+				n.reportRegionChange()
+				d.wg.Add(1)
+				go n.Tick(&d.wg)
+			}
+			d.wg.Wait()
+		case <-ctx.Done():
+			return
+		}
 	}
-	d.wg.Wait()
+}
+
+func (d *Driver) StoresHeartbeat(ctx context.Context) {
+	config := d.raftEngine.storeConfig
+	storeInterval := uint64(config.RaftStore.StoreHeartBeatInterval.Duration / config.SimTickInterval.Duration)
+	var wg sync.WaitGroup
+	for {
+		select {
+		case tick := <-d.tick.store:
+			if uint64(tick)%storeInterval == 0 {
+				for _, n := range d.conn.Nodes {
+					wg.Add(1)
+					go n.storeHeartBeat(&wg)
+				}
+				wg.Wait()
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (d *Driver) RegionsHeartbeat(ctx context.Context) {
+	// ensure only wait for the first time heartbeat done
+	firstReport := true
+	config := d.raftEngine.storeConfig
+	regionInterval := uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
+	nodesChannel := make(map[uint64]chan *core.RegionInfo, len(d.conn.Nodes))
+	for _, n := range d.conn.Nodes {
+		nodesChannel[n.Store.GetId()] = make(chan *core.RegionInfo, d.simConfig.TotalRegion)
+		go func(storeID uint64, ch chan *core.RegionInfo) {
+			for {
+				select {
+				case region := <-ch:
+					d.conn.Nodes[storeID].regionHeartBeat(region)
+				case <-ctx.Done():
+					close(ch)
+					return
+				}
+			}
+		}(n.Store.GetId(), nodesChannel[n.Store.GetId()])
+	}
+
+	for {
+		select {
+		case tick := <-d.tick.region:
+			if uint64(tick)%regionInterval == 0 {
+				regions := d.raftEngine.GetRegions()
+				healthyNodes := make(map[uint64]bool)
+				for _, n := range d.conn.Nodes {
+					if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
+						healthyNodes[n.Store.GetId()] = false
+					} else {
+						healthyNodes[n.Store.GetId()] = true
+					}
+				}
+				report := 0
+				for _, region := range regions {
+					hibernatePercent := d.simConfig.HibernatePercent
+					// using rand(0,100) to meet hibernatePercent
+					if !firstReport && rand.Intn(100) < hibernatePercent {
+						continue
+					}
+
+					if region.GetLeader() != nil {
+						storeID := region.GetLeader().GetStoreId()
+						if healthy, ok := healthyNodes[storeID]; !ok || !healthy {
+							continue
+						}
+						nodesChannel[storeID] <- region.Clone()
+						report++
+					}
+				}
+
+				// Only set HaltSchedule to false when the leader count is 80% of the total region count.
+				// using firstReport to avoid the haltSchedule set to true manually.
+				if HaltSchedule.Load() && firstReport {
+					storeInterval := uint64(config.RaftStore.StoreHeartBeatInterval.Duration / config.SimTickInterval.Duration)
+					ticker := time.NewTicker(time.Duration(storeInterval))
+					for range ticker.C {
+						// need to wait for first time heartbeat done
+						stores, _ := PDHTTPClient.GetStores(ctx)
+						var leaderCount int64
+						for _, store := range stores.Stores {
+							leaderCount += store.Status.LeaderCount
+						}
+						// Add halt schedule check to avoid the situation that the leader count is always less than 80%.
+						if leaderCount > int64(float64(d.simConfig.TotalRegion)*0.8) || !HaltSchedule.Load() {
+							ChooseToHaltPDSchedule(false)
+							firstReport = false
+							ticker.Stop()
+							simutil.Logger.Info("first region heartbeat done", zap.Int64("leaderCount", leaderCount), zap.Int("checkRegions", len(regions)))
+							break
+						}
+					}
+				}
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 var HaltSchedule atomic.Bool
@@ -197,6 +330,7 @@ func (d *Driver) Check() bool {
 
 // Start starts all nodes.
 func (d *Driver) Start() error {
+	simutil.Logger.Info("init nodes")
 	if err := d.updateNodesClient(); err != nil {
 		return err
 	}
@@ -221,7 +355,7 @@ func (d *Driver) Stop() {
 
 // TickCount returns the simulation's tick count.
 func (d *Driver) TickCount() int64 {
-	return d.tickCount
+	return d.tick.count
 }
 
 // GetBootstrapInfo returns a valid bootstrap store and region.

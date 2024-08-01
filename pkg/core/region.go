@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -750,7 +751,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				logRunner.RunTask(
 					regionID,
 					"DebugLog",
-					func() {
+					func(context.Context) {
 						d(msg, fields...)
 					},
 				)
@@ -759,7 +760,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				logRunner.RunTask(
 					regionID,
 					"InfoLog",
-					func() {
+					func(context.Context) {
 						i(msg, fields...)
 					},
 				)
@@ -2262,14 +2263,4 @@ func NewTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...Regi
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}
 	return NewRegionInfo(metaRegion, leader, opts...)
-}
-
-// TraverseRegions executes a function on all regions.
-// ONLY for simulator now and only for READ.
-func (r *RegionsInfo) TraverseRegions(lockedFunc func(*RegionInfo)) {
-	r.t.RLock()
-	defer r.t.RUnlock()
-	for _, item := range r.regions {
-		lockedFunc(item.RegionInfo)
-	}
 }

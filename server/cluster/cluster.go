@@ -1061,10 +1061,8 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.ObserveRegionStatsAsync,
-				func() {
-					if c.regionStats.RegionStatsNeedUpdate(region) {
-						cluster.Collect(c, region, hasRegionStats)
-					}
+				func(ctx context.Context) {
+					cluster.Collect(ctx, c, region, hasRegionStats)
 				},
 			)
 		}
@@ -1073,7 +1071,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ctx.TaskRunner.RunTask(
 				regionID,
 				ratelimit.UpdateSubTree,
-				func() {
+				func(context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
 				ratelimit.WithRetained(true),
@@ -1101,7 +1099,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		ctx.TaskRunner.RunTask(
 			regionID,
 			ratelimit.UpdateSubTree,
-			func() {
+			func(context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
 			ratelimit.WithRetained(retained),
@@ -1112,8 +1110,8 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.HandleOverlaps,
-				func() {
-					cluster.HandleOverlaps(c, overlaps)
+				func(ctx context.Context) {
+					cluster.HandleOverlaps(ctx, c, overlaps)
 				},
 			)
 		}
@@ -1125,11 +1123,11 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	ctx.MiscRunner.RunTask(
 		regionID,
 		ratelimit.CollectRegionStatsAsync,
-		func() {
+		func(ctx context.Context) {
 			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
 			// region stats needs to be collected in API mode.
 			// We need to think of a better way to reduce this part of the cost in the future.
-			cluster.Collect(c, region, hasRegionStats)
+			cluster.Collect(ctx, c, region, hasRegionStats)
 		},
 	)
 
@@ -1139,7 +1137,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.SaveRegionToKV,
-				func() {
+				func(context.Context) {
 					// If there are concurrent heartbeats from the same region, the last write will win even if
 					// writes to storage in the critical area. So don't use mutex to protect it.
 					// Not successfully saved to storage is not fatal, it only leads to longer warm-up

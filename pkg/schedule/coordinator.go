@@ -125,6 +125,7 @@ func (c *Coordinator) PatrolRegions() {
 	defer c.wg.Done()
 	log.Info("coordinator starts patrol regions")
 	c.checkers.PatrolRegions()
+	log.Info("patrol regions has been stopped")
 }
 
 // checkSuspectRanges would pop one suspect key range group
@@ -135,6 +136,7 @@ func (c *Coordinator) checkSuspectRanges() {
 	defer c.wg.Done()
 	log.Info("coordinator begins to check suspect key ranges")
 	c.checkers.CheckSuspectRanges()
+	log.Info("check suspect key ranges has been stopped")
 }
 
 // GetPatrolRegionsDuration returns the duration of the last patrol region round.

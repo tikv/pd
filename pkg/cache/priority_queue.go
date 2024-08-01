@@ -72,6 +72,7 @@ func (pq *PriorityQueue) Get(id uint64) *Entry {
 }
 
 // peek returns the highest priority entry.
+// It only is used for test.
 func (pq *PriorityQueue) peek() *Entry {
 	if max, ok := pq.btree.Max(); ok {
 		return max
@@ -80,6 +81,7 @@ func (pq *PriorityQueue) peek() *Entry {
 }
 
 // tail returns the lowest priority entry.
+// It only is used for test.
 func (pq *PriorityQueue) tail() *Entry {
 	if min, ok := pq.btree.Min(); ok {
 		return min

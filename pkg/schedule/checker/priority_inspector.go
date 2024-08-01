@@ -101,8 +101,8 @@ func (p *PriorityInspector) inspectRegionInReplica(region *core.RegionInfo) (mak
 }
 
 // addOrRemoveRegion add or remove region from queue.
-// it will remove if region's priority equal 0.
-// it's Attempt will increase if region's priority equal last.
+// It will remove if region's priority equal 0.
+// It's Attempt will increase if region's priority equal last.
 func (p *PriorityInspector) addOrRemoveRegion(priority int, regionID uint64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -144,8 +144,9 @@ func (p *PriorityInspector) RemovePriorityRegion(regionID uint64) {
 	p.mu.queue.Remove(regionID)
 }
 
-// GetQueueLen returns the length of priority queue.
-func (p *PriorityInspector) GetQueueLen() int {
+// getQueueLen returns the length of priority queue.
+// it's only used for test.
+func (p *PriorityInspector) getQueueLen() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.mu.queue.Len()

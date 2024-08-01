@@ -27,21 +27,26 @@ type operatorWithTime struct {
 
 type operatorQueue []*operatorWithTime
 
+// Len implements heap.Interface.
 func (opn operatorQueue) Len() int { return len(opn) }
 
+// Less implements heap.Interface.
 func (opn operatorQueue) Less(i, j int) bool {
 	return opn[i].time.Before(opn[j].time)
 }
 
+// Swap implements heap.Interface.
 func (opn operatorQueue) Swap(i, j int) {
 	opn[i], opn[j] = opn[j], opn[i]
 }
 
+// Push implements heap.Interface.
 func (opn *operatorQueue) Push(x any) {
 	item := x.(*operatorWithTime)
 	*opn = append(*opn, item)
 }
 
+// Pop implements heap.Interface.
 func (opn *operatorQueue) Pop() any {
 	old := *opn
 	n := len(old)
