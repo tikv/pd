@@ -105,6 +105,7 @@ func (alloc *allocatorImpl) Alloc() (uint64, error) {
 	return alloc.base, nil
 }
 
+// SetBase sets the base.
 func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
