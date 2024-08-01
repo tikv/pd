@@ -264,7 +264,7 @@ func (h *redirector) waitForLeader(r *http.Request) (leader *pdpb.Member) {
 			}
 		case <-r.Context().Done():
 			return
-		case <-h.s.LoopContext().Done():
+		case <-h.s.Context().Done():
 			return
 		}
 	}

@@ -611,9 +611,10 @@ func (suite *redirectorTestSuite) TestRedirect() {
 	err := leader.ResignLeader()
 	re.NoError(err)
 	for _, svr := range suite.cluster.GetServers() {
-		url := fmt.Sprintf("%s/pd/api/v1/version", svr.GetServer().GetAddr())
+		request, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/version", svr.GetServer().GetAddr()), http.NoBody)
+		re.NoError(err)
 		testutil.Eventually(re, func() bool {
-			resp, err := tests.TestDialClient.Get(url)
+			resp, err := dialClient.Do(request)
 			re.NoError(err)
 			defer resp.Body.Close()
 			_, err = io.ReadAll(resp.Body)
