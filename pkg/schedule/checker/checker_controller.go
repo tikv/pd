@@ -17,6 +17,7 @@ package checker
 import (
 	"bytes"
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -39,11 +40,11 @@ const (
 	checkSuspectRangesInterval = 100 * time.Millisecond
 	// DefaultPendingRegionCacheSize is the default length of waiting list.
 	DefaultPendingRegionCacheSize = 100000
-	// For 1,024,000 regions, patrolRegionScanLimit is 1000, which is max(minPatrolRegionScanLimit, 1,024,000/patrolRegionPartition)
+	// For 1,024,000 regions, patrolRegionScanLimit is 1000, which is max(MinPatrolRegionScanLimit, 1,024,000/patrolRegionPartition)
 	// In order to avoid the patrolRegionScanLimit to be too big or too small, it will be limited to [128,8192].
 	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
-	minPatrolRegionScanLimit = 128
-	maxPatrolScanRegionLimit = 8192
+	MinPatrolRegionScanLimit = 128
+	MaxPatrolScanRegionLimit = 8192
 	patrolRegionPartition    = 1024
 )
 
@@ -121,39 +122,39 @@ func (c *Controller) PatrolRegions() {
 		select {
 		case <-ticker.C:
 			c.updateTickerIfNeeded(ticker)
+			if c.cluster.IsSchedulingHalted() {
+				continue
+			}
+
+			// Check priority regions first.
+			c.checkPriorityRegions()
+			// Check pending processed regions first.
+			c.checkPendingProcessedRegions()
+
+			key, regions = c.checkRegions(key)
+			if len(regions) == 0 {
+				continue
+			}
+			// Updates the label level isolation statistics.
+			c.cluster.UpdateRegionsLabelLevelStats(regions)
+			// When the key is nil, it means that the scan is finished.
+			if len(key) == 0 {
+				// update the scan limit.
+				c.patrolRegionScanLimit = calculateScanLimit(c.cluster)
+				// update the metrics.
+				dur := time.Since(start)
+				patrolCheckRegionsGauge.Set(dur.Seconds())
+				c.setPatrolRegionsDuration(dur)
+				start = time.Now()
+			}
+			failpoint.Inject("breakPatrol", func() {
+				failpoint.Return()
+			})
 		case <-c.ctx.Done():
 			patrolCheckRegionsGauge.Set(0)
 			c.setPatrolRegionsDuration(0)
 			return
 		}
-		if c.cluster.IsSchedulingHalted() {
-			continue
-		}
-
-		// Check priority regions first.
-		c.checkPriorityRegions()
-		// Check pending processed regions first.
-		c.checkPendingProcessedRegions()
-
-		key, regions = c.checkRegions(key)
-		if len(regions) == 0 {
-			continue
-		}
-		// Updates the label level isolation statistics.
-		c.cluster.UpdateRegionsLabelLevelStats(regions)
-		// When the key is nil, it means that the scan is finished.
-		if len(key) == 0 {
-			// update the scan limit.
-			c.patrolRegionScanLimit = calculateScanLimit(c.cluster)
-			// update the metrics.
-			dur := time.Since(start)
-			patrolCheckRegionsGauge.Set(dur.Seconds())
-			c.setPatrolRegionsDuration(dur)
-			start = time.Now()
-		}
-		failpoint.Inject("breakPatrol", func() {
-			failpoint.Break()
-		})
 	}
 }
 
@@ -451,7 +452,18 @@ func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {
 	}
 }
 
+// GetPatrolRegionScanLimit returns the limit of regions to scan.
+// It only used for test.
+func (c *Controller) GetPatrolRegionScanLimit() int {
+	return c.patrolRegionScanLimit
+}
+
 func calculateScanLimit(cluster sche.CheckerCluster) int {
-	scanlimit := max(minPatrolRegionScanLimit, cluster.GetTotalRegionCount()/patrolRegionPartition)
-	return min(scanlimit, maxPatrolScanRegionLimit)
+	regionCount := cluster.GetTotalRegionCount()
+	failpoint.Inject("regionCount", func(val failpoint.Value) {
+		c, _ := strconv.ParseInt(val.(string), 10, 64)
+		regionCount = int(c)
+	})
+	scanlimit := max(MinPatrolRegionScanLimit, regionCount/patrolRegionPartition)
+	return min(scanlimit, MaxPatrolScanRegionLimit)
 }
