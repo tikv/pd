@@ -2196,12 +2196,6 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 			EndKey:      []byte(fmt.Sprintf("a%20d", i+1)),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 		}
-		if i == 0 {
-			region.StartKey = []byte("")
-		}
-		if i == n-1 {
-			region.EndKey = []byte("")
-		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0], core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
 	}
 	return regions
@@ -2898,8 +2892,7 @@ func TestScanLimit(t *testing.T) {
 }
 
 func checkScanLimit(re *require.Assertions, regionCount int, expectScanLimit ...int) {
-	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
-	}, nil, nil, re)
+	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/regionCount", fmt.Sprintf("return(\"%d\")", regionCount)))
@@ -2912,7 +2905,13 @@ func checkScanLimit(re *require.Assertions, regionCount int, expectScanLimit ...
 	re.NoError(tc.addRegionStore(2, 0))
 	re.NoError(tc.addRegionStore(3, 0))
 	regions := newTestRegions(10, 3, 3)
-	for _, region := range regions {
+	for i, region := range regions {
+		if i == 0 {
+			region.GetMeta().StartKey = []byte("")
+		}
+		if i == len(regions)-1 {
+			region.GetMeta().EndKey = []byte("")
+		}
 		re.NoError(tc.putRegion(region))
 	}
 
