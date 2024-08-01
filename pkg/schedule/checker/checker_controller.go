@@ -35,12 +35,16 @@ import (
 )
 
 const (
+	suspectRegionLimit         = 1024
 	checkSuspectRangesInterval = 100 * time.Millisecond
 	// DefaultPendingRegionCacheSize is the default length of waiting list.
 	DefaultPendingRegionCacheSize = 100000
-	// It takes about 1.3 minutes(1000000/128*10/60/1000) to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
-	patrolScanRegionLimit = 128
-	suspectRegionLimit    = 1024
+	// For 1,024,000 regions, patrolRegionScanLimit is 1000, which is max(minPatrolRegionScanLimit, 1,024,000/patrolRegionPartition)
+	// In order to avoid the patrolRegionScanLimit to be too big or too small, it will be limited to [128,8192].
+	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
+	minPatrolRegionScanLimit = 128
+	maxPatrolScanRegionLimit = 8192
+	patrolRegionPartition    = 1024
 )
 
 var (
@@ -76,6 +80,9 @@ type Controller struct {
 	// It's used to update the ticker, so we need to
 	// record it to avoid updating the ticker frequently.
 	interval time.Duration
+	// patrolRegionScanLimit is the limit of regions to scan.
+	// It is calculated by the number of regions.
+	patrolRegionScanLimit int
 }
 
 // NewController create a new Controller.
@@ -96,6 +103,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		pendingProcessedRegions: pendingProcessedRegions,
 		suspectKeyRanges:        cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
+		patrolRegionScanLimit:   calculateScanLimit(cluster),
 	}
 }
 
@@ -135,6 +143,9 @@ func (c *Controller) PatrolRegions() {
 		c.cluster.UpdateRegionsLabelLevelStats(regions)
 		// When the key is nil, it means that the scan is finished.
 		if len(key) == 0 {
+			// update the scan limit.
+			c.patrolRegionScanLimit = calculateScanLimit(c.cluster)
+			// update the metrics.
 			dur := time.Since(start)
 			patrolCheckRegionsGauge.Set(dur.Seconds())
 			c.setPatrolRegionsDuration(dur)
@@ -160,7 +171,7 @@ func (c *Controller) setPatrolRegionsDuration(dur time.Duration) {
 }
 
 func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
-	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
+	regions = c.cluster.ScanRegions(startKey, nil, c.patrolRegionScanLimit)
 	if len(regions) == 0 {
 		// Resets the scan key.
 		key = nil
@@ -438,4 +449,9 @@ func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {
 		ticker.Reset(newInterval)
 		log.Info("checkers starts patrol regions with new interval", zap.Duration("interval", newInterval))
 	}
+}
+
+func calculateScanLimit(cluster sche.CheckerCluster) int {
+	scanlimit := max(minPatrolRegionScanLimit, cluster.GetTotalRegionCount()/patrolRegionPartition)
+	return min(scanlimit, maxPatrolScanRegionLimit)
 }
