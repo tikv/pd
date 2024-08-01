@@ -48,6 +48,11 @@ const (
 
 	reservedDefaultGroupName = "default"
 	middlePriority           = 8
+
+	// Labels for the metrics.
+	ruPerSec   = "ru_per_sec"
+	ruCapacity = "ru_capacity"
+	priority   = "priority"
 )
 
 // Manager is the manager of resource group.
@@ -457,6 +462,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					delete(maxPerSecTrackers, r.name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
 					writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
+					resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: r.name})
 				}
 			}
 		case <-availableRUTicker.C:
@@ -476,8 +482,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					ru = 0
 				}
 				availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
+				resourceGroupConfigGauge.WithLabelValues(group.Name, priority).Set(float64(group.Priority))
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSec).Set(float64(group.RUSettings.RU.Settings.FillRate))
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruCapacity).Set(float64(group.RUSettings.RU.Settings.BurstLimit))
 			}
-
 		case <-recordMaxTicker.C:
 			// Record the sum of RRU and WRU every second.
 			m.RLock()

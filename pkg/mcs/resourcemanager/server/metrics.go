@@ -116,6 +116,14 @@ var (
 			Name:      "available_ru",
 			Help:      "Counter of the available RU for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
+
+	resourceGroupConfigGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "group_config",
+			Help:      "Config of the resource group.",
+		}, []string{newResourceGroupNameLabel, "type"})
 )
 
 func init() {
@@ -130,4 +138,5 @@ func init() {
 	prometheus.MustRegister(availableRUCounter)
 	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
+	prometheus.MustRegister(resourceGroupConfigGauge)
 }
