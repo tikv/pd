@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	mcs "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -141,7 +141,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
 	testutil.Eventually(re, func() bool {
-		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
+		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr &&
 			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
 	})
@@ -152,7 +152,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
 	testutil.Eventually(re, func() bool {
-		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
+		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, constant.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr &&
 			len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames()) == 4
 	})

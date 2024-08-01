@@ -37,7 +37,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/tso"
@@ -951,7 +951,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 
 		s.handleDamagedStore(request.GetStats())
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
-		if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+		if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 			forwardCli, _ := s.updateSchedulingClient(ctx)
 			cli := forwardCli.getClient()
 			if cli != nil {
@@ -987,7 +987,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 // 2. forwardedHost is not empty and forwardedHost is equal to pre, return pre
 // 3. the rest of cases, update forwardedHost and return new client
 func (s *GrpcServer) updateSchedulingClient(ctx context.Context) (*schedulingClient, error) {
-	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
+	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, constant.SchedulingServiceName)
 	if forwardedHost == "" {
 		return nil, ErrNotFoundSchedulingAddr
 	}
@@ -1307,7 +1307,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 
-		if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+		if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 			if forwardErrCh != nil {
 				select {
 				case err, ok := <-forwardErrCh:
@@ -1321,7 +1321,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				default:
 				}
 			}
-			forwardedSchedulingHost, ok := s.GetServicePrimaryAddr(stream.Context(), utils.SchedulingServiceName)
+			forwardedSchedulingHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.SchedulingServiceName)
 			if !ok || len(forwardedSchedulingHost) == 0 {
 				log.Debug("failed to find scheduling service primary address")
 				if cancel != nil {
@@ -1792,7 +1792,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.AskBatchSplitResponse{
@@ -2022,7 +2022,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.ScatterRegionResponse{
@@ -2300,7 +2300,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.GetOperatorResponse{
@@ -2620,7 +2620,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
-	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.SplitRegionsResponse{

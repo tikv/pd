@@ -19,6 +19,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +34,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -48,8 +52,6 @@ import (
 const (
 	// maxRetryTimes is the max retry times for initializing the cluster ID.
 	maxRetryTimes = 5
-	// ClusterIDPath is the path to store cluster id
-	ClusterIDPath = "/pd/cluster_id"
 	// retryInterval is the interval to retry.
 	retryInterval = time.Second
 )
@@ -59,7 +61,7 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
-		if clusterID, err := etcdutil.GetClusterID(client, ClusterIDPath); err == nil && clusterID != 0 {
+		if clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath); err == nil && clusterID != 0 {
 			return clusterID, nil
 		}
 		select {
@@ -95,6 +97,7 @@ func StatusHandler(c *gin.Context) {
 }
 
 type server interface {
+	GetAdvertiseListenAddr() string
 	GetBackendEndpoints() string
 	Context() context.Context
 	GetTLSConfig() *grpcutil.TLSConfig
@@ -107,6 +110,7 @@ type server interface {
 	GetGRPCServer() *grpc.Server
 	SetGRPCServer(*grpc.Server)
 	SetHTTPServer(*http.Server)
+	GetEtcdClient() *clientv3.Client
 	SetEtcdClient(*clientv3.Client)
 	SetHTTPClient(*http.Client)
 	IsSecure() bool
@@ -114,6 +118,7 @@ type server interface {
 	SetUpRestHandler() (http.Handler, apiutil.APIServiceGroup)
 	diagnosticspb.DiagnosticsServer
 	StartTimestamp() int64
+	Name() string
 }
 
 // WaitAPIServiceReady waits for the api service ready.
@@ -122,7 +127,7 @@ func WaitAPIServiceReady(s server) error {
 		ready bool
 		err   error
 	)
-	ticker := time.NewTicker(RetryIntervalWaitAPIService)
+	ticker := time.NewTicker(constant.RetryIntervalWaitAPIService)
 	defer ticker.Stop()
 	retryTimes := 0
 	for {
@@ -267,7 +272,7 @@ func StopHTTPServer(s server) {
 	log.Info("stopping http server")
 	defer log.Info("http server stopped")
 
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultHTTPGracefulShutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constant.DefaultHTTPGracefulShutdownTimeout)
 	defer cancel()
 
 	// First, try to gracefully shutdown the http server
@@ -305,7 +310,7 @@ func StopGRPCServer(s server) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), DefaultGRPCGracefulStopTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), constant.DefaultGRPCGracefulStopTimeout)
 	defer cancel()
 
 	// First, try to gracefully shutdown the grpc server
@@ -328,6 +333,41 @@ func StopGRPCServer(s server) {
 		// concurrent GracefulStop should be interrupted
 		<-ch
 	}
+}
+
+func Register(s server, serviceName string) (uint64, *discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
+	var (
+		clusterID uint64
+		err       error
+	)
+	if clusterID, err = InitClusterID(s.Context(), s.GetEtcdClient()); err != nil {
+		return 0, nil, nil, err
+	}
+	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
+	execPath, err := os.Executable()
+	deployPath := filepath.Dir(execPath)
+	if err != nil {
+		deployPath = ""
+	}
+	serviceID := &discovery.ServiceRegistryEntry{
+		ServiceAddr:    s.GetAdvertiseListenAddr(),
+		Version:        versioninfo.PDReleaseVersion,
+		GitHash:        versioninfo.PDGitHash,
+		DeployPath:     deployPath,
+		StartTimestamp: s.StartTimestamp(),
+		Name:           s.Name(),
+	}
+	serializedEntry, err := serviceID.Serialize()
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(), strconv.FormatUint(clusterID, 10),
+		serviceName, s.GetAdvertiseListenAddr(), serializedEntry, discovery.DefaultLeaseInSeconds)
+	if err := serviceRegister.Register(); err != nil {
+		log.Error("failed to register the service", zap.String("service-name", serviceName), errs.ZapError(err))
+		return 0, nil, nil, err
+	}
+	return clusterID, serviceID, serviceRegister, nil
 }
 
 // Exit exits the program with the given code.

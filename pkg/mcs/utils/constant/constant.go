@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils
+package constant
 
 import "time"
 
 const (
+	// ClusterIDPath is the path to store cluster id
+	ClusterIDPath = "/pd/cluster_id"
 	// RetryIntervalWaitAPIService is the interval to retry.
 	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
 	RetryIntervalWaitAPIService = 500 * time.Millisecond

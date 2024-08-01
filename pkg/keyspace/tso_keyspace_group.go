@@ -29,7 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -90,7 +90,7 @@ func NewKeyspaceGroupManager(
 	ctx, cancel := context.WithCancel(ctx)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
 	for i := 0; i < int(endpoint.UserKindCount); i++ {
-		groups[endpoint.UserKind(i)] = newIndexedHeap(int(utils.MaxKeyspaceGroupCountInUse))
+		groups[endpoint.UserKind(i)] = newIndexedHeap(int(constant.MaxKeyspaceGroupCountInUse))
 	}
 	m := &GroupManager{
 		ctx:                ctx,
@@ -119,9 +119,9 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	// leave the replica/member list empty. The TSO service will assign the default keyspace group replica
 	// to every tso node/pod by default.
 	defaultKeyspaceGroup := &endpoint.KeyspaceGroup{
-		ID:        utils.DefaultKeyspaceGroupID,
+		ID:        constant.DefaultKeyspaceGroupID,
 		UserKind:  endpoint.Basic.String(),
-		Keyspaces: []uint32{utils.DefaultKeyspaceID},
+		Keyspaces: []uint32{constant.DefaultKeyspaceID},
 	}
 
 	m.Lock()
@@ -134,7 +134,7 @@ func (m *GroupManager) Bootstrap(ctx context.Context) error {
 	}
 
 	// Load all the keyspace groups from the storage and add to the respective userKind groups.
-	groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
+	groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 	if err != nil {
 		return err
 	}
@@ -185,7 +185,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 				continue
 			}
 		}
-		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
+		groups, err := m.store.LoadKeyspaceGroups(constant.DefaultKeyspaceGroupID, 0)
 		if err != nil {
 			log.Error("failed to load all keyspace groups", zap.Error(err))
 			continue
@@ -205,8 +205,8 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 			if numExistMembers != 0 && numExistMembers == len(group.Members) && numExistMembers == m.GetNodesCount() {
 				continue
 			}
-			if numExistMembers < utils.DefaultKeyspaceGroupReplicaCount {
-				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, existMembers, utils.DefaultKeyspaceGroupReplicaCount)
+			if numExistMembers < constant.DefaultKeyspaceGroupReplicaCount {
+				nodes, err := m.AllocNodesForKeyspaceGroup(group.ID, existMembers, constant.DefaultKeyspaceGroupReplicaCount)
 				if err != nil {
 					log.Error("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
 					continue
@@ -430,7 +430,7 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
 		failpointOnce.Do(func() {
 			addrs := val.(string)
-			_ = m.SetNodesForKeyspaceGroup(utils.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
+			_ = m.SetNodesForKeyspaceGroup(constant.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
 		})
 	})
 	m.Lock()
@@ -574,7 +574,7 @@ func (m *GroupManager) SplitKeyspaceGroupByID(
 			return err
 		}
 		// Check if the source keyspace group has enough replicas.
-		if len(splitSourceKg.Members) < utils.DefaultKeyspaceGroupReplicaCount {
+		if len(splitSourceKg.Members) < constant.DefaultKeyspaceGroupReplicaCount {
 			return ErrKeyspaceGroupNotEnoughReplicas
 		}
 		// Check if the new keyspace group already exists.
@@ -634,7 +634,7 @@ func buildSplitKeyspaces(
 			oldKeyspaceMap[keyspace] = struct{}{}
 		}
 		for _, keyspace := range new {
-			if keyspace == utils.DefaultKeyspaceID {
+			if keyspace == constant.DefaultKeyspaceID {
 				return nil, nil, ErrModifyDefaultKeyspace
 			}
 			if _, ok := oldKeyspaceMap[keyspace]; !ok {
@@ -670,7 +670,7 @@ func buildSplitKeyspaces(
 		newKeyspaceMap = make(map[uint32]struct{}, newNum)
 	)
 	for _, keyspace := range old {
-		if keyspace == utils.DefaultKeyspaceID {
+		if keyspace == constant.DefaultKeyspaceID {
 			// The source keyspace group must be the default keyspace group and we always keep the default
 			// keyspace in the default keyspace group.
 			continue
@@ -778,7 +778,7 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, existMembers map[st
 		for addr := range existMembers {
 			nodes = append(nodes, endpoint.KeyspaceGroupMember{
 				Address:  addr,
-				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
+				Priority: constant.DefaultKeyspaceGroupReplicaPriority,
 			})
 		}
 
@@ -804,7 +804,7 @@ func (m *GroupManager) AllocNodesForKeyspaceGroup(id uint32, existMembers map[st
 			existMembers[addr] = struct{}{}
 			nodes = append(nodes, endpoint.KeyspaceGroupMember{
 				Address:  addr,
-				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
+				Priority: constant.DefaultKeyspaceGroupReplicaPriority,
 			})
 		}
 		kg.Members = nodes
@@ -844,7 +844,7 @@ func (m *GroupManager) SetNodesForKeyspaceGroup(id uint32, nodes []string) error
 		for _, node := range nodes {
 			members = append(members, endpoint.KeyspaceGroupMember{
 				Address:  node,
-				Priority: utils.DefaultKeyspaceGroupReplicaPriority,
+				Priority: constant.DefaultKeyspaceGroupReplicaPriority,
 			})
 		}
 		kg.Members = members
@@ -923,7 +923,7 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 	if (mergeListNum+1)*2 > etcdutil.MaxEtcdTxnOps {
 		return ErrExceedMaxEtcdTxnOps
 	}
-	if slice.Contains(mergeList, utils.DefaultKeyspaceGroupID) {
+	if slice.Contains(mergeList, constant.DefaultKeyspaceGroupID) {
 		return ErrModifyDefaultKeyspaceGroup
 	}
 	var (
@@ -1071,7 +1071,7 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 			groupsToMerge = make([]uint32, 0, maxBatchSize)
 		)
 		for idx, group := range groups.GetAll() {
-			if group.ID == utils.DefaultKeyspaceGroupID {
+			if group.ID == constant.DefaultKeyspaceGroupID {
 				continue
 			}
 			groupsToMerge = append(groupsToMerge, group.ID)
@@ -1085,7 +1085,7 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 				zap.Int("merged-group-num", mergedGroupNum),
 				zap.Int("unmerged-group-num", unmergedGroupNum))
 			// Reach the batch size, merge them into the default keyspace group.
-			if err := m.MergeKeyspaceGroups(utils.DefaultKeyspaceGroupID, groupsToMerge); err != nil {
+			if err := m.MergeKeyspaceGroups(constant.DefaultKeyspaceGroupID, groupsToMerge); err != nil {
 				log.Error("failed to merge all keyspace groups into the default one",
 					zap.Int("index", idx),
 					zap.Int("batch-size", len(groupsToMerge)),
@@ -1112,7 +1112,7 @@ func (m *GroupManager) MergeAllIntoDefaultKeyspaceGroup() error {
 					ticker.Stop()
 					return nil
 				case <-ticker.C:
-					kg, err := m.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+					kg, err := m.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 					if err != nil {
 						log.Error("failed to check the default keyspace group merge state",
 							zap.Int("index", idx),
