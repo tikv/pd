@@ -361,6 +361,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	if dryRun {
 		collector = plan.NewCollector(basePlan)
 	}
+	defer l.filterCounter.Flush()
 	batch := l.conf.getBatch()
 	balanceLeaderScheduleCounter.Inc()
 
@@ -402,7 +403,6 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			}
 		}
 	}
-	l.filterCounter.Flush()
 	l.retryQuota.GC(append(sourceCandidate.stores, targetCandidate.stores...))
 	return result, collector.GetPlans()
 }

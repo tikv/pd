@@ -39,6 +39,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -493,7 +494,7 @@ func TestGlobalAndLocalTSO(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	_, _, err = cli.GetTS(ctx)
 	re.Error(err)
-	re.True(pd.IsLeaderChange(err))
+	re.True(clierrs.IsLeaderChange(err))
 	_, _, err = cli.GetTS(ctx)
 	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateMember"))
