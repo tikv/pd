@@ -65,7 +65,17 @@ type Controller struct {
 	priorityInspector       *PriorityInspector
 	pendingProcessedRegions cache.Cache
 	suspectKeyRanges        *cache.TTLString // suspect key-range regions that may need fix
-	patrolRegionContext     *PatrolRegionContext
+
+	// duration is the duration of the last patrol round.
+	// It's exported, so it should be protected by a mutex.
+	mu struct {
+		syncutil.RWMutex
+		duration time.Duration
+	}
+	// interval is the config interval of patrol regions.
+	// It's used to update the ticker, so we need to
+	// record it to avoid updating the ticker frequently.
+	interval time.Duration
 }
 
 // NewController create a new Controller.
@@ -85,26 +95,27 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		priorityInspector:       NewPriorityInspector(cluster, conf),
 		pendingProcessedRegions: pendingProcessedRegions,
 		suspectKeyRanges:        cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
-		patrolRegionContext:     &PatrolRegionContext{},
+		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
 	}
 }
 
 // PatrolRegions is used to scan regions.
 // The checkers will check these regions to decide if they need to do some operations.
 func (c *Controller) PatrolRegions() {
-	c.patrolRegionContext.init(c.cluster)
-	defer c.patrolRegionContext.stop()
+	ticker := time.NewTicker(c.interval)
+	defer ticker.Stop()
+	start := time.Now()
 	var (
 		key     []byte
 		regions []*core.RegionInfo
 	)
 	for {
 		select {
-		case <-c.patrolRegionContext.ticker.C:
-			c.patrolRegionContext.updateTickerIfNeeded()
+		case <-ticker.C:
+			c.updateTickerIfNeeded(ticker)
 		case <-c.ctx.Done():
 			patrolCheckRegionsGauge.Set(0)
-			c.patrolRegionContext.setPatrolRegionsDuration(0)
+			c.setPatrolRegionsDuration(0)
 			return
 		}
 		if c.cluster.IsSchedulingHalted() {
@@ -122,8 +133,12 @@ func (c *Controller) PatrolRegions() {
 		}
 		// Updates the label level isolation statistics.
 		c.cluster.UpdateRegionsLabelLevelStats(regions)
+		// When the key is nil, it means that the scan is finished.
 		if len(key) == 0 {
-			c.patrolRegionContext.roundUpdateMetrics()
+			dur := time.Since(start)
+			patrolCheckRegionsGauge.Set(dur.Seconds())
+			c.setPatrolRegionsDuration(dur)
+			start = time.Now()
 		}
 		failpoint.Inject("breakPatrol", func() {
 			failpoint.Break()
@@ -133,7 +148,15 @@ func (c *Controller) PatrolRegions() {
 
 // GetPatrolRegionsDuration returns the duration of the last patrol region round.
 func (c *Controller) GetPatrolRegionsDuration() time.Duration {
-	return c.patrolRegionContext.getPatrolRegionsDuration()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.mu.duration
+}
+
+func (c *Controller) setPatrolRegionsDuration(dur time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.mu.duration = dur
 }
 
 func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
@@ -407,58 +430,12 @@ func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 	}
 }
 
-// PatrolRegionContext is used to store the context of patrol regions.
-type PatrolRegionContext struct {
-	cluster sche.CheckerCluster
-	ticker  *time.Ticker
-	// config
-	interval time.Duration
-	// status
-	patrolRoundStartTime time.Time
-	mu                   struct {
-		syncutil.RWMutex
-		duration time.Duration
-	}
-}
-
-func (p *PatrolRegionContext) init(cluster sche.CheckerCluster) {
-	p.cluster = cluster
-	p.interval = cluster.GetCheckerConfig().GetPatrolRegionInterval()
-	p.patrolRoundStartTime = time.Now()
-	p.ticker = time.NewTicker(p.interval)
-}
-
-func (p *PatrolRegionContext) stop() {
-	if p.ticker != nil {
-		p.ticker.Stop()
-	}
-}
-
-func (p *PatrolRegionContext) updateTickerIfNeeded() {
+func (c *Controller) updateTickerIfNeeded(ticker *time.Ticker) {
 	// Note: we reset the ticker here to support updating configuration dynamically.
-	newInterval := p.cluster.GetCheckerConfig().GetPatrolRegionInterval()
-	if p.interval != newInterval {
-		p.interval = newInterval
-		p.ticker.Reset(newInterval)
+	newInterval := c.cluster.GetCheckerConfig().GetPatrolRegionInterval()
+	if c.interval != newInterval {
+		c.interval = newInterval
+		ticker.Reset(newInterval)
 		log.Info("checkers starts patrol regions with new interval", zap.Duration("interval", newInterval))
 	}
-}
-
-func (p *PatrolRegionContext) getPatrolRegionsDuration() time.Duration {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.mu.duration
-}
-
-func (p *PatrolRegionContext) setPatrolRegionsDuration(dur time.Duration) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.mu.duration = dur
-}
-
-func (p *PatrolRegionContext) roundUpdateMetrics() {
-	dur := time.Since(p.patrolRoundStartTime)
-	patrolCheckRegionsGauge.Set(dur.Seconds())
-	p.setPatrolRegionsDuration(dur)
-	p.patrolRoundStartTime = time.Now()
 }
