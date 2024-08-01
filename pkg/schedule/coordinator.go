@@ -15,7 +15,6 @@
 package schedule
 
 import (
-	"bytes"
 	"context"
 	"strconv"
 	"sync"
@@ -43,25 +42,16 @@ import (
 )
 
 const (
-	runSchedulerCheckInterval  = 3 * time.Second
-	checkSuspectRangesInterval = 100 * time.Millisecond
-	collectTimeout             = 5 * time.Minute
-	maxLoadConfigRetries       = 10
+	runSchedulerCheckInterval = 3 * time.Second
+	collectTimeout            = 5 * time.Minute
+	maxLoadConfigRetries      = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
 
-	// It takes about 1.3 minutes(1000000/128*10/60/1000) to iterate 1 million regions(with DefaultPatrolRegionInterval=10ms).
-	patrolScanRegionLimit = 128
 	// PluginLoad means action for load plugin
 	PluginLoad = "PluginLoad"
 	// PluginUnload means action for unload plugin
 	PluginUnload = "PluginUnload"
-)
-
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	pendingProcessedRegionsGauge = regionListGauge.WithLabelValues("pending_processed_regions")
-	priorityListGauge            = regionListGauge.WithLabelValues("priority_list")
 )
 
 // Coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
@@ -73,7 +63,6 @@ type Coordinator struct {
 	cancel context.CancelFunc
 
 	schedulersInitialized bool
-	patrolRegionsDuration time.Duration
 
 	cluster           sche.ClusterInformer
 	prepareChecker    *prepareChecker
@@ -110,22 +99,6 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	}
 }
 
-// GetPatrolRegionsDuration returns the duration of the last patrol region round.
-func (c *Coordinator) GetPatrolRegionsDuration() time.Duration {
-	if c == nil {
-		return 0
-	}
-	c.RLock()
-	defer c.RUnlock()
-	return c.patrolRegionsDuration
-}
-
-func (c *Coordinator) setPatrolRegionsDuration(dur time.Duration) {
-	c.Lock()
-	defer c.Unlock()
-	c.patrolRegionsDuration = dur
-}
-
 // markSchedulersInitialized marks the scheduler initialization is finished.
 func (c *Coordinator) markSchedulersInitialized() {
 	c.Lock()
@@ -146,106 +119,13 @@ func (c *Coordinator) IsPendingRegion(region uint64) bool {
 }
 
 // PatrolRegions is used to scan regions.
-// The checkers will check these regions to decide if they need to do some operations.
 // The function is exposed for test purpose.
 func (c *Coordinator) PatrolRegions() {
 	defer logutil.LogPanic()
-
 	defer c.wg.Done()
-	ticker := time.NewTicker(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
-	defer ticker.Stop()
-
 	log.Info("coordinator starts patrol regions")
-	start := time.Now()
-	var (
-		key     []byte
-		regions []*core.RegionInfo
-	)
-	for {
-		select {
-		case <-ticker.C:
-			// Note: we reset the ticker here to support updating configuration dynamically.
-			ticker.Reset(c.cluster.GetCheckerConfig().GetPatrolRegionInterval())
-		case <-c.ctx.Done():
-			patrolCheckRegionsGauge.Set(0)
-			c.setPatrolRegionsDuration(0)
-			log.Info("patrol regions has been stopped")
-			return
-		}
-		if c.cluster.IsSchedulingHalted() {
-			continue
-		}
-
-		// Check priority regions first.
-		c.checkPriorityRegions()
-		// Check pending processed regions first.
-		c.checkPendingProcessedRegions()
-
-		key, regions = c.checkRegions(key)
-		if len(regions) == 0 {
-			continue
-		}
-		// Updates the label level isolation statistics.
-		c.cluster.UpdateRegionsLabelLevelStats(regions)
-		if len(key) == 0 {
-			dur := time.Since(start)
-			patrolCheckRegionsGauge.Set(dur.Seconds())
-			c.setPatrolRegionsDuration(dur)
-			start = time.Now()
-		}
-		failpoint.Inject("break-patrol", func() {
-			failpoint.Break()
-		})
-	}
-}
-
-func (c *Coordinator) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
-	regions = c.cluster.ScanRegions(startKey, nil, patrolScanRegionLimit)
-	if len(regions) == 0 {
-		// Resets the scan key.
-		key = nil
-		return
-	}
-
-	for _, region := range regions {
-		c.tryAddOperators(region)
-		key = region.GetEndKey()
-	}
-	return
-}
-
-func (c *Coordinator) checkPendingProcessedRegions() {
-	ids := c.checkers.GetPendingProcessedRegions()
-	pendingProcessedRegionsGauge.Set(float64(len(ids)))
-	for _, id := range ids {
-		region := c.cluster.GetRegion(id)
-		c.tryAddOperators(region)
-	}
-}
-
-// checkPriorityRegions checks priority regions
-func (c *Coordinator) checkPriorityRegions() {
-	items := c.checkers.GetPriorityRegions()
-	removes := make([]uint64, 0)
-	priorityListGauge.Set(float64(len(items)))
-	for _, id := range items {
-		region := c.cluster.GetRegion(id)
-		if region == nil {
-			removes = append(removes, id)
-			continue
-		}
-		ops := c.checkers.CheckRegion(region)
-		// it should skip if region needs to merge
-		if len(ops) == 0 || ops[0].Kind()&operator.OpMerge != 0 {
-			continue
-		}
-		if !c.opController.ExceedStoreLimit(ops...) {
-			c.opController.AddWaitingOperator(ops...)
-		}
-	}
-	for _, v := range removes {
-		c.checkers.RemovePriorityRegions(v)
-	}
+	c.checkers.PatrolRegions()
+	log.Info("patrol regions has been stopped")
 }
 
 // checkSuspectRanges would pop one suspect key range group
@@ -255,60 +135,16 @@ func (c *Coordinator) checkSuspectRanges() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 	log.Info("coordinator begins to check suspect key ranges")
-	ticker := time.NewTicker(checkSuspectRangesInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-c.ctx.Done():
-			log.Info("check suspect key ranges has been stopped")
-			return
-		case <-ticker.C:
-			keyRange, success := c.checkers.PopOneSuspectKeyRange()
-			if !success {
-				continue
-			}
-			limit := 1024
-			regions := c.cluster.ScanRegions(keyRange[0], keyRange[1], limit)
-			if len(regions) == 0 {
-				continue
-			}
-			regionIDList := make([]uint64, 0, len(regions))
-			for _, region := range regions {
-				regionIDList = append(regionIDList, region.GetID())
-			}
-
-			// if the last region's end key is smaller the keyRange[1] which means there existed the remaining regions between
-			// keyRange[0] and keyRange[1] after scan regions, so we put the end key and keyRange[1] into Suspect KeyRanges
-			lastRegion := regions[len(regions)-1]
-			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
-				c.checkers.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
-			}
-			c.checkers.AddPendingProcessedRegions(regionIDList...)
-		}
-	}
+	c.checkers.CheckSuspectRanges()
+	log.Info("check suspect key ranges has been stopped")
 }
 
-func (c *Coordinator) tryAddOperators(region *core.RegionInfo) {
-	if region == nil {
-		// the region could be recent split, continue to wait.
-		return
+// GetPatrolRegionsDuration returns the duration of the last patrol region round.
+func (c *Coordinator) GetPatrolRegionsDuration() time.Duration {
+	if c == nil {
+		return 0
 	}
-	id := region.GetID()
-	if c.opController.GetOperator(id) != nil {
-		c.checkers.RemovePendingProcessedRegion(id)
-		return
-	}
-	ops := c.checkers.CheckRegion(region)
-	if len(ops) == 0 {
-		return
-	}
-
-	if !c.opController.ExceedStoreLimit(ops...) {
-		c.opController.AddWaitingOperator(ops...)
-		c.checkers.RemovePendingProcessedRegion(id)
-	} else {
-		c.checkers.AddPendingProcessedRegions(id)
-	}
+	return c.checkers.GetPatrolRegionsDuration()
 }
 
 // drivePushOperator is used to push the unfinished operator to the executor.

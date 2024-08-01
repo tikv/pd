@@ -595,7 +595,7 @@ func (suite *redirectorTestSuite) SetupSuite() {
 	})
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader(), 0)
+	re.NotEmpty(cluster.WaitLeader())
 	suite.cluster = cluster
 }
 

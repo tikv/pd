@@ -50,23 +50,23 @@ var (
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-	cluster            sche.CheckerCluster
-	ruleManager        *placement.RuleManager
-	regionWaitingList  cache.Cache
-	pendingList        cache.Cache
-	switchWitnessCache *cache.TTLUint64
-	record             *recorder
+	cluster                 sche.CheckerCluster
+	ruleManager             *placement.RuleManager
+	pendingProcessedRegions cache.Cache
+	pendingList             cache.Cache
+	switchWitnessCache      *cache.TTLUint64
+	record                  *recorder
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, pendingProcessedRegions cache.Cache) *RuleChecker {
 	return &RuleChecker{
-		cluster:            cluster,
-		ruleManager:        ruleManager,
-		regionWaitingList:  regionWaitingList,
-		pendingList:        cache.NewDefaultCache(maxPendingListLen),
-		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
-		record:             newRecord(),
+		cluster:                 cluster,
+		ruleManager:             ruleManager,
+		pendingProcessedRegions: pendingProcessedRegions,
+		pendingList:             cache.NewDefaultCache(maxPendingListLen),
+		switchWitnessCache:      cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
+		record:                  newRecord(),
 	}
 }
 
@@ -637,7 +637,7 @@ func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo 
 
 func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempState bool) {
 	if filterByTempState {
-		c.regionWaitingList.Put(region.GetID(), nil)
+		c.pendingProcessedRegions.Put(region.GetID(), nil)
 		c.pendingList.Remove(region.GetID())
 	} else {
 		c.pendingList.Put(region.GetID(), nil)
