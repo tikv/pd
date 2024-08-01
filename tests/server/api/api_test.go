@@ -605,6 +605,25 @@ func (suite *redirectorTestSuite) TestRedirect() {
 			re.Equal(h, header)
 		}
 	}
+	// Test redirect during leader election.
+	leader = suite.cluster.GetLeaderServer()
+	re.NotNil(leader)
+	err := leader.ResignLeader()
+	re.NoError(err)
+	for _, svr := range suite.cluster.GetServers() {
+		request, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/pd/api/v1/version", svr.GetServer().GetAddr()), http.NoBody)
+		re.NoError(err)
+		testutil.Eventually(re, func() bool {
+			resp, err := dialClient.Do(request)
+			re.NoError(err)
+			defer resp.Body.Close()
+			_, err = io.ReadAll(resp.Body)
+			re.NoError(err)
+			// Should not meet 503 since the retry logic ensure the request is sent to the new leader eventually.
+			re.NotEqual(http.StatusServiceUnavailable, resp.StatusCode)
+			return resp.StatusCode == http.StatusOK
+		})
+	}
 }
 
 func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
