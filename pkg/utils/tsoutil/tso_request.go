@@ -17,7 +17,7 @@ package tsoutil
 import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"google.golang.org/grpc"
 )
 
@@ -141,7 +141,7 @@ func (r *PDProtoRequest) getCount() uint32 {
 // count defines the count of timestamps to retrieve.
 func (r *PDProtoRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
-		utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID, r.request.GetDcLocation())
+		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID, r.request.GetDcLocation())
 }
 
 // postProcess sends the response back to the sender of the request

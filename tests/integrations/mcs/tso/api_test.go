@@ -29,7 +29,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -86,11 +86,11 @@ func (suite *tsoAPITestSuite) TestGetKeyspaceGroupMembers() {
 	re.NotNil(primary)
 	members := mustGetKeyspaceGroupMembers(re, primary)
 	re.Len(members, 1)
-	defaultGroupMember := members[mcsutils.DefaultKeyspaceGroupID]
+	defaultGroupMember := members[constant.DefaultKeyspaceGroupID]
 	re.NotNil(defaultGroupMember)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, defaultGroupMember.Group.ID)
+	re.Equal(constant.DefaultKeyspaceGroupID, defaultGroupMember.Group.ID)
 	re.True(defaultGroupMember.IsPrimary)
-	primaryMember, err := primary.GetMember(mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	primaryMember, err := primary.GetMember(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(primaryMember.GetLeaderID(), defaultGroupMember.PrimaryID)
 }

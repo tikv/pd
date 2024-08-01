@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -187,7 +187,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceConfig() {
 		re.Error(err)
 	}
 	// Changing config of DEFAULT keyspace is allowed.
-	updated, err := manager.UpdateKeyspaceConfig(utils.DefaultKeyspaceName, mutations)
+	updated, err := manager.UpdateKeyspaceConfig(constant.DefaultKeyspaceName, mutations)
 	re.NoError(err)
 	// remove auto filled fields
 	delete(updated.Config, TSOKeyspaceGroupIDKey)
@@ -227,7 +227,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		_, err = manager.UpdateKeyspaceState(createRequest.Name, keyspacepb.KeyspaceState_ENABLED, newTime)
 		re.Error(err)
 		// Changing state of DEFAULT keyspace is not allowed.
-		_, err = manager.UpdateKeyspaceState(utils.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
+		_, err = manager.UpdateKeyspaceState(constant.DefaultKeyspaceName, keyspacepb.KeyspaceState_DISABLED, newTime)
 		re.Error(err)
 	}
 }
@@ -392,7 +392,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 	})
 	re.NoError(err)
 	// Check if the keyspace is not attached to the default group.
-	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
 	re.NotContains(defaultKeyspaceGroup.Keyspaces, uint32(111))
@@ -400,7 +400,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignment() {
 	err = suite.manager.PatrolKeyspaceAssignment(0, 0)
 	re.NoError(err)
 	// Check if the keyspace is attached to the default group.
-	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
 	re.Contains(defaultKeyspaceGroup.Keyspaces, uint32(111))
@@ -421,7 +421,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 		re.NoError(err)
 	}
 	// Check if all the keyspaces are not attached to the default group.
-	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
@@ -431,7 +431,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentInBatch() {
 	err = suite.manager.PatrolKeyspaceAssignment(0, 0)
 	re.NoError(err)
 	// Check if all the keyspaces are attached to the default group.
-	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
@@ -454,7 +454,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 		re.NoError(err)
 	}
 	// Check if all the keyspaces are not attached to the default group.
-	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroup, err := suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {
@@ -469,7 +469,7 @@ func (suite *keyspaceTestSuite) TestPatrolKeyspaceAssignmentWithRange() {
 	err = suite.manager.PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID)
 	re.NoError(err)
 	// Check if only the keyspaces within the range are attached to the default group.
-	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroup, err = suite.manager.kgm.GetKeyspaceGroupByID(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotNil(defaultKeyspaceGroup)
 	for i := 1; i < etcdutil.MaxEtcdTxnOps*2+1; i++ {

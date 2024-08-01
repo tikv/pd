@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
@@ -211,7 +212,7 @@ func ResetTS(c *gin.Context) {
 // GetHealth returns the health status of the TSO service.
 func GetHealth(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
-	am, err := svr.GetKeyspaceGroupManager().GetAllocatorManager(utils.DefaultKeyspaceGroupID)
+	am, err := svr.GetKeyspaceGroupManager().GetAllocatorManager(constant.DefaultKeyspaceGroupID)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return

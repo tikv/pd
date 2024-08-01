@@ -24,7 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/codec"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
@@ -110,7 +110,7 @@ func validateID(id uint32) error {
 	if id > spaceIDMax {
 		return errors.Errorf("illegal keyspace id %d, larger than spaceID Max %d", id, spaceIDMax)
 	}
-	if id == utils.DefaultKeyspaceID {
+	if id == constant.DefaultKeyspaceID {
 		return errors.Errorf("illegal keyspace id %d, collides with default keyspace id", id)
 	}
 	return nil
@@ -127,7 +127,7 @@ func validateName(name string) error {
 	if !isValid {
 		return errors.Errorf("illegal keyspace name %s, should contain only alphanumerical and underline", name)
 	}
-	if name == utils.DefaultKeyspaceName {
+	if name == constant.DefaultKeyspaceName {
 		return errors.Errorf("illegal keyspace name %s, collides with default keyspace name", name)
 	}
 	return nil

@@ -21,7 +21,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 func TestConfigBasic(t *testing.T) {
@@ -35,7 +35,7 @@ func TestConfigBasic(t *testing.T) {
 	re.True(strings.HasPrefix(cfg.GetName(), defaultName))
 	re.Equal(defaultBackendEndpoints, cfg.BackendEndpoints)
 	re.Equal(defaultListenAddr, cfg.ListenAddr)
-	re.Equal(utils.DefaultLeaderLease, cfg.LeaderLease)
+	re.Equal(constant.DefaultLeaderLease, cfg.LeaderLease)
 	re.False(cfg.EnableLocalTSO)
 	re.True(cfg.EnableGRPCGateway)
 	re.Equal(defaultTSOSaveInterval, cfg.TSOSaveInterval.Duration)

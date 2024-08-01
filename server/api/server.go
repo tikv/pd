@@ -22,7 +22,7 @@ import (
 	"github.com/gorilla/mux"
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	mcs "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
@@ -70,22 +70,22 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/admin/reset-ts",
 				tsoapi.APIPathPrefix+"/admin/reset-ts",
-				mcs.TSOServiceName,
+				constant.TSOServiceName,
 				[]string{http.MethodPost}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/operators",
 				scheapi.APIPathPrefix+"/operators",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodPost, http.MethodGet, http.MethodDelete}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/checker", // Note: this is a typo in the original code
 				scheapi.APIPathPrefix+"/checkers",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodPost, http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/region/id",
 				scheapi.APIPathPrefix+"/config/regions",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet},
 				func(r *http.Request) bool {
 					// The original code uses the path "/region/id" to get the region id.
@@ -95,79 +95,79 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/regions/accelerate-schedule",
 				scheapi.APIPathPrefix+"/regions/accelerate-schedule",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodPost}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/regions/scatter",
 				scheapi.APIPathPrefix+"/regions/scatter",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodPost}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/regions/split",
 				scheapi.APIPathPrefix+"/regions/split",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodPost}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/regions/replicated",
 				scheapi.APIPathPrefix+"/regions/replicated",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/region-label/rules",
 				scheapi.APIPathPrefix+"/config/region-label/rules",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/region-label/rule/", // Note: this is a typo in the original code
 				scheapi.APIPathPrefix+"/config/region-label/rules",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/hotspot",
 				scheapi.APIPathPrefix+"/hotspot",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/rules",
 				scheapi.APIPathPrefix+"/config/rules",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/rule/",
 				scheapi.APIPathPrefix+"/config/rule",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/rule_group/",
 				scheapi.APIPathPrefix+"/config/rule_groups", // Note: this is a typo in the original code
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/rule_groups",
 				scheapi.APIPathPrefix+"/config/rule_groups",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/config/placement-rule",
 				scheapi.APIPathPrefix+"/config/placement-rule",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			// because the writing of all the meta information of the scheduling service is in the API server,
 			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",
 				scheapi.APIPathPrefix+"/schedulers",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/scheduler-config",
 				scheapi.APIPathPrefix+"/schedulers/config",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers/", // Note: this means "/schedulers/{name}", which is to be used to pause or resume the scheduler
 				scheapi.APIPathPrefix+"/schedulers",
-				mcs.SchedulingServiceName,
+				constant.SchedulingServiceName,
 				[]string{http.MethodPost}),
 		),
 		negroni.Wrap(r)),

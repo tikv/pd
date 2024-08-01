@@ -22,7 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -237,7 +237,7 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty keyspaces")
 		return
 	}
-	if splitParams.StartKeyspaceID < utils.DefaultKeyspaceID ||
+	if splitParams.StartKeyspaceID < constant.DefaultKeyspaceID ||
 		splitParams.StartKeyspaceID > splitParams.EndKeyspaceID {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid start/end keyspace id")
 		return
@@ -400,7 +400,7 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.DefaultKeyspaceGroupReplicaCount {
+	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < constant.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [2, nodes_num]")
 		return
 	}
@@ -553,5 +553,5 @@ func parseNodeAddress(c *gin.Context) (string, error) {
 }
 
 func isValid(id uint32) bool {
-	return id >= utils.DefaultKeyspaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
+	return id >= constant.DefaultKeyspaceGroupID && id <= constant.MaxKeyspaceGroupCountInUse
 }
