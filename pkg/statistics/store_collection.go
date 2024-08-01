@@ -61,7 +61,7 @@ func newStoreStatistics(opt config.ConfProvider) *storeStatistics {
 	}
 }
 
-func (s *storeStatistics) Observe(store *core.StoreInfo) {
+func (s *storeStatistics) observe(store *core.StoreInfo) {
 	for _, k := range s.opt.GetLocationLabels() {
 		v := store.GetLabelValue(k)
 		if v == "" {
@@ -147,6 +147,7 @@ func (s *storeStatistics) Observe(store *core.StoreInfo) {
 	}
 }
 
+// ObserveHotStat records the hot region metrics for the store.
 func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 	// Store flows.
 	storeAddress := store.GetAddress()
@@ -178,7 +179,7 @@ func ObserveHotStat(store *core.StoreInfo, stats *StoresStats) {
 	storeStatusGauge.WithLabelValues(storeAddress, id, "store_regions_write_rate_keys_instant").Set(storeFlowStats.GetInstantLoad(utils.StoreRegionsWriteKeys))
 }
 
-func (s *storeStatistics) Collect() {
+func (s *storeStatistics) collect() {
 	placementStatusGauge.Reset()
 
 	metrics := make(map[string]float64)
@@ -307,12 +308,14 @@ func NewStoreStatisticsMap(opt config.ConfProvider) *storeStatisticsMap {
 	}
 }
 
+// Observe observes the store.
 func (m *storeStatisticsMap) Observe(store *core.StoreInfo) {
-	m.stats.Observe(store)
+	m.stats.observe(store)
 }
 
+// Collect collects the metrics.
 func (m *storeStatisticsMap) Collect() {
-	m.stats.Collect()
+	m.stats.collect()
 }
 
 // Reset resets the metrics.

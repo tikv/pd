@@ -99,6 +99,7 @@ type evictLeaderSchedulerConfig struct {
 	cluster          *core.BasicCluster
 }
 
+// BuildWithArgs builds the config with the args.
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	if len(args) != 1 {
 		return errors.New("should specify the store-id")
@@ -118,6 +119,7 @@ func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	return nil
 }
 
+// Clone clones the config.
 func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
@@ -126,6 +128,7 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 	}
 }
 
+// Persist saves the config.
 func (conf *evictLeaderSchedulerConfig) Persist() error {
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
@@ -164,6 +167,7 @@ func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeade
 	}
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
@@ -174,6 +178,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return schedulers.EncodeConfig(s.conf)
 }
 
+// PrepareConfig ensures the scheduler config is valid.
 func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -186,6 +191,7 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	return res
 }
 
+// CleanConfig is used to clean the scheduler config.
 func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -194,6 +200,7 @@ func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	}
 }
 
+// IsScheduleAllowed checks if the scheduler is allowed to schedule.
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
@@ -202,6 +209,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	return allowed
 }
 
+// Schedule schedules the evict leader operator.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	ops := make([]*operator.Operator, 0, len(s.conf.StoreIDWitRanges))
 	s.conf.mu.RLock()
@@ -236,6 +244,7 @@ type evictLeaderHandler struct {
 	config *evictLeaderSchedulerConfig
 }
 
+// UpdateConfig updates the config.
 func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
@@ -276,11 +285,13 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
+// ListConfig lists the config.
 func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
+// DeleteConfig deletes the config.
 func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["store_id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)

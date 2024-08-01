@@ -14,10 +14,12 @@
 
 package types
 
+// CheckerSchedulerType is the type of checker/scheduler.
 type CheckerSchedulerType string
 
-func (n CheckerSchedulerType) String() string {
-	return string(n)
+// String implements fmt.Stringer.
+func (t CheckerSchedulerType) String() string {
+	return string(t)
 }
 
 const (
@@ -95,6 +97,7 @@ var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
 	LabelScheduler:                 "label",
 }
 
+// SchedulerStr2Type is a map to convert the scheduler string to the CheckerSchedulerType.
 var SchedulerStr2Type = map[string]CheckerSchedulerType{
 	"balance-leader-scheduler":     BalanceLeaderScheduler,
 	"balance-region-scheduler":     BalanceRegionScheduler,
