@@ -675,7 +675,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args := make([]string, 0, 10)
 	// let the test run in the verbose mode.
 	args = append(args, "-test.v")
-	exe := filepath.Join(".", testFileName(pkg))
+	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	if coverProfile != "" {
 		fileName := strings.ReplaceAll(pkg, "/", "_") + "." + fn
 		tmpFile := filepath.Join(coverFileTempDir, fileName)
@@ -748,7 +748,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	// workPath just like `/pd/tests/integrations`
 	xprogPath := filepath.Join(workDir, "bin", "xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
-		xprogPath = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin", "prog")
+		xprogPath = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin", "xprog")
 	}
 	packages := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {
@@ -829,8 +829,7 @@ func testFileFullPath(pkg string) string {
 }
 
 func listNewTestCases(pkg string) []string {
-	exe := filepath.Join(".", testFileName(pkg))
-
+	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	// core.test -test.list Test
 	cmd := exec.Command(exe, "-test.list", "Test")
 	cmd.Dir = filepath.Join(workDir, pkg)
