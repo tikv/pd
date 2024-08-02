@@ -45,7 +45,7 @@ import (
 const (
 	randomRegionMaxRetry = 10
 	scanRegionLimit      = 1000
-	// CollectFactor is the factor to collect the size of region.
+	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
 )
 
