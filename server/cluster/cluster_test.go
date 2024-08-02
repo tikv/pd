@@ -1850,7 +1850,7 @@ func Test(t *testing.T) {
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
-		regionKey := []byte{byte(i)}
+		regionKey := []byte(fmt.Sprintf("a%20d", i+1))
 
 		re.Nil(cache.GetRegion(i))
 		re.Nil(cache.GetRegionByKey(regionKey))
@@ -2192,8 +2192,8 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 		region := &metapb.Region{
 			Id:          i,
 			Peers:       peers,
-			StartKey:    []byte(fmt.Sprintf("a%20d", i)),
-			EndKey:      []byte(fmt.Sprintf("a%20d", i+1)),
+			StartKey:    []byte(fmt.Sprintf("a%20d", i+1)),
+			EndKey:      []byte(fmt.Sprintf("a%20d", i+2)),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0], core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
