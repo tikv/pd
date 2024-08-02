@@ -238,12 +238,12 @@ func newEvictSlowTrendHandler(config *evictSlowTrendSchedulerConfig) http.Handle
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
 	return router
 }
 
-func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -267,7 +267,7 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
-func (handler *evictSlowTrendHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
+func (handler *evictSlowTrendHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -291,14 +291,17 @@ func (s *evictSlowTrendScheduler) GetNextInterval(time.Duration) time.Duration {
 	return intervalGrow(s.GetMinInterval(), MaxScheduleInterval, growthType)
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -327,6 +330,7 @@ func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	return nil
 }
 
+// PrepareConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictedStoreID := s.conf.evictedStore()
 	if evictedStoreID == 0 {
@@ -335,6 +339,7 @@ func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	return cluster.SlowTrendEvicted(evictedStoreID)
 }
 
+// CleanConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
@@ -369,6 +374,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if s.conf.evictedStore() == 0 {
 		return true
@@ -380,6 +386,7 @@ func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 

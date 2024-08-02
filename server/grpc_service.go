@@ -112,7 +112,7 @@ type pdpbTSORequest struct {
 	err     error
 }
 
-func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
+func (s *tsoServer) send(m *pdpb.TsoResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
 	}
@@ -139,7 +139,7 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	}
 }
 
-func (s *tsoServer) Recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
+func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
@@ -176,6 +176,7 @@ type heartbeatServer struct {
 	closed int32
 }
 
+// Send wraps Send() of PD_RegionHeartbeatServer.
 func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
@@ -199,6 +200,7 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	}
 }
 
+// Recv wraps Recv() of PD_RegionHeartbeatServer.
 func (s *heartbeatServer) Recv() (*pdpb.RegionHeartbeatRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF

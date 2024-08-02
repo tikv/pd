@@ -139,16 +139,19 @@ func newScatterRangeScheduler(opController *operator.Controller, config *scatter
 	return scheduler
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (l *scatterRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.handler.ServeHTTP(w, r)
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 	l.config.RLock()
 	defer l.config.RUnlock()
 	return EncodeConfig(l.config)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (l *scatterRangeScheduler) ReloadConfig() error {
 	l.config.Lock()
 	defer l.config.Unlock()
@@ -169,6 +172,7 @@ func (l *scatterRangeScheduler) ReloadConfig() error {
 	return nil
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (l *scatterRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return l.allowBalanceLeader(cluster) || l.allowBalanceRegion(cluster)
 }
@@ -189,6 +193,7 @@ func (l *scatterRangeScheduler) allowBalanceRegion(cluster sche.SchedulerCluster
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (l *scatterRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	scatterRangeCounter.Inc()
 	// isolate a new cluster according to the key range
@@ -227,7 +232,7 @@ type scatterRangeHandler struct {
 	config *scatterRangeSchedulerConfig
 }
 
-func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *scatterRangeHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -269,7 +274,7 @@ func (handler *scatterRangeHandler) UpdateConfig(w http.ResponseWriter, r *http.
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
-func (handler *scatterRangeHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
+func (handler *scatterRangeHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
@@ -280,7 +285,7 @@ func newScatterRangeHandler(config *scatterRangeSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
 	return router
 }

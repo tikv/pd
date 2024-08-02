@@ -56,10 +56,12 @@ func newRandomMergeScheduler(opController *operator.Controller, conf *randomMerg
 	}
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *randomMergeScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpMerge) < cluster.GetSchedulerConfig().GetMergeScheduleLimit()
 	if !allowed {
@@ -68,6 +70,7 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	randomMergeCounter.Inc()
 

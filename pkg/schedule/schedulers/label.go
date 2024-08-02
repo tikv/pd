@@ -55,10 +55,12 @@ func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerCo
 	}
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *labelScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
@@ -67,6 +69,7 @@ func (s *labelScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	labelCounter.Inc()
 	stores := cluster.GetStores()

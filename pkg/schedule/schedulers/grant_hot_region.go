@@ -69,19 +69,19 @@ func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uin
 	return ret
 }
 
-func (conf *grantHotRegionSchedulerConfig) GetStoreLeaderID() uint64 {
+func (conf *grantHotRegionSchedulerConfig) getStoreLeaderID() uint64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.StoreLeaderID
 }
 
-func (conf *grantHotRegionSchedulerConfig) SetStoreLeaderID(id uint64) {
+func (conf *grantHotRegionSchedulerConfig) setStoreLeaderID(id uint64) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.StoreLeaderID = id
 }
 
-func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfig {
+func (conf *grantHotRegionSchedulerConfig) clone() *grantHotRegionSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	newStoreIDs := make([]uint64, len(conf.StoreIDs))
@@ -139,10 +139,12 @@ func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHo
 	return ret
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (s *grantHotRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -186,7 +188,7 @@ type grantHotRegionHandler struct {
 	config *grantHotRegionSchedulerConfig
 }
 
-func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -216,15 +218,15 @@ func (handler *grantHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	}
 
 	if err = handler.config.Persist(); err != nil {
-		handler.config.SetStoreLeaderID(0)
+		handler.config.setStoreLeaderID(0)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
-func (handler *grantHotRegionHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+func (handler *grantHotRegionHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -234,8 +236,8 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
 	return router
 }
 
@@ -269,7 +271,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, 
 				continue
 			}
 		} else {
-			if !s.conf.has(srcStoreID) || srcStoreID == s.conf.GetStoreLeaderID() {
+			if !s.conf.has(srcStoreID) || srcStoreID == s.conf.getStoreLeaderID() {
 				continue
 			}
 		}
@@ -310,7 +312,7 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	var candidate []uint64
 	if isLeader {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.High})
-		candidate = []uint64{s.conf.GetStoreLeaderID()}
+		candidate = []uint64{s.conf.getStoreLeaderID()}
 	} else {
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.High},
 			filter.NewExcludedFilter(s.GetName(), srcRegion.GetStoreIDs(), srcRegion.GetStoreIDs()))

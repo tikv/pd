@@ -53,6 +53,7 @@ type server struct {
 	*Server
 }
 
+// GetCoordinator returns the coordinator.
 func (s *server) GetCoordinator() *schedule.Coordinator {
 	c := s.GetRaftCluster()
 	if c == nil {
@@ -61,6 +62,7 @@ func (s *server) GetCoordinator() *schedule.Coordinator {
 	return c.GetCoordinator()
 }
 
+// GetCluster returns RaftCluster.
 func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.GetRaftCluster()
 }

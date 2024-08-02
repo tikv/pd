@@ -60,7 +60,7 @@ type splitBucketSchedulerConfig struct {
 	SplitLimit uint64 `json:"split-limit"`
 }
 
-func (conf *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
+func (conf *splitBucketSchedulerConfig) clone() *splitBucketSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &splitBucketSchedulerConfig{
@@ -100,7 +100,7 @@ type splitBucketHandler struct {
 }
 
 func (h *splitBucketHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := h.conf.Clone()
+	conf := h.conf.clone()
 	h.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -213,7 +213,7 @@ type splitBucketPlan struct {
 // Schedule return operators if some bucket is too hot.
 func (s *splitBucketScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	splitBucketScheduleCounter.Inc()
-	conf := s.conf.Clone()
+	conf := s.conf.clone()
 	plan := &splitBucketPlan{
 		conf:               conf,
 		cluster:            cluster,

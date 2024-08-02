@@ -51,6 +51,7 @@ var SetUpRestHandler = func(*Service) (http.Handler, apiutil.APIServiceGroup) {
 
 type dummyRestService struct{}
 
+// ServeHTTP implements the http.Handler interface.
 func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("not implemented"))
@@ -83,6 +84,7 @@ type heartbeatServer struct {
 	closed int32
 }
 
+// Send implements the HeartbeatStream interface.
 func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
@@ -106,7 +108,7 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	}
 }
 
-func (s *heartbeatServer) Recv() (*schedulingpb.RegionHeartbeatRequest, error) {
+func (s *heartbeatServer) recv() (*schedulingpb.RegionHeartbeatRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
@@ -133,7 +135,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 	}()
 
 	for {
-		request, err := server.Recv()
+		request, err := server.recv()
 		if err == io.EOF {
 			return nil
 		}

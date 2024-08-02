@@ -60,10 +60,12 @@ func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleL
 	}
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
@@ -72,6 +74,7 @@ func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	// We shuffle leaders between stores by:
 	// 1. random select a valid store.

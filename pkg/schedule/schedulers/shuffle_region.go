@@ -55,14 +55,17 @@ func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleR
 	}
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *shuffleRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.conf.ServeHTTP(w, r)
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
-	return s.conf.EncodeConfig()
+	return s.conf.encodeConfig()
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (s *shuffleRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -82,6 +85,7 @@ func (s *shuffleRegionScheduler) ReloadConfig() error {
 	return nil
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
@@ -90,6 +94,7 @@ func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleRegionCounter.Inc()
 	region, oldPeer := s.scheduleRemovePeer(cluster)
@@ -122,18 +127,18 @@ func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster sche.SchedulerCluste
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
-	ranges := s.conf.GetRanges()
+	ranges := s.conf.getRanges()
 	for _, source := range candidates.Stores {
 		var region *core.RegionInfo
-		if s.conf.IsRoleAllow(roleFollower) {
+		if s.conf.isRoleAllow(roleFollower) {
 			region = filter.SelectOneRegion(cluster.RandFollowerRegions(source.GetID(), ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}
-		if region == nil && s.conf.IsRoleAllow(roleLeader) {
+		if region == nil && s.conf.isRoleAllow(roleLeader) {
 			region = filter.SelectOneRegion(cluster.RandLeaderRegions(source.GetID(), ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}
-		if region == nil && s.conf.IsRoleAllow(roleLearner) {
+		if region == nil && s.conf.isRoleAllow(roleLearner) {
 			region = filter.SelectOneRegion(cluster.RandLearnerRegions(source.GetID(), ranges), nil,
 				pendingFilter, downFilter, replicaFilter)
 		}

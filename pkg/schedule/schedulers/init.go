@@ -225,7 +225,7 @@ func schedulersRegister() {
 			// For clusters with the initial version >= v5.2, it will be overwritten by the default config.
 			conf.applyPrioritiesConfig(compatiblePrioritiesConfig)
 			// For clusters with the initial version >= v6.4, it will be overwritten by the default config.
-			conf.SetRankFormulaVersion("")
+			conf.setRankFormulaVersion("")
 			if err := decoder(conf); err != nil {
 				return nil, err
 			}

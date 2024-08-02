@@ -64,7 +64,7 @@ func initEvictSlowStoreSchedulerConfig(storage endpoint.ConfigStorage) *evictSlo
 	}
 }
 
-func (conf *evictSlowStoreSchedulerConfig) Clone() *evictSlowStoreSchedulerConfig {
+func (conf *evictSlowStoreSchedulerConfig) clone() *evictSlowStoreSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &evictSlowStoreSchedulerConfig{
@@ -149,12 +149,12 @@ func newEvictSlowStoreHandler(config *evictSlowStoreSchedulerConfig) http.Handle
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
 	return router
 }
 
-func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -178,8 +178,8 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
-func (handler *evictSlowStoreHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -189,14 +189,17 @@ type evictSlowStoreScheduler struct {
 	handler http.Handler
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *evictSlowStoreScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -225,6 +228,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	return nil
 }
 
+// PrepareConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
@@ -233,6 +237,7 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	return nil
 }
 
+// CleanConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
@@ -262,6 +267,7 @@ func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerClu
 	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if s.conf.evictStore() != 0 {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
@@ -273,6 +279,7 @@ func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	return true
 }
 
+// Schedule implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
 
