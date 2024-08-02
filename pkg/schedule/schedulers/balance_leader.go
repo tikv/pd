@@ -64,7 +64,7 @@ type balanceLeaderSchedulerConfig struct {
 	Batch int `json:"batch"`
 }
 
-func (conf *balanceLeaderSchedulerConfig) Update(data []byte) (int, any) {
+func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -154,7 +154,7 @@ func newBalanceLeaderHandler(conf *balanceLeaderSchedulerConfig) http.Handler {
 func (handler *balanceLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
 	data, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	httpCode, v := handler.config.Update(data)
+	httpCode, v := handler.config.update(data)
 	handler.rd.JSON(w, httpCode, v)
 }
 

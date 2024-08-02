@@ -259,18 +259,22 @@ func (h *hotScheduler) ReloadConfig() error {
 	return nil
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
 }
 
+// GetMinInterval implements the Scheduler interface.
 func (*hotScheduler) GetMinInterval() time.Duration {
 	return minHotScheduleInterval
 }
 
+// GetNextInterval implements the Scheduler interface.
 func (h *hotScheduler) GetNextInterval(time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetSchedulerConfig().GetHotRegionScheduleLimit()
 	if !allowed {
@@ -279,6 +283,7 @@ func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	hotSchedulerCounter.Inc()
 	typ := h.randomType()
