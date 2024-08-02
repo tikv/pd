@@ -211,7 +211,7 @@ func TestHotRegionScheduleAbnormalReplica(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetHotRegionScheduleLimit(0)
-	hb, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil)
+	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 
 	tc.AddRegionStore(1, 3)
@@ -359,7 +359,7 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	tc.AddLeaderRegionWithWriteInfo(3, 1, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3})
 	tc.AddLeaderRegionWithWriteInfo(4, 2, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{1, 3})
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{1, 2})
-	hs, err := CreateScheduler(utils.Write.String(), oc, storage, cd)
+	hs, err := CreateScheduler(writeType, oc, storage, cd)
 	re.NoError(err)
 	for i := 0; i < 100; i++ {
 		ops, _ = hs.Schedule(tc, false)
