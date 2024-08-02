@@ -325,12 +325,14 @@ func (conf *hotRegionSchedulerConfig) getHistorySampleInterval() time.Duration {
 	return conf.HistorySampleInterval.Duration
 }
 
+// nolint: unused, unparam
 func (conf *hotRegionSchedulerConfig) setHistorySampleDuration(d time.Duration) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.HistorySampleDuration = typeutil.NewDuration(d)
 }
 
+// nolint: unused
 func (conf *hotRegionSchedulerConfig) setHistorySampleInterval(d time.Duration) {
 	conf.Lock()
 	defer conf.Unlock()
