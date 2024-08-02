@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
@@ -69,8 +70,8 @@ func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf conf
 }
 
 // GetType return MergeChecker's type
-func (*MergeChecker) GetType() string {
-	return "merge-checker"
+func (*MergeChecker) GetType() types.CheckerSchedulerType {
+	return types.MergeChecker
 }
 
 // RecordRegionSplit put the recently split region into cache. MergeChecker

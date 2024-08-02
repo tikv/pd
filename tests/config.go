@@ -36,7 +36,7 @@ type serverConfig struct {
 }
 
 func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
-	tempDir, _ := os.MkdirTemp("/tmp", "pd-tests")
+	tempDir, _ := os.MkdirTemp(os.TempDir(), "pd-tests")
 	return &serverConfig{
 		Name:          name,
 		DataDir:       tempDir,

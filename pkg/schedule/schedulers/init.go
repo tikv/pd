@@ -75,7 +75,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = BalanceRegionName
 			return nil
 		}
 	})
@@ -282,7 +281,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = LabelName
 			return nil
 		}
 	})
@@ -307,7 +305,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = RandomMergeName
 			return nil
 		}
 	})
@@ -370,7 +367,6 @@ func schedulersRegister() {
 				}
 				conf.Limit = limit
 			}
-			conf.Name = ShuffleHotRegionName
 			return nil
 		}
 	})

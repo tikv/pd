@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -42,6 +43,8 @@ const (
 	// EvictLeaderType is evict leader scheduler type.
 	EvictLeaderType        = "user-evict-leader"
 	noStoreInSchedulerInfo = "No store in user-evict-leader-scheduler-config"
+
+	UserEvictLeaderScheduler types.CheckerSchedulerType = "user-evict-leader-scheduler"
 )
 
 func init() {
@@ -127,18 +130,13 @@ func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
 
 // Persist saves the config.
 func (conf *evictLeaderSchedulerConfig) Persist() error {
-	name := conf.getScheduleName()
 	conf.mu.RLock()
 	defer conf.mu.RUnlock()
 	data, err := schedulers.EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*evictLeaderSchedulerConfig) getScheduleName() string {
-	return EvictLeaderName
+	return conf.storage.SaveSchedulerConfig(EvictLeaderName, data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -160,7 +158,7 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedulers.Scheduler {
-	base := schedulers.NewBaseScheduler(opController)
+	base := schedulers.NewBaseScheduler(opController, UserEvictLeaderScheduler)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
@@ -174,17 +172,6 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-// GetName returns the scheduler name.
-func (*evictLeaderScheduler) GetName() string {
-	return EvictLeaderName
-}
-
-// GetType returns the scheduler type.
-func (*evictLeaderScheduler) GetType() string {
-	return EvictLeaderType
-}
-
-// EncodeConfig serializes the config.
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -217,7 +204,7 @@ func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }

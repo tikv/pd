@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -669,10 +670,11 @@ func (o *PersistOptions) GetSchedulers() sc.SchedulerConfigs {
 }
 
 // IsSchedulerDisabled returns if the scheduler is disabled.
-func (o *PersistOptions) IsSchedulerDisabled(t string) bool {
+func (o *PersistOptions) IsSchedulerDisabled(tp types.CheckerSchedulerType) bool {
+	oldType := types.SchedulerTypeCompatibleMap[tp]
 	schedulers := o.GetScheduleConfig().Schedulers
 	for _, s := range schedulers {
-		if t == s.Type {
+		if oldType == s.Type {
 			return s.Disable
 		}
 	}
@@ -690,33 +692,35 @@ func (o *PersistOptions) GetHotRegionsReservedDays() uint64 {
 }
 
 // AddSchedulerCfg adds the scheduler configurations.
-func (o *PersistOptions) AddSchedulerCfg(tp string, args []string) {
+func (o *PersistOptions) AddSchedulerCfg(tp types.CheckerSchedulerType, args []string) {
+	oldType := types.SchedulerTypeCompatibleMap[tp]
 	v := o.GetScheduleConfig().Clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// comparing args is to cover the case that there are schedulers in same type but not with same name
 		// such as two schedulers of type "evict-leader",
 		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: tp, Args: args, Disable: false}) {
+		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false}) {
 			return
 		}
 
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: tp, Args: args, Disable: true}) {
+		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
 			schedulerCfg.Disable = false
 			v.Schedulers[i] = schedulerCfg
 			o.SetScheduleConfig(v)
 			return
 		}
 	}
-	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: tp, Args: args, Disable: false})
+	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false})
 	o.SetScheduleConfig(v)
 }
 
 // RemoveSchedulerCfg removes the scheduler configurations.
-func (o *PersistOptions) RemoveSchedulerCfg(tp string) {
+func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
+	oldType := types.SchedulerTypeCompatibleMap[tp]
 	v := o.GetScheduleConfig().Clone()
 	for i, schedulerCfg := range v.Schedulers {
-		if tp == schedulerCfg.Type {
-			if sc.IsDefaultScheduler(tp) {
+		if oldType == schedulerCfg.Type {
+			if sc.IsDefaultScheduler(oldType) {
 				schedulerCfg.Disable = true
 				v.Schedulers[i] = schedulerCfg
 			} else {
