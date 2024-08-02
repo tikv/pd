@@ -111,9 +111,9 @@
 
 [schedule]
 ## Controls the size limit of Region Merge.
-# max-merge-region-size = 20
+# max-merge-region-size = 54
 ## Specifies the upper limit of the Region Merge key.
-# max-merge-region-keys = 200000
+# max-merge-region-keys = 540000
 ## Controls the time interval between the split and merge operations on the same Region.
 # split-merge-interval = "1h"
 ## When PD fails to receive the heartbeat from a store after the specified period of time,
