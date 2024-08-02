@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -92,18 +93,13 @@ func (conf *grantHotRegionSchedulerConfig) Clone() *grantHotRegionSchedulerConfi
 }
 
 func (conf *grantHotRegionSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
 	conf.RLock()
 	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*grantHotRegionSchedulerConfig) getSchedulerName() string {
-	return GrantHotRegionName
+	return conf.storage.SaveSchedulerConfig(types.GrantHotRegionScheduler.String(), data)
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {
@@ -133,6 +129,7 @@ type grantHotRegionScheduler struct {
 func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHotRegionSchedulerConfig) *grantHotRegionScheduler {
 	base := newBaseHotScheduler(opController,
 		statistics.DefaultHistorySampleDuration, statistics.DefaultHistorySampleInterval)
+	base.tp = types.GrantHotRegionScheduler
 	handler := newGrantHotRegionHandler(conf)
 	ret := &grantHotRegionScheduler{
 		baseHotScheduler: base,
@@ -140,14 +137,6 @@ func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHo
 		handler:          handler,
 	}
 	return ret
-}
-
-func (*grantHotRegionScheduler) GetName() string {
-	return GrantHotRegionName
-}
-
-func (*grantHotRegionScheduler) GetType() string {
-	return GrantHotRegionType
 }
 
 func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -180,10 +169,10 @@ func (s *grantHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
 	if !regionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRegion)
 	}
 	if !leaderAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return regionAllowed && leaderAllowed
 }

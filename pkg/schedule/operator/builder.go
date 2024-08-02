@@ -959,6 +959,7 @@ func (p stepPlan) String() string {
 		p.leaderBeforeAdd, p.add, p.promote, p.leaderBeforeRemove, p.demote, p.remove, p.nonWitness, p.promoteNonWitness, p.witness)
 }
 
+// IsEmpty checks if the plan is empty.
 func (p stepPlan) IsEmpty() bool {
 	return p.promote == nil && p.demote == nil && p.add == nil && p.remove == nil && p.nonWitness == nil && p.promoteNonWitness == nil && p.witness == nil
 }

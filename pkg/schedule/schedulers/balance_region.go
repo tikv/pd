@@ -38,7 +38,6 @@ const (
 )
 
 type balanceRegionSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -46,6 +45,7 @@ type balanceRegionSchedulerConfig struct {
 type balanceRegionScheduler struct {
 	*BaseScheduler
 	*retryQuota
+	name          string
 	conf          *balanceRegionSchedulerConfig
 	filters       []filter.Filter
 	filterCounter *filter.Counter
@@ -54,12 +54,11 @@ type balanceRegionScheduler struct {
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on
 // each store balanced.
 func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) Scheduler {
-	base := NewBaseScheduler(opController)
 	scheduler := &balanceRegionScheduler{
-		BaseScheduler: base,
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceRegionScheduler),
 		retryQuota:    newRetryQuota(),
+		name:          types.BalanceRegionScheduler.String(),
 		conf:          conf,
-		filterCounter: filter.NewCounter(types.BalanceRegionScheduler.String()),
 	}
 	for _, setOption := range opts {
 		setOption(scheduler)
@@ -68,6 +67,7 @@ func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceR
 		&filter.StoreStateFilter{ActionScope: scheduler.GetName(), MoveRegion: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(scheduler.GetName()),
 	}
+	scheduler.filterCounter = filter.NewCounter(scheduler.GetName())
 	return scheduler
 }
 
@@ -77,23 +77,8 @@ type BalanceRegionCreateOption func(s *balanceRegionScheduler)
 // WithBalanceRegionName sets the name for the scheduler.
 func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	return func(s *balanceRegionScheduler) {
-		s.conf.Name = name
+		s.name = name
 	}
-}
-
-// WithBalanceRegionFilterCounterName sets the filter counter name for the scheduler.
-func WithBalanceRegionFilterCounterName(name string) BalanceRegionCreateOption {
-	return func(s *balanceRegionScheduler) {
-		s.filterCounter.SetScope(name)
-	}
-}
-
-func (s *balanceRegionScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*balanceRegionScheduler) GetType() string {
-	return BalanceRegionType
 }
 
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -103,7 +88,7 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRegion)
 	}
 	return allowed
 }

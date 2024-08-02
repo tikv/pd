@@ -27,6 +27,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -86,7 +87,6 @@ func (conf *evictSlowTrendSchedulerConfig) Clone() *evictSlowTrendSchedulerConfi
 }
 
 func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
-	name := EvictSlowTrendName
 	data, err := EncodeConfig(conf)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
@@ -94,7 +94,7 @@ func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+	return conf.storage.SaveSchedulerConfig(types.EvictSlowTrendScheduler.String(), data)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
@@ -295,14 +295,6 @@ func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*evictSlowTrendScheduler) GetName() string {
-	return EvictSlowTrendName
-}
-
-func (*evictSlowTrendScheduler) GetType() string {
-	return EvictSlowTrendType
-}
-
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
@@ -374,7 +366,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 		return nil
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
 func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
@@ -383,7 +375,7 @@ func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluste
 	}
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
@@ -459,7 +451,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	handler := newEvictSlowTrendHandler(conf)
 	return &evictSlowTrendScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler),
 		conf:          conf,
 		handler:       handler,
 	}

@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 )
 
 const (
@@ -46,7 +47,7 @@ func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleR
 		&filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(ShuffleRegionName),
 	}
-	base := NewBaseScheduler(opController)
+	base := NewBaseScheduler(opController, types.ShuffleRegionScheduler)
 	return &shuffleRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,
@@ -56,14 +57,6 @@ func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleR
 
 func (s *shuffleRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.conf.ServeHTTP(w, r)
-}
-
-func (*shuffleRegionScheduler) GetName() string {
-	return ShuffleRegionName
-}
-
-func (*shuffleRegionScheduler) GetType() string {
-	return ShuffleRegionType
 }
 
 func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
@@ -92,7 +85,7 @@ func (s *shuffleRegionScheduler) ReloadConfig() error {
 func (s *shuffleRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRegion)
 	}
 	return allowed
 }

@@ -128,6 +128,7 @@ func NewCounter(scope string) *Counter {
 	return &Counter{counter: counter, scope: scope}
 }
 
+// SetScope sets the scope for the counter.
 func (c *Counter) SetScope(scope string) {
 	c.scope = scope
 }

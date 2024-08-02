@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"go.uber.org/zap"
 )
 
@@ -35,7 +36,6 @@ const (
 )
 
 type labelSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -50,17 +50,9 @@ type labelScheduler struct {
 // the store with the specific label.
 func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerConfig) Scheduler {
 	return &labelScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController, types.LabelScheduler),
 		conf:          conf,
 	}
-}
-
-func (s *labelScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*labelScheduler) GetType() string {
-	return LabelType
 }
 
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {
@@ -70,7 +62,7 @@ func (s *labelScheduler) EncodeConfig() ([]byte, error) {
 func (s *labelScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }

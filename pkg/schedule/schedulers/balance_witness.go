@@ -163,7 +163,6 @@ func (handler *balanceWitnessHandler) ListConfig(w http.ResponseWriter, _ *http.
 type balanceWitnessScheduler struct {
 	*BaseScheduler
 	*retryQuota
-	name          string
 	conf          *balanceWitnessSchedulerConfig
 	handler       http.Handler
 	filters       []filter.Filter
@@ -174,11 +173,9 @@ type balanceWitnessScheduler struct {
 // newBalanceWitnessScheduler creates a scheduler that tends to keep witnesses on
 // each store balanced.
 func newBalanceWitnessScheduler(opController *operator.Controller, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) Scheduler {
-	base := NewBaseScheduler(opController)
 	s := &balanceWitnessScheduler{
-		BaseScheduler: base,
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceWitnessScheduler),
 		retryQuota:    newRetryQuota(),
-		name:          BalanceWitnessName,
 		conf:          conf,
 		handler:       newBalanceWitnessHandler(conf),
 		counter:       balanceWitnessCounter,
@@ -206,21 +203,6 @@ func WithBalanceWitnessCounter(counter *prometheus.CounterVec) BalanceWitnessCre
 	return func(s *balanceWitnessScheduler) {
 		s.counter = counter
 	}
-}
-
-// WithBalanceWitnessName sets the name for the scheduler.
-func WithBalanceWitnessName(name string) BalanceWitnessCreateOption {
-	return func(s *balanceWitnessScheduler) {
-		s.name = name
-	}
-}
-
-func (b *balanceWitnessScheduler) GetName() string {
-	return b.name
-}
-
-func (*balanceWitnessScheduler) GetType() string {
-	return BalanceWitnessType
 }
 
 func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
@@ -251,7 +233,7 @@ func (b *balanceWitnessScheduler) ReloadConfig() error {
 func (b *balanceWitnessScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := b.OpController.OperatorCount(operator.OpWitness) < cluster.GetSchedulerConfig().GetWitnessScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(b.GetType(), operator.OpWitness.String()).Inc()
+		operator.IncOperatorLimitCounter(b.GetType(), operator.OpWitness)
 	}
 	return allowed
 }

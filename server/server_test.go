@@ -280,7 +280,7 @@ func TestIsPathInDirectory(t *testing.T) {
 	path := filepath.Join(directory, fileName)
 	re.True(isPathInDirectory(path, directory))
 
-	fileName = "../../test"
+	fileName = filepath.Join("..", "..", "test")
 	path = filepath.Join(directory, fileName)
 	re.False(isPathInDirectory(path, directory))
 }
