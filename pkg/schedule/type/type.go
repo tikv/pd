@@ -98,11 +98,11 @@ var (
 		LabelScheduler:                 "label",
 	}
 
-	// SchedulerTypeCompatibleMapReverse exists for compatibility.
+	// ConvertOldStr2Type exists for compatibility.
 	//
 	//	It is used in the `PersistOptions` and `PersistConfig`. These two structs
 	//	are persisted in the storage, so we need to keep the compatibility.
-	SchedulerTypeCompatibleMapReverse = map[string]CheckerSchedulerType{
+	ConvertOldStr2Type = map[string]CheckerSchedulerType{
 		"balance-leader":          BalanceLeaderScheduler,
 		"balance-region":          BalanceRegionScheduler,
 		"balance-witness":         BalanceWitnessScheduler,

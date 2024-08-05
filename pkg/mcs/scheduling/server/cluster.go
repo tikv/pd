@@ -309,7 +309,7 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
-			schedulerType := types.SchedulerTypeCompatibleMapReverse[scheduler.Type]
+			schedulerType := types.ConvertOldStr2Type[scheduler.Type]
 			s, err := schedulers.CreateScheduler(
 				schedulerType,
 				c.coordinator.GetOperatorController(),

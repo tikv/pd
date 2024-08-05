@@ -320,11 +320,11 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			continue
 		}
 
-		tp := types.SchedulerStr2Type[schedulerCfg.Type]
+		tp := types.ConvertOldStr2Type[schedulerCfg.Type]
 		s, err := schedulers.CreateScheduler(tp, c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), c.schedulers.RemoveScheduler)
 		if err != nil {
-			log.Error("can not create scheduler", zap.Stringer("scheduler-type", tp),
+			log.Error("can not create scheduler", zap.Stringer("type", tp), zap.String("scheduler-type", schedulerCfg.Type),
 				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
 		}
