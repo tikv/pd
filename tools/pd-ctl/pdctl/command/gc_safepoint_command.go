@@ -23,10 +23,6 @@ import (
 	"github.com/tikv/pd/server/api"
 )
 
-var (
-	serviceGCSafepointPrefix = "pd/api/v1/gc/safepoint"
-)
-
 // NewServiceGCSafepointCommand return a service gc safepoint subcommand of rootCmd
 func NewServiceGCSafepointCommand() *cobra.Command {
 	l := &cobra.Command{
@@ -50,12 +46,13 @@ func NewDeleteServiceGCSafepointCommand() *cobra.Command {
 }
 
 func showSSPs(cmd *cobra.Command, _ []string) {
-	r, err := doRequest(cmd, serviceGCSafepointPrefix, http.MethodGet, http.Header{})
+	// r, err := doRequest(cmd, serviceGCSafepointPrefix, http.MethodGet, http.Header{})
+	r, err := PDCli.GetGCSafePoint(cmd.Context())
 	if err != nil {
 		cmd.Printf("Failed to get service GC safepoint: %s\n", err)
 		return
 	}
-	var safepoint api.ListServiceGCSafepoint
+	var safepoint Safepoint
 	if err := json.Unmarshal([]byte(r), &safepoint); err != nil {
 		cmd.Printf("Failed to unmarshal service GC safepoint: %s\n", err)
 		return
@@ -76,9 +73,10 @@ func deleteSSP(cmd *cobra.Command, args []string) {
 		cmd.Usage()
 		return
 	}
-	serviceID := args[0]
-	deleteURL := serviceGCSafepointPrefix + "/" + serviceID
-	r, err := doRequest(cmd, deleteURL, http.MethodDelete, http.Header{})
+	// serviceID := args[0]
+	// deleteURL := serviceGCSafepointPrefix + "/" + serviceID
+	// r, err := doRequest(cmd, deleteURL, http.MethodDelete, http.Header{})
+	r, err := PDCli.DeleteGCSafePoint(cmd.Context(), args[0])
 	if err != nil {
 		cmd.Printf("Failed to delete service GC safepoint: %s\n", err)
 		return

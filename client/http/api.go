@@ -84,6 +84,8 @@ const (
 	// Keyspace
 	KeyspaceConfig        = "/pd/api/v2/keyspaces/%s/config"
 	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
+	// safepoint
+	GCSafepoint = "pd/api/v1/gc/safepoint"
 )
 
 // RegionByID returns the path of PD HTTP API to get region by ID.

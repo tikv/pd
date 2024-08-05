@@ -643,3 +643,9 @@ type Health struct {
 	ClientUrls []string `json:"client_urls"`
 	Health     bool     `json:"health"`
 }
+
+type Safepoint struct {
+	ServiceGCSafepoints   []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
+	MinServiceGcSafepoint uint64                       `json:"min_service_gc_safe_point,omitempty"`
+	GCSafePoint           uint64                       `json:"gc_safe_point"`
+}

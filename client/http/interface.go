@@ -128,6 +128,10 @@ type Client interface {
 	WithTargetURL(string) Client
 	// Close gracefully closes the HTTP client.
 	Close()
+
+	//safepoint
+	GetGCSafePoint(context.Context) (Safepoint, error)
+	DeleteGCSafePoint(context.Context, string) (string, error)
 }
 
 var _ Client = (*client)(nil)
@@ -1023,4 +1027,30 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 		State:          keyspaceState,
 	}
 	return &keyspaceMetaPB, nil
+}
+
+func (c *client) GetGCSafePoint(ctx context.Context) (Safepoint ,error) {
+	var sfp Safepoint
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetGCSafePointName).
+		WithURI(GCSafepoint).
+		WithMethod(http.MethodGet).
+		WithResp(&sfp))
+	if err != nil {
+		return nil, err
+	}
+	return sfp, nil
+}
+
+func (c *client) DeleteGCSafePoint(ctx context.Context, serviceID string) (string ,error) {
+	var msg string
+	err := c.request(ctx, newRequestInfo().
+		WithName(DeleteGCSafePointName).
+		WithURI(GCSafepoint + "/" + serviceID).
+		WithMethod(http.MethodDelete).
+		WithResp(&msg))
+	if err != nil {
+		return nil, err
+	}
+	return msg, nil
 }
