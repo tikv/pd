@@ -65,6 +65,7 @@ type taskID struct {
 	name string
 }
 
+// ConcurrentRunner is a task runner that limits the number of concurrent tasks.
 type ConcurrentRunner struct {
 	ctx                context.Context
 	cancel             context.CancelFunc
@@ -90,7 +91,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		pendingTaskCount:   make(map[string]int),
 		existTasks:         make(map[taskID]*Task),
-		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
+		maxWaitingDuration: runnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
 }
@@ -136,7 +137,7 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 					maxDuration = time.Since(cr.pendingTasks[0].submittedAt)
 				}
 				for taskName, cnt := range cr.pendingTaskCount {
-					RunnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
+					runnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
 				}
 				cr.pendingMu.Unlock()
 				cr.maxWaitingDuration.Set(maxDuration.Seconds())
@@ -157,8 +158,8 @@ func (cr *ConcurrentRunner) run(ctx context.Context, task *Task, token *TaskToke
 		cr.limiter.ReleaseToken(token)
 		cr.processPendingTasks()
 	}
-	RunnerTaskExecutionDuration.WithLabelValues(cr.name, task.name).Observe(time.Since(start).Seconds())
-	RunnerSucceededTasks.WithLabelValues(cr.name, task.name).Inc()
+	runnerTaskExecutionDuration.WithLabelValues(cr.name, task.name).Observe(time.Since(start).Seconds())
+	runnerSucceededTasks.WithLabelValues(cr.name, task.name).Inc()
 }
 
 func (cr *ConcurrentRunner) processPendingTasks() {
@@ -214,12 +215,12 @@ func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Conte
 		if !task.retained {
 			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
 			if maxWait > cr.maxPendingDuration {
-				RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+				runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 				return ErrMaxWaitingTasksExceeded
 			}
 		}
 		if pendingTaskNum > maxPendingTaskNum {
-			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+			runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 			return ErrMaxWaitingTasksExceeded
 		}
 	}

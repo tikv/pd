@@ -94,6 +94,7 @@ func NewTSOServiceCommand() *cobra.Command {
 		Short: "Run the TSO service",
 		Run:   tso.CreateServerWrapper,
 	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this tso member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
@@ -114,6 +115,7 @@ func NewSchedulingServiceCommand() *cobra.Command {
 		Short: "Run the scheduling service",
 		Run:   scheduling.CreateServerWrapper,
 	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this scheduling member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
@@ -134,6 +136,7 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 		Short: "Run the resource manager service",
 		Run:   resource_manager.CreateServerWrapper,
 	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this resource manager member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")

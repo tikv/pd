@@ -94,7 +94,7 @@ func CleanServer(dataDir string) {
 // InitTempFileLogger initializes the logger and redirects the log output to a temporary file.
 func InitTempFileLogger(level string) (fname string) {
 	cfg := &log.Config{}
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	f, _ := os.CreateTemp(os.TempDir(), "pd_tests")
 	fname = f.Name()
 	f.Close()
 	cfg.File.Filename = fname

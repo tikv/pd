@@ -17,7 +17,7 @@ package join
 import (
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -90,7 +90,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.New("join self is forbidden")
 	}
 
-	filePath := path.Join(cfg.DataDir, "join")
+	filePath := filepath.Join(cfg.DataDir, "join")
 	// Read the persist join config
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := os.ReadFile(filePath)
@@ -104,7 +104,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	initialCluster := ""
 	// Cases with data directory.
-	if isDataExist(path.Join(cfg.DataDir, "member")) {
+	if isDataExist(filepath.Join(cfg.DataDir, "member")) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil
@@ -154,7 +154,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	var addResp *clientv3.MemberAddResponse
 
-	failpoint.Inject("add-member-failed", func() {
+	failpoint.Inject("addMemberFailed", func() {
 		listMemberRetryTimes = 2
 		failpoint.Goto("LabelSkipAddMember")
 	})

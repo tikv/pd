@@ -78,7 +78,7 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = os.MkdirTemp("/tmp", "test_pd")
+	cfg.DataDir, _ = os.MkdirTemp(os.TempDir(), "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.DisableStrictReconfigCheck = true
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)

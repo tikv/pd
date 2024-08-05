@@ -158,7 +158,7 @@ func summaryStoresLoadByEngine(
 		store := info.StoreInfo
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
-		if !ok || !collector.Filter(info, kind) {
+		if !ok || !collector.filter(info, kind) {
 			continue
 		}
 
@@ -172,7 +172,7 @@ func summaryStoresLoadByEngine(
 			}
 			hotPeers = append(hotPeers, peer.Clone())
 		}
-		currentLoads := collector.GetLoads(storeLoads, peerLoadSum, rwTy, kind)
+		currentLoads := collector.getLoads(storeLoads, peerLoadSum, rwTy, kind)
 
 		var historyLoads [][]float64
 		if storesHistoryLoads != nil {
@@ -240,7 +240,7 @@ func summaryStoresLoadByEngine(
 
 	{
 		// Metric for debug.
-		engine := collector.Engine()
+		engine := collector.engine()
 		ty := "exp-byte-rate-" + rwTy.String() + "-" + kind.String()
 		hotPeerSummary.WithLabelValues(ty, engine).Set(expectLoads[utils.ByteDim])
 		ty = "exp-key-rate-" + rwTy.String() + "-" + kind.String()
