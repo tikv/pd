@@ -46,7 +46,7 @@ import (
 
 const (
 	// HotRegionName is balance hot region scheduler name.
-	HotRegionName = "balance-hot-region-scheduler"
+	HotRegionName           = "balance-hot-region-scheduler"
 	splitHotReadBuckets     = "split-hot-read-region"
 	splitHotWriteBuckets    = "split-hot-write-region"
 	splitProgressiveRank    = 5
