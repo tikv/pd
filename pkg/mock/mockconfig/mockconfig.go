@@ -20,20 +20,11 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-// oldName2NewType is used to convert old scheduler name to new scheduler type.
-// It is just used for testing.
-var oldName2NewType = map[string]types.CheckerSchedulerType{
-	"balance-leader":   types.BalanceLeaderScheduler,
-	"balance-region":   types.BalanceRegionScheduler,
-	"hot-region":       types.BalanceHotRegionScheduler,
-	"evict-slow-store": types.EvictLeaderScheduler,
-}
-
 // NewTestOptions creates default options for testing.
 func NewTestOptions() *config.PersistOptions {
 	// register default schedulers in case config check fail.
 	for _, d := range sc.DefaultSchedulers {
-		sc.RegisterScheduler(oldName2NewType[d.Type])
+		sc.RegisterScheduler(types.ConvertOldStr2Type[d.Type])
 	}
 	c := config.NewConfig()
 	c.Adjust(nil, false)
