@@ -55,8 +55,8 @@ type Cluster struct {
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
-	ID             uint64
-	suspectRegions map[uint64]struct{}
+	ID                      uint64
+	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
 }
@@ -64,14 +64,14 @@ type Cluster struct {
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	c := &Cluster{
-		ctx:            ctx,
-		BasicCluster:   core.NewBasicCluster(),
-		IDAllocator:    mockid.NewIDAllocator(),
-		HotStat:        statistics.NewHotStat(ctx),
-		HotBucketCache: buckets.NewBucketsCache(ctx),
-		PersistOptions: opts,
-		suspectRegions: map[uint64]struct{}{},
-		Storage:        storage.NewStorageWithMemoryBackend(),
+		ctx:                     ctx,
+		BasicCluster:            core.NewBasicCluster(),
+		IDAllocator:             mockid.NewIDAllocator(),
+		HotStat:                 statistics.NewHotStat(ctx),
+		HotBucketCache:          buckets.NewBucketsCache(ctx),
+		PersistOptions:          opts,
+		pendingProcessedRegions: map[uint64]struct{}{},
+		Storage:                 storage.NewStorageWithMemoryBackend(),
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -844,27 +844,27 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	mc.PutStore(newStore)
 }
 
-// AddSuspectRegions mock method
-func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
+// AddPendingProcessedRegions mock method
+func (mc *Cluster) AddPendingProcessedRegions(ids ...uint64) {
 	for _, id := range ids {
-		mc.suspectRegions[id] = struct{}{}
+		mc.pendingProcessedRegions[id] = struct{}{}
 	}
+}
+
+// CheckPendingProcessedRegions only used for unit test
+func (mc *Cluster) CheckPendingProcessedRegions(id uint64) bool {
+	_, ok := mc.pendingProcessedRegions[id]
+	return ok
+}
+
+// ResetPendingProcessedRegions only used for unit test
+func (mc *Cluster) ResetPendingProcessedRegions() {
+	mc.pendingProcessedRegions = map[uint64]struct{}{}
 }
 
 // GetBasicCluster mock method
 func (mc *Cluster) GetBasicCluster() *core.BasicCluster {
 	return mc.BasicCluster
-}
-
-// CheckRegionUnderSuspect only used for unit test
-func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
-	_, ok := mc.suspectRegions[id]
-	return ok
-}
-
-// ResetSuspectRegions only used for unit test
-func (mc *Cluster) ResetSuspectRegions() {
-	mc.suspectRegions = map[uint64]struct{}{}
 }
 
 // GetRegionByKey get region by key

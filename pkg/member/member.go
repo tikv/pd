@@ -187,7 +187,13 @@ func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout in
 		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
 	})
 
-	if m.leadership.GetCampaignTimesNum() > campaignLeaderFrequencyTimes {
+	checkTimes := campaignLeaderFrequencyTimes
+	failpoint.Inject("changeFrequencyTimes", func(val failpoint.Value) {
+		if v, ok := val.(int); ok {
+			checkTimes = v
+		}
+	})
+	if m.leadership.GetCampaignTimesNum() > checkTimes {
 		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
 			return err
 		}

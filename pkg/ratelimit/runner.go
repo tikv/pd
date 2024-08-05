@@ -42,8 +42,8 @@ const (
 
 // Runner is the interface for running tasks.
 type Runner interface {
-	RunTask(id uint64, name string, f func(), opts ...TaskOption) error
-	Start()
+	RunTask(id uint64, name string, f func(context.Context), opts ...TaskOption) error
+	Start(ctx context.Context)
 	Stop()
 }
 
@@ -51,7 +51,7 @@ type Runner interface {
 type Task struct {
 	id          uint64
 	submittedAt time.Time
-	f           func()
+	f           func(context.Context)
 	name        string
 	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
 	retained bool
@@ -65,13 +65,15 @@ type taskID struct {
 	name string
 }
 
+// ConcurrentRunner is a task runner that limits the number of concurrent tasks.
 type ConcurrentRunner struct {
+	ctx                context.Context
+	cancel             context.CancelFunc
 	name               string
 	limiter            *ConcurrencyLimiter
 	maxPendingDuration time.Duration
 	taskChan           chan *Task
 	pendingMu          sync.Mutex
-	stopChan           chan struct{}
 	wg                 sync.WaitGroup
 	pendingTaskCount   map[string]int
 	pendingTasks       []*Task
@@ -89,7 +91,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		pendingTaskCount:   make(map[string]int),
 		existTasks:         make(map[taskID]*Task),
-		maxWaitingDuration: RunnerTaskMaxWaitingDuration.WithLabelValues(name),
+		maxWaitingDuration: runnerTaskMaxWaitingDuration.WithLabelValues(name),
 	}
 	return s
 }
@@ -103,8 +105,8 @@ func WithRetained(retained bool) TaskOption {
 }
 
 // Start starts the runner.
-func (cr *ConcurrentRunner) Start() {
-	cr.stopChan = make(chan struct{})
+func (cr *ConcurrentRunner) Start(ctx context.Context) {
+	cr.ctx, cr.cancel = context.WithCancel(ctx)
 	cr.wg.Add(1)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -118,11 +120,11 @@ func (cr *ConcurrentRunner) Start() {
 					if err != nil {
 						continue
 					}
-					go cr.run(task, token)
+					go cr.run(cr.ctx, task, token)
 				} else {
-					go cr.run(task, nil)
+					go cr.run(cr.ctx, task, nil)
 				}
-			case <-cr.stopChan:
+			case <-cr.ctx.Done():
 				cr.pendingMu.Lock()
 				cr.pendingTasks = make([]*Task, 0, initialCapacity)
 				cr.pendingMu.Unlock()
@@ -135,7 +137,7 @@ func (cr *ConcurrentRunner) Start() {
 					maxDuration = time.Since(cr.pendingTasks[0].submittedAt)
 				}
 				for taskName, cnt := range cr.pendingTaskCount {
-					RunnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
+					runnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
 				}
 				cr.pendingMu.Unlock()
 				cr.maxWaitingDuration.Set(maxDuration.Seconds())
@@ -144,15 +146,20 @@ func (cr *ConcurrentRunner) Start() {
 	}()
 }
 
-func (cr *ConcurrentRunner) run(task *Task, token *TaskToken) {
+func (cr *ConcurrentRunner) run(ctx context.Context, task *Task, token *TaskToken) {
 	start := time.Now()
-	task.f()
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	task.f(ctx)
 	if token != nil {
 		cr.limiter.ReleaseToken(token)
 		cr.processPendingTasks()
 	}
-	RunnerTaskExecutionDuration.WithLabelValues(cr.name, task.name).Observe(time.Since(start).Seconds())
-	RunnerSucceededTasks.WithLabelValues(cr.name, task.name).Inc()
+	runnerTaskExecutionDuration.WithLabelValues(cr.name, task.name).Observe(time.Since(start).Seconds())
+	runnerSucceededTasks.WithLabelValues(cr.name, task.name).Inc()
 }
 
 func (cr *ConcurrentRunner) processPendingTasks() {
@@ -173,12 +180,12 @@ func (cr *ConcurrentRunner) processPendingTasks() {
 
 // Stop stops the runner.
 func (cr *ConcurrentRunner) Stop() {
-	close(cr.stopChan)
+	cr.cancel()
 	cr.wg.Wait()
 }
 
 // RunTask runs the task asynchronously.
-func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(), opts ...TaskOption) error {
+func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Context), opts ...TaskOption) error {
 	task := &Task{
 		id:          id,
 		name:        name,
@@ -208,12 +215,12 @@ func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(), opts ...Ta
 		if !task.retained {
 			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
 			if maxWait > cr.maxPendingDuration {
-				RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+				runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 				return ErrMaxWaitingTasksExceeded
 			}
 		}
 		if pendingTaskNum > maxPendingTaskNum {
-			RunnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
+			runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
 			return ErrMaxWaitingTasksExceeded
 		}
 	}
@@ -232,13 +239,13 @@ func NewSyncRunner() *SyncRunner {
 }
 
 // RunTask runs the task synchronously.
-func (*SyncRunner) RunTask(_ uint64, _ string, f func(), _ ...TaskOption) error {
-	f()
+func (*SyncRunner) RunTask(_ uint64, _ string, f func(context.Context), _ ...TaskOption) error {
+	f(context.Background())
 	return nil
 }
 
 // Start starts the runner.
-func (*SyncRunner) Start() {}
+func (*SyncRunner) Start(context.Context) {}
 
 // Stop stops the runner.
 func (*SyncRunner) Stop() {}

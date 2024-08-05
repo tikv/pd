@@ -41,10 +41,12 @@ type memoryKVItem struct {
 	key, value string
 }
 
+// Less compares two memoryKVItem.
 func (s *memoryKVItem) Less(than *memoryKVItem) bool {
 	return s.key < than.key
 }
 
+// Load loads the value for the key.
 func (kv *memoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
@@ -55,6 +57,7 @@ func (kv *memoryKV) Load(key string) (string, error) {
 	return item.value, nil
 }
 
+// LoadRange loads the keys in the range of [key, endKey).
 func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	failpoint.Inject("withRangeLimit", func(val failpoint.Value) {
 		rangeLimit, ok := val.(int)
@@ -77,6 +80,7 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	return keys, values, nil
 }
 
+// Save saves the key-value pair.
 func (kv *memoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
@@ -84,6 +88,7 @@ func (kv *memoryKV) Save(key, value string) error {
 	return nil
 }
 
+// Remove removes the key.
 func (kv *memoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()

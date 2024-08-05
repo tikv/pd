@@ -97,6 +97,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
 	suite.backendEndpoints = suite.pdLeaderServer.GetAddr()
@@ -331,10 +332,12 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 		// Resign leader to trigger the TSO resetting.
 		re.NoError(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"))
 		oldLeaderName := suite.cluster.WaitLeader()
+		re.NotEmpty(oldLeaderName)
 		err := suite.cluster.GetServer(oldLeaderName).ResignLeader()
 		re.NoError(err)
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/updateAfterResetTSO"))
 		newLeaderName := suite.cluster.WaitLeader()
+		re.NotEmpty(newLeaderName)
 		re.NotEqual(oldLeaderName, newLeaderName)
 		// Request a new TSO.
 		testutil.Eventually(re, func() bool {
@@ -494,6 +497,7 @@ func TestMixedTSODeployment(t *testing.T) {
 	re.NoError(err)
 
 	leaderServer := cluster.GetServer(cluster.WaitLeader())
+	re.NotNil(leaderServer)
 	backendEndpoints := leaderServer.GetAddr()
 
 	apiSvr, err := cluster.JoinAPIServer(ctx)
@@ -516,6 +520,7 @@ func TestMixedTSODeployment(t *testing.T) {
 			time.Sleep(time.Duration(n) * time.Second)
 			leaderServer.ResignLeader()
 			leaderServer = cluster.GetServer(cluster.WaitLeader())
+			re.NotNil(leaderServer)
 		}
 		cancel1()
 	}()
@@ -534,6 +539,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	err = apiCluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := apiCluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	pdLeader := apiCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 

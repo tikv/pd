@@ -38,7 +38,7 @@ func TestMember(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	pdAddr := cluster.GetConfig().GetClientURL()
@@ -67,7 +67,7 @@ func TestMember(t *testing.T) {
 	})
 
 	// member leader resign
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	args = []string{"-u", pdAddr, "member", "leader", "resign"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.Contains(string(output), "Success")
@@ -77,7 +77,7 @@ func TestMember(t *testing.T) {
 	})
 
 	// member leader_priority <member_name> <priority>
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	args = []string{"-u", pdAddr, "member", "leader_priority", name, "100"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)

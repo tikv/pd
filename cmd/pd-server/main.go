@@ -136,7 +136,7 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 		Short: "Run the resource manager service",
 		Run:   resource_manager.CreateServerWrapper,
 	}
-	cmd.Flags().StringP("name", "", "", "human-readable name for this resource management member")
+	cmd.Flags().StringP("name", "", "", "human-readable name for this resource manager member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")

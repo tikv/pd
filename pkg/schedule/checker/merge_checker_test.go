@@ -56,6 +56,7 @@ func TestMergeCheckerTestSuite(t *testing.T) {
 
 func (suite *mergeCheckerTestSuite) SetupTest() {
 	cfg := mockconfig.NewTestOptions()
+	gcInterval = 100 * time.Millisecond
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster = mockcluster.NewCluster(suite.ctx, cfg)
 	suite.cluster.SetMaxMergeRegionSize(2)
@@ -84,6 +85,7 @@ func (suite *mergeCheckerTestSuite) SetupTest() {
 }
 
 func (suite *mergeCheckerTestSuite) TearDownTest() {
+	gcInterval = time.Minute
 	suite.cancel()
 }
 
@@ -234,6 +236,7 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 	ops = suite.mc.Check(suite.regions[3])
 	re.Nil(ops)
 
+	// issue #4616
 	suite.cluster.SetSplitMergeInterval(500 * time.Millisecond)
 	ops = suite.mc.Check(suite.regions[2])
 	re.Nil(ops)
@@ -241,6 +244,19 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 	re.Nil(ops)
 
 	time.Sleep(500 * time.Millisecond)
+	ops = suite.mc.Check(suite.regions[2])
+	re.NotNil(ops)
+	ops = suite.mc.Check(suite.regions[3])
+	re.NotNil(ops)
+
+	// issue #8405
+	suite.mc.startTime = time.Now()
+	suite.cluster.SetSplitMergeInterval(time.Second)
+	suite.cluster.SetSplitMergeInterval(time.Hour)
+	suite.mc.RecordRegionSplit([]uint64{suite.regions[2].GetID()})
+	suite.cluster.SetSplitMergeInterval(time.Second)
+	suite.mc.Check(suite.regions[2]) // trigger the config update
+	time.Sleep(time.Second)          // wait for the cache to gc
 	ops = suite.mc.Check(suite.regions[2])
 	re.NotNil(ops)
 	ops = suite.mc.Check(suite.regions[3])

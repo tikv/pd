@@ -25,7 +25,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -93,7 +93,7 @@ go tool cover --func=xxx`
 
 var (
 	modulePath           = "github.com/tikv/pd"
-	integrationsTestPath = "tests/integrations"
+	integrationsTestPath = filepath.Join("tests", "integrations")
 )
 
 var (
@@ -171,8 +171,8 @@ func main() {
 		case "it":
 			// run integration tests
 			if len(os.Args) >= 3 {
-				modulePath = path.Join(modulePath, integrationsTestPath)
-				workDir = path.Join(workDir, integrationsTestPath)
+				modulePath = filepath.Join(modulePath, integrationsTestPath)
+				workDir = filepath.Join(workDir, integrationsTestPath)
 				switch os.Args[2] {
 				case "run":
 					isSucceed = cmdRun(os.Args[3:]...)
@@ -576,7 +576,7 @@ type testResult struct {
 func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res := testResult{
 		JUnitTestCase: JUnitTestCase{
-			ClassName: path.Join(modulePath, pkg),
+			ClassName: filepath.Join(modulePath, pkg),
 			Name:      fn,
 		},
 	}
@@ -586,7 +586,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 	var start time.Time
 	for i := 0; i < 3; i++ {
 		cmd := n.testCommand(pkg, fn)
-		cmd.Dir = path.Join(workDir, pkg)
+		cmd.Dir = filepath.Join(workDir, pkg)
 		// Combine the test case output, so the run result for failed cases can be displayed.
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
@@ -673,10 +673,12 @@ func failureCases(input []JUnitTestCase) int {
 
 func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args := make([]string, 0, 10)
-	exe := "./" + testFileName(pkg)
+	// let the test run in the verbose mode.
+	args = append(args, "-test.v")
+	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	if coverProfile != "" {
 		fileName := strings.ReplaceAll(pkg, "/", "_") + "." + fn
-		tmpFile := path.Join(coverFileTempDir, fileName)
+		tmpFile := filepath.Join(coverFileTempDir, fileName)
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
 	if strings.Contains(fn, "Suite") {
@@ -744,13 +746,13 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
 	// workPath just like `/pd/tests/integrations`
-	xprogPath := path.Join(workDir, "bin/xprog")
+	xprogPath := filepath.Join(workDir, "bin", "xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
-		xprogPath = path.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin/xprog")
+		xprogPath = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin", "xprog")
 	}
 	packages := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {
-		packages = append(packages, path.Join(modulePath, pkg))
+		packages = append(packages, filepath.Join(modulePath, pkg))
 	}
 
 	// We use 2 * parallel for `go build` to make it faster.
@@ -797,7 +799,7 @@ func buildTestBinary(pkg string) error {
 	if race {
 		cmd.Args = append(cmd.Args, "-race")
 	}
-	cmd.Dir = path.Join(workDir, pkg)
+	cmd.Dir = filepath.Join(workDir, pkg)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -818,20 +820,19 @@ func testBinaryExist(pkg string) (bool, error) {
 }
 
 func testFileName(pkg string) string {
-	_, file := path.Split(pkg)
+	_, file := filepath.Split(pkg)
 	return file + ".test.bin"
 }
 
 func testFileFullPath(pkg string) string {
-	return path.Join(workDir, pkg, testFileName(pkg))
+	return filepath.Join(workDir, pkg, testFileName(pkg))
 }
 
 func listNewTestCases(pkg string) []string {
-	exe := "./" + testFileName(pkg)
-
+	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	// core.test -test.list Test
 	cmd := exec.Command(exe, "-test.list", "Test")
-	cmd.Dir = path.Join(workDir, pkg)
+	cmd.Dir = filepath.Join(workDir, pkg)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	err := cmd.Run()

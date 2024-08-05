@@ -75,7 +75,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = BalanceRegionName
 			return nil
 		}
 	})
@@ -137,6 +136,7 @@ func schedulersRegister() {
 				return err
 			}
 			conf.StoreIDWithRanges[id] = ranges
+			conf.Batch = EvictLeaderBatchSize
 			return nil
 		}
 	})
@@ -225,7 +225,7 @@ func schedulersRegister() {
 			// For clusters with the initial version >= v5.2, it will be overwritten by the default config.
 			conf.applyPrioritiesConfig(compatiblePrioritiesConfig)
 			// For clusters with the initial version >= v6.4, it will be overwritten by the default config.
-			conf.SetRankFormulaVersion("")
+			conf.setRankFormulaVersion("")
 			if err := decoder(conf); err != nil {
 				return nil, err
 			}
@@ -281,7 +281,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = LabelName
 			return nil
 		}
 	})
@@ -306,7 +305,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			conf.Name = RandomMergeName
 			return nil
 		}
 	})
@@ -369,7 +367,6 @@ func schedulersRegister() {
 				}
 				conf.Limit = limit
 			}
-			conf.Name = ShuffleHotRegionName
 			return nil
 		}
 	})

@@ -29,7 +29,6 @@ linters-settings:
     excludes:
       - G402
       - G404
-      - G601
   testifylint:
     enable:
       - bool-compare
@@ -215,3 +214,6 @@ issues:
     - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
       linters:
         - errcheck
+  include:
+    # remove the comment after the path is ready
+    # - EXC0012

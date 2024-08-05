@@ -595,7 +595,7 @@ func (suite *redirectorTestSuite) SetupSuite() {
 	})
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
-	re.NotEmpty(cluster.WaitLeader(), 0)
+	re.NotEmpty(cluster.WaitLeader())
 	suite.cluster = cluster
 }
 
@@ -742,7 +742,7 @@ func TestRemovingProgress(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()
@@ -938,7 +938,7 @@ func TestPreparingProgress(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
 	clusterID := leader.GetClusterID()

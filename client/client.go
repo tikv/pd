@@ -214,8 +214,9 @@ func WithSkipStoreLimit() RegionsOption {
 
 // GetRegionOp represents available options when getting regions.
 type GetRegionOp struct {
-	needBuckets         bool
-	allowFollowerHandle bool
+	needBuckets                  bool
+	allowFollowerHandle          bool
+	outputMustContainAllKeyRange bool
 }
 
 // GetRegionOption configures GetRegionOp.
@@ -229,6 +230,11 @@ func WithBuckets() GetRegionOption {
 // WithAllowFollowerHandle means that client can send request to follower and let it handle this request.
 func WithAllowFollowerHandle() GetRegionOption {
 	return func(op *GetRegionOp) { op.allowFollowerHandle = true }
+}
+
+// WithOutputMustContainAllKeyRange means the output must contain all key ranges.
+func WithOutputMustContainAllKeyRange() GetRegionOption {
+	return func(op *GetRegionOp) { op.outputMustContainAllKeyRange = true }
 }
 
 var (
@@ -1193,10 +1199,11 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []KeyRange, limit 
 		pbRanges = append(pbRanges, &pdpb.KeyRange{StartKey: r.StartKey, EndKey: r.EndKey})
 	}
 	req := &pdpb.BatchScanRegionsRequest{
-		Header:      c.requestHeader(),
-		NeedBuckets: options.needBuckets,
-		Ranges:      pbRanges,
-		Limit:       int32(limit),
+		Header:             c.requestHeader(),
+		NeedBuckets:        options.needBuckets,
+		Ranges:             pbRanges,
+		Limit:              int32(limit),
+		ContainAllKeyRange: options.outputMustContainAllKeyRange,
 	}
 	serviceClient, cctx := c.getRegionAPIClientAndContext(scanCtx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
 	if serviceClient == nil {

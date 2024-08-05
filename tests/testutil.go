@@ -110,6 +110,7 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 	cfg := rm.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := rm.GenerateConfig(cfg)
 	re.NoError(err)
 

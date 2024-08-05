@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
@@ -42,36 +43,11 @@ const (
 // When a region has label `merge_option=deny`, skip merging the region.
 // If label value is `allow` or other value, it will be treated as `allow`.
 const (
-	mergeCheckerName     = "merge_checker"
 	mergeOptionLabel     = "merge_option"
 	mergeOptionValueDeny = "deny"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	mergeCheckerCounter                     = checkerCounter.WithLabelValues(mergeCheckerName, "check")
-	mergeCheckerPausedCounter               = checkerCounter.WithLabelValues(mergeCheckerName, "paused")
-	mergeCheckerRecentlySplitCounter        = checkerCounter.WithLabelValues(mergeCheckerName, "recently-split")
-	mergeCheckerRecentlyStartCounter        = checkerCounter.WithLabelValues(mergeCheckerName, "recently-start")
-	mergeCheckerNoLeaderCounter             = checkerCounter.WithLabelValues(mergeCheckerName, "no-leader")
-	mergeCheckerNoNeedCounter               = checkerCounter.WithLabelValues(mergeCheckerName, "no-need")
-	mergeCheckerUnhealthyRegionCounter      = checkerCounter.WithLabelValues(mergeCheckerName, "unhealthy-region")
-	mergeCheckerAbnormalReplicaCounter      = checkerCounter.WithLabelValues(mergeCheckerName, "abnormal-replica")
-	mergeCheckerHotRegionCounter            = checkerCounter.WithLabelValues(mergeCheckerName, "hot-region")
-	mergeCheckerNoTargetCounter             = checkerCounter.WithLabelValues(mergeCheckerName, "no-target")
-	mergeCheckerTargetTooLargeCounter       = checkerCounter.WithLabelValues(mergeCheckerName, "target-too-large")
-	mergeCheckerSplitSizeAfterMergeCounter  = checkerCounter.WithLabelValues(mergeCheckerName, "split-size-after-merge")
-	mergeCheckerSplitKeysAfterMergeCounter  = checkerCounter.WithLabelValues(mergeCheckerName, "split-keys-after-merge")
-	mergeCheckerNewOpCounter                = checkerCounter.WithLabelValues(mergeCheckerName, "new-operator")
-	mergeCheckerLargerSourceCounter         = checkerCounter.WithLabelValues(mergeCheckerName, "larger-source")
-	mergeCheckerAdjNotExistCounter          = checkerCounter.WithLabelValues(mergeCheckerName, "adj-not-exist")
-	mergeCheckerAdjRecentlySplitCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "adj-recently-split")
-	mergeCheckerAdjRegionHotCounter         = checkerCounter.WithLabelValues(mergeCheckerName, "adj-region-hot")
-	mergeCheckerAdjDisallowMergeCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "adj-disallow-merge")
-	mergeCheckerAdjAbnormalPeerStoreCounter = checkerCounter.WithLabelValues(mergeCheckerName, "adj-abnormal-peerstore")
-	mergeCheckerAdjSpecialPeerCounter       = checkerCounter.WithLabelValues(mergeCheckerName, "adj-special-peer")
-	mergeCheckerAdjAbnormalReplicaCounter   = checkerCounter.WithLabelValues(mergeCheckerName, "adj-abnormal-replica")
-)
+var gcInterval = time.Minute
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
@@ -84,7 +60,7 @@ type MergeChecker struct {
 
 // NewMergeChecker creates a merge checker.
 func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *MergeChecker {
-	splitCache := cache.NewIDTTL(ctx, time.Minute, conf.GetSplitMergeInterval())
+	splitCache := cache.NewIDTTL(ctx, gcInterval, conf.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
 		conf:       conf,
@@ -94,8 +70,8 @@ func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf conf
 }
 
 // GetType return MergeChecker's type
-func (*MergeChecker) GetType() string {
-	return "merge-checker"
+func (*MergeChecker) GetType() types.CheckerSchedulerType {
+	return types.MergeChecker
 }
 
 // RecordRegionSplit put the recently split region into cache. MergeChecker
@@ -115,13 +91,16 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	// update the split cache.
+	// It must be called before the following merge checker logic.
+	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
+
 	expireTime := m.startTime.Add(m.conf.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		mergeCheckerRecentlyStartCounter.Inc()
 		return nil
 	}
 
-	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
 	if m.splitCache.Exists(region.GetID()) {
 		mergeCheckerRecentlySplitCounter.Inc()
 		return nil
