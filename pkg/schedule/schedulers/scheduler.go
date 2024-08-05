@@ -162,12 +162,13 @@ func SaveSchedulerConfig(storage endpoint.ConfigStorage, s Scheduler) error {
 }
 
 // FindSchedulerTypeByName finds the type of the specified name.
-func FindSchedulerTypeByName(name string) string {
-	var typ string
+func FindSchedulerTypeByName(name string) types.CheckerSchedulerType {
+	var typ types.CheckerSchedulerType
 	for registeredType := range schedulerMap {
 		if strings.Contains(name, registeredType.String()) {
+			// If the name matches multiple types, we should choose the longest one.
 			if len(registeredType) > len(typ) {
-				typ = registeredType.String()
+				typ = registeredType
 			}
 		}
 	}

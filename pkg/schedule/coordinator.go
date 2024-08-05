@@ -276,7 +276,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		typ := schedulers.FindSchedulerTypeByName(name)
 		var cfg sc.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
-			if c.Type == typ {
+			if c.Type == types.SchedulerTypeCompatibleMap[typ] {
 				cfg = c
 				break
 			}
@@ -289,7 +289,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
-		s, err := schedulers.CreateScheduler(types.SchedulerStr2Type[cfg.Type], c.opController,
+		s, err := schedulers.CreateScheduler(types.ConvertOldStr2Type[cfg.Type], c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
