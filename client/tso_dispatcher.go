@@ -76,10 +76,18 @@ type tsoDispatcher struct {
 
 	provider tsoServiceProvider
 	// URL -> *connectionContext
-	connectionCtxs  *sync.Map
-	batchController *tsoBatchController
-	tsDeadlineCh    chan *deadline
-	lastTSOInfo     *tsoInfo
+	connectionCtxs *sync.Map
+	tsoRequestCh   chan *tsoRequest
+	tsDeadlineCh   chan *deadline
+	lastTSOInfo    *tsoInfo
+	// For reusing tsoBatchController objects
+	batchBufferPool *sync.Pool
+
+	// For controlling amount of concurrently processing RPC requests.
+	// A token must be acquired here before sending an RPC request, and the token must be put back after finishing the
+	// RPC. This is used like a semaphore, but we don't use semaphore directly here as it cannot be selected with
+	// other channels.
+	tokenCh chan struct{}
 
 	updateConnectionCtxsCh chan struct{}
 }
@@ -91,24 +99,27 @@ func newTSODispatcher(
 	provider tsoServiceProvider,
 ) *tsoDispatcher {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(ctx)
-	tsoBatchController := newTSOBatchController(
-		make(chan *tsoRequest, maxBatchSize*2),
-		maxBatchSize,
-	)
+	tsoRequestCh := make(chan *tsoRequest, maxBatchSize*2)
 	failpoint.Inject("shortDispatcherChannel", func() {
-		tsoBatchController = newTSOBatchController(
-			make(chan *tsoRequest, 1),
-			maxBatchSize,
-		)
+		tsoRequestCh = make(chan *tsoRequest, 1)
 	})
+
+	tokenCh := make(chan struct{}, 64)
+
 	td := &tsoDispatcher{
-		ctx:                    dispatcherCtx,
-		cancel:                 dispatcherCancel,
-		dc:                     dc,
-		provider:               provider,
-		connectionCtxs:         &sync.Map{},
-		batchController:        tsoBatchController,
-		tsDeadlineCh:           make(chan *deadline, 1),
+		ctx:            dispatcherCtx,
+		cancel:         dispatcherCancel,
+		dc:             dc,
+		provider:       provider,
+		connectionCtxs: &sync.Map{},
+		tsoRequestCh:   tsoRequestCh,
+		tsDeadlineCh:   make(chan *deadline, 1),
+		batchBufferPool: &sync.Pool{
+			New: func() any {
+				return newTSOBatchController(maxBatchSize * 2)
+			},
+		},
+		tokenCh:                tokenCh,
 		updateConnectionCtxsCh: make(chan struct{}, 1),
 	}
 	go td.watchTSDeadline()
@@ -146,13 +157,21 @@ func (td *tsoDispatcher) scheduleUpdateConnectionCtxs() {
 	}
 }
 
+func (td *tsoDispatcher) revokePendingRequests(err error) {
+	for i := 0; i < len(td.tsoRequestCh); i++ {
+		req := <-td.tsoRequestCh
+		req.tryDone(err)
+	}
+}
+
 func (td *tsoDispatcher) close() {
 	td.cancel()
-	td.batchController.clear()
+	tsoErr := errors.WithStack(errClosing)
+	td.revokePendingRequests(tsoErr)
 }
 
 func (td *tsoDispatcher) push(request *tsoRequest) {
-	td.batchController.tsoRequestCh <- request
+	td.tsoRequestCh <- request
 }
 
 func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
@@ -163,8 +182,12 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 		svcDiscovery    = provider.getServiceDiscovery()
 		option          = provider.getOption()
 		connectionCtxs  = td.connectionCtxs
-		batchController = td.batchController
+		batchController *tsoBatchController
 	)
+
+	// Currently only 1 concurrency is supported. Put one token in.
+	td.tokenCh <- struct{}{}
+
 	log.Info("[tso] tso dispatcher created", zap.String("dc-location", dc))
 	// Clean up the connectionCtxs when the dispatcher exits.
 	defer func() {
@@ -174,8 +197,11 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			cc.(*tsoConnectionContext).cancel()
 			return true
 		})
-		// Clear the tso batch controller.
-		batchController.clear()
+		if batchController.collectedRequestCount != 0 {
+			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop")
+		}
+		tsoErr := errors.WithStack(errClosing)
+		td.revokePendingRequests(tsoErr)
 		wg.Done()
 	}()
 	// Daemon goroutine to update the connectionCtxs periodically and handle the `connectionCtxs` update event.
@@ -203,9 +229,7 @@ tsoBatchLoop:
 		maxBatchWaitInterval := option.getMaxTSOBatchWaitInterval()
 		// Once the TSO requests are collected, must make sure they could be finished or revoked eventually,
 		// otherwise the upper caller may get blocked on waiting for the results.
-		if err = batchController.fetchPendingRequests(ctx, maxBatchWaitInterval); err != nil {
-			// Finish the collected requests if the fetch failed.
-			batchController.finishCollectedRequests(0, 0, 0, errors.WithStack(err))
+		if err = batchController.fetchPendingRequests(ctx, td.tsoRequestCh, td.tokenCh, maxBatchWaitInterval); err != nil {
 			if err == context.Canceled {
 				log.Info("[tso] stop fetching the pending tso requests due to context canceled",
 					zap.String("dc-location", dc))
@@ -246,7 +270,7 @@ tsoBatchLoop:
 				select {
 				case <-ctx.Done():
 					// Finish the collected requests if the context is canceled.
-					batchController.finishCollectedRequests(0, 0, 0, errors.WithStack(ctx.Err()))
+					td.cancelCollectedRequests(batchController, errors.WithStack(ctx.Err()))
 					timer.Stop()
 					return
 				case <-streamLoopTimer.C:
@@ -254,7 +278,7 @@ tsoBatchLoop:
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					svcDiscovery.ScheduleCheckMemberChanged()
 					// Finish the collected requests if the stream is failed to be created.
-					batchController.finishCollectedRequests(0, 0, 0, errors.WithStack(err))
+					td.cancelCollectedRequests(batchController, errors.WithStack(err))
 					timer.Stop()
 					continue tsoBatchLoop
 				case <-timer.C:
@@ -279,15 +303,22 @@ tsoBatchLoop:
 		select {
 		case <-ctx.Done():
 			// Finish the collected requests if the context is canceled.
-			batchController.finishCollectedRequests(0, 0, 0, errors.WithStack(ctx.Err()))
+			td.cancelCollectedRequests(batchController, errors.WithStack(ctx.Err()))
 			return
 		case td.tsDeadlineCh <- dl:
 		}
 		// processRequests guarantees that the collected requests could be finished properly.
-		err = td.processRequests(stream, dc, td.batchController)
+		err = td.processRequests(stream, dc, batchController)
 		close(done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
-		if err != nil {
+		if err == nil {
+			// If the request is started successfully, the `batchController` will be put back to the pool when the
+			// request is finished (either successful or not). In this case, set the `batchController` to nil so that
+			// another one will be fetched from the pool.
+			// Otherwise, the `batchController` won't be processed in other goroutines concurrently, and it can be
+			// reused in the next loop safely.
+			batchController = nil
+		} else {
 			select {
 			case <-ctx.Done():
 				return
@@ -422,26 +453,46 @@ func (td *tsoDispatcher) processRequests(
 		keyspaceID         = svcDiscovery.GetKeyspaceID()
 		reqKeyspaceGroupID = svcDiscovery.GetKeyspaceGroupID()
 	)
-	respKeyspaceGroupID, physical, logical, suffixBits, err := stream.processRequests(
+
+	cb := func(result tsoRequestResult, reqKeyspaceGroupID uint32, streamURL string, err error) {
+		defer td.batchBufferPool.Put(tbc)
+		if err != nil {
+			td.cancelCollectedRequests(tbc, err)
+			return
+		}
+
+		curTSOInfo := &tsoInfo{
+			tsoServer:           stream.getServerURL(),
+			reqKeyspaceGroupID:  reqKeyspaceGroupID,
+			respKeyspaceGroupID: result.respKeyspaceGroupID,
+			respReceivedAt:      time.Now(),
+			physical:            result.physical,
+			logical:             result.logical,
+		}
+		// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
+		firstLogical := tsoutil.AddLogical(result.logical, -int64(result.count)+1, result.suffixBits)
+		td.compareAndSwapTS(curTSOInfo, firstLogical)
+		td.doneCollectedRequests(tbc, result.physical, firstLogical, result.suffixBits)
+	}
+
+	err := stream.processRequests(
 		clusterID, keyspaceID, reqKeyspaceGroupID,
-		dcLocation, count, tbc.batchStartTime)
+		dcLocation, count, tbc.extraBatchingStartTime, cb)
 	if err != nil {
-		tbc.finishCollectedRequests(0, 0, 0, err)
+		td.cancelCollectedRequests(tbc, err)
 		return err
 	}
-	curTSOInfo := &tsoInfo{
-		tsoServer:           stream.getServerURL(),
-		reqKeyspaceGroupID:  reqKeyspaceGroupID,
-		respKeyspaceGroupID: respKeyspaceGroupID,
-		respReceivedAt:      time.Now(),
-		physical:            physical,
-		logical:             logical,
-	}
-	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
-	firstLogical := tsoutil.AddLogical(logical, -count+1, suffixBits)
-	td.compareAndSwapTS(curTSOInfo, firstLogical)
-	tbc.finishCollectedRequests(physical, firstLogical, suffixBits, nil)
 	return nil
+}
+
+func (td *tsoDispatcher) cancelCollectedRequests(tbc *tsoBatchController, err error) {
+	td.tokenCh <- struct{}{}
+	tbc.finishCollectedRequests(0, 0, 0, err)
+}
+
+func (td *tsoDispatcher) doneCollectedRequests(tbc *tsoBatchController, physical int64, firstLogical int64, suffixBits uint32) {
+	td.tokenCh <- struct{}{}
+	tbc.finishCollectedRequests(physical, firstLogical, suffixBits, nil)
 }
 
 func (td *tsoDispatcher) compareAndSwapTS(
