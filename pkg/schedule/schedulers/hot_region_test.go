@@ -43,7 +43,7 @@ import (
 
 var (
 	writeType = types.CheckerSchedulerType(utils.Write.String())
-	readType = types.CheckerSchedulerType(utils.Read.String())
+	readType  = types.CheckerSchedulerType(utils.Read.String())
 )
 
 func init() {
