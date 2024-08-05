@@ -114,8 +114,6 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
 	suite.checkServerPrimaryChange(constant.TSOServiceName, 3)
-	// TODO: uncomment after resource-manager is ready
-	// suite.checkServerPrimaryChange(constant.ResourceManagerServiceName, 3)
 }
 
 func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName string, serverNum int) {
