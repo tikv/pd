@@ -67,19 +67,19 @@ func newConcurrentHeapOpQueue() *concurrentHeapOpQueue {
 	return &concurrentHeapOpQueue{heap: make(operatorQueue, 0)}
 }
 
-func (ch *concurrentHeapOpQueue) Len() int {
+func (ch *concurrentHeapOpQueue) len() int {
 	ch.Lock()
 	defer ch.Unlock()
 	return len(ch.heap)
 }
 
-func (ch *concurrentHeapOpQueue) Push(x *operatorWithTime) {
+func (ch *concurrentHeapOpQueue) push(x *operatorWithTime) {
 	ch.Lock()
 	defer ch.Unlock()
 	heap.Push(&ch.heap, x)
 }
 
-func (ch *concurrentHeapOpQueue) Pop() (*operatorWithTime, bool) {
+func (ch *concurrentHeapOpQueue) pop() (*operatorWithTime, bool) {
 	ch.Lock()
 	defer ch.Unlock()
 	if len(ch.heap) == 0 {

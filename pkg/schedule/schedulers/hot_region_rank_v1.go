@@ -39,7 +39,7 @@ func (r *rankV1) checkByPriorityAndTolerance(loads []float64, f func(int) bool) 
 	switch {
 	case r.resourceTy == writeLeader:
 		return r.checkByPriorityAndToleranceFirstOnly(loads, f)
-	case r.sche.conf.IsStrictPickingStoreEnabled():
+	case r.sche.conf.isStrictPickingStoreEnabled():
 		return r.checkByPriorityAndToleranceAllOf(loads, f)
 	default:
 		return r.checkByPriorityAndToleranceFirstOnly(loads, f)
@@ -50,7 +50,7 @@ func (r *rankV1) checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool
 	switch {
 	case r.resourceTy == writeLeader:
 		return r.checkHistoryLoadsByPriorityAndToleranceFirstOnly(loads, f)
-	case r.sche.conf.IsStrictPickingStoreEnabled():
+	case r.sche.conf.isStrictPickingStoreEnabled():
 		return r.checkHistoryLoadsByPriorityAndToleranceAllOf(loads, f)
 	default:
 		return r.checkHistoryLoadsByPriorityAndToleranceFirstOnly(loads, f)

@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -104,6 +105,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	}
 
 	// Ignore the error check here
+	configutil.AdjustCommandLineString(flagSet, &c.Name, "name")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.Level, "log-level")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.File.Filename, "log-file")
 	configutil.AdjustCommandLineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
@@ -646,10 +648,11 @@ func (o *PersistConfig) SetMaxReplicas(replicas int) {
 }
 
 // IsSchedulerDisabled returns if the scheduler is disabled.
-func (o *PersistConfig) IsSchedulerDisabled(t string) bool {
+func (o *PersistConfig) IsSchedulerDisabled(tp types.CheckerSchedulerType) bool {
+	oldType := types.SchedulerTypeCompatibleMap[tp]
 	schedulers := o.GetScheduleConfig().Schedulers
 	for _, s := range schedulers {
-		if t == s.Type {
+		if oldType == s.Type {
 			return s.Disable
 		}
 	}
@@ -739,11 +742,11 @@ func (o *PersistConfig) IsRaftKV2() bool {
 
 // AddSchedulerCfg adds the scheduler configurations.
 // This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
-func (*PersistConfig) AddSchedulerCfg(string, []string) {}
+func (*PersistConfig) AddSchedulerCfg(types.CheckerSchedulerType, []string) {}
 
 // RemoveSchedulerCfg removes the scheduler configurations.
 // This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
-func (*PersistConfig) RemoveSchedulerCfg(string) {}
+func (*PersistConfig) RemoveSchedulerCfg(types.CheckerSchedulerType) {}
 
 // CheckLabelProperty checks if the label property is satisfied.
 func (*PersistConfig) CheckLabelProperty(string, []*metapb.StoreLabel) bool {

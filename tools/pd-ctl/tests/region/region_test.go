@@ -142,7 +142,7 @@ func TestRegion(t *testing.T) {
 		// region check empty-region command
 		{[]string{"region", "check", "empty-region"}, []*core.RegionInfo{r1}},
 		// region check undersized-region command
-		{[]string{"region", "check", "undersized-region"}, []*core.RegionInfo{r1, r4}},
+		{[]string{"region", "check", "undersized-region"}, []*core.RegionInfo{r1, r3, r4}},
 		// region check oversized-region command
 		{[]string{"region", "check", "oversized-region"}, []*core.RegionInfo{r2}},
 		// region keys --format=raw <start_key> <end_key> <limit> command
