@@ -324,7 +324,6 @@ func (s *Server) startServer() (err error) {
 
 	serverReadyChan := make(chan struct{})
 	defer close(serverReadyChan)
-	s.startServerLoop()
 	s.serverLoopWg.Add(1)
 	go utils.StartGRPCAndHTTPServers(s, serverReadyChan, s.GetListener())
 	<-serverReadyChan
@@ -334,6 +333,9 @@ func (s *Server) startServer() (err error) {
 	for _, cb := range s.GetStartCallbacks() {
 		cb()
 	}
+	// The start callback function will initialize storage, which will be used in service ready callback.
+	// We should make sure the calling sequence is right.
+	s.startServerLoop()
 
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
