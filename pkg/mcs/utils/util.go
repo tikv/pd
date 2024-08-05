@@ -26,9 +26,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -49,18 +47,12 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-const (
-	// maxRetryTimes is the max retry times for initializing the cluster ID.
-	maxRetryTimes = 5
-	// retryInterval is the interval to retry.
-	retryInterval = time.Second
-)
-
 // InitClusterID initializes the cluster ID.
 func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err error) {
-	ticker := time.NewTicker(retryInterval)
+	ticker := time.NewTicker(constant.RetryInterval)
 	defer ticker.Stop()
-	for i := 0; i < maxRetryTimes; i++ {
+	retryTimes := 0
+	for {
 		if clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath); err == nil && clusterID != 0 {
 			return clusterID, nil
 		}
@@ -68,9 +60,13 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 		case <-ctx.Done():
 			return 0, err
 		case <-ticker.C:
+			retryTimes++
+			if retryTimes/500 > 0 {
+				log.Warn("etcd is not ready, retrying", errs.ZapError(err))
+				retryTimes /= 500
+			}
 		}
 	}
-	return 0, errors.Errorf("failed to init cluster ID after retrying %d times", maxRetryTimes)
 }
 
 // PromHandler is a handler to get prometheus metrics.
@@ -119,59 +115,6 @@ type server interface {
 	diagnosticspb.DiagnosticsServer
 	StartTimestamp() int64
 	Name() string
-}
-
-// WaitAPIServiceReady waits for the api service ready.
-func WaitAPIServiceReady(s server) error {
-	var (
-		ready bool
-		err   error
-	)
-	ticker := time.NewTicker(constant.RetryIntervalWaitAPIService)
-	defer ticker.Stop()
-	retryTimes := 0
-	for {
-		ready, err = isAPIServiceReady(s)
-		if err == nil && ready {
-			return nil
-		}
-		select {
-		case <-s.Context().Done():
-			return errors.New("context canceled while waiting api server ready")
-		case <-ticker.C:
-			retryTimes++
-			if retryTimes/500 > 0 {
-				log.Warn("api server is not ready, retrying", errs.ZapError(err))
-				retryTimes /= 500
-			}
-		}
-	}
-}
-
-func isAPIServiceReady(s server) (bool, error) {
-	urls := strings.Split(s.GetBackendEndpoints(), ",")
-	if len(urls) == 0 {
-		return false, errors.New("no backend endpoints")
-	}
-	cc, err := s.GetDelegateClient(s.Context(), s.GetTLSConfig(), urls[0])
-	if err != nil {
-		return false, err
-	}
-	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(s.Context(), &pdpb.GetClusterInfoRequest{})
-	if err != nil {
-		return false, err
-	}
-	if clusterInfo.GetHeader().GetError() != nil {
-		return false, errors.Errorf(clusterInfo.GetHeader().GetError().String())
-	}
-	modes := clusterInfo.ServiceModes
-	if len(modes) == 0 {
-		return false, errors.New("no service mode")
-	}
-	if modes[0] == pdpb.ServiceMode_API_SVC_MODE {
-		return true, nil
-	}
-	return false, nil
 }
 
 // InitClient initializes the etcd and http clients.

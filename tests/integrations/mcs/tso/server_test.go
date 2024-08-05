@@ -210,57 +210,6 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	return count
 }
 
-func TestWaitAPIServiceReady(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	startCluster := func(isAPIServiceMode bool) (cluster *tests.TestCluster, backendEndpoints string) {
-		var err error
-		if isAPIServiceMode {
-			cluster, err = tests.NewTestAPICluster(ctx, 1)
-		} else {
-			cluster, err = tests.NewTestCluster(ctx, 1)
-		}
-		re.NoError(err)
-		err = cluster.RunInitialServers()
-		re.NoError(err)
-		leaderName := cluster.WaitLeader()
-		re.NotEmpty(leaderName)
-		pdLeader := cluster.GetServer(leaderName)
-		return cluster, pdLeader.GetAddr()
-	}
-
-	// tso server cannot be started because the pd server is not ready as api service.
-	cluster, backendEndpoints := startCluster(false /*isAPIServiceMode*/)
-	sctx, scancel := context.WithTimeout(ctx, time.Second*10)
-	defer scancel()
-	s, _, err := tests.StartSingleTSOTestServerWithoutCheck(sctx, re, backendEndpoints, tempurl.Alloc())
-	re.Error(err)
-	re.Nil(s)
-	cluster.Destroy()
-
-	// tso server can be started because the pd server is ready as api service.
-	cluster, backendEndpoints = startCluster(true /*isAPIServiceMode*/)
-	sctx, scancel = context.WithTimeout(ctx, time.Second*10)
-	defer scancel()
-	s, cleanup, err := tests.StartSingleTSOTestServerWithoutCheck(sctx, re, backendEndpoints, tempurl.Alloc())
-	re.NoError(err)
-	defer cluster.Destroy()
-	defer cleanup()
-
-	for i := 0; i < 12; i++ {
-		select {
-		case <-time.After(time.Second):
-		case <-sctx.Done():
-			return
-		}
-		if s != nil && s.IsServing() {
-			break
-		}
-	}
-}
-
 type APIServerForward struct {
 	re               *require.Assertions
 	ctx              context.Context
