@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -68,7 +69,7 @@ func setupServer() (*httptest.Server, *config.Config) {
 		AdvertiseClientUrls: "example.com:2380",
 		AdvertisePeerUrls:   "example.com:2380",
 		Name:                "test-svc",
-		DataDir:             "/data",
+		DataDir:             string(filepath.Separator) + "data",
 		ForceNewCluster:     true,
 		EnableGRPCGateway:   true,
 		InitialCluster:      "pd1=http://127.0.0.1:10208",

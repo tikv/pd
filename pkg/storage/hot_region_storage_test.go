@@ -21,6 +21,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -287,7 +288,7 @@ func newTestHotRegionStorage(pullInterval time.Duration,
 	packHotRegionInfo *MockPackHotRegionInfo) (
 	hotRegionStorage *HotRegionStorage,
 	clear func(), err error) {
-	writePath := "./tmp"
+	writePath := strings.Join([]string{".", "tmp"}, string(filepath.Separator))
 	ctx := context.Background()
 	packHotRegionInfo.pullInterval = pullInterval
 	packHotRegionInfo.reservedDays = reservedDays

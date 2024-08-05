@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -61,11 +62,14 @@ func intervalGrow(x time.Duration, maxInterval time.Duration, typ intervalGrowth
 // BaseScheduler is a basic scheduler for all other complex scheduler
 type BaseScheduler struct {
 	OpController *operator.Controller
+
+	name string
+	tp   types.CheckerSchedulerType
 }
 
 // NewBaseScheduler returns a basic scheduler
-func NewBaseScheduler(opController *operator.Controller) *BaseScheduler {
-	return &BaseScheduler{OpController: opController}
+func NewBaseScheduler(opController *operator.Controller, tp types.CheckerSchedulerType) *BaseScheduler {
+	return &BaseScheduler{OpController: opController, tp: tp}
 }
 
 func (*BaseScheduler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -97,3 +101,16 @@ func (*BaseScheduler) PrepareConfig(sche.SchedulerCluster) error { return nil }
 
 // CleanConfig does some cleanup work about config.
 func (*BaseScheduler) CleanConfig(sche.SchedulerCluster) {}
+
+// GetName returns the name of the scheduler
+func (s *BaseScheduler) GetName() string {
+	if len(s.name) == 0 {
+		return s.tp.String()
+	}
+	return s.name
+}
+
+// GetType returns the type of the scheduler
+func (s *BaseScheduler) GetType() types.CheckerSchedulerType {
+	return s.tp
+}

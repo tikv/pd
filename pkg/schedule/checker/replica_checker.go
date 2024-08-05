@@ -61,6 +61,11 @@ func (*ReplicaChecker) Name() string {
 	return types.ReplicaChecker.String()
 }
 
+// GetType return ReplicaChecker's type.
+func (*ReplicaChecker) GetType() types.CheckerSchedulerType {
+	return types.ReplicaChecker
+}
+
 // Check verifies a region's replicas, creating an operator.Operator if need.
 func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	replicaCheckerCounter.Inc()
