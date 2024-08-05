@@ -90,36 +90,36 @@ func TestUpgrade(t *testing.T) {
 	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetReadPriorities())
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetWriteLeaderPriorities())
-	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.GetWritePeerPriorities())
-	re.Equal("v2", hb.conf.GetRankFormulaVersion())
+	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
+	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal("v2", hb.conf.getRankFormulaVersion())
 	// upgrade from json(null)
 	sche, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetReadPriorities())
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetWriteLeaderPriorities())
-	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.GetWritePeerPriorities())
-	re.Equal("v2", hb.conf.GetRankFormulaVersion())
+	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
+	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal("v2", hb.conf.getRankFormulaVersion())
 	// upgrade from < 5.2
 	config51 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"strict-picking-store":"true","enable-for-tiflash":"true"}`
 	sche, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte(config51)))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
-	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.GetReadPriorities())
-	re.Equal([]string{utils.KeyPriority, utils.BytePriority}, hb.conf.GetWriteLeaderPriorities())
-	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.GetWritePeerPriorities())
-	re.Equal("v1", hb.conf.GetRankFormulaVersion())
+	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.KeyPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
+	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal("v1", hb.conf.getRankFormulaVersion())
 	// upgrade from < 6.4
 	config54 := `{"min-hot-byte-rate":100,"min-hot-key-rate":10,"min-hot-query-rate":10,"max-zombie-rounds":5,"max-peer-number":1000,"byte-rate-rank-step-ratio":0.05,"key-rate-rank-step-ratio":0.05,"query-rate-rank-step-ratio":0.05,"count-rank-step-ratio":0.01,"great-dec-ratio":0.95,"minor-dec-ratio":0.99,"src-tolerance-ratio":1.05,"dst-tolerance-ratio":1.05,"read-priorities":["query","byte"],"write-leader-priorities":["query","byte"],"write-peer-priorities":["byte","key"],"strict-picking-store":"true","enable-for-tiflash":"true","forbid-rw-type":"none"}`
 	sche, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte(config54)))
 	re.NoError(err)
 	hb = sche.(*hotScheduler)
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetReadPriorities())
-	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.GetWriteLeaderPriorities())
-	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.GetWritePeerPriorities())
-	re.Equal("v1", hb.conf.GetRankFormulaVersion())
+	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getReadPriorities())
+	re.Equal([]string{utils.QueryPriority, utils.BytePriority}, hb.conf.getWriteLeaderPriorities())
+	re.Equal([]string{utils.BytePriority, utils.KeyPriority}, hb.conf.getWritePeerPriorities())
+	re.Equal("v1", hb.conf.getRankFormulaVersion())
 }
 
 func TestGCPendingOpInfos(t *testing.T) {
@@ -157,7 +157,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		op.Start()
 		op.SetStatusReachTime(operator.CREATED, time.Now().Add(-5*utils.StoreHeartBeatReportInterval*time.Second))
 		op.SetStatusReachTime(operator.STARTED, time.Now().Add((-5*utils.StoreHeartBeatReportInterval+1)*time.Second))
-		return newPendingInfluence(op, []uint64{2}, 4, statistics.Influence{}, hb.conf.GetStoreStatZombieDuration())
+		return newPendingInfluence(op, []uint64{2}, 4, statistics.Influence{}, hb.conf.getStoreStatZombieDuration())
 	}
 	justDoneOpInfluence := func(region *core.RegionInfo, ty opType) *pendingInfluence {
 		infl := notDoneOpInfluence(region, ty)
@@ -406,7 +406,7 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).types = []resourceType{writePeer}
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	tc.AddLabelsStore(1, 2, map[string]string{"zone": "z1", "host": "h1"})
 	tc.AddLabelsStore(2, 2, map[string]string{"zone": "z1", "host": "h2"})
@@ -462,7 +462,7 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
 
 	// Add stores 1, 2, 3, 4, 5, 6  with region counts 3, 2, 2, 2, 0, 0.
@@ -658,7 +658,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	hb.conf.SetHistorySampleDuration(0)
+	hb.conf.setHistorySampleDuration(0)
 
 	// Add TiKV stores 1, 2, 3, 4, 5, 6, 7 (Down) with region counts 3, 3, 2, 2, 0, 0, 0.
 	// Add TiFlash stores 8, 9, 10 with region counts 2, 1, 1.
@@ -740,7 +740,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	}
 	pdServerCfg.FlowRoundByDigit = 3
 	// Disable for TiFlash
-	hb.conf.SetEnableForTiFlash(false)
+	hb.conf.setEnableForTiFlash(false)
 	for i := 0; i < 20; i++ {
 		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
@@ -854,10 +854,10 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.QueryPriority, utils.BytePriority}
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -890,11 +890,11 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).types = []resourceType{writePeer}
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
@@ -947,8 +947,8 @@ func TestHotWriteRegionScheduleUnhealthyStore(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
@@ -992,8 +992,8 @@ func TestHotWriteRegionScheduleCheckHot(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
@@ -1025,7 +1025,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	hb.(*hotScheduler).types = []resourceType{writeLeader}
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	re.NoError(err)
 
 	tc.AddRegionStore(1, 20)
@@ -1091,7 +1091,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
@@ -1175,7 +1175,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	key, err := hex.DecodeString("")
 	re.NoError(err)
@@ -1256,7 +1256,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	re.NoError(err)
 	hb := scheduler.(*hotScheduler)
 	hb.conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
-	hb.conf.SetHistorySampleDuration(0)
+	hb.conf.setHistorySampleDuration(0)
 
 	// Add stores 1, 2, 3, 4, 5 with region counts 3, 2, 2, 2, 0.
 	tc.AddRegionStore(1, 3)
@@ -1376,10 +1376,10 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -1410,10 +1410,10 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
 	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -1475,7 +1475,7 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 	hb.(*hotScheduler).conf.MinorDecRatio = 1
 	hb.(*hotScheduler).conf.DstToleranceRatio = 1
 	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	pendingAmpFactor = 0.0
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
@@ -1581,9 +1581,9 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	defer cancel()
 	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetStrictPickingStore(false)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setStrictPickingStore(false)
 	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
@@ -2048,9 +2048,9 @@ func TestInfluenceByRWType(t *testing.T) {
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).types = []resourceType{writePeer}
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
@@ -2168,9 +2168,9 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).types = []resourceType{writePeer}
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.05)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.05)
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1.05)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1.05)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	// skip stddev check
 	stddevThreshold = -1.0
 
@@ -2213,7 +2213,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
 		{1, []uint64{1, 2, 3}, 2 * units.MiB, 2 * units.MiB, 0},
 	})
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
@@ -2228,7 +2228,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	hb.(*hotScheduler).types = []resourceType{writePeer}
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	re.NoError(err)
 
 	// assert loose store picking
@@ -2270,8 +2270,8 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).types = []resourceType{writePeer}
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1.0)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1.0)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1.0)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1.0)
 	hb.(*hotScheduler).conf.RankFormulaVersion = "v1"
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
@@ -2280,7 +2280,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	tc.AddRegionStore(4, 20)
 	tc.AddRegionStore(5, 20)
 	hb.(*hotScheduler).conf.StrictPickingStore = false
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	// skip uniform cluster
 	tc.UpdateStorageWrittenStats(1, 5*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
@@ -2329,9 +2329,9 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	hb, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	re.NoError(err)
 	hb.(*hotScheduler).types = []resourceType{writeLeader}
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.AddRegionStore(1, 20)
@@ -2539,17 +2539,17 @@ func TestConfigValidation(t *testing.T) {
 	// rank-formula-version
 	// default
 	hc = initHotRegionScheduleConfig()
-	re.Equal("v2", hc.GetRankFormulaVersion())
+	re.Equal("v2", hc.getRankFormulaVersion())
 	// v1
 	hc.RankFormulaVersion = "v1"
 	err = hc.validateLocked()
 	re.NoError(err)
-	re.Equal("v1", hc.GetRankFormulaVersion())
+	re.Equal("v1", hc.getRankFormulaVersion())
 	// v2
 	hc.RankFormulaVersion = "v2"
 	err = hc.validateLocked()
 	re.NoError(err)
-	re.Equal("v2", hc.GetRankFormulaVersion())
+	re.Equal("v2", hc.getRankFormulaVersion())
 	// illegal
 	hc.RankFormulaVersion = "v0"
 	err = hc.validateLocked()
@@ -2558,20 +2558,20 @@ func TestConfigValidation(t *testing.T) {
 	// forbid-rw-type
 	// default
 	hc = initHotRegionScheduleConfig()
-	re.False(hc.IsForbidRWType(utils.Read))
-	re.False(hc.IsForbidRWType(utils.Write))
+	re.False(hc.isForbidRWType(utils.Read))
+	re.False(hc.isForbidRWType(utils.Write))
 	// read
 	hc.ForbidRWType = "read"
 	err = hc.validateLocked()
 	re.NoError(err)
-	re.True(hc.IsForbidRWType(utils.Read))
-	re.False(hc.IsForbidRWType(utils.Write))
+	re.True(hc.isForbidRWType(utils.Read))
+	re.False(hc.isForbidRWType(utils.Write))
 	// write
 	hc.ForbidRWType = "write"
 	err = hc.validateLocked()
 	re.NoError(err)
-	re.False(hc.IsForbidRWType(utils.Read))
-	re.True(hc.IsForbidRWType(utils.Write))
+	re.False(hc.isForbidRWType(utils.Read))
+	re.True(hc.isForbidRWType(utils.Write))
 	// illegal
 	hc.ForbidRWType = "test"
 	err = hc.validateLocked()

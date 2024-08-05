@@ -102,6 +102,7 @@ func (*BaseScheduler) PrepareConfig(sche.SchedulerCluster) error { return nil }
 // CleanConfig does some cleanup work about config.
 func (*BaseScheduler) CleanConfig(sche.SchedulerCluster) {}
 
+// GetName returns the name of the scheduler
 func (s *BaseScheduler) GetName() string {
 	if len(s.name) == 0 {
 		return s.tp.String()
@@ -109,6 +110,7 @@ func (s *BaseScheduler) GetName() string {
 	return s.name
 }
 
+// GetType returns the type of the scheduler
 func (s *BaseScheduler) GetType() types.CheckerSchedulerType {
 	return s.tp
 }

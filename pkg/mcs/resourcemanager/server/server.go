@@ -339,7 +339,7 @@ func (s *Server) startServer() (err error) {
 	s.startServerLoop()
 
 	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr}
+	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr, Name: s.Name()}
 	serializedEntry, err := entry.Serialize()
 	if err != nil {
 		return err

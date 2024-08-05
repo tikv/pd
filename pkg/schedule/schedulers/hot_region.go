@@ -201,7 +201,7 @@ type hotScheduler struct {
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
 	base := newBaseHotScheduler(opController,
-		conf.GetHistorySampleDuration(), conf.GetHistorySampleInterval())
+		conf.getHistorySampleDuration(), conf.getHistorySampleInterval())
 	ret := &hotScheduler{
 		name:             HotRegionName,
 		baseHotScheduler: base,
@@ -213,10 +213,12 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 	return ret
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (h *hotScheduler) EncodeConfig() ([]byte, error) {
-	return h.conf.EncodeConfig()
+	return h.conf.encodeConfig()
 }
 
+// ReloadConfig impl
 func (h *hotScheduler) ReloadConfig() error {
 	h.conf.Lock()
 	defer h.conf.Unlock()
@@ -257,18 +259,22 @@ func (h *hotScheduler) ReloadConfig() error {
 	return nil
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.conf.ServeHTTP(w, r)
 }
 
+// GetMinInterval implements the Scheduler interface.
 func (*hotScheduler) GetMinInterval() time.Duration {
 	return minHotScheduleInterval
 }
 
+// GetNextInterval implements the Scheduler interface.
 func (h *hotScheduler) GetNextInterval(time.Duration) time.Duration {
 	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetSchedulerConfig().GetHotRegionScheduleLimit()
 	if !allowed {
@@ -277,6 +283,7 @@ func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	hotSchedulerCounter.Inc()
 	typ := h.randomType()
@@ -286,22 +293,22 @@ func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*opera
 func (h *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
-	h.updateHistoryLoadConfig(h.conf.GetHistorySampleDuration(), h.conf.GetHistorySampleInterval())
+	h.updateHistoryLoadConfig(h.conf.getHistorySampleDuration(), h.conf.getHistorySampleInterval())
 	h.prepareForBalance(typ, cluster)
-	// IsForbidRWType can not be move earlier to support to use api and metrics.
+	// isForbidRWType can not be move earlier to support to use api and metrics.
 	switch typ {
 	case readLeader, readPeer:
-		if h.conf.IsForbidRWType(utils.Read) {
+		if h.conf.isForbidRWType(utils.Read) {
 			return nil
 		}
 		return h.balanceHotReadRegions(cluster)
 	case writePeer:
-		if h.conf.IsForbidRWType(utils.Write) {
+		if h.conf.isForbidRWType(utils.Write) {
 			return nil
 		}
 		return h.balanceHotWritePeers(cluster)
 	case writeLeader:
-		if h.conf.IsForbidRWType(utils.Write) {
+		if h.conf.isForbidRWType(utils.Write) {
 			return nil
 		}
 		return h.balanceHotWriteLeaders(cluster)
@@ -497,11 +504,11 @@ type balanceSolver struct {
 func (bs *balanceSolver) init() {
 	// Load the configuration items of the scheduler.
 	bs.resourceTy = toResourceType(bs.rwTy, bs.opTy)
-	bs.maxPeerNum = bs.sche.conf.GetMaxPeerNumber()
+	bs.maxPeerNum = bs.sche.conf.getMaxPeerNumber()
 	bs.minHotDegree = bs.GetSchedulerConfig().GetHotRegionCacheHitsThreshold()
 	bs.firstPriority, bs.secondPriority = prioritiesToDim(bs.getPriorities())
-	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.GetGreatDecRatio(), bs.sche.conf.GetMinorDecRatio()
-	switch bs.sche.conf.GetRankFormulaVersion() {
+	bs.greatDecRatio, bs.minorDecRatio = bs.sche.conf.getGreatDecRatio(), bs.sche.conf.getMinorDecRatio()
+	switch bs.sche.conf.getRankFormulaVersion() {
 	case "v1":
 		bs.rank = initRankV1(bs)
 	default:
@@ -532,16 +539,16 @@ func (bs *balanceSolver) init() {
 	}
 
 	rankStepRatios := []float64{
-		utils.ByteDim:  bs.sche.conf.GetByteRankStepRatio(),
-		utils.KeyDim:   bs.sche.conf.GetKeyRankStepRatio(),
-		utils.QueryDim: bs.sche.conf.GetQueryRateRankStepRatio()}
+		utils.ByteDim:  bs.sche.conf.getByteRankStepRatio(),
+		utils.KeyDim:   bs.sche.conf.getKeyRankStepRatio(),
+		utils.QueryDim: bs.sche.conf.getQueryRateRankStepRatio()}
 	stepLoads := make([]float64, utils.DimLen)
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
 	}
 	bs.rankStep = &statistics.StoreLoad{
 		Loads: stepLoads,
-		Count: maxCur.Count * bs.sche.conf.GetCountRankStepRatio(),
+		Count: maxCur.Count * bs.sche.conf.getCountRankStepRatio(),
 	}
 }
 
@@ -555,11 +562,11 @@ func (bs *balanceSolver) getPriorities() []string {
 	// For write, they are different
 	switch bs.resourceTy {
 	case readLeader, readPeer:
-		return adjustPrioritiesConfig(querySupport, bs.sche.conf.GetReadPriorities(), getReadPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getReadPriorities(), getReadPriorities)
 	case writeLeader:
-		return adjustPrioritiesConfig(querySupport, bs.sche.conf.GetWriteLeaderPriorities(), getWriteLeaderPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getWriteLeaderPriorities(), getWriteLeaderPriorities)
 	case writePeer:
-		return adjustPrioritiesConfig(querySupport, bs.sche.conf.GetWritePeerPriorities(), getWritePeerPriorities)
+		return adjustPrioritiesConfig(querySupport, bs.sche.conf.getWritePeerPriorities(), getWritePeerPriorities)
 	}
 	log.Error("illegal type or illegal operator while getting the priority", zap.String("type", bs.rwTy.String()), zap.String("operator", bs.opTy.String()))
 	return []string{}
@@ -761,16 +768,16 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 			// We use store query info rather than total of hot write leader to guide hot write leader scheduler
 			// when its first priority is `QueryDim`, because `Write-peer` does not have `QueryDim`.
 			// The reason is the same with `tikvCollector.GetLoads`.
-			return bs.sche.conf.GetStoreStatZombieDuration()
+			return bs.sche.conf.getStoreStatZombieDuration()
 		}
-		return bs.sche.conf.GetRegionsStatZombieDuration()
+		return bs.sche.conf.getRegionsStatZombieDuration()
 	case writePeer:
 		if bs.best.srcStore.IsTiFlash() {
-			return bs.sche.conf.GetRegionsStatZombieDuration()
+			return bs.sche.conf.getRegionsStatZombieDuration()
 		}
-		return bs.sche.conf.GetStoreStatZombieDuration()
+		return bs.sche.conf.getStoreStatZombieDuration()
 	default:
-		return bs.sche.conf.GetStoreStatZombieDuration()
+		return bs.sche.conf.getStoreStatZombieDuration()
 	}
 }
 
@@ -778,8 +785,8 @@ func (bs *balanceSolver) calcMaxZombieDur() time.Duration {
 // its expectation * ratio, the store would be selected as hot source store
 func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetail {
 	ret := make(map[uint64]*statistics.StoreLoadDetail)
-	confSrcToleranceRatio := bs.sche.conf.GetSrcToleranceRatio()
-	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
+	confSrcToleranceRatio := bs.sche.conf.getSrcToleranceRatio()
+	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
 	for id, detail := range bs.stLoadDetail {
 		srcToleranceRatio := confSrcToleranceRatio
 		if detail.IsTiFlash() {
@@ -1017,8 +1024,8 @@ func (bs *balanceSolver) filterDstStores() map[uint64]*statistics.StoreLoadDetai
 
 func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*statistics.StoreLoadDetail) map[uint64]*statistics.StoreLoadDetail {
 	ret := make(map[uint64]*statistics.StoreLoadDetail, len(candidates))
-	confDstToleranceRatio := bs.sche.conf.GetDstToleranceRatio()
-	confEnableForTiFlash := bs.sche.conf.GetEnableForTiFlash()
+	confDstToleranceRatio := bs.sche.conf.getDstToleranceRatio()
+	confEnableForTiFlash := bs.sche.conf.getEnableForTiFlash()
 	for _, detail := range candidates {
 		store := detail.StoreInfo
 		dstToleranceRatio := confDstToleranceRatio
@@ -1111,7 +1118,7 @@ func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceFirstOnly(_ [][]
 }
 
 func (bs *balanceSolver) enableExpectation() bool {
-	return bs.sche.conf.GetDstToleranceRatio() > 0 && bs.sche.conf.GetSrcToleranceRatio() > 0
+	return bs.sche.conf.getDstToleranceRatio() > 0 && bs.sche.conf.getSrcToleranceRatio() > 0
 }
 
 func (bs *balanceSolver) isUniformFirstPriority(store *statistics.StoreLoadDetail) bool {
@@ -1147,11 +1154,11 @@ func (bs *balanceSolver) isTolerance(dim int, reverse bool) bool {
 func (bs *balanceSolver) getMinRate(dim int) float64 {
 	switch dim {
 	case utils.KeyDim:
-		return bs.sche.conf.GetMinHotKeyRate()
+		return bs.sche.conf.getMinHotKeyRate()
 	case utils.ByteDim:
-		return bs.sche.conf.GetMinHotByteRate()
+		return bs.sche.conf.getMinHotByteRate()
 	case utils.QueryDim:
-		return bs.sche.conf.GetMinHotQueryRate()
+		return bs.sche.conf.getMinHotQueryRate()
 	}
 	return -1
 }

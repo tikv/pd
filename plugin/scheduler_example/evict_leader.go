@@ -44,7 +44,7 @@ const (
 	EvictLeaderType        = "user-evict-leader"
 	noStoreInSchedulerInfo = "No store in user-evict-leader-scheduler-config"
 
-	UserEvictLeaderScheduler types.CheckerSchedulerType = "user-evict-leader-scheduler"
+	userEvictLeaderScheduler types.CheckerSchedulerType = "user-evict-leader-scheduler"
 )
 
 func init() {
@@ -158,7 +158,7 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedulers.Scheduler {
-	base := schedulers.NewBaseScheduler(opController, UserEvictLeaderScheduler)
+	base := schedulers.NewBaseScheduler(opController, userEvictLeaderScheduler)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
@@ -172,6 +172,7 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
@@ -244,8 +245,8 @@ type evictLeaderHandler struct {
 	config *evictLeaderSchedulerConfig
 }
 
-// UpdateConfig updates the config.
-func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+// updateConfig updates the config.
+func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -285,14 +286,12 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
-// ListConfig lists the config.
-func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
+func (handler *evictLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
-// DeleteConfig deletes the config.
-func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["store_id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
@@ -331,9 +330,9 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
-	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods(http.MethodDelete)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
+	router.HandleFunc("/delete/{store_id}", h.deleteConfig).Methods(http.MethodDelete)
 	return router
 }
 

@@ -52,10 +52,12 @@ func newTransferWitnessLeaderScheduler(opController *operator.Controller) Schedu
 	}
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (*transferWitnessLeaderScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {
 	return true
 }
 
+// Schedule implements the Scheduler interface.
 func (s *transferWitnessLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	transferWitnessLeaderCounter.Inc()
 	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), cluster, transferWitnessLeaderBatchSize), nil

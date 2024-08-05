@@ -157,181 +157,183 @@ type hotRegionSchedulerConfig struct {
 	HistorySampleInterval typeutil.Duration `json:"history-sample-interval"`
 }
 
-func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
+func (conf *hotRegionSchedulerConfig) encodeConfig() ([]byte, error) {
 	conf.RLock()
 	defer conf.RUnlock()
 	return EncodeConfig(conf)
 }
 
-func (conf *hotRegionSchedulerConfig) GetStoreStatZombieDuration() time.Duration {
+func (conf *hotRegionSchedulerConfig) getStoreStatZombieDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return time.Duration(conf.MaxZombieRounds*utils.StoreHeartBeatReportInterval) * time.Second
 }
 
-func (conf *hotRegionSchedulerConfig) GetRegionsStatZombieDuration() time.Duration {
+func (conf *hotRegionSchedulerConfig) getRegionsStatZombieDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return time.Duration(conf.MaxZombieRounds*utils.RegionHeartBeatReportInterval) * time.Second
 }
 
-func (conf *hotRegionSchedulerConfig) GetMaxPeerNumber() int {
+func (conf *hotRegionSchedulerConfig) getMaxPeerNumber() int {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MaxPeerNum
 }
 
-func (conf *hotRegionSchedulerConfig) GetSrcToleranceRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getSrcToleranceRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.SrcToleranceRatio
 }
 
-func (conf *hotRegionSchedulerConfig) SetSrcToleranceRatio(tol float64) {
+func (conf *hotRegionSchedulerConfig) setSrcToleranceRatio(tol float64) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.SrcToleranceRatio = tol
 }
 
-func (conf *hotRegionSchedulerConfig) GetDstToleranceRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getDstToleranceRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.DstToleranceRatio
 }
 
-func (conf *hotRegionSchedulerConfig) SetDstToleranceRatio(tol float64) {
+func (conf *hotRegionSchedulerConfig) setDstToleranceRatio(tol float64) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.DstToleranceRatio = tol
 }
 
-func (conf *hotRegionSchedulerConfig) GetByteRankStepRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getByteRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.ByteRateRankStepRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetKeyRankStepRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getKeyRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.KeyRateRankStepRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetQueryRateRankStepRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getQueryRateRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.QueryRateRankStepRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetCountRankStepRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getCountRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.CountRankStepRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetGreatDecRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getGreatDecRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.GreatDecRatio
 }
 
-func (conf *hotRegionSchedulerConfig) SetStrictPickingStore(v bool) {
+func (conf *hotRegionSchedulerConfig) setStrictPickingStore(v bool) {
 	conf.RLock()
 	defer conf.RUnlock()
 	conf.StrictPickingStore = v
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinorDecRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getMinorDecRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinorDecRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinHotKeyRate() float64 {
+func (conf *hotRegionSchedulerConfig) getMinHotKeyRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotKeyRate
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinHotByteRate() float64 {
+func (conf *hotRegionSchedulerConfig) getMinHotByteRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotByteRate
 }
 
-func (conf *hotRegionSchedulerConfig) GetEnableForTiFlash() bool {
+func (conf *hotRegionSchedulerConfig) getEnableForTiFlash() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.EnableForTiFlash
 }
 
-func (conf *hotRegionSchedulerConfig) SetEnableForTiFlash(enable bool) {
+func (conf *hotRegionSchedulerConfig) setEnableForTiFlash(enable bool) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EnableForTiFlash = enable
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinHotQueryRate() float64 {
+func (conf *hotRegionSchedulerConfig) getMinHotQueryRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotQueryRate
 }
 
-func (conf *hotRegionSchedulerConfig) GetReadPriorities() []string {
+func (conf *hotRegionSchedulerConfig) getReadPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.ReadPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorities() []string {
+func (conf *hotRegionSchedulerConfig) getWriteLeaderPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WriteLeaderPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWritePeerPriorities() []string {
+func (conf *hotRegionSchedulerConfig) getWritePeerPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WritePeerPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
+func (conf *hotRegionSchedulerConfig) isStrictPickingStoreEnabled() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.StrictPickingStore
 }
 
-func (conf *hotRegionSchedulerConfig) SetRankFormulaVersion(v string) {
+func (conf *hotRegionSchedulerConfig) setRankFormulaVersion(v string) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.RankFormulaVersion = v
 }
 
-func (conf *hotRegionSchedulerConfig) GetRankFormulaVersion() string {
+func (conf *hotRegionSchedulerConfig) getRankFormulaVersion() string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.getRankFormulaVersionLocked()
 }
 
-func (conf *hotRegionSchedulerConfig) GetHistorySampleDuration() time.Duration {
+func (conf *hotRegionSchedulerConfig) getHistorySampleDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.HistorySampleDuration.Duration
 }
 
-func (conf *hotRegionSchedulerConfig) GetHistorySampleInterval() time.Duration {
+func (conf *hotRegionSchedulerConfig) getHistorySampleInterval() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.HistorySampleInterval.Duration
 }
 
-func (conf *hotRegionSchedulerConfig) SetHistorySampleDuration(d time.Duration) {
+// nolint: unused, unparam
+func (conf *hotRegionSchedulerConfig) setHistorySampleDuration(d time.Duration) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.HistorySampleDuration = typeutil.NewDuration(d)
 }
 
-func (conf *hotRegionSchedulerConfig) SetHistorySampleInterval(d time.Duration) {
+// nolint: unused
+func (conf *hotRegionSchedulerConfig) setHistorySampleInterval(d time.Duration) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.HistorySampleInterval = typeutil.NewDuration(d)
@@ -346,7 +348,7 @@ func (conf *hotRegionSchedulerConfig) getRankFormulaVersionLocked() string {
 	}
 }
 
-func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw utils.RWType) bool {
+func (conf *hotRegionSchedulerConfig) isForbidRWType(rw utils.RWType) bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return rw.String() == conf.ForbidRWType
@@ -367,6 +369,7 @@ func (conf *hotRegionSchedulerConfig) getForbidRWTypeLocked() string {
 	}
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
 	router.HandleFunc("/list", conf.handleGetConfig).Methods(http.MethodGet)

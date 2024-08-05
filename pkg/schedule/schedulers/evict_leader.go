@@ -263,26 +263,32 @@ func (s *evictLeaderScheduler) EvictStoreIDs() []uint64 {
 	return s.conf.getStores()
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
+// GetName implements the Scheduler interface.
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return s.conf.encodeConfig()
 }
 
+// ReloadConfig reloads the config from the storage.
 func (s *evictLeaderScheduler) ReloadConfig() error {
 	return s.conf.reloadConfig(s.GetName())
 }
 
+// PrepareConfig implements the Scheduler interface.
 func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	return s.conf.pauseLeaderTransfer(cluster)
 }
 
+// CleanConfig implements the Scheduler interface.
 func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.resumeLeaderTransfer(cluster)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
@@ -291,6 +297,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
 	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf), nil
@@ -397,7 +404,7 @@ type evictLeaderHandler struct {
 	config *evictLeaderSchedulerConfig
 }
 
-func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -452,12 +459,12 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
-func (handler *evictLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
+func (handler *evictLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.Clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
-func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["store_id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
@@ -484,8 +491,8 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
-	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods(http.MethodDelete)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
+	router.HandleFunc("/delete/{store_id}", h.deleteConfig).Methods(http.MethodDelete)
 	return router
 }

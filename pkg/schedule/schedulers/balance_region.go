@@ -79,10 +79,12 @@ func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 	}
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRegion) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
@@ -91,6 +93,7 @@ func (s *balanceRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	defer s.filterCounter.Flush()
@@ -110,8 +113,8 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	solver := newSolver(basePlan, kind, cluster, opInfluence)
 
 	sort.Slice(sourceStores, func(i, j int) bool {
-		iOp := solver.GetOpInfluence(sourceStores[i].GetID())
-		jOp := solver.GetOpInfluence(sourceStores[j].GetID())
+		iOp := solver.getOpInfluence(sourceStores[i].GetID())
+		jOp := solver.getOpInfluence(sourceStores[j].GetID())
 		return sourceStores[i].RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), iOp) >
 			sourceStores[j].RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), jOp)
 	})
@@ -136,7 +139,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.Source = range sourceStores {
-		retryLimit := s.retryQuota.GetLimit(solver.Source)
+		retryLimit := s.retryQuota.getLimit(solver.Source)
 		solver.sourceScore = solver.sourceStoreScore(s.GetName())
 		if sourceIndex == len(sourceStores)-1 {
 			break
@@ -144,22 +147,22 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		for i := 0; i < retryLimit; i++ {
 			// Priority pick the region that has a pending peer.
 			// Pending region may mean the disk is overload, remove the pending region firstly.
-			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
-				append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.SourceStoreID()))...)
+			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+				append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()))...)
 			if solver.Region == nil {
 				// Then pick the region that has a follower in the source store.
-				solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.SourceStoreID()), pendingFilter)...)
+				solver.Region = filter.SelectOneRegion(cluster.RandFollowerRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
 				// Then pick the region has the leader in the source store.
-				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.SourceStoreID()), pendingFilter)...)
+				solver.Region = filter.SelectOneRegion(cluster.RandLeaderRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
 				// Finally, pick learner.
-				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.SourceStoreID(), s.conf.Ranges), collector,
-					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.SourceStoreID()), pendingFilter)...)
+				solver.Region = filter.SelectOneRegion(cluster.RandLearnerRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
+					append(baseRegionFilters, filter.NewRegionWitnessFilter(solver.sourceStoreID()), pendingFilter)...)
 			}
 			if solver.Region == nil {
 				balanceRegionNoRegionCounter.Inc()
@@ -189,15 +192,15 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			// satisfy all the filters, so the region fit must belong the scheduled region.
 			solver.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
 			if op := s.transferPeer(solver, collector, sourceStores[sourceIndex+1:], faultTargets); op != nil {
-				s.retryQuota.ResetLimit(solver.Source)
+				s.retryQuota.resetLimit(solver.Source)
 				op.Counters = append(op.Counters, balanceRegionNewOpCounter)
 				return []*operator.Operator{op}, collector.GetPlans()
 			}
 			solver.Step--
 		}
-		s.retryQuota.Attenuate(solver.Source)
+		s.retryQuota.attenuate(solver.Source)
 	}
-	s.retryQuota.GC(stores)
+	s.retryQuota.gc(stores)
 	return nil, collector.GetPlans()
 }
 

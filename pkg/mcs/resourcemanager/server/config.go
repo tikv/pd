@@ -202,6 +202,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	}
 
 	// Ignore the error check here
+	configutil.AdjustCommandLineString(flagSet, &c.Name, "name")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.Level, "log-level")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.File.Filename, "log-file")
 	configutil.AdjustCommandLineString(flagSet, &c.Metric.PushAddress, "metrics-addr")

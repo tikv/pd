@@ -104,7 +104,7 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 	kvCalculator := gc.getKVCalculator()
 	for idx, testCase := range testCases {
 		caseNum := fmt.Sprintf("case %d", idx)
-		consumption, _, _, priority, err := gc.onRequestWait(context.TODO(), testCase.req)
+		consumption, _, _, priority, err := gc.onRequestWaitImpl(context.TODO(), testCase.req)
 		re.NoError(err, caseNum)
 		re.Equal(priority, gc.meta.Priority)
 		expectedConsumption := &rmpb.Consumption{}
@@ -112,13 +112,53 @@ func TestRequestAndResponseConsumption(t *testing.T) {
 			kvCalculator.calculateWriteCost(expectedConsumption, testCase.req)
 			re.Equal(expectedConsumption.WRU, consumption.WRU)
 		}
-		consumption, err = gc.onResponse(testCase.req, testCase.resp)
+		consumption, err = gc.onResponseImpl(testCase.req, testCase.resp)
 		re.NoError(err, caseNum)
 		kvCalculator.calculateReadCost(expectedConsumption, testCase.resp)
 		kvCalculator.calculateCPUCost(expectedConsumption, testCase.resp)
 		re.Equal(expectedConsumption.RRU, consumption.RRU, caseNum)
 		re.Equal(expectedConsumption.TotalCpuTimeMs, consumption.TotalCpuTimeMs, caseNum)
 	}
+}
+
+func TestOnResponseWaitConsumption(t *testing.T) {
+	re := require.New(t)
+	gc := createTestGroupCostController(re)
+
+	req := &TestRequestInfo{
+		isWrite: false,
+	}
+	resp := &TestResponseInfo{
+		readBytes: 2000 * 64 * 1024, // 2000RU
+		succeed:   true,
+	}
+
+	consumption, waitTIme, err := gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	re.Zero(waitTIme)
+	verify := func() {
+		expectedConsumption := &rmpb.Consumption{}
+		kvCalculator := gc.getKVCalculator()
+		kvCalculator.calculateReadCost(expectedConsumption, resp)
+		re.Equal(expectedConsumption.RRU, consumption.RRU)
+	}
+	verify()
+
+	// modify the counter, then on response should has wait time.
+	counter := gc.run.requestUnitTokens[rmpb.RequestUnitType_RU]
+	gc.modifyTokenCounter(counter, &rmpb.TokenBucket{
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   1000,
+			BurstLimit: 1000,
+		},
+	},
+		int64(5*time.Second/time.Millisecond),
+	)
+
+	consumption, waitTIme, err = gc.onResponseWaitImpl(context.TODO(), req, resp)
+	re.NoError(err)
+	re.NotZero(waitTIme)
+	verify()
 }
 
 func TestResourceGroupThrottledError(t *testing.T) {
@@ -129,7 +169,7 @@ func TestResourceGroupThrottledError(t *testing.T) {
 		writeBytes: 10000000,
 	}
 	// The group is throttled
-	_, _, _, _, err := gc.onRequestWait(context.TODO(), req)
+	_, _, _, _, err := gc.onRequestWaitImpl(context.TODO(), req)
 	re.Error(err)
 	re.True(errs.ErrClientResourceGroupThrottled.Equal(err))
 }
