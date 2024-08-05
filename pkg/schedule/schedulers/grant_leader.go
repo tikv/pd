@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -69,7 +70,7 @@ func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
 	return nil
 }
 
-func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
+func (conf *grantLeaderSchedulerConfig) clone() *grantLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	newStoreIDWithRanges := make(map[uint64][]core.KeyRange)
@@ -81,19 +82,14 @@ func (conf *grantLeaderSchedulerConfig) Clone() *grantLeaderSchedulerConfig {
 	}
 }
 
-func (conf *grantLeaderSchedulerConfig) Persist() error {
-	name := conf.getSchedulerName()
+func (conf *grantLeaderSchedulerConfig) persist() error {
 	conf.RLock()
 	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
 	if err != nil {
 		return err
 	}
-	return conf.storage.SaveSchedulerConfig(name, data)
-}
-
-func (*grantLeaderSchedulerConfig) getSchedulerName() string {
-	return GrantLeaderName
+	return conf.storage.SaveSchedulerConfig(types.GrantLeaderScheduler.String(), data)
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -159,7 +155,7 @@ type grantLeaderScheduler struct {
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
 func newGrantLeaderScheduler(opController *operator.Controller, conf *grantLeaderSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController)
+	base := NewBaseScheduler(opController, types.GrantLeaderScheduler)
 	handler := newGrantLeaderHandler(conf)
 	return &grantLeaderScheduler{
 		BaseScheduler: base,
@@ -168,22 +164,17 @@ func newGrantLeaderScheduler(opController *operator.Controller, conf *grantLeade
 	}
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *grantLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*grantLeaderScheduler) GetName() string {
-	return GrantLeaderName
-}
-
-func (*grantLeaderScheduler) GetType() string {
-	return GrantLeaderType
-}
-
+// EncodeConfig implements the Scheduler interface.
 func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (s *grantLeaderScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -203,6 +194,7 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 	return nil
 }
 
+// PrepareConfig implements the Scheduler interface.
 func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
@@ -215,6 +207,7 @@ func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	return res
 }
 
+// CleanConfig implements the Scheduler interface.
 func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
@@ -223,14 +216,16 @@ func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	}
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *grantLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantLeaderCounter.Inc()
 	storeIDWithRanges := s.conf.getStoreIDWithRanges()
@@ -262,7 +257,7 @@ type grantLeaderHandler struct {
 	config *grantLeaderSchedulerConfig
 }
 
-func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -297,7 +292,7 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	err = handler.config.Persist()
+	err = handler.config.persist()
 	if err != nil {
 		handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -306,12 +301,12 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.rd.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
 }
 
-func (handler *grantLeaderHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+func (handler *grantLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
-func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *grantLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.Request) {
 	idStr := mux.Vars(r)["store_id"]
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
@@ -323,7 +318,7 @@ func (handler *grantLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	keyRanges := handler.config.getKeyRangesByID(id)
 	succ, last := handler.config.removeStore(id)
 	if succ {
-		err = handler.config.Persist()
+		err = handler.config.persist()
 		if err != nil {
 			handler.config.resetStore(id, keyRanges)
 			handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -354,8 +349,8 @@ func newGrantLeaderHandler(config *grantLeaderSchedulerConfig) http.Handler {
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
-	router.HandleFunc("/delete/{store_id}", h.DeleteConfig).Methods(http.MethodDelete)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
+	router.HandleFunc("/delete/{store_id}", h.deleteConfig).Methods(http.MethodDelete)
 	return router
 }

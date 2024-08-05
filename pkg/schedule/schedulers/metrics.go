@@ -186,7 +186,7 @@ func grantLeaderCounterWithEvent(event string) prometheus.Counter {
 }
 
 func hotRegionCounterWithEvent(event string) prometheus.Counter {
-	return schedulerCounter.WithLabelValues(types.HotRegionScheduler.String(), event)
+	return schedulerCounter.WithLabelValues(types.BalanceHotRegionScheduler.String(), event)
 }
 
 func labelCounterWithEvent(event string) prometheus.Counter {

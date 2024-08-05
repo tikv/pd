@@ -122,7 +122,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		default:
 		}
 
-		request, err := server.Recv(s.GetTSOProxyRecvFromClientTimeout())
+		request, err := server.recv(s.GetTSOProxyRecvFromClientTimeout())
 		if err == io.EOF {
 			return nil
 		}
@@ -189,7 +189,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			Count:     tsopbResp.GetCount(),
 			Timestamp: tsopbResp.GetTimestamp(),
 		}
-		if err := server.Send(response); err != nil {
+		if err := server.send(response); err != nil {
 			return errors.WithStack(err)
 		}
 	}

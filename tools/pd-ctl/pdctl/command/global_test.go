@@ -16,6 +16,7 @@ package command
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -30,16 +31,16 @@ func TestParseTLSConfig(t *testing.T) {
 		Short:         "Placement Driver control",
 		SilenceErrors: true,
 	}
-	certPath := "../../tests/cert"
-	rootCmd.Flags().String("cacert", certPath+"/ca.pem", "path of file that contains list of trusted SSL CAs")
-	rootCmd.Flags().String("cert", certPath+"/client.pem", "path of file that contains X509 certificate in PEM format")
-	rootCmd.Flags().String("key", certPath+"/client-key.pem", "path of file that contains X509 key in PEM format")
+	certPath := filepath.Join("..", "..", "tests", "cert")
+	rootCmd.Flags().String("cacert", filepath.Join(certPath, "ca.pem"), "path of file that contains list of trusted SSL CAs")
+	rootCmd.Flags().String("cert", filepath.Join(certPath, "client.pem"), "path of file that contains X509 certificate in PEM format")
+	rootCmd.Flags().String("key", filepath.Join(certPath, "client-key.pem"), "path of file that contains X509 key in PEM format")
 
 	// generate certs
 	if err := os.Mkdir(certPath, 0755); err != nil {
 		t.Fatal(err)
 	}
-	certScript := "../../tests/cert_opt.sh"
+	certScript := filepath.Join("..", "..", "tests", "cert_opt.sh")
 	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
 		t.Fatal(err)
 	}

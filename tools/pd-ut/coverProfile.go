@@ -18,7 +18,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"sort"
 
 	"golang.org/x/tools/cover"
@@ -70,7 +70,7 @@ func collectCoverProfileFile() {
 }
 
 func collectOneCoverProfileFile(result map[string]*cover.Profile, file os.DirEntry) {
-	f, err := os.Open(path.Join(coverFileTempDir, file.Name()))
+	f, err := os.Open(filepath.Join(coverFileTempDir, file.Name()))
 	if err != nil {
 		fmt.Println("open temp cover file error:", err)
 		os.Exit(-1)
