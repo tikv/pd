@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -44,7 +45,8 @@ import (
 const (
 	randomRegionMaxRetry = 10
 	scanRegionLimit      = 1000
-	CollectFactor        = 0.9
+	// CollectFactor is the factor to collect the count of region.
+	CollectFactor = 0.9
 )
 
 // errRegionIsStale is error info for region is stale.
@@ -720,7 +722,7 @@ func (r *RegionInfo) isRegionRecreated() bool {
 	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
-func (r *RegionInfo) Contains(key []byte) bool {
+func (r *RegionInfo) contain(key []byte) bool {
 	start, end := r.GetStartKey(), r.GetEndKey()
 	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
 }
@@ -750,7 +752,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				logRunner.RunTask(
 					regionID,
 					"DebugLog",
-					func() {
+					func(context.Context) {
 						d(msg, fields...)
 					},
 				)
@@ -759,7 +761,7 @@ func GenerateRegionGuideFunc(enableLog bool) RegionGuideFunc {
 				logRunner.RunTask(
 					regionID,
 					"InfoLog",
-					func() {
+					func(context.Context) {
 						i(msg, fields...)
 					},
 				)
@@ -2141,7 +2143,7 @@ func HexRegionKey(key []byte) []byte {
 // HexRegionKeyStr converts region key to hex format. Used for formatting region in
 // logs.
 func HexRegionKeyStr(key []byte) string {
-	return typeutil.BytesToString(HexRegionKey(key))
+	return string(HexRegionKey(key))
 }
 
 // RegionToHexMeta converts a region meta's keys to hex format. Used for formatting
@@ -2262,14 +2264,4 @@ func NewTestRegionInfo(regionID, storeID uint64, start, end []byte, opts ...Regi
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
 	}
 	return NewRegionInfo(metaRegion, leader, opts...)
-}
-
-// TraverseRegions executes a function on all regions.
-// ONLY for simulator now and only for READ.
-func (r *RegionsInfo) TraverseRegions(lockedFunc func(*RegionInfo)) {
-	r.t.RLock()
-	defer r.t.RUnlock()
-	for _, item := range r.regions {
-		lockedFunc(item.RegionInfo)
-	}
 }

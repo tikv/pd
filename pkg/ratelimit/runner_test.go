@@ -36,7 +36,7 @@ func TestConcurrentRunner(t *testing.T) {
 			err := runner.RunTask(
 				uint64(i),
 				"test1",
-				func() {
+				func(context.Context) {
 					defer wg.Done()
 					time.Sleep(100 * time.Millisecond)
 				},
@@ -56,7 +56,7 @@ func TestConcurrentRunner(t *testing.T) {
 			err := runner.RunTask(
 				uint64(i),
 				"test2",
-				func() {
+				func(context.Context) {
 					defer wg.Done()
 					time.Sleep(100 * time.Millisecond)
 				},
@@ -87,7 +87,7 @@ func TestConcurrentRunner(t *testing.T) {
 			err := runner.RunTask(
 				regionID,
 				"test3",
-				func() {
+				func(context.Context) {
 					time.Sleep(time.Second)
 				},
 			)

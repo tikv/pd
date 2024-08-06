@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -343,8 +344,9 @@ func (c *Cluster) updateScheduler() {
 		// Remove the deleted schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
+			oldType := types.SchedulerTypeCompatibleMap[scheduler.GetType()]
 			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
-				return latestSchedulersConfig[i].Type == scheduler.GetType()
+				return latestSchedulersConfig[i].Type == oldType
 			}) {
 				continue
 			}
@@ -627,10 +629,8 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			ctx.TaskRunner.RunTask(
 				regionID,
 				ratelimit.ObserveRegionStatsAsync,
-				func() {
-					if c.regionStats.RegionStatsNeedUpdate(region) {
-						cluster.Collect(c, region, hasRegionStats)
-					}
+				func(ctx context.Context) {
+					cluster.Collect(ctx, c, region, hasRegionStats)
 				},
 			)
 		}
@@ -639,7 +639,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 			ctx.TaskRunner.RunTask(
 				regionID,
 				ratelimit.UpdateSubTree,
-				func() {
+				func(context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
 				ratelimit.WithRetained(true),
@@ -663,7 +663,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		ctx.TaskRunner.RunTask(
 			regionID,
 			ratelimit.UpdateSubTree,
-			func() {
+			func(context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
 			ratelimit.WithRetained(retained),
@@ -672,8 +672,8 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		ctx.TaskRunner.RunTask(
 			regionID,
 			ratelimit.HandleOverlaps,
-			func() {
-				cluster.HandleOverlaps(c, overlaps)
+			func(ctx context.Context) {
+				cluster.HandleOverlaps(ctx, c, overlaps)
 			},
 		)
 	}
@@ -682,8 +682,8 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 	ctx.TaskRunner.RunTask(
 		regionID,
 		ratelimit.CollectRegionStatsAsync,
-		func() {
-			cluster.Collect(c, region, hasRegionStats)
+		func(ctx context.Context) {
+			cluster.Collect(ctx, c, region, hasRegionStats)
 		},
 	)
 	tracer.OnCollectRegionStatsFinished()

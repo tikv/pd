@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/schedule"
+	"github.com/tikv/pd/pkg/schedule/checker"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -1849,7 +1850,7 @@ func Test(t *testing.T) {
 
 	for i := uint64(0); i < n; i++ {
 		region := regions[i]
-		regionKey := []byte{byte(i)}
+		regionKey := []byte(fmt.Sprintf("a%20d", i+1))
 
 		re.Nil(cache.GetRegion(i))
 		re.Nil(cache.GetRegionByKey(regionKey))
@@ -2183,7 +2184,7 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 		peers := make([]*metapb.Peer, 0, np)
 		for j := uint64(0); j < np; j++ {
 			peer := &metapb.Peer{
-				Id: i*np + j,
+				Id: 100000000 + i*np + j,
 			}
 			peer.StoreId = (i + j) % m
 			peers = append(peers, peer)
@@ -2191,8 +2192,8 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 		region := &metapb.Region{
 			Id:          i,
 			Peers:       peers,
-			StartKey:    []byte{byte(i)},
-			EndKey:      []byte{byte(i + 1)},
+			StartKey:    []byte(fmt.Sprintf("a%20d", i+1)),
+			EndKey:      []byte(fmt.Sprintf("a%20d", i+2)),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0], core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
@@ -2843,7 +2844,7 @@ func TestCheckCache(t *testing.T) {
 
 	// Add a peer with two replicas.
 	re.NoError(tc.addLeaderRegion(1, 2, 3))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/break-patrol", `return`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
 
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.GetWaitGroup().Add(1)
@@ -2877,7 +2878,56 @@ func TestCheckCache(t *testing.T) {
 
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/break-patrol"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+}
+
+func TestScanLimit(t *testing.T) {
+	re := require.New(t)
+
+	checkScanLimit(re, 1000, checker.MinPatrolRegionScanLimit)
+	checkScanLimit(re, 10000)
+	checkScanLimit(re, 100000)
+	checkScanLimit(re, 1000000)
+	checkScanLimit(re, 10000000, checker.MaxPatrolScanRegionLimit)
+}
+
+func checkScanLimit(re *require.Assertions, regionCount int, expectScanLimit ...int) {
+	tc, co, cleanup := prepare(nil, nil, nil, re)
+	defer cleanup()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/regionCount", fmt.Sprintf("return(\"%d\")", regionCount)))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/regionCount"))
+	}()
+
+	re.NoError(tc.addRegionStore(1, 0))
+	re.NoError(tc.addRegionStore(2, 0))
+	re.NoError(tc.addRegionStore(3, 0))
+	regions := newTestRegions(10, 3, 3)
+	for i, region := range regions {
+		if i == 0 {
+			region.GetMeta().StartKey = []byte("")
+		}
+		if i == len(regions)-1 {
+			region.GetMeta().EndKey = []byte("")
+		}
+		re.NoError(tc.putRegion(region))
+	}
+
+	co.GetWaitGroup().Add(1)
+	co.PatrolRegions()
+	defer func() {
+		co.GetSchedulersController().Wait()
+		co.GetWaitGroup().Wait()
+	}()
+
+	limit := co.GetCheckerController().GetPatrolRegionScanLimit()
+	re.LessOrEqual(checker.MinPatrolRegionScanLimit, limit)
+	re.GreaterOrEqual(checker.MaxPatrolScanRegionLimit, limit)
+	if len(expectScanLimit) > 0 {
+		re.Equal(expectScanLimit[0], limit)
+	}
 }
 
 func TestPeerState(t *testing.T) {

@@ -14,10 +14,12 @@
 
 package types
 
+// CheckerSchedulerType is the type of checker/scheduler.
 type CheckerSchedulerType string
 
-func (n CheckerSchedulerType) String() string {
-	return string(n)
+// String implements fmt.Stringer.
+func (t CheckerSchedulerType) String() string {
+	return string(t)
 }
 
 const (
@@ -50,8 +52,8 @@ const (
 	GrantLeaderScheduler CheckerSchedulerType = "grant-leader-scheduler"
 	// GrantHotRegionScheduler is grant hot region scheduler name.
 	GrantHotRegionScheduler CheckerSchedulerType = "grant-hot-region-scheduler"
-	// HotRegionScheduler is balance hot region scheduler name.
-	HotRegionScheduler CheckerSchedulerType = "balance-hot-region-scheduler"
+	// BalanceHotRegionScheduler is balance hot region scheduler name.
+	BalanceHotRegionScheduler CheckerSchedulerType = "balance-hot-region-scheduler"
 	// RandomMergeScheduler is random merge scheduler name.
 	RandomMergeScheduler CheckerSchedulerType = "random-merge-scheduler"
 	// ScatterRangeScheduler is scatter range scheduler name.
@@ -70,3 +72,49 @@ const (
 	// LabelScheduler is label scheduler name.
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
+
+// SchedulerTypeCompatibleMap exists for compatibility.
+//
+//	It is used in the `PersistOptions` and `PersistConfig`. These two structs
+//	are persisted in the storage, so we need to keep the compatibility.
+var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
+	BalanceLeaderScheduler:         "balance-leader",
+	BalanceRegionScheduler:         "balance-region",
+	BalanceWitnessScheduler:        "balance-witness",
+	EvictLeaderScheduler:           "evict-leader",
+	EvictSlowStoreScheduler:        "evict-slow-store",
+	EvictSlowTrendScheduler:        "evict-slow-trend",
+	GrantLeaderScheduler:           "grant-leader",
+	GrantHotRegionScheduler:        "grant-hot-region",
+	BalanceHotRegionScheduler:      "hot-region",
+	RandomMergeScheduler:           "random-merge",
+	ScatterRangeScheduler:          "scatter-range",
+	ShuffleHotRegionScheduler:      "shuffle-hot-region",
+	ShuffleLeaderScheduler:         "shuffle-leader",
+	ShuffleRegionScheduler:         "shuffle-region",
+	SplitBucketScheduler:           "split-bucket",
+	TransferWitnessLeaderScheduler: "transfer-witness-leader",
+	LabelScheduler:                 "label",
+}
+
+// SchedulerStr2Type is a map to convert the scheduler string to the CheckerSchedulerType.
+var SchedulerStr2Type = map[string]CheckerSchedulerType{
+	"balance-leader-scheduler":     BalanceLeaderScheduler,
+	"balance-region-scheduler":     BalanceRegionScheduler,
+	"balance-witness-scheduler":    BalanceWitnessScheduler,
+	"evict-leader-scheduler":       EvictLeaderScheduler,
+	"evict-slow-store-scheduler":   EvictSlowStoreScheduler,
+	"evict-slow-trend-scheduler":   EvictSlowTrendScheduler,
+	"grant-leader-scheduler":       GrantLeaderScheduler,
+	"grant-hot-region-scheduler":   GrantHotRegionScheduler,
+	"balance-hot-region-scheduler": BalanceHotRegionScheduler,
+	"random-merge-scheduler":       RandomMergeScheduler,
+	// TODO: update to `scatter-range-scheduler`
+	"scatter-range":                     ScatterRangeScheduler,
+	"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
+	"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
+	"shuffle-region-scheduler":          ShuffleRegionScheduler,
+	"split-bucket-scheduler":            SplitBucketScheduler,
+	"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
+	"label-scheduler":                   LabelScheduler,
+}

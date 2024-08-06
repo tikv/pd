@@ -261,7 +261,7 @@ func (t *regionTree) find(item *regionItem) *regionItem {
 		return false
 	})
 
-	if result == nil || !result.Contains(item.GetStartKey()) {
+	if result == nil || !result.contain(item.GetStartKey()) {
 		return nil
 	}
 
@@ -370,7 +370,7 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 			// we need to check if the previous item contains the key.
 			if startIndex != 0 && startItem == nil {
 				region = t.tree.GetAt(startIndex - 1).RegionInfo
-				if region.Contains(startKey) {
+				if region.contain(startKey) {
 					startIndex--
 				}
 			}
@@ -437,6 +437,7 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 	return regions
 }
 
+// TotalSize returns the total size of all regions.
 func (t *regionTree) TotalSize() int64 {
 	if t.length() == 0 {
 		return 0
@@ -444,6 +445,8 @@ func (t *regionTree) TotalSize() int64 {
 	return t.totalSize
 }
 
+// TotalWriteRate returns the total write bytes rate and the total write keys
+// rate of all regions.
 func (t *regionTree) TotalWriteRate() (bytesRate, keysRate float64) {
 	if t.length() == 0 {
 		return 0, 0

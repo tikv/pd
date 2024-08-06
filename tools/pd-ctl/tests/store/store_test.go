@@ -595,8 +595,8 @@ func TestStoreTLS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	certPath := "../cert"
-	certScript := "../cert_opt.sh"
+	certPath := filepath.Join("..", "cert")
+	certScript := filepath.Join("..", "cert_opt.sh")
 	// generate certs
 	if err := os.Mkdir(certPath, 0755); err != nil {
 		t.Fatal(err)
@@ -674,9 +674,9 @@ func TestStoreTLS(t *testing.T) {
 	pdAddr = strings.ReplaceAll(pdAddr, "http", "https")
 	// store command
 	args := []string{"-u", pdAddr, "store",
-		"--cacert=../cert/ca.pem",
-		"--cert=../cert/client.pem",
-		"--key=../cert/client-key.pem"}
+		"--cacert=" + filepath.Join("..", "cert", "ca.pem"),
+		"--cert=" + filepath.Join("..", "cert", "client.pem"),
+		"--key=" + filepath.Join("..", "cert", "client-key.pem")}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	storesInfo := new(response.StoresInfo)

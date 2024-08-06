@@ -187,6 +187,7 @@ type splitRegionsHandler struct {
 	oc      *operator.Controller
 }
 
+// SplitRegionByKeys split region by keys.
 func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error {
 	op, err := operator.CreateSplitRegionOperator("region-splitter", region, 0, pdpb.CheckPolicy_USEKEY, splitKeys)
 	if err != nil {
@@ -200,6 +201,7 @@ func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKe
 	return nil
 }
 
+// ScanRegionsByKeyRange scans regions by key range.
 func (h *splitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKeys, results *splitKeyResults) {
 	splitKeys := groupKeys.keys
 	startKey, endKey := groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey()

@@ -119,19 +119,23 @@ func (h *confHandler) SetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if ttlSec := r.URL.Query().Get("ttlSecond"); ttlSec != "" {
-		ttls, err := strconv.Atoi(ttlSec)
+	if ttlString := r.URL.Query().Get("ttlSecond"); ttlString != "" {
+		ttlSec, err := strconv.Atoi(ttlString)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		// if ttlSecond defined, we will apply if to temp configuration.
-		err = h.svr.SaveTTLConfig(conf, time.Duration(ttls)*time.Second)
+		err = h.svr.SaveTTLConfig(conf, time.Duration(ttlSec)*time.Second)
 		if err != nil {
 			h.rd.JSON(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		h.rd.JSON(w, http.StatusOK, "The config is updated.")
+		if ttlSec == 0 {
+			h.rd.JSON(w, http.StatusOK, "The ttl config is deleted.")
+		} else {
+			h.rd.JSON(w, http.StatusOK, "The ttl config is updated.")
+		}
 		return
 	}
 
