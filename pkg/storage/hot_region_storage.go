@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -267,8 +266,8 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 		if err != nil {
 			return err
 		}
-		historyHotRegions[i].StartKey = typeutil.BytesToString(region.StartKey)
-		historyHotRegions[i].EndKey = typeutil.BytesToString(region.EndKey)
+		historyHotRegions[i].StartKey = string(region.StartKey)
+		historyHotRegions[i].EndKey = string(region.EndKey)
 		key := HotRegionStorePath(hotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
 		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
@@ -386,8 +385,8 @@ func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 	if err := encryption.DecryptRegion(region, it.encryptionKeyManager); err != nil {
 		return nil, err
 	}
-	message.StartKey = typeutil.BytesToString(region.StartKey)
-	message.EndKey = typeutil.BytesToString(region.EndKey)
+	message.StartKey = string(region.StartKey)
+	message.EndKey = string(region.EndKey)
 	message.EncryptionMeta = nil
 	return &message, nil
 }

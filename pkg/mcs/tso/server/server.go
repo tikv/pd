@@ -382,6 +382,7 @@ func (s *Server) startServer() (err error) {
 		GitHash:        versioninfo.PDGitHash,
 		DeployPath:     deployPath,
 		StartTimestamp: s.StartTimestamp(),
+		Name:           s.Name(),
 	}
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(), s.cfg.AdvertiseListenAddr,

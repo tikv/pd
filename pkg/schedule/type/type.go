@@ -52,8 +52,8 @@ const (
 	GrantLeaderScheduler CheckerSchedulerType = "grant-leader-scheduler"
 	// GrantHotRegionScheduler is grant hot region scheduler name.
 	GrantHotRegionScheduler CheckerSchedulerType = "grant-hot-region-scheduler"
-	// HotRegionScheduler is balance hot region scheduler name.
-	HotRegionScheduler CheckerSchedulerType = "balance-hot-region-scheduler"
+	// BalanceHotRegionScheduler is balance hot region scheduler name.
+	BalanceHotRegionScheduler CheckerSchedulerType = "balance-hot-region-scheduler"
 	// RandomMergeScheduler is random merge scheduler name.
 	RandomMergeScheduler CheckerSchedulerType = "random-merge-scheduler"
 	// ScatterRangeScheduler is scatter range scheduler name.
@@ -73,8 +73,10 @@ const (
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
 
-// SchedulerTypeCompatibleMap temporarily exists for compatibility.
-// TODO: remove it after all components use CheckerSchedulerType.
+// SchedulerTypeCompatibleMap exists for compatibility.
+//
+//	It is used in the `PersistOptions` and `PersistConfig`. These two structs
+//	are persisted in the storage, so we need to keep the compatibility.
 var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
 	BalanceLeaderScheduler:         "balance-leader",
 	BalanceRegionScheduler:         "balance-region",
@@ -84,7 +86,7 @@ var SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
 	EvictSlowTrendScheduler:        "evict-slow-trend",
 	GrantLeaderScheduler:           "grant-leader",
 	GrantHotRegionScheduler:        "grant-hot-region",
-	HotRegionScheduler:             "hot-region",
+	BalanceHotRegionScheduler:      "hot-region",
 	RandomMergeScheduler:           "random-merge",
 	ScatterRangeScheduler:          "scatter-range",
 	ShuffleHotRegionScheduler:      "shuffle-hot-region",
@@ -105,7 +107,7 @@ var SchedulerStr2Type = map[string]CheckerSchedulerType{
 	"evict-slow-trend-scheduler":   EvictSlowTrendScheduler,
 	"grant-leader-scheduler":       GrantLeaderScheduler,
 	"grant-hot-region-scheduler":   GrantHotRegionScheduler,
-	"balance-hot-region-scheduler": HotRegionScheduler,
+	"balance-hot-region-scheduler": BalanceHotRegionScheduler,
 	"random-merge-scheduler":       RandomMergeScheduler,
 	// TODO: update to `scatter-range-scheduler`
 	"scatter-range":                     ScatterRangeScheduler,

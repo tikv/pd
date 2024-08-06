@@ -65,7 +65,7 @@ func SelectUnavailableTargetStores(stores []*core.StoreInfo, filters []Filter, c
 				cfilter, ok := filters[i].(comparingFilter)
 				sourceID := uint64(0)
 				if ok {
-					sourceID = cfilter.GetSourceStoreID()
+					sourceID = cfilter.getSourceStoreID()
 				}
 				if counter != nil {
 					counter.inc(target, filters[i].Type(), sourceID, s.GetID())
@@ -99,7 +99,7 @@ func SelectTargetStores(stores []*core.StoreInfo, filters []Filter, conf config.
 				cfilter, ok := filter.(comparingFilter)
 				sourceID := uint64(0)
 				if ok {
-					sourceID = cfilter.GetSourceStoreID()
+					sourceID = cfilter.getSourceStoreID()
 				}
 				if counter != nil {
 					counter.inc(target, filter.Type(), sourceID, s.GetID())
@@ -141,8 +141,8 @@ type Filter interface {
 // comparingFilter is an interface to filter target store by comparing source and target stores
 type comparingFilter interface {
 	Filter
-	// GetSourceStoreID returns the source store when comparing.
-	GetSourceStoreID() uint64
+	// getSourceStoreID returns the source store when comparing.
+	getSourceStoreID() uint64
 }
 
 // Target checks if store can pass all Filters as target store.
@@ -156,7 +156,7 @@ func Target(conf config.SharedConfigProvider, store *core.StoreInfo, filters []F
 				targetID := storeID
 				sourceID := ""
 				if ok {
-					sourceID = strconv.FormatUint(cfilter.GetSourceStoreID(), 10)
+					sourceID = strconv.FormatUint(cfilter.getSourceStoreID(), 10)
 				}
 				filterCounter.WithLabelValues(target.String(), filter.Scope(), filter.Type().String(), sourceID, targetID).Inc()
 			}
@@ -319,8 +319,8 @@ func (f *distinctScoreFilter) Target(_ config.SharedConfigProvider, store *core.
 	return statusStoreNotMatchIsolation
 }
 
-// GetSourceStoreID implements the ComparingFilter
-func (f *distinctScoreFilter) GetSourceStoreID() uint64 {
+// getSourceStoreID implements the ComparingFilter
+func (f *distinctScoreFilter) getSourceStoreID() uint64 {
 	return f.srcStore
 }
 
@@ -669,8 +669,8 @@ func (f *ruleFitFilter) Target(_ config.SharedConfigProvider, store *core.StoreI
 	return statusStoreNotMatchRule
 }
 
-// GetSourceStoreID implements the ComparingFilter
-func (f *ruleFitFilter) GetSourceStoreID() uint64 {
+// getSourceStoreID implements the ComparingFilter
+func (f *ruleFitFilter) getSourceStoreID() uint64 {
 	return f.srcStore
 }
 
@@ -730,7 +730,7 @@ func (f *ruleLeaderFitFilter) Target(_ config.SharedConfigProvider, store *core.
 	return statusStoreNotMatchRule
 }
 
-func (f *ruleLeaderFitFilter) GetSourceStoreID() uint64 {
+func (f *ruleLeaderFitFilter) getSourceStoreID() uint64 {
 	return f.srcLeaderStoreID
 }
 

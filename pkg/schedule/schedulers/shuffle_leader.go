@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	types "github.com/tikv/pd/pkg/schedule/type"
 )
 
 const (
@@ -51,7 +52,7 @@ func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleL
 		&filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(conf.Name),
 	}
-	base := NewBaseScheduler(opController)
+	base := NewBaseScheduler(opController, types.ShuffleLeaderScheduler)
 	return &shuffleLeaderScheduler{
 		BaseScheduler: base,
 		conf:          conf,
@@ -59,26 +60,21 @@ func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleL
 	}
 }
 
-func (s *shuffleLeaderScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*shuffleLeaderScheduler) GetType() string {
-	return ShuffleLeaderType
-}
-
+// EncodeConfig implements the Scheduler interface.
 func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	// We shuffle leaders between stores by:
 	// 1. random select a valid store.

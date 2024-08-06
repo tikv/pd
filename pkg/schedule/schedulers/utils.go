@@ -65,24 +65,24 @@ func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, 
 	}
 }
 
-func (p *solver) GetOpInfluence(storeID uint64) int64 {
+func (p *solver) getOpInfluence(storeID uint64) int64 {
 	return p.opInfluence.GetStoreInfluence(storeID).ResourceProperty(p.kind)
 }
 
-func (p *solver) SourceStoreID() uint64 {
+func (p *solver) sourceStoreID() uint64 {
 	return p.Source.GetID()
 }
 
-func (p *solver) SourceMetricLabel() string {
-	return strconv.FormatUint(p.SourceStoreID(), 10)
+func (p *solver) sourceMetricLabel() string {
+	return strconv.FormatUint(p.sourceStoreID(), 10)
 }
 
-func (p *solver) TargetStoreID() uint64 {
+func (p *solver) targetStoreID() uint64 {
 	return p.Target.GetID()
 }
 
-func (p *solver) TargetMetricLabel() string {
-	return strconv.FormatUint(p.TargetStoreID(), 10)
+func (p *solver) targetMetricLabel() string {
+	return strconv.FormatUint(p.targetStoreID(), 10)
 }
 
 func (p *solver) sourceStoreScore(scheduleName string) float64 {
@@ -90,7 +90,7 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 	tolerantResource := p.getTolerantResource()
 	// to avoid schedule too much, if A's core greater than B and C a little
 	// we want that A should be moved out one region not two
-	influence := p.GetOpInfluence(sourceID)
+	influence := p.getOpInfluence(sourceID)
 	if influence > 0 {
 		influence = -influence
 	}
@@ -121,7 +121,7 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 	tolerantResource := p.getTolerantResource()
 	// to avoid schedule call back
 	// A->B, A's influence is negative, so A will be target, C may move region to A
-	influence := p.GetOpInfluence(targetID)
+	influence := p.getOpInfluence(targetID)
 	if influence < 0 {
 		influence = -influence
 	}
@@ -358,7 +358,7 @@ func newRetryQuota() *retryQuota {
 	}
 }
 
-func (q *retryQuota) GetLimit(store *core.StoreInfo) int {
+func (q *retryQuota) getLimit(store *core.StoreInfo) int {
 	id := store.GetID()
 	if limit, ok := q.limits[id]; ok {
 		return limit
@@ -367,19 +367,19 @@ func (q *retryQuota) GetLimit(store *core.StoreInfo) int {
 	return q.initialLimit
 }
 
-func (q *retryQuota) ResetLimit(store *core.StoreInfo) {
+func (q *retryQuota) resetLimit(store *core.StoreInfo) {
 	q.limits[store.GetID()] = q.initialLimit
 }
 
-func (q *retryQuota) Attenuate(store *core.StoreInfo) {
-	newLimit := q.GetLimit(store) / q.attenuation
+func (q *retryQuota) attenuate(store *core.StoreInfo) {
+	newLimit := q.getLimit(store) / q.attenuation
 	if newLimit < q.minLimit {
 		newLimit = q.minLimit
 	}
 	q.limits[store.GetID()] = newLimit
 }
 
-func (q *retryQuota) GC(keepStores []*core.StoreInfo) {
+func (q *retryQuota) gc(keepStores []*core.StoreInfo) {
 	set := make(map[uint64]struct{}, len(keepStores))
 	for _, store := range keepStores {
 		set[store.GetID()] = struct{}{}
