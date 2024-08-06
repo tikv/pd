@@ -100,7 +100,7 @@ func (bs *BaseServer) SetEtcdClient(etcdClient *clientv3.Client) {
 	bs.etcdClient = etcdClient
 }
 
-// SetETCDClient sets the etcd client.
+// GetEtcdClient returns the etcd client.
 func (bs *BaseServer) GetEtcdClient() *clientv3.Client {
 	return bs.etcdClient
 }

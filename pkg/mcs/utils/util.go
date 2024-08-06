@@ -278,6 +278,7 @@ func StopGRPCServer(s server) {
 	}
 }
 
+// Register registers the service.
 func Register(s server, serviceName string) (uint64, *discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
 	var (
 		clusterID uint64

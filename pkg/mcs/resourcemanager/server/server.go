@@ -113,7 +113,6 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
-	// register
 	if s.clusterID, s.serviceID, s.serviceRegister, err = utils.Register(s, constant.ResourceManagerServiceName); err != nil {
 		return err
 	}
