@@ -123,6 +123,7 @@ func (c *Controller) PatrolRegions() {
 		case <-ticker.C:
 			c.updateTickerIfNeeded(ticker)
 			if c.cluster.IsSchedulingHalted() {
+				log.Debug("skip patrol regions due to scheduling is halted")
 				continue
 			}
 
