@@ -292,14 +292,14 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		}
 		for name, cfg := range input {
 			cfg := cfg
-			co.SetETCDCase(name, &cfg)
+			co.SetEtcdCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/etcd/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		co.SetETCDCase(name, cfg)
+		co.SetEtcdCase(name, cfg)
 		c.String(http.StatusOK, "")
 	})
 
@@ -330,12 +330,12 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		c.IndentedJSON(http.StatusOK, cfg)
 	})
 	engine.GET("config/etcd/all", func(c *gin.Context) {
-		all := co.GetAllETCDCases()
+		all := co.GetAllEtcdCases()
 		c.IndentedJSON(http.StatusOK, all)
 	})
 	engine.GET("config/etcd/:name", func(c *gin.Context) {
 		name := c.Param("name")
-		cfg, err := co.GetETCDCase(name)
+		cfg, err := co.GetEtcdCase(name)
 		if err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return
