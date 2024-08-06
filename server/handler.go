@@ -53,6 +53,7 @@ type server struct {
 	*Server
 }
 
+// GetCoordinator returns the coordinator.
 func (s *server) GetCoordinator() *schedule.Coordinator {
 	c := s.GetRaftCluster()
 	if c == nil {
@@ -61,6 +62,7 @@ func (s *server) GetCoordinator() *schedule.Coordinator {
 	return c.GetCoordinator()
 }
 
+// GetCluster returns RaftCluster.
 func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.GetRaftCluster()
 }
@@ -186,6 +188,7 @@ func (h *Handler) GetAllRequestHistoryHotRegion(request *HistoryHotRegionsReques
 
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) error {
+	// TODO: remove this map in subsequent PRs, because we need use new type in the `CreateScheduler`.
 	name := types.SchedulerTypeCompatibleMap[tp]
 	c, err := h.GetRaftCluster()
 	if err != nil {
@@ -208,19 +211,19 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-		log.Info("add scheduler handler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+		log.Info("add scheduler handler successfully", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	} else {
 		if err = c.AddScheduler(s, args...); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-		log.Info("add scheduler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+		log.Info("add scheduler successfully", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	}
 	if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
-	log.Info("persist scheduler config successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+	log.Info("persist scheduler config successfully", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	return nil
 }
 

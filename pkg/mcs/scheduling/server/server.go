@@ -427,6 +427,7 @@ func (s *Server) startServer() (err error) {
 		GitHash:        versioninfo.PDGitHash,
 		DeployPath:     deployPath,
 		StartTimestamp: s.StartTimestamp(),
+		Name:           s.Name(),
 	}
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)

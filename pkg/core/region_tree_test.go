@@ -102,15 +102,15 @@ func TestRegionItem(t *testing.T) {
 	re.False(item.Less(newRegionItem([]byte("b"), []byte{})))
 	re.True(item.Less(newRegionItem([]byte("c"), []byte{})))
 
-	re.False(item.Contains([]byte("a")))
-	re.True(item.Contains([]byte("b")))
-	re.True(item.Contains([]byte("c")))
+	re.False(item.contain([]byte("a")))
+	re.True(item.contain([]byte("b")))
+	re.True(item.contain([]byte("c")))
 
 	item = newRegionItem([]byte("b"), []byte("d"))
-	re.False(item.Contains([]byte("a")))
-	re.True(item.Contains([]byte("b")))
-	re.True(item.Contains([]byte("c")))
-	re.False(item.Contains([]byte("d")))
+	re.False(item.contain([]byte("a")))
+	re.True(item.contain([]byte("b")))
+	re.True(item.contain([]byte("c")))
+	re.False(item.contain([]byte("d")))
 }
 
 func newRegionWithStat(start, end string, size, keys int64) *RegionInfo {
