@@ -16,9 +16,12 @@ package handler
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/hex"
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1262,22 +1265,26 @@ func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []any, retryLim
 }
 
 type StoreRegionSet struct {
-	ID          int64
-	Info 		StoreInfo
-	RegionIDSet map[int64]bool
+	ID           uint64
+	Info         core.StoreInfo
+	RegionIDSet  map[uint64]bool
+	OriginalPeer map[uint64]*metapb.Peer
 }
 
 type MigrationOp struct {
-	FromStore int64
-	ToStore   int64
-	Regions   map[int64]interface{}
+	FromStore    uint64
+	ToStore      uint64
+	ToStoreInfo  *core.StoreInfo
+	OriginalPeer *metapb.Peer
+	Regions      map[uint64]interface{}
 }
 
 func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *MigrationOp {
 	o := MigrationOp{
-		FromStore: fromStore.ID,
-		ToStore:   toStore.ID,
-		Regions:   make(map[int64]interface{}),
+		FromStore:   fromStore.ID,
+		ToStore:     toStore.ID,
+		ToStoreInfo: toStore.Info,
+		Regions:     make(map[uint64]interface{}),
 	}
 	for r, removed := range fromStore.RegionIDSet {
 		if n == 0 {
@@ -1288,6 +1295,7 @@ func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 		}
 		if _, exist := toStore.RegionIDSet[r]; !exist {
 			o.Regions[r] = nil
+			o.OriginalPeer = fromStore.OriginalPeer[r]
 			fromStore.RegionIDSet[r] = true
 		}
 		n--
@@ -1303,7 +1311,7 @@ func MigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
 	for _, store := range stores {
 		percentage := 100 * float64(len(store.RegionIDSet)) / float64(totalRegionCount)
 		log.Info("store region dist",
-			zap.Int64("store-id", store.ID),
+			zap.Uint64("store-id", store.ID),
 			zap.Int("num-region", len(store.RegionIDSet)),
 			zap.String("percentage", fmt.Sprintf("%.2f%%", percentage)))
 	}
@@ -1380,6 +1388,10 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string, storeLab
 		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
+	regionIdMap := make(map[uint64]*core.RegionInfo)
+	for _, r := range regions {
+		regionIdMap[r.GetID()] = r
+	}
 
 	stores := c.GetStores()
 	candidates := make([]*StoreRegionSet)
@@ -1391,7 +1403,7 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string, storeLab
 		if len(s.GetLabels()) != len(storeLabelMap) {
 			continue
 		}
-		for _, l := s.GetLabels() {
+		for _, l := range s.GetLabels() {
 			if larg, ok := storeLabelMap[l.Key]; ok {
 				if larg.Value != l.Value {
 					continue
@@ -1400,11 +1412,33 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string, storeLab
 				continue
 			}
 		}
-		candidates = append(candidates, s)
+		candidate := StoreRegionSet{
+			ID:           s.GetID(),
+			Info:         s,
+			RegionIDSet:  make(map[uint64]bool),
+			OriginalPeer: make(map[uint64]*metapb.Peer),
+		}
+		for _, r := range regions {
+			for _, p := range r.GetPeers() {
+				if p.StoreId == s.GetID() {
+					candidate.RegionIDSet[r.GetID()] = false
+				}
+			}
+		}
+		if len(candidate.RegionIDSet) > 0 {
+			candidates = append(candidates, candidate)
+		}
 	}
 
+	senders, receivers, ops := MigrationPlan(candidates)
 
-
+	for _, op := range ops {
+		for r, _ := range op.Regions {
+			newPeer := &metapb.Peer{StoreId: op.ToStore, Role: op.OriginalPeer.Role, IsWitness: op.OriginalPeer.IsWitness}
+			o := operator.CreateMovePeerOperator("balance-region", c, r, operator.OpReplica, op.FromStore, newPeer)
+			co.GetOperatorController().AddOperator(o)
+		}
+	}
 	return state, nil
 }
 
