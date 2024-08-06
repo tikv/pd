@@ -72,14 +72,9 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 }
 
 func (suite *serverRegisterTestSuite) TestServerRegister() {
-	// test register, primary and unregister when start tso and resource-manager with only one server
 	for i := 0; i < 3; i++ {
 		suite.checkServerRegister(constant.TSOServiceName)
 	}
-	// TODO: uncomment after resource-manager is ready
-	// for i := 0; i < 3; i++ {
-	// suite.checkServerRegister(constant.ResourceManagerServiceName)
-	// }
 }
 
 func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
