@@ -1266,7 +1266,7 @@ func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []any, retryLim
 
 type StoreRegionSet struct {
 	ID           uint64
-	Info         core.StoreInfo
+	Info         *core.StoreInfo
 	RegionIDSet  map[uint64]bool
 	OriginalPeer map[uint64]*metapb.Peer
 }
@@ -1369,8 +1369,8 @@ func MigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
 	return senders, receivers, ops
 }
 
-// CheckRegionsReplicated checks if regions are replicated.
-func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string, storeLabels []*metapb.StoreLabel) (string, error) {
+// BalanceRegion checks if regions are imbalanced and rebalance them.
+func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*metapb.StoreLabel) (string, error) {
 	startKey, err := hex.DecodeString(rawStartKey)
 	if err != nil {
 		return "", err
@@ -1394,7 +1394,7 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string, storeLab
 	}
 
 	stores := c.GetStores()
-	candidates := make([]*StoreRegionSet)
+	candidates := make([]*StoreRegionSet, 0)
 	storeLabelMap := make(map[string]*metapb.StoreLabel)
 	for _, l := range storeLabels {
 		storeLabelMap[l.Key] = l
@@ -1412,7 +1412,7 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string, storeLab
 				continue
 			}
 		}
-		candidate := StoreRegionSet{
+		candidate := &StoreRegionSet{
 			ID:           s.GetID(),
 			Info:         s,
 			RegionIDSet:  make(map[uint64]bool),
@@ -1430,20 +1430,23 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string, storeLab
 		}
 	}
 
-	senders, receivers, ops := MigrationPlan(candidates)
+	_, _, ops := MigrationPlan(candidates)
 
 	for _, op := range ops {
-		for r, _ := range op.Regions {
+		for rid, _ := range op.Regions {
 			newPeer := &metapb.Peer{StoreId: op.ToStore, Role: op.OriginalPeer.Role, IsWitness: op.OriginalPeer.IsWitness}
-			o := operator.CreateMovePeerOperator("balance-region", c, r, operator.OpReplica, op.FromStore, newPeer)
+			o, err := operator.CreateMovePeerOperator("balance-region", c, regionIdMap[rid], operator.OpReplica, op.FromStore, newPeer)
+			if err != nil {
+				return "", err
+			}
 			co.GetOperatorController().AddOperator(o)
 		}
 	}
-	return state, nil
+	return "", nil
 }
 
 // CheckRegionsReplicated checks if regions are replicated.
-func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string) (string, error) {
+func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string, error) {
 	startKey, err := hex.DecodeString(rawStartKey)
 	if err != nil {
 		return "", err
