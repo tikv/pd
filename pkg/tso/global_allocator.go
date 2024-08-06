@@ -617,7 +617,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		return
 	}
 	defer func() {
-		gta.am.ResetAllocatorGroup(GlobalDCLocation)
+		gta.am.ResetAllocatorGroup(GlobalDCLocation, false)
 	}()
 
 	tsoLabel := fmt.Sprintf("TSO Service Group %d", gta.getGroupID())
