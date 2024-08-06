@@ -92,7 +92,7 @@ go tool cover --func=xxx`
 }
 
 var (
-	modulePath           = "github.com/tikv/pd"
+	modulePath           = filepath.Join("github.com", "tikv", "pd")
 	integrationsTestPath = filepath.Join("tests", "integrations")
 )
 
@@ -414,7 +414,7 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 	wg := &sync.WaitGroup{}
 	tasksChannel := make(chan []task, len(pkgs))
 	for _, pkg := range pkgs {
-		_, ok := existPkgs[fmt.Sprintf("%s/%s", modulePath, pkg)]
+		_, ok := existPkgs[filepath.Join(modulePath, pkg)]
 		if !ok {
 			fmt.Println("no test case in ", pkg)
 			continue
@@ -528,7 +528,8 @@ func filterTestCases(tasks []task, arg1 string) ([]task, error) {
 }
 
 func listPackages() ([]string, error) {
-	cmd := exec.Command("go", "list", "./...")
+	listPath := strings.Join([]string{".", "..."}, string(filepath.Separator))
+	cmd := exec.Command("go", "list", listPath)
 	cmd.Dir = workDir
 	ss, err := cmdToLines(cmd)
 	if err != nil {
@@ -677,7 +678,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args = append(args, "-test.v")
 	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	if coverProfile != "" {
-		fileName := strings.ReplaceAll(pkg, "/", "_") + "." + fn
+		fileName := strings.ReplaceAll(pkg, string(filepath.Separator), "_") + "." + fn
 		tmpFile := filepath.Join(coverFileTempDir, fileName)
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
@@ -720,12 +721,12 @@ func generateBuildCache() error {
 	fmt.Println("generate build cache")
 	// cd cmd/pd-server && go test -tags=tso_function_test,deadlock -exec-=true -vet=off -toolexec=go-compile-without-link
 	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=tso_function_test,deadlock")
-	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s/tools/pd-ut/go-compile-without-link.sh", workDir)
-	cmd.Dir = fmt.Sprintf("%s/cmd/pd-server", workDir)
+	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(workDir, "tools", "pd-ut", "go-compile-without-link.sh"))
+	cmd.Dir = filepath.Join(workDir, "cmd", "pd-server")
 	if strings.Contains(workDir, integrationsTestPath) {
-		cmd.Dir = fmt.Sprintf("%s/cmd/pd-server", workDir[:strings.LastIndex(workDir, integrationsTestPath)])
-		goCompileWithoutLink = fmt.Sprintf("-toolexec=%s/tools/pd-ut/go-compile-without-link.sh",
-			workDir[:strings.LastIndex(workDir, integrationsTestPath)])
+		cmd.Dir = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "cmd", "pd-server")
+		goCompileWithoutLink = fmt.Sprintf("-toolexec=%s", filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)],
+			"tools", "pd-ut", "go-compile-without-link.sh"))
 	}
 	cmd.Args = append(cmd.Args, goCompileWithoutLink)
 	cmd.Stdout = os.Stdout
@@ -759,11 +760,11 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 	p := strconv.Itoa(parallel * 2)
 	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
 	if coverProfile != "" {
-		coverpkg := "./..."
+		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		if strings.Contains(workDir, integrationsTestPath) {
-			coverpkg = "../../..."
+			coverPkg = filepath.Join("..", "..", "...")
 		}
-		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverpkg))
+		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))
 	}
 	cmd.Args = append(cmd.Args, packages...)
 	if race {
@@ -794,7 +795,8 @@ func buildTestBinary(pkg string) error {
 	//nolint:gosec
 	cmd := exec.Command("go", "test", "-c", "-vet", "off", "--tags=tso_function_test,deadlock", "-o", testFileName(pkg), "-v")
 	if coverProfile != "" {
-		cmd.Args = append(cmd.Args, "-cover", "-coverpkg=./...")
+		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
+		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))
 	}
 	if race {
 		cmd.Args = append(cmd.Args, "-race")
