@@ -149,7 +149,6 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
-	// register
 	if s.clusterID, s.serviceID, s.serviceRegister, err = utils.Register(s, constant.SchedulingServiceName); err != nil {
 		return err
 	}
